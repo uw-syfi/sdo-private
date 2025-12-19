@@ -14,6 +14,9 @@ cd /mnt/sda/shli/sds/deploy/deathstarbench/hotel
 # Check status
 ./deploy.sh status
 
+# Run comprehensive health check
+./health_check.sh
+
 # View logs
 ./deploy.sh logs
 
@@ -49,6 +52,8 @@ The `deploy.sh` script provides a comprehensive deployment management interface:
 | Command | Description |
 |---------|-------------|
 | `./deploy.sh status` | Check service health and status |
+| `./health_check.sh` | Run comprehensive health check |
+| `./health_check.sh --verbose` | Run health check with detailed output |
 | `./deploy.sh logs` | View logs from all services |
 | `./deploy.sh logs frontend` | View logs from specific service |
 | `./deploy.sh test` | Run application tests |
@@ -112,6 +117,62 @@ MEMC_TIMEOUT=5 ./deploy.sh start
 ```bash
 TLS=1 GC=50 LOG_LEVEL=DEBUG JAEGER_SAMPLE_RATIO=0.1 ./deploy.sh start --build
 ```
+
+## Health Check Script
+
+The `health_check.sh` script provides comprehensive health monitoring for the application.
+
+### Features
+
+The health check script performs:
+
+- ✅ **Docker environment validation** - Checks Docker installation and daemon status
+- ✅ **Container status checks** - Verifies all containers are running
+- ✅ **Port availability tests** - Ensures required ports are accessible
+- ✅ **Frontend API testing** - Tests key endpoints (review, recommendations)
+- ✅ **Consul health** - Verifies service discovery and registration
+- ✅ **Jaeger tracing** - Checks distributed tracing functionality
+- ✅ **Database verification** - Validates all MongoDB instances
+- ✅ **Cache validation** - Checks Memcached services
+- ✅ **Performance metrics** - Measures response times and resource usage
+- ✅ **Health score calculation** - Provides overall system health percentage
+
+### Usage
+
+```bash
+# Basic health check
+./health_check.sh
+
+# Verbose output with detailed information
+./health_check.sh --verbose
+
+# Custom timeout (default: 5 seconds)
+./health_check.sh --timeout 10
+
+# Show help
+./health_check.sh --help
+```
+
+### Output Example
+
+The script provides color-coded output:
+- ✓ Green - Tests passed
+- ✗ Red - Critical failures
+- ⚠ Yellow - Warnings
+
+### Exit Codes
+
+- `0` - All checks passed or only warnings
+- `1` - One or more critical checks failed
+
+### When to Use
+
+Run the health check script:
+- After deployment to verify everything is working
+- Before running load tests
+- When troubleshooting issues
+- As part of automated monitoring
+- After making configuration changes
 
 ## Architecture
 
@@ -235,6 +296,7 @@ cd /mnt/sda/shli/sds/apps/deathstarbench/wrk2
 ```
 deploy/deathstarbench/hotel/
 ├── deploy.sh          # Main deployment script
+├── health_check.sh    # Comprehensive health check script
 └── README.md          # This file
 ```
 
