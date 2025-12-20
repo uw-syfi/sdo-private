@@ -10,8 +10,8 @@ load_dotenv()
 
 from app_operator.app_registry import registry
 from app_operator.operator import ApplicationOperator
-from app_operator.script_generator import generate_scripts
-from app_operator.codex_mode import CodexOperator
+from app_operator.script_generator import generate_scripts, CodexCodingAgent
+from app_operator.coding_agent_mode import CodingAgentOperator
 
 
 def main() -> int:
@@ -184,7 +184,8 @@ Examples:
     
     elif command == "generate-scripts":
         try:
-            success, message = generate_scripts(args.directory, args.model)
+            agent = CodexCodingAgent(model=args.model)
+            success, message = generate_scripts(args.directory, agent)
             if success:
                 print(f"✓ {message}")
                 return 0
@@ -201,10 +202,11 @@ Examples:
             parser.error("interval must be at least 1 second")
         
         try:
-            operator = CodexOperator(
+            agent = CodexCodingAgent(model=args.model)
+            operator = CodingAgentOperator(
                 repo_path=args.directory,
                 health_check_interval=args.interval,
-                codex_model=args.model
+                agent=agent
             )
             return operator.run()
         except ValueError as e:

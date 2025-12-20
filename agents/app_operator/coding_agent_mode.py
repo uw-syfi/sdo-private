@@ -1,4 +1,4 @@
-"""Codex-assisted deployment mode with automatic error fixing."""
+"""Coding-agent-assisted deployment mode with automatic error fixing."""
 
 import os
 import signal
@@ -8,29 +8,39 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from app_operator.script_generator import CodexLLM, generate_scripts
+from app_operator.script_generator import CodingAgent, CodexCodingAgent, generate_scripts
 
 
-class CodexOperator:
-    """Manages automated deployment with codex-assisted error fixing.
+class CodingAgentOperator:
+    """Manages automated deployment with coding-agent-assisted error fixing.
     
     This operator:
     1. Checks for or generates deployment scripts
-    2. Attempts deployment and uses codex to fix errors
-    3. Monitors health checks and provides codex analysis
+    2. Attempts deployment and uses a coding agent to fix errors
+    3. Monitors health checks and provides agent analysis
     """
     
-    def __init__(self, repo_path: str, health_check_interval: int = 30, codex_model: Optional[str] = None):
-        """Initialize the codex operator.
+    def __init__(self, repo_path: str, health_check_interval: int = 30, agent: Optional[CodingAgent] = None):
+        """Initialize the coding agent operator.
         
         Args:
             repo_path: Path to the repository to deploy.
             health_check_interval: Seconds between health checks (default: 30).
-            codex_model: Optional codex model to use.
+            agent: Optional coding agent to use. If None, uses CodexCodingAgent.
         """
         self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval
-        self.codex_model = codex_model
+        
+        # Initialize agent if not provided
+        if agent is None:
+            try:
+                self.agent = CodexCodingAgent()
+            except RuntimeError as e:
+                # Fallback or error if no default agent can be created
+                raise RuntimeError(f"Failed to initialize default coding agent: {e}")
+        else:
+            self.agent = agent
+            
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -44,7 +54,7 @@ class CodexOperator:
             raise ValueError(f"Repository path is not a directory: {repo_path}")
     
     def run(self) -> int:
-        """Main entry point for codex-assisted deployment.
+        """Main entry point for coding-agent-assisted deployment.
         
         Returns:
             int: Exit code (0 for success, 1 for failure).
@@ -55,8 +65,9 @@ class CodexOperator:
         
         try:
             print(f"\n{'='*70}")
-            print(f"  Codex-Assisted Deployment Mode")
+            print(f"  Coding-Agent-Assisted Deployment Mode")
             print(f"  Repository: {self.repo_path}")
+            print(f"  Agent: {self.agent.__class__.__name__}")
             print(f"{'='*70}\n")
             
             # Step 1: Ensure scripts exist
@@ -99,9 +110,9 @@ class CodexOperator:
         print(f"  Generating Deployment Scripts")
         print(f"{'='*70}\n")
         
-        print(f"Scripts not found in {self.sds_dir}, generating with codex...")
+        print(f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
         
-        success, message = generate_scripts(str(self.repo_path), self.codex_model)
+        success, message = generate_scripts(str(self.repo_path), self.agent)
         
         if success:
             print(f"✓ {message}")
@@ -111,7 +122,7 @@ class CodexOperator:
             return False
     
     def _deploy_with_fixing(self, max_attempts: int = 5) -> bool:
-        """Attempt deployment with automatic error fixing using codex.
+        """Attempt deployment with automatic error fixing using a coding agent.
         
         Args:
             max_attempts: Maximum number of deployment attempts (default: 5).
@@ -152,14 +163,14 @@ class CodexOperator:
                 else:
                     print(f"⚠ Health check failed (exit code: {health_result['exit_code']})")
                     
-                    # Health check failed - ask codex to analyze and fix
-                    if not self._fix_with_codex(deploy_result, health_result, attempt, max_attempts):
+                    # Health check failed - ask agent to analyze and fix
+                    if not self._fix_with_agent(deploy_result, health_result, attempt, max_attempts):
                         continue
             else:
                 print(f"✗ Deployment script failed (exit code: {deploy_result['exit_code']})")
                 
-                # Deployment failed - ask codex to analyze and fix
-                if not self._fix_with_codex(deploy_result, None, attempt, max_attempts):
+                # Deployment failed - ask agent to analyze and fix
+                if not self._fix_with_agent(deploy_result, None, attempt, max_attempts):
                     continue
         
         return False
@@ -253,9 +264,9 @@ class CodexOperator:
                 "stderr": f"Failed to run health check: {e}"
             }
     
-    def _fix_with_codex(self, deploy_result: dict, health_result: Optional[dict], 
+    def _fix_with_agent(self, deploy_result: dict, health_result: Optional[dict], 
                         attempt: int, max_attempts: int) -> bool:
-        """Use codex to analyze errors and fix the scripts.
+        """Use a coding agent to analyze errors and fix the scripts.
         
         Args:
             deploy_result: Deployment script result.
@@ -264,21 +275,15 @@ class CodexOperator:
             max_attempts: Maximum number of attempts.
             
         Returns:
-            bool: True if codex suggested a fix and applied it.
+            bool: True if agent suggested a fix and applied it.
         """
         if attempt >= max_attempts:
             print(f"\n✗ Reached maximum attempts ({max_attempts}), giving up")
             return False
         
         print(f"\n{'='*70}")
-        print(f"  Asking Codex to Fix Deployment Issues")
+        print(f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
         print(f"{'='*70}\n")
-        
-        try:
-            llm = CodexLLM(model=self.codex_model)
-        except RuntimeError as e:
-            print(f"✗ Failed to initialize codex: {e}", file=sys.stderr)
-            return False
         
         # Prepare error context
         error_context = self._prepare_error_context(deploy_result, health_result)
@@ -287,28 +292,28 @@ class CodexOperator:
         prompt = self._create_fix_prompt(error_context, attempt, max_attempts)
         
         try:
-            print(f"Consulting codex to analyze and fix the issue...")
+            print(f"Consulting {self.agent.__class__.__name__} to analyze and fix the issue...")
             print(f"{'-'*70}")
             
-            # Run codex to get fix suggestions
-            response = llm.generate(prompt, cwd=str(self.repo_path), timeout=300)
+            # Run agent to get fix suggestions
+            response = self.agent.generate(prompt, cwd=str(self.repo_path), timeout=300)
             
             print(f"{'-'*70}")
-            print(f"\nCodex response received")
+            print(f"\nAgent response received")
             
-            # Codex should have modified the scripts directly
+            # Agent should have modified the scripts directly
             # Just notify user and continue to next attempt
-            print(f"\n✓ Codex has analyzed the issue and may have modified the scripts")
+            print(f"\n✓ Agent has analyzed the issue and may have modified the scripts")
             print(f"  Proceeding to next deployment attempt...\n")
             
             return True
             
         except Exception as e:
-            print(f"✗ Codex failed to provide fix: {e}", file=sys.stderr)
+            print(f"✗ Agent failed to provide fix: {e}", file=sys.stderr)
             return False
     
     def _prepare_error_context(self, deploy_result: dict, health_result: Optional[dict]) -> str:
-        """Prepare error context for codex.
+        """Prepare error context for the coding agent.
         
         Args:
             deploy_result: Deployment script result.
@@ -366,7 +371,7 @@ class CodexOperator:
         return "\n".join(context_parts)
     
     def _create_fix_prompt(self, error_context: str, attempt: int, max_attempts: int) -> str:
-        """Create a prompt for codex to fix deployment errors.
+        """Create a prompt for the coding agent to fix deployment errors.
         
         Args:
             error_context: Formatted error context.
@@ -374,7 +379,7 @@ class CodexOperator:
             max_attempts: Maximum number of attempts.
             
         Returns:
-            str: The prompt for codex.
+            str: The prompt for the agent.
         """
         system_prompt = """You are an expert DevOps engineer debugging deployment issues.
 
@@ -453,7 +458,7 @@ You have read/write access to these files. Please fix the issues and help get th
         return f"{system_prompt}\n\n{user_prompt}"
     
     def _monitor_health(self):
-        """Monitor health checks and provide codex analysis every interval."""
+        """Monitor health checks and provide agent analysis every interval."""
         print(f"\nStarting health monitoring (interval: {self.health_check_interval}s)...")
         
         check_count = 0
@@ -474,25 +479,19 @@ You have read/write access to these files. Please fix the issues and help get th
             # Run health check
             result = self._run_health_check()
             
-            # Ask codex to analyze results
-            self._analyze_health_with_codex(result, check_count)
+            # Ask agent to analyze results
+            self._analyze_health_with_agent(result, check_count)
     
-    def _analyze_health_with_codex(self, health_result: dict, check_count: int):
-        """Use codex to analyze health check results and provide suggestions.
+    def _analyze_health_with_agent(self, health_result: dict, check_count: int):
+        """Use a coding agent to analyze health check results and provide suggestions.
         
         Args:
             health_result: Health check result.
             check_count: Current check count.
         """
         print(f"\n{'-'*70}")
-        print(f"  Asking Codex to Analyze Health Check Results")
+        print(f"  Asking {self.agent.__class__.__name__} to Analyze Health Check Results")
         print(f"{'-'*70}\n")
-        
-        try:
-            llm = CodexLLM(model=self.codex_model)
-        except RuntimeError as e:
-            print(f"✗ Failed to initialize codex: {e}", file=sys.stderr)
-            return
         
         # Prepare health check context
         context = self._prepare_health_context(health_result, check_count)
@@ -501,20 +500,20 @@ You have read/write access to these files. Please fix the issues and help get th
         prompt = self._create_analysis_prompt(context)
         
         try:
-            print(f"Consulting codex for health analysis and suggestions...")
+            print(f"Consulting {self.agent.__class__.__name__} for health analysis and suggestions...")
             
-            # Run codex to get analysis
-            response = llm.generate(prompt, cwd=str(self.repo_path), timeout=120)
+            # Run agent to get analysis
+            response = self.agent.generate(prompt, cwd=str(self.repo_path), timeout=120)
             
             print(f"\n{'='*70}")
-            print(f"  Codex Analysis Complete")
+            print(f"  {self.agent.__class__.__name__} Analysis Complete")
             print(f"{'='*70}\n")
             
             # Note: We're not acting on suggestions yet, just displaying them
             print(f"Note: Suggestions are for information only, not automatically applied")
             
         except Exception as e:
-            print(f"✗ Codex analysis failed: {e}", file=sys.stderr)
+            print(f"✗ Agent analysis failed: {e}", file=sys.stderr)
     
     def _prepare_health_context(self, health_result: dict, check_count: int) -> str:
         """Prepare health check context for analysis.
@@ -553,13 +552,13 @@ You have read/write access to these files. Please fix the issues and help get th
         return "\n".join(context_parts)
     
     def _create_analysis_prompt(self, context: str) -> str:
-        """Create a prompt for codex to analyze health check results.
+        """Create a prompt for the coding agent to analyze health check results.
         
         Args:
             context: Formatted health check context.
             
         Returns:
-            str: The prompt for codex.
+            str: The prompt for the agent.
         """
         system_prompt = """You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.
 
@@ -686,3 +685,6 @@ Remember: Your suggestions are for information only and will not be automaticall
         print(f"  Shutdown Complete")
         print(f"{'='*70}\n")
 
+
+# For backward compatibility
+CodexOperator = CodingAgentOperator

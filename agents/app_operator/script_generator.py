@@ -1,19 +1,38 @@
-"""Script generator using codex to create deploy and health check scripts."""
+"""Script generator using coding agents to create deploy and health check scripts."""
 
 import os
 import shutil
 import subprocess
 import sys
 import threading
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
 
 
-class CodexLLM:
-    """LLM interface that uses the codex binary from PATH."""
+class CodingAgent(ABC):
+    """Abstract base class for coding agents."""
+    
+    @abstractmethod
+    def generate(self, prompt: str, cwd: Optional[str] = None, timeout: int = 300) -> str:
+        """Generate text/code based on a prompt.
+        
+        Args:
+            prompt: The prompt to send to the agent.
+            cwd: Optional working directory context.
+            timeout: Timeout in seconds.
+            
+        Returns:
+            Generated text.
+        """
+        pass
+
+
+class CodexCodingAgent(CodingAgent):
+    """Coding agent implementation using the Codex CLI tool."""
     
     def __init__(self, model: Optional[str] = None):
-        """Initialize the Codex LLM.
+        """Initialize the Codex coding agent.
         
         Args:
             model: Optional model name to use with codex. If None, uses default.
@@ -55,9 +74,9 @@ class CodexLLM:
         if self.model:
             cmd.extend(["--model", self.model])
         
-        print(f"[CodexLLM] Running command: {' '.join(cmd)}")
-        print(f"[CodexLLM] Working directory: {cwd or os.getcwd()}")
-        print(f"[CodexLLM] Prompt length: {len(prompt)} characters")
+        print(f"[CodexCodingAgent] Running command: {' '.join(cmd)}")
+        print(f"[CodexCodingAgent] Working directory: {cwd or os.getcwd()}")
+        print(f"[CodexCodingAgent] Prompt length: {len(prompt)} characters")
         print("-" * 80)
         sys.stdout.flush()
         
@@ -71,7 +90,7 @@ class CodexLLM:
                 if not line:
                     break
                 line_stripped = line.rstrip('\n')
-                print(f"[CodexLLM] {line_stripped}")
+                print(f"[CodexCodingAgent] {line_stripped}")
                 sys.stdout.flush()
                 buffer.append(line)
             pipe.close()
@@ -82,7 +101,7 @@ class CodexLLM:
                 if not line:
                     break
                 line_stripped = line.rstrip('\n')
-                print(f"[CodexLLM] [STDERR] {line_stripped}", file=sys.stderr)
+                print(f"[CodexCodingAgent] [STDERR] {line_stripped}", file=sys.stderr)
                 sys.stderr.flush()
                 buffer.append(line)
             pipe.close()
@@ -138,23 +157,27 @@ class CodexLLM:
                 f"codex exited with code {process.returncode}: {stderr_data}"
             )
         
-        print(f"[CodexLLM] Command completed successfully (exit code: 0)")
+        print(f"[CodexCodingAgent] Command completed successfully (exit code: 0)")
         print("=" * 80)
         sys.stdout.flush()
         
         return stdout_data.strip()
 
 
-def generate_scripts(target_dir: str, codex_model: Optional[str] = None) -> tuple[bool, str]:
-    """Generate deploy.sh and health_check.sh scripts using codex.
+# For backward compatibility
+CodexLLM = CodexCodingAgent
+
+
+def generate_scripts(target_dir: str, agent: Optional[CodingAgent] = None) -> tuple[bool, str]:
+    """Generate deploy.sh and health_check.sh scripts using a coding agent.
     
-    This function runs codex in the target directory with read/write access,
+    This function runs the coding agent in the target directory with read/write access,
     analyzing the repository structure and generating appropriate deployment
     and health check scripts.
     
     Args:
         target_dir: The directory path where scripts should be generated.
-        codex_model: Optional model name for codex. If None, uses default.
+        agent: Optional CodingAgent instance. If None, uses CodexCodingAgent.
         
     Returns:
         Tuple of (success: bool, message: str).
@@ -168,41 +191,42 @@ def generate_scripts(target_dir: str, codex_model: Optional[str] = None) -> tupl
     if not target_path.is_dir():
         return False, f"Target path is not a directory: {target_dir}"
     
-    # Initialize codex LLM
-    try:
-        llm = CodexLLM(model=codex_model)
-    except RuntimeError as e:
-        return False, str(e)
+    # Initialize coding agent if not provided
+    if agent is None:
+        try:
+            agent = CodexCodingAgent()
+        except RuntimeError as e:
+            return False, str(e)
     
     # Create .sds directory if it doesn't exist
     sds_dir = target_path / ".sds"
     sds_dir.mkdir(exist_ok=True)
     
-    # Get absolute path for codex context
+    # Get absolute path for context
     abs_target_dir = str(target_path)
     
-    # Change to target directory for codex context
+    # Change to target directory for context
     original_cwd = os.getcwd()
     try:
         os.chdir(abs_target_dir)
         
-        # Create system prompt for codex
+        # Create system prompt
         system_prompt = _create_system_prompt()
         
-        # Analyze the repository structure (now in target directory context)
+        # Analyze the repository structure
         repo_context = _analyze_repository(target_path)
         
-        # Generate deploy.sh using codex
+        # Generate deploy.sh using coding agent
         deploy_success, deploy_content = _generate_deploy_script(
-            llm, system_prompt, repo_context, abs_target_dir
+            agent, system_prompt, repo_context, abs_target_dir
         )
         
         if not deploy_success:
             return False, f"Failed to generate deploy.sh: {deploy_content}"
         
-        # Generate health_check.sh using codex
+        # Generate health_check.sh using coding agent
         health_check_success, health_check_content = _generate_health_check_script(
-            llm, system_prompt, repo_context, abs_target_dir
+            agent, system_prompt, repo_context, abs_target_dir
         )
         
         if not health_check_success:
@@ -228,7 +252,7 @@ def generate_scripts(target_dir: str, codex_model: Optional[str] = None) -> tupl
 
 
 def _create_system_prompt() -> str:
-    """Create the system prompt for codex to guide script generation."""
+    """Create the system prompt for coding agent to guide script generation."""
     return """You are an expert DevOps engineer generating deployment and health check scripts for applications.
 
 Your task is to analyze a repository and generate two bash scripts:
@@ -347,12 +371,12 @@ def _analyze_repository(repo_path: Path) -> str:
 
 
 def _generate_deploy_script(
-    llm: CodexLLM,
+    agent: CodingAgent,
     system_prompt: str,
     repo_context: str,
     target_dir: str
 ) -> tuple[bool, str]:
-    """Generate deploy.sh script using codex."""
+    """Generate deploy.sh script using a coding agent."""
     human_prompt = f"""Generate a comprehensive deploy.sh bash script for the following repository:
 
 {repo_context}
@@ -375,7 +399,7 @@ Generate ONLY the bash script content, starting with #!/bin/bash. Do not include
 {human_prompt}"""
 
     try:
-        script_content = llm.generate(full_prompt, cwd=target_dir)
+        script_content = agent.generate(full_prompt, cwd=target_dir)
         
         # Remove markdown code fences if present
         if script_content.startswith("```bash"):
@@ -393,18 +417,18 @@ Generate ONLY the bash script content, starting with #!/bin/bash. Do not include
         
         return True, script_content
     except subprocess.TimeoutExpired:
-        return False, "codex command timed out after 5 minutes"
+        return False, "agent command timed out after 5 minutes"
     except Exception as e:
         return False, str(e)
 
 
 def _generate_health_check_script(
-    llm: CodexLLM,
+    agent: CodingAgent,
     system_prompt: str,
     repo_context: str,
     target_dir: str
 ) -> tuple[bool, str]:
-    """Generate health_check.sh script using codex."""
+    """Generate health_check.sh script using a coding agent."""
     human_prompt = f"""Generate a comprehensive health_check.sh bash script for the following repository:
 
 {repo_context}
@@ -429,7 +453,7 @@ Generate ONLY the bash script content, starting with #!/bin/bash. Do not include
 {human_prompt}"""
 
     try:
-        script_content = llm.generate(full_prompt, cwd=target_dir)
+        script_content = agent.generate(full_prompt, cwd=target_dir)
         
         # Remove markdown code fences if present
         if script_content.startswith("```bash"):
@@ -447,7 +471,6 @@ Generate ONLY the bash script content, starting with #!/bin/bash. Do not include
         
         return True, script_content
     except subprocess.TimeoutExpired:
-        return False, "codex command timed out after 5 minutes"
+        return False, "agent command timed out after 5 minutes"
     except Exception as e:
         return False, str(e)
-
