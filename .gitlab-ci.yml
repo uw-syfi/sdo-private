@@ -1,0 +1,18 @@
+image: python:3.11
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+    - when: never
+
+stages:
+  - test
+
+pytest:
+  stage: test
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install -e ./agents[test]
+  script:
+    - cd agents
+    - pytest
