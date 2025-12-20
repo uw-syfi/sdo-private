@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Application deployment and monitoring operator"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "langchain-openai>=1.1.6",
+    "langgraph>=1.0.5",
+]
 
 [project.scripts]
 operator = "app_operator.__main__:main"

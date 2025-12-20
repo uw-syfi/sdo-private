@@ -47,9 +47,9 @@ Examples:
     parser.add_argument(
         "--interval", "-i",
         type=int,
-        default=10,
+        default=30,
         metavar="SECONDS",
-        help="Interval between health checks in seconds (default: 10)"
+        help="Interval between health checks in seconds (default: 30)"
     )
     
     args = parser.parse_args()

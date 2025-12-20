@@ -9,9 +9,9 @@ The SDS Operator is a Python module that manages application lifecycle through a
 **Key Features:**
 - Abstract application interface for flexible implementations
 - Automated health checks at configurable intervals
+- LangGraph-based monitoring loop with LLM status summaries
 - Graceful shutdown on Ctrl+C (SIGINT/SIGTERM)
 - Easy extensibility for multiple applications
-- Zero external dependencies (uses Python stdlib only)
 
 ## Installation
 
@@ -40,9 +40,18 @@ uv run python -m app_operator --app-name hotel
 
 This will:
 1. Deploy the application
-2. Run health checks every 10 seconds
-3. Log health check results
+2. Run health checks every 30 seconds
+3. Print an LLM health summary on every check
 4. Stop gracefully on Ctrl+C
+
+### LLM Configuration
+
+Health summaries use `langchain-openai` by default. Configure:
+
+```bash
+export OPENAI_API_KEY="..."
+export APP_OPERATOR_LLM_MODEL="gpt-4o-mini"  # optional
+```
 
 ### Custom Health Check Interval
 
@@ -231,7 +240,7 @@ def deploy(self) -> DeploymentResult:
 3. **Testability** - Easy to create mock applications for testing
 4. **Extensibility** - Add new apps without touching core operator code
 5. **Type Safety** - Full type hints for better IDE support
-6. **Zero Dependencies** - Uses only Python standard library
+6. **LLM Summaries** - Health checks are summarized concisely by an LLM for operator-friendly logs
 
 ## Development
 
