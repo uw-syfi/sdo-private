@@ -21,6 +21,162 @@ class _HealthMonitorState(TypedDict, total=False):
     shutdown_now: bool
 
 
+class GraphNode:
+    """Base class for LangGraph nodes."""
+    
+    def __init__(self, operator: "ApplicationOperator"):
+        """Initialize the node with a reference to the operator.
+        
+        Args:
+            operator: The ApplicationOperator instance that owns this node.
+        """
+        self.operator = operator
+    
+    def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
+        """Execute the node logic.
+        
+        Args:
+            state: The current graph state.
+            
+        Returns:
+            The updated graph state.
+        """
+        raise NotImplementedError
+
+
+class GraphRouter:
+    """Base class for LangGraph routing functions."""
+    
+    def __init__(self, operator: "ApplicationOperator"):
+        """Initialize the router with a reference to the operator.
+        
+        Args:
+            operator: The ApplicationOperator instance that owns this router.
+        """
+        self.operator = operator
+    
+    def __call__(self, state: _HealthMonitorState) -> str:
+        """Determine the next node to route to.
+        
+        Args:
+            state: The current graph state.
+            
+        Returns:
+            The name of the next node or END.
+        """
+        raise NotImplementedError
+
+
+class WaitIntervalNode(GraphNode):
+    """Node that waits for the check interval before proceeding."""
+    
+    def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
+        """Wait in 1s increments so SIGINT/SIGTERM can stop quickly.
+        
+        Args:
+            state: The current graph state.
+            
+        Returns:
+            Updated state with shutdown_now flag set.
+        """
+        for _ in range(self.operator.check_interval):
+            if self.operator._shutdown_requested:
+                return {**state, "shutdown_now": True}
+            time.sleep(1)
+        return {**state, "shutdown_now": False}
+
+
+class DoHealthCheckNode(GraphNode):
+    """Node that performs the health check on the application."""
+    
+    def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
+        """Execute a health check and update the state.
+        
+        Args:
+            state: The current graph state.
+            
+        Returns:
+            Updated state with health check results.
+        """
+        check_count = int(state.get("check_count", 0)) + 1
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            result_obj = self.operator.app.health_check()
+            result: dict[str, Any] = {
+                "healthy": bool(result_obj.healthy),
+                "message": str(result_obj.message),
+                "details": result_obj.details or {},
+            }
+        except Exception as e:
+            result = {
+                "healthy": False,
+                "message": f"Health check exception: {e}",
+                "details": {"error": str(e)},
+            }
+
+        return {
+            **state,
+            "check_count": check_count,
+            "timestamp": timestamp,
+            "result": result,
+        }
+
+
+class SummarizeAndRecommendNode(GraphNode):
+    """Node that summarizes health check results using LLM and prints them."""
+    
+    def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
+        """Summarize health check results and print them.
+        
+        Args:
+            state: The current graph state.
+            
+        Returns:
+            Updated state with summary added.
+        """
+        timestamp = state.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        check_count = int(state.get("check_count", 0))
+        result = state.get("result") or {}
+
+        summary = self.operator._llm_summarize_health(result=result)
+        print(f"[{timestamp}] Health Check #{check_count}: {summary}")
+
+        return {**state, "summary": summary}
+
+
+class RouteAfterWait(GraphRouter):
+    """Router that determines next step after waiting interval."""
+    
+    def __call__(self, state: _HealthMonitorState) -> str:
+        """Route to health check or END based on shutdown status.
+        
+        Args:
+            state: The current graph state.
+            
+        Returns:
+            Next node name or END.
+        """
+        if state.get("shutdown_now") or self.operator._shutdown_requested:
+            return END
+        return "do_health_check"
+
+
+class RouteNext(GraphRouter):
+    """Router that determines next step after summarizing."""
+    
+    def __call__(self, state: _HealthMonitorState) -> str:
+        """Route back to wait interval or END based on shutdown status.
+        
+        Args:
+            state: The current graph state.
+            
+        Returns:
+            Next node name or END.
+        """
+        return END if self.operator._shutdown_requested else "wait_interval"
+
+
 class ApplicationOperator:
     """Manages application deployment and monitoring.
     
@@ -113,67 +269,25 @@ class ApplicationOperator:
 
     def _build_healthcheck_graph(self):
         """Build a LangGraph that periodically checks health and prints an LLM summary."""
+        # Create node instances
+        wait_interval_node = WaitIntervalNode(self)
+        do_health_check_node = DoHealthCheckNode(self)
+        summarize_and_recommend_node = SummarizeAndRecommendNode(self)
+        
+        # Create router instances
+        route_after_wait = RouteAfterWait(self)
+        route_next = RouteNext(self)
 
-        def wait_interval(state: _HealthMonitorState) -> _HealthMonitorState:
-            # Wait in 1s increments so SIGINT/SIGTERM can stop quickly.
-            for _ in range(self.check_interval):
-                if self._shutdown_requested:
-                    return {**state, "shutdown_now": True}
-                time.sleep(1)
-            return {**state, "shutdown_now": False}
-
-        def route_after_wait(state: _HealthMonitorState) -> str:
-            if state.get("shutdown_now") or self._shutdown_requested:
-                return END
-            return "do_health_check"
-
-        def do_health_check(state: _HealthMonitorState) -> _HealthMonitorState:
-            check_count = int(state.get("check_count", 0)) + 1
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            try:
-                result_obj = self.app.health_check()
-                result: dict[str, Any] = {
-                    "healthy": bool(result_obj.healthy),
-                    "message": str(result_obj.message),
-                    "details": result_obj.details or {},
-                }
-            except Exception as e:
-                result = {
-                    "healthy": False,
-                    "message": f"Health check exception: {e}",
-                    "details": {"error": str(e)},
-                }
-
-            return {
-                **state,
-                "check_count": check_count,
-                "timestamp": timestamp,
-                "result": result,
-            }
-
-        def summarize_and_print(state: _HealthMonitorState) -> _HealthMonitorState:
-            timestamp = state.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            check_count = int(state.get("check_count", 0))
-            result = state.get("result") or {}
-
-            summary = self._llm_summarize_health(result=result)
-            print(f"[{timestamp}] Health Check #{check_count}: {summary}")
-
-            return {**state, "summary": summary}
-
-        def route_next(state: _HealthMonitorState) -> str:
-            return END if self._shutdown_requested else "wait_interval"
-
+        # Build the graph
         workflow = StateGraph(_HealthMonitorState)
-        workflow.add_node("wait_interval", wait_interval)
-        workflow.add_node("do_health_check", do_health_check)
-        workflow.add_node("summarize_and_print", summarize_and_print)
+        workflow.add_node("wait_interval", wait_interval_node)
+        workflow.add_node("do_health_check", do_health_check_node)
+        workflow.add_node("summarize_and_recommend", summarize_and_recommend_node)
 
         workflow.add_edge(START, "wait_interval")
         workflow.add_conditional_edges("wait_interval", route_after_wait, {"do_health_check": "do_health_check", END: END})
-        workflow.add_edge("do_health_check", "summarize_and_print")
-        workflow.add_conditional_edges("summarize_and_print", route_next, {"wait_interval": "wait_interval", END: END})
+        workflow.add_edge("do_health_check", "summarize_and_recommend")
+        workflow.add_conditional_edges("summarize_and_recommend", route_next, {"wait_interval": "wait_interval", END: END})
 
         return workflow.compile()
 
