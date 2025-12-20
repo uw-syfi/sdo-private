@@ -11,6 +11,7 @@ load_dotenv()
 from app_operator.app_registry import registry
 from app_operator.operator import ApplicationOperator
 from app_operator.script_generator import generate_scripts
+from app_operator.codex_mode import CodexOperator
 
 
 def main() -> int:
@@ -38,6 +39,9 @@ Examples:
 
   # Generate deployment scripts for a repository
   python -m app_operator generate-scripts /path/to/repository
+
+  # Codex-assisted deployment mode
+  python -m app_operator codex /path/to/repository
 
   # Stop the application with Ctrl+C
         """
@@ -96,6 +100,29 @@ Examples:
         help="Directory path of the repository to generate scripts for"
     )
     gen_parser.add_argument(
+        "--model",
+        metavar="MODEL",
+        help="Codex model to use (default: from CODEX_MODEL env var or gpt-4o-mini)"
+    )
+    
+    # Codex mode command
+    codex_parser = subparsers.add_parser(
+        "codex",
+        help="Codex-assisted deployment mode with automatic error fixing"
+    )
+    codex_parser.add_argument(
+        "directory",
+        metavar="DIR",
+        help="Directory path of the repository to deploy"
+    )
+    codex_parser.add_argument(
+        "--interval", "-i",
+        type=int,
+        default=30,
+        metavar="SECONDS",
+        help="Interval between health checks in seconds (default: 30)"
+    )
+    codex_parser.add_argument(
         "--model",
         metavar="MODEL",
         help="Codex model to use (default: from CODEX_MODEL env var or gpt-4o-mini)"
@@ -164,6 +191,25 @@ Examples:
             else:
                 print(f"✗ {message}", file=sys.stderr)
                 return 1
+        except Exception as e:
+            print(f"✗ Unexpected error: {e}", file=sys.stderr)
+            return 1
+    
+    elif command == "codex":
+        # Validate interval
+        if args.interval < 1:
+            parser.error("interval must be at least 1 second")
+        
+        try:
+            operator = CodexOperator(
+                repo_path=args.directory,
+                health_check_interval=args.interval,
+                codex_model=args.model
+            )
+            return operator.run()
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
         except Exception as e:
             print(f"✗ Unexpected error: {e}", file=sys.stderr)
             return 1

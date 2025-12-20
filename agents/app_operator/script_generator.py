@@ -47,7 +47,11 @@ class CodexLLM:
         """
         # Prepare codex command
         # "exec" to run in non-interactive mode
-        cmd = [self.codex_path, "exec"]
+        cmd = [
+            self.codex_path, 
+            "exec", 
+            "--dangerously-bypass-approvals-and-sandbox"
+        ]
         if self.model:
             cmd.extend(["--model", self.model])
         

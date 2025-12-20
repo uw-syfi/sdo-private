@@ -61,6 +61,19 @@ APP_OPERATOR_LLM_MODEL=gpt-4o-mini  # default
 
 ### Commands
 
+#### Deploy and Monitor an app with Codex
+
+With codex mode, the app operator uses codex as the agent to deploy and monitor the application.
+
+**What it does:**
+- **Auto-Scripting**: Automatically generates deployment and health check scripts if they are missing. Scripts are created in `<app-dir>/.sds`.
+- **Self-Healing Deployment**: If a deployment fails, Codex analyzes the error logs, identifies the root cause, and automatically fixes the scripts before retrying (up to 5 attempts).
+- **AI-Powered Analysis**: Provides intelligent analysis of health check results to suggest improvements.
+
+```bash
+python -m app_operator codex /path/to/repository
+```
+
 #### Generate Deployment Scripts
 
 Automatically generate deployment and health check scripts for any application repository:
@@ -178,6 +191,22 @@ Press `Ctrl+C` (SIGINT) to gracefully shutdown:
 
 ### Command Reference
 
+#### `codex <DIR>`
+Deploy an application with autonomous error fixing and AI-powered health monitoring.
+
+**Arguments:**
+- `<DIR>`: Path to the repository directory (required)
+
+**Options:**
+- `--model <MODEL>`: Specify the Codex model to use (optional, defaults to `gpt-4o-mini`)
+- `--interval <SECONDS>`, `-i <SECONDS>`: Health check interval in seconds (default: 30)
+- `--dangerously-bypass-approvals-and-sandbox`: Bypass approval prompts and sandbox restrictions. **Use with extreme caution.**
+
+**Example:**
+```bash
+python -m app_operator codex /path/to/repository
+```
+
 #### `generate-scripts <DIR>`
 Generate deployment and health check scripts for a repository using AI.
 
@@ -274,11 +303,14 @@ python -m app_operator run --app-name hotel
 #### Custom Health Check Interval
 
 ```bash
-# Check health every 10 seconds
+# Regular mode - Check health every 10 seconds
 python -m app_operator run --app-name hotel --interval 10
 
-# Check health every 2 minutes
+# Regular mode - Check health every 2 minutes
 python -m app_operator run --app-name hotel --interval 120
+
+# Codex mode - Check health every 60 seconds
+python -m app_operator codex /path/to/repository --interval 60
 ```
 
 #### Using Installed Command
