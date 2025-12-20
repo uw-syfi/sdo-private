@@ -10,6 +10,7 @@ The SDS Operator is a Python module that manages application lifecycle through a
 - Abstract application interface for flexible implementations
 - Automated health checks at configurable intervals
 - LangGraph-based monitoring loop with LLM status summaries
+- Automatic environment variable loading from `.env` files
 - Graceful shutdown on Ctrl+C (SIGINT/SIGTERM)
 - Easy extensibility for multiple applications
 
@@ -46,12 +47,25 @@ This will:
 
 ### LLM Configuration
 
-Health summaries use `langchain-openai` by default. Configure:
+Health summaries use `langchain-openai` by default. Environment variables are automatically loaded from a `.env` file in the project root (if present). You can configure via environment variables:
+
+**Option 1: Using a `.env` file (recommended)**
+
+Create a `.env` file in the `agents/` directory:
+
+```bash
+OPENAI_API_KEY=your-api-key-here
+APP_OPERATOR_LLM_MODEL=gpt-4o-mini  # optional, defaults to gpt-4o-mini
+```
+
+**Option 2: Using environment variables**
 
 ```bash
 export OPENAI_API_KEY="..."
 export APP_OPERATOR_LLM_MODEL="gpt-4o-mini"  # optional
 ```
+
+The operator automatically loads environment variables from `.env` files using `python-dotenv`, so you don't need to manually export them if you use a `.env` file.
 
 ### Custom Health Check Interval
 

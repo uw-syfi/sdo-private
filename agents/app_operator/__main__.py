@@ -3,6 +3,11 @@
 import argparse
 import sys
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from app_operator.app_registry import registry
 from app_operator.operator import ApplicationOperator
 

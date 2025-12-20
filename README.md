@@ -1,93 +1,242 @@
-# sds
+# SDS
 
+SDS (Self-Defining Systems) is an AI-native approach that embeds agentic LLMs into the full systems lifecycle—specification, design, implementation, and operation—to autonomously explore, validate, and evolve infrastructure.
 
+## Overview
 
-## Getting started
+This repository contains applications, tools, and infrastructure code for the SDS project.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Project Structure
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.cs.washington.edu/syslab/sds.git
-git branch -M main
-git push -uf origin main
+sds/
+├── agents/          # Application operators and management tools
+├── apps/            # Application code and configurations
+└── deploy/          # Deployment scripts and configurations
 ```
 
-## Integrate with your tools
+## Application Operator
 
-- [ ] [Set up project integrations](https://gitlab.cs.washington.edu/syslab/sds/-/settings/integrations)
+The Application Operator (`app_operator`) is a tool for deploying and monitoring applications with automated health checks and graceful lifecycle management.
 
-## Collaborate with your team
+### Quick Start
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+#### Installation
 
-## Test and Deploy
+From the `agents` directory:
 
-Use the built-in continuous integration in GitLab.
+```bash
+cd agents
+pip install -e .
+```
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Or using `uv`:
 
-***
+```bash
+cd agents
+uv pip install -e .
+```
 
-# Editing this README
+#### Environment Setup
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Create a `.env` file in the project root with your OpenAI API key (required for health check summaries):
 
-## Suggestions for a good README
+```bash
+OPENAI_API_KEY=your_api_key_here
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Optionally, customize the LLM model:
 
-## Name
-Choose a self-explaining name for your project.
+```bash
+APP_OPERATOR_LLM_MODEL=gpt-4o-mini  # default
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### Commands
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+#### List Available Applications
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+View all registered applications:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```bash
+python -m app_operator --list
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+or using the short form:
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+python -m app_operator -l
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+This will display:
+- Application names
+- Descriptions
+- Total count of available applications
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+#### Deploy and Monitor an Application
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Deploy an application and start monitoring its health:
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+```bash
+python -m app_operator --app-name <APP_NAME>
+```
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+or using the short form:
 
-## License
-For open source projects, say how it is licensed.
+```bash
+python -m app_operator -a <APP_NAME>
+```
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+**Example:**
+
+```bash
+python -m app_operator --app-name hotel
+```
+
+This will:
+1. Deploy the application
+2. Start periodic health checks (default: every 30 seconds)
+3. Display health check summaries with LLM-generated insights
+4. Continue monitoring until stopped
+
+#### Customize Health Check Interval
+
+Set a custom interval between health checks (in seconds):
+
+```bash
+python -m app_operator --app-name hotel --interval 60
+```
+
+or:
+
+```bash
+python -m app_operator -a hotel -i 60
+```
+
+The interval must be at least 1 second. Default is 30 seconds.
+
+#### Stopping the Operator
+
+Press `Ctrl+C` (SIGINT) to gracefully shutdown:
+- Stops health check monitoring
+- Shuts down the application
+- Cleans up resources
+- Exits cleanly
+
+### Command Reference
+
+#### `--list`, `-l`
+List all available applications.
+
+**Example:**
+```bash
+python -m app_operator --list
+```
+
+#### `--app-name <NAME>`, `-a <NAME>`
+**Required** (unless using `--list`). Name of the application to deploy and monitor.
+
+**Example:**
+```bash
+python -m app_operator --app-name hotel
+```
+
+#### `--interval <SECONDS>`, `-i <SECONDS>`
+Interval between health checks in seconds. Must be ≥ 1. Default: 30.
+
+**Example:**
+```bash
+python -m app_operator --app-name hotel --interval 45
+```
+
+### How It Works
+
+1. **Deployment**: The operator calls the application's `deploy()` method to start all necessary services.
+
+2. **Health Monitoring**: After deployment, the operator runs periodic health checks:
+   - Executes the application's `health_check()` method
+   - Uses an LLM to generate concise, operator-friendly summaries
+   - Displays results with timestamps and check numbers
+   - Continues until shutdown is requested
+
+3. **Graceful Shutdown**: On SIGINT/SIGTERM:
+   - Stops the monitoring loop
+   - Calls the application's `shutdown()` method
+   - Cleans up resources
+   - Exits with appropriate status codes
+
+### Examples
+
+#### Basic Usage
+
+```bash
+# List available applications
+python -m app_operator --list
+
+# Deploy and monitor the hotel application
+python -m app_operator --app-name hotel
+
+# Stop with Ctrl+C
+```
+
+#### Custom Health Check Interval
+
+```bash
+# Check health every 10 seconds
+python -m app_operator --app-name hotel --interval 10
+
+# Check health every 2 minutes
+python -m app_operator --app-name hotel --interval 120
+```
+
+#### Using Installed Command
+
+If installed as a package, you can use the `operator` command directly:
+
+```bash
+operator --list
+operator --app-name hotel
+operator -a hotel -i 60
+```
+
+### Exit Codes
+
+- `0`: Success (normal shutdown or successful operation)
+- `1`: Failure (deployment failed, invalid arguments, or unexpected errors)
+
+### Troubleshooting
+
+#### "Unknown application" Error
+
+If you see this error, use `--list` to see available applications:
+
+```bash
+python -m app_operator --list
+```
+
+#### Health Check Failures
+
+Health check failures are displayed in the monitoring output. The operator will continue running and monitoring even if individual checks fail, allowing you to observe recovery or persistent issues.
+
+#### LLM Summary Failures
+
+If LLM summarization fails (e.g., API key issues), the operator will:
+- Continue running normally
+- Use a fallback summary format
+- Display an error message indicating LLM unavailability
+
+### Operator Project Structure
+
+```
+agents/
+  app_operator/
+    __main__.py      # CLI entry point
+    operator.py      # Main operator logic
+    app_registry.py  # Application registry
+    application.py   # Base application class
+    apps/            # Application implementations
+      hotel.py       # Hotel application
+```
+
+## See Also
+
+For more detailed documentation on the application operator, see `agents/README.md`.
