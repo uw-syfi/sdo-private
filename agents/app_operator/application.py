@@ -59,6 +59,18 @@ class Application(ABC):
         pass
     
     @abstractmethod
+    def is_deployed(self) -> bool:
+        """Check if the application is already deployed.
+        
+        This method should verify whether the application services
+        are currently running without attempting to deploy.
+        
+        Returns:
+            bool: True if the application is deployed and running, False otherwise.
+        """
+        pass
+    
+    @abstractmethod
     def deploy(self) -> DeploymentResult:
         """Deploy the application.
         

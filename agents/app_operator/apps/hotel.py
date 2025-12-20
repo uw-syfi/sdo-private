@@ -41,6 +41,32 @@ class HotelApplication(Application):
         """Return the application description."""
         return "DeathStarBench Hotel Reservation"
     
+    def is_deployed(self) -> bool:
+        """Check if the hotel application is already deployed.
+        
+        This checks if Docker containers are running by using docker compose ps.
+        
+        Returns:
+            bool: True if containers are running, False otherwise.
+        """
+        try:
+            # Check if containers are running
+            result = subprocess.run(
+                ["docker", "compose", "ps", "-q", "--status", "running"],
+                cwd=self.project_root / "apps" / "deathstarbench" / "hotelReservation",
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            # If we get output, containers are running
+            running_containers = result.stdout.strip()
+            return bool(running_containers) and result.returncode == 0
+            
+        except Exception:
+            # On any error, assume not deployed
+            return False
+    
     def deploy(self) -> DeploymentResult:
         """Deploy the hotel application using deploy.sh start.
         
