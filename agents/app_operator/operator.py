@@ -8,6 +8,7 @@ from typing import Any, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app_operator.application import Application
@@ -17,6 +18,7 @@ class _HealthMonitorState(TypedDict, total=False):
     check_count: int
     timestamp: str
     result: dict[str, Any]
+    previous_result: dict[str, Any]
     summary: str
     shutdown_now: bool
 
@@ -100,6 +102,9 @@ class DoHealthCheckNode(GraphNode):
         """
         check_count = int(state.get("check_count", 0)) + 1
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Save previous result before updating
+        previous_result = state.get("result")
 
         try:
             result_obj = self.operator.app.health_check()
@@ -119,6 +124,7 @@ class DoHealthCheckNode(GraphNode):
             **state,
             "check_count": check_count,
             "timestamp": timestamp,
+            "previous_result": previous_result,
             "result": result,
         }
 
@@ -138,9 +144,32 @@ class SummarizeAndRecommendNode(GraphNode):
         timestamp = state.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         check_count = int(state.get("check_count", 0))
         result = state.get("result") or {}
+        previous_result = state.get("previous_result")
 
+        # Use LLM to determine if result is meaningfully different from previous
+        result_changed = False
+        
+        if previous_result:
+            result_changed = self.operator._llm_compare_results(
+                previous_result=previous_result,
+                current_result=result
+            )
+
+        # Always generate a summary
         summary = self.operator._llm_summarize_health(result=result)
-        print(f"[{timestamp}] Health Check #{check_count}: {summary}")
+        
+        if result_changed:
+            # Result changed - provide detailed report
+            print(f"[{timestamp}] Health Check #{check_count}: {summary}")
+        else:
+            # Result unchanged - show status message and summary
+            healthy = bool(result.get("healthy", False))
+            status_str = "HEALTHY" if healthy else "UNHEALTHY"
+            if previous_result:
+                print(f"[{timestamp}] Health Check #{check_count}: Status same as before - {status_str}. {summary}")
+            else:
+                # First check - provide full summary
+                print(f"[{timestamp}] Health Check #{check_count}: {summary}")
 
         return {**state, "summary": summary}
 
@@ -199,6 +228,7 @@ class ApplicationOperator:
         self._shutdown_requested = False
         self._deployed = False
         self._llm: Optional[ChatOpenAI] = None
+        self._checkpointer = MemorySaver()
     
     def run(self) -> int:
         """Deploy and monitor the application.
@@ -264,8 +294,9 @@ class ApplicationOperator:
     def _monitor_loop(self):
         """Run health checks using a LangGraph loop until shutdown is requested."""
         graph = self._build_healthcheck_graph()
+        config = {"configurable": {"thread_id": f"{self.app.name}_monitor"}}
         # Sleep first before running the first health check (gives app time to start).
-        graph.invoke({"check_count": 0})
+        graph.invoke({"check_count": 0}, config)
 
     def _build_healthcheck_graph(self):
         """Build a LangGraph that periodically checks health and prints an LLM summary."""
@@ -289,7 +320,7 @@ class ApplicationOperator:
         workflow.add_edge("do_health_check", "summarize_and_recommend")
         workflow.add_conditional_edges("summarize_and_recommend", route_next, {"wait_interval": "wait_interval", END: END})
 
-        return workflow.compile()
+        return workflow.compile(checkpointer=self._checkpointer)
 
     def _get_llm(self) -> ChatOpenAI:
         if self._llm is None:
@@ -309,6 +340,81 @@ class ApplicationOperator:
         tail = text[-tail_chars:]
         return f"{head}\n...\n{tail}"
 
+    def _llm_compare_results(self, *, previous_result: dict[str, Any], current_result: dict[str, Any]) -> bool:
+        """Use LLM to determine if current result is meaningfully different from previous result.
+        
+        Args:
+            previous_result: The previous health check result.
+            current_result: The current health check result.
+            
+        Returns:
+            True if results are meaningfully different, False otherwise.
+        """
+        prev_healthy = bool(previous_result.get("healthy", False))
+        curr_healthy = bool(current_result.get("healthy", False))
+        prev_message = str(previous_result.get("message", "")).strip()
+        curr_message = str(current_result.get("message", "")).strip()
+        prev_details = previous_result.get("details") or {}
+        curr_details = current_result.get("details") or {}
+        
+        # Fast heuristic: if boolean status changed, definitely different
+        if prev_healthy != curr_healthy:
+            return True
+        
+        # If messages are identical and both healthy, likely the same
+        if prev_healthy and curr_healthy and prev_message == curr_message:
+            return False
+        
+        # Use LLM to compare if there are meaningful differences
+        try:
+            llm = self._get_llm()
+            system = SystemMessage(
+                content="""
+You compare two health check results to determine if they are meaningfully different.
+Consider:
+- Different error messages or symptoms indicate different issues
+- Same status but different underlying problems are different
+- Minor variations in messages that mean the same thing are NOT different
+- Changes in exit codes or error details indicate differences
+
+Respond with ONLY "DIFFERENT" or "SAME" (no other text)."""
+            )
+            
+            # Prepare details comparison
+            prev_output = ""
+            curr_output = ""
+            if isinstance(prev_details, dict):
+                prev_output = str(prev_details.get("output", "") or "")
+                prev_output = ApplicationOperator._truncate_text(prev_output.strip(), max_chars=1000) if prev_output else ""
+            if isinstance(curr_details, dict):
+                curr_output = str(curr_details.get("output", "") or "")
+                curr_output = ApplicationOperator._truncate_text(curr_output.strip(), max_chars=1000) if curr_output else ""
+            
+            prev_exit_code = prev_details.get("exit_code") if isinstance(prev_details, dict) else None
+            curr_exit_code = curr_details.get("exit_code") if isinstance(curr_details, dict) else None
+            
+            human = HumanMessage(
+                content=(
+                    f"Previous result:\n"
+                    f"  healthy={prev_healthy}\n"
+                    f"  message={prev_message}\n"
+                    + (f"  exit_code={prev_exit_code}\n" if prev_exit_code is not None else "")
+                    + (f"  output_snippet:\n{prev_output}\n" if prev_output else "")
+                    + f"\nCurrent result:\n"
+                    f"  healthy={curr_healthy}\n"
+                    f"  message={curr_message}\n"
+                    + (f"  exit_code={curr_exit_code}\n" if curr_exit_code is not None else "")
+                    + (f"  output_snippet:\n{curr_output}\n" if curr_output else "")
+                )
+            )
+            resp = llm.invoke([system, human])
+            text = (resp.content or "").strip().upper()
+            return "DIFFERENT" in text
+        except Exception as e:
+            # On LLM failure, fall back to comparing messages
+            print(f"LLM comparison failed: {type(e).__name__}: {e}", file=sys.stderr)
+            return prev_message != curr_message
+    
     def _llm_summarize_health(self, *, result: dict[str, Any]) -> str:
         """Return a concise, operator-friendly health summary string."""
         healthy = bool(result.get("healthy", False))
@@ -334,13 +440,13 @@ class ApplicationOperator:
         try:
             llm = self._get_llm()
             system = SystemMessage(
-                content=(
-                    "You summarize health-check results for an operator log.\n"
-                    "Return 1-2 concise sentences.\n"
-                    "Must start with either 'HEALTHY' or 'UNHEALTHY'.\n"
-                    "If unhealthy, name the failing component(s) / symptom(s) if present.\n"
-                    "Do not use markdown, bullets, or extra formatting."
-                )
+                content="""
+You summarize health-check results for an operator log.
+Return 1-2 concise sentences.
+Must start with either 'HEALTHY' or 'UNHEALTHY'.
+If unhealthy, name the failing component(s) / symptom(s) if present.
+If there are issues to fix, include actionable fixes or recommendations (e.g., 'check X configuration', 'restart Y service', 'verify Z is running').
+Do not use markdown, bullets, or extra formatting."""
             )
             human = HumanMessage(
                 content=(
