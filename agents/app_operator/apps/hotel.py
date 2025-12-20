@@ -3,6 +3,7 @@
 import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from app_operator.application import Application, DeploymentResult, HealthCheckResult
 
@@ -14,13 +15,13 @@ class HotelApplication(Application):
     The scripts are located in deploy/deathstarbench/hotel/.
     """
     
-    def __init__(self, project_root: str = "/mnt/sda/shli/sds"):
+    def __init__(self, project_root: Optional[str] = None):
         """Initialize the hotel application.
         
         Args:
-            project_root: Path to the project root directory.
+            project_root: Optional override for the SDS project root directory.
         """
-        self.project_root = Path(project_root)
+        self.project_root = self._resolve_project_root(project_root)
         self.deploy_dir = self.project_root / "deploy" / "deathstarbench" / "hotel"
         self.deploy_script = self.deploy_dir / "deploy.sh"
         self.health_check_script = self.deploy_dir / "health_check.sh"
@@ -40,6 +41,28 @@ class HotelApplication(Application):
     def description(self) -> str:
         """Return the application description."""
         return "DeathStarBench Hotel Reservation"
+    
+    @staticmethod
+    def _resolve_project_root(project_root: Optional[str]) -> Path:
+        """Determine the SDS project root using overrides or local paths."""
+        if project_root:
+            return Path(project_root).expanduser().resolve()
+        
+        env_root = os.environ.get("SDS_PROJECT_ROOT")
+        if env_root:
+            return Path(env_root).expanduser().resolve()
+        
+        module_path = Path(__file__).resolve()
+        # Walk up the tree looking for the repo that contains deploy scripts.
+        for parent in module_path.parents:
+            deploy_dir = parent / "deploy" / "deathstarbench" / "hotel"
+            if deploy_dir.is_dir():
+                return parent
+        # Fall back to the ancestor that corresponds to the repository root.
+        parent_list = list(module_path.parents)
+        if len(parent_list) >= 4:
+            return parent_list[3]
+        return parent_list[-1]
     
     def is_deployed(self) -> bool:
         """Check if the hotel application is already deployed.
