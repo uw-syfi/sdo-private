@@ -1,11 +1,9 @@
-"""CLI entry point for the operator module."""
-
-from app_operator.coding_agent_mode import CodingAgentOperator
-from app_operator.script_generator import generate_scripts, create_agent_from_config
 import argparse
 import sys
 
 from dotenv import load_dotenv
+
+from app_operator.commands import run, generate_scripts
 
 # Load environment variables from .env file
 load_dotenv()
@@ -38,108 +36,27 @@ Examples:
         dest="command", help="Available commands")
 
     subparsers.required = True
+
+    # 'run' command
     run_parser = subparsers.add_parser(
         "run", help="Run Codex-assisted deployment on a repository")
+    run.add_arguments(run_parser)
 
-    run_parser.add_argument(
-        "directory",
-        metavar="DIR",
-        help="Directory path of the repository to deploy"
-    )
-    run_parser.add_argument(
-        "--interval", "-i",
-        type=int,
-        default=30,
-        metavar="SECONDS",
-        help="Interval between health checks in seconds (default: 30)"
-    )
-    run_parser.add_argument(
-        "--model",
-        metavar="MODEL",
-        help="Model to use (default: from config or env var)"
-    )
-    run_parser.add_argument(
-        "--config",
-        metavar="FILE",
-        help="Path to configuration file (default: sds.toml in target dir)"
-    )
-
+    # 'generate-scripts' command
     gen_parser = subparsers.add_parser(
         "generate-scripts",
         help="Generate deploy.sh and health_check.sh scripts for a repository"
     )
-
-    gen_parser.add_argument(
-        "directory",
-        metavar="DIR",
-        help="Directory path of the repository to generate scripts for"
-    )
-    gen_parser.add_argument(
-        "--model",
-        metavar="MODEL",
-        help="Model to use (default: from config or env var)"
-    )
-    gen_parser.add_argument(
-        "--config",
-        metavar="FILE",
-        help="Path to configuration file (default: sds.toml in target dir)"
-    )
+    generate_scripts.add_arguments(gen_parser)
 
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, 'run')
 
     args = parser.parse_args()
     if args.command == "run":
-        if not args.directory:
-            parser.print_help()
-            return 1
-        if args.interval < 1:
-            parser.error("interval must be at least 1 second")
-        try:
-            agent = create_agent_from_config(
-                args.directory,
-                model_override=args.model,
-                config_path=args.config
-            )
-            operator = CodingAgentOperator(
-                repo_path=args.directory,
-                health_check_interval=args.interval,
-                agent=agent
-            )
-
-            return operator.run()
-
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
-
-        except Exception as e:
-            print(f"✗ Unexpected error: {e}", file=sys.stderr)
-            return 1
-
+        return run.run_command(args)
     elif args.command == "generate-scripts":
-        try:
-            agent = create_agent_from_config(
-                args.directory,
-                model_override=args.model,
-                config_path=args.config
-            )
-
-            success, message = generate_scripts(args.directory, agent)
-
-            if success:
-                print(f"✓ {message}")
-
-                return 0
-
-            else:
-                print(f"✗ {message}", file=sys.stderr)
-
-                return 1
-
-        except Exception as e:
-            print(f"✗ Unexpected error: {e}", file=sys.stderr)
-            return 1
+        return generate_scripts.generate_scripts_command(args)
     else:
         parser.print_help()
         return 1

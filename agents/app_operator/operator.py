@@ -1,28 +1,30 @@
-"""Coding-agent-assisted deployment mode with automatic error fixing."""
-
 import os
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Any
 
-from app_operator.script_generator import CodingAgent, CodexCodingAgent, generate_scripts, create_agent_from_config
+from app_operator.agent_cli.base import CodingAgent
+from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.monitoring import MonitoringTask, HealthCheckTask
+# Still needed for initial script generation
+from app_operator.script_generator import generate_scripts
 
 
-class CodingAgentOperator:
-    """Manages automated deployment with coding-agent-assisted error fixing.
+class AppOperator:
+    """Manages automated deployment with coding-agent-assisted error fixing and extensible monitoring.
 
     This operator:
     1. Checks for or generates deployment scripts
     2. Attempts deployment and uses a coding agent to fix errors
-    3. Monitors health checks and provides agent analysis
+    3. Monitors application health using a configurable set of MonitoringTasks
     """
 
     def __init__(self, repo_path: str, health_check_interval: int = 30,
                  agent: Optional[CodingAgent] = None):
-        """Initialize the coding agent operator.
+        """Initialize the application operator.
 
         Args:
             repo_path: Path to the repository to deploy.
@@ -31,6 +33,7 @@ class CodingAgentOperator:
         """
         self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval
+        self.check_count = 0  # To track health check count for monitoring messages
 
         # Initialize agent if not provided
         if agent is None:
@@ -49,6 +52,9 @@ class CodingAgentOperator:
         self._shutdown_requested = False
         self._deployed = False
 
+        # Initialize monitoring tasks
+        self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
+
         # Validate repository path
         if not self.repo_path.exists():
             raise ValueError(f"Repository path does not exist: {repo_path}")
@@ -57,7 +63,7 @@ class CodingAgentOperator:
                 f"Repository path is not a directory: {repo_path}")
 
     def run(self) -> int:
-        """Main entry point for coding-agent-assisted deployment.
+        """Main entry point for application operation.
 
         Returns:
             int: Exit code (0 for success, 1 for failure).
@@ -68,7 +74,7 @@ class CodingAgentOperator:
 
         try:
             print(f"\n{'='*70}")
-            print(f"  Coding-Agent-Assisted Deployment Mode")
+            print(f"  App Operator Mode")
             print(f"  Repository: {self.repo_path}")
             print(f"  Agent: {self.agent.__class__.__name__}")
             print(f"{'='*70}\n")
@@ -87,7 +93,7 @@ class CodingAgentOperator:
             self._deployed = True
 
             # Step 3: Monitor health and provide analysis
-            self._monitor_health()
+            self._monitor_application()
 
             return 0
 
@@ -118,6 +124,7 @@ class CodingAgentOperator:
         print(
             f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
 
+        # Use the generate_scripts function from script_generator
         success, message = generate_scripts(str(self.repo_path), self.agent)
 
         if success:
@@ -484,12 +491,12 @@ You have read/write access to these files. Please fix the issues and help get th
 
         return f"{system_prompt}\n\n{user_prompt}"
 
-    def _monitor_health(self):
-        """Monitor health checks and provide agent analysis every interval."""
+    def _monitor_application(self):
+        """Monitor application health and provide agent analysis every interval."""
         print(
-            f"\nStarting health monitoring (interval: {self.health_check_interval}s)...")
+            f"\nStarting application monitoring (interval: {self.health_check_interval}s)...")
 
-        check_count = 0
+        self.check_count = 0  # Reset check count for new monitoring session
 
         while not self._shutdown_requested:
             # Wait for interval
@@ -498,20 +505,19 @@ You have read/write access to these files. Please fix the issues and help get th
                     return
                 time.sleep(1)
 
-            check_count += 1
+            self.check_count += 1
 
             print(f"\n{'='*70}")
-            print(f"  Health Check #{check_count}")
+            print(f"  Monitoring Cycle #{self.check_count}")
             print(f"{'='*70}\n")
 
-            # Run health check
-            result = self._run_health_check()
-
-            # Ask agent to analyze results
-            self._analyze_health_with_agent(result, check_count)
+            # Run all registered monitoring tasks
+            for task in self.monitoring_tasks:
+                task.run(self)
 
     def _analyze_health_with_agent(
-            self, health_result: dict, check_count: int):
+            self,
+            health_result: dict, check_count: int):
         """Use a coding agent to analyze health check results and provide suggestions.
 
         Args:
@@ -549,7 +555,8 @@ You have read/write access to these files. Please fix the issues and help get th
             print(f"✗ Agent analysis failed: {e}", file=sys.stderr)
 
     def _prepare_health_context(
-            self, health_result: dict, check_count: int) -> str:
+            self,
+            health_result: dict, check_count: int) -> str:
         """Prepare health check context for analysis.
 
         Args:
