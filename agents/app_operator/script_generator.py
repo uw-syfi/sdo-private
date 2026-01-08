@@ -70,7 +70,7 @@ class CodexCodingAgent(CodingAgent):
             model: Optional model name to use with codex. If None, uses default.
 
         Raises:
-            RuntimeError: If codex binary is not found in PATH.
+            RuntimeError: If codex binary is not found in PATH or is not working.
         """
         self.env = _get_interactive_env()
 
@@ -88,6 +88,30 @@ class CodexCodingAgent(CodingAgent):
             )
         self.codex_path = codex_path
         self.model = model
+        self._check_cli()
+
+    def _check_cli(self):
+        """Check if the codex CLI tool is available and executable."""
+        try:
+            result = subprocess.run(
+                [self.codex_path, "--help"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Codex CLI tool at '{self.codex_path}' is not working correctly. "
+                    f"'{self.codex_path} --help' exited with code {result.returncode}. "
+                    f"Stderr: {result.stderr}"
+                )
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"Codex CLI tool not found at '{self.codex_path}'. "
+                "Please ensure codex is installed and in your PATH."
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to check Codex CLI tool: {e}")
 
     def generate(self, prompt: str,
                  cwd: Optional[str] = None, timeout: int = 300) -> str:
@@ -223,7 +247,7 @@ class GeminiCodingAgent(CodingAgent):
             model: Optional model name to use.
 
         Raises:
-            RuntimeError: If gemini binary is not found in PATH.
+            RuntimeError: If gemini binary is not found in PATH or is not working.
         """
         self.env = _get_interactive_env()
 
@@ -241,6 +265,30 @@ class GeminiCodingAgent(CodingAgent):
             )
         self.gemini_path = gemini_path
         self.model = model
+        self._check_cli()
+
+    def _check_cli(self):
+        """Check if the gemini CLI tool is available and executable."""
+        try:
+            result = subprocess.run(
+                [self.gemini_path, "--help"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Gemini CLI tool at '{self.gemini_path}' is not working correctly. "
+                    f"'{self.gemini_path} --help' exited with code {result.returncode}. "
+                    f"Stderr: {result.stderr}"
+                )
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"Gemini CLI tool not found at '{self.gemini_path}'. "
+                "Please ensure gemini is installed and in your PATH."
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to check Gemini CLI tool: {e}")
 
     def generate(self, prompt: str,
                  cwd: Optional[str] = None, timeout: int = 300) -> str:
