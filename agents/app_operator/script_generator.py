@@ -97,14 +97,14 @@ class CodexCodingAgent(CodingAgent):
                 [self.codex_path, "--help"],
                 capture_output=True,
                 text=True,
-                check=False
+                check=False,
+                env=self.env
             )
             if result.returncode != 0:
                 raise RuntimeError(
                     f"Codex CLI tool at '{self.codex_path}' is not working correctly. "
                     f"'{self.codex_path} --help' exited with code {result.returncode}. "
-                    f"Stderr: {result.stderr}"
-                )
+                    f"Stderr: {result.stderr}")
         except FileNotFoundError:
             raise RuntimeError(
                 f"Codex CLI tool not found at '{self.codex_path}'. "
@@ -274,14 +274,14 @@ class GeminiCodingAgent(CodingAgent):
                 [self.gemini_path, "--help"],
                 capture_output=True,
                 text=True,
-                check=False
+                check=False,
+                env=self.env
             )
             if result.returncode != 0:
                 raise RuntimeError(
                     f"Gemini CLI tool at '{self.gemini_path}' is not working correctly. "
                     f"'{self.gemini_path} --help' exited with code {result.returncode}. "
-                    f"Stderr: {result.stderr}"
-                )
+                    f"Stderr: {result.stderr}")
         except FileNotFoundError:
             raise RuntimeError(
                 f"Gemini CLI tool not found at '{self.gemini_path}'. "
@@ -405,10 +405,6 @@ class GeminiCodingAgent(CodingAgent):
         return stdout_data.strip()
 
 
-# For backward compatibility
-CodexLLM = CodexCodingAgent
-
-
 def create_agent_from_config(
         target_dir: str,
         model_override: Optional[str] = None,
@@ -523,8 +519,7 @@ def generate_scripts(
 
         # Generate health_check.sh using coding agent
         health_check_success, health_check_content = _generate_health_check_script(
-            agent, system_prompt, repo_context, abs_target_dir
-        )
+            agent, system_prompt, repo_context, abs_target_dir)
 
         if not health_check_success:
             return False, f"Failed to generate health_check.sh: {health_check_content}"

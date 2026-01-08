@@ -275,8 +275,12 @@ class CodingAgentOperator:
                 "stderr": f"Failed to run health check: {e}"
             }
 
-    def _fix_with_agent(self, deploy_result: dict, health_result: Optional[dict],
-                        attempt: int, max_attempts: int) -> bool:
+    def _fix_with_agent(
+            self,
+            deploy_result: dict,
+            health_result: Optional[dict],
+            attempt: int,
+            max_attempts: int) -> bool:
         """Use a coding agent to analyze errors and fix the scripts.
 
         Args:
@@ -721,7 +725,3 @@ Remember: Your suggestions are for information only and will not be automaticall
         print(f"\n{'='*70}")
         print(f"  Shutdown Complete")
         print(f"{'='*70}\n")
-
-
-# For backward compatibility
-CodexOperator = CodingAgentOperator
