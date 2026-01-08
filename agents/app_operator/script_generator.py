@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tomllib
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -164,8 +165,175 @@ class CodexCodingAgent(CodingAgent):
         return stdout_data.strip()
 
 
+class GeminiCodingAgent(CodingAgent):
+    """Coding agent implementation using the Gemini CLI tool."""
+    
+    def __init__(self, model: Optional[str] = None):
+        """Initialize the Gemini coding agent.
+        
+        Args:
+            model: Optional model name to use.
+            
+        Raises:
+            RuntimeError: If gemini binary is not found in PATH.
+        """
+        gemini_path = shutil.which("gemini")
+        if not gemini_path:
+            raise RuntimeError(
+                "gemini binary not found in PATH. "
+                "Please ensure gemini is installed and available."
+            )
+        self.gemini_path = gemini_path
+        self.model = model
+    
+    def generate(self, prompt: str, cwd: Optional[str] = None, timeout: int = 300) -> str:
+        """Generate text using gemini.
+        
+        Args:
+            prompt: The prompt to send to gemini.
+            cwd: Optional working directory to run gemini in.
+            timeout: Timeout in seconds (default: 300).
+            
+        Returns:
+            Generated text from gemini.
+        """
+        # Prepare gemini command
+        cmd = [self.gemini_path]
+        if self.model:
+            cmd.extend(["--model", self.model])
+        
+        print(f"[GeminiCodingAgent] Running command: {' '.join(cmd)}")
+        print(f"[GeminiCodingAgent] Working directory: {cwd or os.getcwd()}")
+        print(f"[GeminiCodingAgent] Prompt length: {len(prompt)} characters")
+        print("-" * 80)
+        sys.stdout.flush()
+        
+        # Buffers to capture output
+        stdout_lines = []
+        stderr_lines = []
+        
+        def read_stdout(pipe, buffer):
+            """Read stdout line by line and print + capture."""
+            for line in iter(pipe.readline, ''):
+                if not line:
+                    break
+                line_stripped = line.rstrip('\n')
+                print(f"[GeminiCodingAgent] {line_stripped}")
+                sys.stdout.flush()
+                buffer.append(line)
+            pipe.close()
+        
+        def read_stderr(pipe, buffer):
+            """Read stderr line by line and print + capture."""
+            for line in iter(pipe.readline, ''):
+                if not line:
+                    break
+                line_stripped = line.rstrip('\n')
+                print(f"[GeminiCodingAgent] [STDERR] {line_stripped}", file=sys.stderr)
+                sys.stderr.flush()
+                buffer.append(line)
+            pipe.close()
+        
+        # Run gemini with Popen to capture and print output in real-time
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,  # Line buffered
+            cwd=cwd
+        )
+        
+        # Start threads to read stdout and stderr concurrently
+        stdout_thread = threading.Thread(target=read_stdout, args=(process.stdout, stdout_lines))
+        stderr_thread = threading.Thread(target=read_stderr, args=(process.stderr, stderr_lines))
+        
+        stdout_thread.daemon = True
+        stderr_thread.daemon = True
+        
+        stdout_thread.start()
+        stderr_thread.start()
+        
+        # Send the prompt to stdin and close it
+        try:
+            process.stdin.write(prompt)
+            process.stdin.close()
+        except BrokenPipeError:
+            pass
+        
+        # Wait for process to complete with timeout
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        
+        # Wait for threads to finish reading
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+        
+        # Combine captured output
+        stdout_data = ''.join(stdout_lines)
+        stderr_data = ''.join(stderr_lines)
+        
+        print("-" * 80)
+        
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"gemini exited with code {process.returncode}: {stderr_data}"
+            )
+        
+        print(f"[GeminiCodingAgent] Command completed successfully (exit code: 0)")
+        print("=" * 80)
+        sys.stdout.flush()
+        
+        return stdout_data.strip()
+
+
 # For backward compatibility
 CodexLLM = CodexCodingAgent
+
+
+def create_agent_from_config(target_dir: str, model_override: Optional[str] = None) -> CodingAgent:
+    """Create a coding agent based on configuration file in target directory.
+    
+    Looks for sds.toml or config.toml in the target directory.
+    Default to CodexCodingAgent if no config found or provider is not specified.
+    
+    Args:
+        target_dir: Directory to look for configuration files.
+        model_override: Optional model name to override config.
+        
+    Returns:
+        CodingAgent: Configured coding agent.
+    """
+    target_path = Path(target_dir)
+    config_files = [target_path / "sds.toml", target_path / "config.toml"]
+    
+    provider = "codex"
+    model = model_override
+    
+    for config_file in config_files:
+        if config_file.exists():
+            try:
+                with open(config_file, "rb") as f:
+                    config = tomllib.load(f)
+                    agent_config = config.get("agent", {})
+                    if "provider" in agent_config:
+                        provider = agent_config["provider"]
+                    if not model and "model" in agent_config:
+                        model = agent_config["model"]
+                print(f"Loaded configuration from {config_file}")
+                break
+            except Exception as e:
+                print(f"Warning: Failed to parse {config_file}: {e}", file=sys.stderr)
+    
+    if provider.lower() == "gemini":
+        return GeminiCodingAgent(model=model)
+    else:
+        return CodexCodingAgent(model=model)
 
 
 def generate_scripts(target_dir: str, agent: Optional[CodingAgent] = None) -> tuple[bool, str]:
@@ -177,7 +345,7 @@ def generate_scripts(target_dir: str, agent: Optional[CodingAgent] = None) -> tu
     
     Args:
         target_dir: The directory path where scripts should be generated.
-        agent: Optional CodingAgent instance. If None, uses CodexCodingAgent.
+        agent: Optional CodingAgent instance. If None, creates one from config.
         
     Returns:
         Tuple of (success: bool, message: str).
@@ -194,7 +362,7 @@ def generate_scripts(target_dir: str, agent: Optional[CodingAgent] = None) -> tu
     # Initialize coding agent if not provided
     if agent is None:
         try:
-            agent = CodexCodingAgent()
+            agent = create_agent_from_config(str(target_path))
         except RuntimeError as e:
             return False, str(e)
     

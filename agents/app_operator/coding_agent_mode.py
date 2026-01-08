@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from app_operator.script_generator import CodingAgent, CodexCodingAgent, generate_scripts
+from app_operator.script_generator import CodingAgent, CodexCodingAgent, generate_scripts, create_agent_from_config
 
 
 class CodingAgentOperator:
@@ -26,7 +26,7 @@ class CodingAgentOperator:
         Args:
             repo_path: Path to the repository to deploy.
             health_check_interval: Seconds between health checks (default: 30).
-            agent: Optional coding agent to use. If None, uses CodexCodingAgent.
+            agent: Optional coding agent to use. If None, creates one from config.
         """
         self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval
@@ -34,7 +34,7 @@ class CodingAgentOperator:
         # Initialize agent if not provided
         if agent is None:
             try:
-                self.agent = CodexCodingAgent()
+                self.agent = create_agent_from_config(str(self.repo_path))
             except RuntimeError as e:
                 # Fallback or error if no default agent can be created
                 raise RuntimeError(f"Failed to initialize default coding agent: {e}")

@@ -10,7 +10,7 @@ load_dotenv()
 
 from app_operator.app_registry import registry
 from app_operator.operator import ApplicationOperator
-from app_operator.script_generator import generate_scripts, CodexCodingAgent
+from app_operator.script_generator import generate_scripts, CodexCodingAgent, create_agent_from_config
 from app_operator.coding_agent_mode import CodingAgentOperator
 
 
@@ -102,7 +102,7 @@ Examples:
     gen_parser.add_argument(
         "--model",
         metavar="MODEL",
-        help="Codex model to use (default: from CODEX_MODEL env var or gpt-4o-mini)"
+        help="Model to use (default: from config or env var)"
     )
     
     # Codex mode command
@@ -125,7 +125,7 @@ Examples:
     codex_parser.add_argument(
         "--model",
         metavar="MODEL",
-        help="Codex model to use (default: from CODEX_MODEL env var or gpt-4o-mini)"
+        help="Model to use (default: from config or env var)"
     )
     
     args = parser.parse_args()
@@ -184,7 +184,7 @@ Examples:
     
     elif command == "generate-scripts":
         try:
-            agent = CodexCodingAgent(model=args.model)
+            agent = create_agent_from_config(args.directory, model_override=args.model)
             success, message = generate_scripts(args.directory, agent)
             if success:
                 print(f"✓ {message}")
@@ -202,7 +202,7 @@ Examples:
             parser.error("interval must be at least 1 second")
         
         try:
-            agent = CodexCodingAgent(model=args.model)
+            agent = create_agent_from_config(args.directory, model_override=args.model)
             operator = CodingAgentOperator(
                 repo_path=args.directory,
                 health_check_interval=args.interval,

@@ -74,13 +74,42 @@ cd agents
 uv run python -m app_operator --app-name hotel --interval 30
 ```
 
-### Stop the Application
+## Coding Agent Mode
 
-Press `Ctrl+C` to trigger graceful shutdown. The operator will:
-1. Stop health check monitoring
-2. Execute application shutdown
-3. Clean up resources
-4. Exit
+The operator includes a "Coding Agent Mode" that can autonomously generate deployment scripts and self-fix deployment errors. This mode can be powered by either **Gemini CLI** or **Codex CLI**.
+
+### Autonomous Deployment (Codex/Gemini Mode)
+
+```bash
+cd agents
+uv run python -m app_operator codex /path/to/your/repository
+```
+
+This will:
+1. Analyze the repository structure.
+2. Generate `deploy.sh` and `health_check.sh` scripts if they don't exist.
+3. Attempt to deploy the application.
+4. If deployment fails, the coding agent will analyze the errors and automatically fix the scripts.
+5. Once deployed, the agent will analyze health check results to provide optimization suggestions.
+
+### Configuration (`sds.toml`)
+
+You can configure which coding agent to use by creating an `sds.toml` or `config.toml` file in the root of the target repository:
+
+```toml
+[agent]
+provider = "gemini"  # Options: "gemini" or "codex" (default)
+model = "gemini-pro" # Optional: Override the default model
+```
+
+### Script Generation
+
+To just generate scripts without deploying:
+
+```bash
+cd agents
+uv run python -m app_operator generate-scripts /path/to/your/repository
+```
 
 ## Architecture
 
