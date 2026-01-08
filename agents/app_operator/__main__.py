@@ -105,6 +105,11 @@ Examples:
         metavar="MODEL",
         help="Model to use (default: from config or env var)"
     )
+    gen_parser.add_argument(
+        "--config",
+        metavar="FILE",
+        help="Path to configuration file (default: sds.toml in target dir)"
+    )
 
     # Codex mode command
     codex_parser = subparsers.add_parser(
@@ -127,6 +132,11 @@ Examples:
         "--model",
         metavar="MODEL",
         help="Model to use (default: from config or env var)"
+    )
+    codex_parser.add_argument(
+        "--config",
+        metavar="FILE",
+        help="Path to configuration file (default: sds.toml in target dir)"
     )
 
     args = parser.parse_args()
@@ -190,7 +200,10 @@ Examples:
     elif command == "generate-scripts":
         try:
             agent = create_agent_from_config(
-                args.directory, model_override=args.model)
+                args.directory,
+                model_override=args.model,
+                config_path=args.config
+            )
             success, message = generate_scripts(args.directory, agent)
             if success:
                 print(f"✓ {message}")
@@ -209,7 +222,10 @@ Examples:
 
         try:
             agent = create_agent_from_config(
-                args.directory, model_override=args.model)
+                args.directory,
+                model_override=args.model,
+                config_path=args.config
+            )
             operator = CodingAgentOperator(
                 repo_path=args.directory,
                 health_check_interval=args.interval,

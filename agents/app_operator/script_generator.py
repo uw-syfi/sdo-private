@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import threading
@@ -12,6 +13,32 @@ except ImportError:
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
+
+
+def _get_interactive_env() -> dict[str, str]:
+    """Capture environment variables from an interactive shell."""
+    try:
+        # Run env in an interactive shell to get the full user environment
+        # Use start_new_session=True (setsid) to detach from TTY and avoid
+        # SIGTTOU/SIGTTIN signals when bash -i tries to set process group
+        result = subprocess.run(
+            ["/bin/bash", "-i", "-c", "env"],
+            capture_output=True,
+            text=True,
+            check=False,
+            start_new_session=True
+        )
+        if result.returncode != 0:
+            return os.environ.copy()
+
+        env = {}
+        for line in result.stdout.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                env[key] = value
+        return env
+    except Exception:
+        return os.environ.copy()
 
 
 class CodingAgent(ABC):
@@ -45,7 +72,15 @@ class CodexCodingAgent(CodingAgent):
         Raises:
             RuntimeError: If codex binary is not found in PATH.
         """
-        codex_path = shutil.which("codex")
+        self.env = _get_interactive_env()
+
+        # Search for codex in the captured environment's PATH
+        codex_path = shutil.which("codex", path=self.env.get("PATH"))
+
+        if not codex_path:
+            # Fallback to current PATH if not found in interactive env
+            codex_path = shutil.which("codex")
+
         if not codex_path:
             raise RuntimeError(
                 "codex binary not found in PATH. "
@@ -115,6 +150,7 @@ class CodexCodingAgent(CodingAgent):
             pipe.close()
 
         # Run codex with Popen to capture and print output in real-time
+        # Pass the captured environment to the subprocess
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -122,7 +158,8 @@ class CodexCodingAgent(CodingAgent):
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,  # Line buffered
-            cwd=cwd
+            cwd=cwd,
+            env=self.env
         )
 
         # Start threads to read stdout and stderr concurrently
@@ -188,7 +225,15 @@ class GeminiCodingAgent(CodingAgent):
         Raises:
             RuntimeError: If gemini binary is not found in PATH.
         """
-        gemini_path = shutil.which("gemini")
+        self.env = _get_interactive_env()
+
+        # Search for gemini in the captured environment's PATH
+        gemini_path = shutil.which("gemini", path=self.env.get("PATH"))
+
+        if not gemini_path:
+            # Fallback to current PATH if not found in interactive env
+            gemini_path = shutil.which("gemini")
+
         if not gemini_path:
             raise RuntimeError(
                 "gemini binary not found in PATH. "
@@ -249,6 +294,7 @@ class GeminiCodingAgent(CodingAgent):
             pipe.close()
 
         # Run gemini with Popen to capture and print output in real-time
+        # Pass the captured environment to the subprocess
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -256,7 +302,8 @@ class GeminiCodingAgent(CodingAgent):
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,  # Line buffered
-            cwd=cwd
+            cwd=cwd,
+            env=self.env
         )
 
         # Start threads to read stdout and stderr concurrently
@@ -315,21 +362,29 @@ CodexLLM = CodexCodingAgent
 
 
 def create_agent_from_config(
-        target_dir: str, model_override: Optional[str] = None) -> CodingAgent:
-    """Create a coding agent based on configuration file in target directory.
+        target_dir: str,
+        model_override: Optional[str] = None,
+        config_path: Optional[str] = None) -> CodingAgent:
+    """Create a coding agent based on configuration file.
 
-    Looks for sds.toml or config.toml in the target directory.
+    Looks for sds.toml or config.toml in the target directory, or uses the
+    explicitly provided config path.
     Default to CodexCodingAgent if no config found or provider is not specified.
 
     Args:
-        target_dir: Directory to look for configuration files.
+        target_dir: Directory to look for configuration files (if config_path not set).
         model_override: Optional model name to override config.
+        config_path: Optional explicit path to configuration file.
 
     Returns:
         CodingAgent: Configured coding agent.
     """
     target_path = Path(target_dir)
-    config_files = [target_path / "sds.toml", target_path / "config.toml"]
+
+    if config_path:
+        config_files = [Path(config_path)]
+    else:
+        config_files = [target_path / "sds.toml", target_path / "config.toml"]
 
     provider = "codex"
     model = model_override
@@ -350,6 +405,10 @@ def create_agent_from_config(
                 print(
                     f"Warning: Failed to parse {config_file}: {e}",
                     file=sys.stderr)
+
+    print(f"Initializing coding agent provider: {provider}")
+    if model:
+        print(f"Using coding agent model: {model}")
 
     if provider.lower() == "gemini":
         return GeminiCodingAgent(model=model)

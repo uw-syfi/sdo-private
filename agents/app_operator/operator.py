@@ -567,6 +567,12 @@ class ApplicationOperator:
         signal.signal(signal.SIGINT, self._handle_shutdown_signal)
         signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
+        # Print LLM configuration for health monitoring
+        import os
+        model = os.getenv("APP_OPERATOR_LLM_MODEL", "gpt-4o-mini")
+        print(f"Health Monitor Provider: OpenAI")
+        print(f"Health Monitor Model: {model}")
+
         try:
             # Run the graph which handles deployment and monitoring
             self._monitor_loop()
