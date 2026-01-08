@@ -2,7 +2,14 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TypedDict
+
+
+class HealthCheckDetails(TypedDict, total=False):
+    """Structured details for health check results."""
+    exit_code: int
+    output: str
+    error: str
 
 
 @dataclass
@@ -23,7 +30,7 @@ class HealthCheckResult:
 
     healthy: bool
     message: str
-    details: Optional[dict] = None
+    details: Optional[HealthCheckDetails] = None
 
     def __str__(self) -> str:
         status = "HEALTHY" if self.healthy else "UNHEALTHY"

@@ -4,6 +4,7 @@ import signal
 import sys
 import time
 from datetime import datetime
+from enum import Enum, auto
 from typing import Any, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -12,6 +13,13 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app_operator.application import Application
+
+
+class AppStatus(Enum):
+    """Application health status."""
+    DOWN = auto()
+    WARNING = auto()
+    HEALTHY = auto()
 
 
 class _HealthMonitorState(TypedDict, total=False):
@@ -238,7 +246,7 @@ class SummarizeAndRecommendNode(GraphNode):
 
     def _llm_compare_results(
             self, *, previous_result: dict[str, Any], current_result: dict[str, Any]) -> bool:
-        """Use LLM to determine if current result is meaningfully different from previous result.
+        """Determine if current result is meaningfully different from previous result.
 
         Args:
             previous_result: The previous health check result.
@@ -251,85 +259,27 @@ class SummarizeAndRecommendNode(GraphNode):
         curr_healthy = bool(current_result.get("healthy", False))
         prev_message = str(previous_result.get("message", "")).strip()
         curr_message = str(current_result.get("message", "")).strip()
-        prev_details = previous_result.get("details") or {}
-        curr_details = current_result.get("details") or {}
 
-        # Fast heuristic: if boolean status changed, definitely different
+        # If boolean status changed, definitely different
         if prev_healthy != curr_healthy:
             return True
 
-        # If messages are identical and both healthy, likely the same
-        if prev_healthy and curr_healthy and prev_message == curr_message:
-            return False
+        # If message changed, consider it different
+        if prev_message != curr_message:
+            return True
 
-        # Use LLM to compare if there are meaningful differences
-        try:
-            llm = self.operator._get_llm()
-            system = SystemMessage(
-                content="""
-You compare two health check results to determine if they are meaningfully different.
-Consider:
-- Different error messages or symptoms indicate different issues
-- Same status but different underlying problems are different
-- Minor variations in messages that mean the same thing are NOT different
-- Changes in exit codes or error details indicate differences
+        return False
 
-Respond with ONLY "DIFFERENT" or "SAME" (no other text)."""
-            )
-
-            # Prepare details comparison
-            prev_output = ""
-            curr_output = ""
-            if isinstance(prev_details, dict):
-                prev_output = str(prev_details.get("output", "") or "")
-                prev_output = self._truncate_text(
-                    prev_output.strip(), max_chars=1000) if prev_output else ""
-            if isinstance(curr_details, dict):
-                curr_output = str(curr_details.get("output", "") or "")
-                curr_output = self._truncate_text(
-                    curr_output.strip(), max_chars=1000) if curr_output else ""
-
-            prev_exit_code = prev_details.get(
-                "exit_code") if isinstance(prev_details, dict) else None
-            curr_exit_code = curr_details.get(
-                "exit_code") if isinstance(curr_details, dict) else None
-
-            human = HumanMessage(
-                content=(
-                    f"Previous result:\n"
-                    f"  healthy={prev_healthy}\n"
-                    f"  message={prev_message}\n"
-                    + (f"  exit_code={prev_exit_code}\n" if prev_exit_code is not None else "")
-                    + (f"  output_snippet:\n{prev_output}\n" if prev_output else "")
-                    + f"\nCurrent result:\n"
-                    f"  healthy={curr_healthy}\n"
-                    f"  message={curr_message}\n"
-                    + (f"  exit_code={curr_exit_code}\n" if curr_exit_code is not None else "")
-                    + (f"  output_snippet:\n{curr_output}\n" if curr_output else "")
-                )
-            )
-            resp = llm.invoke([system, human])
-            text = (resp.content or "").strip().upper()
-            return "DIFFERENT" in text
-        except Exception as e:
-            # On LLM failure, fall back to comparing messages
-            print(
-                f"LLM comparison failed: {type(e).__name__}: {e}",
-                file=sys.stderr)
-            return prev_message != curr_message
-
-    def _llm_determine_app_status(
-            self, *, result: dict[str, Any], is_deployed: bool) -> tuple[bool, bool]:
-        """Determine if the application is down (needs redeployment) vs just warnings.
+    def _determine_app_status(
+            self, *, result: dict[str, Any], is_deployed: bool) -> AppStatus:
+        """Determine the application status (DOWN vs WARNING vs HEALTHY).
 
         Args:
             result: The health check result dictionary.
             is_deployed: Whether the app is currently deployed (containers running).
 
         Returns:
-            Tuple of (app_down, is_warning) where:
-            - app_down: True if the application is completely down and needs redeployment
-            - is_warning: True if it's just warnings but app is still running
+            AppStatus: The determined status of the application.
         """
         healthy = bool(result.get("healthy", False))
         message = str(result.get("message", "")).strip()
@@ -337,75 +287,32 @@ Respond with ONLY "DIFFERENT" or "SAME" (no other text)."""
 
         # If healthy, definitely not down
         if healthy:
-            return (False, False)
+            return AppStatus.HEALTHY
 
         # If not deployed, app is definitely down
         if not is_deployed:
-            return (True, False)
+            return AppStatus.DOWN
 
-        # App is deployed but unhealthy - use LLM to determine if it's critical
-        # failure vs warnings
-        try:
-            llm = self.operator._get_llm()
-            system = SystemMessage(
-                content="""
-You analyze health check results to determine if the application is completely down (needs redeployment) or just has warnings/issues but is still running.
+        # App is deployed but unhealthy - check if it's a critical failure
+        exit_code = details.get("exit_code") if isinstance(
+            details, dict) else None
 
-Consider:
-- App is DOWN if: services are not running, containers crashed, critical infrastructure failed, cannot connect to app, all endpoints failing
-- App has WARNINGS if: some non-critical checks failed, performance issues, minor service degradation, but core functionality works, some endpoints still responding
+        # If exit code is non-zero, check for critical failure keywords
+        if exit_code is not None and exit_code != 0:
+            message_lower = message.lower()
+            down_keywords = [
+                "not running",
+                "crashed",
+                "failed to start",
+                "connection refused",
+                "timeout",
+                "not found",
+                "no response"]
+            if any(keyword in message_lower for keyword in down_keywords):
+                return AppStatus.DOWN
 
-Respond with ONLY "DOWN" or "WARNING" (no other text)."""
-            )
-
-            output = ""
-            if isinstance(details, dict):
-                output = str(details.get("output", "") or "")
-            output = self._truncate_text(
-                output.strip(), max_chars=2000) if output else ""
-
-            exit_code = details.get("exit_code") if isinstance(
-                details, dict) else None
-
-            human = HumanMessage(
-                content=(
-                    f"app={self.operator.app.name}\n"
-                    f"healthy={healthy}\n"
-                    f"message={message}\n"
-                    + (f"exit_code={exit_code}\n" if exit_code is not None else "")
-                    + (f"output_snippet:\n{output}\n" if output else "")
-                    + f"\nIs the application completely down (needs redeployment) or just has warnings?"
-                )
-            )
-            resp = llm.invoke([system, human])
-            text = (resp.content or "").strip().upper()
-            app_down = "DOWN" in text
-            is_warning = not app_down
-            return (app_down, is_warning)
-        except Exception as e:
-            # On LLM failure, use heuristics
-            print(
-                f"LLM app status determination failed: {type(e).__name__}: {e}",
-                file=sys.stderr)
-            # Check exit code - non-zero might indicate down
-            exit_code = details.get("exit_code") if isinstance(
-                details, dict) else None
-            if exit_code is not None and exit_code != 0:
-                # Check if message suggests complete failure
-                message_lower = message.lower()
-                down_keywords = [
-                    "not running",
-                    "crashed",
-                    "failed to start",
-                    "connection refused",
-                    "timeout",
-                    "not found",
-                    "no response"]
-                if any(keyword in message_lower for keyword in down_keywords):
-                    return (True, False)
-            # Default to warning if we can't determine (app is deployed but has
-            # issues)
-            return (False, True)
+        # Default to warning if we can't determine it's a critical failure
+        return AppStatus.WARNING
 
     def _llm_summarize_health(self, *, result: dict[str, Any]) -> str:
         """Return a concise, operator-friendly health summary string.
@@ -489,8 +396,11 @@ Do not use markdown, bullets, or extra formatting."""
         is_deployed = self.operator.app.is_deployed()
 
         # Determine if app is down (needs redeployment) vs just warnings
-        app_down, is_warning = self._llm_determine_app_status(
+        app_status = self._determine_app_status(
             result=result, is_deployed=is_deployed)
+
+        app_down = app_status == AppStatus.DOWN
+        is_warning = app_status == AppStatus.WARNING
 
         # Use LLM to determine if result is meaningfully different from
         # previous

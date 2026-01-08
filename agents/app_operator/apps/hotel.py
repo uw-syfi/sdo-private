@@ -7,6 +7,12 @@ from typing import Optional
 
 from app_operator.application import Application, DeploymentResult, HealthCheckResult
 
+# Constants
+DEPLOY_TIMEOUT = 300
+HEALTH_CHECK_TIMEOUT = 30
+SHUTDOWN_TIMEOUT = 120
+DOCKER_PS_TIMEOUT = 10
+
 
 class HotelApplication(Application):
     """DeathStarBench Hotel Reservation application.
@@ -54,17 +60,9 @@ class HotelApplication(Application):
         if env_root:
             return Path(env_root).expanduser().resolve()
 
-        module_path = Path(__file__).resolve()
-        # Walk up the tree looking for the repo that contains deploy scripts.
-        for parent in module_path.parents:
-            deploy_dir = parent / "deploy" / "deathstarbench" / "hotel"
-            if deploy_dir.is_dir():
-                return parent
-        # Fall back to the ancestor that corresponds to the repository root.
-        parent_list = list(module_path.parents)
-        if len(parent_list) >= 4:
-            return parent_list[3]
-        return parent_list[-1]
+        # Fallback: Assume we are in agents/app_operator/apps/hotel.py
+        # Root is 4 levels up: agents/app_operator/apps/hotel.py -> ... -> sds/
+        return Path(__file__).resolve().parents[3]
 
     def is_deployed(self) -> bool:
         """Check if the hotel application is already deployed.
@@ -81,7 +79,7 @@ class HotelApplication(Application):
                 cwd=self.project_root / "apps" / "deathstarbench" / "hotelReservation",
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=DOCKER_PS_TIMEOUT
             )
 
             # If we get output, containers are running
@@ -104,7 +102,7 @@ class HotelApplication(Application):
                 cwd=self.deploy_dir,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=DEPLOY_TIMEOUT
             )
 
             # Collect output
@@ -124,7 +122,7 @@ class HotelApplication(Application):
         except subprocess.TimeoutExpired:
             return DeploymentResult(
                 success=False,
-                message="Deployment timed out after 5 minutes"
+                message=f"Deployment timed out after {DEPLOY_TIMEOUT} seconds"
             )
         except Exception as e:
             return DeploymentResult(
@@ -144,7 +142,7 @@ class HotelApplication(Application):
                 cwd=self.deploy_dir,
                 capture_output=True,
                 text=True,
-                timeout=30  # 30 second timeout for health check
+                timeout=HEALTH_CHECK_TIMEOUT
             )
 
             is_healthy = result.returncode == 0
@@ -183,7 +181,7 @@ class HotelApplication(Application):
                 cwd=self.deploy_dir,
                 capture_output=True,
                 text=True,
-                timeout=120  # 2 minute timeout
+                timeout=SHUTDOWN_TIMEOUT
             )
 
             output = result.stdout if result.stdout else result.stderr
@@ -202,7 +200,7 @@ class HotelApplication(Application):
         except subprocess.TimeoutExpired:
             return DeploymentResult(
                 success=False,
-                message="Shutdown timed out after 2 minutes"
+                message=f"Shutdown timed out after {SHUTDOWN_TIMEOUT} seconds"
             )
         except Exception as e:
             return DeploymentResult(
