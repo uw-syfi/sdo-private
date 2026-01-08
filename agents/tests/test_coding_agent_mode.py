@@ -14,7 +14,8 @@ class StubAgent:
         self.raise_error = raise_error
         self.calls: list[tuple[str, str, int]] = []
 
-    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300) -> str:
+    def generate(self, prompt: str, cwd: str | None = None,
+                 timeout: int = 300) -> str:
         self.calls.append((prompt, cwd, timeout))
         if self.raise_error:
             raise RuntimeError("agent error")
@@ -39,10 +40,12 @@ def stub_agent():
 
 @pytest.fixture
 def operator(repo_path, stub_agent):
-    return CodingAgentOperator(str(repo_path), health_check_interval=1, agent=stub_agent)
+    return CodingAgentOperator(
+        str(repo_path), health_check_interval=1, agent=stub_agent)
 
 
-def test_ensure_scripts_exist_skips_generation(operator, stub_agent, monkeypatch):
+def test_ensure_scripts_exist_skips_generation(
+        operator, stub_agent, monkeypatch):
     calls = {"count": 0}
 
     def fake_generate_scripts(*args, **kwargs):
@@ -55,7 +58,8 @@ def test_ensure_scripts_exist_skips_generation(operator, stub_agent, monkeypatch
     assert calls["count"] == 0  # scripts already present
 
 
-def test_ensure_scripts_exist_generates_when_missing(tmp_path, stub_agent, monkeypatch):
+def test_ensure_scripts_exist_generates_when_missing(
+        tmp_path, stub_agent, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     operator = CodingAgentOperator(str(repo), agent=stub_agent)
@@ -76,7 +80,8 @@ def test_ensure_scripts_exist_generates_when_missing(tmp_path, stub_agent, monke
     assert captured["args"] == (str(repo), stub_agent)
 
 
-def test_ensure_scripts_exist_bubbles_generation_failure(tmp_path, stub_agent, monkeypatch):
+def test_ensure_scripts_exist_bubbles_generation_failure(
+        tmp_path, stub_agent, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     operator = CodingAgentOperator(str(repo), agent=stub_agent)
@@ -192,7 +197,8 @@ def test_run_deploy_script_handles_subprocess_results(operator, monkeypatch):
 
 def test_run_deploy_script_handles_timeouts(operator, monkeypatch):
     def fake_run(*_, **__):
-        raise cam.subprocess.TimeoutExpired(cmd=["./deploy.sh", "start"], timeout=300)
+        raise cam.subprocess.TimeoutExpired(
+            cmd=["./deploy.sh", "start"], timeout=300)
 
     monkeypatch.setattr(cam.subprocess, "run", fake_run)
 
@@ -227,11 +233,13 @@ def test_run_health_check_handles_runtime_errors(operator, monkeypatch):
 
 
 def test_fix_with_agent_skips_when_attempt_exceeds_max(operator, stub_agent):
-    assert operator._fix_with_agent({"exit_code": 1, "success": False}, None, attempt=3, max_attempts=3) is False
+    assert operator._fix_with_agent(
+        {"exit_code": 1, "success": False}, None, attempt=3, max_attempts=3) is False
     assert stub_agent.calls == []
 
 
-def test_fix_with_agent_calls_agent_and_returns_success(operator, stub_agent, monkeypatch):
+def test_fix_with_agent_calls_agent_and_returns_success(
+        operator, stub_agent, monkeypatch):
     operator.agent = stub_agent
 
     def fake_prepare(self, deploy_result, health_result):
@@ -245,14 +253,19 @@ def test_fix_with_agent_calls_agent_and_returns_success(operator, stub_agent, mo
 
     deploy_result = {"exit_code": 99, "success": False}
 
-    assert operator._fix_with_agent(deploy_result, None, attempt=1, max_attempts=2) is True
+    assert operator._fix_with_agent(
+        deploy_result,
+        None,
+        attempt=1,
+        max_attempts=2) is True
     prompt, cwd, timeout = stub_agent.calls[0]
     assert "prompt::context::1/2" in prompt
     assert cwd == str(operator.repo_path)
     assert timeout == 300
 
 
-def test_fix_with_agent_handles_agent_errors(operator, stub_agent, monkeypatch):
+def test_fix_with_agent_handles_agent_errors(
+        operator, stub_agent, monkeypatch):
     operator.agent = stub_agent
     stub_agent.raise_error = True
 
@@ -265,7 +278,8 @@ def test_fix_with_agent_handles_agent_errors(operator, stub_agent, monkeypatch):
     operator._prepare_error_context = MethodType(fake_prepare, operator)
     operator._create_fix_prompt = MethodType(fake_prompt, operator)
 
-    assert operator._fix_with_agent({"exit_code": 1, "success": False}, None, attempt=1, max_attempts=2) is False
+    assert operator._fix_with_agent(
+        {"exit_code": 1, "success": False}, None, attempt=1, max_attempts=2) is False
 
 
 def test_prepare_error_context_truncates_long_outputs(operator):
@@ -273,8 +287,16 @@ def test_prepare_error_context_truncates_long_outputs(operator):
     long_stderr = "b" * 3500
     health_stdout = "c" * 4000
     health_stderr = "d" * 2500
-    deploy_result = {"exit_code": 1, "success": False, "stdout": long_stdout, "stderr": long_stderr}
-    health_result = {"exit_code": 1, "success": False, "stdout": health_stdout, "stderr": health_stderr}
+    deploy_result = {
+        "exit_code": 1,
+        "success": False,
+        "stdout": long_stdout,
+        "stderr": long_stderr}
+    health_result = {
+        "exit_code": 1,
+        "success": False,
+        "stdout": health_stdout,
+        "stderr": health_stderr}
 
     context = operator._prepare_error_context(deploy_result, health_result)
 

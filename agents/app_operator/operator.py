@@ -29,21 +29,21 @@ class _HealthMonitorState(TypedDict, total=False):
 
 class GraphNode:
     """Base class for LangGraph nodes."""
-    
+
     def __init__(self, operator: "ApplicationOperator"):
         """Initialize the node with a reference to the operator.
-        
+
         Args:
             operator: The ApplicationOperator instance that owns this node.
         """
         self.operator = operator
-    
+
     def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
         """Execute the node logic.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             The updated graph state.
         """
@@ -52,21 +52,21 @@ class GraphNode:
 
 class GraphRouter:
     """Base class for LangGraph routing functions."""
-    
+
     def __init__(self, operator: "ApplicationOperator"):
         """Initialize the router with a reference to the operator.
-        
+
         Args:
             operator: The ApplicationOperator instance that owns this router.
         """
         self.operator = operator
-    
+
     def __call__(self, state: _HealthMonitorState) -> str:
         """Determine the next node to route to.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             The name of the next node or END.
         """
@@ -75,24 +75,28 @@ class GraphRouter:
 
 class DeployNode(GraphNode):
     """Node that checks if the app is deployed and deploys if needed."""
-    
+
     def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
         """Check deployment status and deploy if necessary.
-        
+
         This node handles both initial deployment and redeployment scenarios.
         If the app is already deployed and healthy, it skips deployment.
         If redeployment is needed (app_down flag), it will redeploy even if
         containers exist.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             Updated state with deployment status.
         """
-        needs_redeploy = state.get("needs_redeploy", False) or state.get("app_down", False)
+        needs_redeploy = state.get(
+            "needs_redeploy",
+            False) or state.get(
+            "app_down",
+            False)
         is_deployed = self.operator.app.is_deployed()
-        
+
         # If already deployed and not flagged for redeployment, skip
         if is_deployed and not needs_redeploy:
             return {
@@ -102,7 +106,7 @@ class DeployNode(GraphNode):
                 "needs_redeploy": False,
                 "app_down": False
             }
-        
+
         # If redeployment is needed, we may need to stop first
         if needs_redeploy and is_deployed:
             print(f"\n{'='*70}")
@@ -115,11 +119,11 @@ class DeployNode(GraphNode):
             print(f"  Deploying Application: {self.operator.app.name}")
             print(f"  Description: {self.operator.app.description}")
             print(f"{'='*70}\n")
-        
+
         print(f"Starting deployment...")
-        
+
         result = self.operator.app.deploy()
-        
+
         if result.success:
             self.operator._deployed = True
             print(f"✓ {result.message}\n")
@@ -127,7 +131,8 @@ class DeployNode(GraphNode):
                 # Only print the monitoring message on initial deployment
                 print(f"{'='*70}")
                 print(f"  Application is now running")
-                print(f"  Health checks will run every {self.operator.check_interval} seconds")
+                print(
+                    f"  Health checks will run every {self.operator.check_interval} seconds")
                 print(f"  Press Ctrl+C to stop")
                 print(f"{'='*70}\n")
             return {
@@ -150,13 +155,13 @@ class DeployNode(GraphNode):
 
 class WaitIntervalNode(GraphNode):
     """Node that waits for the check interval before proceeding."""
-    
+
     def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
         """Wait in 1s increments so SIGINT/SIGTERM can stop quickly.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             Updated state with shutdown_now flag set.
         """
@@ -169,19 +174,19 @@ class WaitIntervalNode(GraphNode):
 
 class DoHealthCheckNode(GraphNode):
     """Node that performs the health check on the application."""
-    
+
     def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
         """Execute a health check and update the state.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             Updated state with health check results.
         """
         check_count = int(state.get("check_count", 0)) + 1
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         # Save previous result before updating
         previous_result = state.get("result")
 
@@ -210,17 +215,18 @@ class DoHealthCheckNode(GraphNode):
 
 class SummarizeAndRecommendNode(GraphNode):
     """Node that summarizes health check results using LLM and prints them."""
-    
+
     @staticmethod
-    def _truncate_text(text: str, *, max_chars: int = 4000, head_chars: int = 2200, tail_chars: int = 1400) -> str:
+    def _truncate_text(text: str, *, max_chars: int = 4000,
+                       head_chars: int = 2200, tail_chars: int = 1400) -> str:
         """Truncate text to fit within character limits, keeping head and tail.
-        
+
         Args:
             text: The text to truncate.
             max_chars: Maximum total characters allowed.
             head_chars: Number of characters to keep from the start.
             tail_chars: Number of characters to keep from the end.
-            
+
         Returns:
             Truncated text with ellipsis in the middle if needed.
         """
@@ -229,14 +235,15 @@ class SummarizeAndRecommendNode(GraphNode):
         head = text[:head_chars]
         tail = text[-tail_chars:]
         return f"{head}\n...\n{tail}"
-    
-    def _llm_compare_results(self, *, previous_result: dict[str, Any], current_result: dict[str, Any]) -> bool:
+
+    def _llm_compare_results(
+            self, *, previous_result: dict[str, Any], current_result: dict[str, Any]) -> bool:
         """Use LLM to determine if current result is meaningfully different from previous result.
-        
+
         Args:
             previous_result: The previous health check result.
             current_result: The current health check result.
-            
+
         Returns:
             True if results are meaningfully different, False otherwise.
         """
@@ -246,15 +253,15 @@ class SummarizeAndRecommendNode(GraphNode):
         curr_message = str(current_result.get("message", "")).strip()
         prev_details = previous_result.get("details") or {}
         curr_details = current_result.get("details") or {}
-        
+
         # Fast heuristic: if boolean status changed, definitely different
         if prev_healthy != curr_healthy:
             return True
-        
+
         # If messages are identical and both healthy, likely the same
         if prev_healthy and curr_healthy and prev_message == curr_message:
             return False
-        
+
         # Use LLM to compare if there are meaningful differences
         try:
             llm = self.operator._get_llm()
@@ -269,20 +276,24 @@ Consider:
 
 Respond with ONLY "DIFFERENT" or "SAME" (no other text)."""
             )
-            
+
             # Prepare details comparison
             prev_output = ""
             curr_output = ""
             if isinstance(prev_details, dict):
                 prev_output = str(prev_details.get("output", "") or "")
-                prev_output = self._truncate_text(prev_output.strip(), max_chars=1000) if prev_output else ""
+                prev_output = self._truncate_text(
+                    prev_output.strip(), max_chars=1000) if prev_output else ""
             if isinstance(curr_details, dict):
                 curr_output = str(curr_details.get("output", "") or "")
-                curr_output = self._truncate_text(curr_output.strip(), max_chars=1000) if curr_output else ""
-            
-            prev_exit_code = prev_details.get("exit_code") if isinstance(prev_details, dict) else None
-            curr_exit_code = curr_details.get("exit_code") if isinstance(curr_details, dict) else None
-            
+                curr_output = self._truncate_text(
+                    curr_output.strip(), max_chars=1000) if curr_output else ""
+
+            prev_exit_code = prev_details.get(
+                "exit_code") if isinstance(prev_details, dict) else None
+            curr_exit_code = curr_details.get(
+                "exit_code") if isinstance(curr_details, dict) else None
+
             human = HumanMessage(
                 content=(
                     f"Previous result:\n"
@@ -302,16 +313,19 @@ Respond with ONLY "DIFFERENT" or "SAME" (no other text)."""
             return "DIFFERENT" in text
         except Exception as e:
             # On LLM failure, fall back to comparing messages
-            print(f"LLM comparison failed: {type(e).__name__}: {e}", file=sys.stderr)
+            print(
+                f"LLM comparison failed: {type(e).__name__}: {e}",
+                file=sys.stderr)
             return prev_message != curr_message
-    
-    def _llm_determine_app_status(self, *, result: dict[str, Any], is_deployed: bool) -> tuple[bool, bool]:
+
+    def _llm_determine_app_status(
+            self, *, result: dict[str, Any], is_deployed: bool) -> tuple[bool, bool]:
         """Determine if the application is down (needs redeployment) vs just warnings.
-        
+
         Args:
             result: The health check result dictionary.
             is_deployed: Whether the app is currently deployed (containers running).
-            
+
         Returns:
             Tuple of (app_down, is_warning) where:
             - app_down: True if the application is completely down and needs redeployment
@@ -320,16 +334,17 @@ Respond with ONLY "DIFFERENT" or "SAME" (no other text)."""
         healthy = bool(result.get("healthy", False))
         message = str(result.get("message", "")).strip()
         details = result.get("details") or {}
-        
+
         # If healthy, definitely not down
         if healthy:
             return (False, False)
-        
+
         # If not deployed, app is definitely down
         if not is_deployed:
             return (True, False)
-        
-        # App is deployed but unhealthy - use LLM to determine if it's critical failure vs warnings
+
+        # App is deployed but unhealthy - use LLM to determine if it's critical
+        # failure vs warnings
         try:
             llm = self.operator._get_llm()
             system = SystemMessage(
@@ -342,14 +357,16 @@ Consider:
 
 Respond with ONLY "DOWN" or "WARNING" (no other text)."""
             )
-            
+
             output = ""
             if isinstance(details, dict):
                 output = str(details.get("output", "") or "")
-            output = self._truncate_text(output.strip(), max_chars=2000) if output else ""
-            
-            exit_code = details.get("exit_code") if isinstance(details, dict) else None
-            
+            output = self._truncate_text(
+                output.strip(), max_chars=2000) if output else ""
+
+            exit_code = details.get("exit_code") if isinstance(
+                details, dict) else None
+
             human = HumanMessage(
                 content=(
                     f"app={self.operator.app.name}\n"
@@ -367,24 +384,35 @@ Respond with ONLY "DOWN" or "WARNING" (no other text)."""
             return (app_down, is_warning)
         except Exception as e:
             # On LLM failure, use heuristics
-            print(f"LLM app status determination failed: {type(e).__name__}: {e}", file=sys.stderr)
+            print(
+                f"LLM app status determination failed: {type(e).__name__}: {e}",
+                file=sys.stderr)
             # Check exit code - non-zero might indicate down
-            exit_code = details.get("exit_code") if isinstance(details, dict) else None
+            exit_code = details.get("exit_code") if isinstance(
+                details, dict) else None
             if exit_code is not None and exit_code != 0:
                 # Check if message suggests complete failure
                 message_lower = message.lower()
-                down_keywords = ["not running", "crashed", "failed to start", "connection refused", "timeout", "not found", "no response"]
+                down_keywords = [
+                    "not running",
+                    "crashed",
+                    "failed to start",
+                    "connection refused",
+                    "timeout",
+                    "not found",
+                    "no response"]
                 if any(keyword in message_lower for keyword in down_keywords):
                     return (True, False)
-            # Default to warning if we can't determine (app is deployed but has issues)
+            # Default to warning if we can't determine (app is deployed but has
+            # issues)
             return (False, True)
-    
+
     def _llm_summarize_health(self, *, result: dict[str, Any]) -> str:
         """Return a concise, operator-friendly health summary string.
-        
+
         Args:
             result: The health check result dictionary.
-            
+
         Returns:
             A summary string describing the health status.
         """
@@ -399,12 +427,14 @@ Respond with ONLY "DOWN" or "WARNING" (no other text)."""
         output = self._truncate_text(output.strip()) if output else ""
 
         # Fast heuristic fallback (also used if LLM invocation fails).
-        exit_code = details.get("exit_code") if isinstance(details, dict) else None
+        exit_code = details.get("exit_code") if isinstance(
+            details, dict) else None
         fallback = f"{'HEALTHY' if healthy else 'UNHEALTHY'} - {message}"
         if exit_code is not None and not healthy:
             fallback += f" (exit_code={exit_code})"
         if output and not healthy:
-            last_lines = "\n".join([ln for ln in output.splitlines() if ln.strip()][-6:])
+            last_lines = "\n".join(
+                [ln for ln in output.splitlines() if ln.strip()][-6:])
             if last_lines:
                 fallback += f" | last_lines: {last_lines}"
 
@@ -434,33 +464,38 @@ Do not use markdown, bullets, or extra formatting."""
             return text if text else fallback
         except Exception as e:
             # Keep the operator running, but log why the LLM summary failed.
-            print(f"LLM summary failed: {type(e).__name__}: {e}", file=sys.stderr)
+            print(
+                f"LLM summary failed: {type(e).__name__}: {e}",
+                file=sys.stderr)
             # Keep output log-friendly, but make it clear this is a fallback.
             return f"{fallback} (LLM unavailable)"
-    
+
     def __call__(self, state: _HealthMonitorState) -> _HealthMonitorState:
         """Summarize health check results, check deployment status, and determine if redeployment is needed.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             Updated state with summary and deployment status.
         """
-        timestamp = state.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        timestamp = state.get("timestamp",
+                              datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         check_count = int(state.get("check_count", 0))
         result = state.get("result") or {}
         previous_result = state.get("previous_result")
 
         # Check if application is actually deployed
         is_deployed = self.operator.app.is_deployed()
-        
+
         # Determine if app is down (needs redeployment) vs just warnings
-        app_down, is_warning = self._llm_determine_app_status(result=result, is_deployed=is_deployed)
-        
-        # Use LLM to determine if result is meaningfully different from previous
+        app_down, is_warning = self._llm_determine_app_status(
+            result=result, is_deployed=is_deployed)
+
+        # Use LLM to determine if result is meaningfully different from
+        # previous
         result_changed = False
-        
+
         if previous_result:
             result_changed = self._llm_compare_results(
                 previous_result=previous_result,
@@ -469,18 +504,21 @@ Do not use markdown, bullets, or extra formatting."""
 
         # Always generate a summary
         summary = self._llm_summarize_health(result=result)
-        
-        # If app is down, we need to redeploy (regardless of whether containers exist)
+
+        # If app is down, we need to redeploy (regardless of whether containers
+        # exist)
         needs_redeploy = app_down
-        
+
         if result_changed:
             # Result changed - provide detailed report
             if app_down:
                 print(f"[{timestamp}] Health Check #{check_count}: {summary}")
-                print(f"[{timestamp}] ⚠ Application appears to be DOWN - will trigger redeployment")
+                print(
+                    f"[{timestamp}] ⚠ Application appears to be DOWN - will trigger redeployment")
             elif is_warning:
                 print(f"[{timestamp}] Health Check #{check_count}: {summary}")
-                print(f"[{timestamp}] ⚠ Application has warnings but is still running")
+                print(
+                    f"[{timestamp}] ⚠ Application has warnings but is still running")
             else:
                 print(f"[{timestamp}] Health Check #{check_count}: {summary}")
         else:
@@ -489,15 +527,19 @@ Do not use markdown, bullets, or extra formatting."""
             status_str = "HEALTHY" if healthy else "UNHEALTHY"
             if previous_result:
                 if app_down:
-                    print(f"[{timestamp}] Health Check #{check_count}: Status same as before - {status_str}. {summary}")
-                    print(f"[{timestamp}] ⚠ Application still DOWN - will trigger redeployment")
+                    print(
+                        f"[{timestamp}] Health Check #{check_count}: Status same as before - {status_str}. {summary}")
+                    print(
+                        f"[{timestamp}] ⚠ Application still DOWN - will trigger redeployment")
                 else:
-                    print(f"[{timestamp}] Health Check #{check_count}: Status same as before - {status_str}. {summary}")
+                    print(
+                        f"[{timestamp}] Health Check #{check_count}: Status same as before - {status_str}. {summary}")
             else:
                 # First check - provide full summary
                 if app_down:
                     print(f"[{timestamp}] Health Check #{check_count}: {summary}")
-                    print(f"[{timestamp}] ⚠ Application appears to be DOWN - will trigger redeployment")
+                    print(
+                        f"[{timestamp}] ⚠ Application appears to be DOWN - will trigger redeployment")
                 else:
                     print(f"[{timestamp}] Health Check #{check_count}: {summary}")
 
@@ -512,13 +554,13 @@ Do not use markdown, bullets, or extra formatting."""
 
 class RouteAfterDeploy(GraphRouter):
     """Router that determines next step after deployment."""
-    
+
     def __call__(self, state: _HealthMonitorState) -> str:
         """Route to wait interval if deployment succeeded, or END if failed.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             Next node name or END.
         """
@@ -533,13 +575,13 @@ class RouteAfterDeploy(GraphRouter):
 
 class RouteAfterWait(GraphRouter):
     """Router that determines next step after waiting interval."""
-    
+
     def __call__(self, state: _HealthMonitorState) -> str:
         """Route to health check or END based on shutdown status.
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             Next node name or END.
         """
@@ -550,45 +592,45 @@ class RouteAfterWait(GraphRouter):
 
 class RouteNext(GraphRouter):
     """Router that determines next step after summarizing."""
-    
+
     def __call__(self, state: _HealthMonitorState) -> str:
         """Route based on shutdown status and deployment needs.
-        
+
         Routes to:
         - END if shutdown requested
         - deploy if app is down and needs redeployment
         - wait_interval otherwise
-        
+
         Args:
             state: The current graph state.
-            
+
         Returns:
             Next node name or END.
         """
         if self.operator._shutdown_requested:
             return END
-        
+
         # If app is down and needs redeployment, route to deploy node
         if state.get("needs_redeploy", False) or state.get("app_down", False):
             # Reset deployment status to trigger redeployment check
             return "deploy"
-        
+
         return "wait_interval"
 
 
 class ApplicationOperator:
     """Manages application deployment and monitoring.
-    
+
     The operator handles:
     - Deploying applications
     - Running periodic health checks
     - Graceful shutdown on SIGINT/SIGTERM
     - Cleanup of resources
     """
-    
+
     def __init__(self, app: Application, check_interval: int = 30):
         """Initialize the application operator.
-        
+
         Args:
             app: The application to manage.
             check_interval: Seconds between health checks (default: 30).
@@ -599,39 +641,39 @@ class ApplicationOperator:
         self._deployed = False
         self._llm: Optional[ChatOpenAI] = None
         self._checkpointer = MemorySaver()
-    
+
     def run(self) -> int:
         """Deploy and monitor the application.
-        
+
         This is the main entry point that:
         1. Sets up signal handlers
         2. Runs the graph which handles deployment and monitoring
         3. Handles graceful shutdown
-        
+
         Returns:
             int: Exit code (0 for success, 1 for failure).
         """
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._handle_shutdown_signal)
         signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
-        
+
         try:
             # Run the graph which handles deployment and monitoring
             self._monitor_loop()
-            
+
             # Check if deployment succeeded
             if not self._deployed:
                 return 1
-            
+
             return 0
-            
+
         except Exception as e:
             print(f"\n✗ Unexpected error: {e}", file=sys.stderr)
             return 1
         finally:
             # Always try to cleanup
             self._cleanup()
-    
+
     def _monitor_loop(self):
         """Run deployment and health checks using a LangGraph loop until shutdown is requested."""
         graph = self._build_healthcheck_graph()
@@ -642,7 +684,8 @@ class ApplicationOperator:
             "deployed": False,
             "deployment_message": ""
         }
-        # The graph will run until END is reached (either on shutdown or deployment failure)
+        # The graph will run until END is reached (either on shutdown or
+        # deployment failure)
         graph.invoke(initial_state, config)
 
     def _build_healthcheck_graph(self):
@@ -652,7 +695,7 @@ class ApplicationOperator:
         wait_interval_node = WaitIntervalNode(self)
         do_health_check_node = DoHealthCheckNode(self)
         summarize_and_recommend_node = SummarizeAndRecommendNode(self)
-        
+
         # Create router instances
         route_after_deploy = RouteAfterDeploy(self)
         route_after_wait = RouteAfterWait(self)
@@ -663,22 +706,30 @@ class ApplicationOperator:
         workflow.add_node("deploy", deploy_node)
         workflow.add_node("wait_interval", wait_interval_node)
         workflow.add_node("do_health_check", do_health_check_node)
-        workflow.add_node("summarize_and_recommend", summarize_and_recommend_node)
+        workflow.add_node(
+            "summarize_and_recommend",
+            summarize_and_recommend_node)
 
         workflow.add_edge(START, "deploy")
-        workflow.add_conditional_edges("deploy", route_after_deploy, {"wait_interval": "wait_interval", END: END})
-        workflow.add_conditional_edges("wait_interval", route_after_wait, {"do_health_check": "do_health_check", END: END})
+        workflow.add_conditional_edges(
+            "deploy", route_after_deploy, {
+                "wait_interval": "wait_interval", END: END})
+        workflow.add_conditional_edges(
+            "wait_interval", route_after_wait, {
+                "do_health_check": "do_health_check", END: END})
         workflow.add_edge("do_health_check", "summarize_and_recommend")
-        workflow.add_conditional_edges("summarize_and_recommend", route_next, {"wait_interval": "wait_interval", END: END})
+        workflow.add_conditional_edges(
+            "summarize_and_recommend", route_next, {
+                "wait_interval": "wait_interval", END: END})
 
         return workflow.compile(checkpointer=self._checkpointer)
 
     def _get_llm(self) -> ChatOpenAI:
         """Get or create the LLM instance (lazy initialization).
-        
+
         The LLM is shared across all nodes and initialized on first use.
         Model can be overridden via APP_OPERATOR_LLM_MODEL environment variable.
-        
+
         Returns:
             ChatOpenAI: The LLM instance.
         """
@@ -688,12 +739,16 @@ class ApplicationOperator:
             import os
 
             model = os.getenv("APP_OPERATOR_LLM_MODEL", "gpt-4o-mini")
-            self._llm = ChatOpenAI(model=model, temperature=0, timeout=30, max_retries=2)
+            self._llm = ChatOpenAI(
+                model=model,
+                temperature=0,
+                timeout=30,
+                max_retries=2)
         return self._llm
-    
+
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).
-        
+
         Args:
             signum: The signal number.
             frame: The current stack frame.
@@ -701,35 +756,36 @@ class ApplicationOperator:
         if not self._shutdown_requested:
             self._shutdown_requested = True
             signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
-            print(f"\n\nReceived {signal_name} signal. Initiating graceful shutdown...")
-    
+            print(
+                f"\n\nReceived {signal_name} signal. Initiating graceful shutdown...")
+
     def _cleanup(self):
         """Shutdown the application and cleanup resources.
-        
+
         This method is called during normal shutdown or after an error
         to ensure the application is properly stopped.
         """
         if not self._deployed:
             # Nothing to cleanup if we never deployed
             return
-        
+
         print(f"\n{'='*70}")
         print(f"  Shutting Down: {self.app.name}")
         print(f"{'='*70}\n")
-        
+
         print(f"Stopping application...")
-        
+
         try:
             result = self.app.shutdown()
-            
+
             if result.success:
                 print(f"✓ {result.message}")
             else:
                 print(f"⚠ {result.message}", file=sys.stderr)
-                
+
         except Exception as e:
             print(f"✗ Error during shutdown: {e}", file=sys.stderr)
-        
+
         print(f"\n{'='*70}")
         print(f"  Shutdown Complete")
         print(f"{'='*70}\n")
