@@ -10,7 +10,7 @@ This repository contains applications, tools, and infrastructure code for the SD
 
 ```
 sds/
-├── agents/          # Application operators and management tools
+├── app_operator/    # Application operators and management tools
 ├── apps/            # Application code and configurations
 └── deploy/          # Deployment scripts and configurations
 ```
@@ -31,17 +31,15 @@ The Application Operator (`app_operator`) is a tool for deploying and monitoring
 
 #### Installation
 
-From the `agents` directory:
+From the project root:
 
 ```bash
-cd agents
 pip install -e .
 ```
 
 Or using `uv`:
 
 ```bash
-cd agents
 uv pip install -e .
 ```
 

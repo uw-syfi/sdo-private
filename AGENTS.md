@@ -8,9 +8,7 @@ SDS is an AI-native project designed to autonomously explore, validate, and evol
 
 ```
 sds/
-├── agents/          # Python-based Application Operator and tools.
-│   ├── app_operator/ # Core operator logic, agent, and registry.
-│   └── ...
+├── app_operator/    # Core operator logic, agent, and registry.
 ├── apps/            # Application code (DeathStarBench suite).
 │   └── deathstarbench/
 │       ├── hotelReservation/ # Go-based microservices app.
@@ -22,7 +20,7 @@ sds/
 └── README.md        # Root project documentation.
 ```
 
-## 1. Application Operator (`agents/`)
+## 1. Application Operator (`app_operator/`)
 
 The **Application Operator** is a Python tool that autonomously deploys, monitors, and manages applications. It features "Codex" mode to self-correct deployment scripts and uses LLMs to summarize health checks.
 
@@ -31,10 +29,9 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
 *   **Dependency Management:** Uses `uv` (or `pip`).
 *   **Installation:**
     ```bash
-    cd agents
     uv sync  # or pip install -e .
     ```
-*   **Environment:** Requires `.env` in `agents/` or root with `OPENAI_API_KEY`.
+*   **Environment:** Requires `.env` in root with `OPENAI_API_KEY`.
 
 ### Key Commands
 
@@ -101,7 +98,7 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 ## Usage Guide for LLM agents
 
 *   **When debugging deployment:** Check `deploy/deathstarbench/hotel/deploy.sh` and the generated logs.
-*   **When adding a new app:** You will need to implement a subclass in `agents/app_operator/apps/` and register it, pointing it to the underlying deployment scripts.
+*   **When adding a new app:** You will need to implement a subclass in `app_operator/apps/` and register it, pointing it to the underlying deployment scripts.
 
 ## Notes from the developers
 
