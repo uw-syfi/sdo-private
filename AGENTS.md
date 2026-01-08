@@ -107,7 +107,16 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 *   When code update impacts the CLI interface, update the README.
 *   Remember to format the code after code edits.
 
-### Testing 
+### Documentation
+
+*   Update README.md when your changes impact the user-facing behavior.
+
+### Checking syntax correctness
+
+* For python code, use `py_compile` to check for syntax errors.
+
+### Testing
+
 *   We use pytest.
 *   Check if tests pass after you've modified the codebase's behavior.
 *   When introducing new features or modifying existing behavior, write in a testable way. Update tests on application semantic changes.
