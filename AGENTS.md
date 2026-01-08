@@ -48,12 +48,23 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
     ```
 *   **Codex Mode (Autonomous Deployment):**
     ```bash
+    # Uses Codex or Gemini as configured in sds.toml
     python -m app_operator codex /path/to/repo
     ```
 *   **Generate Scripts:**
     ```bash
     python -m app_operator generate-scripts /path/to/repo
     ```
+
+### Coding Agent Configuration
+
+You can specify which AI provider to use for script generation and fixing by adding an `sds.toml` file to the target repository:
+
+```toml
+[agent]
+provider = "gemini"  # "gemini" or "codex"
+model = "gemini-1.5-pro" # optional
+```
 
 ### Architecture
 *   **Abstract Base Class:** `Application` (in `application.py`) defines `deploy()`, `health_check()`, and `shutdown()`.
@@ -99,4 +110,9 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 *   **When asked to "deploy hotel":** Prefer using the `app_operator` (`python -m app_operator --app-name hotel`) as it wraps the underlying scripts and provides AI monitoring.
 *   **When debugging deployment:** Check `deploy/deathstarbench/hotel/deploy.sh` and the generated logs.
 *   **When adding a new app:** You will need to implement a subclass in `agents/app_operator/apps/` and register it, pointing it to the underlying deployment scripts.
+
+## Notes from the developers
+
 *   Keep this file up to date when you update the project.
+*   Use `uv` and `uv run ...` for running python.
+*   When code update impacts the CLI interface, update the README.
