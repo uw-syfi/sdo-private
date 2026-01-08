@@ -40,16 +40,13 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
 
 *   **List Applications:**
     ```bash
-    python -m app_operator --list
+    python -m app_operator list
     ```
-*   **Run Operator (Deploy & Monitor):**
-    ```bash
-    python -m app_operator --app-name hotel
-    ```
-*   **Codex Mode (Autonomous Deployment):**
+*   **Default Mode (Codex-assisted Autonomous Deployment):**
+    This mode attempts to deploy the application in the specified repository, using an AI agent to automatically fix deployment errors.
     ```bash
     # Uses Codex or Gemini as configured in sds.toml
-    python -m app_operator codex /path/to/repo
+    python -m app_operator /path/to/repo
     ```
 *   **Generate Scripts:**
     ```bash
@@ -107,7 +104,7 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 
 ## Usage Guide for LLM agents
 
-*   **When asked to "deploy hotel":** Prefer using the `app_operator` (`python -m app_operator --app-name hotel`) as it wraps the underlying scripts and provides AI monitoring.
+*   **When asked to "deploy <repository_name>":** You can use the default codex-assisted deployment mode by running `python -m app_operator /path/to/repository`.
 *   **When debugging deployment:** Check `deploy/deathstarbench/hotel/deploy.sh` and the generated logs.
 *   **When adding a new app:** You will need to implement a subclass in `agents/app_operator/apps/` and register it, pointing it to the underlying deployment scripts.
 

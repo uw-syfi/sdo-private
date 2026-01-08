@@ -21,44 +21,34 @@ def main() -> int:
     """
     parser = argparse.ArgumentParser(
         prog="operator",
-        description="Deploy and monitor applications with automated health checks",
+        description="Codex-assisted deployment mode with automatic error fixing.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # List available applications
+  # Run Codex-assisted deployment on a repository (default command)
+  python -m app_operator /path/to/repository
+
+  # Use a custom health check interval
+  python -m app_operator /path/to/repository --interval 60
+
+  # List available applications for legacy mode
   python -m app_operator list
-  python -m app_operator --list  # legacy
 
-  # Deploy and monitor the hotel application
-  python -m app_operator run --app-name hotel
-  python -m app_operator --app-name hotel  # legacy
-
-  # Use custom health check interval
-  python -m app_operator run --app-name hotel --interval 30
+  # Run legacy deployment for the hotel application
+  python -m app_operator legacy --app-name hotel
 
   # Generate deployment scripts for a repository
   python -m app_operator generate-scripts /path/to/repository
-
-  # Codex-assisted deployment mode
-  python -m app_operator codex /path/to/repository
-
-  # Stop the application with Ctrl+C
         """
     )
 
-    # Legacy arguments for backward compatibility
     parser.add_argument(
-        "--app-name", "-a",
-        metavar="NAME",
-        help="Name of the application to deploy and monitor (legacy, use 'run' subcommand)"
+        "directory",
+        metavar="DIR",
+        nargs='?',
+        default=None,
+        help="Directory path of the repository to deploy (default if no subcommand is used)"
     )
-
-    parser.add_argument(
-        "--list", "-l",
-        action="store_true",
-        help="List all available applications (legacy, use 'list' subcommand)"
-    )
-
     parser.add_argument(
         "--interval", "-i",
         type=int,
@@ -66,20 +56,30 @@ Examples:
         metavar="SECONDS",
         help="Interval between health checks in seconds (default: 30)"
     )
+    parser.add_argument(
+        "--model",
+        metavar="MODEL",
+        help="Model to use (default: from config or env var)"
+    )
+    parser.add_argument(
+        "--config",
+        metavar="FILE",
+        help="Path to configuration file (default: sds.toml in target dir)"
+    )
 
     subparsers = parser.add_subparsers(
         dest="command", help="Available commands")
 
-    # Run command
-    run_parser = subparsers.add_parser(
-        "run", help="Deploy and monitor an application")
-    run_parser.add_argument(
+    # Legacy command (previously 'run')
+    legacy_parser = subparsers.add_parser(
+        "legacy", help="Deploy and monitor a registered application (legacy mode)")
+    legacy_parser.add_argument(
         "--app-name", "-a",
         metavar="NAME",
         required=True,
         help="Name of the application to deploy and monitor"
     )
-    run_parser.add_argument(
+    legacy_parser.add_argument(
         "--interval", "-i",
         type=int,
         default=30,
@@ -88,7 +88,8 @@ Examples:
     )
 
     # List command
-    subparsers.add_parser("list", help="List all available applications")
+    subparsers.add_parser(
+        "list", help="List all available applications for legacy mode")
 
     # Generate scripts command
     gen_parser = subparsers.add_parser(
@@ -111,66 +112,45 @@ Examples:
         help="Path to configuration file (default: sds.toml in target dir)"
     )
 
-    # Codex mode command
-    codex_parser = subparsers.add_parser(
-        "codex",
-        help="Codex-assisted deployment mode with automatic error fixing"
-    )
-    codex_parser.add_argument(
-        "directory",
-        metavar="DIR",
-        help="Directory path of the repository to deploy"
-    )
-    codex_parser.add_argument(
-        "--interval", "-i",
-        type=int,
-        default=30,
-        metavar="SECONDS",
-        help="Interval between health checks in seconds (default: 30)"
-    )
-    codex_parser.add_argument(
-        "--model",
-        metavar="MODEL",
-        help="Model to use (default: from config or env var)"
-    )
-    codex_parser.add_argument(
-        "--config",
-        metavar="FILE",
-        help="Path to configuration file (default: sds.toml in target dir)"
-    )
-
     args = parser.parse_args()
 
-    # Handle legacy --list flag
-    if args.list:
-        print_available_applications()
-        return 0
-
-    # Determine command
     command = args.command
 
-    # If no command specified but --app-name is provided, use legacy run
-    # behavior
-    if not command and args.app_name:
-        command = "run"
-        # Create a namespace-like object for legacy compatibility
+    # If no command, it's the default (codex) mode
+    if command is None:
+        if not args.directory:
+            parser.print_help()
+            return 1
 
-        class LegacyArgs:
-            app_name = args.app_name
-            interval = args.interval
-        args = LegacyArgs()
+        # Validate interval
+        if args.interval < 1:
+            parser.error("interval must be at least 1 second")
 
-    # If no command and no --app-name, show help
-    if not command:
-        parser.print_help()
-        return 0
+        try:
+            agent = create_agent_from_config(
+                args.directory,
+                model_override=args.model,
+                config_path=args.config
+            )
+            operator = CodingAgentOperator(
+                repo_path=args.directory,
+                health_check_interval=args.interval,
+                agent=agent
+            )
+            return operator.run()
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"✗ Unexpected error: {e}", file=sys.stderr)
+            return 1
 
-    # Handle commands
+    # Handle subcommands
     if command == "list":
         print_available_applications()
         return 0
 
-    elif command == "run":
+    elif command == "legacy":
         # Validate interval
         if args.interval < 1:
             parser.error("interval must be at least 1 second")
@@ -215,30 +195,6 @@ Examples:
             print(f"✗ Unexpected error: {e}", file=sys.stderr)
             return 1
 
-    elif command == "codex":
-        # Validate interval
-        if args.interval < 1:
-            parser.error("interval must be at least 1 second")
-
-        try:
-            agent = create_agent_from_config(
-                args.directory,
-                model_override=args.model,
-                config_path=args.config
-            )
-            operator = CodingAgentOperator(
-                repo_path=args.directory,
-                health_check_interval=args.interval,
-                agent=agent
-            )
-            return operator.run()
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
-        except Exception as e:
-            print(f"✗ Unexpected error: {e}", file=sys.stderr)
-            return 1
-
     else:
         parser.print_help()
         return 1
@@ -246,7 +202,7 @@ Examples:
 
 def print_available_applications():
     """Print a formatted list of available applications."""
-    print("\nAvailable Applications")
+    print("\nAvailable Applications for Legacy Mode")
     print("=" * 70)
 
     descriptions = registry.get_descriptions()
@@ -263,7 +219,7 @@ def print_available_applications():
 
     print(f"\nTotal: {len(descriptions)} application(s)")
     print("=" * 70)
-    print("\nUsage: python -m operator --app-name <NAME>\n")
+    print("\nUsage: python -m app_operator legacy --app-name <NAME>\n")
 
 
 if __name__ == "__main__":

@@ -25,64 +25,18 @@ uv sync
 
 ## Usage
 
-### List Available Applications
 
-```bash
-cd agents
-uv run python -m app_operator --list
-```
 
-### Deploy and Monitor an Application
-
-```bash
-cd agents
-uv run python -m app_operator --app-name hotel
-```
-
-This will:
-1. Deploy the application
-2. Run health checks every 30 seconds
-3. Print an LLM health summary on every check
-4. Stop gracefully on Ctrl+C
-
-### LLM Configuration
-
-Health summaries use `langchain-openai` by default. Environment variables are automatically loaded from a `.env` file in the project root (if present). You can configure via environment variables:
-
-**Option 1: Using a `.env` file (recommended)**
-
-Create a `.env` file in the `agents/` directory:
-
-```bash
-OPENAI_API_KEY=your-api-key-here
-APP_OPERATOR_LLM_MODEL=gpt-4o-mini  # optional, defaults to gpt-4o-mini
-```
-
-**Option 2: Using environment variables**
-
-```bash
-export OPENAI_API_KEY="..."
-export APP_OPERATOR_LLM_MODEL="gpt-4o-mini"  # optional
-```
-
-The operator automatically loads environment variables from `.env` files using `python-dotenv`, so you don't need to manually export them if you use a `.env` file.
-
-### Custom Health Check Interval
-
-```bash
-cd agents
-uv run python -m app_operator --app-name hotel --interval 30
-```
 
 ## Coding Agent Mode
 
 The operator includes a "Coding Agent Mode" that can autonomously generate deployment scripts and self-fix deployment errors. This mode can be powered by either **Gemini CLI** or **Codex CLI**.
 
-### Autonomous Deployment (Codex/Gemini Mode)
+### Autonomous Deployment
 
 ```bash
 cd agents
-uv run python -m app_operator codex /path/to/your/repository
+uv run python -m app_operator /path/to/your/repository
 ```
 
 This will:
@@ -225,9 +179,11 @@ class ApplicationRegistry:
 
 ### Step 3: Run
 
+You can then use the operator command to deploy and monitor your new application (assuming it has been set up with deploy.sh and health_check.sh in its .sds directory):
+
 ```bash
 cd agents
-uv run python -m app_operator --app-name your-app
+uv run python -m app_operator /path/to/your/application
 ```
 
 **That's it!** No changes needed to operator logic, CLI, or any other code.
@@ -308,34 +264,7 @@ cd agents
 uv run black app_operator/
 ```
 
-## Troubleshooting
 
-### Application deployment fails
-
-Check that all deployment scripts/resources exist and are executable:
-
-```bash
-ls -la deploy/deathstarbench/hotel/deploy.sh
-ls -la deploy/deathstarbench/hotel/health_check.sh
-```
-
-### Health checks always fail
-
-Run the health check script manually to see the error:
-
-```bash
-cd deploy/deathstarbench/hotel
-./health_check.sh
-```
-
-### Permission denied errors
-
-Make scripts executable:
-
-```bash
-chmod +x deploy/deathstarbench/hotel/deploy.sh
-chmod +x deploy/deathstarbench/hotel/health_check.sh
-```
 
 ## License
 
