@@ -116,3 +116,9 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 *   Keep this file up to date when you update the project.
 *   Use `uv` and `uv run ...` for running python.
 *   When code update impacts the CLI interface, update the README.
+*   Remember to format the code after code edits.
+
+### Testing 
+*   We use pytest.
+*   Check if tests pass after you've modified the codebase's behavior.
+*   When introducing new features or modifying existing behavior, write in a testable way. Update tests on application semantic changes.
