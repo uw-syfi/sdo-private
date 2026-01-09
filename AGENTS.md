@@ -8,7 +8,9 @@ SDS is an AI-native project designed to autonomously explore, validate, and evol
 
 ```
 sds/
-├── app_operator/    # Core operator logic, agent, and registry.
+├── app_operator/    # Core operator logic.
+│   ├── agents/      # Specialized agents (deployer, monitor).
+│   └── ...
 ├── apps/            # Application code (DeathStarBench suite).
 │   └── deathstarbench/
 │       ├── hotelReservation/ # Go-based microservices app.
@@ -17,12 +19,13 @@ sds/
 ├── deploy/          # Deployment and operational scripts.
 │   └── deathstarbench/
 │       └── hotel/   # Deployment scripts for Hotel Reservation.
+├── tools/           # Shared tools/utilities (e.g., healthcheck).
 └── README.md        # Root project documentation.
 ```
 
 ## 1. Application Operator (`app_operator/`)
 
-The **Application Operator** is a Python tool that autonomously deploys, monitors, and manages applications. It features "Codex" mode to self-correct deployment scripts and uses LLMs to summarize health checks.
+The **Application Operator** is a Python tool that autonomously deploys, monitors, and manages applications. It features a "Codex" mode to self-correct deployment scripts and uses LLMs to summarize health checks.
 
 ### Setup & Usage
 
@@ -41,10 +44,6 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
     # Uses Codex or Gemini as configured in sds.toml
     python -m app_operator run /path/to/repo
     ```
-*   **Generate Scripts:**
-    ```bash
-    python -m app_operator generate-scripts /path/to/repo
-    ```
 
 ### Coding Agent Configuration
 
@@ -57,9 +56,17 @@ model = "gemini-1.5-pro" # optional
 ```
 
 ### Architecture
-*   **Abstract Base Class:** `Application` (in `application.py`) defines `deploy()`, `health_check()`, and `shutdown()`.
-*   **Registry:** `app_registry.py` maps names (e.g., "hotel") to implementation classes.
-*   **Extensibility:** New apps can be added by subclassing `Application` and registering them.
+The operator uses specialized agents to manage the application lifecycle:
+
+*   **DeploymentAgent (`app_operator/agents/deployer.py`):**
+    *   Generates deployment scripts (`deploy.sh`, `health_check.sh`) if missing.
+    *   Deploys the application and automatically fixes errors using an AI agent.
+    *   Manages the self-healing deployment loop.
+*   **AppMonitor (`app_operator/agents/app_monitor.py`):**
+    *   Monitors application health at regular intervals.
+    *   Uses `HealthCheckTask` to execute checks and `CodingAgent` to analyze results.
+*   **Tools (`tools/`):**
+    *   `healthcheck.py`: Encapsulates health check execution logic.
 
 ## 2. Applications (`apps/deathstarbench/`)
 
@@ -97,8 +104,8 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 
 ## Usage Guide for LLM agents
 
-*   **When debugging deployment:** Check `deploy/deathstarbench/hotel/deploy.sh` and the generated logs.
-*   **When adding a new app:** You will need to implement a subclass in `app_operator/apps/` and register it, pointing it to the underlying deployment scripts.
+*   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs.
+*   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
 
 ## Notes from the developers
 

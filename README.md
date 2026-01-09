@@ -11,8 +11,11 @@ This repository contains applications, tools, and infrastructure code for the SD
 ```
 sds/
 ├── app_operator/    # Application operators and management tools
+│   ├── agents/      # Specialized agents (deployer, monitor)
+│   └── ...
 ├── apps/            # Application code and configurations
-└── deploy/          # Deployment scripts and configurations
+├── deploy/          # Deployment scripts and configurations
+└── tools/           # Shared tools/utilities
 ```
 
 ## Application Operator
