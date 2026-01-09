@@ -1,6 +1,9 @@
 import os
 import sys
 import subprocess
+import time
+import threading
+import re
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
@@ -418,33 +421,107 @@ class DeploymentAgent:
         """
         print(f"Running deployment script: {self.deploy_script} {command}")
 
+        # Buffers to capture output
+        stdout_lines = []
+        stderr_lines = []
+
+        def read_pipe(pipe, buffer):
+            """Read pipe line by line and capture."""
+            try:
+                for line in iter(pipe.readline, ''):
+                    if not line:
+                        break
+                    # We don't print here to avoid spamming, unless it's a short command?
+                    # The original implementation captured output but didn't print in real-time
+                    # except via the subprocess.run return.
+                    # But for long commands we might want to see it?
+                    # The requirement says "produce a brief summary... Don't just print the agent_cli's outputs"
+                    # It implies we rely on the summary.
+                    buffer.append(line)
+            except ValueError:
+                pass  # Handle closed file
+            finally:
+                pipe.close()
+
         try:
             # Run deploy script with command
-            result = subprocess.run(
+            process = subprocess.Popen(
                 [str(self.deploy_script), command],
                 cwd=str(self.repo_path),
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout
+                bufsize=1  # Line buffered
             )
 
-            status = "SUCCESS" if result.returncode == 0 else "FAILED"
+            # Start threads to read stdout and stderr
+            stdout_thread = threading.Thread(
+                target=read_pipe, args=(process.stdout, stdout_lines))
+            stderr_thread = threading.Thread(
+                target=read_pipe, args=(process.stderr, stderr_lines))
+
+            stdout_thread.daemon = True
+            stderr_thread.daemon = True
+
+            stdout_thread.start()
+            stderr_thread.start()
+
+            start_time = time.time()
+            last_summary_time = start_time
+            summary_interval = 10
+            initial_delay = 15
+
+            while process.poll() is None:
+                current_time = time.time()
+                elapsed = current_time - start_time
+
+                # Check timeout
+                if elapsed > timeout:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    return {
+                        "success": False,
+                        "exit_code": -1,
+                        "stdout": "".join(stdout_lines),
+                        "stderr": f"Deployment script timed out after {timeout} seconds\n" + "".join(stderr_lines)
+                    }
+
+                # Check for summary update
+                if elapsed > initial_delay and (
+                        current_time - last_summary_time) >= summary_interval:
+                    # Get recent output
+                    recent_stdout = "".join(stdout_lines[-20:])
+                    recent_stderr = "".join(stderr_lines[-20:])
+                    recent_output = f"{recent_stdout}\n{recent_stderr}"
+
+                    if recent_output.strip():
+                        self._summarize_progress(recent_output)
+
+                    last_summary_time = time.time()
+
+                time.sleep(0.5)
+
+            # Wait for threads to finish
+            stdout_thread.join(timeout=1)
+            stderr_thread.join(timeout=1)
+
+            stdout_data = "".join(stdout_lines)
+            stderr_data = "".join(stderr_lines)
+
+            status = "SUCCESS" if process.returncode == 0 else "FAILED"
             print(
-                f"Deployment command '{command}' finished: {status} (Exit Code: {result.returncode})")
+                f"Deployment command '{command}' finished: {status} (Exit Code: {process.returncode})")
 
             return {
-                "success": result.returncode == 0,
-                "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr
+                "success": process.returncode == 0,
+                "exit_code": process.returncode,
+                "stdout": stdout_data,
+                "stderr": stderr_data
             }
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": f"Deployment script timed out after {timeout} seconds"
-            }
+
         except Exception as e:
             return {
                 "success": False,
@@ -452,6 +529,33 @@ class DeploymentAgent:
                 "stdout": "",
                 "stderr": f"Failed to run deployment script: {e}"
             }
+
+    def _summarize_progress(self, output_snippet: str):
+        """Generate and print a summary of the progress using the agent."""
+        prompt = f"""The following is the recent output of a long-running deployment command.
+Please provide a brief, one-line summary of what is currently happening.
+Wrap your summary in <output_msg>...</output_msg> XML tags.
+Do not include any other text or debug info.
+
+Recent Output:
+{output_snippet}
+"""
+        try:
+            # Use silent=True to avoid printing the agent's internal thought process
+            response = self.agent.generate(prompt, silent=True, timeout=30)
+            summary = self._extract_summary(response)
+            if summary:
+                print(f"➜ {summary}")
+        except Exception:
+            # If summarization fails, just ignore it to not interrupt the flow
+            pass
+
+    def _extract_summary(self, response: str) -> Optional[str]:
+        """Extract the summary from the agent's response using XML markers."""
+        match = re.search(r'<output_msg>(.*?)</output_msg>', response, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return None
 
     def _fix_with_agent(
             self,

@@ -23,10 +23,10 @@ def main() -> int:
         epilog="""
 Examples:
   # Run Codex-assisted deployment on a repository
-  python -m app_operator run /path/to/repository
+  ./sds_operator /path/to/repository
 
   # Use a custom health check interval
-  python -m app_operator run /path/to/repository --interval 60
+  ./sds_operator /path/to/repository --interval 60
         """)
 
     subparsers = parser.add_subparsers(

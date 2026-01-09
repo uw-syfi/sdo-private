@@ -1,4 +1,5 @@
 from types import MethodType, SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -180,28 +181,72 @@ def test_run_respects_max_attempts(agent):
 
 
 def test_run_deploy_command_handles_subprocess_results(agent, monkeypatch):
-    def fake_run(cmd, cwd, capture_output, text, timeout):
+    stdout_content = ["all good\n"]
+    stderr_content = []
+
+    class MockProcess:
+        def __init__(self, *args, **kwargs):
+            self.stdout = MagicMock()
+            self.stderr = MagicMock()
+            self.stdout.readline.side_effect = stdout_content + [""]
+            self.stderr.readline.side_effect = stderr_content + [""]
+            self.returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self): pass
+        def kill(self): pass
+
+    def fake_popen(cmd, **kwargs):
         assert cmd[0] == str(agent.deploy_script)
         assert cmd[1] == "start"
-        assert cwd == str(agent.repo_path)
-        return SimpleNamespace(returncode=0, stdout="all good", stderr="")
+        assert kwargs["cwd"] == str(agent.repo_path)
+        return MockProcess()
 
-    monkeypatch.setattr(deployer_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(deployer_module.subprocess, "Popen", fake_popen)
 
     result = agent.run_deploy_command("start")
     assert result["success"] is True
     assert result["exit_code"] == 0
-    assert result["stdout"] == "all good"
+    assert "all good" in result["stdout"]
 
 
 def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
-    def fake_run(*_, **__):
-        raise deployer_module.subprocess.TimeoutExpired(
-            cmd=["./deploy.sh", "start"], timeout=300)
+    class MockProcess:
+        def __init__(self, *args, **kwargs):
+            self.stdout = MagicMock()
+            self.stderr = MagicMock()
+            self.stdout.readline.side_effect = [""]
+            self.stderr.readline.side_effect = [""]
+            self.returncode = None
 
-    monkeypatch.setattr(deployer_module.subprocess, "run", fake_run)
+        def poll(self):
+            return None  # Always running
 
-    result = agent.run_deploy_command("start")
+        def wait(self, timeout=None):
+            if timeout:
+                raise deployer_module.subprocess.TimeoutExpired(cmd=[], timeout=timeout)
+            return 0
+
+        def terminate(self): pass
+        def kill(self): pass
+
+    monkeypatch.setattr(deployer_module.subprocess, "Popen", lambda *args, **kwargs: MockProcess())
+
+    # Mock time to simulate timeout
+    # Initial call: start_time
+    # Loop calls: current_time
+    # We want current_time - start_time > timeout (300)
+
+    times = [0, 301, 302, 303]  # Start, check 1 (timeout), check 2...
+    monkeypatch.setattr(deployer_module.time, "time", lambda: times.pop(0))
+    monkeypatch.setattr(deployer_module.time, "sleep", lambda x: None)
+
+    result = agent.run_deploy_command("start", timeout=300)
     assert result["success"] is False
     assert result["exit_code"] == -1
     assert "timed out" in result["stderr"]

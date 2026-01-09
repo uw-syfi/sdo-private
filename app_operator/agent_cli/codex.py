@@ -63,13 +63,14 @@ class CodexCodingAgent(CodingAgent):
             raise RuntimeError(f"Failed to check Codex CLI tool: {e}")
 
     def generate(self, prompt: str,
-                 cwd: Optional[str] = None, timeout: int = 300) -> str:
+                 cwd: Optional[str] = None, timeout: int = 300, silent: bool = False) -> str:
         """Generate text using codex.
 
         Args:
             prompt: The prompt to send to codex.
             cwd: Optional working directory to run codex in. If None, uses current directory.
             timeout: Timeout in seconds (default: 300).
+            silent: If True, suppress stdout printing of the agent's output.
 
         Returns:
             Generated text from codex.
@@ -88,11 +89,12 @@ class CodexCodingAgent(CodingAgent):
         if self.model:
             cmd.extend(["--model", self.model])
 
-        print(f"[CodexCodingAgent] Running command: {' '.join(cmd)}")
-        print(f"[CodexCodingAgent] Working directory: {cwd or os.getcwd()}")
-        print(f"[CodexCodingAgent] Prompt length: {len(prompt)} characters")
-        print("-" * 80)
-        sys.stdout.flush()
+        if not silent:
+            print(f"[CodexCodingAgent] Running command: {' '.join(cmd)}")
+            print(f"[CodexCodingAgent] Working directory: {cwd or os.getcwd()}")
+            print(f"[CodexCodingAgent] Prompt length: {len(prompt)} characters")
+            print("-" * 80)
+            sys.stdout.flush()
 
         # Buffers to capture output
         stdout_lines = []
@@ -104,8 +106,9 @@ class CodexCodingAgent(CodingAgent):
                 if not line:
                     break
                 line_stripped = line.rstrip('\n')
-                print(f"[CodexCodingAgent] {line_stripped}")
-                sys.stdout.flush()
+                if not silent:
+                    print(f"[CodexCodingAgent] {line_stripped}")
+                    sys.stdout.flush()
                 buffer.append(line)
             pipe.close()
 
@@ -115,10 +118,11 @@ class CodexCodingAgent(CodingAgent):
                 if not line:
                     break
                 line_stripped = line.rstrip('\n')
-                print(
-                    f"[CodexCodingAgent] [STDERR] {line_stripped}",
-                    file=sys.stderr)
-                sys.stderr.flush()
+                if not silent:
+                    print(
+                        f"[CodexCodingAgent] [STDERR] {line_stripped}",
+                        file=sys.stderr)
+                    sys.stderr.flush()
                 buffer.append(line)
             pipe.close()
 
@@ -172,15 +176,17 @@ class CodexCodingAgent(CodingAgent):
         stdout_data = ''.join(stdout_lines)
         stderr_data = ''.join(stderr_lines)
 
-        print("-" * 80)
+        if not silent:
+            print("-" * 80)
 
         if process.returncode != 0:
             raise RuntimeError(
                 f"codex exited with code {process.returncode}: {stderr_data}"
             )
 
-        print("[CodexCodingAgent] Command completed successfully (exit code: 0)")
-        print("=" * 80)
-        sys.stdout.flush()
+        if not silent:
+            print("[CodexCodingAgent] Command completed successfully (exit code: 0)")
+            print("=" * 80)
+            sys.stdout.flush()
 
         return stdout_data.strip()
