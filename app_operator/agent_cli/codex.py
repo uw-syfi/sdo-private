@@ -93,7 +93,7 @@ class CodexCodingAgent(CodingAgent):
             print(f"[CodexCodingAgent] Running command: {' '.join(cmd)}")
             print(f"[CodexCodingAgent] Working directory: {cwd or os.getcwd()}")
             print(f"[CodexCodingAgent] Prompt length: {len(prompt)} characters")
-            print("-" * 80)
+            print("=" * 80)
             sys.stdout.flush()
 
         # Buffers to capture output
@@ -177,16 +177,11 @@ class CodexCodingAgent(CodingAgent):
         stderr_data = ''.join(stderr_lines)
 
         if not silent:
-            print("-" * 80)
+            print("=" * 80)
 
         if process.returncode != 0:
             raise RuntimeError(
                 f"codex exited with code {process.returncode}: {stderr_data}"
             )
-
-        if not silent:
-            print("[CodexCodingAgent] Command completed successfully (exit code: 0)")
-            print("=" * 80)
-            sys.stdout.flush()
 
         return stdout_data.strip()

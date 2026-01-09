@@ -84,7 +84,7 @@ class GeminiCodingAgent(CodingAgent):
             cmd.extend(["--model", self.model])
 
         if not silent:
-            print("-" * 80)
+            print("=" * 80)
             sys.stdout.flush()
 
         # Buffers to capture output
@@ -168,16 +168,11 @@ class GeminiCodingAgent(CodingAgent):
         stderr_data = ''.join(stderr_lines)
 
         if not silent:
-            print("-" * 80)
+            print("=" * 80)
 
         if process.returncode != 0:
             raise RuntimeError(
                 f"gemini exited with code {process.returncode}: {stderr_data}"
             )
-
-        if not silent:
-            print("[Gemini] Command completed successfully (exit code: 0)")
-            print("=" * 80)
-            sys.stdout.flush()
 
         return stdout_data.strip()
