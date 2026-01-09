@@ -2,17 +2,61 @@ image: python:3.11
 
 workflow:
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
-    - when: never
+    # Run on push to main
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    # Run on Merge Requests
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # Prevent duplicate pipelines for branches with open MRs
+    - if: '$CI_OPEN_MERGE_REQUESTS'
+      when: never
+    # Optional: Run on other branches
+    - if: '$CI_COMMIT_BRANCH'
 
 stages:
+  - build
   - test
 
-pytest:
+# Define a global cache for uv's internal files to speed up installs across runs
+variables:
+  UV_CACHE_DIR: ".uv-cache"
+
+cache:
+  key: "uv-global-cache"
+  paths:
+    - .uv-cache/
+
+setup:
+  stage: build
+  script:
+    - pip install uv
+    - echo "Installing dependencies..."
+    - uv sync --all-extras
+  artifacts:
+    paths:
+      - .venv/
+    expire_in: 1 hour
+
+.test_job_template:
   stage: test
   before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -e ./agents[test]
+    - pip install uv
+  dependencies:
+    - setup
+
+static_analysis:
+  extends: .test_job_template
   script:
-    - cd agents
-    - pytest
+    - echo "Running Static Error Checks..."
+    - ./scripts/check_errors.sh
+
+formatting:
+  extends: .test_job_template
+  script:
+    - echo "Checking Code Formatting..."
+    - ./scripts/format_code.sh --check
+
+unit_tests:
+  extends: .test_job_template
+  script:
+    - echo "Running Tests..."
+    - ./scripts/run_tests.sh

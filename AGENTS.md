@@ -8,8 +8,8 @@ SDS is an AI-native project designed to autonomously explore, validate, and evol
 
 ```
 sds/
-├── agents/          # Python-based Application Operator and tools.
-│   ├── app_operator/ # Core operator logic, agent, and registry.
+├── app_operator/    # Core operator logic.
+│   ├── agents/      # Specialized agents (deployer, monitor).
 │   └── ...
 ├── apps/            # Application code (DeathStarBench suite).
 │   └── deathstarbench/
@@ -19,41 +19,30 @@ sds/
 ├── deploy/          # Deployment and operational scripts.
 │   └── deathstarbench/
 │       └── hotel/   # Deployment scripts for Hotel Reservation.
+├── tools/           # Shared tools/utilities (e.g., healthcheck).
 └── README.md        # Root project documentation.
 ```
 
-## 1. Application Operator (`agents/`)
+## 1. Application Operator (`app_operator/`)
 
-The **Application Operator** is a Python tool that autonomously deploys, monitors, and manages applications. It features "Codex" mode to self-correct deployment scripts and uses LLMs to summarize health checks.
+The **Application Operator** is a Python tool that autonomously deploys, monitors, and manages applications. It features a "Codex" mode to self-correct deployment scripts and uses LLMs to summarize health checks.
 
 ### Setup & Usage
 
 *   **Dependency Management:** Uses `uv` (or `pip`).
 *   **Installation:**
     ```bash
-    cd agents
     uv sync  # or pip install -e .
     ```
-*   **Environment:** Requires `.env` in `agents/` or root with `OPENAI_API_KEY`.
+*   **Environment:** Requires `.env` in root with `OPENAI_API_KEY`.
 
 ### Key Commands
 
-*   **List Applications:**
-    ```bash
-    python -m app_operator --list
-    ```
-*   **Run Operator (Deploy & Monitor):**
-    ```bash
-    python -m app_operator --app-name hotel
-    ```
-*   **Codex Mode (Autonomous Deployment):**
+*   **Default Mode (Codex-assisted Autonomous Deployment):**
+    This mode attempts to deploy the application in the specified repository, using an AI agent to automatically fix deployment errors.
     ```bash
     # Uses Codex or Gemini as configured in sds.toml
-    python -m app_operator codex /path/to/repo
-    ```
-*   **Generate Scripts:**
-    ```bash
-    python -m app_operator generate-scripts /path/to/repo
+    python -m app_operator run /path/to/repo
     ```
 
 ### Coding Agent Configuration
@@ -67,9 +56,17 @@ model = "gemini-1.5-pro" # optional
 ```
 
 ### Architecture
-*   **Abstract Base Class:** `Application` (in `application.py`) defines `deploy()`, `health_check()`, and `shutdown()`.
-*   **Registry:** `app_registry.py` maps names (e.g., "hotel") to implementation classes.
-*   **Extensibility:** New apps can be added by subclassing `Application` and registering them.
+The operator uses specialized agents to manage the application lifecycle:
+
+*   **DeploymentAgent (`app_operator/agents/deployer.py`):**
+    *   Generates deployment scripts (`deploy.sh`, `health_check.sh`) if missing.
+    *   Deploys the application and automatically fixes errors using an AI agent.
+    *   Manages the self-healing deployment loop.
+*   **AppMonitor (`app_operator/agents/app_monitor.py`):**
+    *   Monitors application health at regular intervals.
+    *   Uses `HealthCheckTask` to execute checks and `CodingAgent` to analyze results.
+*   **Tools (`tools/`):**
+    *   `healthcheck.py`: Encapsulates health check execution logic.
 
 ## 2. Applications (`apps/deathstarbench/`)
 
@@ -107,9 +104,8 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 
 ## Usage Guide for LLM agents
 
-*   **When asked to "deploy hotel":** Prefer using the `app_operator` (`python -m app_operator --app-name hotel`) as it wraps the underlying scripts and provides AI monitoring.
-*   **When debugging deployment:** Check `deploy/deathstarbench/hotel/deploy.sh` and the generated logs.
-*   **When adding a new app:** You will need to implement a subclass in `agents/app_operator/apps/` and register it, pointing it to the underlying deployment scripts.
+*   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs.
+*   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
 
 ## Notes from the developers
 
@@ -118,7 +114,20 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 *   When code update impacts the CLI interface, update the README.
 *   Remember to format the code after code edits.
 
-### Testing 
+### Documentation
+
+*   Update README.md when your changes impact the user-facing behavior.
+
+### Code hygiene
+
+* When removing code, do not comment it out, just remove it.
+
+### Checking syntax correctness
+
+* For python code, use `scripts/check_errors.sh` to check for syntax errors. Add `--fix` to automatically fix errors. For other errors, see if you can fix them yourself. Run test afterwards to make sure there's no regressions.
+
+### Testing
+
 *   We use pytest.
 *   Check if tests pass after you've modified the codebase's behavior.
 *   When introducing new features or modifying existing behavior, write in a testable way. Update tests on application semantic changes.
