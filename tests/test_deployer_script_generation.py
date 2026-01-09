@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from unittest.mock import Mock
 from app_operator.agents.deployer import generate_scripts, _analyze_repository
 
@@ -11,9 +12,30 @@ class StubAgent:
 
     def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300) -> str:
         self.calls.append((prompt, cwd, timeout))
-        response = self.responses[self.call_count % len(self.responses)]
+        
+        # Simulate agent writing files
+        if cwd:
+            # We need to ensure .sds directory exists as the agent would create files there
+            # But the agent might expect the directory to exist or create it.
+            # In generate_scripts, .sds is created before calling agent.
+            
+            sds_dir = Path(cwd) / ".sds"
+            # It should already exist because generate_scripts creates it.
+            
+            content = self.responses[self.call_count % len(self.responses)]
+            
+            # Determine which file to write based on prompt or call order
+            # The prompt contains the filename instructions.
+            filename = "deploy.sh"
+            if "Create the file at: .sds/health_check.sh" in prompt:
+                filename = "health_check.sh"
+            elif "Create the file at: .sds/deploy.sh" in prompt:
+                filename = "deploy.sh"
+            
+            (sds_dir / filename).write_text(content, encoding="utf-8")
+
         self.call_count += 1
-        return response
+        return "I have generated the scripts."
 
 
 @pytest.fixture
@@ -56,8 +78,8 @@ def test_generate_scripts_creates_files(tmp_path, stub_agent):
     assert (repo / ".sds" / "health_check.sh").exists()
 
     # Verify content
-    assert (repo / ".sds" / "deploy.sh").read_text() == "#!/bin/bash\necho deploy"
-    assert (repo / ".sds" / "health_check.sh").read_text() == "#!/bin/bash\necho health"
+    assert (repo / ".sds" / "deploy.sh").read_text(encoding="utf-8") == "#!/bin/bash\necho deploy"
+    assert (repo / ".sds" / "health_check.sh").read_text(encoding="utf-8") == "#!/bin/bash\necho health"
 
 
 def test_generate_scripts_sends_correct_prompts(tmp_path, stub_agent):
@@ -94,36 +116,3 @@ def test_generate_scripts_handles_agent_errors(tmp_path):
     assert success is False
     assert "API Error" in message
     assert not (repo / ".sds" / "deploy.sh").exists()
-
-
-def test_generate_scripts_cleans_markdown_fences(tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-
-    # Agent returns markdown code blocks
-    responses = [
-        "```bash\n#!/bin/bash\necho deploy\n```",
-        "```\n#!/bin/bash\necho health\n```"
-    ]
-    agent = StubAgent(responses=responses)
-
-    success, message = generate_scripts(str(repo), agent)
-
-    assert success is True
-    assert (repo / ".sds" / "deploy.sh").read_text().strip() == "#!/bin/bash\necho deploy"
-    assert (repo / ".sds" / "health_check.sh").read_text().strip() == "#!/bin/bash\necho health"
-
-
-def test_generate_scripts_adds_shebang_if_missing(tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-
-    responses = ["echo deploy", "echo health"]
-    agent = StubAgent(responses=responses)
-
-    success, message = generate_scripts(str(repo), agent)
-
-    assert success is True
-    content = (repo / ".sds" / "deploy.sh").read_text()
-    assert content.startswith("#!/bin/bash")
-    assert "echo deploy" in content

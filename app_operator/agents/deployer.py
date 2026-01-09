@@ -59,30 +59,29 @@ def generate_scripts(
         repo_context = _analyze_repository(target_path)
 
         # Generate deploy.sh using coding agent
-        deploy_success, deploy_content = _generate_deploy_script(
+        deploy_success, deploy_msg = _generate_deploy_script(
             agent, system_prompt, repo_context, abs_target_dir
         )
 
         if not deploy_success:
-            return False, f"Failed to generate deploy.sh: {deploy_content}"
+            return False, f"Failed to generate deploy.sh: {deploy_msg}"
 
         # Generate health_check.sh using coding agent
-        health_check_success, health_check_content = _generate_health_check_script(
+        health_check_success, health_check_msg = _generate_health_check_script(
             agent, system_prompt, repo_context, abs_target_dir)
 
         if not health_check_success:
-            return False, f"Failed to generate health_check.sh: {health_check_content}"
+            return False, f"Failed to generate health_check.sh: {health_check_msg}"
 
-        # Write scripts to .sds directory
+        # Make scripts executable
         deploy_script_path = sds_dir / "deploy.sh"
         health_check_script_path = sds_dir / "health_check.sh"
 
-        deploy_script_path.write_text(deploy_content, encoding="utf-8")
-        deploy_script_path.chmod(0o755)  # Make executable
+        if deploy_script_path.exists():
+            deploy_script_path.chmod(0o755)
 
-        health_check_script_path.write_text(
-            health_check_content, encoding="utf-8")
-        health_check_script_path.chmod(0o755)  # Make executable
+        if health_check_script_path.exists():
+            health_check_script_path.chmod(0o755)
 
         return True, f"Successfully generated scripts in {sds_dir}"
 
@@ -235,7 +234,7 @@ def _generate_deploy_script(
 Target directory: {target_dir}
 
 Requirements:
-- The script should be placed in a .sds subdirectory
+- Create the file at: .sds/deploy.sh
 - Use SCRIPT_DIR to determine paths relative to the script location
 - Analyze the repository structure to determine the deployment method
 - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
@@ -243,30 +242,21 @@ Requirements:
 - Include proper error handling and colored output
 - The script should work when executed from the .sds directory
 
-Generate ONLY the bash script content, starting with #!/bin/bash. Do not include any markdown formatting or code fences."""
+You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content."""
 
     full_prompt = f"""{system_prompt}
 
 {human_prompt}"""
 
     try:
-        script_content = agent.generate(full_prompt, cwd=target_dir)
+        agent.generate(full_prompt, cwd=target_dir)
 
-        # Remove markdown code fences if present
-        if script_content.startswith("```bash"):
-            script_content = script_content[7:]
-        elif script_content.startswith("```"):
-            script_content = script_content[3:]
-        if script_content.endswith("```"):
-            script_content = script_content[:-3]
+        deploy_script_path = Path(target_dir) / ".sds" / "deploy.sh"
+        if deploy_script_path.exists():
+            return True, "Successfully generated deploy.sh"
+        else:
+            return False, "Agent failed to create .sds/deploy.sh"
 
-        script_content = script_content.strip()
-
-        # Ensure it starts with shebang
-        if not script_content.startswith("#!/bin/bash"):
-            script_content = "#!/bin/bash\n\n" + script_content
-
-        return True, script_content
     except subprocess.TimeoutExpired:
         return False, "agent command timed out after 5 minutes"
     except Exception as e:
@@ -287,7 +277,7 @@ def _generate_health_check_script(
 Target directory: {target_dir}
 
 Requirements:
-- The script should be placed in a .sds subdirectory
+- Create the file at: .sds/health_check.sh
 - Use SCRIPT_DIR to determine paths relative to the script location
 - Analyze the repository structure to determine what to check
 - Include checks for: containers, ports, endpoints, databases, cache, performance
@@ -297,30 +287,21 @@ Requirements:
 - Track total checks, passed checks, failed checks, warnings
 - The script should work when executed from the .sds directory
 
-Generate ONLY the bash script content, starting with #!/bin/bash. Do not include any markdown formatting or code fences."""
+You must use the write_file tool to create the file .sds/health_check.sh directly. Do not just print the content."""
 
     full_prompt = f"""{system_prompt}
 
 {human_prompt}"""
 
     try:
-        script_content = agent.generate(full_prompt, cwd=target_dir)
+        agent.generate(full_prompt, cwd=target_dir)
 
-        # Remove markdown code fences if present
-        if script_content.startswith("```bash"):
-            script_content = script_content[7:]
-        elif script_content.startswith("```"):
-            script_content = script_content[3:]
-        if script_content.endswith("```"):
-            script_content = script_content[:-3]
+        health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
+        if health_check_script_path.exists():
+            return True, "Successfully generated health_check.sh"
+        else:
+            return False, "Agent failed to create .sds/health_check.sh"
 
-        script_content = script_content.strip()
-
-        # Ensure it starts with shebang
-        if not script_content.startswith("#!/bin/bash"):
-            script_content = "#!/bin/bash\n\n" + script_content
-
-        return True, script_content
     except subprocess.TimeoutExpired:
         return False, "agent command timed out after 5 minutes"
     except Exception as e:

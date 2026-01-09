@@ -76,12 +76,13 @@ class GeminiCodingAgent(CodingAgent):
         """
         # Prepare gemini command
         cmd = [self.gemini_path]
+
+        # Enable yolo mode
+        cmd.extend(["-y"])
+
         if self.model:
             cmd.extend(["--model", self.model])
 
-        print(f"[GeminiCodingAgent] Running command: {' '.join(cmd)}")
-        print(f"[GeminiCodingAgent] Working directory: {cwd or os.getcwd()}")
-        print(f"[GeminiCodingAgent] Prompt length: {len(prompt)} characters")
         print("-" * 80)
         sys.stdout.flush()
 
@@ -95,7 +96,7 @@ class GeminiCodingAgent(CodingAgent):
                 if not line:
                     break
                 line_stripped = line.rstrip('\n')
-                print(f"[GeminiCodingAgent] {line_stripped}")
+                print(f"[Gemini] {line_stripped}")
                 sys.stdout.flush()
                 buffer.append(line)
             pipe.close()
@@ -107,7 +108,7 @@ class GeminiCodingAgent(CodingAgent):
                     break
                 line_stripped = line.rstrip('\n')
                 print(
-                    f"[GeminiCodingAgent] [STDERR] {line_stripped}",
+                    f"[Gemini] [STDERR] {line_stripped}",
                     file=sys.stderr)
                 sys.stderr.flush()
                 buffer.append(line)
@@ -170,7 +171,7 @@ class GeminiCodingAgent(CodingAgent):
                 f"gemini exited with code {process.returncode}: {stderr_data}"
             )
 
-        print("[GeminiCodingAgent] Command completed successfully (exit code: 0)")
+        print("[Gemini] Command completed successfully (exit code: 0)")
         print("=" * 80)
         sys.stdout.flush()
 
