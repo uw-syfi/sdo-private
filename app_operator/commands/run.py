@@ -3,6 +3,7 @@ import sys
 
 from app_operator.operator import AppOperator
 from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.config import load_config
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -11,18 +12,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "directory",
         metavar="DIR",
         help="Directory path of the repository to deploy"
-    )
-    parser.add_argument(
-        "--interval", "-i",
-        type=int,
-        default=30,
-        metavar="SECONDS",
-        help="Interval between health checks in seconds (default: 30)"
-    )
-    parser.add_argument(
-        "--model",
-        metavar="MODEL",
-        help="Model to use (default: from config or env var)"
     )
     parser.add_argument(
         "--config",
@@ -40,18 +29,21 @@ def run_command(args: argparse.Namespace) -> int:
             "Error: Directory not specified for 'run' command.",
             file=sys.stderr)
         return 1
-    if args.interval < 1:
+
+    config = load_config(args.directory, args.config)
+    interval = config.operator.interval
+
+    if interval < 1:
         print("Error: interval must be at least 1 second", file=sys.stderr)
         return 1
     try:
         agent = create_agent_from_config(
             args.directory,
-            model_override=args.model,
             config_path=args.config
         )
         operator = AppOperator(
             repo_path=args.directory,
-            health_check_interval=args.interval,
+            health_check_interval=interval,
             agent=agent
         )
 
