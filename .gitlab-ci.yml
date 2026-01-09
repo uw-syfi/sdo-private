@@ -9,24 +9,54 @@ workflow:
     # Prevent duplicate pipelines for branches with open MRs
     - if: '$CI_OPEN_MERGE_REQUESTS'
       when: never
-    # Optional: Run on other branches if needed, but user specifically asked for PR/Main logic.
-    # Allowing other branches helps catching issues before PR.
+    # Optional: Run on other branches
     - if: '$CI_COMMIT_BRANCH'
 
 stages:
+  - build
   - test
 
-test_job:
+# Define a global cache for uv's internal files to speed up installs across runs
+variables:
+  UV_CACHE_DIR: ".uv-cache"
+
+cache:
+  key: "uv-global-cache"
+  paths:
+    - .uv-cache/
+
+setup:
+  stage: build
+  script:
+    - pip install uv
+    - echo "Installing dependencies..."
+    - uv sync --all-extras
+  artifacts:
+    paths:
+      - .venv/
+    expire_in: 1 hour
+
+.test_job_template:
   stage: test
   before_script:
     - pip install uv
-    - uv sync --all-extras
+  dependencies:
+    - setup
+
+static_analysis:
+  extends: .test_job_template
   script:
     - echo "Running Static Error Checks..."
     - ./scripts/check_errors.sh
-    
+
+formatting:
+  extends: .test_job_template
+  script:
     - echo "Checking Code Formatting..."
     - ./scripts/format_code.sh --check
-    
+
+unit_tests:
+  extends: .test_job_template
+  script:
     - echo "Running Tests..."
     - ./scripts/run_tests.sh
