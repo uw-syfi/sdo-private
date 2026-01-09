@@ -79,3 +79,73 @@ def test_analyze_health_calls_agent(monitor, stub_agent):
     assert "all good" in prompt
     assert cwd == str(monitor.repo_path)
     assert timeout == 120
+
+
+def test_analyze_parses_exec_summary(monitor, stub_agent, capsys, tmp_path):
+    # Setup valid XML response
+    stub_agent.response = (
+        "Here is the analysis:\n"
+        "<exec_summary>System is healthy and performing well.</exec_summary>\n"
+        "Details: ..."
+    )
+
+    task = HealthCheckTask()
+    monitor.check_count = 1
+    monitor.log_dir = tmp_path / "logs"
+
+    # Dummy health result
+    health_result = {
+        "exit_code": 0,
+        "success": True,
+        "stdout": "ok",
+        "stderr": ""
+    }
+
+    task.analyze(monitor, health_result)
+
+    captured = capsys.readouterr()
+    assert "Summary: System is healthy and performing well." in captured.out
+
+    # Verify log file creation
+    log_files = list(monitor.log_dir.glob("*.log"))
+    assert len(log_files) == 1
+    assert "System is healthy" in log_files[0].read_text()
+
+
+def test_analyze_handles_missing_summary(monitor, stub_agent, capsys, tmp_path):
+    # Response without tags
+    stub_agent.response = "Just some plain text analysis without tags."
+
+    task = HealthCheckTask()
+    monitor.check_count = 1
+    monitor.log_dir = tmp_path / "logs"
+
+    health_result = {
+        "exit_code": 0,
+        "success": True,
+        "stdout": "ok",
+        "stderr": ""
+    }
+
+    task.analyze(monitor, health_result)
+
+    captured = capsys.readouterr()
+    assert "Summary not found in expected XML format" in captured.out
+
+
+def test_analyze_handles_agent_exception(monitor, stub_agent, capsys, tmp_path):
+    # Mock agent to raise exception
+    def raise_error(*args, **kwargs):
+        raise RuntimeError("Agent API failure")
+
+    stub_agent.generate = raise_error
+    monitor.log_dir = tmp_path / "logs"
+
+    task = HealthCheckTask()
+    health_result = {"exit_code": 0, "success": True, "stdout": "", "stderr": ""}
+
+    # Should not crash
+    task.analyze(monitor, health_result)
+
+    captured = capsys.readouterr()
+    assert "Agent analysis failed: Agent API failure" in captured.err

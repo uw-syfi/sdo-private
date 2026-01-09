@@ -71,6 +71,10 @@ class HealthCheckTask(MonitoringTask):
                     response = monitor.agent.generate(
                         prompt, cwd=str(monitor.repo_path), timeout=120)
 
+                # Explicitly write the response to the log file
+                f.write("\n\n=== Agent Analysis ===\n")
+                f.write(response)
+
             # Extract executive summary
             match = re.search(r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
             if match:
