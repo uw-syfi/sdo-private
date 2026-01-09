@@ -2,17 +2,31 @@ image: python:3.11
 
 workflow:
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
-    - when: never
+    # Run on push to main
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    # Run on Merge Requests
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # Prevent duplicate pipelines for branches with open MRs
+    - if: '$CI_OPEN_MERGE_REQUESTS'
+      when: never
+    # Optional: Run on other branches if needed, but user specifically asked for PR/Main logic.
+    # Allowing other branches helps catching issues before PR.
+    - if: '$CI_COMMIT_BRANCH'
 
 stages:
   - test
 
-pytest:
+test_job:
   stage: test
   before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -e ./agents[test]
+    - pip install uv
+    - uv sync --all-extras
   script:
-    - cd agents
-    - pytest
+    - echo "Running Static Error Checks..."
+    - ./scripts/check_errors.sh
+    
+    - echo "Checking Code Formatting..."
+    - ./scripts/format_code.sh --check
+    
+    - echo "Running Tests..."
+    - ./scripts/run_tests.sh
