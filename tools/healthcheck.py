@@ -1,5 +1,4 @@
 import subprocess
-import sys
 from pathlib import Path
 from typing import Dict, Any
 
@@ -27,11 +26,8 @@ def run_health_check(repo_path: Path, health_check_script: Path,
             timeout=timeout
         )
 
-        # Print output
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
+        status = "PASSED" if result.returncode == 0 else "FAILED"
+        print(f"Health check finished: {status} (Exit Code: {result.returncode})")
 
         return {
             "success": result.returncode == 0,

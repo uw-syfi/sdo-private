@@ -1,5 +1,8 @@
 import sys
 import time
+import re
+import shutil
+import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
@@ -54,20 +57,29 @@ class HealthCheckTask(MonitoringTask):
         prompt = self._create_analysis_prompt(context, monitor.repo_path)
 
         try:
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            # Ensure log directory exists
+            monitor.log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
+
             print(
-                f"Consulting {monitor.agent.__class__.__name__} for health analysis and suggestions...")
+                f"Consulting {monitor.agent.__class__.__name__} for health analysis...")
 
-            # Run agent to get analysis
-            monitor.agent.generate(
-                prompt, cwd=str(monitor.repo_path), timeout=120)
+            # Run agent and redirect its output to the log file
+            with open(log_file, "w") as f:
+                with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
+                    response = monitor.agent.generate(
+                        prompt, cwd=str(monitor.repo_path), timeout=120)
 
-            print(f"\n{'='*70}")
-            print(f"  {monitor.agent.__class__.__name__} Analysis Complete")
-            print(f"{'='*70}\n")
+            # Extract executive summary
+            match = re.search(r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
+            if match:
+                summary = match.group(1).strip()
+                print(f"\nSummary: {summary}")
+            else:
+                print("\nSummary not found in expected XML format. See log for full analysis.")
 
-            # Note: We're not acting on suggestions yet, just displaying them
-            print(
-                "Note: Suggestions are for information only, not automatically applied")
+            print(f"\nFull analysis saved to: {log_file}")
 
         except Exception as e:
             print(f"✗ Agent analysis failed: {e}", file=sys.stderr)
@@ -161,12 +173,13 @@ Your task is to analyze health check results and provide actionable insights and
 
 ## Output Format:
 Provide a structured analysis with:
-- Executive summary (1-2 sentences)
+- Executive summary wrapped in <exec_summary> tags.
+  * THE EXECUTIVE SUMMARY MUST BE NO LONGER THAN 2 LINES.
 - Detailed findings
 - Prioritized recommendations
 - Suggested actions (if any)
 
-Keep your analysis concise but comprehensive."""
+Keep your analysis concise but comprehensive. Wrap the executive summary like this: <exec_summary>Your summary here</exec_summary>. Everything else should be outside these tags."""
 
         system_prompt = system_prompt.format(repo_path=repo_path)
 
@@ -201,6 +214,7 @@ class AppMonitor:
         self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
+        self.log_dir = self.repo_path / ".sds" / "logs" / "monitor"
 
     def run(self, interval: int = 30,
             check_shutdown: Optional[Callable[[], bool]] = None):
@@ -212,6 +226,11 @@ class AppMonitor:
         """
         print(
             f"\nStarting application monitoring (interval: {interval}s)...")
+
+        # Clear log directory on startup
+        if self.log_dir.exists():
+            shutil.rmtree(self.log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
         self.check_count = 0
 

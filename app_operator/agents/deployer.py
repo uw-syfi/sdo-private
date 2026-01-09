@@ -447,11 +447,9 @@ class DeploymentAgent:
                 timeout=timeout
             )
 
-            # Print output
-            if result.stdout:
-                print(result.stdout)
-            if result.stderr:
-                print(result.stderr, file=sys.stderr)
+            status = "SUCCESS" if result.returncode == 0 else "FAILED"
+            print(
+                f"Deployment command '{command}' finished: {status} (Exit Code: {result.returncode})")
 
             return {
                 "success": result.returncode == 0,
