@@ -1,4 +1,7 @@
-import tomli as tomllib  # Using tomli for Python < 3.11
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 from pathlib import Path
 from typing import Optional
 import sys
