@@ -39,7 +39,7 @@ def run_command(args: argparse.Namespace) -> int:
     try:
         agent = create_agent_from_config(
             args.directory,
-            config_path=args.config
+            config=config
         )
         operator = AppOperator(
             repo_path=args.directory,

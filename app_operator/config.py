@@ -28,7 +28,7 @@ class Config:
     def from_dict(cls, data: dict) -> "Config":
         agent_data = data.get("agent", {})
         operator_data = data.get("operator", {})
-        
+
         return cls(
             agent=AgentConfig(**agent_data),
             operator=OperatorConfig(**operator_data)
@@ -50,7 +50,13 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
     if config_path:
         config_files = [Path(config_path)]
     else:
-        config_files = [target_path / "sds.toml", target_path / "config.toml"]
+        # Determine project root (where this package is installed/located)
+        project_root = Path(__file__).resolve().parent.parent
+        config_files = [
+            target_path / "sds.toml",
+            target_path / "config.toml",
+            project_root / "sds.toml"
+        ]
 
     for config_file in config_files:
         if config_file.exists():
@@ -63,5 +69,5 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
                 print(
                     f"Warning: Failed to parse {config_file}: {e}",
                     file=sys.stderr)
-    
+
     return Config()

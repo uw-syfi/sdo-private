@@ -1,6 +1,6 @@
 from typing import Optional
 
-from app_operator.config import load_config
+from app_operator.config import load_config, Config
 from .base import CodingAgent
 from .codex import CodexCodingAgent
 from .gemini import GeminiCodingAgent
@@ -9,7 +9,8 @@ from .gemini import GeminiCodingAgent
 def create_agent_from_config(
         target_dir: str,
         model_override: Optional[str] = None,
-        config_path: Optional[str] = None) -> CodingAgent:
+        config_path: Optional[str] = None,
+        config: Optional[Config] = None) -> CodingAgent:
     """Create a coding agent based on configuration file.
 
     Looks for sds.toml or config.toml in the target directory, or uses the
@@ -20,12 +21,14 @@ def create_agent_from_config(
         target_dir: Directory to look for configuration files (if config_path not set).
         model_override: Optional model name to override config.
         config_path: Optional explicit path to configuration file.
+        config: Optional Config object. If provided, skips loading from file.
 
     Returns:
         CodingAgent: Configured coding agent.
     """
-    config = load_config(target_dir, config_path)
-    
+    if config is None:
+        config = load_config(target_dir, config_path)
+
     provider = config.agent.provider
     model = model_override or config.agent.model
 
