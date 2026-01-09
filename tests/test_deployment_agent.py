@@ -4,6 +4,7 @@ import pytest
 
 import app_operator.agents.deployer as deployer_module
 from app_operator.agents.deployer import DeploymentAgent
+import tools.healthcheck as healthcheck_tool
 
 
 class StubAgent:
@@ -50,7 +51,7 @@ def test_run_generates_scripts_when_missing(
     agent = DeploymentAgent(repo, stub_agent)
 
     generated = {}
-
+    
     def fake_generate_scripts(directory, agent):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
@@ -58,19 +59,16 @@ def test_run_generates_scripts_when_missing(
         (sds_dir / "deploy.sh").write_text("#!/bin/bash\n")
         (sds_dir / "health_check.sh").write_text("#!/bin/bash\n")
         return True, "done"
-
+    
     def fake_run_deploy(self, command="start", timeout=300):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
-    def fake_run_health(self, timeout=120):
+    def fake_run_health(repo, script, timeout=120):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
-
-    monkeypatch.setattr(
-        deployer_module,
-        "generate_scripts",
-        fake_generate_scripts)
+        
+    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
+    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "run_health_check", fake_run_health)
 
     assert agent.run(max_attempts=1) is True
     assert generated["args"] == (str(repo), stub_agent)
@@ -85,10 +83,7 @@ def test_run_fails_if_script_generation_fails(
     def fake_generate_scripts(directory, agent):
         return False, "boom"
 
-    monkeypatch.setattr(
-        deployer_module,
-        "generate_scripts",
-        fake_generate_scripts)
+    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
 
     assert agent.run() is False
 
@@ -97,7 +92,7 @@ def _bind_method(obj, name, func):
     setattr(obj, name, MethodType(func, obj))
 
 
-def test_run_succeeds_without_fix(agent):
+def test_run_succeeds_without_fix(agent, monkeypatch):
     deploy_results = iter(
         [
             {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""},
@@ -112,20 +107,20 @@ def test_run_succeeds_without_fix(agent):
     def fake_run_deploy(self, command="start", timeout=300):
         return next(deploy_results)
 
-    def fake_run_health(self, timeout=120):
+    def fake_run_health(repo, script, timeout=120):
         return next(health_results)
 
     def unexpected_fix(self, *args, **kwargs):
         raise AssertionError("fix should not be invoked on success")
 
     _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "run_health_check", fake_run_health)
+    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     _bind_method(agent, "_fix_with_agent", unexpected_fix)
 
     assert agent.run(max_attempts=1) is True
 
 
-def test_run_retries_after_failure(agent):
+def test_run_retries_after_failure(agent, monkeypatch):
     deploy_results = iter(
         [
             {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom"},
@@ -142,7 +137,7 @@ def test_run_retries_after_failure(agent):
     def fake_run_deploy(self, command="start", timeout=300):
         return next(deploy_results)
 
-    def fake_run_health(self, timeout=120):
+    def fake_run_health(repo, script, timeout=120):
         return next(health_results)
 
     def fake_fix(self, deploy_result, health_result, attempt, max_attempts):
@@ -150,7 +145,7 @@ def test_run_retries_after_failure(agent):
         return True
 
     _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "run_health_check", fake_run_health)
+    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     _bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=3) is True
@@ -207,31 +202,8 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
     assert "timed out" in result["stderr"]
 
 
-def test_run_health_check_maps_failures(agent, monkeypatch):
-    def fake_run(*_, **__):
-        return SimpleNamespace(returncode=1, stdout="", stderr="bad")
-
-    monkeypatch.setattr(deployer_module.subprocess, "run", fake_run)
-
-    result = agent.run_health_check()
-    assert result["success"] is False
-    assert result["exit_code"] == 1
-    assert result["stderr"] == "bad"
-
-
-def test_run_health_check_handles_runtime_errors(agent, monkeypatch):
-    def fake_run(*_, **__):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(deployer_module.subprocess, "run", fake_run)
-
-    result = agent.run_health_check()
-    assert result["success"] is False
-    assert result["exit_code"] == -1
-    assert "Failed to run health check" in result["stderr"]
-
-
 def test_fix_with_agent_skips_when_attempt_exceeds_max(agent, stub_agent):
+
     assert agent._fix_with_agent(
         {"exit_code": 1, "success": False}, None, attempt=3, max_attempts=3) is False
     assert stub_agent.calls == []

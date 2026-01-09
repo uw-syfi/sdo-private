@@ -6,6 +6,7 @@ from typing import Optional, Callable, Dict, Any
 
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.script_generator import generate_scripts
+from tools.healthcheck import run_health_check
 
 
 class DeploymentAgent:
@@ -77,7 +78,8 @@ class DeploymentAgent:
                 print(f"\n✓ Deployment script succeeded (exit code: 0)")
 
                 # Verify with health check
-                health_result = self.run_health_check()
+                health_result = run_health_check(
+                    self.repo_path, self.health_check_script)
 
                 if health_result["success"]:
                     print(f"✓ Health check passed (exit code: 0)")
@@ -152,53 +154,6 @@ class DeploymentAgent:
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": f"Failed to run deployment script: {e}"
-            }
-
-    def run_health_check(self, timeout: int = 120) -> Dict[str, Any]:
-        """Run the health check script.
-
-        Args:
-            timeout: Timeout in seconds.
-
-        Returns:
-            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
-        """
-        print(f"Running health check: {self.health_check_script}")
-
-        try:
-            result = subprocess.run(
-                [str(self.health_check_script)],
-                cwd=str(self.repo_path),
-                capture_output=True,
-                text=True,
-                timeout=timeout
-            )
-
-            # Print output
-            if result.stdout:
-                print(result.stdout)
-            if result.stderr:
-                print(result.stderr, file=sys.stderr)
-
-            return {
-                "success": result.returncode == 0,
-                "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr
-            }
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": f"Health check timed out after {timeout} seconds"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": f"Failed to run health check: {e}"
             }
 
     def _fix_with_agent(
