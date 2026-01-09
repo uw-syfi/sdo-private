@@ -39,7 +39,7 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
     This mode attempts to deploy the application in the specified repository, using an AI agent to automatically fix deployment errors.
     ```bash
     # Uses Codex or Gemini as configured in sds.toml
-    python -m app_operator run /path/to/repo
+    ./sds_operator /path/to/repo
     ```
 
 ### Coding Agent Configuration

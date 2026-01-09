@@ -15,6 +15,7 @@ sds/
 │   └── ...
 ├── apps/            # Application code and configurations
 ├── scripts/         # Helper scripts (formatting, checks)
+├── sds_operator     # CLI tool for running the operator
 ├── tests/           # Unit tests
 └── tools/           # Shared tools/utilities
 ```
@@ -78,7 +79,7 @@ interval = 30 # Health check interval in seconds
 - **AI-Powered Analysis**: Provides intelligent analysis of health check results to suggest improvements.
 
 ```bash
-python -m app_operator run /path/to/repository
+./sds_operator /path/to/repository
 ```
 
 
@@ -96,6 +97,6 @@ Deploy an application with autonomous error fixing and AI-powered health monitor
 
 **Example:**
 ```bash
-python -m app_operator run /path/to/repository
+./sds_operator /path/to/repository
 ```
 
