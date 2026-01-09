@@ -14,7 +14,8 @@ sds/
 │   ├── agents/      # Specialized agents (deployer, monitor)
 │   └── ...
 ├── apps/            # Application code and configurations
-├── deploy/          # Deployment scripts and configurations
+├── scripts/         # Helper scripts (formatting, checks)
+├── tests/           # Unit tests
 └── tools/           # Shared tools/utilities
 ```
 
@@ -37,27 +38,32 @@ The Application Operator (`app_operator`) is a tool for deploying and monitoring
 From the project root:
 
 ```bash
-pip install -e .
+uv sync
 ```
 
-Or using `uv`:
+Or using pip:
 
 ```bash
-uv pip install -e .
+pip install -e .
 ```
 
 #### Environment Setup
 
-Create a `.env` file in the project root with your OpenAI API key (required for health check summaries):
+1. Create a `.env` file in the project root with your OpenAI API key (required for health check summaries):
 
 ```bash
 OPENAI_API_KEY=your_api_key_here
 ```
 
-Optionally, customize the LLM model:
+2. Configure the agent and operator settings using `sds.toml` in the target repository (or use the default configuration):
 
-```bash
-APP_OPERATOR_LLM_MODEL=gpt-4o-mini  # default
+```toml
+[agent]
+provider = "codex"  # or "gemini"
+model = "gpt-4o-mini" # optional
+
+[operator]
+interval = 30 # Health check interval in seconds
 ```
 
 ### Commands
@@ -72,7 +78,7 @@ APP_OPERATOR_LLM_MODEL=gpt-4o-mini  # default
 - **AI-Powered Analysis**: Provides intelligent analysis of health check results to suggest improvements.
 
 ```bash
-python -m app_operator /path/to/repository
+python -m app_operator run /path/to/repository
 ```
 
 
@@ -83,14 +89,13 @@ python -m app_operator /path/to/repository
 Deploy an application with autonomous error fixing and AI-powered health monitoring.
 
 **Arguments:**
-- `<DIR>`: Path to the repository directory (required, positional argument)
+- `DIR`: Path to the repository directory (required, positional argument)
 
 **Options:**
-- `--model <MODEL>`: Specify the AI model to use (optional, defaults to `gpt-4o-mini`)
-- `--interval <SECONDS>`, `-i <SECONDS>`: Health check interval in seconds (default: 30)
+- `--config <FILE>`: Path to configuration file (default: `sds.toml` in target dir)
 
 **Example:**
 ```bash
-python -m app_operator /path/to/repository
+python -m app_operator run /path/to/repository
 ```
 

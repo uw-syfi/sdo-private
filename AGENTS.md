@@ -16,9 +16,6 @@ sds/
 │       ├── hotelReservation/ # Go-based microservices app.
 │       ├── socialNetwork/    # C++/Python/Go microservices app.
 │       └── ...
-├── deploy/          # Deployment and operational scripts.
-│   └── deathstarbench/
-│       └── hotel/   # Deployment scripts for Hotel Reservation.
 ├── tools/           # Shared tools/utilities (e.g., healthcheck).
 └── README.md        # Root project documentation.
 ```
@@ -78,24 +75,12 @@ The operator uses specialized agents to manage the application lifecycle:
 *   **Social Network:** A mixed-language social graph application.
 *   **Media Microservices:** Service for streaming/processing media.
 
-## 3. Deployment & Operations (`deploy/`)
-
-Manual and script-based deployment logic resides here, often wrapped by the `app_operator`.
-
-### Hotel Reservation (`deploy/deathstarbench/hotel/`)
-
-*   **`deploy.sh`**: Main entry point.
-    *   `./deploy.sh start --build`: Build and start.
-    *   `./deploy.sh stop`: Shutdown.
-    *   `./deploy.sh status`: Check Docker containers.
-*   **`health_check.sh`**: Comprehensive system validation.
-    *   Checks: Docker status, Port 5000, Database connectivity, Consul registration.
-
 ## Development Conventions
 
 *   **Python (Agents):**
-    *   Follows strict typing (`mypy`).
-    *   Uses `black` for formatting.
+    *   Uses type hints.
+    *   Uses `autopep8` for formatting.
+    *   Uses `ruff` for static analysis.
     *   Tests via `pytest`.
 *   **Microservices:**
     *   Standard `docker-compose` patterns.
