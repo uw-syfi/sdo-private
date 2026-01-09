@@ -120,7 +120,7 @@ Manual and script-based deployment logic resides here, often wrapped by the `app
 
 ### Checking syntax correctness
 
-* For python code, use `py_compile` to check for syntax errors.
+* For python code, use `scripts/check_errors.sh` to check for syntax errors. Add `--fix` to automatically fix errors. For other errors, see if you can fix them yourself. Run test afterwards to make sure there's no regressions.
 
 ### Testing
 

@@ -58,7 +58,7 @@ class HealthCheckTask(MonitoringTask):
                 f"Consulting {monitor.agent.__class__.__name__} for health analysis and suggestions...")
 
             # Run agent to get analysis
-            response = monitor.agent.generate(
+            monitor.agent.generate(
                 prompt, cwd=str(monitor.repo_path), timeout=120)
 
             print(f"\n{'='*70}")
@@ -67,7 +67,7 @@ class HealthCheckTask(MonitoringTask):
 
             # Note: We're not acting on suggestions yet, just displaying them
             print(
-                f"Note: Suggestions are for information only, not automatically applied")
+                "Note: Suggestions are for information only, not automatically applied")
 
         except Exception as e:
             print(f"✗ Agent analysis failed: {e}", file=sys.stderr)

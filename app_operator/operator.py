@@ -1,8 +1,7 @@
 import signal
 import sys
-import time
 from pathlib import Path
-from typing import Optional, List, Any
+from typing import Optional
 
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
@@ -69,7 +68,7 @@ class AppOperator:
 
         try:
             print(f"\n{'='*70}")
-            print(f"  App Operator Mode")
+            print("  App Operator Mode")
             print(f"  Repository: {self.repo_path}")
             print(f"  Agent: {self.agent.__class__.__name__}")
             print(f"{'='*70}\n")
@@ -120,17 +119,17 @@ class AppOperator:
             return
 
         print(f"\n{'='*70}")
-        print(f"  Shutting Down Application")
+        print("  Shutting Down Application")
         print(f"{'='*70}\n")
 
-        print(f"Running deployment script stop command...")
+        print("Running deployment script stop command...")
 
         try:
             # Use deployer to stop
             result = self.deployer.run_deploy_command("stop", timeout=120)
 
             if result['success']:
-                print(f"✓ Application stopped successfully")
+                print("✓ Application stopped successfully")
             else:
                 print(
                     f"⚠ Stop command exited with code {result['exit_code']}",
@@ -139,5 +138,5 @@ class AppOperator:
             print(f"✗ Error during shutdown: {e}", file=sys.stderr)
 
         print(f"\n{'='*70}")
-        print(f"  Shutdown Complete")
+        print("  Shutdown Complete")
         print(f"{'='*70}\n")

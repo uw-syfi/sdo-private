@@ -170,7 +170,7 @@ class GeminiCodingAgent(CodingAgent):
                 f"gemini exited with code {process.returncode}: {stderr_data}"
             )
 
-        print(f"[GeminiCodingAgent] Command completed successfully (exit code: 0)")
+        print("[GeminiCodingAgent] Command completed successfully (exit code: 0)")
         print("=" * 80)
         sys.stdout.flush()
 

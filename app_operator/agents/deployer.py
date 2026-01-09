@@ -1,8 +1,6 @@
 import os
-import shutil
 import sys
 import subprocess
-import time
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
@@ -361,7 +359,7 @@ class DeploymentAgent:
         if not (self.deploy_script.exists()
                 and self.health_check_script.exists()):
             print(f"\n{'='*70}")
-            print(f"  Generating Deployment Scripts")
+            print("  Generating Deployment Scripts")
             print(f"{'='*70}\n")
             print(
                 f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
@@ -379,7 +377,7 @@ class DeploymentAgent:
 
         # Step 2: Deploy with fixing
         print(f"\n{'='*70}")
-        print(f"  Deploying Application with Error Fixing")
+        print("  Deploying Application with Error Fixing")
         print(f"  Max attempts: {max_attempts}")
         print(f"{'='*70}\n")
 
@@ -395,16 +393,16 @@ class DeploymentAgent:
 
             # Check if deployment succeeded
             if deploy_result["success"]:
-                print(f"\n✓ Deployment script succeeded (exit code: 0)")
+                print("\n✓ Deployment script succeeded (exit code: 0)")
 
                 # Verify with health check
                 health_result = run_health_check(
                     self.repo_path, self.health_check_script)
 
                 if health_result["success"]:
-                    print(f"✓ Health check passed (exit code: 0)")
+                    print("✓ Health check passed (exit code: 0)")
                     print(f"\n{'='*70}")
-                    print(f"  Deployment Successful!")
+                    print("  Deployment Successful!")
                     print(f"{'='*70}\n")
                     return True
                 else:
@@ -520,12 +518,12 @@ class DeploymentAgent:
                 prompt, cwd=str(self.repo_path), timeout=300)
 
             print(f"{'-'*70}")
-            print(f"\nAgent response received")
+            print("\nAgent response received")
 
             # Agent should have modified the scripts directly
             # Just notify user and continue to next attempt
-            print(f"\n✓ Agent has analyzed the issue and may have modified the scripts")
-            print(f"  Proceeding to next deployment attempt...\n")
+            print("\n✓ Agent has analyzed the issue and may have modified the scripts")
+            print("  Proceeding to next deployment attempt...\n")
 
             return True
 

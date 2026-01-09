@@ -1,4 +1,3 @@
-from types import MethodType, SimpleNamespace
 import pytest
 from app_operator.agents.app_monitor import AppMonitor, HealthCheckTask
 import app_operator.agents.app_monitor as app_monitor_module

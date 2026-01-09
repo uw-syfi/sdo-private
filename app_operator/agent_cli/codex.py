@@ -179,7 +179,7 @@ class CodexCodingAgent(CodingAgent):
                 f"codex exited with code {process.returncode}: {stderr_data}"
             )
 
-        print(f"[CodexCodingAgent] Command completed successfully (exit code: 0)")
+        print("[CodexCodingAgent] Command completed successfully (exit code: 0)")
         print("=" * 80)
         sys.stdout.flush()
 

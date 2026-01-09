@@ -4,7 +4,6 @@ import pytest
 
 import app_operator.agents.deployer as deployer_module
 from app_operator.agents.deployer import DeploymentAgent
-import tools.healthcheck as healthcheck_tool
 
 
 class StubAgent:
@@ -51,7 +50,7 @@ def test_run_generates_scripts_when_missing(
     agent = DeploymentAgent(repo, stub_agent)
 
     generated = {}
-    
+
     def fake_generate_scripts(directory, agent):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
@@ -59,14 +58,17 @@ def test_run_generates_scripts_when_missing(
         (sds_dir / "deploy.sh").write_text("#!/bin/bash\n")
         (sds_dir / "health_check.sh").write_text("#!/bin/bash\n")
         return True, "done"
-    
+
     def fake_run_deploy(self, command="start", timeout=300):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
     def fake_run_health(repo, script, timeout=120):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
-        
-    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
+
+    monkeypatch.setattr(
+        deployer_module,
+        "generate_scripts",
+        fake_generate_scripts)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     _bind_method(agent, "run_deploy_command", fake_run_deploy)
 
@@ -83,7 +85,10 @@ def test_run_fails_if_script_generation_fails(
     def fake_generate_scripts(directory, agent):
         return False, "boom"
 
-    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
+    monkeypatch.setattr(
+        deployer_module,
+        "generate_scripts",
+        fake_generate_scripts)
 
     assert agent.run() is False
 
