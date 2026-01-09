@@ -12,18 +12,18 @@ class StubAgent:
 
     def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300) -> str:
         self.calls.append((prompt, cwd, timeout))
-        
+
         # Simulate agent writing files
         if cwd:
             # We need to ensure .sds directory exists as the agent would create files there
             # But the agent might expect the directory to exist or create it.
             # In generate_scripts, .sds is created before calling agent.
-            
+
             sds_dir = Path(cwd) / ".sds"
             # It should already exist because generate_scripts creates it.
-            
+
             content = self.responses[self.call_count % len(self.responses)]
-            
+
             # Determine which file to write based on prompt or call order
             # The prompt contains the filename instructions.
             filename = "deploy.sh"
@@ -31,7 +31,7 @@ class StubAgent:
                 filename = "health_check.sh"
             elif "Create the file at: .sds/deploy.sh" in prompt:
                 filename = "deploy.sh"
-            
+
             (sds_dir / filename).write_text(content, encoding="utf-8")
 
         self.call_count += 1
@@ -79,7 +79,11 @@ def test_generate_scripts_creates_files(tmp_path, stub_agent):
 
     # Verify content
     assert (repo / ".sds" / "deploy.sh").read_text(encoding="utf-8") == "#!/bin/bash\necho deploy"
-    assert (repo / ".sds" / "health_check.sh").read_text(encoding="utf-8") == "#!/bin/bash\necho health"
+    assert (
+        repo /
+        ".sds" /
+        "health_check.sh").read_text(
+        encoding="utf-8") == "#!/bin/bash\necho health"
 
 
 def test_generate_scripts_sends_correct_prompts(tmp_path, stub_agent):
