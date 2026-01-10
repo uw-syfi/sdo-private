@@ -1,5 +1,6 @@
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -136,7 +137,8 @@ class CodexCodingAgent(CodingAgent):
             text=True,
             bufsize=1,  # Line buffered
             cwd=cwd,
-            env=self.env
+            env=self.env,
+            start_new_session=True
         )
 
         # Start threads to read stdout and stderr concurrently
@@ -164,7 +166,11 @@ class CodexCodingAgent(CodingAgent):
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            process.kill()
+            # Kill the entire process group
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # Process might be already gone
             process.wait()
             raise subprocess.TimeoutExpired(cmd, timeout)
 
