@@ -338,10 +338,11 @@ def test_create_fix_prompt_includes_repo_and_scripts(agent):
     assert "error context" in prompt
     assert "2 of 5" in prompt
 
+
 def test_run_aborts_if_fix_fails(agent):
     # This test verifies that if _fix_with_agent returns False (e.g. agent timeout/error),
     # the deployment loop stops immediately and returns False.
-    
+
     # We simulate a failure on the first attempt, and then _fix_with_agent returning False.
     deploy_results = iter(
         [
@@ -351,7 +352,7 @@ def test_run_aborts_if_fix_fails(agent):
             {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom again"},
         ]
     )
-    
+
     fix_calls = {"count": 0}
     deploy_calls = {"count": 0}
 
@@ -366,11 +367,11 @@ def test_run_aborts_if_fix_fails(agent):
     _bind_method(agent, "run_deploy_command", fake_run_deploy)
     _bind_method(agent, "_fix_with_agent", fake_fix)
 
-    # Run with max_attempts=3. 
+    # Run with max_attempts=3.
     # Attempt 1: fails. fake_fix returns False.
     # Should abort immediately.
     assert agent.run(max_attempts=3) is False
-    
+
     # Verify we only tried once
     assert fix_calls["count"] == 1
     assert deploy_calls["count"] == 1
