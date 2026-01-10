@@ -116,3 +116,4 @@ The operator uses specialized agents to manage the application lifecycle:
 *   We use pytest.
 *   Check if tests pass after you've modified the codebase's behavior.
 *   When introducing new features or modifying existing behavior, write in a testable way. Update tests on application semantic changes.
+*   Don't run the sds_operator directly to test; it is a long-running process that will not terminate.

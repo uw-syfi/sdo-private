@@ -327,7 +327,7 @@ class DeploymentAgent:
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
 
-    def run(self, max_attempts: int = 5,
+    def run(self, max_attempts: int = 20,
             check_shutdown: Optional[Callable[[], bool]] = None) -> bool:
         """Attempt deployment with automatic error fixing using a coding agent.
         Ensures scripts exist before deployment.
@@ -498,7 +498,7 @@ class DeploymentAgent:
                     recent_output = f"{recent_stdout}\n{recent_stderr}"
 
                     if recent_output.strip():
-                        self._summarize_progress(recent_output)
+                        self._summarize_progress(recent_output, elapsed)
 
                     last_summary_time = time.time()
 
@@ -530,7 +530,7 @@ class DeploymentAgent:
                 "stderr": f"Failed to run deployment script: {e}"
             }
 
-    def _summarize_progress(self, output_snippet: str):
+    def _summarize_progress(self, output_snippet: str, elapsed_time: float):
         """Generate and print a summary of the progress using the agent."""
         prompt = f"""The following is the recent output of a long-running deployment command.
 Please provide a brief, one-line summary of what is currently happening.
@@ -545,7 +545,7 @@ Recent Output:
             response = self.agent.generate(prompt, silent=True, timeout=30)
             summary = self._extract_summary(response)
             if summary:
-                print(f"➜ {summary}")
+                print(f"[{elapsed_time:.1f}s] ➜ {summary}")
         except Exception:
             # If summarization fails, just ignore it to not interrupt the flow
             pass
@@ -598,7 +598,7 @@ Recent Output:
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
             self.agent.generate(
-                prompt, cwd=str(self.repo_path), timeout=300)
+                prompt, cwd=str(self.repo_path), timeout=None)
 
             print(f"{'-'*70}")
             print("\nAgent response received")
@@ -725,6 +725,7 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - Don't modify files outside .sds directory
 - Don't give up easily - try multiple approaches if needed
 - Don't assume - verify your assumptions against the error logs
+- Don't redeploy the application; propose the fix and let the user decide to redeploy.
 
 ## Approach:
 1. Read and analyze the error messages carefully
@@ -740,6 +741,10 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - Describe the fix you're applying
 - Make the necessary changes to the scripts
 - Confirm the changes are complete
+
+## Deployment tooling
+
+If the deployment script uses Docker, you can run docker commands directly to inspect the container status and logs.
 
 Remember: The goal is to get the application deployed successfully. Be methodical and thorough."""
 
