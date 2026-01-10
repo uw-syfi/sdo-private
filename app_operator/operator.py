@@ -19,16 +19,19 @@ class AppOperator:
     """
 
     def __init__(self, repo_path: str, health_check_interval: int = 30,
+                 health_check_max_count: Optional[int] = 5,
                  agent: Optional[CodingAgent] = None):
         """Initialize the application operator.
 
         Args:
             repo_path: Path to the repository to deploy.
             health_check_interval: Seconds between health checks (default: 30).
+            health_check_max_count: Maximum number of health checks (default: 5).
             agent: Optional coding agent to use. If None, creates one from config.
         """
         self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval
+        self.health_check_max_count = health_check_max_count
 
         # Initialize agent if not provided
         if agent is None:
@@ -87,6 +90,7 @@ class AppOperator:
             # Step 2: Monitor health and provide analysis
             self.monitor.run(
                 interval=self.health_check_interval,
+                max_checks=self.health_check_max_count,
                 check_shutdown=lambda: self._shutdown_requested
             )
 

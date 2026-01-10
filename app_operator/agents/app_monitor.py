@@ -60,7 +60,8 @@ class HealthCheckTask(MonitoringTask):
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             # Ensure log directory exists
             monitor.log_dir.mkdir(parents=True, exist_ok=True)
-            log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
+            log_file = monitor.log_dir / \
+                f"check_{monitor.check_count}_{timestamp}.log"
 
             print(
                 f"Consulting {monitor.agent.__class__.__name__} for health analysis...")
@@ -76,12 +77,14 @@ class HealthCheckTask(MonitoringTask):
                 f.write(response)
 
             # Extract executive summary
-            match = re.search(r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
+            match = re.search(
+                r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
             if match:
                 summary = match.group(1).strip()
                 print(f"\nSummary: {summary}")
             else:
-                print("\nSummary not found in expected XML format. See log for full analysis.")
+                print(
+                    "\nSummary not found in expected XML format. See log for full analysis.")
 
             print(f"\nFull analysis saved to: {log_file}")
 
@@ -221,15 +224,17 @@ class AppMonitor:
         self.log_dir = self.repo_path / ".sds" / "logs" / "monitor"
 
     def run(self, interval: int = 30,
+            max_checks: Optional[int] = None,
             check_shutdown: Optional[Callable[[], bool]] = None):
         """Monitor application health and provide agent analysis every interval.
 
         Args:
             interval: Seconds between checks.
+            max_checks: Maximum number of monitoring cycles. If None, runs indefinitely.
             check_shutdown: Callable returning True if shutdown requested.
         """
         print(
-            f"\nStarting application monitoring (interval: {interval}s)...")
+            f"\nStarting application monitoring (interval: {interval}s, max_checks: {max_checks if max_checks else 'unlimited'})...")
 
         # Clear log directory on startup
         if self.log_dir.exists():
@@ -239,6 +244,11 @@ class AppMonitor:
         self.check_count = 0
 
         while not (check_shutdown and check_shutdown()):
+            if max_checks is not None and self.check_count >= max_checks:
+                print(
+                    f"\nReached maximum number of checks ({max_checks}). Stopping monitor.")
+                break
+
             # Wait for interval
             for _ in range(interval):
                 if check_shutdown and check_shutdown():

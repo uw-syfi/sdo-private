@@ -64,6 +64,31 @@ def test_run_executes_health_check_task(monitor, stub_agent, monkeypatch):
     assert "ok" in stub_agent.calls[0][0]  # prompt contains context
 
 
+def test_run_respects_max_checks(monitor, monkeypatch):
+    # Mock run_health_check
+    mock_result = {
+        "exit_code": 0,
+        "success": True,
+        "stdout": "ok",
+        "stderr": ""}
+
+    calls = {"count": 0}
+
+    def mock_run_health_check(repo, script, timeout=120):
+        calls["count"] += 1
+        return mock_result
+
+    monkeypatch.setattr(
+        app_monitor_module,
+        "run_health_check",
+        mock_run_health_check)
+
+    # Run with max_checks=2
+    monitor.run(interval=0, max_checks=2)
+
+    assert calls["count"] == 2
+
+
 def test_analyze_health_calls_agent(monitor, stub_agent):
     health_result = {
         "exit_code": 0,
@@ -142,7 +167,8 @@ def test_analyze_handles_agent_exception(monitor, stub_agent, capsys, tmp_path):
     monitor.log_dir = tmp_path / "logs"
 
     task = HealthCheckTask()
-    health_result = {"exit_code": 0, "success": True, "stdout": "", "stderr": ""}
+    health_result = {"exit_code": 0,
+                     "success": True, "stdout": "", "stderr": ""}
 
     # Should not crash
     task.analyze(monitor, health_result)
