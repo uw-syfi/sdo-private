@@ -258,7 +258,10 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
 {human_prompt}"""
 
     try:
+        start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        duration = time.time() - start_time
+        print(f"Agent generation took {duration / 60:.2f} minutes")
 
         deploy_script_path = Path(target_dir) / ".sds" / "deploy.sh"
         if deploy_script_path.exists():
@@ -303,7 +306,10 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 {human_prompt}"""
 
     try:
+        start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        duration = time.time() - start_time
+        print(f"Agent generation took {duration / 60:.2f} minutes")
 
         health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
         if health_check_script_path.exists():
@@ -548,7 +554,10 @@ Recent Output:
 """
         try:
             # Use silent=True to avoid printing the agent's internal thought process
+            start_time = time.time()
             response = self.agent.generate(prompt, silent=True, timeout=30)
+            duration = time.time() - start_time
+            print(f"Agent generation (summary) took {duration / 60:.2f} minutes")
             summary = self._extract_summary(response)
             if summary:
                 print(f"[{elapsed_time:.1f}s] ➜ {summary}")
@@ -603,8 +612,11 @@ Recent Output:
 
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
+            start_time = time.time()
             self.agent.generate(
                 prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS)
+            duration = time.time() - start_time
+            print(f"Agent generation (fix) took {duration / 60:.2f} minutes")
 
             print(f"{'-'*70}")
             print("\nAgent response received")
