@@ -1,3 +1,6 @@
 [submodule "apps/deathstarbench"]
 	path = apps/deathstarbench
 	url = git@gitlab.cs.washington.edu:shli/deathstarbench.git
+[submodule "apps/train-ticket"]
+	path = apps/train-ticket
+	url = git@gitlab.cs.washington.edu:shli/train-ticket.git
