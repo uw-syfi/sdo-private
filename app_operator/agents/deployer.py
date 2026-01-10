@@ -12,6 +12,12 @@ from app_operator.agent_cli.factory import create_agent_from_config
 from tools.healthcheck import run_health_check
 
 
+# Constants
+AGENT_FIX_TIMEOUT_SECS = 1800
+DEFAULT_DEPLOY_TIMEOUT_SECS = 300
+DEFAULT_AGENT_TIMEOUT_SECS = 300
+
+
 def generate_scripts(
         target_dir: str, agent: Optional[CodingAgent] = None) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
@@ -252,7 +258,7 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
 {human_prompt}"""
 
     try:
-        agent.generate(full_prompt, cwd=target_dir)
+        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
 
         deploy_script_path = Path(target_dir) / ".sds" / "deploy.sh"
         if deploy_script_path.exists():
@@ -261,7 +267,7 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
             return False, "Agent failed to create .sds/deploy.sh"
 
     except subprocess.TimeoutExpired:
-        return False, "agent command timed out after 5 minutes"
+        return False, f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes"
     except Exception as e:
         return False, str(e)
 
@@ -297,7 +303,7 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 {human_prompt}"""
 
     try:
-        agent.generate(full_prompt, cwd=target_dir)
+        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
 
         health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
         if health_check_script_path.exists():
@@ -306,7 +312,7 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
             return False, "Agent failed to create .sds/health_check.sh"
 
     except subprocess.TimeoutExpired:
-        return False, "agent command timed out after 5 minutes"
+        return False, f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes"
     except Exception as e:
         return False, str(e)
 
@@ -396,7 +402,7 @@ class DeploymentAgent:
                     # Health check failed - ask agent to analyze and fix
                     if not self._fix_with_agent(
                             deploy_result, health_result, attempt, max_attempts):
-                        continue
+                        return False
             else:
                 print(
                     f"✗ Deployment script failed (exit code: {deploy_result['exit_code']})")
@@ -404,12 +410,12 @@ class DeploymentAgent:
                 # Deployment failed - ask agent to analyze and fix
                 if not self._fix_with_agent(
                         deploy_result, None, attempt, max_attempts):
-                    continue
+                    return False
 
         return False
 
     def run_deploy_command(self, command: str = "start",
-                           timeout: int = 300) -> Dict[str, Any]:
+                           timeout: int = DEFAULT_DEPLOY_TIMEOUT_SECS) -> Dict[str, Any]:
         """Run the deployment script with a specific command.
 
         Args:
@@ -598,7 +604,7 @@ Recent Output:
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
             self.agent.generate(
-                prompt, cwd=str(self.repo_path), timeout=None)
+                prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS)
 
             print(f"{'-'*70}")
             print("\nAgent response received")
