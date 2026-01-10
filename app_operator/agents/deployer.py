@@ -14,7 +14,7 @@ from tools.healthcheck import run_health_check
 
 # Constants
 AGENT_FIX_TIMEOUT_SECS = 1800
-DEFAULT_DEPLOY_TIMEOUT_SECS = 300
+DEFAULT_DEPLOY_TIMEOUT_SECS = 900
 DEFAULT_AGENT_TIMEOUT_SECS = 300
 
 
@@ -554,10 +554,7 @@ Recent Output:
 """
         try:
             # Use silent=True to avoid printing the agent's internal thought process
-            start_time = time.time()
             response = self.agent.generate(prompt, silent=True, timeout=30)
-            duration = time.time() - start_time
-            print(f"Agent generation (summary) took {duration / 60:.2f} minutes")
             summary = self._extract_summary(response)
             if summary:
                 print(f"[{elapsed_time:.1f}s] ➜ {summary}")
