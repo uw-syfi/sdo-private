@@ -60,7 +60,7 @@ OPENAI_API_KEY=your_api_key_here
 
 ```toml
 [agent]
-provider = "codex"  # or "gemini"
+provider = "codex"  # or "gemini", "claude"
 model = "gpt-4o-mini" # optional
 
 [operator]
@@ -71,7 +71,7 @@ interval = 30 # Health check interval in seconds
 
 #### Deploy and Monitor an App with AI-Assisted Self-Healing
 
- It uses an AI agent (Codex or Gemini) to deploy and monitor applications.
+ It uses an AI agent (Codex, Gemini, or Claude) to deploy and monitor applications.
 
 **What it does:**
 - **Auto-Scripting**: Automatically generates deployment and health check scripts if they are missing. Scripts are created in `<app-dir>/.sds`.

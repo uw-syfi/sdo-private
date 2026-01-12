@@ -22,7 +22,7 @@ sds/
 
 ## 1. Application Operator (`app_operator/`)
 
-The **Application Operator** is a Python tool that autonomously deploys, monitors, and manages applications. It features a "Codex" mode to self-correct deployment scripts and uses LLMs to summarize health checks.
+The **Application Operator** is a Python tool that autonomously deploys, monitors, and manages applications. It uses AI agents (Codex, Gemini, or Claude) to self-correct deployment scripts and summarize health checks.
 
 ### Setup & Usage
 
@@ -35,10 +35,10 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
 
 ### Key Commands
 
-*   **Default Mode (Codex-assisted Autonomous Deployment):**
+*   **Default Mode (AI-assisted Autonomous Deployment):**
     This mode attempts to deploy the application in the specified repository, using an AI agent to automatically fix deployment errors.
     ```bash
-    # Uses Codex or Gemini as configured in sds.toml
+    # Uses Codex, Gemini, or Claude as configured in sds.toml
     ./sds_operator /path/to/repo
     ```
 
@@ -48,7 +48,7 @@ You can specify which AI provider to use for script generation and fixing by add
 
 ```toml
 [agent]
-provider = "gemini"  # "gemini" or "codex"
+provider = "gemini"  # "gemini", "codex", or "claude"
 model = "gemini-1.5-pro" # optional
 ```
 

@@ -4,6 +4,7 @@ from app_operator.config import load_config, Config
 from .base import CodingAgent
 from .codex import CodexCodingAgent
 from .gemini import GeminiCodingAgent
+from .claude import ClaudeCodeCodingAgent
 
 
 def create_agent_from_config(
@@ -36,7 +37,10 @@ def create_agent_from_config(
     if model:
         print(f"Using coding agent model: {model}")
 
-    if provider.lower() == "gemini":
+    provider_lower = provider.lower()
+    if provider_lower == "gemini":
         return GeminiCodingAgent(model=model)
+    elif provider_lower in ("claude", "claude-code"):
+        return ClaudeCodeCodingAgent(model=model)
     else:
         return CodexCodingAgent(model=model)
