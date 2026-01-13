@@ -680,24 +680,24 @@ Recent Output:
         context_parts.append(
             f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}")
 
-        # if deploy_result['stdout']:
-        #     context_parts.append("\n### STDOUT:")
-        #     # Truncate if too long
-        #     stdout = deploy_result['stdout']
-        #     if len(stdout) > 3000:
-        #         stdout = stdout[-3000:]
-        #         context_parts.append(
-        #             "... (truncated, showing last 3000 chars)")
-        #     context_parts.append(stdout)
+        if deploy_result['stdout']:
+            context_parts.append("\n### STDOUT:")
+            # Truncate if too long
+            stdout = deploy_result['stdout']
+            if len(stdout) > 3000:
+                stdout = stdout[-3000:]
+                context_parts.append(
+                    "... (truncated, showing last 3000 chars)")
+            context_parts.append(stdout)
 
-        # if deploy_result['stderr']:
-        #     context_parts.append("\n### STDERR:")
-        #     stderr = deploy_result['stderr']
-        #     if len(stderr) > 3000:
-        #         stderr = stderr[-3000:]
-        #         context_parts.append(
-        #             "... (truncated, showing last 3000 chars)")
-        #     context_parts.append(stderr)
+        if deploy_result['stderr']:
+            context_parts.append("\n### STDERR:")
+            stderr = deploy_result['stderr']
+            if len(stderr) > 3000:
+                stderr = stderr[-3000:]
+                context_parts.append(
+                    "... (truncated, showing last 3000 chars)")
+            context_parts.append(stderr)
 
         # Health check result (if available)
         if health_result:
@@ -706,23 +706,23 @@ Recent Output:
             context_parts.append(
                 f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}")
 
-            # if health_result['stdout']:
-            #     context_parts.append("\n### STDOUT:")
-            #     stdout = health_result['stdout']
-            #     if len(stdout) > 3000:
-            #         stdout = stdout[-3000:]
-            #         context_parts.append(
-            #             "... (truncated, showing last 3000 chars)")
-            #     context_parts.append(stdout)
+            if health_result['stdout']:
+                context_parts.append("\n### STDOUT:")
+                stdout = health_result['stdout']
+                if len(stdout) > 3000:
+                    stdout = stdout[-3000:]
+                    context_parts.append(
+                        "... (truncated, showing last 3000 chars)")
+                context_parts.append(stdout)
 
-            # if health_result['stderr']:
-            #     context_parts.append("\n### STDERR:")
-            #     stderr = health_result['stderr']
-            #     if len(stderr) > 3000:
-            #         stderr = stderr[-3000:]
-            #         context_parts.append(
-            #             "... (truncated, showing last 3000 chars)")
-            #     context_parts.append(stderr)
+            if health_result['stderr']:
+                context_parts.append("\n### STDERR:")
+                stderr = health_result['stderr']
+                if len(stderr) > 3000:
+                    stderr = stderr[-3000:]
+                    context_parts.append(
+                        "... (truncated, showing last 3000 chars)")
+                context_parts.append(stderr)
 
         return "\n".join(context_parts)
 
