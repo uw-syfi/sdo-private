@@ -65,7 +65,8 @@ def test_run_generates_scripts_when_missing(
         (sds_dir / "health_check.sh").write_text("#!/bin/bash\n")
         return True, "done"
 
-    def fake_run_deploy(self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS):
+    def fake_run_deploy(self, command="start",
+                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
     def fake_run_health(repo, script, timeout=120):
@@ -115,7 +116,8 @@ def test_run_succeeds_without_fix(agent, monkeypatch):
         ]
     )
 
-    def fake_run_deploy(self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS):
+    def fake_run_deploy(self, command="start",
+                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
         return next(deploy_results)
 
     def fake_run_health(repo, script, timeout=120):
@@ -145,13 +147,14 @@ def test_run_retries_after_failure(agent, monkeypatch):
     )
     fix_calls: list[tuple[int, int]] = []
 
-    def fake_run_deploy(self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS):
+    def fake_run_deploy(self, command="start",
+                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
         return next(deploy_results)
 
     def fake_run_health(repo, script, timeout=120):
         return next(health_results)
 
-    def fake_fix(self, deploy_result, health_result, attempt, max_attempts):
+    def fake_fix(self, deploy_result, health_result, attempt, max_attempts, log_file_path=None):
         fix_calls.append((attempt, max_attempts, deploy_result["exit_code"]))
         return True
 
@@ -171,7 +174,8 @@ def test_run_respects_max_attempts(agent):
     )
     fix_calls = {"count": 0}
 
-    def fake_run_deploy(self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS):
+    def fake_run_deploy(self, command="start",
+                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
         return next(deploy_results)
 
     def fake_fix(self, *args, **kwargs):
@@ -273,7 +277,7 @@ def test_fix_with_agent_calls_agent_and_returns_success(
         agent, stub_agent, monkeypatch):
     agent.agent = stub_agent
 
-    def fake_prepare(self, deploy_result, health_result):
+    def fake_prepare(self, deploy_result, health_result, log_file_path=None):
         return "context"
 
     def fake_prompt(self, context, attempt, max_attempts):
@@ -366,7 +370,8 @@ def test_run_aborts_if_fix_fails(agent):
     fix_calls = {"count": 0}
     deploy_calls = {"count": 0}
 
-    def fake_run_deploy(self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS):
+    def fake_run_deploy(self, command="start",
+                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
         deploy_calls["count"] += 1
         return next(deploy_results)
 

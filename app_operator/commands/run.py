@@ -45,6 +45,7 @@ def run_command(args: argparse.Namespace) -> int:
             repo_path=args.directory,
             health_check_interval=interval,
             health_check_max_count=config.operator.max_checks,
+            max_deployment_attempts=config.operator.max_attempts,
             agent=agent
         )
 

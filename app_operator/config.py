@@ -18,6 +18,7 @@ class AgentConfig:
 class OperatorConfig:
     interval: int = 30
     max_checks: int = 5
+    max_attempts: int = 5
 
 
 @dataclass

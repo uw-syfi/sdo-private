@@ -4,3 +4,4 @@ provider = "gemini"
 
 [operator]
 interval = 30
+max_attempts = 5
