@@ -8,13 +8,9 @@ in success, failure, and edge case scenarios.
 This test suite is parameterized to run identical tests across all agent
 implementations with a stubbed subprocess to avoid invoking actual LLMs.
 """
-import os
-import signal
 import subprocess
 import threading
-import time
-from unittest.mock import MagicMock, patch, mock_open, call
-from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -172,7 +168,7 @@ def test_generate_success_cleans_up_pipes(agent_type, mock_which):
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", return_value=mock_process):
                 agent = agent_class()
-                result = agent.generate("test prompt", silent=True)
+                agent.generate("test prompt", silent=True)
 
     # Verify pipes were closed
     assert mock_process.stdout.close.called or mock_process.stdout.readline.called
@@ -204,7 +200,7 @@ def test_generate_success_waits_for_threads(agent_type, mock_which):
                     mock_thread_class.return_value = mock_thread
 
                     agent = agent_class()
-                    result = agent.generate("test", silent=True)
+                    agent.generate("test", silent=True)
 
     # Verify threads were joined with timeout
     assert len(threads_joined) >= 2  # stdout and stderr threads
@@ -223,7 +219,7 @@ def test_generate_success_closes_stdin(agent_type, mock_which):
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", return_value=mock_process):
                 agent = agent_class()
-                result = agent.generate("test prompt", silent=True)
+                agent.generate("test prompt", silent=True)
 
     assert mock_process.stdin.write.called
     assert mock_process.stdin.close.called
@@ -451,7 +447,7 @@ def test_generate_thread_timeout_doesnt_leak_threads(agent_type, mock_which):
             with patch("subprocess.Popen", return_value=mock_process):
                 with patch("threading.Thread", side_effect=TrackingThread):
                     agent = agent_class()
-                    result = agent.generate("test", silent=True)
+                    agent.generate("test", silent=True)
 
     # Verify join() was attempted on threads
     assert thread_join_count["count"] >= 2
@@ -481,7 +477,7 @@ def test_generate_with_cwd_parameter(agent_type, mock_which):
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = agent_class()
-                result = agent.generate("test", cwd=test_cwd, silent=True)
+                agent.generate("test", cwd=test_cwd, silent=True)
 
     assert test_cwd in captured_cwd
 
@@ -505,7 +501,7 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
             with patch("subprocess.Popen", side_effect=track_popen):
                 with patch("app_operator.agent_cli.cli_agent._get_interactive_env", return_value=mock_env):
                     agent = agent_class()
-                    result = agent.generate("test", silent=True)
+                    agent.generate("test", silent=True)
 
     # Verify environment was passed to Popen
     assert len(captured_env) > 0
@@ -533,7 +529,6 @@ def test_generate_silent_mode_suppresses_output(agent_type, mock_which, capsys):
 
     # In silent mode, the output shouldn't be printed to console
     # (though the function still returns the result)
-    captured = capsys.readouterr()
     # Note: This checks the actual stdout, not mocks
     assert result is not None
 
