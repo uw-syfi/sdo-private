@@ -1,5 +1,6 @@
 import argparse
 import shutil
+import subprocess
 import sys
 
 from dotenv import load_dotenv
@@ -24,6 +25,18 @@ def check_dependencies():
         print("Please install them to continue.")
         sys.exit(1)
 
+    # Check if docker daemon is running
+    try:
+        subprocess.check_call(
+            ["docker", "container", "ls"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        print("Error: Docker daemon is not running or not accessible.")
+        print("Please start Docker to continue.")
+        sys.exit(1)
+
 
 def main() -> int:
     """Main entry point for the operator CLI.
@@ -44,20 +57,21 @@ Examples:
 
   # Use a custom health check interval
   ./sds_operator /path/to/repository --interval 60
-        """)
+        """,
+    )
 
-    subparsers = parser.add_subparsers(
-        dest="command", help="Available commands")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     subparsers.required = True
 
     # 'run' command
     run_parser = subparsers.add_parser(
-        "run", help="Run Codex-assisted deployment on a repository")
+        "run", help="Run Codex-assisted deployment on a repository"
+    )
     run.add_arguments(run_parser)
 
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
-        sys.argv.insert(1, 'run')
+        sys.argv.insert(1, "run")
 
     args = parser.parse_args()
     if args.command == "run":
