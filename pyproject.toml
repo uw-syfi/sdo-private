@@ -26,3 +26,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app_operator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["apps", ".venv", "venv", "build", "dist"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

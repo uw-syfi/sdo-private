@@ -4,4 +4,5 @@ provider = "gemini"
 
 [operator]
 interval = 30
-max_attempts = 5
+monitoring_max_iters = 5 # Maximum number of health monitoring iterations (default: 5)
+deployment_max_iters = 20 # Maximum deployment attempts (default: 20)

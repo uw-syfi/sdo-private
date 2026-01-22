@@ -44,8 +44,8 @@ def run_command(args: argparse.Namespace) -> int:
         operator = AppOperator(
             repo_path=args.directory,
             health_check_interval=interval,
-            health_check_max_count=config.operator.max_checks,
-            max_deployment_attempts=config.operator.max_attempts,
+            health_check_max_count=config.operator.monitoring_max_iters,
+            max_deployment_attempts=config.operator.deployment_max_iters,
             agent=agent
         )
 
