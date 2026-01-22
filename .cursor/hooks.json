@@ -3,12 +3,12 @@
   "hooks": {
     "afterFileEdit": [
       {
-        "command": "python3 .cursor/hooks/post_edit.py"
+        "command": "bash .cursor/hooks/post_edit.sh"
       }
     ],
     "afterTabFileEdit": [
       {
-        "command": "python3 .cursor/hooks/post_edit.py"
+        "command": "bash .cursor/hooks/post_edit.sh"
       }
     ]
   }
