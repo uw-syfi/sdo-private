@@ -1,4 +1,5 @@
 import argparse
+import shutil
 import sys
 
 from dotenv import load_dotenv
@@ -8,6 +9,21 @@ from app_operator.commands import run
 # Load environment variables from .env file
 load_dotenv()
 
+REQUIRED_DEPENDENCIES = ["docker", "kubectl"]
+
+
+def check_dependencies():
+    """Check if required system dependencies are installed."""
+    missing = []
+    for tool in REQUIRED_DEPENDENCIES:
+        if not shutil.which(tool):
+            missing.append(tool)
+
+    if missing:
+        print(f"Error: Missing required system dependencies: {', '.join(missing)}")
+        print("Please install them to continue.")
+        sys.exit(1)
+
 
 def main() -> int:
     """Main entry point for the operator CLI.
@@ -15,6 +31,7 @@ def main() -> int:
     Returns:
         int: Exit code (0 for success, non-zero for failure).
     """
+    check_dependencies()
 
     parser = argparse.ArgumentParser(
         prog="operator",
