@@ -65,8 +65,8 @@ model = "gpt-4o-mini" # optional
 
 [operator]
 interval = 30 # Health check interval in seconds (default: 30)
-max_checks = 5 # Maximum number of health checks to run (default: 5)
-max_attempts = 5 # Maximum deployment attempts (default: 5)
+monitoring_max_iters = 5 # Maximum number of health monitoring iterations (default: 5)
+deployment_max_iters = 5 # Maximum deployment attempts (default: 5)
 ```
 
 ### Commands

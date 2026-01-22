@@ -396,9 +396,14 @@ class DeploymentAgent:
             if deploy_result["success"]:
                 print("\n✓ Deployment script succeeded (exit code: 0)")
 
+                # Setup log file for health check
+                health_check_log_path = self.sds_dir / "logs" / \
+                    f"health_check_attempt_{attempt}.log"
+                health_check_log_path.parent.mkdir(parents=True, exist_ok=True)
+
                 # Verify with health check
                 health_result = run_health_check(
-                    self.repo_path, self.health_check_script)
+                    self.repo_path, self.health_check_script, log_file_path=health_check_log_path)
 
                 if health_result["success"]:
                     print("✓ Health check passed (exit code: 0)")
@@ -412,7 +417,7 @@ class DeploymentAgent:
 
                     # Health check failed - ask agent to analyze and fix
                     if not self._fix_with_agent(
-                            deploy_result, health_result, attempt, max_attempts, log_file_path):
+                            deploy_result, health_result, attempt, max_attempts, log_file_path, health_check_log_path):
                         return False
             else:
                 print(
@@ -600,7 +605,8 @@ Recent Output:
             health_result: Optional[Dict[str, Any]],
             attempt: int,
             max_attempts: int,
-            log_file_path: Optional[Path] = None) -> bool:
+            log_file_path: Optional[Path] = None,
+            health_check_log_path: Optional[Path] = None) -> bool:
         """Use a coding agent to analyze errors and fix the scripts.
 
         Args:
@@ -609,6 +615,7 @@ Recent Output:
             attempt: Current attempt number.
             max_attempts: Maximum number of attempts.
             log_file_path: Path to the deployment log file.
+            health_check_log_path: Path to the health check log file.
 
         Returns:
             bool: True if agent suggested a fix and applied it.
@@ -624,7 +631,7 @@ Recent Output:
 
         # Prepare error context
         error_context = self._prepare_error_context(
-            deploy_result, health_result, log_file_path)
+            deploy_result, health_result, log_file_path, health_check_log_path)
 
         # Create fix prompt
         prompt = self._create_fix_prompt(error_context, attempt, max_attempts)
@@ -658,13 +665,14 @@ Recent Output:
 
     def _prepare_error_context(
             self, deploy_result: Dict[str, Any], health_result: Optional[Dict[str, Any]],
-            log_file_path: Optional[Path] = None) -> str:
+            log_file_path: Optional[Path] = None, health_check_log_path: Optional[Path] = None) -> str:
         """Prepare error context for the coding agent.
 
         Args:
             deploy_result: Deployment script result.
             health_result: Health check result (None if deployment failed).
-            log_file_path: Path to the log file.
+            log_file_path: Path to the deployment log file.
+            health_check_log_path: Path to the health check log file.
 
         Returns:
             str: Formatted error context.
@@ -674,55 +682,58 @@ Recent Output:
         if log_file_path:
             context_parts.append(f"Full deployment logs available at: {log_file_path}")
 
+        if health_check_log_path:
+            context_parts.append(f"Health check outputs available at: {health_check_log_path}")
+
         # Deployment result
         context_parts.append("## Deployment Script Result")
         context_parts.append(f"Exit Code: {deploy_result['exit_code']}")
         context_parts.append(
             f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}")
 
-        if deploy_result['stdout']:
-            context_parts.append("\n### STDOUT:")
-            # Truncate if too long
-            stdout = deploy_result['stdout']
-            if len(stdout) > 3000:
-                stdout = stdout[-3000:]
-                context_parts.append(
-                    "... (truncated, showing last 3000 chars)")
-            context_parts.append(stdout)
+        # if deploy_result['stdout']:
+        #     context_parts.append("\n### STDOUT:")
+        #     # Truncate if too long
+        #     stdout = deploy_result['stdout']
+        #     if len(stdout) > 3000:
+        #         stdout = stdout[-3000:]
+        #         context_parts.append(
+        #             "... (truncated, showing last 3000 chars)")
+        #     context_parts.append(stdout)
 
-        if deploy_result['stderr']:
-            context_parts.append("\n### STDERR:")
-            stderr = deploy_result['stderr']
-            if len(stderr) > 3000:
-                stderr = stderr[-3000:]
-                context_parts.append(
-                    "... (truncated, showing last 3000 chars)")
-            context_parts.append(stderr)
+        # if deploy_result['stderr']:
+        #     context_parts.append("\n### STDERR:")
+        #     stderr = deploy_result['stderr']
+        #     if len(stderr) > 3000:
+        #         stderr = stderr[-3000:]
+        #         context_parts.append(
+        #             "... (truncated, showing last 3000 chars)")
+        #     context_parts.append(stderr)
 
-        # Health check result (if available)
-        if health_result:
-            context_parts.append("\n## Health Check Result")
-            context_parts.append(f"Exit Code: {health_result['exit_code']}")
-            context_parts.append(
-                f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}")
+        # # Health check result (if available)
+        # if health_result:
+        #     context_parts.append("\n## Health Check Result")
+        #     context_parts.append(f"Exit Code: {health_result['exit_code']}")
+        #     context_parts.append(
+        #         f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}")
 
-            if health_result['stdout']:
-                context_parts.append("\n### STDOUT:")
-                stdout = health_result['stdout']
-                if len(stdout) > 3000:
-                    stdout = stdout[-3000:]
-                    context_parts.append(
-                        "... (truncated, showing last 3000 chars)")
-                context_parts.append(stdout)
+        #     if health_result['stdout']:
+        #         context_parts.append("\n### STDOUT:")
+        #         stdout = health_result['stdout']
+        #         if len(stdout) > 3000:
+        #             stdout = stdout[-3000:]
+        #             context_parts.append(
+        #                 "... (truncated, showing last 3000 chars)")
+        #         context_parts.append(stdout)
 
-            if health_result['stderr']:
-                context_parts.append("\n### STDERR:")
-                stderr = health_result['stderr']
-                if len(stderr) > 3000:
-                    stderr = stderr[-3000:]
-                    context_parts.append(
-                        "... (truncated, showing last 3000 chars)")
-                context_parts.append(stderr)
+        #     if health_result['stderr']:
+        #         context_parts.append("\n### STDERR:")
+        #         stderr = health_result['stderr']
+        #         if len(stderr) > 3000:
+        #             stderr = stderr[-3000:]
+        #             context_parts.append(
+        #                 "... (truncated, showing last 3000 chars)")
+        #         context_parts.append(stderr)
 
         return "\n".join(context_parts)
 
