@@ -5,9 +5,13 @@ from app_operator.__main__ import check_dependencies, REQUIRED_DEPENDENCIES
 
 def test_check_dependencies_success():
     """Test that check_dependencies passes when all dependencies are present."""
-    with patch("shutil.which") as mock_which:
+    with patch("shutil.which") as mock_which, patch(
+        "subprocess.check_call"
+    ) as mock_check_call:
         # Mock shutil.which to always return a path
         mock_which.return_value = "/usr/bin/some-tool"
+        # Mock subprocess.check_call to succeed (docker daemon check)
+        mock_check_call.return_value = None
 
         # Should not raise SystemExit
         try:

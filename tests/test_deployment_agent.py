@@ -277,7 +277,8 @@ def test_fix_with_agent_calls_agent_and_returns_success(
         agent, stub_agent, monkeypatch):
     agent.agent = stub_agent
 
-    def fake_prepare(self, deploy_result, health_result, log_file_path=None, health_check_log_path=None):
+    def fake_prepare(self, deploy_result, health_result,
+                     log_file_path=None, health_check_log_path=None):
         return "context"
 
     def fake_prompt(self, context, attempt, max_attempts):
@@ -319,7 +320,7 @@ def test_fix_with_agent_handles_agent_errors(
 
 def test_prepare_error_context_truncates_long_outputs(agent):
     """Test that _prepare_error_context returns basic error context.
-    
+
     Note: The current implementation no longer includes stdout/stderr in the context
     (they are commented out). This test verifies the function works with long outputs
     without crashing, even though the outputs are not included in the returned context.
