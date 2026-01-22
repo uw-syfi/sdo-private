@@ -19,7 +19,8 @@ DEFAULT_AGENT_TIMEOUT_SECS = 300
 
 
 def generate_scripts(
-        target_dir: str, agent: Optional[CodingAgent] = None) -> tuple[bool, str]:
+    target_dir: str, agent: Optional[CodingAgent] = None
+) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
     This function runs the coding agent in the target directory with read/write access,
@@ -77,7 +78,8 @@ def generate_scripts(
 
         # Generate health_check.sh using coding agent
         health_check_success, health_check_msg = _generate_health_check_script(
-            agent, system_prompt, repo_context, abs_target_dir)
+            agent, system_prompt, repo_context, abs_target_dir
+        )
 
         if not health_check_success:
             return False, f"Failed to generate health_check.sh: {health_check_msg}"
@@ -180,26 +182,23 @@ def _analyze_repository(repo_path: Path) -> str:
 
     # Check for common deployment files
     if (repo_path / "docker-compose.yml").exists():
-        context_parts.append(
-            "- Found docker-compose.yml (Docker Compose deployment)")
+        context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
     if (repo_path / "docker-compose.yaml").exists():
-        context_parts.append(
-            "- Found docker-compose.yaml (Docker Compose deployment)")
+        context_parts.append("- Found docker-compose.yaml (Docker Compose deployment)")
     if (repo_path / "Dockerfile").exists():
         context_parts.append("- Found Dockerfile (Docker-based application)")
     if (repo_path / "k8s").exists() or (repo_path / "kubernetes").exists():
         context_parts.append("- Found Kubernetes manifests directory")
     if (repo_path / "Makefile").exists():
-        context_parts.append(
-            "- Found Makefile (may contain build/deploy targets)")
+        context_parts.append("- Found Makefile (may contain build/deploy targets)")
 
     # Check for common application files
     if (repo_path / "package.json").exists():
         context_parts.append("- Found package.json (Node.js application)")
-    if (repo_path / "requirements.txt").exists() or (repo_path /
-                                                     "pyproject.toml").exists():
-        context_parts.append(
-            "- Found Python dependencies (Python application)")
+    if (repo_path / "requirements.txt").exists() or (
+        repo_path / "pyproject.toml"
+    ).exists():
+        context_parts.append("- Found Python dependencies (Python application)")
     if (repo_path / "go.mod").exists():
         context_parts.append("- Found go.mod (Go application)")
     if (repo_path / "Cargo.toml").exists():
@@ -211,29 +210,28 @@ def _analyze_repository(repo_path: Path) -> str:
     readme_files = list(repo_path.glob("README*"))
     if readme_files:
         context_parts.append(
-            f"- Found README file(s): {', '.join(f.name for f in readme_files)}")
+            f"- Found README file(s): {', '.join(f.name for f in readme_files)}"
+        )
 
     # List top-level directories
-    dirs = [d for d in repo_path.iterdir() if d.is_dir()
-            and not d.name.startswith('.')]
+    dirs = [d for d in repo_path.iterdir() if d.is_dir() and not d.name.startswith(".")]
     if dirs:
-        dir_names = ', '.join(
-            sorted([d.name for d in dirs[:10]]))  # Limit to 10
+        dir_names = ", ".join(sorted([d.name for d in dirs[:10]]))  # Limit to 10
         context_parts.append(f"- Top-level directories: {dir_names}")
 
     # Get repository name
     repo_name = repo_path.name
     context_parts.insert(0, f"Repository: {repo_name}")
 
-    return "\n".join(
-        context_parts) if context_parts else "Repository structure analysis: No obvious deployment files found"
+    return (
+        "\n".join(context_parts)
+        if context_parts
+        else "Repository structure analysis: No obvious deployment files found"
+    )
 
 
 def _generate_deploy_script(
-    agent: CodingAgent,
-    system_prompt: str,
-    repo_context: str,
-    target_dir: str
+    agent: CodingAgent, system_prompt: str, repo_context: str, target_dir: str
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
     human_prompt = f"""Generate a comprehensive deploy.sh bash script for the following repository:
@@ -270,16 +268,16 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
             return False, "Agent failed to create .sds/deploy.sh"
 
     except subprocess.TimeoutExpired:
-        return False, f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes"
+        return (
+            False,
+            f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes",
+        )
     except Exception as e:
         return False, str(e)
 
 
 def _generate_health_check_script(
-    agent: CodingAgent,
-    system_prompt: str,
-    repo_context: str,
-    target_dir: str
+    agent: CodingAgent, system_prompt: str, repo_context: str, target_dir: str
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
     human_prompt = f"""Generate a comprehensive health_check.sh bash script for the following repository:
@@ -318,7 +316,10 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
             return False, "Agent failed to create .sds/health_check.sh"
 
     except subprocess.TimeoutExpired:
-        return False, f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes"
+        return (
+            False,
+            f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes",
+        )
     except Exception as e:
         return False, str(e)
 
@@ -339,8 +340,9 @@ class DeploymentAgent:
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
 
-    def run(self, max_attempts: int = 5,
-            check_shutdown: Optional[Callable[[], bool]] = None) -> bool:
+    def run(
+        self, max_attempts: int = 5, check_shutdown: Optional[Callable[[], bool]] = None
+    ) -> bool:
         """Attempt deployment with automatic error fixing using a coding agent.
         Ensures scripts exist before deployment.
 
@@ -352,16 +354,15 @@ class DeploymentAgent:
             bool: True if deployment succeeded.
         """
         # Step 1: Ensure scripts exist
-        if not (self.deploy_script.exists()
-                and self.health_check_script.exists()):
-            print(f"\n{'='*70}")
+        if not (self.deploy_script.exists() and self.health_check_script.exists()):
+            print(f"\n{'=' * 70}")
             print("  Generating Deployment Scripts")
-            print(f"{'='*70}\n")
+            print(f"{'=' * 70}\n")
             print(
-                f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
+                f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}..."
+            )
 
-            success, message = generate_scripts(
-                str(self.repo_path), self.agent)
+            success, message = generate_scripts(str(self.repo_path), self.agent)
 
             if success:
                 print(f"✓ {message}")
@@ -372,10 +373,10 @@ class DeploymentAgent:
             print(f"✓ Found existing scripts in {self.sds_dir}")
 
         # Step 2: Deploy with fixing
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("  Deploying Application with Error Fixing")
         print(f"  Max attempts: {max_attempts}")
-        print(f"{'='*70}\n")
+        print(f"{'=' * 70}\n")
 
         for attempt in range(1, max_attempts + 1):
             if check_shutdown and check_shutdown():
@@ -390,49 +391,67 @@ class DeploymentAgent:
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Run deployment script
-            deploy_result = self.run_deploy_command("start", log_file_path=log_file_path)
+            deploy_result = self.run_deploy_command(
+                "start", log_file_path=log_file_path
+            )
 
             # Check if deployment succeeded
             if deploy_result["success"]:
                 print("\n✓ Deployment script succeeded (exit code: 0)")
 
                 # Setup log file for health check
-                health_check_log_path = self.sds_dir / "logs" / \
-                    f"health_check_attempt_{attempt}.log"
+                health_check_log_path = (
+                    self.sds_dir / "logs" / f"health_check_attempt_{attempt}.log"
+                )
                 health_check_log_path.parent.mkdir(parents=True, exist_ok=True)
 
                 # Verify with health check
                 health_result = run_health_check(
-                    self.repo_path, self.health_check_script, log_file_path=health_check_log_path)
+                    self.repo_path,
+                    self.health_check_script,
+                    log_file_path=health_check_log_path,
+                )
 
                 if health_result["success"]:
                     print("✓ Health check passed (exit code: 0)")
-                    print(f"\n{'='*70}")
+                    print(f"\n{'=' * 70}")
                     print("  Deployment Successful!")
-                    print(f"{'='*70}\n")
+                    print(f"{'=' * 70}\n")
                     return True
                 else:
                     print(
-                        f"⚠ Health check failed (exit code: {health_result['exit_code']})")
+                        f"⚠ Health check failed (exit code: {health_result['exit_code']})"
+                    )
 
                     # Health check failed - ask agent to analyze and fix
                     if not self._fix_with_agent(
-                            deploy_result, health_result, attempt, max_attempts, log_file_path, health_check_log_path):
+                        deploy_result,
+                        health_result,
+                        attempt,
+                        max_attempts,
+                        log_file_path,
+                        health_check_log_path,
+                    ):
                         return False
             else:
                 print(
-                    f"✗ Deployment script failed (exit code: {deploy_result['exit_code']})")
+                    f"✗ Deployment script failed (exit code: {deploy_result['exit_code']})"
+                )
 
                 # Deployment failed - ask agent to analyze and fix
                 if not self._fix_with_agent(
-                        deploy_result, None, attempt, max_attempts, log_file_path):
+                    deploy_result, None, attempt, max_attempts, log_file_path
+                ):
                     return False
 
         return False
 
-    def run_deploy_command(self, command: str = "start",
-                           timeout: int = DEFAULT_DEPLOY_TIMEOUT_SECS,
-                           log_file_path: Optional[Path] = None) -> Dict[str, Any]:
+    def run_deploy_command(
+        self,
+        command: str = "start",
+        timeout: int = DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path: Optional[Path] = None,
+    ) -> Dict[str, Any]:
         """Run the deployment script with a specific command.
 
         Args:
@@ -462,7 +481,7 @@ class DeploymentAgent:
         def read_pipe(pipe, buffer):
             """Read pipe line by line and capture."""
             try:
-                for line in iter(pipe.readline, ''):
+                for line in iter(pipe.readline, ""):
                     if not line:
                         break
                     # We don't print here to avoid spamming, unless it's a short command?
@@ -482,6 +501,7 @@ class DeploymentAgent:
             finally:
                 pipe.close()
 
+        process = None
         try:
             # Run deploy script with command
             process = subprocess.Popen(
@@ -490,14 +510,16 @@ class DeploymentAgent:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1  # Line buffered
+                bufsize=1,  # Line buffered
             )
 
             # Start threads to read stdout and stderr
             stdout_thread = threading.Thread(
-                target=read_pipe, args=(process.stdout, stdout_lines))
+                target=read_pipe, args=(process.stdout, stdout_lines)
+            )
             stderr_thread = threading.Thread(
-                target=read_pipe, args=(process.stderr, stderr_lines))
+                target=read_pipe, args=(process.stderr, stderr_lines)
+            )
 
             stdout_thread.daemon = True
             stderr_thread.daemon = True
@@ -525,12 +547,15 @@ class DeploymentAgent:
                         "success": False,
                         "exit_code": -1,
                         "stdout": "".join(stdout_lines),
-                        "stderr": f"Deployment script timed out after {timeout} seconds\n" + "".join(stderr_lines)
+                        "stderr": f"Deployment script timed out after {timeout} seconds\n"
+                        + "".join(stderr_lines),
                     }
 
                 # Check for summary update
-                if elapsed > initial_delay and (
-                        current_time - last_summary_time) >= summary_interval:
+                if (
+                    elapsed > initial_delay
+                    and (current_time - last_summary_time) >= summary_interval
+                ):
                     # Get recent output
                     recent_stdout = "".join(stdout_lines[-20:])
                     recent_stderr = "".join(stderr_lines[-20:])
@@ -555,13 +580,14 @@ class DeploymentAgent:
 
             status = "SUCCESS" if process.returncode == 0 else "FAILED"
             print(
-                f"Deployment command '{command}' finished: {status} (Exit Code: {process.returncode})")
+                f"Deployment command '{command}' finished: {status} (Exit Code: {process.returncode})"
+            )
 
             return {
                 "success": process.returncode == 0,
                 "exit_code": process.returncode,
                 "stdout": stdout_data,
-                "stderr": stderr_data
+                "stderr": stderr_data,
             }
 
         except Exception as e:
@@ -569,8 +595,19 @@ class DeploymentAgent:
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
-                "stderr": f"Failed to run deployment script: {e}"
+                "stderr": f"Failed to run deployment script: {e}",
             }
+        finally:
+            # Ensure process is killed on exit (including KeyboardInterrupt)
+            if process and process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except (subprocess.TimeoutExpired, Exception):
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
 
     def _summarize_progress(self, output_snippet: str, elapsed_time: float):
         """Generate and print a summary of the progress using the agent."""
@@ -594,19 +631,20 @@ Recent Output:
 
     def _extract_summary(self, response: str) -> Optional[str]:
         """Extract the summary from the agent's response using XML markers."""
-        match = re.search(r'<output_msg>(.*?)</output_msg>', response, re.DOTALL)
+        match = re.search(r"<output_msg>(.*?)</output_msg>", response, re.DOTALL)
         if match:
             return match.group(1).strip()
         return None
 
     def _fix_with_agent(
-            self,
-            deploy_result: Dict[str, Any],
-            health_result: Optional[Dict[str, Any]],
-            attempt: int,
-            max_attempts: int,
-            log_file_path: Optional[Path] = None,
-            health_check_log_path: Optional[Path] = None) -> bool:
+        self,
+        deploy_result: Dict[str, Any],
+        health_result: Optional[Dict[str, Any]],
+        attempt: int,
+        max_attempts: int,
+        log_file_path: Optional[Path] = None,
+        health_check_log_path: Optional[Path] = None,
+    ) -> bool:
         """Use a coding agent to analyze errors and fix the scripts.
 
         Args:
@@ -624,32 +662,34 @@ Recent Output:
             print(f"\n✗ Reached maximum attempts ({max_attempts}), giving up")
             return False
 
-        print(f"\n{'='*70}")
-        print(
-            f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
-        print(f"{ '='*70}\n")
+        print(f"\n{'=' * 70}")
+        print(f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
+        print(f"{'=' * 70}\n")
 
         # Prepare error context
         error_context = self._prepare_error_context(
-            deploy_result, health_result, log_file_path, health_check_log_path)
+            deploy_result, health_result, log_file_path, health_check_log_path
+        )
 
         # Create fix prompt
         prompt = self._create_fix_prompt(error_context, attempt, max_attempts)
 
         try:
             print(
-                f"Consulting {self.agent.__class__.__name__} to analyze and fix the issue...")
-            print(f"{'-'*70}")
+                f"Consulting {self.agent.__class__.__name__} to analyze and fix the issue..."
+            )
+            print(f"{'-' * 70}")
 
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
             start_time = time.time()
             self.agent.generate(
-                prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS)
+                prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS
+            )
             duration = time.time() - start_time
             print(f"Agent generation (fix) took {duration / 60:.2f} minutes")
 
-            print(f"{'-'*70}")
+            print(f"{'-' * 70}")
             print("\nAgent response received")
 
             # Agent should have modified the scripts directly
@@ -664,8 +704,12 @@ Recent Output:
             return False
 
     def _prepare_error_context(
-            self, deploy_result: Dict[str, Any], health_result: Optional[Dict[str, Any]],
-            log_file_path: Optional[Path] = None, health_check_log_path: Optional[Path] = None) -> str:
+        self,
+        deploy_result: Dict[str, Any],
+        health_result: Optional[Dict[str, Any]],
+        log_file_path: Optional[Path] = None,
+        health_check_log_path: Optional[Path] = None,
+    ) -> str:
         """Prepare error context for the coding agent.
 
         Args:
@@ -683,13 +727,16 @@ Recent Output:
             context_parts.append(f"Full deployment logs available at: {log_file_path}")
 
         if health_check_log_path:
-            context_parts.append(f"Health check outputs available at: {health_check_log_path}")
+            context_parts.append(
+                f"Health check outputs available at: {health_check_log_path}"
+            )
 
         # Deployment result
         context_parts.append("## Deployment Script Result")
         context_parts.append(f"Exit Code: {deploy_result['exit_code']}")
         context_parts.append(
-            f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}")
+            f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}"
+        )
 
         # if deploy_result['stdout']:
         #     context_parts.append("\n### STDOUT:")
@@ -737,8 +784,9 @@ Recent Output:
 
         return "\n".join(context_parts)
 
-    def _create_fix_prompt(self, error_context: str,
-                           attempt: int, max_attempts: int) -> str:
+    def _create_fix_prompt(
+        self, error_context: str, attempt: int, max_attempts: int
+    ) -> str:
         """Create a prompt for the coding agent to fix deployment errors.
 
         Args:
@@ -807,9 +855,7 @@ If the deployment script uses Docker, you can run docker commands directly to in
 Remember: The goal is to get the application deployed successfully. Be methodical and thorough."""
 
         system_prompt = system_prompt.format(
-            repo_path=self.repo_path,
-            attempt=attempt,
-            max_attempts=max_attempts
+            repo_path=self.repo_path, attempt=attempt, max_attempts=max_attempts
         )
 
         user_prompt = f"""The deployment has failed. Please analyze the error and fix the deployment scripts.

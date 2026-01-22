@@ -51,13 +51,14 @@ class CLICodingAgent(CodingAgent):
                 capture_output=True,
                 text=True,
                 check=False,
-                env=self.env
+                env=self.env,
             )
             if result.returncode != 0:
                 raise RuntimeError(
                     f"{self.binary_name} CLI tool at '{self.binary_path}' is not working correctly. "
                     f"'{self.binary_path} --help' exited with code {result.returncode}. "
-                    f"Stderr: {result.stderr}")
+                    f"Stderr: {result.stderr}"
+                )
         except FileNotFoundError:
             raise RuntimeError(
                 f"{self.binary_name} CLI tool not found at '{self.binary_path}'. "
@@ -76,8 +77,13 @@ class CLICodingAgent(CodingAgent):
         """Return the log prefix for this agent."""
         return f"[{self.__class__.__name__}]"
 
-    def generate(self, prompt: str,
-                 cwd: Optional[str] = None, timeout: int = 300, silent: bool = False) -> str:
+    def generate(
+        self,
+        prompt: str,
+        cwd: Optional[str] = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ) -> str:
         """Generate text using the CLI tool.
 
         Args:
@@ -111,10 +117,10 @@ class CLICodingAgent(CodingAgent):
 
         def read_stdout(pipe, buffer):
             """Read stdout line by line and print + capture."""
-            for line in iter(pipe.readline, ''):
+            for line in iter(pipe.readline, ""):
                 if not line:
                     break
-                line_stripped = line.rstrip('\n')
+                line_stripped = line.rstrip("\n")
                 if not silent:
                     print(f"{self._log_prefix} {line_stripped}")
                     sys.stdout.flush()
@@ -123,14 +129,14 @@ class CLICodingAgent(CodingAgent):
 
         def read_stderr(pipe, buffer):
             """Read stderr line by line and print + capture."""
-            for line in iter(pipe.readline, ''):
+            for line in iter(pipe.readline, ""):
                 if not line:
                     break
-                line_stripped = line.rstrip('\n')
+                line_stripped = line.rstrip("\n")
                 if not silent:
                     print(
-                        f"{self._log_prefix} [STDERR] {line_stripped}",
-                        file=sys.stderr)
+                        f"{self._log_prefix} [STDERR] {line_stripped}", file=sys.stderr
+                    )
                     sys.stderr.flush()
                 buffer.append(line)
             pipe.close()
@@ -145,16 +151,16 @@ class CLICodingAgent(CodingAgent):
             bufsize=1,  # Line buffered
             cwd=cwd,
             env=self.env,
-            start_new_session=True
+            start_new_session=True,
         )
 
         # Start threads to read stdout and stderr concurrently
         stdout_thread = threading.Thread(
-            target=read_stdout, args=(
-                process.stdout, stdout_lines))
+            target=read_stdout, args=(process.stdout, stdout_lines)
+        )
         stderr_thread = threading.Thread(
-            target=read_stderr, args=(
-                process.stderr, stderr_lines))
+            target=read_stderr, args=(process.stderr, stderr_lines)
+        )
 
         stdout_thread.daemon = True
         stderr_thread.daemon = True
@@ -180,14 +186,22 @@ class CLICodingAgent(CodingAgent):
                 pass  # Process might be already gone
             process.wait()
             raise subprocess.TimeoutExpired(cmd, timeout)
+        finally:
+            # Ensure process is killed on any exit (e.g. KeyboardInterrupt)
+            if process.poll() is None:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    process.wait()
+                except (ProcessLookupError, OSError):
+                    pass
 
         # Wait for threads to finish reading
         stdout_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
 
         # Combine captured output
-        stdout_data = ''.join(stdout_lines)
-        stderr_data = ''.join(stderr_lines)
+        stdout_data = "".join(stdout_lines)
+        stderr_data = "".join(stderr_lines)
 
         if not silent:
             print("=" * 80)

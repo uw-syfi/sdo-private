@@ -18,10 +18,14 @@ class AppOperator:
     3. Monitors application health using a configurable set of MonitoringTasks
     """
 
-    def __init__(self, repo_path: str, health_check_interval: int = 30,
-                 health_check_max_count: Optional[int] = 5,
-                 max_deployment_attempts: int = 5,
-                 agent: Optional[CodingAgent] = None):
+    def __init__(
+        self,
+        repo_path: str,
+        health_check_interval: int = 30,
+        health_check_max_count: Optional[int] = 5,
+        max_deployment_attempts: int = 5,
+        agent: Optional[CodingAgent] = None,
+    ):
         """Initialize the application operator.
 
         Args:
@@ -42,8 +46,7 @@ class AppOperator:
                 self.agent = create_agent_from_config(str(self.repo_path))
             except RuntimeError as e:
                 # Fallback or error if no default agent can be created
-                raise RuntimeError(
-                    f"Failed to initialize default coding agent: {e}")
+                raise RuntimeError(f"Failed to initialize default coding agent: {e}")
         else:
             self.agent = agent
 
@@ -59,8 +62,7 @@ class AppOperator:
         if not self.repo_path.exists():
             raise ValueError(f"Repository path does not exist: {repo_path}")
         if not self.repo_path.is_dir():
-            raise ValueError(
-                f"Repository path is not a directory: {repo_path}")
+            raise ValueError(f"Repository path is not a directory: {repo_path}")
 
     def run(self) -> int:
         """Main entry point for application operation.
@@ -73,20 +75,22 @@ class AppOperator:
         signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
         try:
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print("  App Operator Mode")
             print(f"  Repository: {self.repo_path}")
             print(f"  Agent: {self.agent.__class__.__name__}")
-            print(f"{'='*70}\n")
+            print(f"{'=' * 70}\n")
 
             # Step 1: Deploy with automatic error fixing (includes script
             # generation)
             if not self.deployer.run(
-                    max_attempts=self.max_deployment_attempts,
-                    check_shutdown=lambda: self._shutdown_requested):
+                max_attempts=self.max_deployment_attempts,
+                check_shutdown=lambda: self._shutdown_requested,
+            ):
                 print(
                     "\n✗ Failed to deploy application after multiple attempts",
-                    file=sys.stderr)
+                    file=sys.stderr,
+                )
                 return 1
 
             self._deployed = True
@@ -95,14 +99,20 @@ class AppOperator:
             self.monitor.run(
                 interval=self.health_check_interval,
                 max_checks=self.health_check_max_count,
-                check_shutdown=lambda: self._shutdown_requested
+                check_shutdown=lambda: self._shutdown_requested,
             )
 
             return 0
 
+        except KeyboardInterrupt:
+            # Graceful shutdown initiated by signal handler
+            print("\nShutting down due to interrupt...")
+            return 1
+
         except Exception as e:
             print(f"\n✗ Unexpected error: {e}", file=sys.stderr)
             import traceback
+
             traceback.print_exc()
             return 1
         finally:
@@ -118,17 +128,20 @@ class AppOperator:
         if not self._shutdown_requested:
             self._shutdown_requested = True
             signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
-            print(
-                f"\n\nReceived {signal_name} signal. Initiating graceful shutdown...")
+            print(f"\n\nReceived {signal_name} signal. Initiating graceful shutdown...")
+
+            # Re-raise KeyboardInterrupt to interrupt blocking calls
+            if signum == signal.SIGINT:
+                raise KeyboardInterrupt()
 
     def _cleanup(self):
         """Shutdown the application and cleanup resources."""
         if not self._deployed:
             return
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("  Shutting Down Application")
-        print(f"{'='*70}\n")
+        print(f"{'=' * 70}\n")
 
         print("Running deployment script stop command...")
 
@@ -136,15 +149,16 @@ class AppOperator:
             # Use deployer to stop
             result = self.deployer.run_deploy_command("stop", timeout=120)
 
-            if result['success']:
+            if result["success"]:
                 print("✓ Application stopped successfully")
             else:
                 print(
                     f"⚠ Stop command exited with code {result['exit_code']}",
-                    file=sys.stderr)
+                    file=sys.stderr,
+                )
         except Exception as e:
             print(f"✗ Error during shutdown: {e}", file=sys.stderr)
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("  Shutdown Complete")
-        print(f"{'='*70}\n")
+        print(f"{'=' * 70}\n")

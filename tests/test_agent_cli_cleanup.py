@@ -8,6 +8,7 @@ in success, failure, and edge case scenarios.
 This test suite is parameterized to run identical tests across all agent
 implementations with a stubbed subprocess to avoid invoking actual LLMs.
 """
+
 import subprocess
 import threading
 from unittest.mock import MagicMock, patch
@@ -62,30 +63,25 @@ class StubAgent(CodingAgent):
         self.generate_calls = []
 
     def generate(self, prompt: str, cwd=None, timeout=300, silent=False) -> str:
-        self.generate_calls.append({
-            "prompt": prompt,
-            "cwd": cwd,
-            "timeout": timeout,
-            "silent": silent
-        })
+        self.generate_calls.append(
+            {"prompt": prompt, "cwd": cwd, "timeout": timeout, "silent": silent}
+        )
         return "stub response"
 
 
 @pytest.fixture
 def mock_env():
     """Mock environment for agent initialization."""
-    return {
-        "PATH": "/usr/bin:/bin",
-        "HOME": "/tmp",
-        "USER": "test"
-    }
+    return {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "USER": "test"}
 
 
 @pytest.fixture
 def mock_which(mock_env):
     """Mock shutil.which to return a fake binary path."""
+
     def which_impl(name, path=None):
         return f"/usr/bin/{name}"
+
     return which_impl
 
 
@@ -93,9 +89,9 @@ def mock_which(mock_env):
     params=[
         ("claude", ClaudeCodeCodingAgent),
         ("codex", CodexCodingAgent),
-        ("gemini", GeminiCodingAgent)
+        ("gemini", GeminiCodingAgent),
     ],
-    ids=["claude", "codex", "gemini"]
+    ids=["claude", "codex", "gemini"],
 )
 def agent_type(request):
     """Parameterized fixture for all agent types."""
@@ -105,6 +101,7 @@ def agent_type(request):
 # ============================================================================
 # INITIALIZATION AND BINARY DETECTION TESTS
 # ============================================================================
+
 
 def test_agent_detects_missing_binary(agent_type):
     """Test agent fails gracefully when binary is not found."""
@@ -121,10 +118,7 @@ def test_agent_detects_broken_binary(agent_type, mock_which):
 
     with patch("shutil.which", side_effect=mock_which):
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1,
-                stderr="binary error"
-            )
+            mock_run.return_value = MagicMock(returncode=1, stderr="binary error")
             with pytest.raises(RuntimeError, match="not working correctly"):
                 agent_class()
 
@@ -154,6 +148,7 @@ def test_agent_initializes_with_model(agent_type, mock_which):
 # ============================================================================
 # SUCCESSFUL EXECUTION AND CLEANUP TESTS
 # ============================================================================
+
 
 def test_generate_success_cleans_up_pipes(agent_type, mock_which):
     """Test pipes are properly closed on successful execution."""
@@ -231,7 +226,19 @@ def test_generate_success_returns_output(agent_type, mock_which):
 
     mock_process = MockProcess()
     expected_output = "success output"
-    mock_process.stdout.readline.side_effect = [f"{expected_output}\n", ""]
+
+    if agent_name == "gemini":
+        # Gemini expects JSON stream output
+        import json
+
+        json_output = json.dumps(
+            {"type": "message", "role": "assistant", "content": expected_output}
+        )
+        mock_process.stdout.readline.side_effect = [f"{json_output}\n", ""]
+    else:
+        # Other agents expect plain text
+        mock_process.stdout.readline.side_effect = [f"{expected_output}\n", ""]
+
     mock_process.stderr.readline.side_effect = [""]
     mock_process.returncode = 0
 
@@ -248,6 +255,7 @@ def test_generate_success_returns_output(agent_type, mock_which):
 # ============================================================================
 # TIMEOUT AND PROCESS TERMINATION CLEANUP TESTS
 # ============================================================================
+
 
 def test_generate_timeout_kills_process(agent_type, mock_which):
     """Test process group is killed on timeout."""
@@ -357,6 +365,7 @@ def test_generate_timeout_closes_all_resources(agent_type, mock_which):
 # ERROR HANDLING AND CLEANUP TESTS
 # ============================================================================
 
+
 def test_generate_non_zero_exit_raises_error(agent_type, mock_which):
     """Test non-zero exit code raises RuntimeError."""
     agent_name, agent_class = agent_type
@@ -425,6 +434,7 @@ def test_generate_broken_pipe_on_stdin_handled(agent_type, mock_which):
 # THREAD CLEANUP AND ORPHANED THREAD TESTS
 # ============================================================================
 
+
 def test_generate_thread_timeout_doesnt_leak_threads(agent_type, mock_which):
     """Test threads are properly cleaned up even if join() times out."""
     agent_name, agent_class = agent_type
@@ -456,6 +466,7 @@ def test_generate_thread_timeout_doesnt_leak_threads(agent_type, mock_which):
 # ============================================================================
 # WORKING DIRECTORY AND ENVIRONMENT CLEANUP TESTS
 # ============================================================================
+
 
 def test_generate_with_cwd_parameter(agent_type, mock_which):
     """Test working directory parameter is passed to subprocess."""
@@ -499,7 +510,10 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", side_effect=track_popen):
-                with patch("app_operator.agent_cli.cli_agent._get_interactive_env", return_value=mock_env):
+                with patch(
+                    "app_operator.agent_cli.cli_agent._get_interactive_env",
+                    return_value=mock_env,
+                ):
                     agent = agent_class()
                     agent.generate("test", silent=True)
 
@@ -511,6 +525,7 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
 # ============================================================================
 # SILENT MODE TESTS
 # ============================================================================
+
 
 def test_generate_silent_mode_suppresses_output(agent_type, mock_which, capsys):
     """Test silent mode prevents printing of agent output."""
@@ -536,6 +551,7 @@ def test_generate_silent_mode_suppresses_output(agent_type, mock_which, capsys):
 # ============================================================================
 # RESOURCE COUNTING AND LEAK DETECTION TESTS
 # ============================================================================
+
 
 def test_multiple_generates_dont_leak_resources(agent_type, mock_which):
     """Test multiple calls to generate() don't accumulate resource leaks."""
@@ -563,6 +579,7 @@ def test_multiple_generates_dont_leak_resources(agent_type, mock_which):
 # FACTORY AND CROSS-AGENT CONSISTENCY TESTS
 # ============================================================================
 
+
 def test_factory_creates_all_agent_types(mock_which):
     """Test factory can create all agent types."""
     from app_operator.agent_cli.factory import create_agent_from_config
@@ -580,13 +597,9 @@ def test_factory_creates_all_agent_types(mock_which):
 
             for provider_name, expected_class in agents_to_test:
                 config = Config(
-                    agent=AgentConfig(provider=provider_name),
-                    operator=OperatorConfig()
+                    agent=AgentConfig(provider=provider_name), operator=OperatorConfig()
                 )
-                agent = create_agent_from_config(
-                    "/tmp",
-                    config=config
-                )
+                agent = create_agent_from_config("/tmp", config=config)
                 assert isinstance(agent, expected_class)
 
 
@@ -601,7 +614,7 @@ def test_factory_defaults_to_codex(mock_which):
 
             config = Config(
                 agent=AgentConfig(provider="unknown_provider"),
-                operator=OperatorConfig()
+                operator=OperatorConfig(),
             )
             agent = create_agent_from_config("/tmp", config=config)
             assert isinstance(agent, CodexCodingAgent)
