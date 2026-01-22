@@ -158,6 +158,14 @@ class GeminiCodingAgent(CLICodingAgent):
                 pass
             process.wait()
             raise subprocess.TimeoutExpired(cmd, timeout)
+        finally:
+            # Ensure process is killed on any exit (e.g. KeyboardInterrupt)
+            if process.poll() is None:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    process.wait()
+                except (ProcessLookupError, OSError):
+                    pass
 
         # Wait for threads
         stdout_thread.join(timeout=1)

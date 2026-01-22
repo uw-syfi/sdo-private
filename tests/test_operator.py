@@ -19,15 +19,16 @@ def mock_agent():
 @pytest.fixture
 def app_operator(repo_path, mock_agent):
     # Mock the internal agents to avoid real instantiation
-    with patch('app_operator.operator.DeploymentAgent') as mock_deployer_cls, \
-            patch('app_operator.operator.AppMonitor') as mock_monitor_cls:
-
+    with (
+        patch("app_operator.operator.DeploymentAgent") as mock_deployer_cls,
+        patch("app_operator.operator.AppMonitor") as mock_monitor_cls,
+    ):
         op = AppOperator(str(repo_path), agent=mock_agent)
         yield op, mock_deployer_cls.return_value, mock_monitor_cls.return_value
 
 
 def test_operator_init_validates_path(tmp_path):
-    with patch('app_operator.operator.create_agent_from_config') as mock_create_agent:
+    with patch("app_operator.operator.create_agent_from_config") as mock_create_agent:
         mock_create_agent.return_value = Mock()
         with pytest.raises(ValueError, match="does not exist"):
             AppOperator(str(tmp_path / "nonexistent"))
@@ -84,16 +85,47 @@ def test_cleanup_skips_if_not_deployed(app_operator):
     mock_deployer.run_deploy_command.assert_not_called()
 
 
-def test_handle_shutdown_signal(app_operator):
+def test_handle_shutdown_signal_sigint(app_operator):
     op, _, _ = app_operator
 
     # Verify initial state
     assert op._shutdown_requested is False
 
-    # Simulate signal
-    op._handle_shutdown_signal(signal.SIGINT, None)
+    # Simulate SIGINT signal - should raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        op._handle_shutdown_signal(signal.SIGINT, None)
 
     assert op._shutdown_requested is True
+
+
+def test_handle_shutdown_signal_sigterm(app_operator):
+    op, _, _ = app_operator
+
+    # Verify initial state
+    assert op._shutdown_requested is False
+
+    # Simulate SIGTERM signal - should NOT raise KeyboardInterrupt
+    op._handle_shutdown_signal(signal.SIGTERM, None)
+
+    assert op._shutdown_requested is True
+
+
+def test_run_handles_keyboard_interrupt(app_operator):
+    op, mock_deployer, _ = app_operator
+
+    # Simulate KeyboardInterrupt during deployment
+    mock_deployer.run.side_effect = KeyboardInterrupt()
+
+    # We also want to verify cleanup is called.
+    # Since _cleanup relies on _deployed flag, let's set it or mock it.
+    # But _cleanup is called in finally block.
+
+    # Mock _cleanup to verify it's called
+    with patch.object(op, "_cleanup") as mock_cleanup:
+        exit_code = op.run()
+
+        assert exit_code == 1
+        mock_cleanup.assert_called_once()
 
 
 def test_run_handles_exception_gracefully(app_operator):
