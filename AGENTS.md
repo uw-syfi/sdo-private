@@ -102,7 +102,7 @@ The operator uses specialized agents to manage the application lifecycle:
 *   Keep this file up to date when you update the project.
 *   Use `uv` and `uv run ...` for running python.
 *   When code update impacts the CLI interface, update the README.
-*   Remember to format the code after code edits.
+*   Remember to format the code after code edits using `@scripts/format_code.sh`.
 
 ### Documentation
 
@@ -112,9 +112,10 @@ The operator uses specialized agents to manage the application lifecycle:
 
 * When removing code, do not comment it out, just remove it.
 
-### Checking syntax correctness
+### Code Validation
 
-* For python code, use `scripts/check_errors.sh` to check for syntax errors. Add `--fix` to automatically fix errors. For other errors, see if you can fix them yourself. Run test afterwards to make sure there's no regressions.
+*   **Formatting:** Run `@scripts/format_code.sh` on python code edits.
+*   **Linting:** Run `@scripts/check_errors.sh` on python code edits. Add `--fix` to automatically fix errors.
 
 ### Testing
 
