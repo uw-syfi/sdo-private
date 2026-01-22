@@ -1,6 +1,5 @@
 [agent]
 provider = "gemini"
-# model = "gemini-3-pro"
 
 [operator]
 interval = 30
