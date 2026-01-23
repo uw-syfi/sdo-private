@@ -178,19 +178,6 @@ def _analyze_repository(repo_path: Path) -> str:
     context_parts = []
 
     # Check for common deployment files
-    # if (repo_path / "docker-compose.yml").exists():
-    #     context_parts.append(
-    #         "- Found docker-compose.yml (Docker Compose deployment)")
-    # if (repo_path / "docker-compose.yaml").exists():
-    #     context_parts.append(
-    #         "- Found docker-compose.yaml (Docker Compose deployment)")
-    # if (repo_path / "Dockerfile").exists():
-    #     context_parts.append("- Found Dockerfile (Docker-based application)")
-    # if (repo_path / "k8s").exists() or (repo_path / "kubernetes").exists():
-    #     context_parts.append("- Found Kubernetes manifests directory")
-    # if (repo_path / "Makefile").exists():
-    #     context_parts.append(
-    #         "- Found Makefile (may contain build/deploy targets)")
 
     # Check for common application files
     if (repo_path / "package.json").exists():
@@ -198,8 +185,7 @@ def _analyze_repository(repo_path: Path) -> str:
     if (repo_path / "requirements.txt").exists() or (
         repo_path / "pyproject.toml"
     ).exists():
-        context_parts.append(
-            "- Found Python dependencies (Python application)")
+        context_parts.append("- Found Python dependencies (Python application)")
     if (repo_path / "go.mod").exists():
         context_parts.append("- Found go.mod (Go application)")
     if (repo_path / "Cargo.toml").exists():
@@ -260,8 +246,7 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir,
-                       timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
         print(f"Agent generation took {duration / 60:.2f} minutes")
 
@@ -309,13 +294,11 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir,
-                       timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
         print(f"Agent generation took {duration / 60:.2f} minutes")
 
-        health_check_script_path = Path(
-            target_dir) / ".sds" / "health_check.sh"
+        health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
         if health_check_script_path.exists():
             return True, "Successfully generated health_check.sh"
         else:
@@ -395,8 +378,7 @@ class DeploymentAgent:
                 f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}..."
             )
 
-            success, message = generate_scripts(
-                str(self.repo_path), self.agent)
+            success, message = generate_scripts(str(self.repo_path), self.agent)
 
             if success:
                 print(f"✓ {message}")
@@ -427,8 +409,7 @@ class DeploymentAgent:
             print(f"\n--- Deployment Attempt #{attempt} ---\n")
 
             # Setup log file for this attempt
-            log_file_path = self.sds_dir / "logs" / \
-                f"deploy_attempt_{attempt}.log"
+            log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
             # Ensure directory exists
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -443,8 +424,7 @@ class DeploymentAgent:
 
                 # Setup log file for health check
                 health_check_log_path = (
-                    self.sds_dir / "logs" /
-                    f"health_check_attempt_{attempt}.log"
+                    self.sds_dir / "logs" / f"health_check_attempt_{attempt}.log"
                 )
                 health_check_log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -674,8 +654,7 @@ Recent Output:
 
     def _extract_summary(self, response: str) -> Optional[str]:
         """Extract the summary from the agent's response using XML markers."""
-        match = re.search(r"<output_msg>(.*?)</output_msg>",
-                          response, re.DOTALL)
+        match = re.search(r"<output_msg>(.*?)</output_msg>", response, re.DOTALL)
         if match:
             return match.group(1).strip()
         return None
@@ -707,8 +686,7 @@ Recent Output:
             return False
 
         print(f"\n{'=' * 70}")
-        print(
-            f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
+        print(f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
         print(f"{'=' * 70}\n")
 
         # Prepare error context
@@ -778,8 +756,7 @@ Recent Output:
         context_parts = []
 
         if log_file_path:
-            context_parts.append(
-                f"Full deployment logs available at: {log_file_path}")
+            context_parts.append(f"Full deployment logs available at: {log_file_path}")
 
         if health_check_log_path:
             context_parts.append(
@@ -855,8 +832,7 @@ Recent Output:
         # Determine previous fix summary file path
         previous_summary_note = ""
         if attempt > 1:
-            prev_log_path = self.sds_dir / "logs" / \
-                f"fix_summary_{attempt - 1}.log"
+            prev_log_path = self.sds_dir / "logs" / f"fix_summary_{attempt - 1}.log"
             previous_summary_note = (
                 f"\n\nNote: This is attempt #{attempt}. "
                 f"You can read the summary of the previous fix attempt at:\n{prev_log_path}\n"
