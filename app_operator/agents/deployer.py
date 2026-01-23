@@ -861,7 +861,8 @@ Recent Output:
                 f"\n\nNote: This is attempt #{attempt}. "
                 f"You can read the summary of the previous fix attempt at:\n{prev_log_path}\n"
                 "The log files follow the pattern .sds/logs/fix_summary_{attempt}.log. "
-                "Please review the previous attempt to avoid repeating mistakes."
+                "Please review the previous attempt to avoid repeating mistakes, and to check if the previous fix was successful."
+                "Note that the application may still be failing, but the it's now failing for a different reason."
             )
 
         system_prompt = """You are an expert DevOps engineer debugging deployment issues.
