@@ -198,7 +198,8 @@ def _analyze_repository(repo_path: Path) -> str:
     if (repo_path / "requirements.txt").exists() or (
         repo_path / "pyproject.toml"
     ).exists():
-        context_parts.append("- Found Python dependencies (Python application)")
+        context_parts.append(
+            "- Found Python dependencies (Python application)")
     if (repo_path / "go.mod").exists():
         context_parts.append("- Found go.mod (Go application)")
     if (repo_path / "Cargo.toml").exists():
@@ -259,7 +260,8 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir,
+                       timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
         print(f"Agent generation took {duration / 60:.2f} minutes")
 
@@ -307,11 +309,13 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir,
+                       timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
         print(f"Agent generation took {duration / 60:.2f} minutes")
 
-        health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
+        health_check_script_path = Path(
+            target_dir) / ".sds" / "health_check.sh"
         if health_check_script_path.exists():
             return True, "Successfully generated health_check.sh"
         else:
@@ -342,6 +346,33 @@ class DeploymentAgent:
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
 
+    def _get_next_attempt_number(self) -> int:
+        """Determine the next attempt number based on existing logs."""
+        logs_dir = self.sds_dir / "logs"
+        if not logs_dir.exists():
+            return 1
+
+        # Find all deploy logs
+        log_files = list(logs_dir.glob("deploy_attempt_*.log"))
+        if not log_files:
+            return 1
+
+        # Extract numbers
+        max_attempt = 0
+        for log_file in log_files:
+            try:
+                # filename format: deploy_attempt_{n}.log
+                name = log_file.stem  # deploy_attempt_{n}
+                parts = name.split("_")
+                if len(parts) >= 3 and parts[-1].isdigit():
+                    num = int(parts[-1])
+                    if num > max_attempt:
+                        max_attempt = num
+            except ValueError:
+                continue
+
+        return max_attempt + 1
+
     def run(
         self, max_attempts: int = 5, check_shutdown: Optional[Callable[[], bool]] = None
     ) -> bool:
@@ -364,7 +395,8 @@ class DeploymentAgent:
                 f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}..."
             )
 
-            success, message = generate_scripts(str(self.repo_path), self.agent)
+            success, message = generate_scripts(
+                str(self.repo_path), self.agent)
 
             if success:
                 print(f"✓ {message}")
@@ -374,13 +406,20 @@ class DeploymentAgent:
         else:
             print(f"✓ Found existing scripts in {self.sds_dir}")
 
+        # Determine start attempt based on existing logs
+        start_attempt = self._get_next_attempt_number()
+        end_of_range = start_attempt + max_attempts
+        absolute_max_attempts = end_of_range - 1
+
         # Step 2: Deploy with fixing
         print(f"\n{'=' * 70}")
         print("  Deploying Application with Error Fixing")
-        print(f"  Max attempts: {max_attempts}")
+        print(
+            f"  Max attempts: {max_attempts} (Starting from #{start_attempt}, up to #{absolute_max_attempts})"
+        )
         print(f"{'=' * 70}\n")
 
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(start_attempt, end_of_range):
             if check_shutdown and check_shutdown():
                 print("\nShutdown requested, aborting deployment")
                 return False
@@ -388,7 +427,8 @@ class DeploymentAgent:
             print(f"\n--- Deployment Attempt #{attempt} ---\n")
 
             # Setup log file for this attempt
-            log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
+            log_file_path = self.sds_dir / "logs" / \
+                f"deploy_attempt_{attempt}.log"
             # Ensure directory exists
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -403,7 +443,8 @@ class DeploymentAgent:
 
                 # Setup log file for health check
                 health_check_log_path = (
-                    self.sds_dir / "logs" / f"health_check_attempt_{attempt}.log"
+                    self.sds_dir / "logs" /
+                    f"health_check_attempt_{attempt}.log"
                 )
                 health_check_log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -430,7 +471,7 @@ class DeploymentAgent:
                         deploy_result,
                         health_result,
                         attempt,
-                        max_attempts,
+                        absolute_max_attempts,
                         log_file_path,
                         health_check_log_path,
                     ):
@@ -442,7 +483,7 @@ class DeploymentAgent:
 
                 # Deployment failed - ask agent to analyze and fix
                 if not self._fix_with_agent(
-                    deploy_result, None, attempt, max_attempts, log_file_path
+                    deploy_result, None, attempt, absolute_max_attempts, log_file_path
                 ):
                     return False
 
@@ -633,7 +674,8 @@ Recent Output:
 
     def _extract_summary(self, response: str) -> Optional[str]:
         """Extract the summary from the agent's response using XML markers."""
-        match = re.search(r"<output_msg>(.*?)</output_msg>", response, re.DOTALL)
+        match = re.search(r"<output_msg>(.*?)</output_msg>",
+                          response, re.DOTALL)
         if match:
             return match.group(1).strip()
         return None
@@ -665,7 +707,8 @@ Recent Output:
             return False
 
         print(f"\n{'=' * 70}")
-        print(f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
+        print(
+            f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
         print(f"{'=' * 70}\n")
 
         # Prepare error context
@@ -735,7 +778,8 @@ Recent Output:
         context_parts = []
 
         if log_file_path:
-            context_parts.append(f"Full deployment logs available at: {log_file_path}")
+            context_parts.append(
+                f"Full deployment logs available at: {log_file_path}")
 
         if health_check_log_path:
             context_parts.append(
@@ -811,7 +855,8 @@ Recent Output:
         # Determine previous fix summary file path
         previous_summary_note = ""
         if attempt > 1:
-            prev_log_path = self.sds_dir / "logs" / f"fix_summary_{attempt - 1}.log"
+            prev_log_path = self.sds_dir / "logs" / \
+                f"fix_summary_{attempt - 1}.log"
             previous_summary_note = (
                 f"\n\nNote: This is attempt #{attempt}. "
                 f"You can read the summary of the previous fix attempt at:\n{prev_log_path}\n"
@@ -879,7 +924,7 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 
 If the deployment script uses Docker, you can run docker commands directly to inspect the container status and logs.
 
-Remember: The goal is to get the application deployed successfully. Be methodical and thorough."""
+Check for container abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs."""
 
         system_prompt = system_prompt.format(
             repo_path=self.repo_path, attempt=attempt, max_attempts=max_attempts
