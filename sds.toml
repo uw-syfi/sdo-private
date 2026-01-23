@@ -1,5 +1,5 @@
 [agent]
-provider = "gemini"
+provider = "opencode"
 # model = "gemini-3-pro"
 
 [operator]

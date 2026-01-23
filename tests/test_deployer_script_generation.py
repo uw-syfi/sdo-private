@@ -7,7 +7,10 @@ from app_operator.agents.deployer import generate_scripts, _analyze_repository
 class StubAgent:
     def __init__(self, responses=None):
         self.calls = []
-        self.responses = responses or ["#!/bin/bash\necho deploy", "#!/bin/bash\necho health"]
+        self.responses = responses or [
+            "#!/bin/bash\necho deploy",
+            "#!/bin/bash\necho health",
+        ]
         self.call_count = 0
 
     def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300) -> str:
@@ -43,24 +46,12 @@ def stub_agent():
     return StubAgent()
 
 
-def test_analyze_repository_detects_docker(tmp_path):
-    (tmp_path / "docker-compose.yml").touch()
-    (tmp_path / "Dockerfile").touch()
-
-    context = _analyze_repository(tmp_path)
-
-    assert "Found docker-compose.yml" in context
-    assert "Found Dockerfile" in context
-
-
-def test_analyze_repository_detects_k8s_and_languages(tmp_path):
-    (tmp_path / "k8s").mkdir()
+def test_analyze_repository_detects_languages(tmp_path):
     (tmp_path / "package.json").touch()
     (tmp_path / "go.mod").touch()
 
     context = _analyze_repository(tmp_path)
 
-    assert "Found Kubernetes manifests directory" in context
     assert "Found package.json" in context
     assert "Found go.mod" in context
 
@@ -78,12 +69,12 @@ def test_generate_scripts_creates_files(tmp_path, stub_agent):
     assert (repo / ".sds" / "health_check.sh").exists()
 
     # Verify content
-    assert (repo / ".sds" / "deploy.sh").read_text(encoding="utf-8") == "#!/bin/bash\necho deploy"
-    assert (
-        repo /
-        ".sds" /
-        "health_check.sh").read_text(
-        encoding="utf-8") == "#!/bin/bash\necho health"
+    assert (repo / ".sds" / "deploy.sh").read_text(
+        encoding="utf-8"
+    ) == "#!/bin/bash\necho deploy"
+    assert (repo / ".sds" / "health_check.sh").read_text(
+        encoding="utf-8"
+    ) == "#!/bin/bash\necho health"
 
 
 def test_generate_scripts_sends_correct_prompts(tmp_path, stub_agent):
@@ -98,13 +89,11 @@ def test_generate_scripts_sends_correct_prompts(tmp_path, stub_agent):
     # Check first call (deploy.sh)
     prompt1, cwd1, _ = stub_agent.calls[0]
     assert "deploy.sh" in prompt1
-    assert "Found docker-compose.yml" in prompt1
     assert cwd1 == str(repo)
 
     # Check second call (health_check.sh)
     prompt2, cwd2, _ = stub_agent.calls[1]
     assert "health_check.sh" in prompt2
-    assert "Found docker-compose.yml" in prompt2
     assert cwd2 == str(repo)
 
 

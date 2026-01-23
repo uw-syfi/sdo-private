@@ -124,9 +124,6 @@ Your task is to analyze a repository and generate two bash scripts:
 - For deploy.sh: Include start, stop, restart, status, logs, build, cleanup commands
 - For health_check.sh: Check containers, ports, endpoints, databases, performance metrics
 - Include summary reports and exit codes
-- Use docker compose commands if docker-compose.yml exists
-- Check for Kubernetes manifests if k8s/ directory exists
-- Adapt to the specific application type (microservices, monolith, etc.)
 
 ## DON'Ts:
 - Don't hardcode absolute paths (use SCRIPT_DIR and relative paths)
@@ -168,7 +165,7 @@ health_check.sh should include:
 
 ## Important:
 - Analyze the repository structure to understand the deployment method
-- Look for docker-compose.yml, Dockerfile, Kubernetes manifests, Makefile, etc.
+- Look for docker composer YAML file(s), Dockerfile, Kubernetes manifests, Makefile, etc. They may not be in the root directory or use these file names.
 - Identify the main application entry points and services
 - Determine health check endpoints and ports
 - Adapt the scripts to match the actual application architecture
@@ -181,16 +178,6 @@ def _analyze_repository(repo_path: Path) -> str:
     context_parts = []
 
     # Check for common deployment files
-    if (repo_path / "docker-compose.yml").exists():
-        context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
-    if (repo_path / "docker-compose.yaml").exists():
-        context_parts.append("- Found docker-compose.yaml (Docker Compose deployment)")
-    if (repo_path / "Dockerfile").exists():
-        context_parts.append("- Found Dockerfile (Docker-based application)")
-    if (repo_path / "k8s").exists() or (repo_path / "kubernetes").exists():
-        context_parts.append("- Found Kubernetes manifests directory")
-    if (repo_path / "Makefile").exists():
-        context_parts.append("- Found Makefile (may contain build/deploy targets)")
 
     # Check for common application files
     if (repo_path / "package.json").exists():
@@ -213,11 +200,13 @@ def _analyze_repository(repo_path: Path) -> str:
             f"- Found README file(s): {', '.join(f.name for f in readme_files)}"
         )
 
-    # List top-level directories
-    dirs = [d for d in repo_path.iterdir() if d.is_dir() and not d.name.startswith(".")]
-    if dirs:
-        dir_names = ", ".join(sorted([d.name for d in dirs[:10]]))  # Limit to 10
-        context_parts.append(f"- Top-level directories: {dir_names}")
+    # # List top-level directories
+    # dirs = [d for d in repo_path.iterdir() if d.is_dir()
+    #         and not d.name.startswith(".")]
+    # if dirs:
+    #     dir_names = ", ".join(
+    #         sorted([d.name for d in dirs[:10]]))  # Limit to 10
+    #     context_parts.append(f"- Top-level directories: {dir_names}")
 
     # Get repository name
     repo_name = repo_path.name
@@ -340,6 +329,33 @@ class DeploymentAgent:
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
 
+    def _get_next_attempt_number(self) -> int:
+        """Determine the next attempt number based on existing logs."""
+        logs_dir = self.sds_dir / "logs"
+        if not logs_dir.exists():
+            return 1
+
+        # Find all deploy logs
+        log_files = list(logs_dir.glob("deploy_attempt_*.log"))
+        if not log_files:
+            return 1
+
+        # Extract numbers
+        max_attempt = 0
+        for log_file in log_files:
+            try:
+                # filename format: deploy_attempt_{n}.log
+                name = log_file.stem  # deploy_attempt_{n}
+                parts = name.split("_")
+                if len(parts) >= 3 and parts[-1].isdigit():
+                    num = int(parts[-1])
+                    if num > max_attempt:
+                        max_attempt = num
+            except ValueError:
+                continue
+
+        return max_attempt + 1
+
     def run(
         self, max_attempts: int = 5, check_shutdown: Optional[Callable[[], bool]] = None
     ) -> bool:
@@ -372,13 +388,20 @@ class DeploymentAgent:
         else:
             print(f"✓ Found existing scripts in {self.sds_dir}")
 
+        # Determine start attempt based on existing logs
+        start_attempt = self._get_next_attempt_number()
+        end_of_range = start_attempt + max_attempts
+        absolute_max_attempts = end_of_range - 1
+
         # Step 2: Deploy with fixing
         print(f"\n{'=' * 70}")
         print("  Deploying Application with Error Fixing")
-        print(f"  Max attempts: {max_attempts}")
+        print(
+            f"  Max attempts: {max_attempts} (Starting from #{start_attempt}, up to #{absolute_max_attempts})"
+        )
         print(f"{'=' * 70}\n")
 
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(start_attempt, end_of_range):
             if check_shutdown and check_shutdown():
                 print("\nShutdown requested, aborting deployment")
                 return False
@@ -428,7 +451,7 @@ class DeploymentAgent:
                         deploy_result,
                         health_result,
                         attempt,
-                        max_attempts,
+                        absolute_max_attempts,
                         log_file_path,
                         health_check_log_path,
                     ):
@@ -440,7 +463,7 @@ class DeploymentAgent:
 
                 # Deployment failed - ask agent to analyze and fix
                 if not self._fix_with_agent(
-                    deploy_result, None, attempt, max_attempts, log_file_path
+                    deploy_result, None, attempt, absolute_max_attempts, log_file_path
                 ):
                     return False
 
@@ -683,11 +706,20 @@ Recent Output:
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
             start_time = time.time()
-            self.agent.generate(
+            response = self.agent.generate(
                 prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS
             )
             duration = time.time() - start_time
             print(f"Agent generation (fix) took {duration / 60:.2f} minutes")
+
+            # Extract summary and save to log
+            match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
+            if match:
+                summary_text = match.group(1).strip()
+                log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                log_file.write_text(summary_text)
+                print(f"  Saved fix summary to {log_file}")
 
             print(f"{'-' * 70}")
             print("\nAgent response received")
@@ -797,6 +829,18 @@ Recent Output:
         Returns:
             str: The prompt for the agent.
         """
+        # Determine previous fix summary file path
+        previous_summary_note = ""
+        if attempt > 1:
+            prev_log_path = self.sds_dir / "logs" / f"fix_summary_{attempt - 1}.log"
+            previous_summary_note = (
+                f"\n\nNote: This is attempt #{attempt}. "
+                f"You can read the summary of the previous fix attempt at:\n{prev_log_path}\n"
+                "The log files follow the pattern .sds/logs/fix_summary_{attempt}.log. "
+                "Please review the previous attempt to avoid repeating mistakes, and to check if the previous fix was successful."
+                "Note that the application may still be failing, but the it's now failing for a different reason."
+            )
+
         system_prompt = """You are an expert DevOps engineer debugging deployment issues.
 
 Your task is to analyze deployment errors and fix the deployment scripts.
@@ -847,12 +891,17 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - Describe the fix you're applying
 - Make the necessary changes to the scripts
 - Confirm the changes are complete
+- Output a brief summary of the fix wrapped in <summary></summary> tags.
+  - The summary must explicitly state:
+    1) what were the issue(s) found
+    2) what were your fix(es)
+  - Be concise but thorough in coverage.
 
 ## Deployment tooling
 
 If the deployment script uses Docker, you can run docker commands directly to inspect the container status and logs.
 
-Remember: The goal is to get the application deployed successfully. Be methodical and thorough."""
+Check for container abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs."""
 
         system_prompt = system_prompt.format(
             repo_path=self.repo_path, attempt=attempt, max_attempts=max_attempts
@@ -860,7 +909,7 @@ Remember: The goal is to get the application deployed successfully. Be methodica
 
         user_prompt = f"""The deployment has failed. Please analyze the error and fix the deployment scripts.
 
-{error_context}
+{error_context}{previous_summary_note}
 
 Please:
 1. Analyze what went wrong
