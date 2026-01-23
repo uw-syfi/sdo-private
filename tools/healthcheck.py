@@ -3,8 +3,12 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 
-def run_health_check(repo_path: Path, health_check_script: Path,
-                     timeout: int = 120, log_file_path: Optional[Path] = None) -> Dict[str, Any]:
+def run_health_check(
+    repo_path: Path,
+    health_check_script: Path,
+    timeout: int = 120,
+    log_file_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     """Run the health check script.
 
     Args:
@@ -33,7 +37,7 @@ def run_health_check(repo_path: Path, health_check_script: Path,
             cwd=str(repo_path),
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
         )
 
         status = "PASSED" if result.returncode == 0 else "FAILED"
@@ -61,22 +65,35 @@ def run_health_check(repo_path: Path, health_check_script: Path,
             "success": result.returncode == 0,
             "exit_code": result.returncode,
             "stdout": result.stdout,
-            "stderr": result.stderr
+            "stderr": result.stderr,
         }
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         error_msg = f"Health check timed out after {timeout} seconds"
+
+        # Capture partial output
+        stdout_output = e.stdout if e.stdout else ""
+        stderr_output = e.stderr if e.stderr else error_msg
+
         if log_file:
             try:
-                log_file.write("=== Health Check Error ===\n")
+                log_file.write("=== Health Check Timeout ===\n")
                 log_file.write(f"{error_msg}\n")
+                if stdout_output:
+                    log_file.write("=== STDOUT (Partial) ===\n")
+                    log_file.write(stdout_output)
+                    log_file.write("\n")
+                if stderr_output != error_msg and stderr_output:
+                    log_file.write("=== STDERR (Partial) ===\n")
+                    log_file.write(stderr_output)
+                    log_file.write("\n")
                 log_file.flush()
             except Exception:
                 pass
         return {
             "success": False,
             "exit_code": -1,
-            "stdout": "",
-            "stderr": error_msg
+            "stdout": stdout_output,
+            "stderr": stderr_output,
         }
     except Exception as e:
         error_msg = f"Failed to run health check: {e}"
@@ -87,12 +104,7 @@ def run_health_check(repo_path: Path, health_check_script: Path,
                 log_file.flush()
             except Exception:
                 pass
-        return {
-            "success": False,
-            "exit_code": -1,
-            "stdout": "",
-            "stderr": error_msg
-        }
+        return {"success": False, "exit_code": -1, "stdout": "", "stderr": error_msg}
     finally:
         if log_file:
             try:
