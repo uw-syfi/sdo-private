@@ -4,14 +4,16 @@ from app_operator.config import load_config, Config
 from .base import CodingAgent
 from .codex import CodexCodingAgent
 from .gemini import GeminiCodingAgent
+from .opencode import OpencodeCodingAgent
 from .claude import ClaudeCodeCodingAgent
 
 
 def create_agent_from_config(
-        target_dir: str,
-        model_override: Optional[str] = None,
-        config_path: Optional[str] = None,
-        config: Optional[Config] = None) -> CodingAgent:
+    target_dir: str,
+    model_override: Optional[str] = None,
+    config_path: Optional[str] = None,
+    config: Optional[Config] = None,
+) -> CodingAgent:
     """Create a coding agent based on configuration file.
 
     Looks for sds.toml or config.toml in the target directory, or uses the
@@ -40,6 +42,8 @@ def create_agent_from_config(
     provider_lower = provider.lower()
     if provider_lower == "gemini":
         return GeminiCodingAgent(model=model)
+    elif provider_lower == "opencode":
+        return OpencodeCodingAgent(model=model)
     elif provider_lower in ("claude", "claude-code"):
         return ClaudeCodeCodingAgent(model=model)
     else:
