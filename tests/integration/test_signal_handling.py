@@ -29,7 +29,7 @@ class TestSignalHandling:
         deploy_script.write_text(
             "#!/bin/bash\n"
             "echo 'Starting deployment...'\n"
-            "sleep 5\n"  # Run for 5 seconds
+            "sleep 2\n"  # Run for 2 seconds
             "echo 'Deployment complete'\n"
             "exit 0\n"
         )
@@ -37,11 +37,7 @@ class TestSignalHandling:
 
         # Create a health check script
         health_script = sds_dir / "health_check.sh"
-        health_script.write_text(
-            "#!/bin/bash\n"
-            "echo 'Health check passed'\n"
-            "exit 0\n"
-        )
+        health_script.write_text("#!/bin/bash\necho 'Health check passed'\nexit 0\n")
         health_script.chmod(0o755)
 
         agent = StubAgent()
@@ -53,7 +49,7 @@ class TestSignalHandling:
             agent=agent,
         )
 
-        # Run operator in a thread and send SIGINT after 1 second
+        # Run operator in a thread and send SIGINT after 0.5 second
         def run_operator():
             return operator.run()
 
@@ -67,7 +63,7 @@ class TestSignalHandling:
         thread.start()
 
         # Wait a bit then send SIGINT
-        time.sleep(1)
+        time.sleep(0.5)
         operator._shutdown_requested = True
 
         thread.join(timeout=10)
@@ -94,7 +90,7 @@ class TestSignalHandling:
 
         operator = AppOperator(
             str(repo),
-            health_check_interval=1,
+            health_check_interval=0.1,
             health_check_max_count=5,
             max_deployment_attempts=1,
             agent=stub_agent,
@@ -114,7 +110,7 @@ class TestSignalHandling:
         thread.start()
 
         # Let deployment complete, then request shutdown
-        time.sleep(2)
+        time.sleep(0.5)
         operator._shutdown_requested = True
 
         thread.join(timeout=10)

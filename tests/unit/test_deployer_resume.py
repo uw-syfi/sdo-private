@@ -58,7 +58,11 @@ def test_run_resumes_from_existing_attempts(agent, repo_path, monkeypatch):
     executed_attempts = []
 
     def fake_run_deploy(
-        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
     ):
         # Extract attempt number from log path
         if log_file_path:
@@ -93,7 +97,11 @@ def test_run_starts_fresh_without_logs(agent, monkeypatch):
     executed_attempts = []
 
     def fake_run_deploy(
-        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
     ):
         if log_file_path:
             name = log_file_path.stem

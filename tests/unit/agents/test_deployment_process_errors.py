@@ -39,14 +39,17 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         # Run with very short timeout
-        result = deployer.run_deploy_command("start", timeout=2)
+        result = deployer.run_deploy_command("start", timeout=0.5)
 
         # Should have timed out
         assert result["success"] is False
         assert result["exit_code"] == -1
 
         # Should have captured partial output
-        assert "Starting deployment" in result["stdout"] or "Starting deployment" in result["stderr"]
+        assert (
+            "Starting deployment" in result["stdout"]
+            or "Starting deployment" in result["stderr"]
+        )
         assert "timed out" in result["stderr"]
 
     def test_deployment_completes_just_before_timeout(self, tmp_path):
@@ -60,11 +63,7 @@ class TestDeploymentProcessTimeouts:
         # Create a deploy script that completes quickly
         deploy_script = sds_dir / "deploy.sh"
         deploy_script.write_text(
-            "#!/bin/bash\n"
-            "echo 'Quick deployment'\n"
-            "sleep 1\n"
-            "echo 'Done'\n"
-            "exit 0\n"
+            "#!/bin/bash\necho 'Quick deployment'\nsleep 0.2\necho 'Done'\nexit 0\n"
         )
         deploy_script.chmod(0o755)
 
@@ -72,7 +71,7 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         # Run with generous timeout
-        result = deployer.run_deploy_command("start", timeout=5)
+        result = deployer.run_deploy_command("start", timeout=1)
 
         # Should succeed
         assert result["success"] is True
@@ -91,9 +90,16 @@ class TestDeploymentProcessTimeouts:
         deploy_script = sds_dir / "deploy.sh"
         deploy_script.write_text(
             "#!/bin/bash\n"
-            "trap 'echo Caught signal; exit 1' TERM INT\n"
+            "handler() {\n"
+            "    echo 'Caught signal'\n"
+            '    if [ -n "$PID" ]; then kill $PID; fi\n'
+            "    exit 1\n"
+            "}\n"
+            "trap handler TERM INT\n"
             "echo 'Starting'\n"
-            "sleep 100\n"  # Long sleep
+            "sleep 100 &\n"
+            "PID=$!\n"
+            "wait $PID\n"
             "echo 'Should not reach here'\n"
         )
         deploy_script.chmod(0o755)
@@ -102,11 +108,11 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         start_time = time.time()
-        result = deployer.run_deploy_command("start", timeout=2)
+        result = deployer.run_deploy_command("start", timeout=0.5)
         elapsed = time.time() - start_time
 
         # Should have timed out quickly (not waited 100 seconds)
-        assert elapsed < 10  # Should be ~2 seconds + cleanup time
+        assert elapsed < 2  # Should be ~0.5 seconds + cleanup time
         assert result["success"] is False
 
     def test_deployment_with_zero_timeout_fails(self, tmp_path):
@@ -155,11 +161,11 @@ class TestHealthCheckProcessErrors:
 
         # Run with short timeout
         start_time = time.time()
-        result = run_health_check(repo, health_script, timeout=2)
+        result = run_health_check(repo, health_script, timeout=0.5)
         elapsed = time.time() - start_time
 
         # Should timeout quickly
-        assert elapsed < 10
+        assert elapsed < 2
         assert result["success"] is False
 
 
@@ -177,9 +183,7 @@ class TestProcessExecutionEdgeCases:
         # Script that fails with specific exit code
         deploy_script = sds_dir / "deploy.sh"
         deploy_script.write_text(
-            "#!/bin/bash\n"
-            "echo 'Failing with exit code 42'\n"
-            "exit 42\n"
+            "#!/bin/bash\necho 'Failing with exit code 42'\nexit 42\n"
         )
         deploy_script.chmod(0o755)
 
@@ -201,10 +205,7 @@ class TestProcessExecutionEdgeCases:
 
         deploy_script = sds_dir / "deploy.sh"
         deploy_script.write_text(
-            "#!/bin/bash\n"
-            "echo 'stdout message'\n"
-            "echo 'stderr message' >&2\n"
-            "exit 0\n"
+            "#!/bin/bash\necho 'stdout message'\necho 'stderr message' >&2\nexit 0\n"
         )
         deploy_script.chmod(0o755)
 
@@ -234,7 +235,10 @@ class TestProcessExecutionEdgeCases:
         result = deployer.run_deploy_command("start", timeout=5)
 
         assert result["success"] is False
-        assert "No such file" in result["stderr"] or "not found" in result["stderr"].lower()
+        assert (
+            "No such file" in result["stderr"]
+            or "not found" in result["stderr"].lower()
+        )
 
     def test_script_not_executable(self, tmp_path):
         """Script without execute permission should fail."""
@@ -256,4 +260,7 @@ class TestProcessExecutionEdgeCases:
 
         # Should fail with permission error
         assert result["success"] is False
-        assert "Permission denied" in result["stderr"] or "permission" in result["stderr"].lower()
+        assert (
+            "Permission denied" in result["stderr"]
+            or "permission" in result["stderr"].lower()
+        )
