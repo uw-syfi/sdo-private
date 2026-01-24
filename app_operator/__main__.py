@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from app_operator.commands import run
+from app_operator.commands import run, init_exp
 
 # Load environment variables from .env file
 load_dotenv()
@@ -70,12 +70,20 @@ Examples:
     )
     run.add_arguments(run_parser)
 
+    # 'init-exp' command
+    init_exp_parser = subparsers.add_parser(
+        "init-exp", help="Initialize a new experiment from an existing application"
+    )
+    init_exp.add_arguments(init_exp_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
     args = parser.parse_args()
     if args.command == "run":
         return run.run_command(args)
+    elif args.command == "init-exp":
+        return init_exp.run_command(args)
     else:
         parser.print_help()
         return 1

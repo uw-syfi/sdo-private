@@ -44,6 +44,8 @@ venv.bak/
 # pyenv
 .python-version
 
+exp
+
 # pytest
 .pytest_cache/
 .coverage
