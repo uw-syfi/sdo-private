@@ -6,6 +6,7 @@ import sys
 from dotenv import load_dotenv
 
 from app_operator.commands import run, init_exp
+from app_operator.logger import logger
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,8 +22,8 @@ def check_dependencies():
             missing.append(tool)
 
     if missing:
-        print(f"Error: Missing required system dependencies: {', '.join(missing)}")
-        print("Please install them to continue.")
+        logger.error(f"Missing required system dependencies: {', '.join(missing)}")
+        logger.info("Please install them to continue.")
         sys.exit(1)
 
     # Check if docker daemon is running
@@ -33,8 +34,8 @@ def check_dependencies():
             stderr=subprocess.DEVNULL,
         )
     except subprocess.CalledProcessError:
-        print("Error: Docker daemon is not running or not accessible.")
-        print("Please start Docker to continue.")
+        logger.error("Docker daemon is not running or not accessible.")
+        logger.info("Please start Docker to continue.")
         sys.exit(1)
 
 

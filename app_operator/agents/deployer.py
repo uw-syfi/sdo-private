@@ -1,5 +1,4 @@
 import os
-import sys
 import subprocess
 import time
 import threading
@@ -9,6 +8,7 @@ from typing import Optional, Callable, Dict, Any
 
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.logger import logger
 from tools.healthcheck import run_health_check
 from tools.trajectory import (
     Phase,
@@ -273,7 +273,7 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
         start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
-        print(f"Agent generation took {duration / 60:.2f} minutes")
+        logger.info(f"Agent generation took {duration / 60:.2f} minutes")
 
         deploy_script_path = Path(target_dir) / ".sds" / "deploy.sh"
         if deploy_script_path.exists():
@@ -324,7 +324,7 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
         start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
-        print(f"Agent generation took {duration / 60:.2f} minutes")
+        logger.info(f"Agent generation took {duration / 60:.2f} minutes")
 
         health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
         if health_check_script_path.exists():
@@ -402,22 +402,20 @@ class DeploymentAgent:
         """
         # Step 1: Ensure scripts exist
         if not (self.deploy_script.exists() and self.health_check_script.exists()):
-            print(f"\n{'=' * 70}")
-            print("  Generating Deployment Scripts")
-            print(f"{'=' * 70}\n")
-            print(
+            logger.info("Generating Deployment Scripts")
+            logger.info(
                 f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}..."
             )
 
             success, message = generate_scripts(str(self.repo_path), self.agent)
 
             if success:
-                print(f"✓ {message}")
+                logger.success(message)
             else:
-                print(f"✗ {message}", file=sys.stderr)
+                logger.error(message)
                 return False
         else:
-            print(f"✓ Found existing scripts in {self.sds_dir}")
+            logger.success(f"Found existing scripts in {self.sds_dir}")
 
         # Determine start attempt based on existing logs
         start_attempt = self._get_next_attempt_number()
@@ -425,19 +423,17 @@ class DeploymentAgent:
         absolute_max_attempts = end_of_range - 1
 
         # Step 2: Deploy with fixing
-        print(f"\n{'=' * 70}")
-        print("  Deploying Application with Error Fixing")
-        print(
-            f"  Max attempts: {max_attempts} (Starting from #{start_attempt}, up to #{absolute_max_attempts})"
+        logger.info("Deploying Application with Error Fixing")
+        logger.info(
+            f"Max attempts: {max_attempts} (Starting from #{start_attempt}, up to #{absolute_max_attempts})"
         )
-        print(f"{'=' * 70}\n")
 
         for attempt in range(start_attempt, end_of_range):
             if check_shutdown and check_shutdown():
-                print("\nShutdown requested, aborting deployment")
+                logger.info("Shutdown requested, aborting deployment")
                 return False
 
-            print(f"\n--- Deployment Attempt #{attempt} ---\n")
+            logger.info(f"--- Deployment Attempt #{attempt} ---")
 
             # Start deployment phase in trajectory
             record_phase_start(
@@ -468,7 +464,7 @@ class DeploymentAgent:
 
             # Check if deployment succeeded
             if deploy_result["success"]:
-                print("\n✓ Deployment script succeeded (exit code: 0)")
+                logger.success("Deployment script succeeded (exit code: 0)")
                 record_assistant_message(
                     "Deployment script executed successfully (exit code: 0)",
                     duration=deploy_duration,
@@ -500,10 +496,8 @@ class DeploymentAgent:
                 )
 
                 if health_result["success"]:
-                    print("✓ Health check passed (exit code: 0)")
-                    print(f"\n{'=' * 70}")
-                    print("  Deployment Successful!")
-                    print(f"{'=' * 70}\n")
+                    logger.success("Health check passed (exit code: 0)")
+                    logger.success("Deployment Successful!")
                     record_assistant_message(
                         "Health check passed. Deployment successful!"
                     )
@@ -511,7 +505,7 @@ class DeploymentAgent:
                     return True
                 else:
                     res = health_result["exit_code"]
-                    print(f"⚠ Health check failed (exit code: {res})")
+                    logger.warning(f"Health check failed (exit code: {res})")
                     record_assistant_message(
                         f"Health check failed (exit code: {res}). Analyzing errors..."
                     )
@@ -530,7 +524,7 @@ class DeploymentAgent:
                     record_phase_end("needs_retry")
             else:
                 res = deploy_result["exit_code"]
-                print(f"✗ Deployment script failed (exit code: {res})")
+                logger.error(f"Deployment script failed (exit code: {res})")
                 record_assistant_message(
                     f"Deployment script failed (exit code: {res}). Analyzing errors..."
                 )
@@ -561,7 +555,7 @@ class DeploymentAgent:
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
-        print(f"Running deployment script: {self.deploy_script} {command}")
+        logger.info(f"Running deployment script: {self.deploy_script} {command}")
 
         # Open log file if provided
         log_file = None
@@ -569,9 +563,9 @@ class DeploymentAgent:
         if log_file_path:
             try:
                 log_file = open(log_file_path, "w")
-                print(f"  Logging output to: {log_file_path}")
+                logger.info(f"Logging output to: {log_file_path}")
             except Exception as e:
-                print(f"Warning: Could not open log file {log_file_path}: {e}")
+                logger.warning(f"Could not open log file {log_file_path}: {e}")
 
         # Buffers to capture output
         stdout_lines = []
@@ -678,7 +672,7 @@ class DeploymentAgent:
             stderr_data = "".join(stderr_lines)
 
             status = "SUCCESS" if process.returncode == 0 else "FAILED"
-            print(
+            logger.info(
                 f"Deployment command '{command}' finished: {status} (Exit Code: {process.returncode})"
             )
 
@@ -723,7 +717,7 @@ Recent Output:
             response = self.agent.generate(prompt, silent=True, timeout=30)
             summary = self._extract_summary(response)
             if summary:
-                print(f"[{elapsed_time:.1f}s] ➜ {summary}")
+                logger.info(f"[{elapsed_time:.1f}s] ➜ {summary}")
         except Exception:
             # If summarization fails, just ignore it to not interrupt the flow
             pass
@@ -758,12 +752,10 @@ Recent Output:
             bool: True if agent suggested a fix and applied it.
         """
         if attempt >= max_attempts:
-            print(f"\n✗ Reached maximum attempts ({max_attempts}), giving up")
+            logger.error(f"Reached maximum attempts ({max_attempts}), giving up")
             return False
 
-        print(f"\n{'=' * 70}")
-        print(f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
-        print(f"{'=' * 70}\n")
+        logger.info(f"Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
 
         # Prepare error context
         error_context = self._prepare_error_context(
@@ -774,10 +766,9 @@ Recent Output:
         prompt = self._create_fix_prompt(error_context, attempt, max_attempts)
 
         try:
-            print(
+            logger.info(
                 f"Consulting {self.agent.__class__.__name__} to analyze and fix the issue..."
             )
-            print(f"{'-' * 70}")
 
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
@@ -786,7 +777,7 @@ Recent Output:
                 prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS
             )
             duration = time.time() - start_time
-            print(f"Agent generation (fix) took {duration / 60:.2f} minutes")
+            logger.info(f"Agent generation (fix) took {duration / 60:.2f} minutes")
 
             # Extract summary and save to log
             match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
@@ -795,20 +786,21 @@ Recent Output:
                 log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
                 log_file.parent.mkdir(parents=True, exist_ok=True)
                 log_file.write_text(summary_text)
-                print(f"  Saved fix summary to {log_file}")
+                logger.info(f"Saved fix summary to {log_file}")
 
-            print(f"{'-' * 70}")
-            print("\nAgent response received")
+            logger.info("Agent response received")
 
             # Agent should have modified the scripts directly
             # Just notify user and continue to next attempt
-            print("\n✓ Agent has analyzed the issue and may have modified the scripts")
-            print("  Proceeding to next deployment attempt...\n")
+            logger.success(
+                "Agent has analyzed the issue and may have modified the scripts"
+            )
+            logger.info("Proceeding to next deployment attempt...")
 
             return True
 
         except Exception as e:
-            print(f"✗ Agent failed to provide fix: {e}", file=sys.stderr)
+            logger.error(f"Agent failed to provide fix: {e}")
             record_assistant_message(f"Failed to provide fix: {e}")
             return False
 
