@@ -50,6 +50,35 @@ class AgentConfig:
 
 
 @dataclass
+class DeploymentConfig:
+    platform: str = "docker"
+    target: str = "local"
+
+    VALID_PLATFORMS = {"docker", "k8s"}
+    VALID_TARGETS = {"local", "remote"}
+
+    def __post_init__(self):
+        """Validate configuration values after initialization."""
+        if not isinstance(self.platform, str):
+            raise TypeError(f"platform must be str, got {type(self.platform).__name__}")
+        if self.platform not in self.VALID_PLATFORMS:
+            raise ValueError(
+                f"Invalid platform: '{self.platform}'. "
+                f"Valid platforms: {', '.join(sorted(self.VALID_PLATFORMS))}"
+            )
+
+        if not isinstance(self.target, str):
+            raise TypeError(f"target must be str, got {type(self.target).__name__}")
+        if self.target == "remote":
+            raise ValueError("Remote deployment is not currently supported")
+        if self.target not in self.VALID_TARGETS:
+            raise ValueError(
+                f"Invalid target: '{self.target}'. "
+                f"Valid targets: {', '.join(sorted(self.VALID_TARGETS))}"
+            )
+
+
+@dataclass
 class OperatorConfig:
     interval: int = 30
     monitoring_max_iters: int = 5
@@ -76,6 +105,7 @@ class OperatorConfig:
 class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     operator: OperatorConfig = field(default_factory=OperatorConfig)
+    deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
 
     @staticmethod
     def _validate_fields(
@@ -98,7 +128,7 @@ class Config:
     @classmethod
     def from_dict(cls, data: dict) -> "Config":
         # Validate top-level sections
-        recognized_sections = {"agent", "operator"}
+        recognized_sections = {"agent", "operator", "deployment"}
         unrecognized_sections = set(data.keys()) - recognized_sections
         if unrecognized_sections:
             raise UnrecognizedSectionError(
@@ -110,12 +140,16 @@ class Config:
         # Extract and validate section data
         agent_data = data.get("agent", {})
         operator_data = data.get("operator", {})
+        deployment_data = data.get("deployment", {})
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
+        cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
 
         return cls(
-            agent=AgentConfig(**agent_data), operator=OperatorConfig(**operator_data)
+            agent=AgentConfig(**agent_data),
+            operator=OperatorConfig(**operator_data),
+            deployment=DeploymentConfig(**deployment_data),
         )
 
 
@@ -137,6 +171,8 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
         # Determine project root (where this package is installed/located)
         project_root = Path(__file__).resolve().parent.parent
         config_files = [
+            target_path / ".sds" / "config.toml",
+            target_path / ".sds" / "sds.toml",
             target_path / "sds.toml",
             target_path / "config.toml",
             project_root / "sds.toml",

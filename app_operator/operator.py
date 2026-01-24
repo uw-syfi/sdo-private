@@ -8,6 +8,7 @@ from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
+from app_operator.config import load_config, Config
 from tools.trajectory import init_trajectory, finalize_trajectory
 
 
@@ -28,6 +29,7 @@ class AppOperator:
         max_deployment_attempts: int = 5,
         agent: Optional[CodingAgent] = None,
         filesystem: Optional[FileSystemInterface] = None,
+        config: Optional[Config] = None,
     ):
         """Initialize the application operator.
 
@@ -38,6 +40,7 @@ class AppOperator:
             max_deployment_attempts: Maximum deployment attempts (default: 5).
             agent: Optional coding agent to use. If None, creates one from config.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+            config: Optional configuration object.
         """
         self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval
@@ -51,17 +54,29 @@ class AppOperator:
         if not self.filesystem.is_dir(self.repo_path):
             raise ValueError(f"Repository path is not a directory: {repo_path}")
 
+        # Initialize config if not provided
+        if config is None:
+            self.config = load_config(str(self.repo_path))
+        else:
+            self.config = config
+
+        self.sds_dir = self.repo_path / ".sds"
+
+        # Persist deployment configuration
+        self._persist_deployment_config()
+
         # Initialize agent if not provided
         if agent is None:
             try:
-                self.agent = create_agent_from_config(str(self.repo_path))
+                self.agent = create_agent_from_config(
+                    str(self.repo_path), config=self.config
+                )
             except RuntimeError as e:
                 # Fallback or error if no default agent can be created
                 raise RuntimeError(f"Failed to initialize default coding agent: {e}")
         else:
             self.agent = agent
 
-        self.sds_dir = self.repo_path / ".sds"
         self._shutdown_requested = False
         self._deployed = False
 
@@ -72,6 +87,25 @@ class AppOperator:
         # Initialize trajectory recorder
         self.trajectory = init_trajectory(self.repo_path)
         self.trajectory.set_agent_name(self.agent.__class__.__name__)
+
+    def _persist_deployment_config(self):
+        """Persist deployment preference to .sds/config.toml."""
+        if not self.filesystem.exists(self.sds_dir):
+            self.filesystem.mkdir(self.sds_dir)
+
+        sds_config_path = self.sds_dir / "config.toml"
+
+        # We only write if the file doesn't exist to avoid overwriting user edits,
+        # ensuring we respect existing preferences if present (which would be loaded).
+        # If not present, we create it to track the current preference.
+        if not self.filesystem.exists(sds_config_path):
+            logger.info(f"Creating deployment config at {sds_config_path}")
+            config_content = (
+                "[deployment]\n"
+                f'platform = "{self.config.deployment.platform}"\n'
+                f'target = "{self.config.deployment.target}"\n'
+            )
+            self.filesystem.write_text(sds_config_path, config_content)
 
     def run(self) -> int:
         """Main entry point for application operation.
@@ -87,6 +121,8 @@ class AppOperator:
             logger.info("Starting App Operator Mode")
             logger.info(f"Repository: {self.repo_path}")
             logger.info(f"Agent: {self.agent.__class__.__name__}")
+            logger.info(f"Deployment Platform: {self.config.deployment.platform}")
+            logger.info(f"Deployment Target: {self.config.deployment.target}")
 
             # Step 1: Deploy with automatic error fixing (includes script
             # generation)

@@ -139,9 +139,7 @@ class InMemoryFilesystem(FileSystemInterface):
         Args:
             path: The path that should fail with permission error.
         """
-        self.should_fail[str(path)] = PermissionError(
-            f"Permission denied: '{path}'"
-        )
+        self.should_fail[str(path)] = PermissionError(f"Permission denied: '{path}'")
 
     def simulate_disk_full(self, path: Path):
         """Configure the filesystem to raise disk full error for a path.
@@ -149,9 +147,7 @@ class InMemoryFilesystem(FileSystemInterface):
         Args:
             path: The path that should fail with disk full error.
         """
-        self.should_fail[str(path)] = OSError(
-            f"No space left on device: '{path}'"
-        )
+        self.should_fail[str(path)] = OSError(f"No space left on device: '{path}'")
 
     def simulate_readonly(self, path: Path):
         """Configure the filesystem to be read-only for a path.
@@ -159,9 +155,7 @@ class InMemoryFilesystem(FileSystemInterface):
         Args:
             path: The path that should fail with read-only error.
         """
-        self.should_fail[str(path)] = OSError(
-            f"Read-only file system: '{path}'"
-        )
+        self.should_fail[str(path)] = OSError(f"Read-only file system: '{path}'")
 
     def clear_failures(self):
         """Clear all simulated failures."""
@@ -200,6 +194,8 @@ class InMemoryFilesystem(FileSystemInterface):
             to_create = []
             while str(current) != "." and str(current) not in self.directories:
                 to_create.append(str(current))
+                if current == current.parent:
+                    break
                 current = current.parent
             for dir_path in reversed(to_create):
                 self.directories.add(dir_path)
