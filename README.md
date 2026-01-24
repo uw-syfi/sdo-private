@@ -141,3 +141,32 @@ Initialize a new experiment from an existing application.
 - `APP_PATH`: Path to the source application directory
 - `EXP_NAME`: Name of the new experiment
 
+### AI-Assisted Contribution Workflow
+
+SDS supports AI-assisted contributions using coding agent skills (currently available in Claude, Gemini, and Opencode agents).
+
+**Workflow:**
+
+1. **Create a branch**: Use the `git-branch` skill to create a new feature branch
+2. **Make commits**: Use the `git-commit` skill to create commits with AI-generated messages
+3. **Prepare PR**: Use the `pr-prepare` skill to generate a comprehensive PR description
+4. **Open PR**: Create a merge request on GitLab with the generated content
+
+**Example:**
+
+```bash
+# In Claude (use "/" prefix):
+/git-branch "add monitoring alerts"
+# ... edit files ...
+/git-commit
+/pr-prepare  # Automatically pushes branch to remote
+
+# In opencode or gemini-cli (no "/" prefix needed):
+git-branch "add monitoring alerts"
+# ... edit files ...
+git-commit
+pr-prepare  # Automatically pushes branch to remote
+
+# Then create MR on GitLab using the generated title and description
+```
+
