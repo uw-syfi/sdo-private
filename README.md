@@ -73,6 +73,10 @@ model = "gpt-4o-mini" # optional
 interval = 30 # Health check interval in seconds (default: 30)
 monitoring_max_iters = 5 # Maximum number of health monitoring iterations (default: 5)
 deployment_max_iters = 5 # Maximum deployment attempts (default: 5)
+
+[deployment]
+platform = "docker" # Deployment platform: "docker" or "k8s" (default: "docker")
+target = "local"    # Deployment target: "local" or "remote" (default: "local")
 ```
 
 ### Experiment Workflow
