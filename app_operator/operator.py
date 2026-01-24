@@ -7,6 +7,7 @@ from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
+from tools.trajectory import init_trajectory, finalize_trajectory
 
 
 class AppOperator:
@@ -40,6 +41,12 @@ class AppOperator:
         self.health_check_max_count = health_check_max_count
         self.max_deployment_attempts = max_deployment_attempts
 
+        # Validate repository path
+        if not self.repo_path.exists():
+            raise ValueError(f"Repository path does not exist: {repo_path}")
+        if not self.repo_path.is_dir():
+            raise ValueError(f"Repository path is not a directory: {repo_path}")
+
         # Initialize agent if not provided
         if agent is None:
             try:
@@ -58,11 +65,9 @@ class AppOperator:
         self.deployer = DeploymentAgent(self.repo_path, self.agent)
         self.monitor = AppMonitor(self.repo_path, self.agent)
 
-        # Validate repository path
-        if not self.repo_path.exists():
-            raise ValueError(f"Repository path does not exist: {repo_path}")
-        if not self.repo_path.is_dir():
-            raise ValueError(f"Repository path is not a directory: {repo_path}")
+        # Initialize trajectory recorder
+        self.trajectory = init_trajectory(self.repo_path)
+        self.trajectory.set_agent_name(self.agent.__class__.__name__)
 
     def run(self) -> int:
         """Main entry point for application operation.
@@ -117,6 +122,7 @@ class AppOperator:
             return 1
         finally:
             self._cleanup()
+            finalize_trajectory("completed" if self._deployed else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame):
         """Handle shutdown signals (SIGINT, SIGTERM).

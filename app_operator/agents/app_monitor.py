@@ -9,6 +9,13 @@ from typing import Optional, Callable, Dict, Any, List
 
 from app_operator.agent_cli.base import CodingAgent
 from tools.healthcheck import run_health_check
+from tools.trajectory import (
+    Phase,
+    record_phase_start,
+    record_phase_end,
+    record_assistant_message,
+    record_tool_call,
+)
 
 
 class MonitoringTask(ABC):
@@ -38,20 +45,36 @@ class HealthCheckTask(MonitoringTask):
         Args:
             monitor: The AppMonitor instance.
         """
-        health_result = run_health_check(
-            monitor.repo_path, monitor.health_check_script)
+        # Start monitoring phase in trajectory
+        record_phase_start(Phase.MONITORING, {"cycle": monitor.check_count})
+
+        # Run health check
+        start_time = time.time()
+        health_result = run_health_check(monitor.repo_path, monitor.health_check_script)
+        duration = time.time() - start_time
+
+        # Record health check tool call
+        record_tool_call(
+            tool="bash",
+            args={"script": ".sds/health_check.sh"},
+            stdout=health_result.get("stdout", ""),
+            stderr=health_result.get("stderr", ""),
+            exit_code=int(health_result.get("exit_code", -1) or -1),
+            duration=duration,
+        )
+
         self.analyze(monitor, health_result)
 
     def analyze(self, monitor: Any, health_result: Dict[str, Any]) -> None:
         """Analyze health check results using the agent."""
-        print(f"\n{'-'*70}")
+        print(f"\n{'-' * 70}")
         print(
-            f"  Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results")
-        print(f"{'-'*70}\n")
+            f"  Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results"
+        )
+        print(f"{'-' * 70}\n")
 
         # Prepare health check context
-        context = self._prepare_health_context(
-            health_result, monitor.check_count)
+        context = self._prepare_health_context(health_result, monitor.check_count)
 
         # Create analysis prompt
         prompt = self._create_analysis_prompt(context, monitor.repo_path)
@@ -60,17 +83,18 @@ class HealthCheckTask(MonitoringTask):
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             # Ensure log directory exists
             monitor.log_dir.mkdir(parents=True, exist_ok=True)
-            log_file = monitor.log_dir / \
-                f"check_{monitor.check_count}_{timestamp}.log"
+            log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
 
             print(
-                f"Consulting {monitor.agent.__class__.__name__} for health analysis...")
+                f"Consulting {monitor.agent.__class__.__name__} for health analysis..."
+            )
 
             # Run agent and redirect its output to the log file
             with open(log_file, "w") as f:
                 with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
                     response = monitor.agent.generate(
-                        prompt, cwd=str(monitor.repo_path), timeout=120)
+                        prompt, cwd=str(monitor.repo_path), timeout=120
+                    )
 
                 # Explicitly write the response to the log file
                 f.write("\n\n=== Agent Analysis ===\n")
@@ -78,49 +102,52 @@ class HealthCheckTask(MonitoringTask):
 
             # Extract executive summary
             match = re.search(
-                r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
+                r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL
+            )
             if match:
                 summary = match.group(1).strip()
                 print(f"\nSummary: {summary}")
             else:
                 print(
-                    "\nSummary not found in expected XML format. See log for full analysis.")
+                    "\nSummary not found in expected XML format. See log for full analysis."
+                )
 
             print(f"\nFull analysis saved to: {log_file}")
 
+            # End the monitoring phase
+            record_phase_end("completed")
+
         except Exception as e:
             print(f"✗ Agent analysis failed: {e}", file=sys.stderr)
+            record_assistant_message(f"Analysis failed: {e}")
+            record_phase_end("failed")
 
-    def _prepare_health_context(
-            self,
-            health_result: dict, check_count: int) -> str:
+    def _prepare_health_context(self, health_result: dict, check_count: int) -> str:
         """Prepare health check context for analysis."""
         context_parts = []
 
         context_parts.append(f"## Health Check #{check_count}")
         context_parts.append(f"Exit Code: {health_result['exit_code']}")
         context_parts.append(
-            f"Status: {'PASSED' if health_result['success'] else 'FAILED'}")
-        context_parts.append(
-            f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            f"Status: {'PASSED' if health_result['success'] else 'FAILED'}"
+        )
+        context_parts.append(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        if health_result['stdout']:
+        if health_result["stdout"]:
             context_parts.append("\n### Output:")
-            stdout = health_result['stdout']
+            stdout = health_result["stdout"]
             # For health checks, include more output (up to 5000 chars)
             if len(stdout) > 5000:
                 stdout = stdout[-5000:]
-                context_parts.append(
-                    "... (truncated, showing last 5000 chars)")
+                context_parts.append("... (truncated, showing last 5000 chars)")
             context_parts.append(stdout)
 
-        if health_result['stderr']:
+        if health_result["stderr"]:
             context_parts.append("\n### Errors:")
-            stderr = health_result['stderr']
+            stderr = health_result["stderr"]
             if len(stderr) > 2000:
                 stderr = stderr[-2000:]
-                context_parts.append(
-                    "... (truncated, showing last 2000 chars)")
+                context_parts.append("... (truncated, showing last 2000 chars)")
             context_parts.append(stderr)
 
         return "\n".join(context_parts)
@@ -223,9 +250,12 @@ class AppMonitor:
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
         self.log_dir = self.repo_path / ".sds" / "logs" / "monitor"
 
-    def run(self, interval: int = 30,
-            max_checks: Optional[int] = None,
-            check_shutdown: Optional[Callable[[], bool]] = None):
+    def run(
+        self,
+        interval: int = 30,
+        max_checks: Optional[int] = None,
+        check_shutdown: Optional[Callable[[], bool]] = None,
+    ):
         """Monitor application health and provide agent analysis every interval.
 
         Args:
@@ -234,7 +264,8 @@ class AppMonitor:
             check_shutdown: Callable returning True if shutdown requested.
         """
         print(
-            f"\nStarting application monitoring (interval: {interval}s, max_checks: {max_checks if max_checks else 'unlimited'})...")
+            f"\nStarting application monitoring (interval: {interval}s, max_checks: {max_checks if max_checks else 'unlimited'})..."
+        )
 
         # Clear log directory on startup
         if self.log_dir.exists():
@@ -246,7 +277,8 @@ class AppMonitor:
         while not (check_shutdown and check_shutdown()):
             if max_checks is not None and self.check_count >= max_checks:
                 print(
-                    f"\nReached maximum number of checks ({max_checks}). Stopping monitor.")
+                    f"\nReached maximum number of checks ({max_checks}). Stopping monitor."
+                )
                 break
 
             # Wait for interval
@@ -257,9 +289,9 @@ class AppMonitor:
 
             self.check_count += 1
 
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print(f"  Monitoring Cycle #{self.check_count}")
-            print(f"{'='*70}\n")
+            print(f"{'=' * 70}\n")
 
             # Run all registered monitoring tasks
             for task in self.monitoring_tasks:
