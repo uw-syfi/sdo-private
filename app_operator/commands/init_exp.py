@@ -52,9 +52,12 @@ def run_command(args: argparse.Namespace) -> int:
         shutil.copytree(app_path, target_path)
 
         # Remove git history
-        git_dir = target_path / ".git"
-        if git_dir.exists():
-            shutil.rmtree(git_dir, ignore_errors=True)
+        git_path = target_path / ".git"
+        if git_path.exists():
+            if git_path.is_dir():
+                shutil.rmtree(git_path, ignore_errors=True)
+            else:
+                git_path.unlink()
 
         # Remove .sds directory if it exists
         sds_dir = target_path / ".sds"

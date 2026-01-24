@@ -111,6 +111,7 @@ The operator uses specialized agents to manage the application lifecycle:
 
 *   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs.
 *   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
+*   **When fixing bugs:** Think of how to write test(s) to reproduce the issue first and then use them to verify your fix. The test should be part of your fix. If you cannot do so, you must defend your decision.
 
 ## Notes from the developers
 
