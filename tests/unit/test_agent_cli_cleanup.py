@@ -604,17 +604,12 @@ def test_factory_creates_all_agent_types(mock_which):
 
 
 def test_factory_defaults_to_codex(mock_which):
-    """Test factory defaults to Codex if provider not recognized."""
-    from app_operator.agent_cli.factory import create_agent_from_config
+    """Test that invalid provider raises ValueError with validation."""
     from app_operator.config import Config, AgentConfig, OperatorConfig
 
-    with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-
-            config = Config(
-                agent=AgentConfig(provider="unknown_provider"),
-                operator=OperatorConfig(),
-            )
-            agent = create_agent_from_config("/tmp", config=config)
-            assert isinstance(agent, CodexCodingAgent)
+    # With the new validation, invalid providers should raise ValueError
+    with pytest.raises(ValueError, match="Invalid provider"):
+        Config(
+            agent=AgentConfig(provider="unknown_provider"),
+            operator=OperatorConfig(),
+        )
