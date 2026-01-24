@@ -1,6 +1,5 @@
 from typing import Optional, List
 import json
-import sys
 import time
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
@@ -30,10 +29,9 @@ class GeminiGenerationSession(CLIGenerationSession):
             # Fallback for non-JSON lines (e.g. YOLO warnings)
             if not self.silent:
                 if self._at_line_start:
-                    sys.stdout.write(f"{self.log_prefix} ")
-                sys.stdout.write(line.rstrip() + "\n")
+                    self._log_raw(f"{self.log_prefix} ")
+                self._log_raw(line.rstrip() + "\n")
                 self._at_line_start = True
-                sys.stdout.flush()
 
     def _handle_event(self, event: GeminiEvent):
         """Handle a single parsed Gemini event."""
@@ -82,14 +80,13 @@ class GeminiGenerationSession(CLIGenerationSession):
 
         # Ensure we start block events on a new line
         if not self._at_line_start:
-            sys.stdout.write("\n")
+            self._log_raw("\n")
             self._at_line_start = True
 
         # Render and print
         output = event.render(self.log_prefix)
         if output:
-            print(output)
-            sys.stdout.flush()
+            self._log_raw(output + "\n")
 
     def _print_stream_content(self, content: str):
         """Print streaming content with prefix handling."""
@@ -104,17 +101,15 @@ class GeminiGenerationSession(CLIGenerationSession):
             if is_last:
                 if line:
                     if self._at_line_start:
-                        sys.stdout.write(f"{self.log_prefix} ")
+                        self._log_raw(f"{self.log_prefix} ")
                         self._at_line_start = False
-                    sys.stdout.write(line)
+                    self._log_raw(line)
             else:
                 if self._at_line_start:
-                    sys.stdout.write(f"{self.log_prefix} ")
-                sys.stdout.write(line)
-                sys.stdout.write("\n")
+                    self._log_raw(f"{self.log_prefix} ")
+                self._log_raw(line)
+                self._log_raw("\n")
                 self._at_line_start = True
-
-        sys.stdout.flush()
 
 
 class GeminiCodingAgent(CLICodingAgent):
@@ -164,6 +159,7 @@ class GeminiCodingAgent(CLICodingAgent):
             env=self.env,
             log_prefix=self._log_prefix,
             cmd=cmd,
+            logger=self.logger,
             cwd=cwd,
             timeout=timeout,
             silent=silent,

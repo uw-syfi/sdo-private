@@ -5,21 +5,25 @@ except ImportError:
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field, fields
-import sys
+
+from app_operator.logger import logger
 
 
 class ConfigError(Exception):
     """Base exception for configuration errors."""
+
     pass
 
 
 class UnrecognizedSectionError(ConfigError):
     """Raised when an unrecognized section is found in the config file."""
+
     pass
 
 
 class UnrecognizedFieldError(ConfigError):
     """Raised when an unrecognized field is found in a recognized section."""
+
     pass
 
 
@@ -33,9 +37,7 @@ class AgentConfig:
     def __post_init__(self):
         """Validate configuration values after initialization."""
         if not isinstance(self.provider, str):
-            raise TypeError(
-                f"provider must be str, got {type(self.provider).__name__}"
-            )
+            raise TypeError(f"provider must be str, got {type(self.provider).__name__}")
         if self.provider.lower() not in self.VALID_PROVIDERS:
             raise ValueError(
                 f"Invalid provider: '{self.provider}'. "
@@ -56,22 +58,16 @@ class OperatorConfig:
     def __post_init__(self):
         """Validate configuration values after initialization."""
         if not isinstance(self.interval, int):
-            raise TypeError(
-                f"interval must be int, got {type(self.interval).__name__}"
-            )
+            raise TypeError(f"interval must be int, got {type(self.interval).__name__}")
         if self.interval <= 0:
             raise ValueError(f"interval must be positive, got {self.interval}")
         if self.interval > 86400:
-            raise ValueError(
-                f"interval too large: {self.interval}s (max: 86400s/24h)"
-            )
+            raise ValueError(f"interval too large: {self.interval}s (max: 86400s/24h)")
 
-        for field_name in ['monitoring_max_iters', 'deployment_max_iters']:
+        for field_name in ["monitoring_max_iters", "deployment_max_iters"]:
             value = getattr(self, field_name)
             if not isinstance(value, int):
-                raise TypeError(
-                    f"{field_name} must be int, got {type(value).__name__}"
-                )
+                raise TypeError(f"{field_name} must be int, got {type(value).__name__}")
             if value <= 0:
                 raise ValueError(f"{field_name} must be positive, got {value}")
 
@@ -83,9 +79,7 @@ class Config:
 
     @staticmethod
     def _validate_fields(
-        section_data: dict,
-        section_name: str,
-        config_class: type
+        section_data: dict, section_name: str, config_class: type
     ) -> None:
         """Validate that all fields in a section are recognized."""
         if not section_data:
@@ -121,8 +115,7 @@ class Config:
         cls._validate_fields(operator_data, "operator", OperatorConfig)
 
         return cls(
-            agent=AgentConfig(**agent_data),
-            operator=OperatorConfig(**operator_data)
+            agent=AgentConfig(**agent_data), operator=OperatorConfig(**operator_data)
         )
 
 
@@ -146,7 +139,7 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
         config_files = [
             target_path / "sds.toml",
             target_path / "config.toml",
-            project_root / "sds.toml"
+            project_root / "sds.toml",
         ]
 
     for config_file in config_files:
@@ -154,14 +147,12 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
             try:
                 with open(config_file, "rb") as f:
                     data = tomllib.load(f)
-                    print(f"Loaded configuration from {config_file}")
+                    logger.info(f"Loaded configuration from {config_file}")
                     return Config.from_dict(data)
             except (ConfigError, TypeError):
                 # Re-raise config validation errors and TypeError from dataclass
                 raise
             except Exception as e:
-                print(
-                    f"Warning: Failed to parse {config_file}: {e}",
-                    file=sys.stderr)
+                logger.warning(f"Warning: Failed to parse {config_file}: {e}")
 
     return Config()
