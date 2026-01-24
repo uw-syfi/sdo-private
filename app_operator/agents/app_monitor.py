@@ -1,4 +1,3 @@
-import sys
 import time
 import re
 import shutil
@@ -8,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
 
 from app_operator.agent_cli.base import CodingAgent
+from app_operator.logger import logger
 from tools.healthcheck import run_health_check
 from tools.trajectory import (
     Phase,
@@ -67,11 +67,9 @@ class HealthCheckTask(MonitoringTask):
 
     def analyze(self, monitor: Any, health_result: Dict[str, Any]) -> None:
         """Analyze health check results using the agent."""
-        print(f"\n{'-' * 70}")
-        print(
-            f"  Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results"
+        logger.info(
+            f"Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results"
         )
-        print(f"{'-' * 70}\n")
 
         # Prepare health check context
         context = self._prepare_health_context(health_result, monitor.check_count)
@@ -85,7 +83,7 @@ class HealthCheckTask(MonitoringTask):
             monitor.log_dir.mkdir(parents=True, exist_ok=True)
             log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
 
-            print(
+            logger.info(
                 f"Consulting {monitor.agent.__class__.__name__} for health analysis..."
             )
 
@@ -106,19 +104,19 @@ class HealthCheckTask(MonitoringTask):
             )
             if match:
                 summary = match.group(1).strip()
-                print(f"\nSummary: {summary}")
+                logger.info(f"Summary: {summary}")
             else:
-                print(
-                    "\nSummary not found in expected XML format. See log for full analysis."
+                logger.warning(
+                    "Summary not found in expected XML format. See log for full analysis."
                 )
 
-            print(f"\nFull analysis saved to: {log_file}")
+            logger.info(f"Full analysis saved to: {log_file}")
 
             # End the monitoring phase
             record_phase_end("completed")
 
         except Exception as e:
-            print(f"✗ Agent analysis failed: {e}", file=sys.stderr)
+            logger.error(f"Agent analysis failed: {e}")
             record_assistant_message(f"Analysis failed: {e}")
             record_phase_end("failed")
 
@@ -263,8 +261,8 @@ class AppMonitor:
             max_checks: Maximum number of monitoring cycles. If None, runs indefinitely.
             check_shutdown: Callable returning True if shutdown requested.
         """
-        print(
-            f"\nStarting application monitoring (interval: {interval}s, max_checks: {max_checks if max_checks else 'unlimited'})..."
+        logger.info(
+            f"Starting application monitoring (interval: {interval}s, max_checks: {max_checks if max_checks else 'unlimited'})..."
         )
 
         # Clear log directory on startup
@@ -276,8 +274,8 @@ class AppMonitor:
 
         while not (check_shutdown and check_shutdown()):
             if max_checks is not None and self.check_count >= max_checks:
-                print(
-                    f"\nReached maximum number of checks ({max_checks}). Stopping monitor."
+                logger.info(
+                    f"Reached maximum number of checks ({max_checks}). Stopping monitor."
                 )
                 break
 
@@ -289,9 +287,7 @@ class AppMonitor:
 
             self.check_count += 1
 
-            print(f"\n{'=' * 70}")
-            print(f"  Monitoring Cycle #{self.check_count}")
-            print(f"{'=' * 70}\n")
+            logger.info(f"Monitoring Cycle #{self.check_count}")
 
             # Run all registered monitoring tasks
             for task in self.monitoring_tasks:

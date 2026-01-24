@@ -1,5 +1,4 @@
 import signal
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -7,6 +6,7 @@ from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
+from app_operator.logger import logger
 from tools.trajectory import init_trajectory, finalize_trajectory
 
 
@@ -80,11 +80,9 @@ class AppOperator:
         signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
         try:
-            print(f"\n{'=' * 70}")
-            print("  App Operator Mode")
-            print(f"  Repository: {self.repo_path}")
-            print(f"  Agent: {self.agent.__class__.__name__}")
-            print(f"{'=' * 70}\n")
+            logger.info("Starting App Operator Mode")
+            logger.info(f"Repository: {self.repo_path}")
+            logger.info(f"Agent: {self.agent.__class__.__name__}")
 
             # Step 1: Deploy with automatic error fixing (includes script
             # generation)
@@ -92,10 +90,7 @@ class AppOperator:
                 max_attempts=self.max_deployment_attempts,
                 check_shutdown=lambda: self._shutdown_requested,
             ):
-                print(
-                    "\n✗ Failed to deploy application after multiple attempts",
-                    file=sys.stderr,
-                )
+                logger.error("Failed to deploy application after multiple attempts")
                 return 1
 
             self._deployed = True
@@ -111,11 +106,11 @@ class AppOperator:
 
         except KeyboardInterrupt:
             # Graceful shutdown initiated by signal handler
-            print("\nShutting down due to interrupt...")
+            logger.info("Shutting down due to interrupt...")
             return 1
 
         except Exception as e:
-            print(f"\n✗ Unexpected error: {e}", file=sys.stderr)
+            logger.error(f"Unexpected error: {e}")
             import traceback
 
             traceback.print_exc()
@@ -134,7 +129,9 @@ class AppOperator:
         if not self._shutdown_requested:
             self._shutdown_requested = True
             signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
-            print(f"\n\nReceived {signal_name} signal. Initiating graceful shutdown...")
+            logger.info(
+                f"Received {signal_name} signal. Initiating graceful shutdown..."
+            )
 
             # Re-raise KeyboardInterrupt to interrupt blocking calls
             if signum == signal.SIGINT:
@@ -145,26 +142,19 @@ class AppOperator:
         if not self._deployed:
             return
 
-        print(f"\n{'=' * 70}")
-        print("  Shutting Down Application")
-        print(f"{'=' * 70}\n")
+        logger.info("Shutting Down Application")
 
-        print("Running deployment script stop command...")
+        logger.info("Running deployment script stop command...")
 
         try:
             # Use deployer to stop
             result = self.deployer.run_deploy_command("stop", timeout=120)
 
             if result["success"]:
-                print("✓ Application stopped successfully")
+                logger.success("Application stopped successfully")
             else:
-                print(
-                    f"⚠ Stop command exited with code {result['exit_code']}",
-                    file=sys.stderr,
-                )
+                logger.warning(f"Stop command exited with code {result['exit_code']}")
         except Exception as e:
-            print(f"✗ Error during shutdown: {e}", file=sys.stderr)
+            logger.error(f"Error during shutdown: {e}")
 
-        print(f"\n{'=' * 70}")
-        print("  Shutdown Complete")
-        print(f"{'=' * 70}\n")
+        logger.info("Shutdown Complete")

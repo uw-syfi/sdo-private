@@ -5,9 +5,10 @@ from app_operator.__main__ import check_dependencies, REQUIRED_DEPENDENCIES
 
 def test_check_dependencies_success():
     """Test that check_dependencies passes when all dependencies are present."""
-    with patch("shutil.which") as mock_which, patch(
-        "subprocess.check_call"
-    ) as mock_check_call:
+    with (
+        patch("shutil.which") as mock_which,
+        patch("subprocess.check_call") as mock_check_call,
+    ):
         # Mock shutil.which to always return a path
         mock_which.return_value = "/usr/bin/some-tool"
         # Mock subprocess.check_call to succeed (docker daemon check)
@@ -20,7 +21,7 @@ def test_check_dependencies_success():
             pytest.fail("check_dependencies raised SystemExit unexpectedly!")
 
 
-def test_check_dependencies_missing_tool(capsys):
+def test_check_dependencies_missing_tool(capture_logs):
     """Test that check_dependencies exits when a dependency is missing."""
     # We'll use one of the actual required dependencies to test failure
     tool_to_fail = REQUIRED_DEPENDENCIES[0]
@@ -41,8 +42,10 @@ def test_check_dependencies_missing_tool(capsys):
         assert excinfo.value.code == 1
 
         # Verify output
-        captured = capsys.readouterr()
-        assert f"Error: Missing required system dependencies: {tool_to_fail}" in captured.out
+        assert any(
+            f"Missing required system dependencies: {tool_to_fail}" in msg
+            for msg in capture_logs
+        )
 
 
 def test_main_calls_check_dependencies():
@@ -62,7 +65,7 @@ def test_main_calls_check_dependencies():
     mock_check.assert_called_once()
 
 
-def test_check_dependencies_checks_docker(capsys):
+def test_check_dependencies_checks_docker(capture_logs):
     """Test that check_dependencies specifically checks for docker."""
     with patch("shutil.which") as mock_which:
         # custom side effect to fail for docker
@@ -80,11 +83,13 @@ def test_check_dependencies_checks_docker(capsys):
         assert excinfo.value.code == 1
 
         # Verify output
-        captured = capsys.readouterr()
-        assert "Error: Missing required system dependencies: docker" in captured.out
+        assert any(
+            "Missing required system dependencies: docker" in msg
+            for msg in capture_logs
+        )
 
 
-def test_check_dependencies_checks_kubectl(capsys):
+def test_check_dependencies_checks_kubectl(capture_logs):
     """Test that check_dependencies specifically checks for kubectl."""
     with patch("shutil.which") as mock_which:
         # custom side effect to fail for kubectl
@@ -102,5 +107,7 @@ def test_check_dependencies_checks_kubectl(capsys):
         assert excinfo.value.code == 1
 
         # Verify output
-        captured = capsys.readouterr()
-        assert "Error: Missing required system dependencies: kubectl" in captured.out
+        assert any(
+            "Missing required system dependencies: kubectl" in msg
+            for msg in capture_logs
+        )
