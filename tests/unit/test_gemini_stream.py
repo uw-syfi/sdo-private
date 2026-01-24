@@ -3,6 +3,7 @@ import io
 from unittest.mock import MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from app_operator.agent_cli.gemini import GeminiCodingAgent
 
@@ -57,8 +58,11 @@ def test_generate_stream_prefixing(gemini_agent, mock_popen):
     mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
-    with patch("sys.stdout", captured_stdout):
+    handler_id = logger.add(captured_stdout, format="{message}")
+    try:
         result = gemini_agent.generate("Test")
+    finally:
+        logger.remove(handler_id)
 
     output = captured_stdout.getvalue()
 
@@ -89,8 +93,11 @@ def test_tool_use_truncation_and_prefix(gemini_agent, mock_popen):
     mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
-    with patch("sys.stdout", captured_stdout):
+    handler_id = logger.add(captured_stdout, format="{message}")
+    try:
         gemini_agent.generate("Test")
+    finally:
+        logger.remove(handler_id)
 
     output = captured_stdout.getvalue()
 
@@ -129,8 +136,11 @@ def test_tool_result_empty_message(gemini_agent, mock_popen):
     mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
-    with patch("sys.stdout", captured_stdout):
+    handler_id = logger.add(captured_stdout, format="{message}")
+    try:
         gemini_agent.generate("Test")
+    finally:
+        logger.remove(handler_id)
 
     output = captured_stdout.getvalue()
 
