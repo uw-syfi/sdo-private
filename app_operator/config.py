@@ -28,12 +28,52 @@ class AgentConfig:
     provider: str = "codex"
     model: Optional[str] = None
 
+    VALID_PROVIDERS = {"codex", "gemini", "claude", "claude-code", "opencode"}
+
+    def __post_init__(self):
+        """Validate configuration values after initialization."""
+        if not isinstance(self.provider, str):
+            raise TypeError(
+                f"provider must be str, got {type(self.provider).__name__}"
+            )
+        if self.provider.lower() not in self.VALID_PROVIDERS:
+            raise ValueError(
+                f"Invalid provider: '{self.provider}'. "
+                f"Valid providers: {', '.join(sorted(self.VALID_PROVIDERS))}"
+            )
+        if self.model is not None and not isinstance(self.model, str):
+            raise TypeError(
+                f"model must be str or None, got {type(self.model).__name__}"
+            )
+
 
 @dataclass
 class OperatorConfig:
     interval: int = 30
     monitoring_max_iters: int = 5
     deployment_max_iters: int = 5
+
+    def __post_init__(self):
+        """Validate configuration values after initialization."""
+        if not isinstance(self.interval, int):
+            raise TypeError(
+                f"interval must be int, got {type(self.interval).__name__}"
+            )
+        if self.interval <= 0:
+            raise ValueError(f"interval must be positive, got {self.interval}")
+        if self.interval > 86400:
+            raise ValueError(
+                f"interval too large: {self.interval}s (max: 86400s/24h)"
+            )
+
+        for field_name in ['monitoring_max_iters', 'deployment_max_iters']:
+            value = getattr(self, field_name)
+            if not isinstance(value, int):
+                raise TypeError(
+                    f"{field_name} must be int, got {type(value).__name__}"
+                )
+            if value <= 0:
+                raise ValueError(f"{field_name} must be positive, got {value}")
 
 
 @dataclass

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
 
 from app_operator.agent_cli.base import CodingAgent
+from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from tools.healthcheck import run_health_check
 from tools.trajectory import (
@@ -80,7 +81,7 @@ class HealthCheckTask(MonitoringTask):
         try:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             # Ensure log directory exists
-            monitor.log_dir.mkdir(parents=True, exist_ok=True)
+            monitor.filesystem.mkdir(monitor.log_dir, parents=True, exist_ok=True)
             log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
 
             logger.info(
@@ -234,15 +235,22 @@ Remember: Your suggestions are for information only and will not be automaticall
 class AppMonitor:
     """Agent responsible for monitoring application health."""
 
-    def __init__(self, repo_path: Path, agent: CodingAgent):
+    def __init__(
+        self,
+        repo_path: Path,
+        agent: CodingAgent,
+        filesystem: Optional[FileSystemInterface] = None,
+    ):
         """Initialize the monitor agent.
 
         Args:
             repo_path: Path to the repository.
             agent: The coding agent to use for analysis.
+            filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
         """
         self.repo_path = repo_path
         self.agent = agent
+        self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
@@ -268,7 +276,7 @@ class AppMonitor:
         # Clear log directory on startup
         if self.log_dir.exists():
             shutil.rmtree(self.log_dir)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.filesystem.mkdir(self.log_dir, parents=True, exist_ok=True)
 
         self.check_count = 0
 

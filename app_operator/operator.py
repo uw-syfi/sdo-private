@@ -6,6 +6,7 @@ from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
+from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from tools.trajectory import init_trajectory, finalize_trajectory
 
@@ -26,6 +27,7 @@ class AppOperator:
         health_check_max_count: Optional[int] = 5,
         max_deployment_attempts: int = 5,
         agent: Optional[CodingAgent] = None,
+        filesystem: Optional[FileSystemInterface] = None,
     ):
         """Initialize the application operator.
 
@@ -35,16 +37,18 @@ class AppOperator:
             health_check_max_count: Maximum number of health checks (default: 5).
             max_deployment_attempts: Maximum deployment attempts (default: 5).
             agent: Optional coding agent to use. If None, creates one from config.
+            filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
         """
         self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval
         self.health_check_max_count = health_check_max_count
         self.max_deployment_attempts = max_deployment_attempts
+        self.filesystem = filesystem if filesystem is not None else RealFilesystem()
 
         # Validate repository path
-        if not self.repo_path.exists():
+        if not self.filesystem.exists(self.repo_path):
             raise ValueError(f"Repository path does not exist: {repo_path}")
-        if not self.repo_path.is_dir():
+        if not self.filesystem.is_dir(self.repo_path):
             raise ValueError(f"Repository path is not a directory: {repo_path}")
 
         # Initialize agent if not provided
@@ -62,8 +66,8 @@ class AppOperator:
         self._deployed = False
 
         # Initialize agents
-        self.deployer = DeploymentAgent(self.repo_path, self.agent)
-        self.monitor = AppMonitor(self.repo_path, self.agent)
+        self.deployer = DeploymentAgent(self.repo_path, self.agent, self.filesystem)
+        self.monitor = AppMonitor(self.repo_path, self.agent, self.filesystem)
 
         # Initialize trajectory recorder
         self.trajectory = init_trajectory(self.repo_path)
