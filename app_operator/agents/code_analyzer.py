@@ -5,6 +5,7 @@ from typing import Optional
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
+from app_operator.prompts import get_loader
 from tools.trajectory import (
     Phase,
     record_phase_start,
@@ -60,16 +61,10 @@ class CodeAnalyzerAgent:
             self.filesystem.mkdir(self.sds_dir, exist_ok=True)
 
             # Create the prompt
-            system_prompt = self._create_system_prompt()
-
-            user_prompt = f"""Please analyze the repository at {self.repo_path} following the system instructions.
-
-Generate the required files:
-1. .sds/code_analysis.md
-2. .sds/deployment_issues.md
-
-You have read access to the entire repository.
-"""
+            system_prompt = get_loader().render("code_analyzer/system.jinja2")
+            user_prompt = get_loader().render(
+                "code_analyzer/user.jinja2", repo_path=self.repo_path
+            )
 
             logger.info(
                 f"Consulting {self.agent.__class__.__name__} to analyze the codebase..."
@@ -115,10 +110,3 @@ You have read access to the entire repository.
             record_phase_end("failed")
             record_assistant_message(f"Code analysis failed: {e}")
             return False
-
-    def _create_system_prompt(self) -> str:
-        """Create the system prompt for the code analyzer agent."""
-        prompt_path = (
-            Path(__file__).resolve().parents[2] / "prompts" / "code_analyzer_agent.md"
-        )
-        return prompt_path.read_text(encoding="utf-8")

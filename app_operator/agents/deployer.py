@@ -11,6 +11,7 @@ from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
+from app_operator.prompts import get_loader
 from tools.healthcheck import run_health_check
 from tools.trajectory import (
     Phase,
@@ -142,125 +143,7 @@ def generate_scripts(
 
 def _create_system_prompt(platform: str) -> str:
     """Create the system prompt for coding agent to guide script generation."""
-    prompt = """You are an expert DevOps engineer generating deployment and health check scripts for applications.
-
-Your task is to analyze a repository and generate two bash scripts:
-1. deploy.sh - A comprehensive deployment script
-2. health_check.sh - A comprehensive health check script
-
-## Important Resources:
-- Check for `.sds/code_analysis.md` and `.sds/deployment_issues.md`. These files contain automated analysis of the codebase and potential deployment issues. Use them to inform your script generation.
-
-"""
-
-    if platform == "k8s":
-        prompt += """## CRITICAL: Target Platform is Kubernetes
-
-You MUST generate scripts for Kubernetes deployment.
-
-### Kubernetes Platform Requirements:
-- Look for: k8s/, kubernetes/, *.yaml manifests with "kind: Deployment", "kind: Service", etc.
-- If existing manifests are found, use them.
-- If no manifests are found, you MUST generate valid Kubernetes manifests (Deployment, Service) and apply them.
-- Generate scripts that use `kubectl` commands
-- Commands: kubectl apply, kubectl delete, kubectl get pods, kubectl logs, etc.
-- Use `kubectl wait` or check loops for readiness checks
-
-**CRITICAL REQUIREMENT**: The deployment method MUST be Kubernetes. DO NOT use Docker Compose or plain Docker commands.
-"""
-    elif platform == "docker":
-        prompt += """## CRITICAL: Target Platform is Docker
-
-You MUST generate scripts for Docker deployment.
-
-### Docker Platform Requirements:
-- Analyze the repository to choose between Docker Compose and plain Docker.
-- **Docker Compose** (Recommended if compose file exists):
-  - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
-  - If found: Generate scripts that use `docker-compose` or `docker compose` commands
-  - Commands: docker-compose up, docker-compose down, docker-compose ps, docker-compose logs
-- **Plain Docker**:
-  - Look for: Dockerfile(s) without docker-compose files
-  - If found: Generate scripts that use direct `docker run` commands
-  - Commands: docker build, docker run, docker stop, docker ps, docker logs
-
-**CRITICAL REQUIREMENT**: The deployment method MUST be Docker based. DO NOT use Kubernetes commands.
-"""
-    else:
-        prompt += """## CRITICAL: Deployment Platform Detection
-
-You MUST analyze the repository structure to determine the EXACT deployment platform:
-
-### Docker Compose Platform:
-- Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
-- If found: Generate scripts that use `docker-compose` or `docker compose` commands
-
-### Kubernetes Platform:
-- Look for: k8s/, kubernetes/, *.yaml manifests
-- If found: Generate scripts that use `kubectl` commands
-
-### Plain Docker Platform:
-- Look for: Dockerfile(s) without docker-compose files
-- If found: Generate scripts that use direct `docker run` commands
-"""
-
-    prompt += """
-## DO's:
-- Use proper bash scripting practices (set -e, proper error handling)
-- Include color-coded output (RED, GREEN, YELLOW, BLUE, CYAN, MAGENTA, NC)
-- Add helper functions for printing (print_header, print_success, print_error, print_warning, print_info)
-- Check prerequisites (Docker, Docker Compose, kubectl, etc. based on platform)
-- Use SCRIPT_DIR and proper path resolution
-- Include comprehensive error handling
-- Add command-line argument parsing
-- Include help/usage information
-- Make scripts executable-ready (shebang #!/bin/bash)
-- For deploy.sh: Include start, stop, restart, status, logs, build, cleanup commands
-- For health_check.sh: Check containers/pods, ports, endpoints, databases, performance metrics
-- Include summary reports and exit codes
-
-## DON'Ts:
-- **NEVER mix deployment platforms** (e.g., don't use both docker-compose and kubectl in the same script)
-- Don't hardcode absolute paths (use SCRIPT_DIR and relative paths)
-- Don't skip error handling
-- Don't use deprecated commands
-- Don't generate overly complex scripts - keep them maintainable
-- Don't assume specific port numbers without checking the codebase
-- Don't include hardcoded credentials or secrets
-- Don't generate scripts that modify files outside the application directory
-- Don't skip prerequisite checks
-
-## Example Structure (ADAPT TO REPOSITORY):
-
-deploy.sh should include:
-- Configuration section with paths and env vars
-- Helper functions
-- check_prerequisites()
-- build_images() (if needed)
-- start_services()
-- stop_services()
-- restart_services()
-- check_health()
-- view_logs()
-- cleanup()
-- Main command dispatcher
-
-health_check.sh should include:
-- Configuration section
-- Helper functions
-- check_platform_specific_resources()
-- check_ports()
-- check_endpoints()
-- print_summary()
-- Main execution flow
-
-## Important:
-- **STEP 1**: Confirm the repository structure matches the target platform.
-- **STEP 2**: Identify services, ports, and health check endpoints.
-- **STEP 3**: Generate robust scripts using the correct commands for the platform.
-- **VERIFY**: Explicitly state which platform you are targeting in the comments."""
-
-    return prompt
+    return get_loader().render("deployer/system.jinja2", platform=platform)
 
 
 def _analyze_repository(repo_path: Path) -> str:
@@ -327,56 +210,20 @@ def _generate_deploy_script(
     deployment_config: Optional[DeploymentConfig] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
+    platform = deployment_config.platform if deployment_config else "auto"
+    full_prompt = get_loader().render(
+        "deployer/generate_script.jinja2",
+        system_prompt=system_prompt,
+        script_name="deploy.sh",
+        repo_context=repo_context,
+        target_dir=target_dir,
+        platform=platform,
+    )
 
-    platform_specific_instructions = ""
-    if deployment_config and deployment_config.platform == "k8s":
-        platform_specific_instructions = """
-1. **Target Platform: Kubernetes**
-   - Use `kubectl` commands.
-   - Ensure you handle manifest application and pod readiness.
-"""
-    elif deployment_config and deployment_config.platform == "docker":
-        platform_specific_instructions = """
-1. **Target Platform: Docker**
-   - Use `docker-compose` or `docker` commands as appropriate for the repo.
-"""
-    else:
-        platform_specific_instructions = """
-1. **Deployment Platform Detection**:
-   - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
-   - Use the appropriate commands.
-"""
-
-    human_prompt = f"""Generate a comprehensive deploy.sh bash script for the following repository:
-
-{repo_context}
-
-Target directory: {target_dir}
-
-CRITICAL REQUIREMENTS:
-
-{platform_specific_instructions}
-
-2. **Script Requirements**:
-   - Create the file at: .sds/deploy.sh
-   - Use SCRIPT_DIR to determine paths relative to the script location
-   - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
-   - Make it robust, well-documented, and production-ready
-   - Include proper error handling and colored output
-   - The script should work when executed from the .sds directory
-   - Check for correct prerequisites
-
-3. **Platform-Specific Commands**:
-   - Use the commands that match the detected/target platform (see System Prompt).
-
-You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content."""
-
-    full_prompt = f"""{system_prompt}
-
-{human_prompt}"""
     try:
         start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
 
@@ -407,59 +254,20 @@ def _generate_health_check_script(
     deployment_config: Optional[DeploymentConfig] = None,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
-
-    platform_specific_instructions = ""
-    if deployment_config and deployment_config.platform == "k8s":
-        platform_specific_instructions = """
-1. **Target Platform: Kubernetes**
-   - Use `kubectl` commands.
-   - Check pod status and readiness.
-"""
-    elif deployment_config and deployment_config.platform == "docker":
-        platform_specific_instructions = """
-1. **Target Platform: Docker**
-   - Use `docker-compose ps` or `docker ps`.
-   - Check container status.
-"""
-    else:
-        platform_specific_instructions = """
-1. **Deployment Platform Detection**:
-   - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
-   - Use the appropriate status check commands.
-"""
-
-    human_prompt = f"""Generate a comprehensive health_check.sh bash script for the following repository:
-
-{repo_context}
-
-Target directory: {target_dir}
-
-CRITICAL REQUIREMENTS:
-
-{platform_specific_instructions}
-
-2. **Script Requirements**:
-   - Create the file at: .sds/health_check.sh
-   - Use SCRIPT_DIR to determine paths relative to the script location
-   - Include checks for: containers/pods, ports, endpoints, databases, cache, performance
-   - Include a summary report with health score
-   - Make it robust, well-documented, and production-ready
-   - Include proper error handling and colored output
-   - Track total checks, passed checks, failed checks, warnings
-   - The script should work when executed from the .sds directory
-
-3. **Platform-Specific Checks**:
-   - Use the checks that match the detected/target platform (see System Prompt).
-
-You must use the write_file tool to create the file .sds/health_check.sh directly. Do not just print the content."""
-
-    full_prompt = f"""{system_prompt}
-
-{human_prompt}"""
+    platform = deployment_config.platform if deployment_config else "auto"
+    full_prompt = get_loader().render(
+        "deployer/generate_script.jinja2",
+        system_prompt=system_prompt,
+        script_name="health_check.sh",
+        repo_context=repo_context,
+        target_dir=target_dir,
+        platform=platform,
+    )
 
     try:
         start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
 
@@ -859,14 +667,9 @@ class DeploymentAgent:
 
     def _summarize_progress(self, output_snippet: str, elapsed_time: float):
         """Generate and print a summary of the progress using the agent."""
-        prompt = f"""The following is the recent output of a long-running deployment command.
-Please provide a brief, one-line summary of what is currently happening.
-Wrap your summary in <output_msg>...</output_msg> XML tags.
-Do not include any other text or debug info.
-
-Recent Output:
-{output_snippet}
-"""
+        prompt = get_loader().render(
+            "deployer/summarize.jinja2", output_snippet=output_snippet
+        )
         try:
             # Use silent=True to avoid printing the agent's internal thought process
             response = self.agent.generate(prompt, silent=True, timeout=30)
@@ -994,50 +797,6 @@ Recent Output:
             f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}"
         )
 
-        # if deploy_result['stdout']:
-        #     context_parts.append("\n### STDOUT:")
-        #     # Truncate if too long
-        #     stdout = deploy_result['stdout']
-        #     if len(stdout) > 3000:
-        #         stdout = stdout[-3000:]
-        #         context_parts.append(
-        #             "... (truncated, showing last 3000 chars)")
-        #     context_parts.append(stdout)
-
-        # if deploy_result['stderr']:
-        #     context_parts.append("\n### STDERR:")
-        #     stderr = deploy_result['stderr']
-        #     if len(stderr) > 3000:
-        #         stderr = stderr[-3000:]
-        #         context_parts.append(
-        #             "... (truncated, showing last 3000 chars)")
-        #     context_parts.append(stderr)
-
-        # # Health check result (if available)
-        # if health_result:
-        #     context_parts.append("\n## Health Check Result")
-        #     context_parts.append(f"Exit Code: {health_result['exit_code']}")
-        #     context_parts.append(
-        #         f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}")
-
-        #     if health_result['stdout']:
-        #         context_parts.append("\n### STDOUT:")
-        #         stdout = health_result['stdout']
-        #         if len(stdout) > 3000:
-        #             stdout = stdout[-3000:]
-        #             context_parts.append(
-        #                 "... (truncated, showing last 3000 chars)")
-        #         context_parts.append(stdout)
-
-        #     if health_result['stderr']:
-        #         context_parts.append("\n### STDERR:")
-        #         stderr = health_result['stderr']
-        #         if len(stderr) > 3000:
-        #             stderr = stderr[-3000:]
-        #             context_parts.append(
-        #                 "... (truncated, showing last 3000 chars)")
-        #         context_parts.append(stderr)
-
         return "\n".join(context_parts)
 
     def _create_fix_prompt(
@@ -1065,118 +824,13 @@ Recent Output:
                 "Note that the application may still be failing, but the it's now failing for a different reason."
             )
 
-        system_prompt = """You are an expert DevOps engineer debugging deployment issues.
-
-Your task is to analyze deployment errors and fix the deployment scripts.
-
-## Context
-- Repository: {repo_path}
-- Deployment script: .sds/deploy.sh
-- Health check script: .sds/health_check.sh
-- Current attempt: {attempt} of {max_attempts}
-
-## CRITICAL: Deployment Platform Awareness
-
-**BEFORE MAKING ANY FIXES, IDENTIFY THE DEPLOYMENT PLATFORM:**
-
-1. Read the deployment script (.sds/deploy.sh) to see what commands it uses
-2. Identify if it's using:
-   - Docker Compose (docker-compose commands)
-   - Kubernetes (kubectl commands)
-   - Plain Docker (docker run/stop/ps commands)
-   - Other platforms
-
-3. **CRITICAL**: All fixes MUST use commands appropriate for the detected platform
-   - If using Docker Compose → Use docker-compose commands in fixes
-   - If using Kubernetes → Use kubectl commands in fixes
-   - If using plain Docker → Use docker commands in fixes
-   - DO NOT mix platforms or suggest commands for the wrong platform
-
-4. Check the repository structure to confirm:
-   - Look for docker-compose.yml/yaml files
-   - Look for Kubernetes manifests (k8s/, *.yaml with kind: Deployment)
-   - Look for Dockerfiles
-
-## DO's:
-- **FIRST**: Identify the deployment platform being used
-- Carefully analyze the error messages and logs
-- Identify the root cause of the deployment failure
-- Fix the scripts directly using file editing tools
-- Consider common issues: missing dependencies, wrong ports, incorrect paths, permission issues
-- Test your understanding of the error before making changes
-- Make minimal, targeted fixes
-- Ensure scripts are still robust after fixes
-- Fix both deployment and health check scripts if needed
-- Consider environment-specific issues (Docker, Kubernetes, networking, file permissions)
-- Look for typos, syntax errors, or incorrect commands
-- Check if services are starting in the right order
-- Verify port bindings and network configurations
-- Check for missing environment variables or configuration files
-- **Use platform-appropriate commands** (match the platform detected in the script)
-
-## DON'Ts:
-- **NEVER change the deployment platform** (don't switch from docker-compose to kubectl or vice versa)
-- **NEVER use commands from the wrong platform** (don't use kubectl if script uses docker-compose)
-- Don't make random changes without understanding the error
-- Don't remove error handling or safety checks
-- Don't introduce new bugs while fixing old ones
-- Don't skip analyzing the full error context
-- Don't make overly complex changes
-- Don't modify files outside .sds directory
-- Don't give up easily - try multiple approaches if needed
-- Don't assume - verify your assumptions against the error logs
-- Don't redeploy the application; propose the fix and let the user decide to redeploy.
-
-## Approach:
-1. **STEP 1**: Read .sds/deploy.sh to identify which deployment platform it uses
-2. **STEP 2**: Read and analyze the error messages carefully
-3. **STEP 3**: Identify the specific failure point
-4. **STEP 4**: Determine the root cause
-5. **STEP 5**: Make targeted fixes using commands appropriate for the detected platform
-6. **STEP 6**: Verify the fix makes sense in context
-
-## Expected Output:
-- State which deployment platform you detected (Docker Compose, Kubernetes, plain Docker, etc.)
-- Analyze the error thoroughly
-- Explain what went wrong
-- Describe the fix you're applying
-- Make the necessary changes to the scripts (using correct platform commands)
-- Confirm the changes are complete
-- Output a brief summary of the fix wrapped in <summary></summary> tags.
-  - The summary must explicitly state:
-    1) what were the issue(s) found
-    2) what were your fix(es)
-    3) which deployment platform is being used
-  - Be concise but thorough in coverage.
-
-## Deployment tooling
-
-If the deployment script uses Docker or Docker Compose, you can run docker/docker-compose commands directly to inspect the container status and logs.
-
-If the deployment script uses Kubernetes, you can run kubectl commands to inspect pod status, logs, and events.
-
-Check for container/pod abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs."""
-
-        system_prompt = system_prompt.format(
-            repo_path=self.repo_path, attempt=attempt, max_attempts=max_attempts
+        return get_loader().render(
+            "deployer/fix_error.jinja2",
+            repo_path=self.repo_path,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            error_context=error_context,
+            previous_summary_note=previous_summary_note,
+            deploy_script=self.deploy_script,
+            health_check_script=self.health_check_script,
         )
-
-        user_prompt = f"""The deployment has failed. Please analyze the error and fix the deployment scripts.
-
-{error_context}{previous_summary_note}
-
-Please check `.sds/deployment_issues.md` for potential issues identified during initial analysis. Note that this file is static and might be out-of-date (some issues may have been fixed already), so verify findings against the current state of the codebase.
-
-Please:
-1. Analyze what went wrong
-2. Identify the root cause
-3. Fix the scripts in .sds/deploy.sh and/or .sds/health_check.sh
-4. Explain your fix
-
-The scripts are located at:
-- {self.deploy_script}
-- {self.health_check_script}
-
-You have read/write access to these files. Please fix the issues and help get the deployment working."""
-
-        return f"{system_prompt}\n\n{user_prompt}"
