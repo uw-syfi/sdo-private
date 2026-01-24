@@ -66,6 +66,10 @@ The operator uses specialized agents to manage the application lifecycle:
     *   Generates deployment scripts (`deploy.sh`, `health_check.sh`) if missing.
     *   Deploys the application and automatically fixes errors using an AI agent.
     *   Manages the self-healing deployment loop.
+*   **CodeAnalyzerAgent (`app_operator/agents/code_analyzer.py`):**
+    *   Analyzes the codebase before deployment.
+    *   Generates `.sds/code_analysis.md` and `.sds/deployment_issues.md`.
+    *   Identifies potential deployment issues proactively.
 *   **AppMonitor (`app_operator/agents/app_monitor.py`):**
     *   Monitors application health at regular intervals.
     *   Uses `HealthCheckTask` to execute checks and `CodingAgent` to analyze results.
