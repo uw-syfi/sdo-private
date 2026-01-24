@@ -9,6 +9,131 @@ from typing import Optional, List
 
 from .base import CodingAgent
 from .utils import _get_interactive_env
+from tools.trajectory import record_user_message, record_assistant_message
+
+
+class CLIGenerationSession:
+    """Handles a single generation request lifecycle."""
+
+    def __init__(
+        self,
+        binary_name: str,
+        env: dict,
+        log_prefix: str,
+        cmd: List[str],
+        cwd: Optional[str] = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ):
+        self.binary_name = binary_name
+        self.env = env
+        self.log_prefix = log_prefix
+        self.cmd = cmd
+        self.cwd = cwd
+        self.timeout = timeout
+        self.silent = silent
+
+        # State initialization
+        self.stdout_lines = []
+        self.stderr_lines = []
+
+    def _process_stdout(self, line: str) -> None:
+        """Process a line from stdout."""
+        line_stripped = line.rstrip("\n")
+        if not self.silent:
+            print(f"{self.log_prefix} {line_stripped}")
+            sys.stdout.flush()
+        self.stdout_lines.append(line)
+
+    def _process_stderr(self, line: str) -> None:
+        """Process a line from stderr."""
+        line_stripped = line.rstrip("\n")
+        if not self.silent:
+            print(f"{self.log_prefix} [STDERR] {line_stripped}", file=sys.stderr)
+            sys.stderr.flush()
+        self.stderr_lines.append(line)
+
+    def run(self, prompt: str) -> str:
+        """Execute the generation process."""
+        if not self.silent:
+            print(f"{self.log_prefix} Running command: {' '.join(self.cmd)}")
+            print("=" * 80)
+            sys.stdout.flush()
+
+        def read_stdout(pipe):
+            for line in iter(pipe.readline, ""):
+                if not line:
+                    break
+                self._process_stdout(line)
+            pipe.close()
+
+        def read_stderr(pipe):
+            for line in iter(pipe.readline, ""):
+                if not line:
+                    break
+                self._process_stderr(line)
+            pipe.close()
+
+        process = subprocess.Popen(
+            self.cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            cwd=self.cwd,
+            env=self.env,
+            start_new_session=True,
+        )
+
+        stdout_thread = threading.Thread(target=read_stdout, args=(process.stdout,))
+        stderr_thread = threading.Thread(target=read_stderr, args=(process.stderr,))
+
+        stdout_thread.daemon = True
+        stderr_thread.daemon = True
+
+        stdout_thread.start()
+        stderr_thread.start()
+
+        try:
+            if process.stdin:
+                process.stdin.write(prompt)
+                process.stdin.close()
+        except BrokenPipeError:
+            pass
+
+        try:
+            process.wait(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            raise subprocess.TimeoutExpired(self.cmd, self.timeout)
+        finally:
+            if process.poll() is None:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    process.wait()
+                except (ProcessLookupError, OSError):
+                    pass
+
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+
+        stdout_data = "".join(self.stdout_lines)
+        stderr_data = "".join(self.stderr_lines)
+
+        if not self.silent:
+            print("=" * 80)
+
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"{self.binary_name} exited with code {process.returncode}: {stderr_data}"
+            )
+
+        return stdout_data.strip()
 
 
 class CLICodingAgent(CodingAgent):
@@ -77,6 +202,27 @@ class CLICodingAgent(CodingAgent):
         """Return the log prefix for this agent."""
         return f"[{self.__class__.__name__}]"
 
+    def _create_session(
+        self,
+        cmd: List[str],
+        cwd: Optional[str] = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ) -> CLIGenerationSession:
+        """Create a session for a single generation request.
+
+        Can be overridden by subclasses to return specialized sessions.
+        """
+        return CLIGenerationSession(
+            binary_name=self.binary_name,
+            env=self.env,
+            log_prefix=self._log_prefix,
+            cmd=cmd,
+            cwd=cwd,
+            timeout=timeout,
+            silent=silent,
+        )
+
     def generate(
         self,
         prompt: str,
@@ -94,121 +240,13 @@ class CLICodingAgent(CodingAgent):
 
         Returns:
             Generated text.
-
-        Raises:
-            RuntimeError: If execution fails.
-            subprocess.TimeoutExpired: If execution times out.
         """
+        # Record the prompt in trajectory
+        record_user_message(prompt)
+
         cmd = self._get_command(prompt)
+        session = self._create_session(cmd, cwd, timeout, silent)
+        result = session.run(prompt)
 
-        if not silent:
-            # Only print extra details if verbose/debug is desired,
-            # but matching original behavior which printed command details for Codex
-            # and separator for Gemini.
-            # We'll normalize to printing separator and command for both if feasible,
-            # or keep it simple.
-            print(f"{self._log_prefix} Running command: {' '.join(cmd)}")
-            print("=" * 80)
-            sys.stdout.flush()
-
-        # Buffers to capture output
-        stdout_lines = []
-        stderr_lines = []
-
-        def read_stdout(pipe, buffer):
-            """Read stdout line by line and print + capture."""
-            for line in iter(pipe.readline, ""):
-                if not line:
-                    break
-                line_stripped = line.rstrip("\n")
-                if not silent:
-                    print(f"{self._log_prefix} {line_stripped}")
-                    sys.stdout.flush()
-                buffer.append(line)
-            pipe.close()
-
-        def read_stderr(pipe, buffer):
-            """Read stderr line by line and print + capture."""
-            for line in iter(pipe.readline, ""):
-                if not line:
-                    break
-                line_stripped = line.rstrip("\n")
-                if not silent:
-                    print(
-                        f"{self._log_prefix} [STDERR] {line_stripped}", file=sys.stderr
-                    )
-                    sys.stderr.flush()
-                buffer.append(line)
-            pipe.close()
-
-        # Run process with Popen to capture and print output in real-time
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,  # Line buffered
-            cwd=cwd,
-            env=self.env,
-            start_new_session=True,
-        )
-
-        # Start threads to read stdout and stderr concurrently
-        stdout_thread = threading.Thread(
-            target=read_stdout, args=(process.stdout, stdout_lines)
-        )
-        stderr_thread = threading.Thread(
-            target=read_stderr, args=(process.stderr, stderr_lines)
-        )
-
-        stdout_thread.daemon = True
-        stderr_thread.daemon = True
-
-        stdout_thread.start()
-        stderr_thread.start()
-
-        # Send the prompt to stdin and close it
-        try:
-            process.stdin.write(prompt)
-            process.stdin.close()
-        except BrokenPipeError:
-            pass
-
-        # Wait for process to complete with timeout
-        try:
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            # Kill the entire process group
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass  # Process might be already gone
-            process.wait()
-            raise subprocess.TimeoutExpired(cmd, timeout)
-        finally:
-            # Ensure process is killed on any exit (e.g. KeyboardInterrupt)
-            if process.poll() is None:
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                    process.wait()
-                except (ProcessLookupError, OSError):
-                    pass
-
-        # Wait for threads to finish reading
-        stdout_thread.join(timeout=1)
-        stderr_thread.join(timeout=1)
-
-        # Combine captured output
-        stdout_data = "".join(stdout_lines)
-        stderr_data = "".join(stderr_lines)
-
-        if not silent:
-            print("=" * 80)
-
-        if process.returncode != 0:
-            raise RuntimeError(
-                f"{self.binary_name} exited with code {process.returncode}: {stderr_data}"
-            )
-
-        return stdout_data.strip()
+        record_assistant_message(result)
+        return result

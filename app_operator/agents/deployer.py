@@ -14,7 +14,6 @@ from tools.trajectory import (
     Phase,
     record_phase_start,
     record_phase_end,
-    record_user_message,
     record_assistant_message,
     record_tool_call,
 )
@@ -271,9 +270,6 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
 
 {human_prompt}"""
     try:
-        # Record the prompt in trajectory
-        record_user_message(full_prompt)
-
         start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
@@ -281,24 +277,8 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
 
         deploy_script_path = Path(target_dir) / ".sds" / "deploy.sh"
         if deploy_script_path.exists():
-            # Record successful generation
-            record_tool_call(
-                tool="write_file",
-                args={"path": ".sds/deploy.sh"},
-                stdout="Successfully generated deploy.sh",
-                exit_code=0,
-                duration=duration,
-            )
-            record_assistant_message(
-                "I have analyzed the repository and generated deploy.sh with commands for start, stop, restart, status, logs, build, and cleanup.",
-                duration=duration,
-            )
             return True, "Successfully generated deploy.sh"
         else:
-            record_assistant_message(
-                "Failed to create deploy.sh: Agent did not write the file",
-                duration=duration,
-            )
             return False, "Agent failed to create .sds/deploy.sh"
 
     except subprocess.TimeoutExpired:
@@ -341,9 +321,6 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 {human_prompt}"""
 
     try:
-        # Record the prompt in trajectory
-        record_user_message(full_prompt)
-
         start_time = time.time()
         agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
@@ -351,24 +328,8 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 
         health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
         if health_check_script_path.exists():
-            # Record successful generation
-            record_tool_call(
-                tool="write_file",
-                args={"path": ".sds/health_check.sh"},
-                stdout="Successfully generated health_check.sh",
-                exit_code=0,
-                duration=duration,
-            )
-            record_assistant_message(
-                "I have analyzed the repository and generated health_check.sh with checks for containers, ports, endpoints, and performance metrics.",
-                duration=duration,
-            )
             return True, "Successfully generated health_check.sh"
         else:
-            record_assistant_message(
-                "Failed to create health_check.sh: Agent did not write the file",
-                duration=duration,
-            )
             return False, "Agent failed to create .sds/health_check.sh"
 
     except subprocess.TimeoutExpired:
@@ -818,9 +779,6 @@ Recent Output:
             )
             print(f"{'-' * 70}")
 
-            # Record the fix prompt in trajectory
-            record_user_message(prompt)
-
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
             start_time = time.time()
@@ -829,13 +787,6 @@ Recent Output:
             )
             duration = time.time() - start_time
             print(f"Agent generation (fix) took {duration / 60:.2f} minutes")
-
-            # Record agent response in trajectory
-            res = response[:1000] if response else "No response"
-            record_assistant_message(
-                f"Analyzed the deployment error and applied fixes. Response: {res}",
-                duration=duration,
-            )
 
             # Extract summary and save to log
             match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)

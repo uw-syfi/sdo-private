@@ -13,7 +13,6 @@ from tools.trajectory import (
     Phase,
     record_phase_start,
     record_phase_end,
-    record_user_message,
     record_assistant_message,
     record_tool_call,
 )
@@ -90,11 +89,7 @@ class HealthCheckTask(MonitoringTask):
                 f"Consulting {monitor.agent.__class__.__name__} for health analysis..."
             )
 
-            # Record the analysis prompt in trajectory
-            record_user_message(prompt)
-
             # Run agent and redirect its output to the log file
-            start_time = time.time()
             with open(log_file, "w") as f:
                 with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
                     response = monitor.agent.generate(
@@ -105,8 +100,6 @@ class HealthCheckTask(MonitoringTask):
                 f.write("\n\n=== Agent Analysis ===\n")
                 f.write(response)
 
-            duration = time.time() - start_time
-
             # Extract executive summary
             match = re.search(
                 r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL
@@ -114,16 +107,9 @@ class HealthCheckTask(MonitoringTask):
             if match:
                 summary = match.group(1).strip()
                 print(f"\nSummary: {summary}")
-                # Record the analysis result in trajectory
-                record_assistant_message(summary, duration=duration)
             else:
                 print(
                     "\nSummary not found in expected XML format. See log for full analysis."
-                )
-                # Record full response if no summary found
-                record_assistant_message(
-                    response[:1000] if response else "No response from agent",
-                    duration=duration,
                 )
 
             print(f"\nFull analysis saved to: {log_file}")
