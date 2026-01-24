@@ -153,6 +153,16 @@ class Config:
         )
 
 
+def _deep_merge(base: dict, update: dict) -> dict:
+    """Recursively merge update dict into base dict."""
+    for k, v in update.items():
+        if isinstance(v, dict) and k in base and isinstance(base[k], dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
 def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
     """Load configuration from sds.toml or config.toml.
 
@@ -164,31 +174,71 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
         Config: The loaded configuration object.
     """
     target_path = Path(target_dir)
+    merged_data = {}
 
     if config_path:
-        config_files = [Path(config_path)]
+        # If explicit path provided, load only that
+        files_to_load = [(Path(config_path), False)]  # (path, is_app_config)
     else:
         # Determine project root (where this package is installed/located)
         project_root = Path(__file__).resolve().parent.parent
-        config_files = [
-            target_path / ".sds" / "config.toml",
-            target_path / ".sds" / "sds.toml",
+
+        # Define hierarchy: Base (Repo/Root) -> Override (App .sds)
+        # We load base first, then merge override on top.
+
+        # Potential base config files (pick first that exists)
+        base_candidates = [
             target_path / "sds.toml",
             target_path / "config.toml",
             project_root / "sds.toml",
         ]
 
-    for config_file in config_files:
-        if config_file.exists():
-            try:
-                with open(config_file, "rb") as f:
-                    data = tomllib.load(f)
-                    logger.info(f"Loaded configuration from {config_file}")
-                    return Config.from_dict(data)
-            except (ConfigError, TypeError):
-                # Re-raise config validation errors and TypeError from dataclass
-                raise
-            except Exception as e:
-                logger.warning(f"Warning: Failed to parse {config_file}: {e}")
+        # Potential app config files (pick first that exists)
+        app_candidates = [
+            target_path / ".sds" / "config.toml",
+            target_path / ".sds" / "sds.toml",
+        ]
 
-    return Config()
+        files_to_load = []
+
+        # Find base config
+        for f in base_candidates:
+            if f.exists():
+                files_to_load.append((f, False))
+                break
+
+        # Find app config
+        for f in app_candidates:
+            if f.exists():
+                files_to_load.append((f, True))
+                break
+
+    for config_file, is_app_config in files_to_load:
+        if not config_file.exists():
+            continue
+
+        try:
+            with open(config_file, "rb") as f:
+                data = tomllib.load(f)
+                logger.info(f"Loaded configuration from {config_file}")
+
+                if is_app_config:
+                    # Validate app config only contains deployment settings
+                    forbidden_sections = set(data.keys()) - {"deployment"}
+                    if forbidden_sections:
+                        raise UnrecognizedSectionError(
+                            f"Application config {config_file} may only contain "
+                            f"[deployment] section. Found forbidden section(s): "
+                            f"{', '.join(sorted(forbidden_sections))}"
+                        )
+
+                _deep_merge(merged_data, data)
+
+        except (ConfigError, TypeError):
+            # Re-raise config validation errors and TypeError from dataclass
+            raise
+        except Exception as e:
+            # Re-raise parsing errors to prevent silent fallback to defaults
+            raise ConfigError(f"Failed to parse {config_file}: {e}") from e
+
+    return Config.from_dict(merged_data)
