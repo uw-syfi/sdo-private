@@ -41,6 +41,12 @@ class AppOperator:
         self.health_check_max_count = health_check_max_count
         self.max_deployment_attempts = max_deployment_attempts
 
+        # Validate repository path
+        if not self.repo_path.exists():
+            raise ValueError(f"Repository path does not exist: {repo_path}")
+        if not self.repo_path.is_dir():
+            raise ValueError(f"Repository path is not a directory: {repo_path}")
+
         # Initialize agent if not provided
         if agent is None:
             try:
@@ -62,12 +68,6 @@ class AppOperator:
         # Initialize trajectory recorder
         self.trajectory = init_trajectory(self.repo_path)
         self.trajectory.set_agent_name(self.agent.__class__.__name__)
-
-        # Validate repository path
-        if not self.repo_path.exists():
-            raise ValueError(f"Repository path does not exist: {repo_path}")
-        if not self.repo_path.is_dir():
-            raise ValueError(f"Repository path is not a directory: {repo_path}")
 
     def run(self) -> int:
         """Main entry point for application operation.

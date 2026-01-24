@@ -25,6 +25,7 @@ GEMINI_SESSION_DIR = Path.home() / ".gemini" / "tmp"
 
 class Phase(str, Enum):
     """Phases of SDS operation."""
+
     SCRIPT_GENERATION = "script_generation"
     DEPLOYMENT = "deployment"
     MONITORING = "monitoring"
@@ -32,6 +33,7 @@ class Phase(str, Enum):
 
 class MessageRole(str, Enum):
     """Role of a message in the trajectory."""
+
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -41,6 +43,7 @@ class MessageRole(str, Enum):
 @dataclass
 class TrajectoryMessage:
     """A single message in the trajectory."""
+
     role: str
     content: Optional[str] = None
     tool: Optional[str] = None
@@ -80,7 +83,7 @@ class TrajectoryRecorder:
     trajectory data from any part of the SDS codebase.
     """
 
-    _instance: Optional['TrajectoryRecorder'] = None
+    _instance: Optional["TrajectoryRecorder"] = None
     _lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
@@ -108,7 +111,9 @@ class TrajectoryRecorder:
 
             # Create timestamped filename for this run
             self._run_timestamp = time.strftime("%Y%m%d-%H%M%S")
-            self.trajectory_file = self.trajectories_dir / f"trajectory_{self._run_timestamp}.json"
+            self.trajectory_file = (
+                self.trajectories_dir / f"trajectory_{self._run_timestamp}.json"
+            )
 
             # Also maintain a symlink to the latest trajectory
             self._latest_link = self.sds_dir / "trajectory.json"
@@ -120,12 +125,12 @@ class TrajectoryRecorder:
                     "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "end_time": None,
                     "agent_name": None,
-                    "status": "running"
+                    "status": "running",
                 },
                 "script_generation": [],
                 "deployment": [],
                 "monitoring": [],
-                "gemini_sessions": []  # Will store paths to gemini session files
+                "gemini_sessions": [],  # Will store paths to gemini session files
             }
 
             # Current conversation being recorded (not yet committed)
@@ -143,7 +148,7 @@ class TrajectoryRecorder:
             self._initialized = True
 
     @classmethod
-    def get_instance(cls) -> Optional['TrajectoryRecorder']:
+    def get_instance(cls) -> Optional["TrajectoryRecorder"]:
         """Get the current instance if it exists."""
         return cls._instance
 
@@ -179,7 +184,7 @@ class TrajectoryRecorder:
                 TrajectoryMessage(
                     role=MessageRole.SYSTEM.value,
                     content=system_content,
-                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                 ).to_dict()
             )
 
@@ -219,7 +224,7 @@ class TrajectoryRecorder:
                     TrajectoryMessage(
                         role=MessageRole.USER.value,
                         content=content,
-                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                     ).to_dict()
                 )
 
@@ -232,7 +237,7 @@ class TrajectoryRecorder:
                         role=MessageRole.ASSISTANT.value,
                         content=content,
                         timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-                        duration_seconds=duration
+                        duration_seconds=duration,
                     ).to_dict()
                 )
 
@@ -243,7 +248,7 @@ class TrajectoryRecorder:
         stdout: str = "",
         stderr: str = "",
         exit_code: int = None,
-        duration: float = None
+        duration: float = None,
     ) -> None:
         """Add a tool call with its output to the current conversation.
 
@@ -267,11 +272,15 @@ class TrajectoryRecorder:
                     stdout_limit = MAX_OUTPUT_LENGTH - stderr_limit
 
                     if len(stdout) > stdout_limit:
-                        truncated_stdout = f"[truncated, showing last {stdout_limit} chars]\n..." + \
-                            stdout[-stdout_limit:]
+                        truncated_stdout = (
+                            f"[truncated, showing last {stdout_limit} chars]\n..."
+                            + stdout[-stdout_limit:]
+                        )
                     if len(stderr) > stderr_limit:
-                        truncated_stderr = f"[truncated, showing last {stderr_limit} chars]\n..." + \
-                            stderr[-stderr_limit:]
+                        truncated_stderr = (
+                            f"[truncated, showing last {stderr_limit} chars]\n..."
+                            + stderr[-stderr_limit:]
+                        )
 
                 self._current_conversation.append(
                     TrajectoryMessage(
@@ -282,7 +291,7 @@ class TrajectoryRecorder:
                         stderr=truncated_stderr if truncated_stderr else None,
                         exit_code=exit_code,
                         timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-                        duration_seconds=duration
+                        duration_seconds=duration,
                     ).to_dict()
                 )
 
@@ -298,7 +307,7 @@ class TrajectoryRecorder:
                     TrajectoryMessage(
                         role=MessageRole.ASSISTANT.value,
                         content=f"Phase completed with status: {status}",
-                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                     ).to_dict()
                 )
 
@@ -380,7 +389,9 @@ class TrajectoryRecorder:
             run_start_ts = time.mktime(run_start)
 
             # Find all session files created after our run started
-            gemini_sessions_dir = self.trajectories_dir / "gemini_sessions" / self._run_timestamp
+            gemini_sessions_dir = (
+                self.trajectories_dir / "gemini_sessions" / self._run_timestamp
+            )
             sessions_copied = []
 
             for project_dir in GEMINI_SESSION_DIR.iterdir():
@@ -397,7 +408,10 @@ class TrajectoryRecorder:
                     if file_mtime >= run_start_ts:
                         # Copy session file to our trajectory directory
                         gemini_sessions_dir.mkdir(parents=True, exist_ok=True)
-                        dest_file = gemini_sessions_dir / f"{project_dir.name}_{session_file.name}"
+                        dest_file = (
+                            gemini_sessions_dir
+                            / f"{project_dir.name}_{session_file.name}"
+                        )
                         shutil.copy2(session_file, dest_file)
                         sessions_copied.append(str(dest_file.relative_to(self.sds_dir)))
 
@@ -424,7 +438,7 @@ class TrajectoryRecorder:
                     TrajectoryMessage(
                         role=MessageRole.ASSISTANT.value,
                         content=f"Run ended with status: {status}",
-                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                     ).to_dict()
                 )
                 self._commit_current_conversation()
@@ -440,6 +454,7 @@ class TrajectoryRecorder:
 
 
 # Global convenience functions for easy access from anywhere in the codebase
+
 
 def init_trajectory(repo_path: Path) -> TrajectoryRecorder:
     """Initialize the global trajectory recorder.
@@ -486,7 +501,7 @@ def record_tool_call(
     stdout: str = "",
     stderr: str = "",
     exit_code: int = None,
-    duration: float = None
+    duration: float = None,
 ) -> None:
     """Record a tool call with its output."""
     recorder = get_trajectory()
