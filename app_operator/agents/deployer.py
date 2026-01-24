@@ -132,6 +132,9 @@ Your task is to analyze a repository and generate two bash scripts:
 1. deploy.sh - A comprehensive deployment script
 2. health_check.sh - A comprehensive health check script
 
+## Important Resources:
+- Check for `.sds/code_analysis.md` and `.sds/deployment_issues.md`. These files contain automated analysis of the codebase and potential deployment issues. Use them to inform your script generation.
+
 ## DO's:
 - Use proper bash scripting practices (set -e, proper error handling)
 - Include color-coded output (RED, GREEN, YELLOW, BLUE, CYAN, MAGENTA, NC)
@@ -199,6 +202,13 @@ def _analyze_repository(repo_path: Path) -> str:
     context_parts = []
 
     # Check for common deployment files
+    if (repo_path / ".sds" / "code_analysis.md").exists():
+        context_parts.append("- Found code analysis: .sds/code_analysis.md")
+    if (repo_path / ".sds" / "deployment_issues.md").exists():
+        context_parts.append(
+            "- Found deployment issues report: .sds/deployment_issues.md"
+        )
+
     if (repo_path / "docker-compose.yml").exists():
         context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
     if (repo_path / "docker-compose.yaml").exists():
@@ -1008,6 +1018,8 @@ Check for container abnormalities, including recent restarts, high CPU or memory
         user_prompt = f"""The deployment has failed. Please analyze the error and fix the deployment scripts.
 
 {error_context}{previous_summary_note}
+
+Please check `.sds/deployment_issues.md` for potential issues identified during initial analysis. Note that this file is static and might be out-of-date (some issues may have been fixed already), so verify findings against the current state of the codebase.
 
 Please:
 1. Analyze what went wrong

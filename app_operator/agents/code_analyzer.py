@@ -1,0 +1,124 @@
+import time
+from pathlib import Path
+from typing import Optional
+
+from app_operator.agent_cli.base import CodingAgent
+from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.logger import logger
+from tools.trajectory import (
+    Phase,
+    record_phase_start,
+    record_phase_end,
+    record_assistant_message,
+)
+
+# Constants
+DEFAULT_ANALYSIS_TIMEOUT_SECS = 600  # 10 minutes
+
+
+class CodeAnalyzerAgent:
+    """Agent responsible for analyzing the codebase before deployment."""
+
+    def __init__(
+        self,
+        repo_path: Path,
+        coding_agent: CodingAgent,
+        filesystem: Optional[FileSystemInterface] = None,
+    ):
+        """Initialize the code analyzer agent.
+
+        Args:
+            repo_path: Path to the repository to analyze.
+            coding_agent: The coding agent to use for analysis.
+            filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+        """
+        self.repo_path = repo_path
+        self.agent = coding_agent
+        self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+        self.sds_dir = self.repo_path / ".sds"
+        self.analysis_file = self.sds_dir / "code_analysis.md"
+        self.issues_file = self.sds_dir / "deployment_issues.md"
+
+    def run(self) -> bool:
+        """Run the code analysis.
+
+        Returns:
+            bool: True if analysis completed successfully or was already done.
+        """
+        # Check if analysis already exists
+        if self.filesystem.exists(self.analysis_file) and self.filesystem.exists(
+            self.issues_file
+        ):
+            logger.info("Code analysis files already exist. Skipping analysis.")
+            return True
+
+        logger.info("Starting Code Analysis Phase")
+        record_phase_start(Phase.EXPLORATION)
+
+        try:
+            # Ensure .sds directory exists
+            self.filesystem.mkdir(self.sds_dir, exist_ok=True)
+
+            # Create the prompt
+            system_prompt = self._create_system_prompt()
+
+            user_prompt = f"""Please analyze the repository at {self.repo_path} following the system instructions.
+
+Generate the required files:
+1. .sds/code_analysis.md
+2. .sds/deployment_issues.md
+
+You have read access to the entire repository.
+"""
+
+            logger.info(
+                f"Consulting {self.agent.__class__.__name__} to analyze the codebase..."
+            )
+
+            start_time = time.time()
+
+            # The agent is expected to use tools to explore and then write the files
+            self.agent.generate(
+                f"{system_prompt}\n\n{user_prompt}",
+                cwd=str(self.repo_path),
+                timeout=DEFAULT_ANALYSIS_TIMEOUT_SECS,
+            )
+
+            duration = time.time() - start_time
+            logger.info(f"Agent analysis took {duration / 60:.2f} minutes")
+
+            # Verify files were created
+            if self.filesystem.exists(self.analysis_file) and self.filesystem.exists(
+                self.issues_file
+            ):
+                logger.success("Code analysis completed successfully")
+                record_phase_end("success")
+                record_assistant_message("Code analysis completed successfully")
+                return True
+            else:
+                missing = []
+                if not self.filesystem.exists(self.analysis_file):
+                    missing.append(str(self.analysis_file))
+                if not self.filesystem.exists(self.issues_file):
+                    missing.append(str(self.issues_file))
+
+                error_msg = (
+                    f"Agent failed to create analysis files: {', '.join(missing)}"
+                )
+                logger.error(error_msg)
+                record_phase_end("failed")
+                record_assistant_message(error_msg)
+                return False
+
+        except Exception as e:
+            logger.error(f"Code analysis failed: {e}")
+            record_phase_end("failed")
+            record_assistant_message(f"Code analysis failed: {e}")
+            return False
+
+    def _create_system_prompt(self) -> str:
+        """Create the system prompt for the code analyzer agent."""
+        prompt_path = (
+            Path(__file__).resolve().parents[2] / "prompts" / "code_analyzer_agent.md"
+        )
+        return prompt_path.read_text(encoding="utf-8")

@@ -22,9 +22,15 @@ def app_operator(repo_path, mock_agent):
     with (
         patch("app_operator.operator.DeploymentAgent") as mock_deployer_cls,
         patch("app_operator.operator.AppMonitor") as mock_monitor_cls,
+        patch("app_operator.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
     ):
         op = AppOperator(str(repo_path), agent=mock_agent)
-        yield op, mock_deployer_cls.return_value, mock_monitor_cls.return_value
+        yield (
+            op,
+            mock_deployer_cls.return_value,
+            mock_monitor_cls.return_value,
+            mock_analyzer_cls.return_value,
+        )
 
 
 def test_operator_init_validates_path(tmp_path):
@@ -35,7 +41,7 @@ def test_operator_init_validates_path(tmp_path):
 
 
 def test_run_success_flow(app_operator):
-    op, mock_deployer, mock_monitor = app_operator
+    op, mock_deployer, mock_monitor, mock_analyzer = app_operator
 
     # Setup mocks
     mock_deployer.run.return_value = True
@@ -46,12 +52,13 @@ def test_run_success_flow(app_operator):
     exit_code = op.run()
 
     assert exit_code == 0
+    mock_analyzer.run.assert_called_once()
     mock_deployer.run.assert_called_once()
     mock_monitor.run.assert_called_once()
 
 
 def test_run_deployment_failure(app_operator):
-    op, mock_deployer, mock_monitor = app_operator
+    op, mock_deployer, mock_monitor, mock_analyzer = app_operator
 
     # Deployment fails
     mock_deployer.run.return_value = False
@@ -59,12 +66,13 @@ def test_run_deployment_failure(app_operator):
     exit_code = op.run()
 
     assert exit_code == 1
+    mock_analyzer.run.assert_called_once()
     mock_deployer.run.assert_called_once()
     mock_monitor.run.assert_not_called()
 
 
 def test_cleanup_stops_application(app_operator):
-    op, mock_deployer, _ = app_operator
+    op, mock_deployer, _, _ = app_operator
 
     # Pretend we deployed successfully
     op._deployed = True
@@ -76,7 +84,7 @@ def test_cleanup_stops_application(app_operator):
 
 
 def test_cleanup_skips_if_not_deployed(app_operator):
-    op, mock_deployer, _ = app_operator
+    op, mock_deployer, _, _ = app_operator
 
     op._deployed = False
 
@@ -86,7 +94,7 @@ def test_cleanup_skips_if_not_deployed(app_operator):
 
 
 def test_handle_shutdown_signal_sigint(app_operator):
-    op, _, _ = app_operator
+    op, _, _, _ = app_operator
 
     # Verify initial state
     assert op._shutdown_requested is False
@@ -99,7 +107,7 @@ def test_handle_shutdown_signal_sigint(app_operator):
 
 
 def test_handle_shutdown_signal_sigterm(app_operator):
-    op, _, _ = app_operator
+    op, _, _, _ = app_operator
 
     # Verify initial state
     assert op._shutdown_requested is False
@@ -111,7 +119,7 @@ def test_handle_shutdown_signal_sigterm(app_operator):
 
 
 def test_run_handles_keyboard_interrupt(app_operator):
-    op, mock_deployer, _ = app_operator
+    op, mock_deployer, _, _ = app_operator
 
     # Simulate KeyboardInterrupt during deployment
     mock_deployer.run.side_effect = KeyboardInterrupt()
@@ -129,7 +137,7 @@ def test_run_handles_keyboard_interrupt(app_operator):
 
 
 def test_run_handles_exception_gracefully(app_operator):
-    op, mock_deployer, _ = app_operator
+    op, mock_deployer, _, _ = app_operator
 
     mock_deployer.run.side_effect = Exception("Unexpected crash")
 

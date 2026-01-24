@@ -26,6 +26,7 @@ GEMINI_SESSION_DIR = Path.home() / ".gemini" / "tmp"
 class Phase(str, Enum):
     """Phases of SDS operation."""
 
+    EXPLORATION = "exploration"
     SCRIPT_GENERATION = "script_generation"
     DEPLOYMENT = "deployment"
     MONITORING = "monitoring"
@@ -193,7 +194,12 @@ class TrajectoryRecorder:
         context = context or {}
         agent_name = self.trajectory["metadata"].get("agent_name", "AI Agent")
 
-        if phase == Phase.SCRIPT_GENERATION:
+        if phase == Phase.EXPLORATION:
+            return (
+                f"You are an AI operator ({agent_name}) responsible for exploring "
+                f"the codebase and identifying potential deployment issues."
+            )
+        elif phase == Phase.SCRIPT_GENERATION:
             return (
                 f"You are an AI operator ({agent_name}) responsible for analyzing "
                 f"the repository and generating deployment scripts (deploy.sh) and "

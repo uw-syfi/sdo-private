@@ -6,6 +6,7 @@ from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
+from app_operator.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from tools.trajectory import init_trajectory, finalize_trajectory
@@ -66,6 +67,7 @@ class AppOperator:
         self._deployed = False
 
         # Initialize agents
+        self.analyzer = CodeAnalyzerAgent(self.repo_path, self.agent, self.filesystem)
         self.deployer = DeploymentAgent(self.repo_path, self.agent, self.filesystem)
         self.monitor = AppMonitor(self.repo_path, self.agent, self.filesystem)
 
@@ -88,7 +90,10 @@ class AppOperator:
             logger.info(f"Repository: {self.repo_path}")
             logger.info(f"Agent: {self.agent.__class__.__name__}")
 
-            # Step 1: Deploy with automatic error fixing (includes script
+            # Step 1: Code Analysis
+            self.analyzer.run()
+
+            # Step 2: Deploy with automatic error fixing (includes script
             # generation)
             if not self.deployer.run(
                 max_attempts=self.max_deployment_attempts,
@@ -99,7 +104,7 @@ class AppOperator:
 
             self._deployed = True
 
-            # Step 2: Monitor health and provide analysis
+            # Step 3: Monitor health and provide analysis
             self.monitor.run(
                 interval=self.health_check_interval,
                 max_checks=self.health_check_max_count,
