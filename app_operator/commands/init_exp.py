@@ -54,12 +54,12 @@ def run_command(args: argparse.Namespace) -> int:
         # Remove git history
         git_dir = target_path / ".git"
         if git_dir.exists():
-            shutil.rmtree(git_dir)
+            shutil.rmtree(git_dir, ignore_errors=True)
 
         # Remove .sds directory if it exists
         sds_dir = target_path / ".sds"
         if sds_dir.exists():
-            shutil.rmtree(sds_dir)
+            shutil.rmtree(sds_dir, ignore_errors=True)
 
         # Initialize new git repo
         subprocess.run(
