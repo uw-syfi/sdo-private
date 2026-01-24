@@ -7,6 +7,7 @@ import threading
 from abc import abstractmethod
 from typing import Optional, List
 
+from app_operator.logger import logger
 from .base import CodingAgent
 from .utils import _get_interactive_env
 from tools.trajectory import record_user_message, record_assistant_message
@@ -21,6 +22,7 @@ class CLIGenerationSession:
         env: dict,
         log_prefix: str,
         cmd: List[str],
+        logger,
         cwd: Optional[str] = None,
         timeout: int = 300,
         silent: bool = False,
@@ -29,6 +31,7 @@ class CLIGenerationSession:
         self.env = env
         self.log_prefix = log_prefix
         self.cmd = cmd
+        self.logger = logger
         self.cwd = cwd
         self.timeout = timeout
         self.silent = silent
@@ -37,27 +40,30 @@ class CLIGenerationSession:
         self.stdout_lines = []
         self.stderr_lines = []
 
+    def _log_raw(self, message: str) -> None:
+        """Log a raw message directly to output if not silent."""
+        if not self.silent:
+            self.logger.opt(raw=True).info(message)
+
     def _process_stdout(self, line: str) -> None:
         """Process a line from stdout."""
         line_stripped = line.rstrip("\n")
         if not self.silent:
-            print(f"{self.log_prefix} {line_stripped}")
-            sys.stdout.flush()
+            self.logger.info(line_stripped)
         self.stdout_lines.append(line)
 
     def _process_stderr(self, line: str) -> None:
         """Process a line from stderr."""
         line_stripped = line.rstrip("\n")
         if not self.silent:
-            print(f"{self.log_prefix} [STDERR] {line_stripped}", file=sys.stderr)
-            sys.stderr.flush()
+            self.logger.info(f"[STDERR] {line_stripped}")
         self.stderr_lines.append(line)
 
     def run(self, prompt: str) -> str:
         """Execute the generation process."""
         if not self.silent:
-            print(f"{self.log_prefix} Running command: {' '.join(self.cmd)}")
-            print("=" * 80)
+            self.logger.info(f"Running command: {' '.join(self.cmd)}")
+            self._log_raw("=" * 80 + "\n")
             sys.stdout.flush()
 
         def read_stdout(pipe):
@@ -125,8 +131,7 @@ class CLIGenerationSession:
         stdout_data = "".join(self.stdout_lines)
         stderr_data = "".join(self.stderr_lines)
 
-        if not self.silent:
-            print("=" * 80)
+        self._log_raw("=" * 80 + "\n")
 
         if process.returncode != 0:
             raise RuntimeError(
@@ -167,6 +172,7 @@ class CLICodingAgent(CodingAgent):
             )
         self.binary_path = binary_path
         self._check_cli()
+        self.logger = logger.bind(agent_prefix=self._log_prefix)
 
     def _check_cli(self):
         """Check if the CLI tool is available and executable."""
@@ -218,6 +224,7 @@ class CLICodingAgent(CodingAgent):
             env=self.env,
             log_prefix=self._log_prefix,
             cmd=cmd,
+            logger=self.logger,
             cwd=cwd,
             timeout=timeout,
             silent=silent,

@@ -1,6 +1,7 @@
 from typing import Optional
 
 from app_operator.config import load_config, Config
+from app_operator.logger import logger
 from .base import CodingAgent
 from .codex import CodexCodingAgent
 from .gemini import GeminiCodingAgent
@@ -35,9 +36,9 @@ def create_agent_from_config(
     provider = config.agent.provider
     model = model_override or config.agent.model
 
-    print(f"Initializing coding agent provider: {provider}")
+    logger.info(f"Initializing coding agent provider: {provider}")
     if model:
-        print(f"Using coding agent model: {model}")
+        logger.info(f"Using coding agent model: {model}")
 
     provider_lower = provider.lower()
     if provider_lower == "gemini":

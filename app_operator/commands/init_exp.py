@@ -1,8 +1,9 @@
 import argparse
-import sys
 import shutil
 import subprocess
 from pathlib import Path
+
+from app_operator.logger import logger
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -23,11 +24,11 @@ def run_command(args: argparse.Namespace) -> int:
     exp_name = args.exp_name
 
     if not app_path.exists():
-        print(f"Error: Source path '{app_path}' does not exist.", file=sys.stderr)
+        logger.error(f"Error: Source path '{app_path}' does not exist.")
         return 1
 
     if not app_path.is_dir():
-        print(f"Error: Source path '{app_path}' is not a directory.", file=sys.stderr)
+        logger.error(f"Error: Source path '{app_path}' is not a directory.")
         return 1
 
     app_name = app_path.name
@@ -36,15 +37,12 @@ def run_command(args: argparse.Namespace) -> int:
     target_path = Path.cwd() / "exp" / app_name / exp_name
 
     if target_path.exists():
-        print(
-            f"Error: Experiment directory '{target_path}' already exists.",
-            file=sys.stderr,
-        )
+        logger.error(f"Error: Experiment directory '{target_path}' already exists.")
         return 1
 
-    print(f"Initializing experiment '{exp_name}' for app '{app_name}'...")
-    print(f"Source: {app_path}")
-    print(f"Target: {target_path}")
+    logger.info(f"Initializing experiment '{exp_name}' for app '{app_name}'...")
+    logger.info(f"Source: {app_path}")
+    logger.info(f"Target: {target_path}")
 
     try:
         # Ensure parent directories exist
@@ -56,12 +54,12 @@ def run_command(args: argparse.Namespace) -> int:
         # Remove git history
         git_dir = target_path / ".git"
         if git_dir.exists():
-            shutil.rmtree(git_dir)
+            shutil.rmtree(git_dir, ignore_errors=True)
 
         # Remove .sds directory if it exists
         sds_dir = target_path / ".sds"
         if sds_dir.exists():
-            shutil.rmtree(sds_dir)
+            shutil.rmtree(sds_dir, ignore_errors=True)
 
         # Initialize new git repo
         subprocess.run(
@@ -71,11 +69,11 @@ def run_command(args: argparse.Namespace) -> int:
             stdout=subprocess.DEVNULL,
         )
 
-        print(f"Successfully initialized experiment at '{target_path}'")
+        logger.info(f"Successfully initialized experiment at '{target_path}'")
         return 0
 
     except Exception as e:
-        print(f"Error initializing experiment: {e}", file=sys.stderr)
+        logger.error(f"Error initializing experiment: {e}")
         # Cleanup if partial failure?
         # For now, let user handle it to avoid accidental data loss logic
         return 1

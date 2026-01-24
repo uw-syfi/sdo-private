@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 from app_operator.agent_cli.gemini import GeminiCodingAgent
 
@@ -63,8 +64,11 @@ def test_generate_from_fixture(gemini_agent, mock_popen):
 
     # Capture stdout to verify rendering
     captured_stdout = io.StringIO()
-    with patch("sys.stdout", captured_stdout):
+    handler_id = logger.add(captured_stdout, format="{message}")
+    try:
         result = gemini_agent.generate("Test prompt")
+    finally:
+        logger.remove(handler_id)
 
     output = captured_stdout.getvalue()
 
