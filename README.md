@@ -75,27 +75,40 @@ monitoring_max_iters = 5 # Maximum number of health monitoring iterations (defau
 deployment_max_iters = 5 # Maximum deployment attempts (default: 5)
 ```
 
-### Commands
+### Experiment Workflow
 
-#### Deploy and Monitor an App with AI-Assisted Self-Healing
+#### 1. Create an Experiment
 
- It uses an AI agent (Codex, Gemini, or Claude) to deploy and monitor applications.
+First, create an isolated experiment environment from an existing application using `init-exp`.
+
+```bash
+./sds_operator init-exp apps/target-app my-experiment-name
+```
+This copies the application to `exp/<app-name>/<exp-name>`, removes existing git history and SDS configurations, and initializes a new git repository.
+
+#### 2. Run the Experiment
+
+Next, use the `run` command to deploy and monitor the experiment using an AI agent.
+
+```bash
+./sds_operator run exp/target-app/my-experiment-name
+```
 
 **What it does:**
 - **Auto-Scripting**: Automatically generates deployment and health check scripts if they are missing. Scripts are created in `<app-dir>/.sds`.
 - **Self-Healing Deployment**: If a deployment fails, the AI agent analyzes the error logs, identifies the root cause, and automatically fixes the scripts before retrying (up to 5 attempts).
 - **AI-Powered Analysis**: Provides intelligent analysis of health check results to suggest improvements.
 
-```bash
-./sds_operator /path/to/repository
-```
-
-
 ### Command Reference
 
-#### Deploy and Monitor a Repository
+#### `run` - Deploy and Monitor
 
 Deploy an application with autonomous error fixing and AI-powered health monitoring.
+
+**Usage:**
+```bash
+./sds_operator run <DIR> [options]
+```
 
 **Arguments:**
 - `DIR`: Path to the repository directory (required, positional argument)
@@ -103,8 +116,16 @@ Deploy an application with autonomous error fixing and AI-powered health monitor
 **Options:**
 - `--config <FILE>`: Path to configuration file (default: `sds.toml` in target dir)
 
-**Example:**
+#### `init-exp` - Initialize Experiment
+
+Initialize a new experiment from an existing application.
+
+**Usage:**
 ```bash
-./sds_operator /path/to/repository
+./sds_operator init-exp <APP_PATH> <EXP_NAME>
 ```
+
+**Arguments:**
+- `APP_PATH`: Path to the source application directory
+- `EXP_NAME`: Name of the new experiment
 
