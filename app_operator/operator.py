@@ -81,7 +81,9 @@ class AppOperator:
         self._deployed = False
 
         # Initialize agents
-        self.deployer = DeploymentAgent(self.repo_path, self.agent, self.filesystem)
+        self.deployer = DeploymentAgent(
+            self.repo_path, self.agent, self.filesystem, self.config.deployment
+        )
         self.monitor = AppMonitor(self.repo_path, self.agent, self.filesystem)
 
         # Initialize trajectory recorder

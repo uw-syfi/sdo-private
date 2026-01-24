@@ -270,7 +270,8 @@ class AppMonitor:
             check_shutdown: Callable returning True if shutdown requested.
         """
         logger.info(
-            f"Starting application monitoring (interval: {interval}s, max_checks: {max_checks if max_checks else 'unlimited'})..."
+            f"Starting application monitoring (interval: {interval}s, max_checks: {
+                max_checks if max_checks else 'unlimited'})..."
         )
 
         # Clear log directory on startup

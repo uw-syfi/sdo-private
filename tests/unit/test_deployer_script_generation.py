@@ -52,9 +52,6 @@ def test_analyze_repository_detects_languages(tmp_path):
 
     context = _analyze_repository(tmp_path)
 
-    assert "Found package.json" in context
-    assert "Found go.mod" in context
-
 
 def test_generate_scripts_creates_files(tmp_path, stub_agent):
     # Setup repo

@@ -38,9 +38,7 @@ def test_operator_persists_config(mock_trajectory):
 
     config = Config(deployment=DeploymentConfig(platform="k8s", target="local"))
 
-    operator = AppOperator(
-        repo_path=str(repo_path), filesystem=fs, agent=agent, config=config
-    )
+    _ = AppOperator(repo_path=str(repo_path), filesystem=fs, agent=agent, config=config)
 
     sds_config = repo_path / ".sds" / "config.toml"
     assert fs.exists(sds_config)
@@ -64,9 +62,7 @@ def test_operator_does_not_overwrite_existing_config(mock_trajectory):
 
     config = Config(deployment=DeploymentConfig(platform="k8s", target="local"))
 
-    operator = AppOperator(
-        repo_path=str(repo_path), filesystem=fs, agent=agent, config=config
-    )
+    _ = AppOperator(repo_path=str(repo_path), filesystem=fs, agent=agent, config=config)
 
     content = fs.read_text(sds_config)
     # Should still be docker because file existed and logic is "if not exists"
