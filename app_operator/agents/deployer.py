@@ -518,9 +518,8 @@ class DeploymentAgent:
         ):
             logger.info("Generating Deployment Scripts")
             logger.info(
-                f"Scripts not found in {self.sds_dir}, generating with {
-                    self.agent.__class__.__name__
-                }..."
+                f"Scripts not found in {self.sds_dir}, generating with "
+                f"{self.agent.__class__.__name__}..."
             )
 
             success, message = generate_scripts(
@@ -793,9 +792,7 @@ class DeploymentAgent:
 
             status = "SUCCESS" if process.returncode == 0 else "FAILED"
             logger.info(
-                f"Deployment command '{command}' finished: {status} (Exit Code: {
-                    process.returncode
-                })"
+                f"Deployment command '{command}' finished: {status} (Exit Code: {process.returncode})"
             )
 
             return {
