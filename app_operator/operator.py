@@ -1,4 +1,5 @@
 import signal
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -118,8 +119,9 @@ class AppOperator:
             int: Exit code (0 for success, 1 for failure).
         """
         # Setup signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, self._handle_shutdown_signal)
-        signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, self._handle_shutdown_signal)
+            signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
         try:
             logger.info("Starting App Operator Mode")
