@@ -10,6 +10,14 @@ from typing import Optional, Callable, Dict, Any
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
 from tools.healthcheck import run_health_check
+from tools.trajectory import (
+    Phase,
+    record_phase_start,
+    record_phase_end,
+    record_user_message,
+    record_assistant_message,
+    record_tool_call,
+)
 
 
 # Constants
@@ -62,6 +70,9 @@ def generate_scripts(
     try:
         os.chdir(abs_target_dir)
 
+        # Start script generation phase in trajectory
+        record_phase_start(Phase.SCRIPT_GENERATION)
+
         # Create system prompt
         system_prompt = _create_system_prompt()
 
@@ -74,6 +85,7 @@ def generate_scripts(
         )
 
         if not deploy_success:
+            record_phase_end("failed")
             return False, f"Failed to generate deploy.sh: {deploy_msg}"
 
         # Generate health_check.sh using coding agent
@@ -82,6 +94,7 @@ def generate_scripts(
         )
 
         if not health_check_success:
+            record_phase_end("failed")
             return False, f"Failed to generate health_check.sh: {health_check_msg}"
 
         # Make scripts executable
@@ -94,9 +107,11 @@ def generate_scripts(
         if health_check_script_path.exists():
             health_check_script_path.chmod(0o755)
 
+        record_phase_end("success")
         return True, f"Successfully generated scripts in {sds_dir}"
 
     except Exception as e:
+        record_phase_end("failed")
         return False, f"Failed to generate scripts: {e}"
     finally:
         # Restore original working directory
@@ -178,6 +193,16 @@ def _analyze_repository(repo_path: Path) -> str:
     context_parts = []
 
     # Check for common deployment files
+    if (repo_path / "docker-compose.yml").exists():
+        context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
+    if (repo_path / "docker-compose.yaml").exists():
+        context_parts.append("- Found docker-compose.yaml (Docker Compose deployment)")
+    if (repo_path / "Dockerfile").exists():
+        context_parts.append("- Found Dockerfile (Docker-based application)")
+    if (repo_path / "k8s").exists() or (repo_path / "kubernetes").exists():
+        context_parts.append("- Found Kubernetes manifests directory")
+    if (repo_path / "Makefile").exists():
+        context_parts.append("- Found Makefile (may contain build/deploy targets)")
 
     # Check for common application files
     if (repo_path / "package.json").exists():
@@ -185,8 +210,7 @@ def _analyze_repository(repo_path: Path) -> str:
     if (repo_path / "requirements.txt").exists() or (
         repo_path / "pyproject.toml"
     ).exists():
-        context_parts.append(
-            "- Found Python dependencies (Python application)")
+        context_parts.append("- Found Python dependencies (Python application)")
     if (repo_path / "go.mod").exists():
         context_parts.append("- Found go.mod (Go application)")
     if (repo_path / "Cargo.toml").exists():
@@ -246,26 +270,46 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
     full_prompt = f"""{system_prompt}
 
 {human_prompt}"""
-
     try:
+        # Record the prompt in trajectory
+        record_user_message(full_prompt)
+
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir,
-                       timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
         print(f"Agent generation took {duration / 60:.2f} minutes")
 
         deploy_script_path = Path(target_dir) / ".sds" / "deploy.sh"
         if deploy_script_path.exists():
+            # Record successful generation
+            record_tool_call(
+                tool="write_file",
+                args={"path": ".sds/deploy.sh"},
+                stdout="Successfully generated deploy.sh",
+                exit_code=0,
+                duration=duration,
+            )
+            record_assistant_message(
+                "I have analyzed the repository and generated deploy.sh with commands for start, stop, restart, status, logs, build, and cleanup.",
+                duration=duration,
+            )
             return True, "Successfully generated deploy.sh"
         else:
+            record_assistant_message(
+                "Failed to create deploy.sh: Agent did not write the file",
+                duration=duration,
+            )
             return False, "Agent failed to create .sds/deploy.sh"
 
     except subprocess.TimeoutExpired:
+        timeout = DEFAULT_AGENT_TIMEOUT_SECS // 60
+        record_assistant_message(f"Script generation timed out after {timeout} minutes")
         return (
             False,
-            f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes",
+            f"agent command timed out after {timeout} minutes",
         )
     except Exception as e:
+        record_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
 
 
@@ -297,25 +341,45 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 {human_prompt}"""
 
     try:
+        # Record the prompt in trajectory
+        record_user_message(full_prompt)
+
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir,
-                       timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
         duration = time.time() - start_time
         print(f"Agent generation took {duration / 60:.2f} minutes")
 
-        health_check_script_path = Path(
-            target_dir) / ".sds" / "health_check.sh"
+        health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
         if health_check_script_path.exists():
+            # Record successful generation
+            record_tool_call(
+                tool="write_file",
+                args={"path": ".sds/health_check.sh"},
+                stdout="Successfully generated health_check.sh",
+                exit_code=0,
+                duration=duration,
+            )
+            record_assistant_message(
+                "I have analyzed the repository and generated health_check.sh with checks for containers, ports, endpoints, and performance metrics.",
+                duration=duration,
+            )
             return True, "Successfully generated health_check.sh"
         else:
+            record_assistant_message(
+                "Failed to create health_check.sh: Agent did not write the file",
+                duration=duration,
+            )
             return False, "Agent failed to create .sds/health_check.sh"
 
     except subprocess.TimeoutExpired:
+        timeout = DEFAULT_AGENT_TIMEOUT_SECS // 60
+        record_assistant_message(f"Script generation timed out after {timeout} minutes")
         return (
             False,
-            f"agent command timed out after {DEFAULT_AGENT_TIMEOUT_SECS // 60} minutes",
+            f"agent command timed out after {timeout} minutes",
         )
     except Exception as e:
+        record_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
 
 
@@ -384,8 +448,7 @@ class DeploymentAgent:
                 f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}..."
             )
 
-            success, message = generate_scripts(
-                str(self.repo_path), self.agent)
+            success, message = generate_scripts(str(self.repo_path), self.agent)
 
             if success:
                 print(f"✓ {message}")
@@ -415,33 +478,64 @@ class DeploymentAgent:
 
             print(f"\n--- Deployment Attempt #{attempt} ---\n")
 
+            # Start deployment phase in trajectory
+            record_phase_start(
+                Phase.DEPLOYMENT, {"attempt": attempt, "max_attempts": max_attempts}
+            )
+
             # Setup log file for this attempt
-            log_file_path = self.sds_dir / "logs" / \
-                f"deploy_attempt_{attempt}.log"
+            log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
             # Ensure directory exists
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Run deployment script
+            start_time = time.time()
             deploy_result = self.run_deploy_command(
                 "start", log_file_path=log_file_path
+            )
+            deploy_duration = time.time() - start_time
+
+            # Record the deployment tool call
+            record_tool_call(
+                tool="bash",
+                args={"script": ".sds/deploy.sh start"},
+                stdout=deploy_result.get("stdout", ""),
+                stderr=deploy_result.get("stderr", ""),
+                exit_code=int(deploy_result.get("exit_code", -1) or -1),
+                duration=deploy_duration,
             )
 
             # Check if deployment succeeded
             if deploy_result["success"]:
                 print("\n✓ Deployment script succeeded (exit code: 0)")
+                record_assistant_message(
+                    "Deployment script executed successfully (exit code: 0)",
+                    duration=deploy_duration,
+                )
 
                 # Setup log file for health check
                 health_check_log_path = (
-                    self.sds_dir / "logs" /
-                    f"health_check_attempt_{attempt}.log"
+                    self.sds_dir / "logs" / f"health_check_attempt_{attempt}.log"
                 )
                 health_check_log_path.parent.mkdir(parents=True, exist_ok=True)
 
                 # Verify with health check
+                health_start = time.time()
                 health_result = run_health_check(
                     self.repo_path,
                     self.health_check_script,
                     log_file_path=health_check_log_path,
+                )
+                health_duration = time.time() - health_start
+
+                # Record health check tool call
+                record_tool_call(
+                    tool="bash",
+                    args={"script": ".sds/health_check.sh"},
+                    stdout=health_result.get("stdout", ""),
+                    stderr=health_result.get("stderr", ""),
+                    exit_code=int(health_result.get("exit_code", -1) or -1),
+                    duration=health_duration,
                 )
 
                 if health_result["success"]:
@@ -449,10 +543,16 @@ class DeploymentAgent:
                     print(f"\n{'=' * 70}")
                     print("  Deployment Successful!")
                     print(f"{'=' * 70}\n")
+                    record_assistant_message(
+                        "Health check passed. Deployment successful!"
+                    )
+                    record_phase_end("success")
                     return True
                 else:
-                    print(
-                        f"⚠ Health check failed (exit code: {health_result['exit_code']})"
+                    res = health_result["exit_code"]
+                    print(f"⚠ Health check failed (exit code: {res})")
+                    record_assistant_message(
+                        f"Health check failed (exit code: {res}). Analyzing errors..."
                     )
 
                     # Health check failed - ask agent to analyze and fix
@@ -464,17 +564,23 @@ class DeploymentAgent:
                         log_file_path,
                         health_check_log_path,
                     ):
+                        record_phase_end("failed")
                         return False
+                    record_phase_end("needs_retry")
             else:
-                print(
-                    f"✗ Deployment script failed (exit code: {deploy_result['exit_code']})"
+                res = deploy_result["exit_code"]
+                print(f"✗ Deployment script failed (exit code: {res})")
+                record_assistant_message(
+                    f"Deployment script failed (exit code: {res}). Analyzing errors..."
                 )
 
                 # Deployment failed - ask agent to analyze and fix
                 if not self._fix_with_agent(
                     deploy_result, None, attempt, absolute_max_attempts, log_file_path
                 ):
+                    record_phase_end("failed")
                     return False
+                record_phase_end("needs_retry")
 
         return False
 
@@ -663,8 +769,7 @@ Recent Output:
 
     def _extract_summary(self, response: str) -> Optional[str]:
         """Extract the summary from the agent's response using XML markers."""
-        match = re.search(r"<output_msg>(.*?)</output_msg>",
-                          response, re.DOTALL)
+        match = re.search(r"<output_msg>(.*?)</output_msg>", response, re.DOTALL)
         if match:
             return match.group(1).strip()
         return None
@@ -696,8 +801,7 @@ Recent Output:
             return False
 
         print(f"\n{'=' * 70}")
-        print(
-            f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
+        print(f"  Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
         print(f"{'=' * 70}\n")
 
         # Prepare error context
@@ -714,6 +818,9 @@ Recent Output:
             )
             print(f"{'-' * 70}")
 
+            # Record the fix prompt in trajectory
+            record_user_message(prompt)
+
             # Run agent to get fix suggestions
             # Note: The agent is expected to modify files directly
             start_time = time.time()
@@ -722,6 +829,13 @@ Recent Output:
             )
             duration = time.time() - start_time
             print(f"Agent generation (fix) took {duration / 60:.2f} minutes")
+
+            # Record agent response in trajectory
+            res = response[:1000] if response else "No response"
+            record_assistant_message(
+                f"Analyzed the deployment error and applied fixes. Response: {res}",
+                duration=duration,
+            )
 
             # Extract summary and save to log
             match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
@@ -744,6 +858,7 @@ Recent Output:
 
         except Exception as e:
             print(f"✗ Agent failed to provide fix: {e}", file=sys.stderr)
+            record_assistant_message(f"Failed to provide fix: {e}")
             return False
 
     def _prepare_error_context(
@@ -767,8 +882,7 @@ Recent Output:
         context_parts = []
 
         if log_file_path:
-            context_parts.append(
-                f"Full deployment logs available at: {log_file_path}")
+            context_parts.append(f"Full deployment logs available at: {log_file_path}")
 
         if health_check_log_path:
             context_parts.append(
@@ -844,8 +958,7 @@ Recent Output:
         # Determine previous fix summary file path
         previous_summary_note = ""
         if attempt > 1:
-            prev_log_path = self.sds_dir / "logs" / \
-                f"fix_summary_{attempt - 1}.log"
+            prev_log_path = self.sds_dir / "logs" / f"fix_summary_{attempt - 1}.log"
             previous_summary_note = (
                 f"\n\nNote: This is attempt #{attempt}. "
                 f"You can read the summary of the previous fix attempt at:\n{prev_log_path}\n"

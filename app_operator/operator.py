@@ -7,6 +7,7 @@ from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
+from tools.trajectory import init_trajectory, finalize_trajectory
 
 
 class AppOperator:
@@ -57,6 +58,10 @@ class AppOperator:
         # Initialize agents
         self.deployer = DeploymentAgent(self.repo_path, self.agent)
         self.monitor = AppMonitor(self.repo_path, self.agent)
+
+        # Initialize trajectory recorder
+        self.trajectory = init_trajectory(self.repo_path)
+        self.trajectory.set_agent_name(self.agent.__class__.__name__)
 
         # Validate repository path
         if not self.repo_path.exists():
@@ -117,6 +122,7 @@ class AppOperator:
             return 1
         finally:
             self._cleanup()
+            finalize_trajectory("completed" if self._deployed else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame):
         """Handle shutdown signals (SIGINT, SIGTERM).
