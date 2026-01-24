@@ -62,3 +62,4 @@ dmypy.json
 
 # UV
 uv.lock
+sds.toml

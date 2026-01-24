@@ -1,0 +1,8 @@
+[agent]
+provider = "codex" # or "gemini", "claude", "opencode"
+# model = "gpt-4o-mini" # optional
+
+[operator]
+interval = 30
+monitoring_max_iters = 5 # Maximum number of health monitoring iterations
+deployment_max_iters = 20 # Maximum deployment attempts

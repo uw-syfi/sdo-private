@@ -56,7 +56,13 @@ pip install -e .
 OPENAI_API_KEY=your_api_key_here
 ```
 
-2. Configure the agent and operator settings using `sds.toml` in the target repository (or use the default configuration):
+2. Configure the agent and operator settings by copying `sds.example.toml` to `sds.toml` in the project root:
+
+```bash
+cp sds.example.toml sds.toml
+```
+
+Then edit `sds.toml` to configure your settings:
 
 ```toml
 [agent]
