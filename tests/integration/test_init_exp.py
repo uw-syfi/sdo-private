@@ -142,3 +142,33 @@ def test_init_exp_fails_if_exists(source_app, execute_command):
     # Second run should fail
     ret2, _ = execute_command(str(source_app), "exp-dup")
     assert ret2 != 0
+
+
+def test_init_exp_handles_git_submodule_structure(tmp_path, execute_command):
+    """Verify init-exp works when .git is a file (like in submodules)."""
+    app_name = "submodule-app"
+    source_root = tmp_path / "submodule_source"
+    source_root.mkdir()
+    app_path = source_root / app_name
+    app_path.mkdir()
+
+    # Add some files
+    (app_path / "src").mkdir()
+    (app_path / "src" / "code.py").write_text("print('submodule')")
+
+    # simulate git submodule: .git is a file pointing to the gitdir
+    (app_path / ".git").write_text("gitdir: ../.git/modules/submodule-app")
+
+    ret, target_path = execute_command(str(app_path), "exp-submod")
+
+    assert ret == 0
+    assert target_path.exists()
+
+    # The .git file should be replaced by a .git directory (new repo)
+    assert (target_path / ".git").is_dir()
+    assert (target_path / ".git" / "HEAD").exists()
+
+    # Check it's a valid repo
+    subprocess.run(
+        ["git", "status"], cwd=target_path, check=True, stdout=subprocess.DEVNULL
+    )
