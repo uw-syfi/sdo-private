@@ -50,10 +50,18 @@ pip install -e .
 
 #### Environment Setup
 
-1. Create a `.env` file in the project root with your OpenAI API key (required for health check summaries):
+1. Create a `.env` file in the project root with the necessary API keys and configuration.
 
+For OpenAI (required for Codex agent):
 ```bash
 OPENAI_API_KEY=your_api_key_here
+```
+
+For Gemini Agent (Vertex AI):
+```bash
+GOOGLE_APPLICATION_CREDENTIALS="path/to/your/credentials.json"
+GOOGLE_CLOUD_PROJECT="your_project_id"
+GOOGLE_CLOUD_LOCATION="global"
 ```
 
 2. Configure the agent and operator settings by copying `sds.example.toml` to `sds.toml` in the project root:
