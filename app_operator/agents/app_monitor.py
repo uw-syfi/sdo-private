@@ -9,6 +9,7 @@ from typing import Optional, Callable, Dict, Any, List
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
+from app_operator.prompts import get_loader
 from tools.healthcheck import run_health_check
 from tools.trajectory import (
     Phase,
@@ -153,83 +154,9 @@ class HealthCheckTask(MonitoringTask):
 
     def _create_analysis_prompt(self, context: str, repo_path: Path) -> str:
         """Create a prompt for the coding agent to analyze health check results."""
-        system_prompt = """You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.
-
-Your task is to analyze health check results and provide actionable insights and suggestions.
-
-## Context
-- Repository: {repo_path}
-- Application is currently deployed and running
-- You are analyzing periodic health check results
-- Your suggestions will NOT be automatically applied
-
-## DO's:
-- Carefully analyze all health metrics and indicators
-- Identify any issues, warnings, or anomalies
-- Provide clear, actionable suggestions for improvement
-- Prioritize issues by severity (critical, warning, info)
-- Consider performance, reliability, and resource utilization
-- Look for trends or patterns if multiple checks have been performed
-- Suggest proactive improvements, not just reactive fixes
-- Be specific about what to check or fix
-- Consider monitoring and observability improvements
-- Suggest optimization opportunities
-
-## DON'Ts:
-- Don't ignore warnings or minor issues
-- Don't provide vague suggestions
-- Don't recommend destructive actions without clear warnings
-- Don't panic over temporary blips (distinguish from real issues)
-- Don't focus only on failures - also suggest improvements for healthy systems
-- Don't make assumptions without evidence from the health check output
-
-## Analysis Framework:
-1. Overall Health Status
-   - Is the system healthy?
-   - Are all components functioning?
-   - Any degraded services?
-
-2. Issues Found
-   - Critical issues (requires immediate attention)
-   - Warnings (should be addressed soon)
-   - Info (nice to have improvements)
-
-3. Performance Analysis
-   - Response times
-   - Resource utilization
-   - Bottlenecks
-
-4. Recommendations
-   - Short-term fixes
-   - Long-term improvements
-   - Monitoring suggestions
-
-## Output Format:
-Provide a structured analysis with:
-- Executive summary wrapped in <exec_summary> tags.
-  * THE EXECUTIVE SUMMARY MUST BE NO LONGER THAN 2 LINES.
-- Detailed findings
-- Prioritized recommendations
-- Suggested actions (if any)
-
-Keep your analysis concise but comprehensive. Wrap the executive summary like this: <exec_summary>Your summary here</exec_summary>. Everything else should be outside these tags."""
-
-        system_prompt = system_prompt.format(repo_path=repo_path)
-
-        user_prompt = f"""Please analyze the following health check results and provide insights and suggestions:
-
-{context}
-
-Provide:
-1. Overall health assessment
-2. Any issues or concerns
-3. Performance observations
-4. Recommendations for improvement
-5. Suggested actions (if any)
-
-Remember: Your suggestions are for information only and will not be automatically applied."""
-
-        return f"{system_prompt}\n\n{user_prompt}"
+        return get_loader().render(
+            "monitor/analyze_health.jinja2", repo_path=repo_path, context=context
+        )
 
 
 class AppMonitor:
