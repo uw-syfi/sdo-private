@@ -40,6 +40,7 @@ def run_command(args: argparse.Namespace) -> int:
             health_check_max_count=config.operator.monitoring_max_iters,
             max_deployment_attempts=config.operator.deployment_max_iters,
             agent=agent,
+            config=config,
         )
 
         return operator.run()

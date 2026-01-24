@@ -6,3 +6,7 @@ provider = "codex" # or "gemini", "claude", "opencode"
 interval = 30
 monitoring_max_iters = 5 # Maximum number of health monitoring iterations
 deployment_max_iters = 20 # Maximum deployment attempts
+
+[deployment]
+platform = "docker" # "docker" or "k8s"
+target = "local" # "local" or "remote"

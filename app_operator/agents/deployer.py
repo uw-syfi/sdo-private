@@ -8,6 +8,7 @@ from typing import Optional, Callable, Dict, Any
 
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.config import DeploymentConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from tools.healthcheck import run_health_check
@@ -30,6 +31,7 @@ def generate_scripts(
     target_dir: str,
     agent: Optional[CodingAgent] = None,
     filesystem: Optional[FileSystemInterface] = None,
+    deployment_config: Optional[DeploymentConfig] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -41,12 +43,16 @@ def generate_scripts(
         target_dir: The directory path where scripts should be generated.
         agent: Optional CodingAgent instance. If None, creates one from config.
         filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+        deployment_config: Optional deployment configuration. If None, uses default.
 
     Returns:
         Tuple of (success: bool, message: str).
     """
     if filesystem is None:
         filesystem = RealFilesystem()
+
+    if deployment_config is None:
+        deployment_config = DeploymentConfig()
 
     target_path = Path(target_dir).resolve()
 
@@ -79,15 +85,20 @@ def generate_scripts(
         # Start script generation phase in trajectory
         record_phase_start(Phase.SCRIPT_GENERATION)
 
-        # Create system prompt
-        system_prompt = _create_system_prompt()
+        # Create system prompt based on deployment platform
+        system_prompt = _create_system_prompt(deployment_config.platform)
 
         # Analyze the repository structure
         repo_context = _analyze_repository(target_path)
 
         # Generate deploy.sh using coding agent
         deploy_success, deploy_msg = _generate_deploy_script(
-            agent, system_prompt, repo_context, abs_target_dir, filesystem
+            agent,
+            system_prompt,
+            repo_context,
+            abs_target_dir,
+            filesystem,
+            deployment_config,
         )
 
         if not deploy_success:
@@ -96,7 +107,12 @@ def generate_scripts(
 
         # Generate health_check.sh using coding agent
         health_check_success, health_check_msg = _generate_health_check_script(
-            agent, system_prompt, repo_context, abs_target_dir, filesystem
+            agent,
+            system_prompt,
+            repo_context,
+            abs_target_dir,
+            filesystem,
+            deployment_config,
         )
 
         if not health_check_success:
@@ -124,29 +140,84 @@ def generate_scripts(
         os.chdir(original_cwd)
 
 
-def _create_system_prompt() -> str:
+def _create_system_prompt(platform: str) -> str:
     """Create the system prompt for coding agent to guide script generation."""
-    return """You are an expert DevOps engineer generating deployment and health check scripts for applications.
+    prompt = """You are an expert DevOps engineer generating deployment and health check scripts for applications.
 
 Your task is to analyze a repository and generate two bash scripts:
 1. deploy.sh - A comprehensive deployment script
 2. health_check.sh - A comprehensive health check script
 
+"""
+
+    if platform == "k8s":
+        prompt += """## CRITICAL: Target Platform is Kubernetes
+
+You MUST generate scripts for Kubernetes deployment.
+
+### Kubernetes Platform Requirements:
+- Look for: k8s/, kubernetes/, *.yaml manifests with "kind: Deployment", "kind: Service", etc.
+- If existing manifests are found, use them.
+- If no manifests are found, you MUST generate valid Kubernetes manifests (Deployment, Service) and apply them.
+- Generate scripts that use `kubectl` commands
+- Commands: kubectl apply, kubectl delete, kubectl get pods, kubectl logs, etc.
+- Use `kubectl wait` or check loops for readiness checks
+
+**CRITICAL REQUIREMENT**: The deployment method MUST be Kubernetes. DO NOT use Docker Compose or plain Docker commands.
+"""
+    elif platform == "docker":
+        prompt += """## CRITICAL: Target Platform is Docker
+
+You MUST generate scripts for Docker deployment.
+
+### Docker Platform Requirements:
+- Analyze the repository to choose between Docker Compose and plain Docker.
+- **Docker Compose** (Recommended if compose file exists):
+  - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
+  - If found: Generate scripts that use `docker-compose` or `docker compose` commands
+  - Commands: docker-compose up, docker-compose down, docker-compose ps, docker-compose logs
+- **Plain Docker**:
+  - Look for: Dockerfile(s) without docker-compose files
+  - If found: Generate scripts that use direct `docker run` commands
+  - Commands: docker build, docker run, docker stop, docker ps, docker logs
+
+**CRITICAL REQUIREMENT**: The deployment method MUST be Docker based. DO NOT use Kubernetes commands.
+"""
+    else:
+        prompt += """## CRITICAL: Deployment Platform Detection
+
+You MUST analyze the repository structure to determine the EXACT deployment platform:
+
+### Docker Compose Platform:
+- Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
+- If found: Generate scripts that use `docker-compose` or `docker compose` commands
+
+### Kubernetes Platform:
+- Look for: k8s/, kubernetes/, *.yaml manifests
+- If found: Generate scripts that use `kubectl` commands
+
+### Plain Docker Platform:
+- Look for: Dockerfile(s) without docker-compose files
+- If found: Generate scripts that use direct `docker run` commands
+"""
+
+    prompt += """
 ## DO's:
 - Use proper bash scripting practices (set -e, proper error handling)
 - Include color-coded output (RED, GREEN, YELLOW, BLUE, CYAN, MAGENTA, NC)
 - Add helper functions for printing (print_header, print_success, print_error, print_warning, print_info)
-- Check prerequisites (Docker, Docker Compose, required tools)
+- Check prerequisites (Docker, Docker Compose, kubectl, etc. based on platform)
 - Use SCRIPT_DIR and proper path resolution
 - Include comprehensive error handling
 - Add command-line argument parsing
 - Include help/usage information
 - Make scripts executable-ready (shebang #!/bin/bash)
 - For deploy.sh: Include start, stop, restart, status, logs, build, cleanup commands
-- For health_check.sh: Check containers, ports, endpoints, databases, performance metrics
+- For health_check.sh: Check containers/pods, ports, endpoints, databases, performance metrics
 - Include summary reports and exit codes
 
 ## DON'Ts:
+- **NEVER mix deployment platforms** (e.g., don't use both docker-compose and kubectl in the same script)
 - Don't hardcode absolute paths (use SCRIPT_DIR and relative paths)
 - Don't skip error handling
 - Don't use deprecated commands
@@ -156,73 +227,42 @@ Your task is to analyze a repository and generate two bash scripts:
 - Don't generate scripts that modify files outside the application directory
 - Don't skip prerequisite checks
 
-## Example Structure (DO NOT COPY EXACTLY - ADAPT TO REPOSITORY):
+## Example Structure (ADAPT TO REPOSITORY):
 
 deploy.sh should include:
-- Configuration section with paths and environment variables
-- Helper functions for colored output
-- check_prerequisites() function
-- build_images() function (if using Docker)
-- start_services() function
-- stop_services() function
-- restart_services() function
-- check_health() function
-- view_logs() function
-- cleanup() function
-- Main command dispatcher with case statement
+- Configuration section with paths and env vars
+- Helper functions
+- check_prerequisites()
+- build_images() (if needed)
+- start_services()
+- stop_services()
+- restart_services()
+- check_health()
+- view_logs()
+- cleanup()
+- Main command dispatcher
 
 health_check.sh should include:
 - Configuration section
-- Helper functions for colored output and status tracking
-- check_docker() function
-- check_containers() function
-- check_ports() function
-- check_endpoints() function (HTTP/HTTPS health checks)
-- check_databases() function (if applicable)
-- check_cache() function (if applicable)
-- check_performance() function
-- print_summary() function with health score
+- Helper functions
+- check_platform_specific_resources()
+- check_ports()
+- check_endpoints()
+- print_summary()
 - Main execution flow
 
 ## Important:
-- Analyze the repository structure to understand the deployment method
-- Look for docker composer YAML file(s), Dockerfile, Kubernetes manifests, Makefile, etc. They may not be in the root directory or use these file names.
-- Identify the main application entry points and services
-- Determine health check endpoints and ports
-- Adapt the scripts to match the actual application architecture
-- Use relative paths based on SCRIPT_DIR
-- Make the scripts robust and production-ready"""
+- **STEP 1**: Confirm the repository structure matches the target platform.
+- **STEP 2**: Identify services, ports, and health check endpoints.
+- **STEP 3**: Generate robust scripts using the correct commands for the platform.
+- **VERIFY**: Explicitly state which platform you are targeting in the comments."""
+
+    return prompt
 
 
 def _analyze_repository(repo_path: Path) -> str:
     """Analyze repository structure and return context string."""
     context_parts = []
-
-    # Check for common deployment files
-    if (repo_path / "docker-compose.yml").exists():
-        context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
-    if (repo_path / "docker-compose.yaml").exists():
-        context_parts.append("- Found docker-compose.yaml (Docker Compose deployment)")
-    if (repo_path / "Dockerfile").exists():
-        context_parts.append("- Found Dockerfile (Docker-based application)")
-    if (repo_path / "k8s").exists() or (repo_path / "kubernetes").exists():
-        context_parts.append("- Found Kubernetes manifests directory")
-    if (repo_path / "Makefile").exists():
-        context_parts.append("- Found Makefile (may contain build/deploy targets)")
-
-    # Check for common application files
-    if (repo_path / "package.json").exists():
-        context_parts.append("- Found package.json (Node.js application)")
-    if (repo_path / "requirements.txt").exists() or (
-        repo_path / "pyproject.toml"
-    ).exists():
-        context_parts.append("- Found Python dependencies (Python application)")
-    if (repo_path / "go.mod").exists():
-        context_parts.append("- Found go.mod (Go application)")
-    if (repo_path / "Cargo.toml").exists():
-        context_parts.append("- Found Cargo.toml (Rust application)")
-    if (repo_path / "pom.xml").exists():
-        context_parts.append("- Found pom.xml (Java/Maven application)")
 
     # Check for README
     readme_files = list(repo_path.glob("README*"))
@@ -230,14 +270,6 @@ def _analyze_repository(repo_path: Path) -> str:
         context_parts.append(
             f"- Found README file(s): {', '.join(f.name for f in readme_files)}"
         )
-
-    # # List top-level directories
-    # dirs = [d for d in repo_path.iterdir() if d.is_dir()
-    #         and not d.name.startswith(".")]
-    # if dirs:
-    #     dir_names = ", ".join(
-    #         sorted([d.name for d in dirs[:10]]))  # Limit to 10
-    #     context_parts.append(f"- Top-level directories: {dir_names}")
 
     # Get repository name
     repo_name = repo_path.name
@@ -256,24 +288,50 @@ def _generate_deploy_script(
     repo_context: str,
     target_dir: str,
     filesystem: FileSystemInterface,
+    deployment_config: Optional[DeploymentConfig] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
+
+    platform_specific_instructions = ""
+    if deployment_config and deployment_config.platform == "k8s":
+        platform_specific_instructions = """
+1. **Target Platform: Kubernetes**
+   - Use `kubectl` commands.
+   - Ensure you handle manifest application and pod readiness.
+"""
+    elif deployment_config and deployment_config.platform == "docker":
+        platform_specific_instructions = """
+1. **Target Platform: Docker**
+   - Use `docker-compose` or `docker` commands as appropriate for the repo.
+"""
+    else:
+        platform_specific_instructions = """
+1. **Deployment Platform Detection**:
+   - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
+   - Use the appropriate commands.
+"""
+
     human_prompt = f"""Generate a comprehensive deploy.sh bash script for the following repository:
 
 {repo_context}
 
 Target directory: {target_dir}
 
-Requirements:
-- Create the file at: .sds/deploy.sh
-- Use SCRIPT_DIR to determine paths relative to the script location
-- Analyze the repository structure to determine the deployment method
-- Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
-- Make it robust, well-documented, and production-ready
-- Include proper error handling and colored output
-- The script should work when executed from the .sds directory
+CRITICAL REQUIREMENTS:
 
-You can generate Dockerfile(s) if needed to package individual services.
+{platform_specific_instructions}
+
+2. **Script Requirements**:
+   - Create the file at: .sds/deploy.sh
+   - Use SCRIPT_DIR to determine paths relative to the script location
+   - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
+   - Make it robust, well-documented, and production-ready
+   - Include proper error handling and colored output
+   - The script should work when executed from the .sds directory
+   - Check for correct prerequisites
+
+3. **Platform-Specific Commands**:
+   - Use the commands that match the detected/target platform (see System Prompt).
 
 You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content."""
 
@@ -310,24 +368,52 @@ def _generate_health_check_script(
     repo_context: str,
     target_dir: str,
     filesystem: FileSystemInterface,
+    deployment_config: Optional[DeploymentConfig] = None,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
+
+    platform_specific_instructions = ""
+    if deployment_config and deployment_config.platform == "k8s":
+        platform_specific_instructions = """
+1. **Target Platform: Kubernetes**
+   - Use `kubectl` commands.
+   - Check pod status and readiness.
+"""
+    elif deployment_config and deployment_config.platform == "docker":
+        platform_specific_instructions = """
+1. **Target Platform: Docker**
+   - Use `docker-compose ps` or `docker ps`.
+   - Check container status.
+"""
+    else:
+        platform_specific_instructions = """
+1. **Deployment Platform Detection**:
+   - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
+   - Use the appropriate status check commands.
+"""
+
     human_prompt = f"""Generate a comprehensive health_check.sh bash script for the following repository:
 
 {repo_context}
 
 Target directory: {target_dir}
 
-Requirements:
-- Create the file at: .sds/health_check.sh
-- Use SCRIPT_DIR to determine paths relative to the script location
-- Analyze the repository structure to determine what to check
-- Include checks for: containers, ports, endpoints, databases, cache, performance
-- Include a summary report with health score
-- Make it robust, well-documented, and production-ready
-- Include proper error handling and colored output
-- Track total checks, passed checks, failed checks, warnings
-- The script should work when executed from the .sds directory
+CRITICAL REQUIREMENTS:
+
+{platform_specific_instructions}
+
+2. **Script Requirements**:
+   - Create the file at: .sds/health_check.sh
+   - Use SCRIPT_DIR to determine paths relative to the script location
+   - Include checks for: containers/pods, ports, endpoints, databases, cache, performance
+   - Include a summary report with health score
+   - Make it robust, well-documented, and production-ready
+   - Include proper error handling and colored output
+   - Track total checks, passed checks, failed checks, warnings
+   - The script should work when executed from the .sds directory
+
+3. **Platform-Specific Checks**:
+   - Use the checks that match the detected/target platform (see System Prompt).
 
 You must use the write_file tool to create the file .sds/health_check.sh directly. Do not just print the content."""
 
@@ -367,6 +453,7 @@ class DeploymentAgent:
         repo_path: Path,
         coding_agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
+        deployment_config: Optional[DeploymentConfig] = None,
     ):
         """Initialize the deployment agent.
 
@@ -374,10 +461,12 @@ class DeploymentAgent:
             repo_path: Path to the repository to deploy.
             coding_agent: The coding agent to use for generating/fixing scripts.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+            deployment_config: Optional deployment configuration.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+        self.deployment_config = deployment_config or DeploymentConfig()
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -429,11 +518,12 @@ class DeploymentAgent:
         ):
             logger.info("Generating Deployment Scripts")
             logger.info(
-                f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}..."
+                f"Scripts not found in {self.sds_dir}, generating with "
+                f"{self.agent.__class__.__name__}..."
             )
 
             success, message = generate_scripts(
-                str(self.repo_path), self.agent, self.filesystem
+                str(self.repo_path), self.agent, self.filesystem, self.deployment_config
             )
 
             if success:
@@ -949,7 +1039,30 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - Health check script: .sds/health_check.sh
 - Current attempt: {attempt} of {max_attempts}
 
+## CRITICAL: Deployment Platform Awareness
+
+**BEFORE MAKING ANY FIXES, IDENTIFY THE DEPLOYMENT PLATFORM:**
+
+1. Read the deployment script (.sds/deploy.sh) to see what commands it uses
+2. Identify if it's using:
+   - Docker Compose (docker-compose commands)
+   - Kubernetes (kubectl commands)
+   - Plain Docker (docker run/stop/ps commands)
+   - Other platforms
+
+3. **CRITICAL**: All fixes MUST use commands appropriate for the detected platform
+   - If using Docker Compose → Use docker-compose commands in fixes
+   - If using Kubernetes → Use kubectl commands in fixes
+   - If using plain Docker → Use docker commands in fixes
+   - DO NOT mix platforms or suggest commands for the wrong platform
+
+4. Check the repository structure to confirm:
+   - Look for docker-compose.yml/yaml files
+   - Look for Kubernetes manifests (k8s/, *.yaml with kind: Deployment)
+   - Look for Dockerfiles
+
 ## DO's:
+- **FIRST**: Identify the deployment platform being used
 - Carefully analyze the error messages and logs
 - Identify the root cause of the deployment failure
 - Fix the scripts directly using file editing tools
@@ -958,13 +1071,16 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - Make minimal, targeted fixes
 - Ensure scripts are still robust after fixes
 - Fix both deployment and health check scripts if needed
-- Consider environment-specific issues (Docker, networking, file permissions)
+- Consider environment-specific issues (Docker, Kubernetes, networking, file permissions)
 - Look for typos, syntax errors, or incorrect commands
 - Check if services are starting in the right order
 - Verify port bindings and network configurations
 - Check for missing environment variables or configuration files
+- **Use platform-appropriate commands** (match the platform detected in the script)
 
 ## DON'Ts:
+- **NEVER change the deployment platform** (don't switch from docker-compose to kubectl or vice versa)
+- **NEVER use commands from the wrong platform** (don't use kubectl if script uses docker-compose)
 - Don't make random changes without understanding the error
 - Don't remove error handling or safety checks
 - Don't introduce new bugs while fixing old ones
@@ -976,30 +1092,34 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - Don't redeploy the application; propose the fix and let the user decide to redeploy.
 
 ## Approach:
-1. Read and analyze the error messages carefully
-2. Identify the specific failure point
-3. Determine the root cause
-4. Read the relevant scripts to understand current implementation
-5. Make targeted fixes to address the root cause
-6. Verify the fix makes sense in context
+1. **STEP 1**: Read .sds/deploy.sh to identify which deployment platform it uses
+2. **STEP 2**: Read and analyze the error messages carefully
+3. **STEP 3**: Identify the specific failure point
+4. **STEP 4**: Determine the root cause
+5. **STEP 5**: Make targeted fixes using commands appropriate for the detected platform
+6. **STEP 6**: Verify the fix makes sense in context
 
 ## Expected Output:
+- State which deployment platform you detected (Docker Compose, Kubernetes, plain Docker, etc.)
 - Analyze the error thoroughly
 - Explain what went wrong
 - Describe the fix you're applying
-- Make the necessary changes to the scripts
+- Make the necessary changes to the scripts (using correct platform commands)
 - Confirm the changes are complete
 - Output a brief summary of the fix wrapped in <summary></summary> tags.
   - The summary must explicitly state:
     1) what were the issue(s) found
     2) what were your fix(es)
+    3) which deployment platform is being used
   - Be concise but thorough in coverage.
 
 ## Deployment tooling
 
-If the deployment script uses Docker, you can run docker commands directly to inspect the container status and logs.
+If the deployment script uses Docker or Docker Compose, you can run docker/docker-compose commands directly to inspect the container status and logs.
 
-Check for container abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs."""
+If the deployment script uses Kubernetes, you can run kubectl commands to inspect pod status, logs, and events.
+
+Check for container/pod abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs."""
 
         system_prompt = system_prompt.format(
             repo_path=self.repo_path, attempt=attempt, max_attempts=max_attempts

@@ -8,7 +8,7 @@ from app_operator.agents.deployer import (
     DeploymentAgent,
     AGENT_FIX_TIMEOUT_SECS,
     DEFAULT_DEPLOY_TIMEOUT_SECS,
-    DEFAULT_AGENT_TIMEOUT_SECS
+    DEFAULT_AGENT_TIMEOUT_SECS,
 )
 
 
@@ -20,8 +20,12 @@ class StubAgent:
         self.raise_error = raise_error
         self.calls: list[tuple[str, str, int]] = []
 
-    def generate(self, prompt: str, cwd: str | None = None,
-                 timeout: int = DEFAULT_AGENT_TIMEOUT_SECS) -> str:
+    def generate(
+        self,
+        prompt: str,
+        cwd: str | None = None,
+        timeout: int = DEFAULT_AGENT_TIMEOUT_SECS,
+    ) -> str:
         self.calls.append((prompt, cwd, timeout))
         if self.raise_error:
             raise RuntimeError("agent error")
@@ -49,15 +53,16 @@ def agent(repo_path, stub_agent):
     return DeploymentAgent(repo_path, stub_agent)
 
 
-def test_run_generates_scripts_when_missing(
-        tmp_path, stub_agent, monkeypatch):
+def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     agent = DeploymentAgent(repo, stub_agent)
 
     generated = {}
 
-    def fake_generate_scripts(directory, agent, filesystem=None):
+    def fake_generate_scripts(
+        directory, agent, filesystem=None, deployment_config=None
+    ):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
         sds_dir.mkdir(exist_ok=True)
@@ -65,17 +70,15 @@ def test_run_generates_scripts_when_missing(
         (sds_dir / "health_check.sh").write_text("#!/bin/bash\n")
         return True, "done"
 
-    def fake_run_deploy(self, command="start",
-                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
+    def fake_run_deploy(
+        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+    ):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
     def fake_run_health(repo, script, timeout=120, log_file_path=None):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
-    monkeypatch.setattr(
-        deployer_module,
-        "generate_scripts",
-        fake_generate_scripts)
+    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     _bind_method(agent, "run_deploy_command", fake_run_deploy)
 
@@ -83,19 +86,17 @@ def test_run_generates_scripts_when_missing(
     assert generated["args"] == (str(repo), stub_agent)
 
 
-def test_run_fails_if_script_generation_fails(
-        tmp_path, stub_agent, monkeypatch):
+def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     agent = DeploymentAgent(repo, stub_agent)
 
-    def fake_generate_scripts(directory, agent, filesystem=None):
+    def fake_generate_scripts(
+        directory, agent, filesystem=None, deployment_config=None
+    ):
         return False, "boom"
 
-    monkeypatch.setattr(
-        deployer_module,
-        "generate_scripts",
-        fake_generate_scripts)
+    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
 
     assert agent.run() is False
 
@@ -116,8 +117,9 @@ def test_run_succeeds_without_fix(agent, monkeypatch):
         ]
     )
 
-    def fake_run_deploy(self, command="start",
-                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
+    def fake_run_deploy(
+        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+    ):
         return next(deploy_results)
 
     def fake_run_health(repo, script, timeout=120, log_file_path=None):
@@ -147,14 +149,17 @@ def test_run_retries_after_failure(agent, monkeypatch):
     )
     fix_calls: list[tuple[int, int]] = []
 
-    def fake_run_deploy(self, command="start",
-                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
+    def fake_run_deploy(
+        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+    ):
         return next(deploy_results)
 
     def fake_run_health(repo, script, timeout=120, log_file_path=None):
         return next(health_results)
 
-    def fake_fix(self, deploy_result, health_result, attempt, max_attempts, log_file_path=None):
+    def fake_fix(
+        self, deploy_result, health_result, attempt, max_attempts, log_file_path=None
+    ):
         fix_calls.append((attempt, max_attempts, deploy_result["exit_code"]))
         return True
 
@@ -174,8 +179,9 @@ def test_run_respects_max_attempts(agent):
     )
     fix_calls = {"count": 0}
 
-    def fake_run_deploy(self, command="start",
-                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
+    def fake_run_deploy(
+        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+    ):
         return next(deploy_results)
 
     def fake_fix(self, *args, **kwargs):
@@ -207,8 +213,11 @@ def test_run_deploy_command_handles_subprocess_results(agent, monkeypatch):
         def wait(self, timeout=None):
             return 0
 
-        def terminate(self): pass
-        def kill(self): pass
+        def terminate(self):
+            pass
+
+        def kill(self):
+            pass
 
     def fake_popen(cmd, **kwargs):
         assert cmd[0] == str(agent.deploy_script)
@@ -241,10 +250,15 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
                 raise deployer_module.subprocess.TimeoutExpired(cmd=[], timeout=timeout)
             return 0
 
-        def terminate(self): pass
-        def kill(self): pass
+        def terminate(self):
+            pass
 
-    monkeypatch.setattr(deployer_module.subprocess, "Popen", lambda *args, **kwargs: MockProcess())
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(
+        deployer_module.subprocess, "Popen", lambda *args, **kwargs: MockProcess()
+    )
 
     # Mock time to simulate timeout
     # Initial call: start_time
@@ -256,7 +270,8 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
         0,
         DEFAULT_DEPLOY_TIMEOUT_SECS + 1,
         DEFAULT_DEPLOY_TIMEOUT_SECS + 2,
-        DEFAULT_DEPLOY_TIMEOUT_SECS + 3]
+        DEFAULT_DEPLOY_TIMEOUT_SECS + 3,
+    ]
     monkeypatch.setattr(deployer_module.time, "time", lambda: times.pop(0))
     monkeypatch.setattr(deployer_module.time, "sleep", lambda x: None)
 
@@ -267,18 +282,25 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
 
 
 def test_fix_with_agent_skips_when_attempt_exceeds_max(agent, stub_agent):
-
-    assert agent._fix_with_agent(
-        {"exit_code": 1, "success": False}, None, attempt=3, max_attempts=3) is False
+    assert (
+        agent._fix_with_agent(
+            {"exit_code": 1, "success": False}, None, attempt=3, max_attempts=3
+        )
+        is False
+    )
     assert stub_agent.calls == []
 
 
-def test_fix_with_agent_calls_agent_and_returns_success(
-        agent, stub_agent, monkeypatch):
+def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monkeypatch):
     agent.agent = stub_agent
 
-    def fake_prepare(self, deploy_result, health_result,
-                     log_file_path=None, health_check_log_path=None):
+    def fake_prepare(
+        self,
+        deploy_result,
+        health_result,
+        log_file_path=None,
+        health_check_log_path=None,
+    ):
         return "context"
 
     def fake_prompt(self, context, attempt, max_attempts):
@@ -289,19 +311,14 @@ def test_fix_with_agent_calls_agent_and_returns_success(
 
     deploy_result = {"exit_code": 99, "success": False}
 
-    assert agent._fix_with_agent(
-        deploy_result,
-        None,
-        attempt=1,
-        max_attempts=2) is True
+    assert agent._fix_with_agent(deploy_result, None, attempt=1, max_attempts=2) is True
     prompt, cwd, timeout = stub_agent.calls[0]
     assert "prompt::context::1/2" in prompt
     assert cwd == str(agent.repo_path)
     assert timeout == AGENT_FIX_TIMEOUT_SECS
 
 
-def test_fix_with_agent_handles_agent_errors(
-        agent, stub_agent, monkeypatch):
+def test_fix_with_agent_handles_agent_errors(agent, stub_agent, monkeypatch):
     agent.agent = stub_agent
     stub_agent.raise_error = True
 
@@ -314,8 +331,12 @@ def test_fix_with_agent_handles_agent_errors(
     agent._prepare_error_context = MethodType(fake_prepare, agent)
     agent._create_fix_prompt = MethodType(fake_prompt, agent)
 
-    assert agent._fix_with_agent(
-        {"exit_code": 1, "success": False}, None, attempt=1, max_attempts=2) is False
+    assert (
+        agent._fix_with_agent(
+            {"exit_code": 1, "success": False}, None, attempt=1, max_attempts=2
+        )
+        is False
+    )
 
 
 def test_prepare_error_context_truncates_long_outputs(agent):
@@ -333,12 +354,14 @@ def test_prepare_error_context_truncates_long_outputs(agent):
         "exit_code": 1,
         "success": False,
         "stdout": long_stdout,
-        "stderr": long_stderr}
+        "stderr": long_stderr,
+    }
     health_result = {
         "exit_code": 1,
         "success": False,
         "stdout": health_stdout,
-        "stderr": health_stderr}
+        "stderr": health_stderr,
+    }
 
     context = agent._prepare_error_context(deploy_result, health_result)
 
@@ -376,8 +399,9 @@ def test_run_aborts_if_fix_fails(agent):
     fix_calls = {"count": 0}
     deploy_calls = {"count": 0}
 
-    def fake_run_deploy(self, command="start",
-                        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None):
+    def fake_run_deploy(
+        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+    ):
         deploy_calls["count"] += 1
         return next(deploy_results)
 
