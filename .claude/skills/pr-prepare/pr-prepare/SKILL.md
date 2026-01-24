@@ -21,7 +21,38 @@ git branch --show-current
 
 If the output is `main`, error immediately with: "Cannot prepare PR from main branch. Please switch to a feature branch first."
 
-### 2. Gather Context
+### 2. Check for Uncommitted Changes
+
+Check for uncommitted changes (ignoring submodules):
+
+```bash
+git status --ignore-submodules
+```
+
+If there are uncommitted changes, warn the user:
+
+```
+⚠️  Warning: You have uncommitted changes. Please commit or stash them before preparing a PR.
+
+Uncommitted changes:
+<list the modified/untracked files>
+
+Run `git status` for details.
+```
+
+Then stop the workflow - do not proceed to the next steps.
+
+### 3. Push Branch to Remote
+
+Push the current branch to remote (publishes branch and latest commits):
+
+```bash
+git push -u origin HEAD
+```
+
+If the push fails, show the error to the user and explain what might be wrong (e.g., permission issues, remote not configured).
+
+### 4. Gather Context
 
 Collect information about the changes:
 
@@ -40,7 +71,7 @@ Analyze both outputs to understand:
 - What functionality was added, modified, or removed
 - The scope and type of changes
 
-### 3. Determine PR Type
+### 5. Determine PR Type
 
 Based on the changes, select the appropriate type prefix:
 
@@ -53,7 +84,7 @@ Based on the changes, select the appropriate type prefix:
 - `perf`: Performance improvements
 - `style`: Code style/formatting changes
 
-### 4. Generate PR Title
+### 6. Generate PR Title
 
 Format: `<type>: <brief-desc>`
 
@@ -68,7 +99,7 @@ Examples:
 - `fix: resolve memory leak in image processor`
 - `refactor: extract validation logic to separate module`
 
-### 5. Generate PR Body
+### 7. Generate PR Body
 
 Write a clear description that includes:
 
@@ -85,7 +116,7 @@ Write a clear description that includes:
 - How to verify the changes work
 - Only include if not obvious or if there are specific testing steps
 
-### 6. Output Format
+### 8. Output Format
 
 Present the title and body as plaintext for the user to copy:
 
