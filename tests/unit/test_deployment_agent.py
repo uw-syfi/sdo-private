@@ -57,7 +57,7 @@ def test_run_generates_scripts_when_missing(
 
     generated = {}
 
-    def fake_generate_scripts(directory, agent):
+    def fake_generate_scripts(directory, agent, filesystem=None):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
         sds_dir.mkdir(exist_ok=True)
@@ -89,7 +89,7 @@ def test_run_fails_if_script_generation_fails(
     repo.mkdir()
     agent = DeploymentAgent(repo, stub_agent)
 
-    def fake_generate_scripts(directory, agent):
+    def fake_generate_scripts(directory, agent, filesystem=None):
         return False, "boom"
 
     monkeypatch.setattr(

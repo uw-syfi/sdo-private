@@ -8,6 +8,7 @@ from typing import Optional, Callable, Dict, Any
 
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from tools.healthcheck import run_health_check
 from tools.trajectory import (
@@ -26,7 +27,9 @@ DEFAULT_AGENT_TIMEOUT_SECS = 300
 
 
 def generate_scripts(
-    target_dir: str, agent: Optional[CodingAgent] = None
+    target_dir: str,
+    agent: Optional[CodingAgent] = None,
+    filesystem: Optional[FileSystemInterface] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -37,17 +40,21 @@ def generate_scripts(
     Args:
         target_dir: The directory path where scripts should be generated.
         agent: Optional CodingAgent instance. If None, creates one from config.
+        filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
 
     Returns:
         Tuple of (success: bool, message: str).
     """
+    if filesystem is None:
+        filesystem = RealFilesystem()
+
     target_path = Path(target_dir).resolve()
 
     # Validate target directory exists
-    if not target_path.exists():
+    if not filesystem.exists(target_path):
         return False, f"Target directory does not exist: {target_dir}"
 
-    if not target_path.is_dir():
+    if not filesystem.is_dir(target_path):
         return False, f"Target path is not a directory: {target_dir}"
 
     # Initialize coding agent if not provided
@@ -59,7 +66,7 @@ def generate_scripts(
 
     # Create .sds directory if it doesn't exist
     sds_dir = target_path / ".sds"
-    sds_dir.mkdir(exist_ok=True)
+    filesystem.mkdir(sds_dir, exist_ok=True)
 
     # Get absolute path for context
     abs_target_dir = str(target_path)
@@ -80,7 +87,7 @@ def generate_scripts(
 
         # Generate deploy.sh using coding agent
         deploy_success, deploy_msg = _generate_deploy_script(
-            agent, system_prompt, repo_context, abs_target_dir
+            agent, system_prompt, repo_context, abs_target_dir, filesystem
         )
 
         if not deploy_success:
@@ -89,7 +96,7 @@ def generate_scripts(
 
         # Generate health_check.sh using coding agent
         health_check_success, health_check_msg = _generate_health_check_script(
-            agent, system_prompt, repo_context, abs_target_dir
+            agent, system_prompt, repo_context, abs_target_dir, filesystem
         )
 
         if not health_check_success:
@@ -100,11 +107,11 @@ def generate_scripts(
         deploy_script_path = sds_dir / "deploy.sh"
         health_check_script_path = sds_dir / "health_check.sh"
 
-        if deploy_script_path.exists():
-            deploy_script_path.chmod(0o755)
+        if filesystem.exists(deploy_script_path):
+            filesystem.chmod(deploy_script_path, 0o755)
 
-        if health_check_script_path.exists():
-            health_check_script_path.chmod(0o755)
+        if filesystem.exists(health_check_script_path):
+            filesystem.chmod(health_check_script_path, 0o755)
 
         record_phase_end("success")
         return True, f"Successfully generated scripts in {sds_dir}"
@@ -244,7 +251,11 @@ def _analyze_repository(repo_path: Path) -> str:
 
 
 def _generate_deploy_script(
-    agent: CodingAgent, system_prompt: str, repo_context: str, target_dir: str
+    agent: CodingAgent,
+    system_prompt: str,
+    repo_context: str,
+    target_dir: str,
+    filesystem: FileSystemInterface,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
     human_prompt = f"""Generate a comprehensive deploy.sh bash script for the following repository:
@@ -276,7 +287,7 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
 
         deploy_script_path = Path(target_dir) / ".sds" / "deploy.sh"
-        if deploy_script_path.exists():
+        if filesystem.exists(deploy_script_path):
             return True, "Successfully generated deploy.sh"
         else:
             return False, "Agent failed to create .sds/deploy.sh"
@@ -294,7 +305,11 @@ You must use the write_file tool to create the file .sds/deploy.sh directly. Do 
 
 
 def _generate_health_check_script(
-    agent: CodingAgent, system_prompt: str, repo_context: str, target_dir: str
+    agent: CodingAgent,
+    system_prompt: str,
+    repo_context: str,
+    target_dir: str,
+    filesystem: FileSystemInterface,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
     human_prompt = f"""Generate a comprehensive health_check.sh bash script for the following repository:
@@ -327,7 +342,7 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
 
         health_check_script_path = Path(target_dir) / ".sds" / "health_check.sh"
-        if health_check_script_path.exists():
+        if filesystem.exists(health_check_script_path):
             return True, "Successfully generated health_check.sh"
         else:
             return False, "Agent failed to create .sds/health_check.sh"
@@ -347,15 +362,22 @@ You must use the write_file tool to create the file .sds/health_check.sh directl
 class DeploymentAgent:
     """Agent responsible for deploying applications and fixing deployment errors."""
 
-    def __init__(self, repo_path: Path, coding_agent: CodingAgent):
+    def __init__(
+        self,
+        repo_path: Path,
+        coding_agent: CodingAgent,
+        filesystem: Optional[FileSystemInterface] = None,
+    ):
         """Initialize the deployment agent.
 
         Args:
             repo_path: Path to the repository to deploy.
             coding_agent: The coding agent to use for generating/fixing scripts.
+            filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
+        self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -363,7 +385,7 @@ class DeploymentAgent:
     def _get_next_attempt_number(self) -> int:
         """Determine the next attempt number based on existing logs."""
         logs_dir = self.sds_dir / "logs"
-        if not logs_dir.exists():
+        if not self.filesystem.exists(logs_dir):
             return 1
 
         # Find all deploy logs
@@ -401,13 +423,18 @@ class DeploymentAgent:
             bool: True if deployment succeeded.
         """
         # Step 1: Ensure scripts exist
-        if not (self.deploy_script.exists() and self.health_check_script.exists()):
+        if not (
+            self.filesystem.exists(self.deploy_script)
+            and self.filesystem.exists(self.health_check_script)
+        ):
             logger.info("Generating Deployment Scripts")
             logger.info(
                 f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}..."
             )
 
-            success, message = generate_scripts(str(self.repo_path), self.agent)
+            success, message = generate_scripts(
+                str(self.repo_path), self.agent, self.filesystem
+            )
 
             if success:
                 logger.success(message)
@@ -443,7 +470,7 @@ class DeploymentAgent:
             # Setup log file for this attempt
             log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
             # Ensure directory exists
-            log_file_path.parent.mkdir(parents=True, exist_ok=True)
+            self.filesystem.mkdir(log_file_path.parent, parents=True, exist_ok=True)
 
             # Run deployment script
             start_time = time.time()
@@ -474,7 +501,9 @@ class DeploymentAgent:
                 health_check_log_path = (
                     self.sds_dir / "logs" / f"health_check_attempt_{attempt}.log"
                 )
-                health_check_log_path.parent.mkdir(parents=True, exist_ok=True)
+                self.filesystem.mkdir(
+                    health_check_log_path.parent, parents=True, exist_ok=True
+                )
 
                 # Verify with health check
                 health_start = time.time()
@@ -784,8 +813,8 @@ Recent Output:
             if match:
                 summary_text = match.group(1).strip()
                 log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
-                log_file.parent.mkdir(parents=True, exist_ok=True)
-                log_file.write_text(summary_text)
+                self.filesystem.mkdir(log_file.parent, parents=True, exist_ok=True)
+                self.filesystem.write_text(log_file, summary_text)
                 logger.info(f"Saved fix summary to {log_file}")
 
             logger.info("Agent response received")
