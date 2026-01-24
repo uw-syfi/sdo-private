@@ -409,9 +409,13 @@ class DeploymentAgent:
             # Run deployment script
             start_time = time.time()
             deploy_result = self.run_deploy_command(
-                "start", log_file_path=log_file_path
+                "start", log_file_path=log_file_path, check_shutdown=check_shutdown
             )
             deploy_duration = time.time() - start_time
+
+            if check_shutdown and check_shutdown():
+                logger.info("Shutdown requested, aborting deployment")
+                return False
 
             # Record the deployment tool call
             record_tool_call(
@@ -507,6 +511,7 @@ class DeploymentAgent:
         command: str = "start",
         timeout: int = DEFAULT_DEPLOY_TIMEOUT_SECS,
         log_file_path: Optional[Path] = None,
+        check_shutdown: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """Run the deployment script with a specific command.
 
@@ -514,6 +519,7 @@ class DeploymentAgent:
             command: The command to pass to the script (e.g., "start", "stop").
             timeout: Timeout in seconds.
             log_file_path: Optional path to write output logs to.
+            check_shutdown: Optional callable returning True if shutdown requested.
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
@@ -591,6 +597,21 @@ class DeploymentAgent:
             while process.poll() is None:
                 current_time = time.time()
                 elapsed = current_time - start_time
+
+                # Check shutdown
+                if check_shutdown and check_shutdown():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    return {
+                        "success": False,
+                        "exit_code": -1,
+                        "stdout": "".join(stdout_lines),
+                        "stderr": "Deployment interrupted by shutdown request\n"
+                        + "".join(stderr_lines),
+                    }
 
                 # Check timeout
                 if elapsed > timeout:

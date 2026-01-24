@@ -71,7 +71,11 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
         return True, "done"
 
     def fake_run_deploy(
-        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
     ):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
@@ -118,7 +122,11 @@ def test_run_succeeds_without_fix(agent, monkeypatch):
     )
 
     def fake_run_deploy(
-        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
     ):
         return next(deploy_results)
 
@@ -150,7 +158,11 @@ def test_run_retries_after_failure(agent, monkeypatch):
     fix_calls: list[tuple[int, int]] = []
 
     def fake_run_deploy(
-        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
     ):
         return next(deploy_results)
 
@@ -180,7 +192,11 @@ def test_run_respects_max_attempts(agent):
     fix_calls = {"count": 0}
 
     def fake_run_deploy(
-        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
     ):
         return next(deploy_results)
 
@@ -400,7 +416,11 @@ def test_run_aborts_if_fix_fails(agent):
     deploy_calls = {"count": 0}
 
     def fake_run_deploy(
-        self, command="start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS, log_file_path=None
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
     ):
         deploy_calls["count"] += 1
         return next(deploy_results)

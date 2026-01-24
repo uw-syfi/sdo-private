@@ -216,10 +216,17 @@ class AppMonitor:
                 break
 
             # Wait for interval
-            for _ in range(interval):
+            waited = 0.0
+            step = 1.0
+            while waited < interval:
                 if check_shutdown and check_shutdown():
                     return
-                time.sleep(1)
+
+                remaining = interval - waited
+                current_step = min(step, remaining)
+
+                time.sleep(current_step)
+                waited += current_step
 
             self.check_count += 1
 
