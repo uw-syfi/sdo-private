@@ -2,6 +2,8 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from app_operator.logger import logger
+
 
 def run_health_check(
     repo_path: Path,
@@ -20,16 +22,16 @@ def run_health_check(
     Returns:
         dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
     """
-    print(f"Running health check: {health_check_script}")
+    logger.info(f"Running health check: {health_check_script}")
 
     log_file = None
     if log_file_path:
         try:
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
             log_file = open(log_file_path, "w")
-            print(f"  Logging health check output to: {log_file_path}")
+            logger.info(f"  Logging health check output to: {log_file_path}")
         except Exception as e:
-            print(f"Warning: Could not open health check log file {log_file_path}: {e}")
+            logger.warning(f"Could not open health check log file {log_file_path}: {e}")
 
     try:
         result = subprocess.run(
@@ -41,7 +43,7 @@ def run_health_check(
         )
 
         status = "PASSED" if result.returncode == 0 else "FAILED"
-        print(f"Health check finished: {status} (Exit Code: {result.returncode})")
+        logger.info(f"Health check finished: {status} (Exit Code: {result.returncode})")
 
         # Write outputs to log file if provided
         if log_file:
@@ -59,7 +61,7 @@ def run_health_check(
                     log_file.write("\n")
                 log_file.flush()
             except Exception as e:
-                print(f"Warning: Could not write to health check log file: {e}")
+                logger.warning(f"Could not write to health check log file: {e}")
 
         return {
             "success": result.returncode == 0,
