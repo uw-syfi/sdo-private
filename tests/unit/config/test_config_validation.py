@@ -79,6 +79,9 @@ class TestOperatorConfigValidation:
         assert config.interval == 30
         assert config.monitoring_max_iters == 5
         assert config.deployment_max_iters == 5
+        assert config.agent_fix_timeout == 1800
+        assert config.deploy_timeout == 900
+        assert config.agent_timeout == 300
 
     def test_interval_boundary_values(self):
         """Test interval at boundary values."""
@@ -93,6 +96,43 @@ class TestOperatorConfigValidation:
         # Exactly at maximum
         config = OperatorConfig(interval=86400)
         assert config.interval == 86400
+
+    def test_agent_fix_timeout_must_be_positive(self):
+        """Agent fix timeout must be positive."""
+        with pytest.raises(ValueError, match="agent_fix_timeout must be positive"):
+            OperatorConfig(agent_fix_timeout=0)
+
+    def test_agent_fix_timeout_type_checked(self):
+        """Agent fix timeout must be an integer."""
+        with pytest.raises(TypeError, match="agent_fix_timeout must be int"):
+            OperatorConfig(agent_fix_timeout="1800")
+
+    def test_deploy_timeout_must_be_positive(self):
+        """Deploy timeout must be positive."""
+        with pytest.raises(ValueError, match="deploy_timeout must be positive"):
+            OperatorConfig(deploy_timeout=-1)
+
+    def test_deploy_timeout_type_checked(self):
+        """Deploy timeout must be an integer."""
+        with pytest.raises(TypeError, match="deploy_timeout must be int"):
+            OperatorConfig(deploy_timeout=900.5)
+
+    def test_agent_timeout_must_be_positive(self):
+        """Agent timeout must be positive."""
+        with pytest.raises(ValueError, match="agent_timeout must be positive"):
+            OperatorConfig(agent_timeout=0)
+
+    def test_agent_timeout_type_checked(self):
+        """Agent timeout must be an integer."""
+        with pytest.raises(TypeError, match="agent_timeout must be int"):
+            OperatorConfig(agent_timeout="300")
+
+    def test_custom_timeout_values_accepted(self):
+        """Custom timeout values should be accepted."""
+        config = OperatorConfig(agent_fix_timeout=3600, deploy_timeout=1800, agent_timeout=600)
+        assert config.agent_fix_timeout == 3600
+        assert config.deploy_timeout == 1800
+        assert config.agent_timeout == 600
 
 
 class TestAgentConfigValidation:
@@ -188,4 +228,31 @@ class TestConfigIntegration:
         with pytest.raises(ValueError, match="Invalid provider"):
             Config.from_dict({
                 "agent": {"provider": "unknown"}
+            })
+
+    def test_config_from_dict_with_custom_timeouts(self):
+        """Config.from_dict should accept custom timeout values."""
+        config = Config.from_dict({
+            "operator": {
+                "agent_fix_timeout": 3600,
+                "deploy_timeout": 1800,
+                "agent_timeout": 600
+            }
+        })
+        assert config.operator.agent_fix_timeout == 3600
+        assert config.operator.deploy_timeout == 1800
+        assert config.operator.agent_timeout == 600
+
+    def test_config_from_dict_validates_timeout_types(self):
+        """Config.from_dict should validate timeout types."""
+        with pytest.raises(TypeError, match="agent_fix_timeout must be int"):
+            Config.from_dict({
+                "operator": {"agent_fix_timeout": "not-an-int"}
+            })
+
+    def test_config_from_dict_validates_timeout_values(self):
+        """Config.from_dict should validate timeout values are positive."""
+        with pytest.raises(ValueError, match="deploy_timeout must be positive"):
+            Config.from_dict({
+                "operator": {"deploy_timeout": -100}
             })

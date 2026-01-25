@@ -6,9 +6,9 @@ import pytest
 import app_operator.agents.deployer as deployer_module
 from app_operator.agents.deployer import (
     DeploymentAgent,
-    AGENT_FIX_TIMEOUT_SECS,
     DEFAULT_DEPLOY_TIMEOUT_SECS,
 )
+from app_operator.config import OperatorConfig
 from tests.fixtures.agents import TrackingAgent, ErrorAgent
 
 
@@ -41,7 +41,7 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
     generated = {}
 
     def fake_generate_scripts(
-        directory, agent, filesystem=None, deployment_config=None
+        directory, agent, filesystem=None, deployment_config=None, operator_config=None
     ):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
@@ -76,7 +76,7 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
     agent = DeploymentAgent(repo, stub_agent)
 
     def fake_generate_scripts(
-        directory, agent, filesystem=None, deployment_config=None
+        directory, agent, filesystem=None, deployment_config=None, operator_config=None
     ):
         return False, "boom"
 
@@ -314,7 +314,7 @@ def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monke
     timeout = call["kwargs"].get("timeout")
     assert "prompt::context::1/2" in prompt
     assert cwd == str(agent.repo_path)
-    assert timeout == AGENT_FIX_TIMEOUT_SECS
+    assert timeout == OperatorConfig().agent_fix_timeout
 
 
 def test_fix_with_agent_handles_agent_errors(agent, monkeypatch):

@@ -7,7 +7,7 @@ from typing import Optional, Callable, Dict, Any
 
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
-from app_operator.config import DeploymentConfig
+from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -33,6 +33,7 @@ def generate_scripts(
     agent: Optional[CodingAgent] = None,
     filesystem: Optional[FileSystemInterface] = None,
     deployment_config: Optional[DeploymentConfig] = None,
+    operator_config: Optional[OperatorConfig] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -45,6 +46,7 @@ def generate_scripts(
         agent: Optional CodingAgent instance. If None, creates one from config.
         filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
         deployment_config: Optional deployment configuration. If None, uses default.
+        operator_config: Optional operator configuration for timeouts. If None, uses default.
 
     Returns:
         Tuple of (success: bool, message: str).
@@ -54,6 +56,9 @@ def generate_scripts(
 
     if deployment_config is None:
         deployment_config = DeploymentConfig()
+
+    if operator_config is None:
+        operator_config = OperatorConfig()
 
     target_path = Path(target_dir).resolve()
 
@@ -96,6 +101,7 @@ def generate_scripts(
             abs_target_dir,
             filesystem,
             deployment_config,
+            operator_config,
         )
 
         if not deploy_success:
@@ -110,6 +116,7 @@ def generate_scripts(
             abs_target_dir,
             filesystem,
             deployment_config,
+            operator_config,
         )
 
         if not health_check_success:
@@ -205,8 +212,12 @@ def _generate_deploy_script(
     target_dir: str,
     filesystem: FileSystemInterface,
     deployment_config: Optional[DeploymentConfig] = None,
+    operator_config: Optional[OperatorConfig] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
+    if operator_config is None:
+        operator_config = OperatorConfig()
+
     platform = deployment_config.platform if deployment_config else "auto"
     full_prompt = get_loader().render(
         "deployer/generate_script.jinja2",
@@ -219,7 +230,7 @@ def _generate_deploy_script(
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout)
 
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
@@ -231,7 +242,7 @@ def _generate_deploy_script(
             return False, "Agent failed to create .sds/deploy.sh"
 
     except subprocess.TimeoutExpired:
-        timeout = DEFAULT_AGENT_TIMEOUT_SECS // 60
+        timeout = operator_config.agent_timeout // 60
         record_assistant_message(f"Script generation timed out after {timeout} minutes")
         return (
             False,
@@ -252,8 +263,12 @@ def _generate_health_check_script(
     target_dir: str,
     filesystem: FileSystemInterface,
     deployment_config: Optional[DeploymentConfig] = None,
+    operator_config: Optional[OperatorConfig] = None,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
+    if operator_config is None:
+        operator_config = OperatorConfig()
+
     platform = deployment_config.platform if deployment_config else "auto"
     full_prompt = get_loader().render(
         "deployer/generate_script.jinja2",
@@ -266,7 +281,7 @@ def _generate_health_check_script(
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout)
 
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
@@ -278,7 +293,7 @@ def _generate_health_check_script(
             return False, "Agent failed to create .sds/health_check.sh"
 
     except subprocess.TimeoutExpired:
-        timeout = DEFAULT_AGENT_TIMEOUT_SECS // 60
+        timeout = operator_config.agent_timeout // 60
         record_assistant_message(f"Script generation timed out after {timeout} minutes")
         return (
             False,
@@ -301,6 +316,7 @@ class DeploymentAgent:
         coding_agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         deployment_config: Optional[DeploymentConfig] = None,
+        operator_config: Optional[OperatorConfig] = None,
     ):
         """Initialize the deployment agent.
 
@@ -309,11 +325,13 @@ class DeploymentAgent:
             coding_agent: The coding agent to use for generating/fixing scripts.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             deployment_config: Optional deployment configuration.
+            operator_config: Optional operator configuration for timeouts.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.deployment_config = deployment_config or DeploymentConfig()
+        self.operator_config = operator_config or OperatorConfig()
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -370,7 +388,7 @@ class DeploymentAgent:
             )
 
             success, message = generate_scripts(
-                str(self.repo_path), self.agent, self.filesystem, self.deployment_config
+                str(self.repo_path), self.agent, self.filesystem, self.deployment_config, self.operator_config
             )
 
             if success:
@@ -512,7 +530,7 @@ class DeploymentAgent:
     def run_deploy_command(
         self,
         command: str = "start",
-        timeout: int = DEFAULT_DEPLOY_TIMEOUT_SECS,
+        timeout: Optional[int] = None,
         log_file_path: Optional[Path] = None,
         check_shutdown: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
@@ -520,13 +538,15 @@ class DeploymentAgent:
 
         Args:
             command: The command to pass to the script (e.g., "start", "stop").
-            timeout: Timeout in seconds.
+            timeout: Timeout in seconds. If None, uses operator_config.deploy_timeout.
             log_file_path: Optional path to write output logs to.
             check_shutdown: Optional callable returning True if shutdown requested.
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
+        if timeout is None:
+            timeout = self.operator_config.deploy_timeout
         logger.info(f"Running deployment script: {self.deploy_script} {command}")
 
         # Open log file if provided
@@ -766,7 +786,7 @@ class DeploymentAgent:
             # Note: The agent is expected to modify files directly
             start_time = time.time()
             response = self.agent.generate(
-                prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS
+                prompt, cwd=str(self.repo_path), timeout=self.operator_config.agent_fix_timeout
             )
             duration = time.time() - start_time
             logger.info(f"Agent generation (fix) took {duration / 60:.2f} minutes")

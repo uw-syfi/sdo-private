@@ -86,7 +86,7 @@ class AppOperator:
         # Initialize agents
         self.analyzer = CodeAnalyzerAgent(self.repo_path, self.agent, self.filesystem)
         self.deployer = DeploymentAgent(
-            self.repo_path, self.agent, self.filesystem, self.config.deployment
+            self.repo_path, self.agent, self.filesystem, self.config.deployment, self.config.operator
         )
         self.monitor = AppMonitor(self.repo_path, self.agent, self.filesystem)
 

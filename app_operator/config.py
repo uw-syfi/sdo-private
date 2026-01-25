@@ -83,6 +83,9 @@ class OperatorConfig:
     interval: int = 30
     monitoring_max_iters: int = 5
     deployment_max_iters: int = 5
+    agent_fix_timeout: int = 1800
+    deploy_timeout: int = 900
+    agent_timeout: int = 300
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
@@ -93,7 +96,8 @@ class OperatorConfig:
         if self.interval > 86400:
             raise ValueError(f"interval too large: {self.interval}s (max: 86400s/24h)")
 
-        for field_name in ["monitoring_max_iters", "deployment_max_iters"]:
+        for field_name in ["monitoring_max_iters", "deployment_max_iters",
+                           "agent_fix_timeout", "deploy_timeout", "agent_timeout"]:
             value = getattr(self, field_name)
             if not isinstance(value, int):
                 raise TypeError(f"{field_name} must be int, got {type(value).__name__}")
