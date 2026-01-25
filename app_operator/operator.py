@@ -94,7 +94,7 @@ class AppOperator:
         self.trajectory = init_trajectory(self.repo_path)
         self.trajectory.set_agent_name(self.agent.__class__.__name__)
 
-    def _persist_deployment_config(self):
+    def _persist_deployment_config(self) -> None:
         """Persist deployment preference to .sds/config.toml."""
         if not self.filesystem.exists(self.sds_dir):
             self.filesystem.mkdir(self.sds_dir)
@@ -169,7 +169,7 @@ class AppOperator:
             self._cleanup()
             finalize_trajectory("completed" if self._deployed else "failed")
 
-    def _handle_shutdown_signal(self, signum: int, frame):
+    def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).
 
         Args:
@@ -187,7 +187,7 @@ class AppOperator:
             if signum == signal.SIGINT:
                 raise KeyboardInterrupt()
 
-    def _cleanup(self):
+    def _cleanup(self) -> None:
         """Shutdown the application and cleanup resources."""
         if not self._deployed:
             return
