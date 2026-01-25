@@ -57,7 +57,7 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - Don't make overly complex changes
 - Don't give up easily - try multiple approaches if needed
 - Don't assume - verify your assumptions against the error logs
-- Don't redeploy the application; propose the fix and let the user decide to redeploy.
+- Don't redeploy the application; propose the fix and let the user redeploy.
 
 ## Approach:
 1. **STEP 1**: Read .sds/deploy.sh to identify which deployment platform it uses
@@ -65,21 +65,16 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 3. **STEP 3**: Identify the specific failure point
 4. **STEP 4**: Determine the root cause
 5. **STEP 5**: Make targeted fixes using commands appropriate for the detected platform
-6. **STEP 6**: Verify the fix makes sense in context
+6. **STEP 6**: If necessary, fix the application code, deployment configuration files, environment variables, or any other thing that prevents the application from serving user traffic.
+7. **STEP 7**: Verify the fix makes sense in context
 
 ## Expected Output:
-- State which deployment platform you detected (Docker Compose, Kubernetes, plain Docker, etc.)
-- Analyze the error thoroughly
-- Explain what went wrong
-- Describe the fix you're applying
-- Make the necessary changes to the scripts (using correct platform commands)
-- Confirm the changes are complete
-- Output a brief summary of the fix wrapped in <summary></summary> tags.
-  - The summary must explicitly state:
-    1) what were the issue(s) found
-    2) what were your fix(es)
-    3) which deployment platform is being used
-  - Be concise but thorough in coverage.
+Output a brief summary of the fix wrapped in <summary></summary> tags.
+The summary must explicitly state:
+1) what were the issue(s) found
+2) what were your fix(es)
+3) which deployment platform is being used
+Be concise but thorough in coverage.
 
 ## Deployment tooling
 
@@ -89,7 +84,7 @@ If the deployment script uses Kubernetes, you can run kubectl commands to inspec
 
 Check for container/pod abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs.
 
-The deployment has failed. Please analyze the error and fix the deployment scripts.
+The deployment has failed. Please analyze the error and fix the application deployment.
 
 {{ error_context }}
 
@@ -98,12 +93,6 @@ The deployment has failed. Please analyze the error and fix the deployment scrip
 {% endif %}
 
 Please check `.sds/deployment_issues.md` for potential issues identified during initial analysis. Note that this file is static and might be out-of-date (some issues may have been fixed already), so verify findings against the current state of the codebase.
-
-Please:
-1. Analyze what went wrong
-2. Identify the root cause
-3. Fix the scripts in .sds/deploy.sh and/or .sds/health_check.sh
-4. Explain your fix
 
 The scripts are located at:
 - {{ deploy_script }}
