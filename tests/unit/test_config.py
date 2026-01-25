@@ -5,6 +5,7 @@ from app_operator.config import (
     UnrecognizedSectionError,
     UnrecognizedFieldError,
 )
+from app_operator.exceptions import ConfigurationError
 
 
 def test_load_config_valid_config(tmp_path):
@@ -254,3 +255,32 @@ interval = 90
     config = load_config(str(tmp_path))
     assert config.agent.provider == "codex"  # default
     assert config.operator.interval == 90
+
+
+def test_exception_hierarchy():
+    """Test that config exceptions properly extend ConfigurationError."""
+    # Verify the inheritance hierarchy
+    assert issubclass(UnrecognizedSectionError, ConfigurationError)
+    assert issubclass(UnrecognizedFieldError, ConfigurationError)
+
+
+def test_unrecognized_section_caught_as_configuration_error(tmp_path):
+    """Test that UnrecognizedSectionError can be caught as ConfigurationError."""
+    config_file = tmp_path / "sds.toml"
+    config_file.write_text("""[unknown_section]
+field = "value"
+""")
+
+    with pytest.raises(ConfigurationError):
+        load_config(str(tmp_path))
+
+
+def test_unrecognized_field_caught_as_configuration_error(tmp_path):
+    """Test that UnrecognizedFieldError can be caught as ConfigurationError."""
+    config_file = tmp_path / "sds.toml"
+    config_file.write_text("""[agent]
+unknown_field = "value"
+""")
+
+    with pytest.raises(ConfigurationError):
+        load_config(str(tmp_path))

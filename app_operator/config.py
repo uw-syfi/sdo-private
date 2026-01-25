@@ -7,21 +7,16 @@ from typing import Optional
 from dataclasses import dataclass, field, fields
 
 from app_operator.logger import logger
+from app_operator.exceptions import ConfigurationError
 
 
-class ConfigError(Exception):
-    """Base exception for configuration errors."""
-
-    pass
-
-
-class UnrecognizedSectionError(ConfigError):
+class UnrecognizedSectionError(ConfigurationError):
     """Raised when an unrecognized section is found in the config file."""
 
     pass
 
 
-class UnrecognizedFieldError(ConfigError):
+class UnrecognizedFieldError(ConfigurationError):
     """Raised when an unrecognized field is found in a recognized section."""
 
     pass
@@ -238,11 +233,11 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
 
                 _deep_merge(merged_data, data)
 
-        except (ConfigError, TypeError):
+        except (ConfigurationError, TypeError):
             # Re-raise config validation errors and TypeError from dataclass
             raise
         except Exception as e:
             # Re-raise parsing errors to prevent silent fallback to defaults
-            raise ConfigError(f"Failed to parse {config_file}: {e}") from e
+            raise ConfigurationError(f"Failed to parse {config_file}: {e}") from e
 
     return Config.from_dict(merged_data)
