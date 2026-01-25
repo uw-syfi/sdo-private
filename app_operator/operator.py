@@ -8,6 +8,7 @@ from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
 from app_operator.agents.code_analyzer import CodeAnalyzerAgent
+from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
@@ -75,7 +76,7 @@ class AppOperator:
                 )
             except RuntimeError as e:
                 # Fallback or error if no default agent can be created
-                raise RuntimeError(f"Failed to initialize default coding agent: {e}")
+                raise AgentError(f"Failed to initialize default coding agent: {e}")
         else:
             self.agent = agent
 

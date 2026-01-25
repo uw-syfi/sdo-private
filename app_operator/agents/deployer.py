@@ -9,6 +9,7 @@ from typing import Optional, Callable, Dict, Any
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig
+from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
@@ -68,7 +69,7 @@ def generate_scripts(
     if agent is None:
         try:
             agent = create_agent_from_config(str(target_path))
-        except RuntimeError as e:
+        except (RuntimeError, AgentError) as e:
             return False, str(e)
 
     # Create .sds directory if it doesn't exist
@@ -133,9 +134,13 @@ def generate_scripts(
         record_phase_end("success")
         return True, f"Successfully generated scripts in {sds_dir}"
 
-    except Exception as e:
+    except (AgentError, DeploymentError, FileSystemError) as e:
         record_phase_end("failed")
         return False, f"Failed to generate scripts: {e}"
+    except Exception as e:
+        # Catch any unexpected errors and log them
+        record_phase_end("failed")
+        return False, f"Unexpected error during script generation: {e}"
     finally:
         # Restore original working directory
         os.chdir(original_cwd)
@@ -240,6 +245,9 @@ def _generate_deploy_script(
             False,
             f"agent command timed out after {timeout} minutes",
         )
+    except AgentError as e:
+        record_assistant_message(f"Script generation failed: {e}")
+        return False, str(e)
     except Exception as e:
         record_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
@@ -284,6 +292,9 @@ def _generate_health_check_script(
             False,
             f"agent command timed out after {timeout} minutes",
         )
+    except AgentError as e:
+        record_assistant_message(f"Script generation failed: {e}")
+        return False, str(e)
     except Exception as e:
         record_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
@@ -533,7 +544,7 @@ class DeploymentAgent:
             try:
                 log_file = open(log_file_path, "w")
                 logger.info(f"Logging output to: {log_file_path}")
-            except Exception as e:
+            except (OSError, IOError) as e:
                 logger.warning(f"Could not open log file {log_file_path}: {e}")
 
         # Buffers to capture output
@@ -667,12 +678,21 @@ class DeploymentAgent:
                 "stderr": stderr_data,
             }
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             return {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": f"Failed to run deployment script: {e}",
+            }
+        except Exception as e:
+            # Catch any unexpected errors
+            logger.error(f"Unexpected error running deployment script: {e}")
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": f"Unexpected error running deployment script: {e}",
             }
         finally:
             # Ensure process is killed on exit (including KeyboardInterrupt)
@@ -778,9 +798,13 @@ class DeploymentAgent:
 
             return True
 
-        except Exception as e:
+        except AgentError as e:
             logger.error(f"Agent failed to provide fix: {e}")
             record_assistant_message(f"Failed to provide fix: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error while getting fix from agent: {e}")
+            record_assistant_message(f"Unexpected error during fix attempt: {e}")
             return False
 
     def _prepare_error_context(
