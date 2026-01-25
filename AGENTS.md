@@ -55,6 +55,9 @@ model = "gemini-1.5-pro" # optional
 interval = 30 # Health check interval in seconds (1-86400, default: 30)
 monitoring_max_iters = 5 # Maximum health monitoring iterations (>0, default: 5)
 deployment_max_iters = 5 # Maximum deployment attempts (>0, default: 5)
+agent_fix_timeout = 1800 # Agent fix timeout in seconds (>0, default: 1800 / 30 minutes)
+deploy_timeout = 900 # Deployment timeout in seconds (>0, default: 900 / 15 minutes)
+agent_timeout = 300 # Agent generation timeout in seconds (>0, default: 300 / 5 minutes)
 ```
 
 **Note**: Invalid configuration values will raise `ValueError` or `TypeError` with clear error messages at initialization.
