@@ -63,3 +63,14 @@ def get_loader() -> PromptLoader:
     if _loader is None:
         _loader = PromptLoader()
     return _loader
+
+
+def reset_loader() -> None:
+    """Reset the loader singleton (for testing).
+
+    This function allows tests to reset the global loader instance,
+    ensuring test isolation when different tests need different
+    loader configurations.
+    """
+    global _loader
+    _loader = None

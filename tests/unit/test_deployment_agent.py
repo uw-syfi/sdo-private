@@ -6,30 +6,10 @@ import pytest
 import app_operator.agents.deployer as deployer_module
 from app_operator.agents.deployer import (
     DeploymentAgent,
-    AGENT_FIX_TIMEOUT_SECS,
     DEFAULT_DEPLOY_TIMEOUT_SECS,
-    DEFAULT_AGENT_TIMEOUT_SECS,
 )
-
-
-class StubAgent:
-    """Lightweight coding agent stub used by tests."""
-
-    def __init__(self, response: str = "ok", raise_error: bool = False):
-        self.response = response
-        self.raise_error = raise_error
-        self.calls: list[tuple[str, str, int]] = []
-
-    def generate(
-        self,
-        prompt: str,
-        cwd: str | None = None,
-        timeout: int = DEFAULT_AGENT_TIMEOUT_SECS,
-    ) -> str:
-        self.calls.append((prompt, cwd, timeout))
-        if self.raise_error:
-            raise RuntimeError("agent error")
-        return self.response
+from app_operator.config import OperatorConfig
+from tests.fixtures.agents import TrackingAgent, ErrorAgent
 
 
 @pytest.fixture
@@ -45,7 +25,7 @@ def repo_path(tmp_path):
 
 @pytest.fixture
 def stub_agent():
-    return StubAgent()
+    return TrackingAgent(response="ok")
 
 
 @pytest.fixture
@@ -61,7 +41,7 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
     generated = {}
 
     def fake_generate_scripts(
-        directory, agent, filesystem=None, deployment_config=None
+        directory, agent, filesystem=None, deployment_config=None, operator_config=None
     ):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
@@ -96,7 +76,7 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
     agent = DeploymentAgent(repo, stub_agent)
 
     def fake_generate_scripts(
-        directory, agent, filesystem=None, deployment_config=None
+        directory, agent, filesystem=None, deployment_config=None, operator_config=None
     ):
         return False, "boom"
 
@@ -304,7 +284,7 @@ def test_fix_with_agent_skips_when_attempt_exceeds_max(agent, stub_agent):
         )
         is False
     )
-    assert stub_agent.calls == []
+    assert len(stub_agent.calls) == 0
 
 
 def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monkeypatch):
@@ -328,15 +308,18 @@ def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monke
     deploy_result = {"exit_code": 99, "success": False}
 
     assert agent._fix_with_agent(deploy_result, None, attempt=1, max_attempts=2) is True
-    prompt, cwd, timeout = stub_agent.calls[0]
+    call = stub_agent.calls[0]
+    prompt = call["prompt"]
+    cwd = call["kwargs"].get("cwd")
+    timeout = call["kwargs"].get("timeout")
     assert "prompt::context::1/2" in prompt
     assert cwd == str(agent.repo_path)
-    assert timeout == AGENT_FIX_TIMEOUT_SECS
+    assert timeout == OperatorConfig().agent_fix_timeout
 
 
-def test_fix_with_agent_handles_agent_errors(agent, stub_agent, monkeypatch):
-    agent.agent = stub_agent
-    stub_agent.raise_error = True
+def test_fix_with_agent_handles_agent_errors(agent, monkeypatch):
+    error_agent = ErrorAgent(error_message="agent error")
+    agent.agent = error_agent
 
     def fake_prepare(self, *args, **kwargs):
         return "ctx"

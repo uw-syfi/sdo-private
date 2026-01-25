@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from enum import Enum
 
+from app_operator.logger import logger
+
 
 # Maximum characters to capture in tool output (stdout + stderr combined)
 MAX_OUTPUT_LENGTH = 10000
@@ -354,7 +356,7 @@ class TrajectoryRecorder:
             self._update_latest_link()
         except Exception as e:
             # Log error but don't crash
-            print(f"Warning: Failed to write trajectory file: {e}")
+            logger.warning(f"Failed to write trajectory file: {e}")
 
     def _update_latest_link(self) -> None:
         """Update the trajectory.json symlink to point to the latest trajectory."""
@@ -426,7 +428,7 @@ class TrajectoryRecorder:
                 self.trajectory["gemini_sessions"] = sessions_copied
 
         except Exception as e:
-            print(f"Warning: Failed to collect Gemini sessions: {e}")
+            logger.warning(f"Failed to collect Gemini sessions: {e}")
 
     def finalize(self, status: str = "completed") -> Path:
         """Finalize the trajectory recording.

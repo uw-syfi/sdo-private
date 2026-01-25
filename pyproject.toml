@@ -17,6 +17,7 @@ dependencies = [
 test = [
     "pytest>=8.0.0",
     "autopep8>=2.0.0",
+    "ruff>=0.1.0",
 ]
 
 [project.scripts]

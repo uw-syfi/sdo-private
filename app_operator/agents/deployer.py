@@ -1,17 +1,18 @@
-import os
+import re
 import subprocess
 import time
-import threading
-import re
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
 from app_operator.agent_cli.base import CodingAgent
 from app_operator.agent_cli.factory import create_agent_from_config
-from app_operator.config import DeploymentConfig
+from app_operator.config import DeploymentConfig, OperatorConfig
+from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
+from app_operator.subprocess_runner import SubprocessRunner
+from app_operator.progress_summarizer import ProgressSummarizer
 from tools.healthcheck import run_health_check
 from tools.trajectory import (
     Phase,
@@ -33,6 +34,7 @@ def generate_scripts(
     agent: Optional[CodingAgent] = None,
     filesystem: Optional[FileSystemInterface] = None,
     deployment_config: Optional[DeploymentConfig] = None,
+    operator_config: Optional[OperatorConfig] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -45,6 +47,7 @@ def generate_scripts(
         agent: Optional CodingAgent instance. If None, creates one from config.
         filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
         deployment_config: Optional deployment configuration. If None, uses default.
+        operator_config: Optional operator configuration for timeouts. If None, uses default.
 
     Returns:
         Tuple of (success: bool, message: str).
@@ -54,6 +57,9 @@ def generate_scripts(
 
     if deployment_config is None:
         deployment_config = DeploymentConfig()
+
+    if operator_config is None:
+        operator_config = OperatorConfig()
 
     target_path = Path(target_dir).resolve()
 
@@ -68,7 +74,7 @@ def generate_scripts(
     if agent is None:
         try:
             agent = create_agent_from_config(str(target_path))
-        except RuntimeError as e:
+        except (RuntimeError, AgentError) as e:
             return False, str(e)
 
     # Create .sds directory if it doesn't exist
@@ -78,11 +84,7 @@ def generate_scripts(
     # Get absolute path for context
     abs_target_dir = str(target_path)
 
-    # Change to target directory for context
-    original_cwd = os.getcwd()
     try:
-        os.chdir(abs_target_dir)
-
         # Start script generation phase in trajectory
         record_phase_start(Phase.SCRIPT_GENERATION)
 
@@ -100,6 +102,7 @@ def generate_scripts(
             abs_target_dir,
             filesystem,
             deployment_config,
+            operator_config,
         )
 
         if not deploy_success:
@@ -114,6 +117,7 @@ def generate_scripts(
             abs_target_dir,
             filesystem,
             deployment_config,
+            operator_config,
         )
 
         if not health_check_success:
@@ -133,12 +137,13 @@ def generate_scripts(
         record_phase_end("success")
         return True, f"Successfully generated scripts in {sds_dir}"
 
-    except Exception as e:
+    except (AgentError, DeploymentError, FileSystemError) as e:
         record_phase_end("failed")
         return False, f"Failed to generate scripts: {e}"
-    finally:
-        # Restore original working directory
-        os.chdir(original_cwd)
+    except Exception as e:
+        # Catch any unexpected errors and log them
+        record_phase_end("failed")
+        return False, f"Unexpected error during script generation: {e}"
 
 
 def _create_system_prompt(platform: str) -> str:
@@ -208,8 +213,12 @@ def _generate_deploy_script(
     target_dir: str,
     filesystem: FileSystemInterface,
     deployment_config: Optional[DeploymentConfig] = None,
+    operator_config: Optional[OperatorConfig] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
+    if operator_config is None:
+        operator_config = OperatorConfig()
+
     platform = deployment_config.platform if deployment_config else "auto"
     full_prompt = get_loader().render(
         "deployer/generate_script.jinja2",
@@ -222,7 +231,7 @@ def _generate_deploy_script(
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout)
 
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
@@ -234,12 +243,15 @@ def _generate_deploy_script(
             return False, "Agent failed to create .sds/deploy.sh"
 
     except subprocess.TimeoutExpired:
-        timeout = DEFAULT_AGENT_TIMEOUT_SECS // 60
+        timeout = operator_config.agent_timeout // 60
         record_assistant_message(f"Script generation timed out after {timeout} minutes")
         return (
             False,
             f"agent command timed out after {timeout} minutes",
         )
+    except AgentError as e:
+        record_assistant_message(f"Script generation failed: {e}")
+        return False, str(e)
     except Exception as e:
         record_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
@@ -252,8 +264,12 @@ def _generate_health_check_script(
     target_dir: str,
     filesystem: FileSystemInterface,
     deployment_config: Optional[DeploymentConfig] = None,
+    operator_config: Optional[OperatorConfig] = None,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
+    if operator_config is None:
+        operator_config = OperatorConfig()
+
     platform = deployment_config.platform if deployment_config else "auto"
     full_prompt = get_loader().render(
         "deployer/generate_script.jinja2",
@@ -266,7 +282,7 @@ def _generate_health_check_script(
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=DEFAULT_AGENT_TIMEOUT_SECS)
+        agent.generate(full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout)
 
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
@@ -278,12 +294,15 @@ def _generate_health_check_script(
             return False, "Agent failed to create .sds/health_check.sh"
 
     except subprocess.TimeoutExpired:
-        timeout = DEFAULT_AGENT_TIMEOUT_SECS // 60
+        timeout = operator_config.agent_timeout // 60
         record_assistant_message(f"Script generation timed out after {timeout} minutes")
         return (
             False,
             f"agent command timed out after {timeout} minutes",
         )
+    except AgentError as e:
+        record_assistant_message(f"Script generation failed: {e}")
+        return False, str(e)
     except Exception as e:
         record_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
@@ -298,6 +317,7 @@ class DeploymentAgent:
         coding_agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         deployment_config: Optional[DeploymentConfig] = None,
+        operator_config: Optional[OperatorConfig] = None,
     ):
         """Initialize the deployment agent.
 
@@ -306,14 +326,24 @@ class DeploymentAgent:
             coding_agent: The coding agent to use for generating/fixing scripts.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             deployment_config: Optional deployment configuration.
+            operator_config: Optional operator configuration for timeouts.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.deployment_config = deployment_config or DeploymentConfig()
+        self.operator_config = operator_config or OperatorConfig()
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
+
+    def _get_time(self) -> float:
+        """Get current time. Separate method to allow mocking in tests."""
+        return time.time()
+
+    def _sleep(self, seconds: float) -> None:
+        """Sleep for given seconds. Separate method to allow mocking in tests."""
+        time.sleep(seconds)
 
     def _get_next_attempt_number(self) -> int:
         """Determine the next attempt number based on existing logs."""
@@ -367,7 +397,7 @@ class DeploymentAgent:
             )
 
             success, message = generate_scripts(
-                str(self.repo_path), self.agent, self.filesystem, self.deployment_config
+                str(self.repo_path), self.agent, self.filesystem, self.deployment_config, self.operator_config
             )
 
             if success:
@@ -509,7 +539,7 @@ class DeploymentAgent:
     def run_deploy_command(
         self,
         command: str = "start",
-        timeout: int = DEFAULT_DEPLOY_TIMEOUT_SECS,
+        timeout: Optional[int] = None,
         log_file_path: Optional[Path] = None,
         check_shutdown: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
@@ -517,196 +547,54 @@ class DeploymentAgent:
 
         Args:
             command: The command to pass to the script (e.g., "start", "stop").
-            timeout: Timeout in seconds.
+            timeout: Timeout in seconds. If None, uses operator_config.deploy_timeout.
             log_file_path: Optional path to write output logs to.
             check_shutdown: Optional callable returning True if shutdown requested.
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
+        if timeout is None:
+            timeout = self.operator_config.deploy_timeout
         logger.info(f"Running deployment script: {self.deploy_script} {command}")
 
-        # Open log file if provided
-        log_file = None
-        log_lock = threading.Lock()
         if log_file_path:
-            try:
-                log_file = open(log_file_path, "w")
-                logger.info(f"Logging output to: {log_file_path}")
-            except Exception as e:
-                logger.warning(f"Could not open log file {log_file_path}: {e}")
+            logger.info(f"Logging output to: {log_file_path}")
 
-        # Buffers to capture output
-        stdout_lines = []
-        stderr_lines = []
-
-        def read_pipe(pipe, buffer):
-            """Read pipe line by line and capture."""
-            try:
-                for line in iter(pipe.readline, ""):
-                    if not line:
-                        break
-                    # We don't print here to avoid spamming, unless it's a short command?
-                    # The original implementation captured output but didn't print in real-time
-                    # except via the subprocess.run return.
-                    # But for long commands we might want to see it?
-                    # The requirement says "produce a brief summary... Don't just print the agent_cli's outputs"
-                    # It implies we rely on the summary.
-                    buffer.append(line)
-
-                    if log_file:
-                        with log_lock:
-                            log_file.write(line)
-                            log_file.flush()
-            except ValueError:
-                pass  # Handle closed file
-            finally:
-                pipe.close()
-
-        process = None
-        try:
-            # Run deploy script with command
-            process = subprocess.Popen(
-                [str(self.deploy_script), command],
-                cwd=str(self.repo_path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # Line buffered
-            )
-
-            # Start threads to read stdout and stderr
-            stdout_thread = threading.Thread(
-                target=read_pipe, args=(process.stdout, stdout_lines)
-            )
-            stderr_thread = threading.Thread(
-                target=read_pipe, args=(process.stderr, stderr_lines)
-            )
-
-            stdout_thread.daemon = True
-            stderr_thread.daemon = True
-
-            stdout_thread.start()
-            stderr_thread.start()
-
-            start_time = time.time()
-            last_summary_time = start_time
-            summary_interval = 30
-            initial_delay = 15
-
-            while process.poll() is None:
-                current_time = time.time()
-                elapsed = current_time - start_time
-
-                # Check shutdown
-                if check_shutdown and check_shutdown():
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                    return {
-                        "success": False,
-                        "exit_code": -1,
-                        "stdout": "".join(stdout_lines),
-                        "stderr": "Deployment interrupted by shutdown request\n"
-                        + "".join(stderr_lines),
-                    }
-
-                # Check timeout
-                if elapsed > timeout:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                    return {
-                        "success": False,
-                        "exit_code": -1,
-                        "stdout": "".join(stdout_lines),
-                        "stderr": f"Deployment script timed out after {timeout} seconds\n"
-                        + "".join(stderr_lines),
-                    }
-
-                # Check for summary update
-                if (
-                    elapsed > initial_delay
-                    and (current_time - last_summary_time) >= summary_interval
-                ):
-                    # Get recent output
-                    recent_stdout = "".join(stdout_lines[-20:])
-                    recent_stderr = "".join(stderr_lines[-20:])
-                    recent_output = f"{recent_stdout}\n{recent_stderr}"
-
-                    if recent_output.strip():
-                        self._summarize_progress(recent_output, elapsed)
-
-                    last_summary_time = time.time()
-
-                time.sleep(0.5)
-
-            # Wait for threads to finish
-            stdout_thread.join(timeout=1)
-            stderr_thread.join(timeout=1)
-
-            if log_file:
-                log_file.close()
-
-            stdout_data = "".join(stdout_lines)
-            stderr_data = "".join(stderr_lines)
-
-            status = "SUCCESS" if process.returncode == 0 else "FAILED"
-            logger.info(
-                f"Deployment command '{command}' finished: {status} (Exit Code: {process.returncode})"
-            )
-
-            return {
-                "success": process.returncode == 0,
-                "exit_code": process.returncode,
-                "stdout": stdout_data,
-                "stderr": stderr_data,
-            }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": f"Failed to run deployment script: {e}",
-            }
-        finally:
-            # Ensure process is killed on exit (including KeyboardInterrupt)
-            if process and process.poll() is None:
-                try:
-                    process.terminate()
-                    process.wait(timeout=2)
-                except (subprocess.TimeoutExpired, Exception):
-                    try:
-                        process.kill()
-                    except Exception:
-                        pass
-
-    def _summarize_progress(self, output_snippet: str, elapsed_time: float):
-        """Generate and print a summary of the progress using the agent."""
-        prompt = get_loader().render(
-            "deployer/summarize.jinja2", output_snippet=output_snippet
+        # Create subprocess runner
+        # Pass subprocess.Popen from this module so tests can patch it
+        runner = SubprocessRunner(
+            command=[str(self.deploy_script), command],
+            cwd=str(self.repo_path),
+            timeout=timeout,
+            log_file_path=log_file_path,
+            check_shutdown=check_shutdown,
+            time_func=self._get_time,
+            sleep_func=self._sleep,
+            popen_func=subprocess.Popen,
         )
-        try:
-            # Use silent=True to avoid printing the agent's internal thought process
-            response = self.agent.generate(prompt, silent=True, timeout=30)
-            summary = self._extract_summary(response)
-            if summary:
-                logger.info(f"[{elapsed_time:.1f}s] ➜ {summary}")
-        except Exception:
-            # If summarization fails, just ignore it to not interrupt the flow
-            pass
 
-    def _extract_summary(self, response: str) -> Optional[str]:
-        """Extract the summary from the agent's response using XML markers."""
-        match = re.search(r"<output_msg>(.*?)</output_msg>", response, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        return None
+        # Create progress summarizer
+        summarizer = ProgressSummarizer(
+            agent_generate_fn=lambda prompt, silent, timeout: self.agent.generate(
+                prompt, silent=silent, timeout=timeout
+            ),
+            initial_delay=15.0,
+            summary_interval=30.0,
+            time_func=self._get_time,
+        )
+
+        # Start the subprocess with progress monitoring
+        result = runner.run_with_progress_monitoring(summarizer)
+
+        # Log completion
+        status = "SUCCESS" if result.get("success") else "FAILED"
+        exit_code = result.get("exit_code", -1)
+        logger.info(
+            f"Deployment command '{command}' finished: {status} (Exit Code: {exit_code})"
+        )
+
+        return result
 
     def _fix_with_agent(
         self,
@@ -753,7 +641,7 @@ class DeploymentAgent:
             # Note: The agent is expected to modify files directly
             start_time = time.time()
             response = self.agent.generate(
-                prompt, cwd=str(self.repo_path), timeout=AGENT_FIX_TIMEOUT_SECS
+                prompt, cwd=str(self.repo_path), timeout=self.operator_config.agent_fix_timeout
             )
             duration = time.time() - start_time
             logger.info(f"Agent generation (fix) took {duration / 60:.2f} minutes")
@@ -778,9 +666,13 @@ class DeploymentAgent:
 
             return True
 
-        except Exception as e:
+        except AgentError as e:
             logger.error(f"Agent failed to provide fix: {e}")
             record_assistant_message(f"Failed to provide fix: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error while getting fix from agent: {e}")
+            record_assistant_message(f"Unexpected error during fix attempt: {e}")
             return False
 
     def _prepare_error_context(

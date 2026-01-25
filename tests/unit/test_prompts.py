@@ -1,10 +1,13 @@
 import pytest
-from app_operator.prompts import get_loader
+from app_operator.prompts import get_loader, reset_loader, PromptLoader
 
 
 @pytest.fixture
 def loader():
-    return get_loader()
+    """Fixture that provides a loader and ensures cleanup after test."""
+    loader = get_loader()
+    yield loader
+    reset_loader()  # Ensure clean state for next test
 
 
 def test_loader_initialization(loader):
@@ -120,3 +123,69 @@ def test_monitor_analyze_health(loader):
     assert "Repository: /repo" in rendered
     assert "HEALTH_CONTEXT" in rendered
     assert "<exec_summary>" in rendered
+
+
+def test_reset_loader():
+    """Test that reset_loader clears the singleton."""
+    # Get initial loader
+    loader1 = get_loader()
+    assert loader1 is not None
+
+    # Get it again - should be same instance (singleton)
+    loader2 = get_loader()
+    assert loader1 is loader2
+
+    # Reset the loader
+    reset_loader()
+
+    # Get a new loader - should be a different instance
+    loader3 = get_loader()
+    assert loader3 is not None
+    assert loader3 is not loader1
+
+
+def test_reset_loader_with_custom_templates_dir(tmp_path):
+    """Test that reset allows switching to custom templates directory."""
+    # Create a custom templates directory
+    custom_templates = tmp_path / "custom_prompts"
+    custom_templates.mkdir()
+    (custom_templates / "test.jinja2").write_text("Custom template")
+
+    # Reset to ensure clean state
+    reset_loader()
+
+    # Get default loader first
+    default_loader = get_loader()
+    default_dir = default_loader.templates_dir
+
+    # Reset and create a custom loader
+    reset_loader()
+
+    # Note: PromptLoader can be instantiated with custom dir,
+    # but get_loader() always uses default. This test verifies
+    # reset functionality for potential future extensions.
+    custom_loader = PromptLoader(custom_templates)
+    assert custom_loader.templates_dir == custom_templates
+    assert custom_loader.templates_dir != default_dir
+
+    # Verify the custom loader can render custom templates
+    rendered = custom_loader.render("test.jinja2")
+    assert rendered == "Custom template"
+
+    # Clean up
+    reset_loader()
+
+
+def test_reset_loader_idempotent():
+    """Test that calling reset_loader multiple times is safe."""
+    reset_loader()
+    reset_loader()
+    reset_loader()
+
+    # Should still be able to get a loader
+    loader = get_loader()
+    assert loader is not None
+    assert loader.templates_dir.exists()
+
+    # Clean up
+    reset_loader()

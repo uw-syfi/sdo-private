@@ -8,6 +8,7 @@ from app_operator.agent_cli.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
 from app_operator.agents.code_analyzer import CodeAnalyzerAgent
+from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
@@ -75,7 +76,7 @@ class AppOperator:
                 )
             except RuntimeError as e:
                 # Fallback or error if no default agent can be created
-                raise RuntimeError(f"Failed to initialize default coding agent: {e}")
+                raise AgentError(f"Failed to initialize default coding agent: {e}")
         else:
             self.agent = agent
 
@@ -85,7 +86,7 @@ class AppOperator:
         # Initialize agents
         self.analyzer = CodeAnalyzerAgent(self.repo_path, self.agent, self.filesystem)
         self.deployer = DeploymentAgent(
-            self.repo_path, self.agent, self.filesystem, self.config.deployment
+            self.repo_path, self.agent, self.filesystem, self.config.deployment, self.config.operator
         )
         self.monitor = AppMonitor(self.repo_path, self.agent, self.filesystem)
 
@@ -93,7 +94,7 @@ class AppOperator:
         self.trajectory = init_trajectory(self.repo_path)
         self.trajectory.set_agent_name(self.agent.__class__.__name__)
 
-    def _persist_deployment_config(self):
+    def _persist_deployment_config(self) -> None:
         """Persist deployment preference to .sds/config.toml."""
         if not self.filesystem.exists(self.sds_dir):
             self.filesystem.mkdir(self.sds_dir)
@@ -168,7 +169,7 @@ class AppOperator:
             self._cleanup()
             finalize_trajectory("completed" if self._deployed else "failed")
 
-    def _handle_shutdown_signal(self, signum: int, frame):
+    def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).
 
         Args:
@@ -186,7 +187,7 @@ class AppOperator:
             if signum == signal.SIGINT:
                 raise KeyboardInterrupt()
 
-    def _cleanup(self):
+    def _cleanup(self) -> None:
         """Shutdown the application and cleanup resources."""
         if not self._deployed:
             return
