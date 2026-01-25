@@ -1,4 +1,3 @@
-import os
 import subprocess
 import time
 import threading
@@ -79,11 +78,7 @@ def generate_scripts(
     # Get absolute path for context
     abs_target_dir = str(target_path)
 
-    # Change to target directory for context
-    original_cwd = os.getcwd()
     try:
-        os.chdir(abs_target_dir)
-
         # Start script generation phase in trajectory
         record_phase_start(Phase.SCRIPT_GENERATION)
 
@@ -141,9 +136,6 @@ def generate_scripts(
         # Catch any unexpected errors and log them
         record_phase_end("failed")
         return False, f"Unexpected error during script generation: {e}"
-    finally:
-        # Restore original working directory
-        os.chdir(original_cwd)
 
 
 def _create_system_prompt(platform: str) -> str:
@@ -668,7 +660,8 @@ class DeploymentAgent:
 
             status = "SUCCESS" if process.returncode == 0 else "FAILED"
             logger.info(
-                f"Deployment command '{command}' finished: {status} (Exit Code: {process.returncode})"
+                f"Deployment command '{command}' finished: {status} (Exit Code: {
+                    process.returncode})"
             )
 
             return {

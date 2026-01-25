@@ -8,7 +8,6 @@ from app_operator.agents.deployer import (
     DeploymentAgent,
     AGENT_FIX_TIMEOUT_SECS,
     DEFAULT_DEPLOY_TIMEOUT_SECS,
-    DEFAULT_AGENT_TIMEOUT_SECS,
 )
 from tests.fixtures.agents import TrackingAgent, ErrorAgent
 
