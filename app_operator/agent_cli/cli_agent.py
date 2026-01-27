@@ -56,7 +56,7 @@ class CLIGenerationSession:
         """Process a line from stderr."""
         line_stripped = line.rstrip("\n")
         if not self.silent:
-            self.logger.info(f"[STDERR] {line_stripped}")
+            self.logger.bind(stderr=True).info(f"[STDERR] {line_stripped}")
         self.stderr_lines.append(line)
 
     def run(self, prompt: str) -> str:
