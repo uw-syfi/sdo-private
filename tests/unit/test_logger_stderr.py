@@ -128,4 +128,3 @@ def test_stdout_output_not_red_with_agent_prefix(gemini_agent):
 
     # Verify red color codes are NOT present for stdout
     assert "\x1b[31m" not in output
-
