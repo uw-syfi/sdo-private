@@ -120,7 +120,7 @@ def test_multiple_stderr_lines_in_red(gemini_agent, mock_popen):
     handler_id = logger.add(captured_output, format=formatter, colorize=True)
 
     try:
-        result = gemini_agent.generate("Test prompt")
+        gemini_agent.generate("Test prompt")
     finally:
         logger.remove(handler_id)
 
