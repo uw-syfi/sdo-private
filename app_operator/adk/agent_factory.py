@@ -2,7 +2,7 @@ from typing import Any, Callable, List, Optional
 
 # Assuming imports
 try:
-    from google.genai.agent import LlmAgent, LoopAgent
+    from google.adk.agents import LlmAgent, LoopAgent
 except ImportError:
 
     class LlmAgent:
@@ -29,11 +29,11 @@ def build_adk_agent(
         Configured LlmAgent instance.
     """
     return LlmAgent(
-        model=model,
-        tools=tools,
-        instructions=instruction,
         name=name,
         description=f"SDS Agent: {name}",
+        model=model,
+        tools=tools,
+        instruction=instruction,
     )
 
 

@@ -12,18 +12,14 @@ def test_runner_returns_text():
 
     with patch("app_operator.adk.runner.Runner") as MockRunner:
         mock_instance = MockRunner.return_value
-        mock_result = MagicMock()
-        mock_result.text = "Response text"
+        mock_event = MagicMock()
+        mock_event.is_final_response.return_value = True
+        mock_event.content = MagicMock()
+        mock_part = MagicMock()
+        mock_part.text = "Response text"
+        mock_event.content.parts = [mock_part]
 
-        # Mock run_async
-        async def mock_run_async(*args, **kwargs):
-            return mock_result
-
-        mock_instance.run_async = mock_run_async
-
-        # We need to ensure asyncio.run works.
-        # If imports of google.genai.agent failed, AdkAgentRunner uses fallback classes.
-        # But we patched Runner, so it uses our mock.
+        mock_instance.run.return_value = iter([mock_event])
 
         result = runner_wrapper.run_once(agent, "Hello")
         assert result == "Response text"

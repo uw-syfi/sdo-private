@@ -5,7 +5,9 @@ from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
 
 # Assuming imports
 try:
-    from google.genai.agent import Runner, InMemorySessionService, LlmAgent, LoopAgent
+    from google.adk.agents import LlmAgent, LoopAgent
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
 except ImportError:
     # Fallback/Mock for development environment without ADK installed
     class Runner:
@@ -73,52 +75,36 @@ class AdkAgentRunner:
 
         session_id = str(uuid.uuid4())
 
-        # Runner.run is typically synchronous? Plan says run_async.
-        # If I am in sync context, I should use run() if available, or run_async with event loop.
-        # app_operator is synchronous mostly.
-        # I'll check if `run` exists. If only `run_async`, I need `asyncio.run`.
-        # Most python SDKs provide sync `run`.
-        # I'll assume `run` exists or handle async if needed.
-        # Plan says: "Use runner.run_async... and extract final model response text."
+        # Runner.run returns an event generator. Extract the final response text.
+        response_text = ""
 
-        # Since I'm in a sync method `run_once`, I'll try to run it synchronously.
-        # If `run_async` is the only way, I'll wrap it.
+        if hasattr(runner, "run"):
+            for event in runner.run(
+                user_id="sds", session_id=session_id, new_message=user_prompt
+            ):
+                # Prefer the final response event text; fallback to last text seen.
+                event_text = _extract_text_from_event(event)
+                if event_text:
+                    response_text = event_text
+                if hasattr(event, "is_final_response") and event.is_final_response():
+                    if event_text:
+                        response_text = event_text
+                    break
 
-        try:
-            # Assuming sync run is available or I can wrap async
-            # But the plan explicitly mentioned run_async.
-            # Let's try to use asyncio.run if I can import it.
-            import asyncio
+            return response_text
 
-            # We need to execute the runner
-            # output = runner.run(user_id="sds", session_id=session_id, new_message=user_prompt)
-            # If `run` returns the result directly.
+        raise AttributeError("Runner does not provide a run() method")
 
-            # Using asyncio.run for run_async
-            result = asyncio.run(
-                runner.run_async(
-                    user_id="sds", session_id=session_id, new_message=user_prompt
-                )
-            )
 
-            # Extract text from result
-            if hasattr(result, "text"):
-                return result.text
-            elif hasattr(result, "content"):
-                return str(result.content)
-            else:
-                return str(result)
-
-        except AttributeError:
-            # Maybe run() exists and is sync
-            if hasattr(runner, "run"):
-                result = runner.run(
-                    user_id="sds", session_id=session_id, new_message=user_prompt
-                )
-                if hasattr(result, "text"):
-                    return result.text
-                elif hasattr(result, "content"):
-                    return str(result.content)
-                else:
-                    return str(result)
-            raise
+def _extract_text_from_event(event: object) -> str:
+    """Extract plain text content from an ADK event."""
+    content = getattr(event, "content", None)
+    if content is None:
+        return ""
+    parts = getattr(content, "parts", None) or []
+    texts = []
+    for part in parts:
+        text = getattr(part, "text", None)
+        if text:
+            texts.append(text)
+    return "".join(texts)
