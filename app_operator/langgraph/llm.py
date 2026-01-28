@@ -1,7 +1,6 @@
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_google_vertexai import ChatVertexAI
 from langchain_anthropic import ChatAnthropic
 
 from app_operator.config import Config
@@ -39,15 +38,15 @@ def build_llm(config: Config) -> BaseChatModel:
             # If API key is missing, try falling back to Vertex AI
             if "API key required" in str(e):
                 logger.info("Gemini API key not found, falling back to Vertex AI")
-                kwargs = {"model": model}
+                kwargs = {"model": model, "vertexai": True}
                 if location:
                     kwargs["location"] = location
-                return ChatVertexAI(**kwargs)
+                return ChatGoogleGenerativeAI(**kwargs)
             raise
     if provider == "vertex":
-        kwargs = {"model": model}
+        kwargs = {"model": model, "vertexai": True}
         if location:
             kwargs["location"] = location
-        return ChatVertexAI(**kwargs)
+        return ChatGoogleGenerativeAI(**kwargs)
 
     raise ValueError(f"Unsupported langgraph provider: {config.agent.provider}")
