@@ -1,6 +1,6 @@
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional
 
 from langchain_core.messages import (
     SystemMessage,
