@@ -5,7 +5,7 @@ errors such as permission denied, disk full, and other I/O failures.
 """
 
 import pytest
-from app_operator.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures.agents import StubAgent
 
 
@@ -110,7 +110,7 @@ class TestScriptGenerationFilesystemErrors:
 
     def test_sds_directory_not_writable(self, tmp_path):
         """Should handle case where .sds directory cannot be created."""
-        from app_operator.agents.deployer import generate_scripts
+        from app_operator.cli_agent.agents.deployer import generate_scripts
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -125,7 +125,11 @@ class TestScriptGenerationFilesystemErrors:
             try:
                 success, message = generate_scripts(str(repo), agent)
                 # If it returns, should indicate failure
-                assert success is False or "Permission denied" in message or "Read-only" in message
+                assert (
+                    success is False
+                    or "Permission denied" in message
+                    or "Read-only" in message
+                )
             except PermissionError:
                 # Also acceptable - permission error is raised
                 pass
@@ -135,7 +139,7 @@ class TestScriptGenerationFilesystemErrors:
 
     def test_target_directory_deleted_during_operation(self, tmp_path):
         """Should handle case where target directory is deleted during operation."""
-        from app_operator.agents.deployer import generate_scripts
+        from app_operator.cli_agent.agents.deployer import generate_scripts
 
         repo = tmp_path / "repo"
         repo.mkdir()

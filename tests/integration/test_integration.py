@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from app_operator.operator import AppOperator
-from app_operator.cli_agent.base import CodingAgent
+from app_operator.cli_agent.backend.base import CodingAgent
 
 # --- Fake Agent ---
 

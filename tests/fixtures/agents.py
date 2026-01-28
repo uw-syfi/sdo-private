@@ -6,7 +6,7 @@ scenarios without requiring actual agent execution.
 
 import time
 from typing import List, Dict, Any, Optional
-from app_operator.cli_agent.base import CodingAgent
+from app_operator.cli_agent.backend.base import CodingAgent
 
 
 class StubAgent(CodingAgent):

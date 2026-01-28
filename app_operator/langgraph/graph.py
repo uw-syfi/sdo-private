@@ -18,11 +18,10 @@ from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
-from app_operator.agents.deployer import _analyze_repository, _create_system_prompt
+from app_operator.deployment_context import analyze_repository, create_system_prompt
 from tools.trajectory import (
     Phase,
     record_phase_start,
-    record_phase_end,
 )
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
@@ -93,7 +92,6 @@ def _invoke_agent(
     handler = LangGraphTrajectoryHandler()
 
     if system_prompt:
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -101,7 +99,6 @@ def _invoke_agent(
         # We record the user part of the prompt
         handler.on_user_message(user_prompt)
     else:
-        full_prompt = user_prompt
         messages = [HumanMessage(content=user_prompt)]
         handler.on_user_message(user_prompt)
 
@@ -188,7 +185,6 @@ def _run_script(
     log_file_path: Optional[Path] = None,
     timeout: int = 900,
 ) -> Dict[str, Any]:
-    start_time = time.time()
     try:
         result = subprocess.run(
             command,
@@ -198,21 +194,18 @@ def _run_script(
             text=True,
             timeout=timeout,
         )
-        duration = time.time() - start_time
         success = result.returncode == 0
         stdout = result.stdout
         stderr = result.stderr
         exit_code = result.returncode
 
     except subprocess.TimeoutExpired:
-        duration = time.time() - start_time
         success = False
         stdout = ""
         stderr = f"Command timed out after {timeout} seconds"
         exit_code = -1
 
     except Exception as e:
-        duration = time.time() - start_time
         success = False
         stdout = ""
         stderr = f"Error: {str(e)}"
@@ -328,8 +321,8 @@ def build_graph(
 
         record_phase_start(Phase.SCRIPT_GENERATION)
 
-        system_prompt = _create_system_prompt(config.deployment.platform)
-        repo_context = _analyze_repository(repo_path)
+        system_prompt = create_system_prompt(config.deployment.platform)
+        repo_context = analyze_repository(repo_path)
 
         deploy_prompt = loader.render(
             "deployer/generate_script.jinja2",
@@ -444,7 +437,7 @@ def build_graph(
             deploy_result, health_result, log_file_path, health_check_log_path
         )
 
-        system_prompt = _create_system_prompt(config.deployment.platform)
+        system_prompt = create_system_prompt(config.deployment.platform)
         previous_summary_note = ""
         if state["attempt"] > 1:
             prev_log_path = (

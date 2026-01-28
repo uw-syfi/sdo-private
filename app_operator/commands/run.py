@@ -1,7 +1,7 @@
 import argparse
 
-from app_operator.operator import AppOperator
-from app_operator.cli_agent.factory import create_agent_from_config
+from app_operator.cli_agent.operator import AppOperator
+from app_operator.cli_agent import create_agent_from_config
 from app_operator.langgraph import LangGraphOperator
 from app_operator.config import load_config
 from app_operator.logger import logger

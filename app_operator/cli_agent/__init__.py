@@ -1,9 +1,10 @@
-from .base import CodingAgent
-from .factory import create_agent_from_config
-from .codex import CodexCodingAgent
-from .gemini import GeminiCodingAgent
-from .opencode import OpencodeCodingAgent
-from .claude import ClaudeCodeCodingAgent
+from .backend.base import CodingAgent
+from .backend.factory import create_agent_from_config
+from .backend.codex import CodexCodingAgent
+from .backend.gemini import GeminiCodingAgent
+from .backend.opencode import OpencodeCodingAgent
+from .backend.claude import ClaudeCodeCodingAgent
+from .operator import AppOperator
 
 __all__ = [
     "CodingAgent",
@@ -12,4 +13,5 @@ __all__ = [
     "GeminiCodingAgent",
     "OpencodeCodingAgent",
     "ClaudeCodeCodingAgent",
+    "AppOperator",
 ]

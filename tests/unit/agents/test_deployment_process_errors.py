@@ -5,7 +5,7 @@ and edge cases in process execution.
 """
 
 import time
-from app_operator.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures.agents import StubAgent
 
 

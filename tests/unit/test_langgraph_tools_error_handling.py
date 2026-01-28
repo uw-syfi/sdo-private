@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
-import sys
 import subprocess
 
 from app_operator.langgraph.tools import (

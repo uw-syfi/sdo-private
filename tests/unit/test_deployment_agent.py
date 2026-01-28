@@ -3,8 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app_operator.agents.deployer as deployer_module
-from app_operator.agents.deployer import (
+import app_operator.cli_agent.agents.deployer as deployer_module
+from app_operator.cli_agent.agents.deployer import (
     DeploymentAgent,
     DEFAULT_DEPLOY_TIMEOUT_SECS,
 )

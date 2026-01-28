@@ -1,5 +1,5 @@
 import pytest
-from app_operator.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tools.healthcheck import run_health_check
 
 

@@ -14,10 +14,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app_operator.cli_agent.claude import ClaudeCodeCodingAgent
-from app_operator.cli_agent.codex import CodexCodingAgent
-from app_operator.cli_agent.gemini import GeminiCodingAgent
-from app_operator.cli_agent.opencode import OpencodeCodingAgent
+from app_operator.cli_agent.backend.claude import ClaudeCodeCodingAgent
+from app_operator.cli_agent.backend.codex import CodexCodingAgent
+from app_operator.cli_agent.backend.gemini import GeminiCodingAgent
+from app_operator.cli_agent.backend.opencode import OpencodeCodingAgent
 
 
 class MockProcess:
@@ -305,7 +305,7 @@ def test_agent_includes_model_in_command_when_specified(agent_info, mock_which):
     # Find the index of --model and check the next element is our model
     model_idx = cmd.index("--model")
     assert cmd[model_idx + 1] == test_model, (
-        f"{agent_name} should use model '{test_model}', " f"but got: {cmd[model_idx + 1]}"
+        f"{agent_name} should use model '{test_model}', but got: {cmd[model_idx + 1]}"
     )
 
 
@@ -352,7 +352,7 @@ def test_agent_handles_multiline_prompts(agent_info, mock_which):
 def test_agent_handles_special_characters_in_prompt(agent_info, mock_which):
     """Test agents handle prompts with special characters."""
     agent_name, agent_class, _ = agent_info
-    test_prompt = 'Fix bug in "auth.js" where user\'s password isn\'t validated'
+    test_prompt = "Fix bug in \"auth.js\" where user's password isn't validated"
 
     stdin_writes = []
 
