@@ -10,6 +10,7 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.langgraph.llm import build_llm
 from app_operator.langgraph.graph import build_graph
+from tools.trajectory import init_trajectory, finalize_trajectory
 
 
 class LangGraphOperator:
@@ -42,6 +43,10 @@ class LangGraphOperator:
 
         self.sds_dir = self.repo_path / ".sds"
         self._persist_deployment_config()
+
+        # Initialize trajectory recorder
+        self.trajectory = init_trajectory(self.repo_path)
+        self.trajectory.set_agent_name("LangGraph")
 
         try:
             self.llm = build_llm(self.config)
@@ -113,10 +118,12 @@ class LangGraphOperator:
 
             health_result = final_state.get("health_result") if final_state else None
             self._deployed = bool(health_result and health_result.get("success"))
+            finalize_trajectory("completed" if self._deployed else "failed")
             return 0
 
         except KeyboardInterrupt:
             logger.info("Shutting down due to interrupt...")
+            finalize_trajectory("interrupted")
             return 1
 
         except Exception as e:
@@ -124,6 +131,7 @@ class LangGraphOperator:
             import traceback
 
             traceback.print_exc()
+            finalize_trajectory("failed")
             return 1
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:

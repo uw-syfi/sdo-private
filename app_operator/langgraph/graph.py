@@ -19,9 +19,15 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.agents.deployer import _analyze_repository, _create_system_prompt
+from tools.trajectory import (
+    Phase,
+    record_phase_start,
+    record_phase_end,
+)
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
 from app_operator.langgraph.models import get_model_context_limit
+from app_operator.langgraph.trajectory_handler import LangGraphTrajectoryHandler
 
 
 BLUE = "\033[34m"
@@ -84,15 +90,20 @@ def _invoke_agent(
     agent_name: str = "Agent",
     context_limit: int = 128000,
 ) -> tuple[str, list[BaseMessage]]:
+    handler = LangGraphTrajectoryHandler()
+
     if system_prompt:
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
+        # We record the user part of the prompt
+        handler.on_user_message(user_prompt)
     else:
         full_prompt = user_prompt
         messages = [HumanMessage(content=user_prompt)]
+        handler.on_user_message(user_prompt)
 
     response_messages = list(messages)
     total_usage = {"input": 0, "output": 0, "total": 0}
@@ -110,6 +121,8 @@ def _invoke_agent(
             response_messages.extend(new_messages)
 
             for msg in new_messages:
+                handler.process_message(msg)
+
                 if isinstance(msg, AIMessage):
                     usage = _extract_token_usage(msg)
                     total_usage["input"] += usage.get("input", 0)
@@ -281,6 +294,8 @@ def build_graph(
         if state["analysis_done"]:
             return state
 
+        record_phase_start(Phase.EXPLORATION)
+
         # Check if analysis files already exist
         sds_dir = repo_path / ".sds"
         analysis_file = sds_dir / "code_analysis.md"
@@ -310,6 +325,8 @@ def build_graph(
     def generate_scripts(state: OperatorState) -> OperatorState:
         if state["scripts_done"]:
             return state
+
+        record_phase_start(Phase.SCRIPT_GENERATION)
 
         system_prompt = _create_system_prompt(config.deployment.platform)
         repo_context = _analyze_repository(repo_path)
@@ -354,6 +371,11 @@ def build_graph(
     def deploy_attempt(state: OperatorState) -> OperatorState:
         if check_shutdown and check_shutdown():
             return state
+
+        record_phase_start(
+            Phase.DEPLOYMENT,
+            {"attempt": state["attempt"], "max_attempts": state["max_attempts"]},
+        )
 
         log_file = (
             repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
@@ -483,6 +505,8 @@ def build_graph(
         if check_shutdown and check_shutdown():
             return state
 
+        record_phase_start(Phase.MONITORING, {"cycle": state["monitor_count"]})
+
         interval = health_check_interval
         if interval > 0:
             time.sleep(interval)
@@ -508,6 +532,9 @@ def build_graph(
         return state
 
     def monitor_analyze(state: OperatorState) -> OperatorState:
+        # We are still in MONITORING phase, so we don't start a new one,
+        # but we are calling an agent, so logging will happen naturally.
+
         health_result = state.get("health_result") or {}
         context_parts = []
         context_parts.append(f"## Health Check #{state['monitor_count']}")
