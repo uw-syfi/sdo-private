@@ -34,9 +34,9 @@ class AgentConfig:
         "claude",
         "claude-code",
         "opencode",
+        "anthropic",
         "vertex",
         "openai",
-        "anthropic",
     }
 
     def __post_init__(self):

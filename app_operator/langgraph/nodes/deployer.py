@@ -7,7 +7,11 @@ from app_operator.filesystem import FileSystemInterface
 from app_operator.prompts import PromptLoader
 from app_operator.prompts.deployment_context import create_system_prompt
 from app_operator.prompts.deployer import create_fix_prompt, prepare_error_context
-from app_operator.trajectory import Phase, record_phase_start
+from app_operator.trajectory import (
+    Phase,
+    TrajectoryRecorderProtocol,
+    NullTrajectoryRecorder,
+)
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import (
     BLUE,
@@ -22,13 +26,15 @@ def deploy_attempt(
     state: OperatorState,
     repo_path: Path,
     filesystem: FileSystemInterface,
-    config: Config,
+    operator_config: Config,
     check_shutdown: Optional[Callable[[], bool]],
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> OperatorState:
+    recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():
         return state
 
-    record_phase_start(
+    recorder.start_phase(
         Phase.DEPLOYMENT,
         {"attempt": state["attempt"], "max_attempts": state["max_attempts"]},
     )
@@ -43,7 +49,8 @@ def deploy_attempt(
         filesystem,
         ".sds/deploy.sh start",
         log_file_path=log_file,
-        timeout=config.operator.deploy_timeout,
+        timeout=operator_config.operator.deploy_timeout,
+        recorder=recorder,
     )
     state["deploy_result"] = result
     return state
@@ -53,12 +60,14 @@ def fix_errors(
     state: OperatorState,
     repo_path: Path,
     filesystem: FileSystemInterface,
-    config: Config,
+    operator_config: Config,
     loader: PromptLoader,
     agent: Any,
     context_limit: int,
     check_shutdown: Optional[Callable[[], bool]],
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> OperatorState:
+    recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():
         return state
 
@@ -78,7 +87,7 @@ def fix_errors(
         deploy_result, health_result, log_file_path, health_check_log_path
     )
 
-    system_prompt = create_system_prompt(config.deployment.platform)
+    system_prompt = create_system_prompt(operator_config.deployment.platform)
     prompt = create_fix_prompt(
         repo_path=repo_path,
         attempt=state["attempt"],
@@ -95,6 +104,7 @@ def fix_errors(
         prompt,
         agent_name="Error Fixer",
         context_limit=context_limit,
+        recorder=recorder,
     )
     state["messages"] = messages
 
@@ -111,6 +121,11 @@ def fix_errors(
         log_file = repo_path / ".sds" / "logs" / f"fix_summary_{state['attempt']}.log"
         write_log_file(filesystem, log_file, summary_text)
         state["last_fix_summary"] = summary_text
+
+    # End the current phase as we are about to retry (or fail if max attempts reached)
+    # The graph logic handles max attempts check in should_fix edge.
+    # If we are here, we are fixing.
+    recorder.end_phase("needs_retry")
 
     state["attempt"] += 1
     return state

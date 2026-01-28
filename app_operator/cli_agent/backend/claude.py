@@ -12,7 +12,7 @@ from .claude_events import (
     MultiEvent,
     ResultEvent,
 )
-from app_operator.trajectory import record_tool_call
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
@@ -78,7 +78,7 @@ class ClaudeGenerationSession(CLIGenerationSession):
                 duration = time.time() - start_time if start_time else None
                 args = self.tool_args.get(event.tool_id, {})
 
-                record_tool_call(
+                self.recorder.add_tool_call(
                     tool=event.tool_name_resolved,
                     args=args,
                     stdout=event.output,
@@ -142,13 +142,18 @@ class ClaudeGenerationSession(CLIGenerationSession):
 class ClaudeCodeCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Claude Code CLI tool."""
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
+    ):
         """Initialize the Claude Code coding agent.
 
         Args:
             model: Optional model name to use with Claude Code. If None, uses default.
+            recorder: Trajectory recorder instance.
         """
-        super().__init__("claude", model)
+        super().__init__("claude", model, recorder)
 
     @property
     def claude_path(self) -> str:
@@ -180,6 +185,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         cwd: Optional[str] = None,
         timeout: int = 300,
         silent: bool = False,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ) -> ClaudeGenerationSession:
         return ClaudeGenerationSession(
             binary_name=self.binary_name,
@@ -190,4 +196,5 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             cwd=cwd,
             timeout=timeout,
             silent=silent,
+            recorder=recorder,
         )
