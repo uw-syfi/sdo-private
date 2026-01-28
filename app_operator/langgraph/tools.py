@@ -24,6 +24,7 @@ class ToolContext:
 def _build_ls(context: ToolContext) -> Callable[[str], str]:
     @tool("LS")
     def ls(path: str = ".") -> str:
+        """List files in the specified directory."""
         target = context.resolve_path(path)
         if not target.exists():
             raise FileNotFoundError(f"Path does not exist: {path}")
@@ -42,6 +43,7 @@ def _build_ls(context: ToolContext) -> Callable[[str], str]:
 def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
     @tool("Glob")
     def glob(pattern: str) -> List[str]:
+        """Find files matching the pattern."""
         results = []
         for path in context.repo_root.glob(pattern):
             if path.is_file() or path.is_dir():
@@ -51,7 +53,9 @@ def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
                 except ValueError:
                     continue
         results = sorted(results)
-        record_tool_call(tool="Glob", args={"pattern": pattern}, stdout="\n".join(results))
+        record_tool_call(
+            tool="Glob", args={"pattern": pattern}, stdout="\n".join(results)
+        )
         return results
 
     return glob
@@ -60,6 +64,7 @@ def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
 def _build_read(context: ToolContext) -> Callable[[str], str]:
     @tool("Read")
     def read(path: str) -> str:
+        """Read the content of a file."""
         target = context.resolve_path(path)
         content = context.filesystem.read_text(target)
         record_tool_call(tool="Read", args={"path": path}, stdout=content)
@@ -71,6 +76,7 @@ def _build_read(context: ToolContext) -> Callable[[str], str]:
 def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
     @tool("Grep")
     def grep(pattern: str, path: str = ".") -> List[str]:
+        """Search for a regex pattern in files."""
         target = context.resolve_path(path)
         regex = re.compile(pattern)
         matches: List[str] = []
@@ -114,6 +120,7 @@ def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path) -> List[str]
 def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
     @tool("write_file")
     def write_file(path: str, content: str) -> str:
+        """Write content to a file."""
         target = context.resolve_path(path)
         if target.is_dir():
             raise IsADirectoryError(f"Path is a directory: {path}")
@@ -134,6 +141,7 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
 def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
     @tool("bash")
     def bash(command: str, timeout: int = 120) -> Dict[str, Any]:
+        """Execute a bash command."""
         result = subprocess.run(
             command,
             cwd=str(context.repo_root),

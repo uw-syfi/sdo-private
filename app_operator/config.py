@@ -26,10 +26,12 @@ class UnrecognizedFieldError(ConfigurationError):
 class AgentConfig:
     provider: str = "codex"
     model: Optional[str] = None
+    location: Optional[str] = None
 
     VALID_PROVIDERS = {
         "codex",
         "gemini",
+        "vertex",
         "claude",
         "claude-code",
         "opencode",
@@ -49,6 +51,10 @@ class AgentConfig:
         if self.model is not None and not isinstance(self.model, str):
             raise TypeError(
                 f"model must be str or None, got {type(self.model).__name__}"
+            )
+        if self.location is not None and not isinstance(self.location, str):
+            raise TypeError(
+                f"location must be str or None, got {type(self.location).__name__}"
             )
 
 
@@ -99,8 +105,13 @@ class OperatorConfig:
         if self.interval > 86400:
             raise ValueError(f"interval too large: {self.interval}s (max: 86400s/24h)")
 
-        for field_name in ["monitoring_max_iters", "deployment_max_iters",
-                           "agent_fix_timeout", "deploy_timeout", "agent_timeout"]:
+        for field_name in [
+            "monitoring_max_iters",
+            "deployment_max_iters",
+            "agent_fix_timeout",
+            "deploy_timeout",
+            "agent_timeout",
+        ]:
             value = getattr(self, field_name)
             if not isinstance(value, int):
                 raise TypeError(f"{field_name} must be int, got {type(value).__name__}")
