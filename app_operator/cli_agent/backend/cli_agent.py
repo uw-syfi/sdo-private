@@ -10,7 +10,7 @@ from typing import Optional, List
 from app_operator.logger import logger
 from .base import CodingAgent
 from .utils import _get_interactive_env
-from app_operator.trajectory import record_user_message, record_assistant_message
+from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
 
 
 class CLIGenerationSession:
@@ -26,6 +26,7 @@ class CLIGenerationSession:
         cwd: Optional[str] = None,
         timeout: int = 300,
         silent: bool = False,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ):
         self.binary_name = binary_name
         self.env = env
@@ -35,6 +36,7 @@ class CLIGenerationSession:
         self.cwd = cwd
         self.timeout = timeout
         self.silent = silent
+        self.recorder = recorder or NullTrajectoryRecorder()
 
         # State initialization
         self.stdout_lines = []
@@ -144,12 +146,18 @@ class CLIGenerationSession:
 class CLICodingAgent(CodingAgent):
     """Base class for CLI-based coding agents."""
 
-    def __init__(self, binary_name: str, model: Optional[str] = None):
+    def __init__(
+        self,
+        binary_name: str,
+        model: Optional[str] = None,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
+    ):
         """Initialize the CLI coding agent.
 
         Args:
             binary_name: The name of the executable to use.
             model: Optional model name to use.
+            recorder: Trajectory recorder instance.
 
         Raises:
             RuntimeError: If binary is not found in PATH or is not working.
@@ -157,6 +165,7 @@ class CLICodingAgent(CodingAgent):
         self.env = _get_interactive_env()
         self.binary_name = binary_name
         self.model = model
+        self.recorder = recorder or NullTrajectoryRecorder()
 
         # Search for binary in the captured environment's PATH
         binary_path = shutil.which(binary_name, path=self.env.get("PATH"))
@@ -214,6 +223,7 @@ class CLICodingAgent(CodingAgent):
         cwd: Optional[str] = None,
         timeout: int = 300,
         silent: bool = False,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ) -> CLIGenerationSession:
         """Create a session for a single generation request.
 
@@ -228,6 +238,7 @@ class CLICodingAgent(CodingAgent):
             cwd=cwd,
             timeout=timeout,
             silent=silent,
+            recorder=recorder,
         )
 
     def generate(
@@ -249,11 +260,13 @@ class CLICodingAgent(CodingAgent):
             Generated text.
         """
         # Record the prompt in trajectory
-        record_user_message(prompt)
+        self.recorder.add_user_message(prompt)
 
         cmd = self._get_command(prompt)
-        session = self._create_session(cmd, cwd, timeout, silent)
+        session = self._create_session(
+            cmd, cwd, timeout, silent, recorder=self.recorder
+        )
         result = session.run(prompt)
 
-        record_assistant_message(result)
+        self.recorder.add_assistant_message(result)
         return result

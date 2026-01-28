@@ -11,6 +11,7 @@ from app_operator.prompts import get_loader
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
 from app_operator.langgraph.models import get_model_context_limit
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 from app_operator.langgraph.nodes.analyzer import analyze_code
 from app_operator.langgraph.nodes.generator import generate_scripts
@@ -29,6 +30,7 @@ def build_graph(
     health_check_interval: int,
     filesystem: Optional[FileSystemInterface] = None,
     check_shutdown: Optional[Callable[[], bool]] = None,
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ):
     if filesystem is None:
         filesystem = RealFilesystem()
@@ -53,6 +55,7 @@ def build_graph(
         loader=loader,
         agent=analyze_agent,
         context_limit=context_limit,
+        recorder=recorder,
     )
 
     generate_node = functools.partial(
@@ -62,6 +65,7 @@ def build_graph(
         loader=loader,
         agent=script_agent,
         context_limit=context_limit,
+        recorder=recorder,
     )
 
     deploy_node = functools.partial(
@@ -70,6 +74,7 @@ def build_graph(
         filesystem=filesystem,
         config=config,
         check_shutdown=check_shutdown,
+        recorder=recorder,
     )
 
     health_node = functools.partial(
@@ -77,6 +82,7 @@ def build_graph(
         repo_path=repo_path,
         filesystem=filesystem,
         check_shutdown=check_shutdown,
+        recorder=recorder,
     )
 
     fix_node = functools.partial(
@@ -88,6 +94,7 @@ def build_graph(
         agent=fix_agent,
         context_limit=context_limit,
         check_shutdown=check_shutdown,
+        recorder=recorder,
     )
 
     monitor_health_node_bound = functools.partial(
@@ -96,6 +103,7 @@ def build_graph(
         filesystem=filesystem,
         health_check_interval=health_check_interval,
         check_shutdown=check_shutdown,
+        recorder=recorder,
     )
 
     monitor_analyze_node_bound = functools.partial(
@@ -105,6 +113,7 @@ def build_graph(
         loader=loader,
         agent=monitor_agent,
         context_limit=context_limit,
+        recorder=recorder,
     )
 
     def should_fix(state: OperatorState) -> str:

@@ -12,7 +12,7 @@ from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
-from app_operator.trajectory import init_trajectory, finalize_trajectory
+from app_operator.trajectory import TrajectoryRecorder
 
 
 class AppOperator:
@@ -90,20 +90,28 @@ class AppOperator:
         self._shutdown_requested = False
         self._deployed = False
 
+        # Initialize trajectory recorder
+        self.recorder = TrajectoryRecorder(self.repo_path)
+        self.recorder.set_agent_name(self.agent.__class__.__name__)
+
+        # Attach recorder to agent
+        self.agent.recorder = self.recorder
+
         # Initialize agents
-        self.analyzer = CodeAnalyzerAgent(self.repo_path, self.agent, self.filesystem)
+        self.analyzer = CodeAnalyzerAgent(
+            self.repo_path, self.agent, self.filesystem, recorder=self.recorder
+        )
         self.deployer = DeploymentAgent(
             self.repo_path,
             self.agent,
             self.filesystem,
             self.config.deployment,
             self.config.operator,
+            recorder=self.recorder,
         )
-        self.monitor = AppMonitor(self.repo_path, self.agent, self.filesystem)
-
-        # Initialize trajectory recorder
-        self.trajectory = init_trajectory(self.repo_path)
-        self.trajectory.set_agent_name(self.agent.__class__.__name__)
+        self.monitor = AppMonitor(
+            self.repo_path, self.agent, self.filesystem, recorder=self.recorder
+        )
 
     def _persist_deployment_config(self) -> None:
         """Persist deployment preference to .sds/config.toml."""
@@ -178,7 +186,7 @@ class AppOperator:
             return 1
         finally:
             self._cleanup()
-            finalize_trajectory("completed" if self._deployed else "failed")
+            self.recorder.finalize("completed" if self._deployed else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).

@@ -10,19 +10,25 @@ import json
 import shutil
 import time
 import threading
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import (
+    List,
+    Dict,
+    Any,
+    Optional,
+    Protocol,
+    runtime_checkable,
+    ContextManager,
+)
 from enum import Enum
 
 from app_operator.logger import logger
+from app_operator.trajectory_collectors import collect_gemini_sessions
+from app_operator.prompts.trajectory_prompts import get_system_prompt
 
-
-# Maximum characters to capture in tool output (stdout + stderr combined)
-MAX_OUTPUT_LENGTH = 10000
-
-# Gemini CLI session storage location
-GEMINI_SESSION_DIR = Path.home() / ".gemini" / "tmp"
+GEMINI_SESSION_DIR = Path.home() / ".gemini"
 
 
 class Phase(str, Enum):
@@ -59,115 +65,105 @@ class TrajectoryMessage:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, excluding None values."""
-        d = {"role": self.role}
-        if self.content is not None:
-            d["content"] = self.content
-        if self.tool is not None:
-            d["tool"] = self.tool
-        if self.args is not None:
-            d["args"] = self.args
-        if self.stdout is not None:
-            d["stdout"] = self.stdout
-        if self.stderr is not None:
-            d["stderr"] = self.stderr
-        if self.exit_code is not None:
-            d["exit_code"] = self.exit_code
-        if self.timestamp is not None:
-            d["timestamp"] = self.timestamp
-        if self.duration_seconds is not None:
-            d["duration_seconds"] = self.duration_seconds
-        return d
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+
+@runtime_checkable
+class TrajectoryRecorderProtocol(Protocol):
+    """Protocol for trajectory recorders."""
+
+    def start_phase(
+        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+    ) -> None: ...
+    def end_phase(self, status: Optional[str] = None) -> None: ...
+    def add_user_message(self, content: str) -> None: ...
+    def add_assistant_message(
+        self, content: str, duration: Optional[float] = None
+    ) -> None: ...
+    def add_tool_call(
+        self,
+        tool: str,
+        args: Dict[str, Any],
+        stdout: str = "",
+        stderr: str = "",
+        exit_code: Optional[int] = None,
+        duration: Optional[float] = None,
+    ) -> None: ...
+    def set_phase_status(self, status: str) -> None: ...
+    def set_agent_name(self, agent_name: str) -> None: ...
+    def finalize(self, status: str = "completed") -> Path: ...
+    def phase(
+        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+    ) -> ContextManager: ...
 
 
 class TrajectoryRecorder:
     """Records agent interactions in real-time during SDS execution.
 
-    This is a singleton class that can be accessed globally to record
-    trajectory data from any part of the SDS codebase.
+    Writes JSON to .sds/trajectories/
     """
 
-    _instance: Optional["TrajectoryRecorder"] = None
-    _lock = threading.Lock()
-
-    def __new__(cls, *args, **kwargs):
-        """Ensure only one instance exists."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
-
-    def __init__(self, repo_path: Optional[Path] = None):
+    def __init__(self, repo_path: Path, max_output_length: int = 10000):
         """Initialize the trajectory recorder.
 
         Args:
-            repo_path: Path to the repository. Required on first initialization.
+            repo_path: Path to the repository.
+            max_output_length: Maximum characters to capture in tool output.
         """
-        if self._initialized and repo_path is None:
-            return
+        self.repo_path = Path(repo_path)
+        self.max_output_length = max_output_length
+        self.sds_dir = self.repo_path / ".sds"
+        self.trajectories_dir = self.sds_dir / "trajectories"
 
-        if repo_path is not None:
-            self.repo_path = Path(repo_path)
-            self.sds_dir = self.repo_path / ".sds"
-            self.trajectories_dir = self.sds_dir / "trajectories"
+        # Create timestamped filename for this run
+        self._run_timestamp = time.strftime("%Y%m%d-%H%M%S")
+        self.trajectory_file = (
+            self.trajectories_dir / f"trajectory_{self._run_timestamp}.json"
+        )
 
-            # Create timestamped filename for this run
-            self._run_timestamp = time.strftime("%Y%m%d-%H%M%S")
-            self.trajectory_file = (
-                self.trajectories_dir / f"trajectory_{self._run_timestamp}.json"
-            )
+        # Also maintain a symlink to the latest trajectory
+        self._latest_link = self.sds_dir / "trajectory.json"
 
-            # Also maintain a symlink to the latest trajectory
-            self._latest_link = self.sds_dir / "trajectory.json"
+        # Sequential call ID counter for tracking agent calls
+        self._call_counter = 0
+        self._call_id_lock = threading.Lock()
 
-            # Sequential call ID counter for tracking agent calls
-            self._call_counter = 0
-            self._call_id_lock = threading.Lock()
+        # Initialize trajectory structure
+        self.trajectory: Dict[str, Any] = {
+            "metadata": {
+                "repo_path": str(self.repo_path),
+                "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": None,
+                "agent_name": None,
+                "status": "running",
+                "run_id": self._run_timestamp,
+            },
+            "calls": [],  # Sequential list of all agent calls with metadata
+            "exploration": [],
+            "script_generation": [],
+            "deployment": [],
+            "monitoring": [],
+            "gemini_sessions": [],  # Will store paths to gemini session files
+        }
 
-            # Initialize trajectory structure
-            self.trajectory: Dict[str, Any] = {
-                "metadata": {
-                    "repo_path": str(self.repo_path),
-                    "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "end_time": None,
-                    "agent_name": None,
-                    "status": "running",
-                    "run_id": self._run_timestamp,
-                },
-                "calls": [],  # Sequential list of all agent calls with metadata
-                "exploration": [],
-                "script_generation": [],
-                "deployment": [],
-                "monitoring": [],
-                "gemini_sessions": [],  # Will store paths to gemini session files
-            }
+        # Current conversation being recorded (not yet committed)
+        self._current_phase: Optional[Phase] = None
+        self._current_conversation: List[Dict[str, Any]] = []
+        self._current_call_id: Optional[int] = None
+        self._conversation_lock = threading.Lock()
 
-            # Current conversation being recorded (not yet committed)
-            self._current_phase: Optional[Phase] = None
-            self._current_conversation: List[Dict[str, Any]] = []
-            self._current_call_id: Optional[int] = None
-            self._conversation_lock = threading.Lock()
+        # Pending status for the current phase (set by set_phase_status)
+        self._pending_phase_status: Optional[str] = None
 
-            # Ensure directories exist
-            self.sds_dir.mkdir(parents=True, exist_ok=True)
-            self.trajectories_dir.mkdir(parents=True, exist_ok=True)
+        # Prevent double finalization
+        self._finalized = False
 
-            # Save initial state
-            self._write_to_file()
+        # Ensure directories exist
+        self.sds_dir.mkdir(parents=True, exist_ok=True)
+        self.trajectories_dir.mkdir(parents=True, exist_ok=True)
 
-            self._initialized = True
-
-    @classmethod
-    def get_instance(cls) -> Optional["TrajectoryRecorder"]:
-        """Get the current instance if it exists."""
-        return cls._instance
-
-    @classmethod
-    def reset(cls):
-        """Reset the singleton instance."""
-        with cls._lock:
-            cls._instance = None
+        # Save initial state
+        self._write_to_file()
 
     def set_agent_name(self, agent_name: str) -> None:
         """Set the agent name in metadata."""
@@ -196,12 +192,14 @@ class TrajectoryRecorder:
             self._call_counter += 1
             return self._call_counter
 
-    def start_phase(self, phase: Phase, context: Dict[str, Any] = None) -> None:
+    def start_phase(
+        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Start a new phase/conversation.
 
         Args:
-            phase: The phase type (script_generation, deployment, monitoring).
-            context: Additional context for the phase (e.g., attempt number).
+            phase: The phase type.
+            context: Additional context for the phase.
         """
         with self._conversation_lock:
             # Commit any existing conversation first
@@ -213,6 +211,7 @@ class TrajectoryRecorder:
             # Start new conversation
             self._current_phase = phase
             self._current_conversation = []
+            self._pending_phase_status = None
 
             # Record this call in the calls list
             call_start_time = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -225,8 +224,9 @@ class TrajectoryRecorder:
             }
             self.trajectory["calls"].append(call_record)
 
-            # Add system message with context (including call_id)
-            system_content = self._get_system_prompt(phase, context)
+            # Add system message with context
+            agent_name = self.trajectory["metadata"].get("agent_name", "AI Agent")
+            system_content = get_system_prompt(phase.value, context, agent_name)
             self._current_conversation.append(
                 TrajectoryMessage(
                     role=MessageRole.SYSTEM.value,
@@ -234,39 +234,6 @@ class TrajectoryRecorder:
                     timestamp=call_start_time,
                 ).to_dict()
             )
-
-    def _get_system_prompt(self, phase: Phase, context: Dict[str, Any] = None) -> str:
-        """Generate system prompt for a phase."""
-        context = context or {}
-        agent_name = self.trajectory["metadata"].get("agent_name", "AI Agent")
-
-        if phase == Phase.EXPLORATION:
-            return (
-                f"You are an AI operator ({agent_name}) responsible for exploring "
-                f"the codebase and identifying potential deployment issues."
-            )
-        elif phase == Phase.SCRIPT_GENERATION:
-            return (
-                f"You are an AI operator ({agent_name}) responsible for analyzing "
-                f"the repository and generating deployment scripts (deploy.sh) and "
-                f"health check scripts (health_check.sh)."
-            )
-        elif phase == Phase.DEPLOYMENT:
-            attempt = context.get("attempt", 1)
-            max_attempts = context.get("max_attempts", 5)
-            return (
-                f"You are an AI operator ({agent_name}) responsible for deploying "
-                f"the application and fixing any deployment errors. "
-                f"Deployment attempt {attempt} of {max_attempts}."
-            )
-        elif phase == Phase.MONITORING:
-            cycle = context.get("cycle", 1)
-            return (
-                f"You are an AI operator ({agent_name}) responsible for analyzing "
-                f"application health check results and providing recommendations. "
-                f"Monitoring cycle #{cycle}."
-            )
-        return f"You are an AI operator ({agent_name})."
 
     def add_user_message(self, content: str) -> None:
         """Add a user/prompt message to the current conversation."""
@@ -279,8 +246,12 @@ class TrajectoryRecorder:
                         timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                     ).to_dict()
                 )
+            else:
+                logger.warning("Attempted to record user message outside of a phase")
 
-    def add_assistant_message(self, content: str, duration: float = None) -> None:
+    def add_assistant_message(
+        self, content: str, duration: Optional[float] = None
+    ) -> None:
         """Add an assistant response to the current conversation."""
         with self._conversation_lock:
             if self._current_phase is not None:
@@ -292,6 +263,10 @@ class TrajectoryRecorder:
                         duration_seconds=duration,
                     ).to_dict()
                 )
+            else:
+                logger.warning(
+                    "Attempted to record assistant message outside of a phase"
+                )
 
     def add_tool_call(
         self,
@@ -299,29 +274,20 @@ class TrajectoryRecorder:
         args: Dict[str, Any],
         stdout: str = "",
         stderr: str = "",
-        exit_code: int = None,
-        duration: float = None,
+        exit_code: Optional[int] = None,
+        duration: Optional[float] = None,
     ) -> None:
-        """Add a tool call with its output to the current conversation.
-
-        Args:
-            tool: Name of the tool (e.g., "bash", "write_file")
-            args: Arguments passed to the tool
-            stdout: Standard output from the tool
-            stderr: Standard error from the tool
-            exit_code: Exit code from the tool (for bash commands)
-            duration: How long the tool took to execute
-        """
+        """Add a tool call with its output to the current conversation."""
         with self._conversation_lock:
             if self._current_phase is not None:
                 # Truncate outputs if too long, but keep both stdout and stderr
                 truncated_stdout = stdout
                 truncated_stderr = stderr
 
-                if len(stdout) + len(stderr) > MAX_OUTPUT_LENGTH:
+                if len(stdout) + len(stderr) > self.max_output_length:
                     # Allocate space proportionally, but ensure stderr gets captured
-                    stderr_limit = min(len(stderr), MAX_OUTPUT_LENGTH // 3)
-                    stdout_limit = MAX_OUTPUT_LENGTH - stderr_limit
+                    stderr_limit = min(len(stderr), self.max_output_length // 3)
+                    stdout_limit = self.max_output_length - stderr_limit
 
                     if len(stdout) > stdout_limit:
                         truncated_stdout = (
@@ -346,8 +312,14 @@ class TrajectoryRecorder:
                         duration_seconds=duration,
                     ).to_dict()
                 )
+            else:
+                logger.warning("Attempted to record tool call outside of a phase")
 
-    def end_phase(self, status: str = None) -> None:
+    def set_phase_status(self, status: str) -> None:
+        """Set the status to be used when ending the current phase."""
+        self._pending_phase_status = status
+
+    def end_phase(self, status: Optional[str] = None) -> None:
         """End the current phase, commit conversation, and save to file."""
         with self._conversation_lock:
             if self._current_phase is None:
@@ -369,6 +341,7 @@ class TrajectoryRecorder:
             # Reset current state
             self._current_phase = None
             self._current_conversation = []
+            self._pending_phase_status = None
 
         # Save to file (outside lock to avoid holding it during I/O)
         self._write_to_file()
@@ -510,7 +483,7 @@ class TrajectoryRecorder:
                         if call_metadata_map:
                             # Find the closest metadata file by time
                             best_metadata_match = None
-                            min_time_diff = float('inf')
+                            min_time_diff = float("inf")
 
                             for call_id, meta_info in call_metadata_map.items():
                                 meta_file = meta_info["metadata_file"]
@@ -518,7 +491,9 @@ class TrajectoryRecorder:
 
                                 # Check if session file was created shortly after metadata file
                                 time_diff = abs(file_mtime - meta_mtime)
-                                if time_diff < min_time_diff and time_diff < 10:  # Within 10 seconds
+                                if (
+                                    time_diff < min_time_diff and time_diff < 10
+                                ):  # Within 10 seconds
                                     min_time_diff = time_diff
                                     best_metadata_match = call_id
 
@@ -527,9 +502,13 @@ class TrajectoryRecorder:
 
                         # Create a unique filename with call_id if available
                         if matched_call_id is not None:
-                            dest_filename = f"gemini_session_call_{matched_call_id:03d}.json"
+                            dest_filename = (
+                                f"gemini_session_call_{matched_call_id:03d}.json"
+                            )
                         else:
-                            dest_filename = f"gemini_session_{len(sessions_info) + 1:03d}.json"
+                            dest_filename = (
+                                f"gemini_session_{len(sessions_info) + 1:03d}.json"
+                            )
 
                         dest_file = gemini_sessions_dir / dest_filename
                         shutil.copy2(session_file, dest_file)
@@ -563,7 +542,7 @@ class TrajectoryRecorder:
         try:
             # Find the call whose time range encompasses the session modification time
             best_match = None
-            min_time_diff = float('inf')
+            min_time_diff = float("inf")
 
             for call_record in self.trajectory["calls"]:
                 call_start_str = call_record["start_time"]
@@ -608,6 +587,9 @@ class TrajectoryRecorder:
         Returns:
             Path to the saved trajectory file.
         """
+        if self._finalized:
+            return self.trajectory_file
+
         with self._conversation_lock:
             # Commit any in-progress conversation
             if self._current_phase:
@@ -623,46 +605,92 @@ class TrajectoryRecorder:
                 self._current_conversation = []
 
         # Collect Gemini CLI session files
-        self._collect_gemini_sessions()
+        sessions = collect_gemini_sessions(
+            self.sds_dir,
+            self.trajectories_dir,
+            self._run_timestamp,
+            self.trajectory["metadata"]["start_time"],
+        )
+        if sessions:
+            self.trajectory["gemini_sessions"] = sessions
 
         self.trajectory["metadata"]["status"] = status
         self._write_to_file()
+        self._finalized = True
         return self.trajectory_file
 
-
-# Global convenience functions for easy access from anywhere in the codebase
-
-
-def init_trajectory(repo_path: Path) -> TrajectoryRecorder:
-    """Initialize the global trajectory recorder.
-
-    Args:
-        repo_path: Path to the repository.
-
-    Returns:
-        The initialized TrajectoryRecorder instance.
-    """
-    TrajectoryRecorder.reset()
-    return TrajectoryRecorder(repo_path)
+    @contextmanager
+    def phase(self, phase: Phase, context: Optional[Dict[str, Any]] = None):
+        """Context manager for a trajectory phase."""
+        self.start_phase(phase, context)
+        try:
+            yield self
+        except Exception:
+            self.end_phase("failed")
+            raise
+        else:
+            status = self._pending_phase_status or "success"
+            self.end_phase(status)
 
 
-def get_trajectory() -> Optional[TrajectoryRecorder]:
-    """Get the current trajectory recorder instance."""
-    return TrajectoryRecorder.get_instance()
+class NullTrajectoryRecorder:
+    """No-op recorder for tests."""
+
+    def start_phase(
+        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        pass
+
+    def end_phase(self, status: Optional[str] = None) -> None:
+        pass
+
+    def add_user_message(self, content: str) -> None:
+        pass
+
+    def add_assistant_message(
+        self, content: str, duration: Optional[float] = None
+    ) -> None:
+        pass
+
+    def add_tool_call(
+        self,
+        tool: str,
+        args: Dict[str, Any],
+        stdout: str = "",
+        stderr: str = "",
+        exit_code: Optional[int] = None,
+        duration: Optional[float] = None,
+    ) -> None:
+        pass
+
+    def set_phase_status(self, status: str) -> None:
+        pass
+
+    def set_agent_name(self, agent_name: str) -> None:
+        pass
+
+    @contextmanager
+    def phase(self, phase: Phase, context: Optional[Dict[str, Any]] = None):
+        yield self
+
+    def finalize(self, status: str = "completed") -> Path:
+        return Path("/dev/null")
 
 
-def record_phase_start(phase: Phase, context: Dict[str, Any] = None) -> None:
-    """Start recording a new phase."""
-    recorder = get_trajectory()
-    if recorder:
-        recorder.start_phase(phase, context)
+# Global recorder instance
+_recorder: Optional["TrajectoryRecorder"] = None
 
 
-def record_user_message(content: str) -> None:
-    """Record a user/prompt message."""
-    recorder = get_trajectory()
-    if recorder:
-        recorder.add_user_message(content)
+def init_trajectory(repo_path: Path) -> "TrajectoryRecorder":
+    """Initialize the global trajectory recorder."""
+    global _recorder
+    _recorder = TrajectoryRecorder(repo_path)
+    return _recorder
+
+
+def get_trajectory() -> Optional["TrajectoryRecorder"]:
+    """Get the global trajectory recorder instance."""
+    return _recorder
 
 
 def record_assistant_message(content: str, duration: float = None) -> None:
@@ -723,3 +751,17 @@ def get_run_id() -> Optional[str]:
     if recorder:
         return recorder.get_run_id()
     return None
+
+
+def record_phase_start(phase: Phase, context: Dict[str, Any] = None) -> None:
+    """Start a new phase."""
+    recorder = get_trajectory()
+    if recorder:
+        recorder.start_phase(phase, context)
+
+
+def record_user_message(content: str) -> None:
+    """Record a user message."""
+    recorder = get_trajectory()
+    if recorder:
+        recorder.add_user_message(content)

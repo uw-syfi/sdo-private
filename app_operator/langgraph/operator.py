@@ -10,7 +10,7 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.langgraph.llm import build_llm
 from app_operator.langgraph.graph import build_graph
-from app_operator.trajectory import init_trajectory, finalize_trajectory
+from app_operator.trajectory import TrajectoryRecorder
 
 
 class LangGraphOperator:
@@ -45,8 +45,8 @@ class LangGraphOperator:
         self._persist_deployment_config()
 
         # Initialize trajectory recorder
-        self.trajectory = init_trajectory(self.repo_path)
-        self.trajectory.set_agent_name("LangGraph")
+        self.recorder = TrajectoryRecorder(self.repo_path)
+        self.recorder.set_agent_name("LangGraph")
 
         try:
             self.llm = build_llm(self.config)
@@ -63,6 +63,7 @@ class LangGraphOperator:
             health_check_interval=self.health_check_interval,
             filesystem=self.filesystem,
             check_shutdown=lambda: self._shutdown_requested,
+            recorder=self.recorder,
         )
 
     def _persist_deployment_config(self) -> None:
@@ -118,12 +119,11 @@ class LangGraphOperator:
 
             health_result = final_state.get("health_result") if final_state else None
             self._deployed = bool(health_result and health_result.get("success"))
-            finalize_trajectory("completed" if self._deployed else "failed")
             return 0
 
         except KeyboardInterrupt:
             logger.info("Shutting down due to interrupt...")
-            finalize_trajectory("interrupted")
+            self.recorder.finalize("interrupted")
             return 1
 
         except Exception as e:
@@ -131,8 +131,10 @@ class LangGraphOperator:
             import traceback
 
             traceback.print_exc()
-            finalize_trajectory("failed")
+            self.recorder.finalize("failed")
             return 1
+        finally:
+            self.recorder.finalize("completed" if self._deployed else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         if not self._shutdown_requested:

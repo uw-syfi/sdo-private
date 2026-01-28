@@ -23,14 +23,6 @@ def temp_repo(tmp_path):
     return repo
 
 
-@pytest.fixture(autouse=True)
-def reset_trajectory():
-    """Reset the trajectory recorder before and after each test."""
-    TrajectoryRecorder.reset()
-    yield
-    TrajectoryRecorder.reset()
-
-
 def test_trajectory_lifecycle_integration(temp_repo):
     """
     Test the full lifecycle of trajectory recording from an external perspective.
@@ -45,7 +37,7 @@ def test_trajectory_lifecycle_integration(temp_repo):
     focusing instead on the persisted artifact (trajectory.json).
     """
     # 1. Initialize
-    init_trajectory(temp_repo)
+    recorder = TrajectoryRecorder(temp_repo)
 
     # Verify file creation (trajectory.json symlink and actual file)
     sds_dir = temp_repo / ".sds"
@@ -56,31 +48,32 @@ def test_trajectory_lifecycle_integration(temp_repo):
     assert traj_link.is_symlink() or traj_link.is_file()  # Windows fallback copys file
 
     # 2. Simulate Script Generation Phase
-    record_phase_start(Phase.SCRIPT_GENERATION)
-    record_user_message("Generate scripts for this repo")
-    record_tool_call(
-        tool="ls", args={"path": "."}, stdout="file1.txt\nfile2.txt", duration=0.1
-    )
-    record_assistant_message("I see the files.")
-    record_phase_end(status="success")
+    with recorder.phase(Phase.SCRIPT_GENERATION) as r:
+        r.add_user_message("Generate scripts for this repo")
+        r.add_tool_call(
+            tool="ls", args={"path": "."}, stdout="file1.txt\nfile2.txt", duration=0.1
+        )
+        r.add_assistant_message("I see the files.")
 
     # 3. Simulate Deployment Phase
-    record_phase_start(Phase.DEPLOYMENT, context={"attempt": 1, "max_attempts": 3})
-    record_user_message("Deploy the app")
-    # Simulate a failed tool call
-    record_tool_call(
-        tool="bash",
-        args={"command": "deploy.sh"},
-        stdout="",
-        stderr="Error: failed",
-        exit_code=1,
-        duration=1.5,
-    )
-    record_assistant_message("Deployment failed, retrying...")
-    record_phase_end(status="failed")
+    with recorder.phase(
+        Phase.DEPLOYMENT, context={"attempt": 1, "max_attempts": 3}
+    ) as r:
+        r.add_user_message("Deploy the app")
+        # Simulate a failed tool call
+        r.add_tool_call(
+            tool="bash",
+            args={"command": "deploy.sh"},
+            stdout="",
+            stderr="Error: failed",
+            exit_code=1,
+            duration=1.5,
+        )
+        r.add_assistant_message("Deployment failed, retrying...")
+        r.set_phase_status("failed")
 
     # 4. Finalize
-    final_path = finalize_trajectory(status="completed")
+    final_path = recorder.finalize(status="completed")
 
     assert final_path is not None
     assert final_path.exists()
@@ -118,7 +111,8 @@ def test_trajectory_lifecycle_integration(temp_repo):
     messages = conversation["messages"]
     # Expect: System, User, Tool, Assistant
     # Note: Phase start adds a system message automatically
-    assert len(messages) >= 4
+    # Context manager add a status message at the end
+    assert len(messages) >= 5
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "Generate scripts for this repo"
@@ -161,16 +155,14 @@ def test_trajectory_lifecycle_integration(temp_repo):
 
 def test_trajectory_robustness_large_output(temp_repo):
     """Test robustness against large tool outputs."""
-    init_trajectory(temp_repo)
-    record_phase_start(Phase.SCRIPT_GENERATION)
+    recorder = TrajectoryRecorder(temp_repo)
 
-    # Create a large output
-    large_output = "a" * 15000
+    with recorder.phase(Phase.SCRIPT_GENERATION) as r:
+        # Create a large output
+        large_output = "a" * 15000
+        r.add_tool_call("cat", {"file": "large.txt"}, stdout=large_output)
 
-    record_tool_call("cat", {"file": "large.txt"}, stdout=large_output)
-    record_phase_end()
-
-    final_path = finalize_trajectory()
+    final_path = recorder.finalize()
     assert final_path is not None
 
     with open(final_path) as f:

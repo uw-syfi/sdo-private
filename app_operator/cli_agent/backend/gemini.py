@@ -6,7 +6,12 @@ from pathlib import Path
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
-from app_operator.trajectory import record_tool_call, get_current_call_id, get_run_id
+from app_operator.trajectory import (
+    record_tool_call,
+    get_current_call_id,
+    get_run_id,
+    TrajectoryRecorderProtocol,
+)
 
 
 class GeminiGenerationSession(CLIGenerationSession):
@@ -106,7 +111,7 @@ class GeminiGenerationSession(CLIGenerationSession):
                 duration = time.time() - start_time if start_time else None
                 args = self.tool_args.get(event.tool_id, {})
 
-                record_tool_call(
+                self.recorder.add_tool_call(
                     tool=event.tool_name_resolved,
                     args=args,
                     stdout=event.output,
@@ -159,13 +164,18 @@ class GeminiGenerationSession(CLIGenerationSession):
 class GeminiCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Gemini CLI tool."""
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
+    ):
         """Initialize the Gemini coding agent.
 
         Args:
             model: Optional model name to use.
+            recorder: Trajectory recorder instance.
         """
-        super().__init__("gemini", model)
+        super().__init__("gemini", model, recorder)
 
     @property
     def gemini_path(self) -> str:
@@ -197,6 +207,7 @@ class GeminiCodingAgent(CLICodingAgent):
         cwd: Optional[str] = None,
         timeout: int = 300,
         silent: bool = False,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ) -> GeminiGenerationSession:
         return GeminiGenerationSession(
             binary_name=self.binary_name,
@@ -207,4 +218,5 @@ class GeminiCodingAgent(CLICodingAgent):
             cwd=cwd,
             timeout=timeout,
             silent=silent,
+            recorder=recorder,
         )

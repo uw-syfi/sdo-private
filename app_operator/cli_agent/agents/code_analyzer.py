@@ -8,9 +8,8 @@ from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.trajectory import (
     Phase,
-    record_phase_start,
-    record_phase_end,
-    record_assistant_message,
+    TrajectoryRecorderProtocol,
+    NullTrajectoryRecorder,
 )
 
 # Constants
@@ -25,6 +24,7 @@ class CodeAnalyzerAgent:
         repo_path: Path,
         coding_agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ):
         """Initialize the code analyzer agent.
 
@@ -32,10 +32,12 @@ class CodeAnalyzerAgent:
             repo_path: Path to the repository to analyze.
             coding_agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+            recorder: Trajectory recorder instance.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+        self.recorder = recorder or NullTrajectoryRecorder()
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"
         self.issues_file = self.sds_dir / "deployment_issues.md"
@@ -54,59 +56,59 @@ class CodeAnalyzerAgent:
             return True
 
         logger.info("Starting Code Analysis Phase")
-        record_phase_start(Phase.EXPLORATION)
 
-        try:
-            # Ensure .sds directory exists
-            self.filesystem.mkdir(self.sds_dir, exist_ok=True)
+        with self.recorder.phase(Phase.EXPLORATION) as r:
+            try:
+                # Ensure .sds directory exists
+                self.filesystem.mkdir(self.sds_dir, exist_ok=True)
 
-            # Create the prompt
-            system_prompt = get_loader().render("code_analyzer/system.jinja2")
-            user_prompt = get_loader().render(
-                "code_analyzer/user.jinja2", repo_path=self.repo_path
-            )
-
-            logger.info(
-                f"Consulting {self.agent.__class__.__name__} to analyze the codebase..."
-            )
-
-            start_time = time.time()
-
-            # The agent is expected to use tools to explore and then write the files
-            self.agent.generate(
-                f"{system_prompt}\n\n{user_prompt}",
-                cwd=str(self.repo_path),
-                timeout=DEFAULT_ANALYSIS_TIMEOUT_SECS,
-            )
-
-            duration = time.time() - start_time
-            logger.info(f"Agent analysis took {duration / 60:.2f} minutes")
-
-            # Verify files were created
-            if self.filesystem.exists(self.analysis_file) and self.filesystem.exists(
-                self.issues_file
-            ):
-                logger.success("Code analysis completed successfully")
-                record_phase_end("success")
-                record_assistant_message("Code analysis completed successfully")
-                return True
-            else:
-                missing = []
-                if not self.filesystem.exists(self.analysis_file):
-                    missing.append(str(self.analysis_file))
-                if not self.filesystem.exists(self.issues_file):
-                    missing.append(str(self.issues_file))
-
-                error_msg = (
-                    f"Agent failed to create analysis files: {', '.join(missing)}"
+                # Create the prompt
+                system_prompt = get_loader().render("code_analyzer/system.jinja2")
+                user_prompt = get_loader().render(
+                    "code_analyzer/user.jinja2", repo_path=self.repo_path
                 )
-                logger.error(error_msg)
-                record_phase_end("failed")
-                record_assistant_message(error_msg)
-                return False
 
-        except Exception as e:
-            logger.error(f"Code analysis failed: {e}")
-            record_phase_end("failed")
-            record_assistant_message(f"Code analysis failed: {e}")
-            return False
+                logger.info(
+                    f"Consulting {self.agent.__class__.__name__} to analyze the codebase..."
+                )
+
+                start_time = time.time()
+
+                # The agent is expected to use tools to explore and then write the files
+                self.agent.generate(
+                    f"{system_prompt}\n\n{user_prompt}",
+                    cwd=str(self.repo_path),
+                    timeout=DEFAULT_ANALYSIS_TIMEOUT_SECS,
+                )
+
+                duration = time.time() - start_time
+                logger.info(f"Agent analysis took {duration / 60:.2f} minutes")
+
+                # Verify files were created
+                if self.filesystem.exists(
+                    self.analysis_file
+                ) and self.filesystem.exists(self.issues_file):
+                    logger.success("Code analysis completed successfully")
+                    r.add_assistant_message("Code analysis completed successfully")
+                    return True
+                else:
+                    missing = []
+                    if not self.filesystem.exists(self.analysis_file):
+                        missing.append(str(self.analysis_file))
+                    if not self.filesystem.exists(self.issues_file):
+                        missing.append(str(self.issues_file))
+
+                    error_msg = (
+                        f"Agent failed to create analysis files: {', '.join(missing)}"
+                    )
+                    logger.error(error_msg)
+                    r.set_phase_status("failed")
+                    r.add_assistant_message(error_msg)
+                    return False
+
+            except Exception as e:
+                logger.error(f"Code analysis failed: {e}")
+                # The context manager catches exception and ends phase with "failed"
+                r.add_assistant_message(f"Code analysis failed: {e}")
+                r.set_phase_status("failed")
+                return False

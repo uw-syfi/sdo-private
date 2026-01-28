@@ -4,7 +4,11 @@ from typing import Any, Callable, Optional
 
 from app_operator.filesystem import FileSystemInterface
 from app_operator.prompts import PromptLoader
-from app_operator.trajectory import Phase, record_phase_start
+from app_operator.trajectory import (
+    Phase,
+    TrajectoryRecorderProtocol,
+    NullTrajectoryRecorder,
+)
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import (
     BLUE,
@@ -20,7 +24,9 @@ def health_check(
     repo_path: Path,
     filesystem: FileSystemInterface,
     check_shutdown: Optional[Callable[[], bool]],
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> OperatorState:
+    recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():
         return state
 
@@ -42,8 +48,13 @@ def health_check(
         ".sds/health_check.sh",
         log_file_path=log_file,
         timeout=120,
+        recorder=recorder,
     )
     state["health_result"] = result
+
+    if result.get("success"):
+        # If health check passes, deployment phase is successful
+        recorder.end_phase("success")
 
     return state
 
@@ -54,11 +65,14 @@ def monitor_health(
     filesystem: FileSystemInterface,
     health_check_interval: int,
     check_shutdown: Optional[Callable[[], bool]],
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> OperatorState:
+    recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():
         return state
 
-    record_phase_start(Phase.MONITORING, {"cycle": state["monitor_count"]})
+    # Start monitoring phase
+    recorder.start_phase(Phase.MONITORING, {"cycle": state["monitor_count"]})
 
     interval = health_check_interval
     if interval > 0:
@@ -80,6 +94,7 @@ def monitor_health(
         ".sds/health_check.sh",
         log_file_path=log_file,
         timeout=120,
+        recorder=recorder,
     )
     state["health_result"] = result
     return state
@@ -92,9 +107,10 @@ def monitor_analyze(
     loader: PromptLoader,
     agent: Any,
     context_limit: int,
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> OperatorState:
-    # We are still in MONITORING phase, so we don't start a new one,
-    # but we are calling an agent, so logging will happen naturally.
+    recorder = recorder or NullTrajectoryRecorder()
+    # We are still in MONITORING phase initiated by monitor_health
 
     health_result = state.get("health_result") or {}
     context_parts = []
@@ -125,6 +141,7 @@ def monitor_analyze(
         prompt,
         agent_name="Health Monitor",
         context_limit=context_limit,
+        recorder=recorder,
     )
     state["messages"] = messages
 
@@ -136,5 +153,8 @@ def monitor_analyze(
         / f"analysis_{state['monitor_count']}.log"
     )
     write_log_file(filesystem, log_file, response)
+
+    # End the monitoring phase
+    recorder.end_phase("completed")
 
     return state

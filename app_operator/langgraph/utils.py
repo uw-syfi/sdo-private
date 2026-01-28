@@ -1,4 +1,5 @@
 import subprocess
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -13,6 +14,8 @@ from langchain_core.messages import (
 from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.trajectory_handler import LangGraphTrajectoryHandler
+from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
+from app_operator.langgraph.message_utils import extract_text
 
 BLUE = "\033[34m"
 GREEN = "\033[32m"
@@ -51,26 +54,11 @@ def _update_usage(state: OperatorState, new_usage: Dict[str, int]) -> None:
     }
 
 
-def _extract_text(content: Any) -> str:
-    """Extract text from message content, handling both string and list formats."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        text_parts = []
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                text_parts.append(part.get("text", ""))
-            elif isinstance(part, str):
-                text_parts.append(part)
-        return "".join(text_parts)
-    return str(content)
-
-
 def _last_assistant_text(messages: list[BaseMessage]) -> str:
     for message in reversed(messages):
         content = getattr(message, "content", None)
         if content:
-            return _extract_text(content)
+            return extract_text(content)
     return ""
 
 
@@ -81,8 +69,9 @@ def invoke_agent(
     user_prompt: str,
     agent_name: str = "Agent",
     context_limit: int = 128000,
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> tuple[str, list[BaseMessage]]:
-    handler = LangGraphTrajectoryHandler()
+    handler = LangGraphTrajectoryHandler(recorder)
 
     if system_prompt:
         messages: list[BaseMessage] = [
@@ -130,7 +119,7 @@ def invoke_agent(
                                 f"{BLUE}[Tool Use] {tool_call['name']} {args_str}{RESET}"
                             )
 
-                    content_text = _extract_text(msg.content)
+                    content_text = extract_text(msg.content)
                     if content_text:
                         # Print thought/response in default color (usually white/gray)
                         # similar to CLI agent text stream
@@ -143,7 +132,7 @@ def invoke_agent(
                         )
 
                 elif isinstance(msg, ToolMessage):
-                    content = _extract_text(msg.content)
+                    content = extract_text(msg.content)
                     if len(content) > MAX_DISPLAY_CONTENT:
                         content = f"{content[:MAX_DISPLAY_CONTENT]}... (truncated)"
 
@@ -169,7 +158,9 @@ def run_script(
     command: str,
     log_file_path: Optional[Path] = None,
     timeout: int = 900,
+    recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> Dict[str, Any]:
+    start_time = time.time()
     try:
         result = subprocess.run(
             command,
@@ -196,6 +187,8 @@ def run_script(
         stderr = f"Error: {str(e)}"
         exit_code = -1
 
+    duration = time.time() - start_time
+
     if log_file_path:
         log_content = (
             f"=== Command ===\n{command}\n\n"
@@ -204,6 +197,16 @@ def run_script(
             f"=== STDERR ===\n{stderr}\n"
         )
         write_log_file(filesystem, log_file_path, log_content)
+
+    if recorder:
+        recorder.add_tool_call(
+            tool="bash",
+            args={"command": command},
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=exit_code,
+            duration=duration,
+        )
 
     return {
         "success": success,

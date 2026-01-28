@@ -10,6 +10,7 @@ from app_operator.cli_agent.backend.base import CodingAgent
 class StubAgent(CodingAgent):
     def __init__(self, model=None):
         self.model = model
+        self.recorder = None
 
     def generate(self, *args, **kwargs):
         return ""
@@ -23,7 +24,7 @@ class StubAgent(CodingAgent):
 
 @pytest.fixture
 def mock_trajectory():
-    with patch("app_operator.cli_agent.operator.init_trajectory") as mock:
+    with patch("app_operator.cli_agent.operator.TrajectoryRecorder") as mock:
         mock_recorder = MagicMock()
         mock.return_value = mock_recorder
         yield mock

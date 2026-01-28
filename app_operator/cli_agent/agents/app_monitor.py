@@ -13,10 +13,8 @@ from app_operator.prompts import get_loader
 from app_operator.cli_agent.healthcheck import run_health_check
 from app_operator.trajectory import (
     Phase,
-    record_phase_start,
-    record_phase_end,
-    record_assistant_message,
-    record_tool_call,
+    TrajectoryRecorderProtocol,
+    NullTrajectoryRecorder,
 )
 
 
@@ -33,7 +31,7 @@ class MonitoringTask(ABC):
         pass
 
     @abstractmethod
-    def analyze(self, agent: CodingAgent, context: str) -> None:
+    def analyze(self, operator: Any, result: Any) -> None:
         """Use a coding agent to analyze results and provide suggestions."""
         pass
 
@@ -41,34 +39,40 @@ class MonitoringTask(ABC):
 class HealthCheckTask(MonitoringTask):
     """A monitoring task specifically for running health checks."""
 
-    def run(self, monitor: Any) -> None:
+    def run(self, operator: Any) -> None:
         """Run the health check task.
 
         Args:
-            monitor: The AppMonitor instance.
+            operator: The AppMonitor instance.
         """
+        monitor = operator
         # Start monitoring phase in trajectory
-        record_phase_start(Phase.MONITORING, {"cycle": monitor.check_count})
+        with monitor.recorder.phase(
+            Phase.MONITORING, {"cycle": monitor.check_count}
+        ) as r:
+            # Run health check
+            start_time = time.time()
+            health_result = run_health_check(
+                monitor.repo_path, monitor.health_check_script
+            )
+            duration = time.time() - start_time
 
-        # Run health check
-        start_time = time.time()
-        health_result = run_health_check(monitor.repo_path, monitor.health_check_script)
-        duration = time.time() - start_time
+            # Record health check tool call
+            r.add_tool_call(
+                tool="bash",
+                args={"script": ".sds/health_check.sh"},
+                stdout=health_result.get("stdout", ""),
+                stderr=health_result.get("stderr", ""),
+                exit_code=int(health_result.get("exit_code", -1) or -1),
+                duration=duration,
+            )
 
-        # Record health check tool call
-        record_tool_call(
-            tool="bash",
-            args={"script": ".sds/health_check.sh"},
-            stdout=health_result.get("stdout", ""),
-            stderr=health_result.get("stderr", ""),
-            exit_code=int(health_result.get("exit_code", -1) or -1),
-            duration=duration,
-        )
+            self.analyze(monitor, health_result)
 
-        self.analyze(monitor, health_result)
-
-    def analyze(self, monitor: Any, health_result: Dict[str, Any]) -> None:
+    def analyze(self, operator: Any, result: Any) -> None:
         """Analyze health check results using the agent."""
+        monitor = operator
+        health_result = result
         logger.info(
             f"Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results"
         )
@@ -114,13 +118,13 @@ class HealthCheckTask(MonitoringTask):
 
             logger.info(f"Full analysis saved to: {log_file}")
 
-            # End the monitoring phase
-            record_phase_end("completed")
+            # End the monitoring phase (handled by context manager exit, defaulting to success)
 
         except Exception as e:
             logger.error(f"Agent analysis failed: {e}")
-            record_assistant_message(f"Analysis failed: {e}")
-            record_phase_end("failed")
+            monitor.recorder.add_assistant_message(f"Analysis failed: {e}")
+            # Ensure we mark phase as failed
+            monitor.recorder.set_phase_status("failed")
 
     def _prepare_health_context(self, health_result: dict, check_count: int) -> str:
         """Prepare health check context for analysis."""
@@ -167,6 +171,7 @@ class AppMonitor:
         repo_path: Path,
         agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ):
         """Initialize the monitor agent.
 
@@ -174,10 +179,12 @@ class AppMonitor:
             repo_path: Path to the repository.
             agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+            recorder: Trajectory recorder instance.
         """
         self.repo_path = repo_path
         self.agent = agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+        self.recorder = recorder or NullTrajectoryRecorder()
         self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"

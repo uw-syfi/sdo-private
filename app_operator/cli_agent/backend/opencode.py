@@ -4,7 +4,7 @@ from typing import Optional, List
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
-from app_operator.trajectory import record_tool_call
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 class OpencodeGenerationSession(CLIGenerationSession):
@@ -44,7 +44,7 @@ class OpencodeGenerationSession(CLIGenerationSession):
                 )
                 stdout = str(event.output_data) if event.output_data is not None else ""
 
-                record_tool_call(
+                self.recorder.add_tool_call(
                     tool=event.tool_name,
                     args=args,
                     stdout=stdout,
@@ -100,15 +100,20 @@ class OpencodeGenerationSession(CLIGenerationSession):
 class OpencodeCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Opencode CLI tool."""
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
+    ):
         """Initialize the Opencode coding agent.
 
         Args:
             model: Optional model name to use.
+            recorder: Trajectory recorder instance.
         """
         if not model:
             model = "google-vertex/gemini-3-pro-preview"
-        super().__init__("opencode", model)
+        super().__init__("opencode", model, recorder)
 
     @property
     def _log_prefix(self) -> str:
@@ -132,6 +137,7 @@ class OpencodeCodingAgent(CLICodingAgent):
         cwd: Optional[str] = None,
         timeout: int = 300,
         silent: bool = False,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ) -> OpencodeGenerationSession:
         return OpencodeGenerationSession(
             binary_name=self.binary_name,
@@ -142,4 +148,5 @@ class OpencodeCodingAgent(CLICodingAgent):
             cwd=cwd,
             timeout=timeout,
             silent=silent,
+            recorder=recorder,
         )
