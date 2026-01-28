@@ -67,6 +67,21 @@ def _update_usage(state: OperatorState, new_usage: Dict[str, int]) -> None:
     }
 
 
+def _extract_text(content: Any) -> str:
+    """Extract text from message content, handling both string and list formats."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text_parts.append(part.get("text", ""))
+            elif isinstance(part, str):
+                text_parts.append(part)
+        return "".join(text_parts)
+    return str(content)
+
+
 def _invoke_agent(
     state: OperatorState,
     agent: Any,
@@ -75,10 +90,17 @@ def _invoke_agent(
     agent_name: str = "Agent",
     context_limit: int = 128000,
 ) -> tuple[str, list[BaseMessage]]:
-    full_prompt = f"{system_prompt}\n\n{user_prompt}"
-    record_user_message(full_prompt)
+    if system_prompt:
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+    else:
+        full_prompt = user_prompt
+        messages = [HumanMessage(content=user_prompt)]
 
-    messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+    record_user_message(full_prompt)
     response_messages = list(messages)
     total_usage = {"input": 0, "output": 0, "total": 0}
 
@@ -103,14 +125,18 @@ def _invoke_agent(
 
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
+                            args_str = str(tool_call["args"])
+                            if len(args_str) > 500:
+                                args_str = f"{args_str[:500]}... (truncated)"
                             print(
-                                f"{BLUE}[Tool Use] {tool_call['name']} {tool_call['args']}{RESET}"
+                                f"{BLUE}[Tool Use] {tool_call['name']} {args_str}{RESET}"
                             )
 
-                    if msg.content:
+                    content_text = _extract_text(msg.content)
+                    if content_text:
                         # Print thought/response in default color (usually white/gray)
                         # similar to CLI agent text stream
-                        print(f"{msg.content}")
+                        print(f"{content_text}")
 
                     if usage.get("total", 0) > 0:
                         pct = round((usage["total"] / context_limit) * 100, 1)
@@ -119,7 +145,7 @@ def _invoke_agent(
                         )
 
                 elif isinstance(msg, ToolMessage):
-                    content = str(msg.content)
+                    content = _extract_text(msg.content)
                     if len(content) > 500:
                         content = f"{content[:500]}... (truncated)"
 
@@ -138,7 +164,7 @@ def _last_assistant_text(messages: list[BaseMessage]) -> str:
     for message in reversed(messages):
         content = getattr(message, "content", None)
         if content:
-            return str(content)
+            return _extract_text(content)
     return ""
 
 
@@ -156,39 +182,58 @@ def _run_script(
     timeout: int = 900,
 ) -> Dict[str, Any]:
     start_time = time.time()
-    result = subprocess.run(
-        command,
-        cwd=str(repo_path),
-        shell=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    duration = time.time() - start_time
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(repo_path),
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        duration = time.time() - start_time
+        success = result.returncode == 0
+        stdout = result.stdout
+        stderr = result.stderr
+        exit_code = result.returncode
+
+    except subprocess.TimeoutExpired:
+        duration = time.time() - start_time
+        success = False
+        stdout = ""
+        stderr = f"Command timed out after {timeout} seconds"
+        exit_code = -1
+
+    except Exception as e:
+        duration = time.time() - start_time
+        success = False
+        stdout = ""
+        stderr = f"Error: {str(e)}"
+        exit_code = -1
 
     if log_file_path:
         log_content = (
             f"=== Command ===\n{command}\n\n"
-            f"=== Exit Code ===\n{result.returncode}\n\n"
-            f"=== STDOUT ===\n{result.stdout}\n\n"
-            f"=== STDERR ===\n{result.stderr}\n"
+            f"=== Exit Code ===\n{exit_code}\n\n"
+            f"=== STDOUT ===\n{stdout}\n\n"
+            f"=== STDERR ===\n{stderr}\n"
         )
         _write_log_file(filesystem, log_file_path, log_content)
 
     record_tool_call(
         tool="bash",
         args={"script": command},
-        stdout=result.stdout,
-        stderr=result.stderr,
-        exit_code=result.returncode,
+        stdout=stdout,
+        stderr=stderr,
+        exit_code=exit_code,
         duration=duration,
     )
 
     return {
-        "success": result.returncode == 0,
-        "exit_code": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
+        "success": success,
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
     }
 
 
@@ -337,6 +382,10 @@ def build_graph(
         log_file = (
             repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
         )
+
+        print(f"\n{BLUE}Running deployment script...{RESET}")
+        print(f"Logging output to: {log_file}")
+
         result = _run_script(
             repo_path,
             filesystem,
@@ -360,6 +409,10 @@ def build_graph(
         log_file = (
             repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
         )
+
+        print(f"\n{BLUE}Running health check script...{RESET}")
+        print(f"Logging output to: {log_file}")
+
         result = _run_script(
             repo_path,
             filesystem,
@@ -399,6 +452,7 @@ def build_graph(
             deploy_result, health_result, log_file_path, health_check_log_path
         )
 
+        system_prompt = _create_system_prompt(config.deployment.platform)
         previous_summary_note = ""
         if state["attempt"] > 1:
             prev_log_path = (
@@ -429,7 +483,7 @@ def build_graph(
         response, messages = _invoke_agent(
             state,
             fix_agent,
-            "",
+            system_prompt,
             prompt,
             agent_name="Error Fixer",
             context_limit=context_limit,
@@ -438,7 +492,14 @@ def build_graph(
 
         match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
         if match:
-            summary_text = match.group(1).strip()
+            summary_text = match.group(1)
+            # Handle potential escaped characters
+            summary_text = (
+                summary_text.replace("\\n", "\n")
+                .replace("\\t", "\t")
+                .replace("\\r", "\r")
+                .strip()
+            )
             log_file = (
                 repo_path / ".sds" / "logs" / f"fix_summary_{state['attempt']}.log"
             )
