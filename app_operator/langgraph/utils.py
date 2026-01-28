@@ -14,7 +14,7 @@ from langchain_core.messages import (
 from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.trajectory_handler import LangGraphTrajectoryHandler
-from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
+from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.langgraph.message_utils import extract_text
 
 BLUE = "\033[34m"

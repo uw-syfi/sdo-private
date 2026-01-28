@@ -19,7 +19,7 @@ from app_operator.langgraph.utils import invoke_agent
 
 def generate_scripts(
     state: OperatorState,
-    config: Config,
+    operator_config: Config,
     repo_path: Path,
     loader: PromptLoader,
     agent: Any,
@@ -31,7 +31,7 @@ def generate_scripts(
         return state
 
     with recorder.phase(Phase.SCRIPT_GENERATION):
-        system_prompt = create_system_prompt(config.deployment.platform)
+        system_prompt = create_system_prompt(operator_config.deployment.platform)
         repo_context = analyze_repository(repo_path)
 
         deploy_prompt = create_generate_script_prompt(
@@ -39,14 +39,14 @@ def generate_scripts(
             script_name="deploy.sh",
             repo_context=repo_context,
             target_dir=str(repo_path),
-            platform=config.deployment.platform,
+            platform=operator_config.deployment.platform,
         )
         health_prompt = create_generate_script_prompt(
             system_prompt=system_prompt,
             script_name="health_check.sh",
             repo_context=repo_context,
             target_dir=str(repo_path),
-            platform=config.deployment.platform,
+            platform=operator_config.deployment.platform,
         )
 
         _, _ = invoke_agent(

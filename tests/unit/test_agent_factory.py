@@ -4,7 +4,6 @@ from app_operator.cli_agent.backend.factory import create_agent_from_config
 from app_operator.cli_agent.backend.base import CodingAgent, register_provider
 from app_operator.cli_agent.backend.cli_agent import CLICodingAgent
 from app_operator.config import Config, AgentConfig
-import pytest
 
 
 @pytest.fixture

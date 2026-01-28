@@ -60,7 +60,7 @@ def build_graph(
 
     generate_node = functools.partial(
         generate_scripts,
-        config=config,
+        operator_config=config,
         repo_path=repo_path,
         loader=loader,
         agent=script_agent,
@@ -72,7 +72,7 @@ def build_graph(
         deploy_attempt,
         repo_path=repo_path,
         filesystem=filesystem,
-        config=config,
+        operator_config=config,
         check_shutdown=check_shutdown,
         recorder=recorder,
     )
@@ -89,7 +89,7 @@ def build_graph(
         fix_errors,
         repo_path=repo_path,
         filesystem=filesystem,
-        config=config,
+        operator_config=config,
         loader=loader,
         agent=fix_agent,
         context_limit=context_limit,

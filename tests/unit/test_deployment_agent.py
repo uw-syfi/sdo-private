@@ -1,5 +1,5 @@
 from types import MethodType
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,7 +14,6 @@ from app_operator.prompts.deployer import (
 )
 from app_operator.config import OperatorConfig
 from tests.fixtures.agents import TrackingAgent, ErrorAgent
-from app_operator.prompts.deployer import prepare_error_context, create_fix_prompt
 
 
 @pytest.fixture

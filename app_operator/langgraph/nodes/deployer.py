@@ -26,7 +26,7 @@ def deploy_attempt(
     state: OperatorState,
     repo_path: Path,
     filesystem: FileSystemInterface,
-    config: Config,
+    operator_config: Config,
     check_shutdown: Optional[Callable[[], bool]],
     recorder: Optional[TrajectoryRecorderProtocol] = None,
 ) -> OperatorState:
@@ -49,7 +49,7 @@ def deploy_attempt(
         filesystem,
         ".sds/deploy.sh start",
         log_file_path=log_file,
-        timeout=config.operator.deploy_timeout,
+        timeout=operator_config.operator.deploy_timeout,
         recorder=recorder,
     )
     state["deploy_result"] = result
@@ -60,7 +60,7 @@ def fix_errors(
     state: OperatorState,
     repo_path: Path,
     filesystem: FileSystemInterface,
-    config: Config,
+    operator_config: Config,
     loader: PromptLoader,
     agent: Any,
     context_limit: int,
@@ -87,7 +87,7 @@ def fix_errors(
         deploy_result, health_result, log_file_path, health_check_log_path
     )
 
-    system_prompt = create_system_prompt(config.deployment.platform)
+    system_prompt = create_system_prompt(operator_config.deployment.platform)
     prompt = create_fix_prompt(
         repo_path=repo_path,
         attempt=state["attempt"],

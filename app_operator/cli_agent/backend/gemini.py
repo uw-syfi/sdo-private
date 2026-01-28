@@ -7,7 +7,6 @@ from pathlib import Path
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
 from app_operator.trajectory import (
-    record_tool_call,
     get_current_call_id,
     get_run_id,
     TrajectoryRecorderProtocol,

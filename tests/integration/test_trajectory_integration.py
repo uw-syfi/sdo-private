@@ -7,7 +7,6 @@ from app_operator.trajectory import (
     record_phase_end,
     record_user_message,
     record_assistant_message,
-    record_tool_call,
     get_current_call_id,
     get_run_id,
     Phase,

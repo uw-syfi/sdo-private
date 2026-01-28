@@ -4,7 +4,7 @@ import shutil
 import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any, List
+from typing import Optional, Callable, Any, List
 
 from app_operator.cli_agent.backend.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
