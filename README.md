@@ -10,19 +10,26 @@ This repository contains applications, tools, and infrastructure code for the SD
 
 ```
 sds/
-├── app_operator/    # Application operators and management tools
-│   ├── agents/      # Specialized agents (deployer, monitor)
-│   └── ...
-├── apps/            # Application code and configurations
-├── scripts/         # Helper scripts (formatting, checks)
-├── sds_operator     # CLI tool for running the operator
-├── tests/           # Unit tests
-└── tools/           # Shared tools/utilities
+├── app_operator/         # Core operator logic
+│   ├── cli_agent/        # CLI-based agent implementation
+│   │   ├── agents/       # Specialized agents (deployer, monitor, code_analyzer)
+│   │   └── backend/      # Coding agent CLI backends (claude, gemini, codex, opencode)
+│   ├── langgraph/        # LangGraph-based implementation
+│   ├── commands/         # CLI commands (run, init_exp, viz_graph)
+│   └── prompts/          # Jinja2 prompt templates
+├── apps/                 # Application code and configurations
+├── scripts/              # Helper scripts (formatting, checks)
+├── sds_operator          # CLI tool for running the operator
+└── tests/                # Unit and integration tests
 ```
 
 ## Application Operator
 
 The Application Operator (`app_operator`) is a tool for deploying and monitoring applications with automated health checks and graceful lifecycle management. It also includes AI-powered script generation to automatically create deployment and health check scripts for any application repository.
+
+SDS provides two implementations of this high-level approach:
+- **CLI Agent Runtime (`cli_agent`)**: Communicates with external coding agents via their CLI interfaces for autonomous tasks.
+- **LangGraph Runtime (`langgraph`)**: Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes.
 
 ### Key Features
 

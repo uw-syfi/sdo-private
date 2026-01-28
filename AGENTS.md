@@ -8,16 +8,24 @@ SDS is an AI-native project designed to autonomously explore, validate, and evol
 
 ```
 sds/
-├── app_operator/    # Core operator logic.
-│   ├── agents/      # Specialized agents (deployer, monitor).
-│   └── ...
-├── apps/            # Application code (DeathStarBench suite).
+├── app_operator/         # Core operator logic
+│   ├── cli_agent/        # CLI-based agent implementation
+│   │   ├── agents/       # Specialized agents (deployer, monitor, code_analyzer)
+│   │   └── backend/      # Coding agent CLI backends (claude, gemini, codex, opencode)
+│   ├── langgraph/        # LangGraph-based implementation
+│   ├── commands/         # CLI commands (run, init_exp, viz_graph)
+│   ├── prompts/          # Jinja2 prompt templates
+│   ├── config.py         # Configuration dataclasses
+│   ├── exceptions.py     # Custom exception hierarchy
+│   ├── filesystem.py     # Filesystem abstraction layer
+│   ├── logger.py         # Logging configuration
+│   └── trajectory.py     # Agent interaction recording
+├── apps/                 # Application code (DeathStarBench suite)
 │   └── deathstarbench/
-│       ├── hotelReservation/ # Go-based microservices app.
-│       ├── socialNetwork/    # C++/Python/Go microservices app.
+│       ├── hotelReservation/ # Go-based microservices app
+│       ├── socialNetwork/    # C++/Python/Go microservices app
 │       └── ...
-├── tools/           # Shared tools/utilities (e.g., healthcheck).
-└── README.md        # Root project documentation.
+└── README.md             # Root project documentation
 ```
 
 ## 1. Application Operator (`app_operator/`)
@@ -44,9 +52,19 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
 
 ### Coding Agent Configuration
 
-You can specify which AI provider to use for script generation and fixing by adding an `sds.toml` file to the target repository:
+You can specify which AI provider to use for script generation and fixing by adding an `sds.toml` file to the target repository.
+
+The operator supports two different runtime implementations for the same high-level autonomous deployment and monitoring logic:
+
+*   **CLI Agent (`cli_agent`):** The default implementation. It interacts with the system by calling out to specialized coding agents (like Gemini, Claude, or Codex) through their CLI interfaces.
+*   **LangGraph (`langgraph`):** A modular and stateful implementation built using LangGraph. It models the deployment and monitoring process as a graph of specialized nodes and edges.
+
+Example `sds.toml` configuration:
 
 ```toml
+[runtime]
+impl = "cli_agent" # or "langgraph"
+
 [agent]
 provider = "gemini"  # Valid: "gemini", "codex", "claude", "claude-code", "opencode"
 model = "gemini-1.5-pro" # optional
@@ -63,32 +81,56 @@ agent_timeout = 300 # Agent generation timeout in seconds (>0, default: 300 / 5 
 **Note**: Invalid configuration values will raise `ValueError` or `TypeError` with clear error messages at initialization.
 
 ### Architecture
-The operator uses specialized agents to manage the application lifecycle:
 
-*   **DeploymentAgent (`app_operator/agents/deployer.py`):**
+The system is organized into two main runtime implementations, sharing core configuration and filesystem abstractions.
+
+#### CLI Agent Architecture (`app_operator/cli_agent/`)
+This implementation uses existing coding agent CLIs to manage the application lifecycle:
+
+*   **DeploymentAgent (`app_operator/cli_agent/agents/deployer.py`):**
     *   Generates deployment scripts (`deploy.sh`, `health_check.sh`) if missing.
     *   Deploys the application and automatically fixes errors using an AI agent.
     *   Manages the self-healing deployment loop.
-*   **CodeAnalyzerAgent (`app_operator/agents/code_analyzer.py`):**
+*   **CodeAnalyzerAgent (`app_operator/cli_agent/agents/code_analyzer.py`):**
     *   Analyzes the codebase before deployment.
     *   Generates `.sds/code_analysis.md` and `.sds/deployment_issues.md`.
     *   Identifies potential deployment issues proactively.
-*   **AppMonitor (`app_operator/agents/app_monitor.py`):**
+*   **AppMonitor (`app_operator/cli_agent/agents/app_monitor.py`):**
     *   Monitors application health at regular intervals.
     *   Uses `HealthCheckTask` to execute checks and `CodingAgent` to analyze results.
+*   **Backend Providers (`app_operator/cli_agent/backend/`):**
+    *   Implements AI provider integrations (Claude, Gemini, Codex, Opencode).
+    *   Each backend has event parsers for streaming output (`*_events.py`).
+    *   Factory pattern (`factory.py`) for creating agent instances.
+
+#### LangGraph Architecture (`app_operator/langgraph/`)
+This implementation uses a stateful graph to manage the lifecycle:
+
+*   **Graph Definition (`app_operator/langgraph/graph.py`):** Defines the nodes (deployment, monitoring, error fixing) and the transitions between them.
+*   **State Management (`app_operator/langgraph/state.py`):** Maintains the state of the deployment and monitoring process throughout the graph execution.
+*   **Tools (`app_operator/langgraph/tools.py`):** Provides the LLM with tools for executing shell commands, reading files, and performing health checks.
+*   **LLM Integration (`app_operator/langgraph/llm.py`):** Configures LangChain LLM instances based on provider settings.
+*   **Models (`app_operator/langgraph/models.py`):** Pydantic models for structured LLM outputs.
+*   **Trajectory Handler (`app_operator/langgraph/trajectory_handler.py`):** Records agent interactions for the LangGraph runtime.
+
+#### Shared Components
 *   **Configuration (`app_operator/config.py`):**
     *   `AgentConfig`: AI provider configuration (codex, gemini, claude, claude-code, opencode)
     *   `OperatorConfig`: Operational parameters (intervals, max iterations)
     *   All configs validate on initialization with clear error messages
 *   **Exceptions (`app_operator/exceptions.py`):**
-    *   Custom exception hierarchy for clear error categorization
-    *   Exceptions include context (exit codes, attempt numbers, timeout flags)
+    *   Custom exception hierarchy for clear error categorization.
 *   **Filesystem (`app_operator/filesystem.py`):**
-    *   Abstraction layer for filesystem operations
-    *   `RealFilesystem`: Production implementation
-    *   `InMemoryFilesystem`: Testing implementation (fast, isolated)
-*   **Tools (`tools/`):**
-    *   `healthcheck.py`: Encapsulates health check execution logic.
+    *   Abstraction layer for filesystem operations (`RealFilesystem` vs `InMemoryFilesystem`).
+*   **Trajectory (`app_operator/trajectory.py`):**
+    *   Records agent interactions, prompts, responses, and tool calls.
+    *   Saves structured trajectory.json files for analysis.
+*   **Prompts (`app_operator/prompts/`):**
+    *   Jinja2 template system for generating agent prompts.
+    *   Templates organized by agent type: `deployer/`, `monitor/`, `code_analyzer/`.
+    *   `PromptLoader` class for rendering templates with context.
+*   **Commands (`app_operator/commands/`):**
+    *   CLI command implementations: `run`, `init_exp`, `viz_graph`.
 
 ## 2. Applications (`apps/deathstarbench/`)
 
