@@ -4,8 +4,8 @@ import time
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
-from app_operator.agent_cli.base import CodingAgent
-from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.cli_agent.base import CodingAgent
+from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem

@@ -3,8 +3,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from app_operator.agent_cli.base import CodingAgent
-from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.cli_agent.base import CodingAgent
+from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.agents.deployer import DeploymentAgent
 from app_operator.agents.app_monitor import AppMonitor
 from app_operator.agents.code_analyzer import CodeAnalyzerAgent

@@ -64,6 +64,16 @@ GOOGLE_CLOUD_PROJECT="your_project_id"
 GOOGLE_CLOUD_LOCATION="global"
 ```
 
+For Gemini via LangChain:
+```bash
+GOOGLE_API_KEY=your_api_key_here
+```
+
+For Anthropic via LangChain:
+```bash
+ANTHROPIC_API_KEY=your_api_key_here
+```
+
 2. Configure the agent and operator settings by copying `sds.example.toml` to `sds.toml` in the project root:
 
 ```bash
@@ -74,8 +84,8 @@ Then edit `sds.toml` to configure your settings:
 
 ```toml
 [agent]
-provider = "codex"  # or "gemini", "claude"
-model = "gpt-4o-mini" # optional
+provider = "codex"  # or "gemini", "claude", "opencode", "openai", "anthropic"
+model = "gpt-4o-mini" # required for langgraph runtime
 
 [operator]
 interval = 30 # Health check interval in seconds (default: 30)
@@ -85,7 +95,18 @@ deployment_max_iters = 5 # Maximum deployment attempts (default: 5)
 [deployment]
 platform = "docker" # Deployment platform: "docker" or "k8s" (default: "docker")
 target = "local"    # Deployment target: "local" or "remote" (default: "local")
+
+[runtime]
+impl = "cli_agent" # "cli_agent" or "langgraph"
 ```
+
+**LangGraph runtime requirements**
+- Set `[runtime] impl = "langgraph"` to use the LangGraph implementation.
+- When using LangGraph, you must set both `agent.provider` and `agent.model`.
+- Provider mapping in LangGraph:
+  - `codex`/`opencode`/`openai` → OpenAI
+  - `claude`/`claude-code`/`anthropic` → Anthropic
+  - `gemini` → Gemini
 
 ### Experiment Workflow
 
@@ -169,4 +190,3 @@ pr-prepare  # Automatically pushes branch to remote
 
 # Then create MR on GitLab using the generated title and description
 ```
-
