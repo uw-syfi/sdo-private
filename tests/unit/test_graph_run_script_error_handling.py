@@ -13,24 +13,15 @@ class TestGraphRunScriptErrorHandling(unittest.TestCase):
         self.fs = InMemoryFilesystem()
         self.fs.mkdir(self.repo_root)
 
-        # Patch record_tool_call to avoid external dependencies
-        self.patcher = patch("app_operator.langgraph.graph.record_tool_call")
-        self.mock_record = self.patcher.start()
-
     def tearDown(self):
-        self.patcher.stop()
+        pass
 
     @patch("subprocess.run")
     def test_run_script_timeout(self, mock_run):
         # Simulate timeout
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="sleep 100", timeout=1)
 
-        result = _run_script(
-            self.repo_root,
-            self.fs,
-            "sleep 100",
-            timeout=1
-        )
+        result = _run_script(self.repo_root, self.fs, "sleep 100", timeout=1)
 
         self.assertFalse(result["success"])
         self.assertEqual(result["exit_code"], -1)
@@ -41,11 +32,7 @@ class TestGraphRunScriptErrorHandling(unittest.TestCase):
         # Simulate generic exception
         mock_run.side_effect = Exception("System failure")
 
-        result = _run_script(
-            self.repo_root,
-            self.fs,
-            "ls"
-        )
+        result = _run_script(self.repo_root, self.fs, "ls")
 
         self.assertFalse(result["success"])
         self.assertEqual(result["exit_code"], -1)

@@ -1,5 +1,4 @@
 import argparse
-import sys
 from unittest.mock import MagicMock
 from pathlib import Path
 

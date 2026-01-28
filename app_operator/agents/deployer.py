@@ -710,6 +710,13 @@ class DeploymentAgent:
             f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}"
         )
 
+        if health_result is not None:
+            context_parts.append("\n## Health Check Result")
+            context_parts.append(f"Exit Code: {health_result['exit_code']}")
+            context_parts.append(
+                f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}"
+            )
+
         return "\n".join(context_parts)
 
     def _create_fix_prompt(

@@ -1,5 +1,6 @@
 import signal
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -9,7 +10,6 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.langgraph.llm import build_llm
 from app_operator.langgraph.graph import build_graph
-from tools.trajectory import init_trajectory, finalize_trajectory
 
 
 class LangGraphOperator:
@@ -50,9 +50,6 @@ class LangGraphOperator:
 
         self._shutdown_requested = False
         self._deployed = False
-
-        self.trajectory = init_trajectory(self.repo_path)
-        self.trajectory.set_agent_name("LangGraph")
 
         self.graph = build_graph(
             self.llm,
@@ -105,7 +102,10 @@ class LangGraphOperator:
                 "token_usage": {"input": 0, "output": 0, "total": 0},
             }
 
-            final_state = self.graph.invoke(initial_state)
+            thread_id = str(int(time.time()))
+            final_state = self.graph.invoke(
+                initial_state, config={"configurable": {"thread_id": thread_id}}
+            )
 
             if final_state:
                 usage = final_state.get("token_usage", {})
@@ -125,8 +125,6 @@ class LangGraphOperator:
 
             traceback.print_exc()
             return 1
-        finally:
-            finalize_trajectory("completed" if self._deployed else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         if not self._shutdown_requested:

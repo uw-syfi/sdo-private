@@ -6,7 +6,6 @@ from typing import List, Dict, Any, Callable
 from langchain_core.tools import tool
 
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from tools.trajectory import record_tool_call
 
 
 class ToolContext:
@@ -29,13 +28,13 @@ def _build_ls(context: ToolContext) -> Callable[[str], str]:
             target = context.resolve_path(path)
             if not context.filesystem.exists(target):
                 return f"Error: Path does not exist: {path}"
-            if context.filesystem.exists(target) and not context.filesystem.is_dir(target):
+            if context.filesystem.exists(target) and not context.filesystem.is_dir(
+                target
+            ):
                 result = target.name
-                record_tool_call(tool="LS", args={"path": path}, stdout=result)
                 return result
             entries = sorted(p.name for p in target.iterdir())
             result = "\n".join(entries)
-            record_tool_call(tool="LS", args={"path": path}, stdout=result)
             return result
         except Exception as e:
             return f"Error: {str(e)}"
@@ -63,9 +62,6 @@ def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
                     except ValueError:
                         continue
             results = sorted(results)
-            record_tool_call(
-                tool="Glob", args={"pattern": pattern}, stdout="\n".join(results)
-            )
             return results
         except Exception as e:
             return [f"Error: {str(e)}"]
@@ -80,7 +76,6 @@ def _build_read(context: ToolContext) -> Callable[[str], str]:
         try:
             target = context.resolve_path(path)
             content = context.filesystem.read_text(target)
-            record_tool_call(tool="Read", args={"path": path}, stdout=content)
             return content
         except Exception as e:
             return f"Error: {str(e)}"
@@ -97,23 +92,15 @@ def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
             regex = re.compile(pattern)
             matches: List[str] = []
 
-            if context.filesystem.exists(target) and not context.filesystem.is_dir(target):
+            if context.filesystem.exists(target) and not context.filesystem.is_dir(
+                target
+            ):
                 matches.extend(_grep_file(regex, target, context.repo_root))
-                record_tool_call(
-                    tool="Grep",
-                    args={"pattern": pattern, "path": path},
-                    stdout="\n".join(matches),
-                )
                 return matches
 
             for file_path in target.rglob("*"):
                 if file_path.is_file():
                     matches.extend(_grep_file(regex, file_path, context.repo_root))
-            record_tool_call(
-                tool="Grep",
-                args={"pattern": pattern, "path": path},
-                stdout="\n".join(matches),
-            )
             return matches
         except Exception as e:
             return [f"Error: {str(e)}"]
@@ -147,11 +134,6 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
                 context.filesystem.mkdir(target.parent, parents=True, exist_ok=True)
             context.filesystem.write_text(target, content)
             result = f"Wrote {len(content)} bytes to {path}"
-            record_tool_call(
-                tool="write_file",
-                args={"path": path, "content": f"<len:{len(content)}>"},
-                stdout=result,
-            )
             return result
         except Exception as e:
             return f"Error: {str(e)}"
@@ -173,14 +155,6 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
                 timeout=timeout,
             )
 
-            record_tool_call(
-                tool="bash",
-                args={"command": command, "timeout": timeout},
-                stdout=result.stdout,
-                stderr=result.stderr,
-                exit_code=result.returncode,
-            )
-
             return {
                 "success": result.returncode == 0,
                 "exit_code": result.returncode,
@@ -189,13 +163,6 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
             }
         except subprocess.TimeoutExpired:
             error_msg = f"Command timed out after {timeout} seconds"
-            record_tool_call(
-                tool="bash",
-                args={"command": command, "timeout": timeout},
-                stdout="",
-                stderr=error_msg,
-                exit_code=-1,
-            )
             return {
                 "success": False,
                 "exit_code": -1,
@@ -204,13 +171,6 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
             }
         except Exception as e:
             error_msg = f"Error: {str(e)}"
-            record_tool_call(
-                tool="bash",
-                args={"command": command, "timeout": timeout},
-                stdout="",
-                stderr=error_msg,
-                exit_code=-1,
-            )
             return {
                 "success": False,
                 "exit_code": -1,

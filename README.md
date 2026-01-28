@@ -149,6 +149,21 @@ Deploy an application with autonomous error fixing and AI-powered health monitor
 **Options:**
 - `--config <FILE>`: Path to configuration file (default: `sds.toml` in target dir)
 
+#### `viz-graph` - Visualize Dependency Graph
+
+Visualize the agent's dependency graph in LangGraph.
+
+**Usage:**
+```bash
+./sds_operator viz-graph [options]
+```
+
+**Options:**
+- `--output <FILE>`, `-o <FILE>`: Output file path (e.g., `graph.png`, `graph.mermaid`).
+  - If `.png` extension is used, generates a PNG image (requires internet access).
+  - Otherwise, saves the Mermaid syntax text.
+  - If omitted, prints Mermaid syntax to stdout.
+
 #### `init-exp` - Initialize Experiment
 
 Initialize a new experiment from an existing application.

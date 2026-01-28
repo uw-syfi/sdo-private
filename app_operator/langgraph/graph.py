@@ -19,14 +19,6 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.agents.deployer import _analyze_repository, _create_system_prompt
-from tools.trajectory import (
-    Phase,
-    record_phase_start,
-    record_phase_end,
-    record_user_message,
-    record_assistant_message,
-    record_tool_call,
-)
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
 from app_operator.langgraph.models import get_model_context_limit
@@ -35,6 +27,8 @@ from app_operator.langgraph.models import get_model_context_limit
 BLUE = "\033[34m"
 GREEN = "\033[32m"
 RESET = "\033[0m"
+
+MAX_DISPLAY_CONTENT = 100
 
 
 def _extract_token_usage(message: BaseMessage) -> Dict[str, int]:
@@ -100,7 +94,6 @@ def _invoke_agent(
         full_prompt = user_prompt
         messages = [HumanMessage(content=user_prompt)]
 
-    record_user_message(full_prompt)
     response_messages = list(messages)
     total_usage = {"input": 0, "output": 0, "total": 0}
 
@@ -126,8 +119,10 @@ def _invoke_agent(
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
                             args_str = str(tool_call["args"])
-                            if len(args_str) > 500:
-                                args_str = f"{args_str[:500]}... (truncated)"
+                            if len(args_str) > MAX_DISPLAY_CONTENT:
+                                args_str = (
+                                    f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
+                                )
                             print(
                                 f"{BLUE}[Tool Use] {tool_call['name']} {args_str}{RESET}"
                             )
@@ -146,8 +141,8 @@ def _invoke_agent(
 
                 elif isinstance(msg, ToolMessage):
                     content = _extract_text(msg.content)
-                    if len(content) > 500:
-                        content = f"{content[:500]}... (truncated)"
+                    if len(content) > MAX_DISPLAY_CONTENT:
+                        content = f"{content[:MAX_DISPLAY_CONTENT]}... (truncated)"
 
                     print(f"{GREEN}[Tool Result] {content}{RESET}")
 
@@ -156,7 +151,6 @@ def _invoke_agent(
     _update_usage(state, total_usage)
 
     assistant_text = _last_assistant_text(response_messages)
-    record_assistant_message(assistant_text)
     return assistant_text, response_messages
 
 
@@ -219,15 +213,6 @@ def _run_script(
             f"=== STDERR ===\n{stderr}\n"
         )
         _write_log_file(filesystem, log_file_path, log_content)
-
-    record_tool_call(
-        tool="bash",
-        args={"script": command},
-        stdout=stdout,
-        stderr=stderr,
-        exit_code=exit_code,
-        duration=duration,
-    )
 
     return {
         "success": success,
@@ -306,7 +291,6 @@ def build_graph(
             state["analysis_done"] = True
             return state
 
-        record_phase_start(Phase.EXPLORATION)
         system_prompt = loader.render("code_analyzer/system.jinja2")
         user_prompt = loader.render("code_analyzer/user.jinja2", repo_path=repo_path)
 
@@ -319,7 +303,6 @@ def build_graph(
             context_limit=context_limit,
         )
 
-        record_phase_end("success")
         state["analysis_done"] = True
         state["messages"] = messages
         return state
@@ -328,7 +311,6 @@ def build_graph(
         if state["scripts_done"]:
             return state
 
-        record_phase_start(Phase.SCRIPT_GENERATION)
         system_prompt = _create_system_prompt(config.deployment.platform)
         repo_context = _analyze_repository(repo_path)
 
@@ -366,18 +348,12 @@ def build_graph(
             context_limit=context_limit,
         )
 
-        record_phase_end("success")
         state["scripts_done"] = True
         return state
 
     def deploy_attempt(state: OperatorState) -> OperatorState:
         if check_shutdown and check_shutdown():
             return state
-
-        record_phase_start(
-            Phase.DEPLOYMENT,
-            {"attempt": state["attempt"], "max_attempts": state["max_attempts"]},
-        )
 
         log_file = (
             repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
@@ -403,7 +379,6 @@ def build_graph(
         deploy_result = state.get("deploy_result") or {}
         if not deploy_result.get("success"):
             state["health_result"] = None
-            record_phase_end("needs_retry")
             return state
 
         log_file = (
@@ -421,11 +396,6 @@ def build_graph(
             timeout=120,
         )
         state["health_result"] = result
-
-        if result["success"]:
-            record_phase_end("success")
-        else:
-            record_phase_end("needs_retry")
 
         return state
 
@@ -518,7 +488,6 @@ def build_graph(
             time.sleep(interval)
 
         state["monitor_count"] += 1
-        record_phase_start(Phase.MONITORING, {"cycle": state["monitor_count"]})
 
         log_file = (
             repo_path
@@ -580,7 +549,6 @@ def build_graph(
         )
         _write_log_file(filesystem, log_file, response)
 
-        record_phase_end("completed")
         return state
 
     def should_fix(state: OperatorState) -> str:
