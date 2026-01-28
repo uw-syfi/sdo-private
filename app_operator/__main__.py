@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from app_operator.commands import run, init_exp
+from app_operator.commands import run, init_exp, viz_graph
 from app_operator.logger import logger
 
 # Load environment variables from .env file
@@ -77,6 +77,12 @@ Examples:
     )
     init_exp.add_arguments(init_exp_parser)
 
+    # 'viz-graph' command
+    viz_graph_parser = subparsers.add_parser(
+        "viz-graph", help="Visualize the agent's dependency graph"
+    )
+    viz_graph.add_arguments(viz_graph_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
@@ -85,6 +91,8 @@ Examples:
         return run.run_command(args)
     elif args.command == "init-exp":
         return init_exp.run_command(args)
+    elif args.command == "viz-graph":
+        return viz_graph.run_command(args)
     else:
         parser.print_help()
         return 1
