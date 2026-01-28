@@ -148,12 +148,12 @@ class TestAgentConfigValidation:
             AgentConfig(provider="invalid-provider")
 
     def test_provider_case_insensitive(self):
-        """Provider names should be case-insensitive."""
+        """Provider names should be case-insensitive and normalized."""
         config = AgentConfig(provider="CODEX")
-        assert config.provider == "CODEX"
+        assert config.provider == "codex"
 
         config = AgentConfig(provider="Gemini")
-        assert config.provider == "Gemini"
+        assert config.provider == "gemini"
 
     def test_valid_providers_accepted(self):
         """All valid providers should be accepted."""

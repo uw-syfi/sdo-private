@@ -2,11 +2,10 @@ from typing import Optional
 
 from app_operator.config import load_config, Config
 from app_operator.logger import logger
-from .base import CodingAgent
-from .codex import CodexCodingAgent
-from .gemini import GeminiCodingAgent
-from .opencode import OpencodeCodingAgent
-from .claude import ClaudeCodeCodingAgent
+from .base import CodingAgent, AGENT_REGISTRY
+
+# Import modules to ensure agents are registered
+from . import codex, gemini, opencode, claude  # noqa: F401
 
 
 def create_agent_from_config(
@@ -41,13 +40,9 @@ def create_agent_from_config(
         logger.info(f"Using coding agent model: {model}")
 
     provider_lower = provider.lower()
-    if provider_lower == "gemini":
-        return GeminiCodingAgent(model=model)
-    elif provider_lower == "opencode":
-        return OpencodeCodingAgent(model=model)
-    elif provider_lower in ("claude", "claude-code", "anthropic"):
-        return ClaudeCodeCodingAgent(model=model)
-    elif provider_lower in ("openai", "codex"):
-        return CodexCodingAgent(model=model)
-    else:
-        return CodexCodingAgent(model=model)
+
+    if provider_lower in AGENT_REGISTRY:
+        return AGENT_REGISTRY[provider_lower](model=model)
+
+    # Default fallback
+    return AGENT_REGISTRY["codex"](model=model)

@@ -10,10 +10,14 @@ from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
-from app_operator.prompts import get_loader
 from app_operator.prompts.deployment_context import (
     analyze_repository,
     create_system_prompt,
+)
+from app_operator.prompts.deployer import (
+    create_generate_script_prompt,
+    create_fix_prompt,
+    prepare_error_context,
 )
 from app_operator.cli_agent.subprocess_runner import SubprocessRunner
 from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
@@ -164,8 +168,7 @@ def _generate_deploy_script(
         operator_config = OperatorConfig()
 
     platform = deployment_config.platform if deployment_config else "auto"
-    full_prompt = get_loader().render(
-        "deployer/generate_script.jinja2",
+    full_prompt = create_generate_script_prompt(
         system_prompt=system_prompt,
         script_name="deploy.sh",
         repo_context=repo_context,
@@ -217,8 +220,7 @@ def _generate_health_check_script(
         operator_config = OperatorConfig()
 
     platform = deployment_config.platform if deployment_config else "auto"
-    full_prompt = get_loader().render(
-        "deployer/generate_script.jinja2",
+    full_prompt = create_generate_script_prompt(
         system_prompt=system_prompt,
         script_name="health_check.sh",
         repo_context=repo_context,
@@ -577,12 +579,19 @@ class DeploymentAgent:
         logger.info(f"Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
 
         # Prepare error context
-        error_context = self._prepare_error_context(
+        error_context = prepare_error_context(
             deploy_result, health_result, log_file_path, health_check_log_path
         )
 
         # Create fix prompt
-        prompt = self._create_fix_prompt(error_context, attempt, max_attempts)
+        prompt = create_fix_prompt(
+            self.repo_path,
+            attempt,
+            max_attempts,
+            error_context,
+            self.deploy_script,
+            self.health_check_script,
+        )
 
         try:
             logger.info(
@@ -628,83 +637,3 @@ class DeploymentAgent:
             logger.error(f"Unexpected error while getting fix from agent: {e}")
             record_assistant_message(f"Unexpected error during fix attempt: {e}")
             return False
-
-    def _prepare_error_context(
-        self,
-        deploy_result: Dict[str, Any],
-        health_result: Optional[Dict[str, Any]],
-        log_file_path: Optional[Path] = None,
-        health_check_log_path: Optional[Path] = None,
-    ) -> str:
-        """Prepare error context for the coding agent.
-
-        Args:
-            deploy_result: Deployment script result.
-            health_result: Health check result (None if deployment failed).
-            log_file_path: Path to the deployment log file.
-            health_check_log_path: Path to the health check log file.
-
-        Returns:
-            str: Formatted error context.
-        """
-        context_parts = []
-
-        if log_file_path:
-            context_parts.append(f"Full deployment logs available at: {log_file_path}")
-
-        if health_check_log_path:
-            context_parts.append(
-                f"Health check outputs available at: {health_check_log_path}"
-            )
-
-        # Deployment result
-        context_parts.append("## Deployment Script Result")
-        context_parts.append(f"Exit Code: {deploy_result['exit_code']}")
-        context_parts.append(
-            f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}"
-        )
-
-        if health_result is not None:
-            context_parts.append("\n## Health Check Result")
-            context_parts.append(f"Exit Code: {health_result['exit_code']}")
-            context_parts.append(
-                f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}"
-            )
-
-        return "\n".join(context_parts)
-
-    def _create_fix_prompt(
-        self, error_context: str, attempt: int, max_attempts: int
-    ) -> str:
-        """Create a prompt for the coding agent to fix deployment errors.
-
-        Args:
-            error_context: Formatted error context.
-            attempt: Current attempt number.
-            max_attempts: Maximum number of attempts.
-
-        Returns:
-            str: The prompt for the agent.
-        """
-        # Determine previous fix summary file path
-        previous_summary_note = ""
-        if attempt > 1:
-            prev_log_path = self.sds_dir / "logs" / f"fix_summary_{attempt - 1}.log"
-            previous_summary_note = (
-                f"\n\nNote: This is attempt #{attempt}. "
-                f"You can read the summary of the previous fix attempt at:\n{prev_log_path}\n"
-                "The log files follow the pattern .sds/logs/fix_summary_{attempt}.log. "
-                "Please review the previous attempt to avoid repeating mistakes, and to check if the previous fix was successful."
-                "Note that the application may still be failing, but the it's now failing for a different reason."
-            )
-
-        return get_loader().render(
-            "deployer/fix_error.jinja2",
-            repo_path=self.repo_path,
-            attempt=attempt,
-            max_attempts=max_attempts,
-            error_context=error_context,
-            previous_summary_note=previous_summary_note,
-            deploy_script=self.deploy_script,
-            health_check_script=self.health_check_script,
-        )

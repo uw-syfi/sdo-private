@@ -1,3 +1,4 @@
+from .base import register_provider
 from typing import Optional, List
 import json
 import time
@@ -154,6 +155,7 @@ class GeminiGenerationSession(CLIGenerationSession):
                 self._at_line_start = True
 
 
+@register_provider("gemini")
 class GeminiCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Gemini CLI tool."""
 

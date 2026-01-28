@@ -22,7 +22,7 @@ def test_analyze_code_skips_if_files_exist():
     # We need to mock create_react_agent so it returns a mock agent
     with (
         patch("app_operator.langgraph.graph.create_react_agent") as mock_create_agent,
-        patch("app_operator.langgraph.graph._run_script") as mock_run_script,
+        patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run_script,
     ):
         analyze_agent_mock = MagicMock()
         script_agent_mock = MagicMock()
@@ -98,7 +98,7 @@ def test_analyze_code_runs_if_files_missing():
 
     with (
         patch("app_operator.langgraph.graph.create_react_agent") as mock_create_agent,
-        patch("app_operator.langgraph.graph._run_script") as mock_run_script,
+        patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run_script,
     ):
         analyze_agent_mock = MagicMock()
         script_agent_mock = MagicMock()

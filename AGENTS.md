@@ -307,6 +307,12 @@ if result.exit_code != 0:
     )
 ```
 
+**7. Environment Independence**
+
+Tests must not assume external binaries (e.g., `npm`, `docker`, agents) are installed in the environment.
+*   Mock `shutil.which` and `subprocess.run` to simulate binary presence/absence.
+*   See `tests/unit/test_agent_factory.py` for examples of mocking agent binaries.
+
 #### Test Coverage Guidelines
 
 When introducing new features or modifying existing behavior:

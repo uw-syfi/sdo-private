@@ -31,10 +31,10 @@ class AgentConfig:
     VALID_PROVIDERS = {
         "codex",
         "gemini",
-        "vertex",
         "claude",
         "claude-code",
         "opencode",
+        "vertex",
         "openai",
         "anthropic",
     }
@@ -43,11 +43,16 @@ class AgentConfig:
         """Validate configuration values after initialization."""
         if not isinstance(self.provider, str):
             raise TypeError(f"provider must be str, got {type(self.provider).__name__}")
+
+        # Case-insensitive check
         if self.provider.lower() not in self.VALID_PROVIDERS:
             raise ValueError(
                 f"Invalid provider: '{self.provider}'. "
                 f"Valid providers: {', '.join(sorted(self.VALID_PROVIDERS))}"
             )
+        # Normalize provider name
+        self.provider = self.provider.lower()
+
         if self.model is not None and not isinstance(self.model, str):
             raise TypeError(
                 f"model must be str or None, got {type(self.model).__name__}"

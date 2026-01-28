@@ -3,7 +3,7 @@ from unittest.mock import patch
 from pathlib import Path
 import subprocess
 
-from app_operator.langgraph.graph import _run_script
+from app_operator.langgraph.utils import run_script
 from app_operator.filesystem import InMemoryFilesystem
 
 
@@ -21,7 +21,7 @@ class TestGraphRunScriptErrorHandling(unittest.TestCase):
         # Simulate timeout
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="sleep 100", timeout=1)
 
-        result = _run_script(self.repo_root, self.fs, "sleep 100", timeout=1)
+        result = run_script(self.repo_root, self.fs, "sleep 100", timeout=1)
 
         self.assertFalse(result["success"])
         self.assertEqual(result["exit_code"], -1)
@@ -32,7 +32,7 @@ class TestGraphRunScriptErrorHandling(unittest.TestCase):
         # Simulate generic exception
         mock_run.side_effect = Exception("System failure")
 
-        result = _run_script(self.repo_root, self.fs, "ls")
+        result = run_script(self.repo_root, self.fs, "ls")
 
         self.assertFalse(result["success"])
         self.assertEqual(result["exit_code"], -1)
