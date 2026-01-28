@@ -27,7 +27,7 @@ from app_operator.cli_agent.healthcheck import run_health_check
 
 from app_operator.adk.models import build_adk_model
 from app_operator.adk.tools import build_tools
-from app_operator.adk.agent_factory import build_adk_agent
+from app_operator.adk.agent_factory import build_adk_agent, build_loop_agent
 from app_operator.adk.runner import AdkAgentRunner
 
 
@@ -193,125 +193,78 @@ class AdkOperator:
                     raise AgentError(msg)
 
     def _deploy_with_retries(self) -> bool:
-        """Deploy application with retries and auto-fix."""
-        logger.info(f"Deploying with max {self.max_deployment_attempts} attempts...")
+        """Deploy application using LoopAgent."""
+        logger.info(
+            f"Deploying with LoopAgent (max {self.max_deployment_attempts} retries)..."
+        )
 
-        # Determine start attempt
-        start_attempt = self._get_next_attempt_number()
-        end_attempt = start_attempt + self.max_deployment_attempts
+        # 1. Define Deployer Agent
+        deployer_prompt = (
+            "You are the Deployer. Your goal is to deploy the application and verify its health.\n"
+            "1. Run `.sds/deploy.sh start` using the `bash` tool.\n"
+            "2. If the deployment succeeds (exit code 0), run `.sds/health_check.sh` using the `bash` tool.\n"
+            "3. If the health check also succeeds, you MUST call the `finish_deployment` tool immediately to complete the process.\n"
+            "4. If any step fails, stop and output 'Deployment failed' to yield to the Fixer."
+        )
 
-        # Agent for fixing (will be created if needed)
-        fixer_agent = None
+        deployer = build_adk_agent(
+            name="Deployer",
+            instruction=deployer_prompt,
+            model=self.model,
+            tools=self.tools,
+        )
 
-        for attempt in range(start_attempt, end_attempt):
-            logger.info(f"--- Deployment Attempt #{attempt} ---")
+        # 2. Define Fixer Agent
+        fixer_prompt = (
+            f"You are the Fixer. Your goal is to fix deployment or health check errors.\n"
+            f"1. Analyze the output and errors from the previous Deployer attempt.\n"
+            f"2. Use tools like `read`, `grep`, `edit`, `ls` to investigate and fix the issues in the scripts or codebase.\n"
+            f"3. After applying fixes, yield back to the Deployer to retry.\n"
+            f"Context: Platform is {self.config.deployment.platform}."
+        )
 
-            with self.recorder.phase(Phase.DEPLOYMENT, {"attempt": attempt}) as r:
-                log_file = self.logs_dir / f"deploy_attempt_{attempt}.log"
+        fixer = build_adk_agent(
+            name="Fixer",
+            instruction=fixer_prompt,
+            model=self.model,
+            tools=self.tools,
+        )
 
-                # Run deploy.sh
-                start_time = time.time()
-                deploy_result = self._run_deploy_command(
-                    "start", log_file_path=log_file
+        # 3. Create LoopAgent
+        # max_iterations covers Deploy -> Fix cycles.
+        loop_agent = build_loop_agent(
+            name="DeploymentLoop",
+            sub_agents=[deployer, fixer],
+            max_iterations=self.max_deployment_attempts * 2,
+            tools=self.tools,
+        )
+
+        # 4. Run Loop
+        with self.recorder.phase(Phase.DEPLOYMENT) as r:
+            try:
+                # The user prompt triggers the loop
+                response = self.runner.run_once(
+                    loop_agent,
+                    "Start the deployment process. Alternate between Deployer and Fixer until successful.",
                 )
-                duration = time.time() - start_time
 
-                # Record tool call
-                r.add_tool_call(
-                    tool="bash",
-                    args={"script": ".sds/deploy.sh start"},
-                    stdout=deploy_result.get("stdout", ""),
-                    stderr=deploy_result.get("stderr", ""),
-                    exit_code=deploy_result.get("exit_code", -1),
-                    duration=duration,
-                )
-
-                health_result = None
-                if deploy_result["success"]:
-                    logger.success("Deployment script succeeded.")
-                    r.add_assistant_message("Deployment script succeeded.")
-
-                    # Run health check
-                    health_log = self.logs_dir / f"health_check_attempt_{attempt}.log"
-                    health_start = time.time()
-                    health_result = run_health_check(
-                        self.repo_path,
-                        self.health_check_script,
-                        log_file_path=health_log,
-                    )
-                    health_duration = time.time() - health_start
-
-                    r.add_tool_call(
-                        tool="bash",
-                        args={"script": ".sds/health_check.sh"},
-                        stdout=health_result.get("stdout", ""),
-                        stderr=health_result.get("stderr", ""),
-                        exit_code=health_result.get("exit_code", -1),
-                        duration=health_duration,
-                    )
-
-                    if health_result["success"]:
-                        logger.success("Health check passed.")
-                        r.add_assistant_message(
-                            "Health check passed. Deployment successful!"
-                        )
-                        return True
-                    else:
-                        logger.warning("Health check failed.")
-                        r.add_assistant_message("Health check failed. Analyzing...")
+                # Check for success signal
+                if (
+                    "DEPLOYMENT_FINISHED" in response
+                    or "Deployment Successful" in response
+                ):
+                    logger.success("Deployment Loop completed successfully.")
+                    r.add_assistant_message("Deployment Loop completed successfully.")
+                    return True
                 else:
-                    logger.error("Deployment script failed.")
-                    r.add_assistant_message("Deployment script failed. Analyzing...")
+                    logger.error("Deployment Loop ended without success signal.")
+                    r.add_assistant_message("Deployment Loop failed.")
+                    return False
 
-                # Fix attempt
-                if attempt < end_attempt - 1:
-                    if not fixer_agent:
-                        # Initialize fixer agent
-                        system_prompt = create_system_prompt(
-                            self.config.deployment.platform
-                        )
-                        fixer_agent = build_adk_agent(
-                            name="ErrorFixer",
-                            instruction=system_prompt,
-                            model=self.model,
-                            tools=self.tools,
-                        )
-
-                    logger.info("Consulting agent to fix issues...")
-
-                    error_context = prepare_error_context(
-                        deploy_result,
-                        health_result,
-                        log_file,
-                        self.logs_dir / f"health_check_attempt_{attempt}.log"
-                        if health_result
-                        else None,
-                    )
-
-                    prompt = create_fix_prompt(
-                        self.repo_path,
-                        attempt,
-                        self.max_deployment_attempts,
-                        error_context,
-                        self.deploy_script,
-                        self.health_check_script,
-                    )
-
-                    response = self.runner.run_once(fixer_agent, prompt)
-
-                    # Save summary if found
-                    match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
-                    if match:
-                        summary_file = self.logs_dir / f"fix_summary_{attempt}.log"
-                        self.filesystem.write_text(summary_file, match.group(1).strip())
-
-                    logger.info("Agent processed the error. Retrying...")
-                    r.set_phase_status("needs_retry")
-                else:
-                    logger.error("Max attempts reached.")
-                    r.set_phase_status("failed")
-
-        return False
+            except Exception as e:
+                logger.error(f"Deployment Loop failed: {e}")
+                r.add_assistant_message(f"Deployment Loop failed: {e}")
+                return False
 
     def _monitor(self) -> None:
         """Run health monitoring."""

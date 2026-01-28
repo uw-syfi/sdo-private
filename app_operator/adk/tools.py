@@ -239,6 +239,14 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
     return bash
 
 
+def _build_finish_deployment(context: ToolContext) -> Callable[[], str]:
+    def finish_deployment() -> str:
+        """Mark the deployment as successfully completed and finish the process."""
+        return "DEPLOYMENT_FINISHED"
+
+    return finish_deployment
+
+
 def build_tools(
     repo_path: Path, filesystem: FileSystemInterface = None
 ) -> List[Callable[..., Any]]:
@@ -253,4 +261,5 @@ def build_tools(
         _build_grep(context),
         _build_write_file(context),
         _build_bash(context),
+        _build_finish_deployment(context),
     ]

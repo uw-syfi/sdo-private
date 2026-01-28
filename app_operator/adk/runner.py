@@ -5,7 +5,7 @@ from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
 
 # Assuming imports
 try:
-    from google.genai.agent import Runner, InMemorySessionService, LlmAgent
+    from google.genai.agent import Runner, InMemorySessionService, LlmAgent, LoopAgent
 except ImportError:
     # Fallback/Mock for development environment without ADK installed
     class Runner:
@@ -20,6 +20,10 @@ except ImportError:
 
     class LlmAgent:
         pass
+
+    class LoopAgent(LlmAgent):
+        def __init__(self, name, sub_agents, max_iterations=None, tools=None):
+            pass
 
 
 class AdkAgentRunner:
