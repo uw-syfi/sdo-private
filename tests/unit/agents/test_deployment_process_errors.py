@@ -5,7 +5,7 @@ and edge cases in process execution.
 """
 
 import time
-from app_operator.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures.agents import StubAgent
 
 
@@ -141,7 +141,7 @@ class TestHealthCheckProcessErrors:
 
     def test_health_check_timeout(self, tmp_path):
         """Health check that times out should be handled properly."""
-        from tools.healthcheck import run_health_check
+        from app_operator.cli_agent.healthcheck import run_health_check
 
         repo = tmp_path / "repo"
         repo.mkdir()

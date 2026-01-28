@@ -26,8 +26,18 @@ class UnrecognizedFieldError(ConfigurationError):
 class AgentConfig:
     provider: str = "codex"
     model: Optional[str] = None
+    location: Optional[str] = None
 
-    VALID_PROVIDERS = {"codex", "gemini", "claude", "claude-code", "opencode"}
+    VALID_PROVIDERS = {
+        "codex",
+        "gemini",
+        "vertex",
+        "claude",
+        "claude-code",
+        "opencode",
+        "openai",
+        "anthropic",
+    }
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
@@ -41,6 +51,10 @@ class AgentConfig:
         if self.model is not None and not isinstance(self.model, str):
             raise TypeError(
                 f"model must be str or None, got {type(self.model).__name__}"
+            )
+        if self.location is not None and not isinstance(self.location, str):
+            raise TypeError(
+                f"location must be str or None, got {type(self.location).__name__}"
             )
 
 
@@ -91,8 +105,13 @@ class OperatorConfig:
         if self.interval > 86400:
             raise ValueError(f"interval too large: {self.interval}s (max: 86400s/24h)")
 
-        for field_name in ["monitoring_max_iters", "deployment_max_iters",
-                           "agent_fix_timeout", "deploy_timeout", "agent_timeout"]:
+        for field_name in [
+            "monitoring_max_iters",
+            "deployment_max_iters",
+            "agent_fix_timeout",
+            "deploy_timeout",
+            "agent_timeout",
+        ]:
             value = getattr(self, field_name)
             if not isinstance(value, int):
                 raise TypeError(f"{field_name} must be int, got {type(value).__name__}")
@@ -101,10 +120,34 @@ class OperatorConfig:
 
 
 @dataclass
+class RuntimeConfig:
+    impl: str = "cli_agent"
+
+    VALID_IMPLS = {"cli_agent", "langgraph"}
+
+    def __post_init__(self):
+        if not isinstance(self.impl, str):
+            raise TypeError(f"impl must be str, got {type(self.impl).__name__}")
+        if self.impl not in self.VALID_IMPLS:
+            raise ValueError(
+                f"Invalid impl: '{self.impl}'. "
+                f"Valid impls: {', '.join(sorted(self.VALID_IMPLS))}"
+            )
+
+
+@dataclass
 class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     operator: OperatorConfig = field(default_factory=OperatorConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+
+    def __post_init__(self):
+        if self.runtime.impl == "langgraph":
+            if not self.agent.provider:
+                raise ValueError("agent.provider must be set for langgraph runtime")
+            if not self.agent.model:
+                raise ValueError("agent.model must be set for langgraph runtime")
 
     @staticmethod
     def _validate_fields(
@@ -127,7 +170,7 @@ class Config:
     @classmethod
     def from_dict(cls, data: dict) -> "Config":
         # Validate top-level sections
-        recognized_sections = {"agent", "operator", "deployment"}
+        recognized_sections = {"agent", "operator", "deployment", "runtime"}
         unrecognized_sections = set(data.keys()) - recognized_sections
         if unrecognized_sections:
             raise UnrecognizedSectionError(
@@ -140,15 +183,18 @@ class Config:
         agent_data = data.get("agent", {})
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
+        runtime_data = data.get("runtime", {})
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
+        cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
 
         return cls(
             agent=AgentConfig(**agent_data),
             operator=OperatorConfig(**operator_data),
             deployment=DeploymentConfig(**deployment_data),
+            runtime=RuntimeConfig(**runtime_data),
         )
 
 

@@ -10,19 +10,26 @@ This repository contains applications, tools, and infrastructure code for the SD
 
 ```
 sds/
-├── app_operator/    # Application operators and management tools
-│   ├── agents/      # Specialized agents (deployer, monitor)
-│   └── ...
-├── apps/            # Application code and configurations
-├── scripts/         # Helper scripts (formatting, checks)
-├── sds_operator     # CLI tool for running the operator
-├── tests/           # Unit tests
-└── tools/           # Shared tools/utilities
+├── app_operator/         # Core operator logic
+│   ├── cli_agent/        # CLI-based agent implementation
+│   │   ├── agents/       # Specialized agents (deployer, monitor, code_analyzer)
+│   │   └── backend/      # Coding agent CLI backends (claude, gemini, codex, opencode)
+│   ├── langgraph/        # LangGraph-based implementation
+│   ├── commands/         # CLI commands (run, init_exp, viz_graph)
+│   └── prompts/          # Jinja2 prompt templates
+├── apps/                 # Application code and configurations
+├── scripts/              # Helper scripts (formatting, checks)
+├── sds_operator          # CLI tool for running the operator
+└── tests/                # Unit and integration tests
 ```
 
 ## Application Operator
 
 The Application Operator (`app_operator`) is a tool for deploying and monitoring applications with automated health checks and graceful lifecycle management. It also includes AI-powered script generation to automatically create deployment and health check scripts for any application repository.
+
+SDS provides two implementations of this high-level approach:
+- **CLI Agent Runtime (`cli_agent`)**: Communicates with external coding agents via their CLI interfaces for autonomous tasks.
+- **LangGraph Runtime (`langgraph`)**: Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes.
 
 ### Key Features
 
@@ -64,6 +71,16 @@ GOOGLE_CLOUD_PROJECT="your_project_id"
 GOOGLE_CLOUD_LOCATION="global"
 ```
 
+For Gemini via LangChain:
+```bash
+GOOGLE_API_KEY=your_api_key_here
+```
+
+For Anthropic via LangChain:
+```bash
+ANTHROPIC_API_KEY=your_api_key_here
+```
+
 2. Configure the agent and operator settings by copying `sds.example.toml` to `sds.toml` in the project root:
 
 ```bash
@@ -74,8 +91,8 @@ Then edit `sds.toml` to configure your settings:
 
 ```toml
 [agent]
-provider = "codex"  # or "gemini", "claude"
-model = "gpt-4o-mini" # optional
+provider = "codex"  # or "gemini", "claude", "opencode", "openai", "anthropic"
+model = "gpt-4o-mini" # required for langgraph runtime
 
 [operator]
 interval = 30 # Health check interval in seconds (default: 30)
@@ -85,7 +102,18 @@ deployment_max_iters = 5 # Maximum deployment attempts (default: 5)
 [deployment]
 platform = "docker" # Deployment platform: "docker" or "k8s" (default: "docker")
 target = "local"    # Deployment target: "local" or "remote" (default: "local")
+
+[runtime]
+impl = "cli_agent" # "cli_agent" or "langgraph"
 ```
+
+**LangGraph runtime requirements**
+- Set `[runtime] impl = "langgraph"` to use the LangGraph implementation.
+- When using LangGraph, you must set both `agent.provider` and `agent.model`.
+- Provider mapping in LangGraph:
+  - `codex`/`opencode`/`openai` → OpenAI
+  - `claude`/`claude-code`/`anthropic` → Anthropic
+  - `gemini` → Gemini
 
 ### Experiment Workflow
 
@@ -128,6 +156,21 @@ Deploy an application with autonomous error fixing and AI-powered health monitor
 **Options:**
 - `--config <FILE>`: Path to configuration file (default: `sds.toml` in target dir)
 
+#### `viz-graph` - Visualize Dependency Graph
+
+Visualize the agent's dependency graph in LangGraph.
+
+**Usage:**
+```bash
+./sds_operator viz-graph [options]
+```
+
+**Options:**
+- `--output <FILE>`, `-o <FILE>`: Output file path (e.g., `graph.png`, `graph.mermaid`).
+  - If `.png` extension is used, generates a PNG image (requires internet access).
+  - Otherwise, saves the Mermaid syntax text.
+  - If omitted, prints Mermaid syntax to stdout.
+
 #### `init-exp` - Initialize Experiment
 
 Initialize a new experiment from an existing application.
@@ -169,4 +212,3 @@ pr-prepare  # Automatically pushes branch to remote
 
 # Then create MR on GitLab using the generated title and description
 ```
-

@@ -11,13 +11,12 @@ class PromptLoader:
 
         Args:
             templates_dir: Path to the directory containing templates.
-                           Defaults to the 'prompts' directory at the project root.
+                           Defaults to the 'templates' directory in this package.
         """
         if templates_dir is None:
-            # Assumes this file is in app_operator/prompts.py
-            # and prompts/ is in the project root.
-            root_dir = Path(__file__).resolve().parents[1]
-            self.templates_dir = root_dir / "prompts"
+            # Assumes this file is in app_operator/prompts/__init__.py
+            # and templates/ is in app_operator/prompts/templates
+            self.templates_dir = Path(__file__).resolve().parent / "templates"
         else:
             self.templates_dir = Path(templates_dir)
 

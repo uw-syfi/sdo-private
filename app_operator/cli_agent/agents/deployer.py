@@ -4,17 +4,21 @@ import time
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
-from app_operator.agent_cli.base import CodingAgent
-from app_operator.agent_cli.factory import create_agent_from_config
+from app_operator.cli_agent.backend.base import CodingAgent
+from app_operator.cli_agent.backend.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
-from app_operator.subprocess_runner import SubprocessRunner
-from app_operator.progress_summarizer import ProgressSummarizer
-from tools.healthcheck import run_health_check
-from tools.trajectory import (
+from app_operator.prompts.deployment_context import (
+    analyze_repository,
+    create_system_prompt,
+)
+from app_operator.cli_agent.subprocess_runner import SubprocessRunner
+from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
+from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.trajectory import (
     Phase,
     record_phase_start,
     record_phase_end,
@@ -89,10 +93,10 @@ def generate_scripts(
         record_phase_start(Phase.SCRIPT_GENERATION)
 
         # Create system prompt based on deployment platform
-        system_prompt = _create_system_prompt(deployment_config.platform)
+        system_prompt = create_system_prompt(deployment_config.platform)
 
         # Analyze the repository structure
-        repo_context = _analyze_repository(target_path)
+        repo_context = analyze_repository(target_path)
 
         # Generate deploy.sh using coding agent
         deploy_success, deploy_msg = _generate_deploy_script(
@@ -146,66 +150,6 @@ def generate_scripts(
         return False, f"Unexpected error during script generation: {e}"
 
 
-def _create_system_prompt(platform: str) -> str:
-    """Create the system prompt for coding agent to guide script generation."""
-    return get_loader().render("deployer/system.jinja2", platform=platform)
-
-
-def _analyze_repository(repo_path: Path) -> str:
-    """Analyze repository structure and return context string."""
-    context_parts = []
-
-    # Check for common deployment files
-    if (repo_path / ".sds" / "code_analysis.md").exists():
-        context_parts.append("- Found code analysis: .sds/code_analysis.md")
-    if (repo_path / ".sds" / "deployment_issues.md").exists():
-        context_parts.append(
-            "- Found deployment issues report: .sds/deployment_issues.md"
-        )
-
-    if (repo_path / "docker-compose.yml").exists():
-        context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
-    if (repo_path / "docker-compose.yaml").exists():
-        context_parts.append("- Found docker-compose.yaml (Docker Compose deployment)")
-    if (repo_path / "Dockerfile").exists():
-        context_parts.append("- Found Dockerfile (Docker-based application)")
-    if (repo_path / "k8s").exists() or (repo_path / "kubernetes").exists():
-        context_parts.append("- Found Kubernetes manifests directory")
-    if (repo_path / "Makefile").exists():
-        context_parts.append("- Found Makefile (may contain build/deploy targets)")
-
-    # Check for common application files
-    if (repo_path / "package.json").exists():
-        context_parts.append("- Found package.json (Node.js application)")
-    if (repo_path / "requirements.txt").exists() or (
-        repo_path / "pyproject.toml"
-    ).exists():
-        context_parts.append("- Found Python dependencies (Python application)")
-    if (repo_path / "go.mod").exists():
-        context_parts.append("- Found go.mod (Go application)")
-    if (repo_path / "Cargo.toml").exists():
-        context_parts.append("- Found Cargo.toml (Rust application)")
-    if (repo_path / "pom.xml").exists():
-        context_parts.append("- Found pom.xml (Java/Maven application)")
-
-    # Check for README
-    readme_files = list(repo_path.glob("README*"))
-    if readme_files:
-        context_parts.append(
-            f"- Found README file(s): {', '.join(f.name for f in readme_files)}"
-        )
-
-    # Get repository name
-    repo_name = repo_path.name
-    context_parts.insert(0, f"Repository: {repo_name}")
-
-    return (
-        "\n".join(context_parts)
-        if context_parts
-        else "Repository structure analysis: No obvious deployment files found"
-    )
-
-
 def _generate_deploy_script(
     agent: CodingAgent,
     system_prompt: str,
@@ -231,7 +175,9 @@ def _generate_deploy_script(
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout)
+        agent.generate(
+            full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout
+        )
 
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
@@ -282,7 +228,9 @@ def _generate_health_check_script(
 
     try:
         start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout)
+        agent.generate(
+            full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout
+        )
 
         duration = time.time() - start_time
         logger.info(f"Agent generation took {duration / 60:.2f} minutes")
@@ -397,7 +345,11 @@ class DeploymentAgent:
             )
 
             success, message = generate_scripts(
-                str(self.repo_path), self.agent, self.filesystem, self.deployment_config, self.operator_config
+                str(self.repo_path),
+                self.agent,
+                self.filesystem,
+                self.deployment_config,
+                self.operator_config,
             )
 
             if success:
@@ -641,7 +593,9 @@ class DeploymentAgent:
             # Note: The agent is expected to modify files directly
             start_time = time.time()
             response = self.agent.generate(
-                prompt, cwd=str(self.repo_path), timeout=self.operator_config.agent_fix_timeout
+                prompt,
+                cwd=str(self.repo_path),
+                timeout=self.operator_config.agent_fix_timeout,
             )
             duration = time.time() - start_time
             logger.info(f"Agent generation (fix) took {duration / 60:.2f} minutes")
@@ -709,6 +663,13 @@ class DeploymentAgent:
         context_parts.append(
             f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}"
         )
+
+        if health_result is not None:
+            context_parts.append("\n## Health Check Result")
+            context_parts.append(f"Exit Code: {health_result['exit_code']}")
+            context_parts.append(
+                f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}"
+            )
 
         return "\n".join(context_parts)
 

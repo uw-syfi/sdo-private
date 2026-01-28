@@ -1,7 +1,8 @@
 import pytest
 from pathlib import Path
 from unittest.mock import Mock
-from app_operator.agents.deployer import generate_scripts, _analyze_repository
+from app_operator.cli_agent.agents.deployer import generate_scripts
+from app_operator.prompts.deployment_context import analyze_repository
 
 
 class StubAgent:
@@ -50,7 +51,7 @@ def test_analyze_repository_detects_languages(tmp_path):
     (tmp_path / "package.json").touch()
     (tmp_path / "go.mod").touch()
 
-    context = _analyze_repository(tmp_path)
+    context = analyze_repository(tmp_path)
     assert isinstance(context, str)
     assert "Repository: " in context
 

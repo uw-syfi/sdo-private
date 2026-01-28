@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 import signal
-from app_operator.operator import AppOperator
+from app_operator.cli_agent.operator import AppOperator
 
 
 @pytest.fixture
@@ -20,9 +20,9 @@ def mock_agent():
 def app_operator(repo_path, mock_agent):
     # Mock the internal agents to avoid real instantiation
     with (
-        patch("app_operator.operator.DeploymentAgent") as mock_deployer_cls,
-        patch("app_operator.operator.AppMonitor") as mock_monitor_cls,
-        patch("app_operator.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
+        patch("app_operator.cli_agent.operator.DeploymentAgent") as mock_deployer_cls,
+        patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
+        patch("app_operator.cli_agent.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
     ):
         op = AppOperator(str(repo_path), agent=mock_agent)
         yield (
@@ -34,7 +34,9 @@ def app_operator(repo_path, mock_agent):
 
 
 def test_operator_init_validates_path(tmp_path):
-    with patch("app_operator.operator.create_agent_from_config") as mock_create_agent:
+    with patch(
+        "app_operator.cli_agent.operator.create_agent_from_config"
+    ) as mock_create_agent:
         mock_create_agent.return_value = Mock()
         with pytest.raises(ValueError, match="does not exist"):
             AppOperator(str(tmp_path / "nonexistent"))

@@ -45,7 +45,9 @@ def create_agent_from_config(
         return GeminiCodingAgent(model=model)
     elif provider_lower == "opencode":
         return OpencodeCodingAgent(model=model)
-    elif provider_lower in ("claude", "claude-code"):
+    elif provider_lower in ("claude", "claude-code", "anthropic"):
         return ClaudeCodeCodingAgent(model=model)
+    elif provider_lower in ("openai", "codex"):
+        return CodexCodingAgent(model=model)
     else:
         return CodexCodingAgent(model=model)

@@ -1,6 +1,6 @@
 import pytest
-from app_operator.agents.app_monitor import AppMonitor, HealthCheckTask
-import app_operator.agents.app_monitor as app_monitor_module
+from app_operator.cli_agent.agents.app_monitor import AppMonitor, HealthCheckTask
+import app_operator.cli_agent.agents.app_monitor as app_monitor_module
 
 
 class StubAgent:

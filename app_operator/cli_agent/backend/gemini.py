@@ -4,7 +4,7 @@ import time
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
-from tools.trajectory import record_tool_call
+from app_operator.trajectory import record_tool_call
 
 
 class GeminiGenerationSession(CLIGenerationSession):

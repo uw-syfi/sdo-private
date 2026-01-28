@@ -6,12 +6,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
 
-from app_operator.agent_cli.base import CodingAgent
+from app_operator.cli_agent.backend.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
-from tools.healthcheck import run_health_check
-from tools.trajectory import (
+from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.trajectory import (
     Phase,
     record_phase_start,
     record_phase_end,

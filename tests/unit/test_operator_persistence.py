@@ -1,10 +1,10 @@
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from app_operator.operator import AppOperator
+from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import Config, DeploymentConfig
 from app_operator.filesystem import InMemoryFilesystem
-from app_operator.agent_cli.base import CodingAgent
+from app_operator.cli_agent.backend.base import CodingAgent
 
 
 class StubAgent(CodingAgent):
@@ -23,7 +23,7 @@ class StubAgent(CodingAgent):
 
 @pytest.fixture
 def mock_trajectory():
-    with patch("app_operator.operator.init_trajectory") as mock:
+    with patch("app_operator.cli_agent.operator.init_trajectory") as mock:
         mock_recorder = MagicMock()
         mock.return_value = mock_recorder
         yield mock

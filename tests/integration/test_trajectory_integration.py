@@ -1,6 +1,6 @@
 import json
 import pytest
-from tools.trajectory import (
+from app_operator.trajectory import (
     init_trajectory,
     finalize_trajectory,
     record_phase_start,

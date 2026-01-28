@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from app_operator.agent_cli.gemini import GeminiCodingAgent
+from app_operator.cli_agent.backend.gemini import GeminiCodingAgent
 
 # Define the fixture path relative to this test file or project root
 FIXTURE_PATH = Path("tests/fixtures/gemini/example_stream_json.txt")
@@ -28,9 +28,12 @@ def mock_which():
 def gemini_agent(mock_which, mock_env):
     """Create a GeminiCodingAgent instance with mocked environment."""
     with patch(
-        "app_operator.agent_cli.cli_agent._get_interactive_env", return_value=mock_env
+        "app_operator.cli_agent.backend.cli_agent._get_interactive_env",
+        return_value=mock_env,
     ):
-        with patch("app_operator.agent_cli.cli_agent.CLICodingAgent._check_cli"):
+        with patch(
+            "app_operator.cli_agent.backend.cli_agent.CLICodingAgent._check_cli"
+        ):
             agent = GeminiCodingAgent()
             yield agent
 

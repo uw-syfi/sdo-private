@@ -10,7 +10,7 @@ from typing import Optional, List
 from app_operator.logger import logger
 from .base import CodingAgent
 from .utils import _get_interactive_env
-from tools.trajectory import record_user_message, record_assistant_message
+from app_operator.trajectory import record_user_message, record_assistant_message
 
 
 class CLIGenerationSession:

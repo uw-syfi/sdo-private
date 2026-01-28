@@ -3,16 +3,16 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from app_operator.agent_cli.base import CodingAgent
-from app_operator.agent_cli.factory import create_agent_from_config
-from app_operator.agents.deployer import DeploymentAgent
-from app_operator.agents.app_monitor import AppMonitor
-from app_operator.agents.code_analyzer import CodeAnalyzerAgent
+from app_operator.cli_agent.backend.base import CodingAgent
+from app_operator.cli_agent.backend.factory import create_agent_from_config
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.app_monitor import AppMonitor
+from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
-from tools.trajectory import init_trajectory, finalize_trajectory
+from app_operator.trajectory import init_trajectory, finalize_trajectory
 
 
 class AppOperator:
@@ -86,7 +86,11 @@ class AppOperator:
         # Initialize agents
         self.analyzer = CodeAnalyzerAgent(self.repo_path, self.agent, self.filesystem)
         self.deployer = DeploymentAgent(
-            self.repo_path, self.agent, self.filesystem, self.config.deployment, self.config.operator
+            self.repo_path,
+            self.agent,
+            self.filesystem,
+            self.config.deployment,
+            self.config.operator,
         )
         self.monitor = AppMonitor(self.repo_path, self.agent, self.filesystem)
 
