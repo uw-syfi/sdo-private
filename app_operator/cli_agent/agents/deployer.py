@@ -11,7 +11,10 @@ from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
-from app_operator.deployment_context import analyze_repository, create_system_prompt
+from app_operator.prompts.deployment_context import (
+    analyze_repository,
+    create_system_prompt,
+)
 from app_operator.cli_agent.subprocess_runner import SubprocessRunner
 from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
 from app_operator.cli_agent.healthcheck import run_health_check
