@@ -4,7 +4,7 @@ provider = "codex" # or "gemini", "claude", "opencode", "openai", "anthropic"
 # location = "us-central1" # optional: specify vertex AI location (default: us-central1)
 
 [runtime]
-impl = "cli_agent" # or "langgraph"
+impl = "cli_agent" # or "langgraph", "adk"
 
 [operator]
 interval = 30

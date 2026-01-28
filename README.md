@@ -27,9 +27,10 @@ sds/
 
 The Application Operator (`app_operator`) is a tool for deploying and monitoring applications with automated health checks and graceful lifecycle management. It also includes AI-powered script generation to automatically create deployment and health check scripts for any application repository.
 
-SDS provides two implementations of this high-level approach:
+SDS provides three implementations of this high-level approach:
 - **CLI Agent Runtime (`cli_agent`)**: Communicates with external coding agents via their CLI interfaces for autonomous tasks.
 - **LangGraph Runtime (`langgraph`)**: Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes.
+- **ADK Runtime (`adk`)**: Uses Google's Agent Development Kit with Gemini models for deterministic orchestration of agent tasks.
 
 ### Key Features
 
@@ -104,7 +105,7 @@ platform = "docker" # Deployment platform: "docker" or "k8s" (default: "docker")
 target = "local"    # Deployment target: "local" or "remote" (default: "local")
 
 [runtime]
-impl = "cli_agent" # "cli_agent" or "langgraph"
+impl = "cli_agent" # "cli_agent", "langgraph", or "adk"
 ```
 
 **LangGraph runtime requirements**
@@ -114,6 +115,12 @@ impl = "cli_agent" # "cli_agent" or "langgraph"
   - `codex`/`opencode`/`openai` → OpenAI
   - `claude`/`claude-code`/`anthropic` → Anthropic
   - `gemini` → Gemini
+
+**ADK runtime requirements**
+- Set `[runtime] impl = "adk"` to use the ADK implementation.
+- Must set `agent.model` (e.g., "gemini-2.0-flash").
+- Only supports `gemini` or `vertex` providers.
+- Requires `google-adk` package.
 
 ### Experiment Workflow
 

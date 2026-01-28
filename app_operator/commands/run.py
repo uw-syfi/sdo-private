@@ -3,6 +3,7 @@ import argparse
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.cli_agent import create_agent_from_config
 from app_operator.langgraph import LangGraphOperator
+from app_operator.adk import AdkOperator
 from app_operator.config import load_config
 from app_operator.logger import logger
 
@@ -36,6 +37,14 @@ def run_command(args: argparse.Namespace) -> int:
     try:
         if config.runtime.impl == "langgraph":
             operator = LangGraphOperator(
+                repo_path=args.directory,
+                health_check_interval=interval,
+                health_check_max_count=config.operator.monitoring_max_iters,
+                max_deployment_attempts=config.operator.deployment_max_iters,
+                config=config,
+            )
+        elif config.runtime.impl == "adk":
+            operator = AdkOperator(
                 repo_path=args.directory,
                 health_check_interval=interval,
                 health_check_max_count=config.operator.monitoring_max_iters,

@@ -18,3 +18,19 @@ def test_runtime_impl_langgraph_accepts_provider_and_model():
     assert config.runtime.impl == "langgraph"
     assert config.agent.provider == "openai"
     assert config.agent.model == "gpt-4o-mini"
+
+
+def test_runtime_impl_adk_requires_model():
+    with pytest.raises(ValueError, match="agent.model must be set for adk runtime"):
+        Config.from_dict({"runtime": {"impl": "adk"}})
+
+
+def test_runtime_impl_adk_accepts_model():
+    config = Config.from_dict(
+        {
+            "runtime": {"impl": "adk"},
+            "agent": {"provider": "gemini", "model": "gemini-2.0-flash"},
+        }
+    )
+    assert config.runtime.impl == "adk"
+    assert config.agent.model == "gemini-2.0-flash"
