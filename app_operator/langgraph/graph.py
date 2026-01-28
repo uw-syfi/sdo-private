@@ -30,10 +30,16 @@ from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
 
 
+BLUE = "\033[34m"
+GREEN = "\033[32m"
+RESET = "\033[0m"
+
+
 def _invoke_agent(
     agent: Any,
     system_prompt: str,
     user_prompt: str,
+    agent_name: str = "Agent",
 ) -> tuple[str, list[BaseMessage]]:
     full_prompt = f"{system_prompt}\n\n{user_prompt}"
     record_user_message(full_prompt)
@@ -42,7 +48,7 @@ def _invoke_agent(
     response_messages = list(messages)
 
     print("\n" + "=" * 50)
-    print("Executing Agent...")
+    print(f"Executing {agent_name}...")
     print("=" * 50 + "\n")
 
     for chunk in agent.stream({"messages": messages}, stream_mode="updates"):
@@ -56,22 +62,22 @@ def _invoke_agent(
             for msg in new_messages:
                 if isinstance(msg, AIMessage):
                     if msg.tool_calls:
-                        print("\n[Agent Tool Call]")
                         for tool_call in msg.tool_calls:
-                            print(f"  Tool: {tool_call['name']}")
-                            print(f"  Args: {tool_call['args']}")
+                            print(
+                                f"{BLUE}[Tool Use] {tool_call['name']} {tool_call['args']}{RESET}"
+                            )
 
                     if msg.content:
-                        print("\n[Agent Thought/Response]")
+                        # Print thought/response in default color (usually white/gray)
+                        # similar to CLI agent text stream
                         print(f"{msg.content}")
 
                 elif isinstance(msg, ToolMessage):
-                    print("\n[Tool Output]")
                     content = str(msg.content)
                     if len(content) > 500:
-                        print(f"{content[:500]}... (truncated)")
-                    else:
-                        print(f"{content}")
+                        content = f"{content[:500]}... (truncated)"
+
+                    print(f"{GREEN}[Tool Result] {content}{RESET}")
 
     print("\n" + "=" * 50 + "\n")
 
@@ -197,7 +203,9 @@ def build_graph(
         system_prompt = loader.render("code_analyzer/system.jinja2")
         user_prompt = loader.render("code_analyzer/user.jinja2", repo_path=repo_path)
 
-        _, messages = _invoke_agent(analyze_agent, system_prompt, user_prompt)
+        _, messages = _invoke_agent(
+            analyze_agent, system_prompt, user_prompt, agent_name="Code Analyzer"
+        )
 
         record_phase_end("success")
         state["analysis_done"] = True
@@ -229,8 +237,8 @@ def build_graph(
             platform=config.deployment.platform,
         )
 
-        _invoke_agent(script_agent, "", deploy_prompt)
-        _invoke_agent(script_agent, "", health_prompt)
+        _invoke_agent(script_agent, "", deploy_prompt, agent_name="Script Generator")
+        _invoke_agent(script_agent, "", health_prompt, agent_name="Script Generator")
 
         record_phase_end("success")
         state["scripts_done"] = True
@@ -332,7 +340,9 @@ def build_graph(
             health_check_script=repo_path / ".sds" / "health_check.sh",
         )
 
-        response, messages = _invoke_agent(fix_agent, "", prompt)
+        response, messages = _invoke_agent(
+            fix_agent, "", prompt, agent_name="Error Fixer"
+        )
         state["messages"] = messages
 
         match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
@@ -399,7 +409,9 @@ def build_graph(
             "monitor/analyze_health.jinja2", repo_path=repo_path, context=context
         )
 
-        response, messages = _invoke_agent(monitor_agent, "", prompt)
+        response, messages = _invoke_agent(
+            monitor_agent, "", prompt, agent_name="Health Monitor"
+        )
         state["messages"] = messages
 
         log_file = (
