@@ -16,6 +16,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.agents.deployer import _analyze_repository, _create_system_prompt
 from tools.trajectory import (
@@ -80,7 +81,6 @@ def _invoke_agent(
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
     response_messages = list(messages)
     total_usage = {"input": 0, "output": 0, "total": 0}
-    max_request_usage = 0
 
     print("\n" + "=" * 50)
     print(f"Executing {agent_name}...")
@@ -101,9 +101,6 @@ def _invoke_agent(
                     total_usage["output"] += usage.get("output", 0)
                     total_usage["total"] += usage.get("total", 0)
 
-                    if usage.get("total", 0) > max_request_usage:
-                        max_request_usage = usage.get("total", 0)
-
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
                             print(
@@ -115,6 +112,12 @@ def _invoke_agent(
                         # similar to CLI agent text stream
                         print(f"{msg.content}")
 
+                    if usage.get("total", 0) > 0:
+                        pct = round((usage["total"] / context_limit) * 100, 1)
+                        print(
+                            f"\nToken Usage: {pct}% ({usage['total']}/{context_limit})"
+                        )
+
                 elif isinstance(msg, ToolMessage):
                     content = str(msg.content)
                     if len(content) > 500:
@@ -123,10 +126,6 @@ def _invoke_agent(
                     print(f"{GREEN}[Tool Result] {content}{RESET}")
 
     print("\n" + "=" * 50 + "\n")
-    if max_request_usage > 0:
-        pct = round((max_request_usage / context_limit) * 100, 1)
-        print(f"Token Usage: {pct}% ({max_request_usage}/{context_limit})")
-        print("-" * 50 + "\n")
 
     _update_usage(state, total_usage)
 
@@ -250,6 +249,16 @@ def build_graph(
 
     def analyze_code(state: OperatorState) -> OperatorState:
         if state["analysis_done"]:
+            return state
+
+        # Check if analysis files already exist
+        sds_dir = repo_path / ".sds"
+        analysis_file = sds_dir / "code_analysis.md"
+        issues_file = sds_dir / "deployment_issues.md"
+
+        if filesystem.exists(analysis_file) and filesystem.exists(issues_file):
+            logger.info("Code analysis files already exist. Skipping analysis.")
+            state["analysis_done"] = True
             return state
 
         record_phase_start(Phase.EXPLORATION)
