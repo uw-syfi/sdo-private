@@ -1,6 +1,29 @@
 from app_operator.cli_agent.backend.factory import create_agent_from_config
 from app_operator.cli_agent.backend.base import CodingAgent, register_provider
+from app_operator.cli_agent.backend.cli_agent import CLICodingAgent
 from app_operator.config import Config, AgentConfig
+import pytest
+
+
+@pytest.fixture
+def mock_binaries(monkeypatch):
+    """Mock binary checks for agent creation."""
+
+    # Only mock specific binaries that we expect to be present for these tests
+    allowed_binaries = {"gemini", "codex", "claude", "opencode"}
+
+    def mock_which(cmd, path=None):
+        if cmd in allowed_binaries:
+            return f"/usr/bin/{cmd}"
+        return None
+
+    # We need to patch shutil in the cli_agent module where it's used
+    monkeypatch.setattr(
+        "app_operator.cli_agent.backend.cli_agent.shutil.which", mock_which
+    )
+
+    # Also mock _check_cli to avoid running subprocess
+    monkeypatch.setattr(CLICodingAgent, "_check_cli", lambda self: None)
 
 
 @register_provider("mock_provider")
@@ -25,13 +48,13 @@ def test_create_agent_registered_provider(tmp_path, monkeypatch):
     assert agent.model == "test-model"
 
 
-def test_create_agent_gemini(tmp_path):
+def test_create_agent_gemini(tmp_path, mock_binaries):
     config = Config(agent=AgentConfig(provider="gemini"))
     agent = create_agent_from_config(str(tmp_path), config=config)
     assert agent.__class__.__name__ == "GeminiCodingAgent"
 
 
-def test_create_agent_codex_default(tmp_path, monkeypatch):
+def test_create_agent_codex_default(tmp_path, monkeypatch, mock_binaries):
     monkeypatch.setattr(
         AgentConfig,
         "VALID_PROVIDERS",
@@ -43,13 +66,13 @@ def test_create_agent_codex_default(tmp_path, monkeypatch):
     assert agent.__class__.__name__ == "CodexCodingAgent"
 
 
-def test_create_agent_claude_alias(tmp_path):
+def test_create_agent_claude_alias(tmp_path, mock_binaries):
     config = Config(agent=AgentConfig(provider="anthropic"))
     agent = create_agent_from_config(str(tmp_path), config=config)
     assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"
 
 
-def test_create_agent_opencode(tmp_path):
+def test_create_agent_opencode(tmp_path, mock_binaries):
     config = Config(agent=AgentConfig(provider="opencode"))
     agent = create_agent_from_config(str(tmp_path), config=config)
     assert agent.__class__.__name__ == "OpencodeCodingAgent"
