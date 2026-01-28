@@ -125,6 +125,12 @@ This implementation uses a stateful graph to manage the lifecycle:
 *   **Trajectory (`app_operator/trajectory.py`):**
     *   Records agent interactions, prompts, responses, and tool calls.
     *   Saves structured trajectory.json files for analysis.
+    *   **Sequential Call IDs:** Each agent call receives a unique sequential ID (1, 2, 3...) for tracking:
+        *   Call IDs are stored in the `calls` array with start/end times and phase info
+        *   Each conversation in phases (script_generation, deployment, monitoring) includes its `call_id`
+        *   For Gemini CLI: metadata files (`sds_call_XXX.json`) are written to correlate sessions
+        *   Gemini sessions are collected and matched to call IDs based on timing and metadata
+        *   Session files are renamed to `gemini_session_call_XXX.json` for easy correlation
 *   **Prompts (`app_operator/prompts/`):**
     *   Jinja2 template system for generating agent prompts.
     *   Templates organized by agent type: `deployer/`, `monitor/`, `code_analyzer/`.

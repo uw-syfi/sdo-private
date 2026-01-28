@@ -1,10 +1,11 @@
 from typing import Optional, List
 import json
 import time
+from pathlib import Path
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
-from app_operator.trajectory import record_tool_call
+from app_operator.trajectory import record_tool_call, get_current_call_id, get_run_id
 
 
 class GeminiGenerationSession(CLIGenerationSession):
@@ -15,6 +16,47 @@ class GeminiGenerationSession(CLIGenerationSession):
         self.tool_start_times = {}
         self.tool_args = {}
         self._at_line_start = True
+
+        # Capture call_id and run_id for correlation
+        self.call_id = get_current_call_id()
+        self.run_id = get_run_id()
+
+    def _write_call_metadata(self):
+        """Write metadata file to help correlate Gemini session with trajectory call."""
+        if self.call_id is None or self.run_id is None:
+            return
+
+        try:
+            # Write metadata to Gemini's tmp directory
+            gemini_tmp_dir = Path.home() / ".gemini" / "tmp"
+            if not gemini_tmp_dir.exists():
+                return
+
+            # Find the project directory (usually matches cwd)
+            if self.cwd:
+                project_name = Path(self.cwd).name
+                project_dir = gemini_tmp_dir / project_name / "chats"
+                if project_dir.exists():
+                    metadata_file = project_dir / f"sds_call_{self.call_id:03d}.json"
+                    metadata = {
+                        "call_id": self.call_id,
+                        "run_id": self.run_id,
+                        "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "cwd": self.cwd,
+                    }
+                    with open(metadata_file, "w") as f:
+                        json.dump(metadata, f, indent=2)
+        except Exception:
+            # Silently fail - this is just metadata for convenience
+            pass
+
+    def run(self, prompt: str) -> str:
+        """Execute the generation process, writing call metadata first."""
+        # Write metadata file to correlate with trajectory
+        self._write_call_metadata()
+
+        # Call parent implementation
+        return super().run(prompt)
 
     def _process_stdout(self, line: str) -> None:
         """Process a line from stdout."""

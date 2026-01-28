@@ -45,11 +45,18 @@ class AppOperator:
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             config: Optional configuration object.
         """
-        self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval
         self.health_check_max_count = health_check_max_count
         self.max_deployment_attempts = max_deployment_attempts
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+
+        # Convert to Path and resolve only for real filesystem
+        # (InMemoryFilesystem doesn't need symlink resolution)
+        if isinstance(self.filesystem, RealFilesystem):
+            self.repo_path = Path(repo_path).resolve()
+        else:
+            # For InMemoryFilesystem, just use absolute path
+            self.repo_path = Path(repo_path).absolute()
 
         # Validate repository path
         if not self.filesystem.exists(self.repo_path):

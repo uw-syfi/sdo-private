@@ -121,6 +121,10 @@ class TrajectoryRecorder:
             # Also maintain a symlink to the latest trajectory
             self._latest_link = self.sds_dir / "trajectory.json"
 
+            # Sequential call ID counter for tracking agent calls
+            self._call_counter = 0
+            self._call_id_lock = threading.Lock()
+
             # Initialize trajectory structure
             self.trajectory: Dict[str, Any] = {
                 "metadata": {
@@ -129,7 +133,10 @@ class TrajectoryRecorder:
                     "end_time": None,
                     "agent_name": None,
                     "status": "running",
+                    "run_id": self._run_timestamp,
                 },
+                "calls": [],  # Sequential list of all agent calls with metadata
+                "exploration": [],
                 "script_generation": [],
                 "deployment": [],
                 "monitoring": [],
@@ -139,6 +146,7 @@ class TrajectoryRecorder:
             # Current conversation being recorded (not yet committed)
             self._current_phase: Optional[Phase] = None
             self._current_conversation: List[Dict[str, Any]] = []
+            self._current_call_id: Optional[int] = None
             self._conversation_lock = threading.Lock()
 
             # Ensure directories exist
@@ -166,6 +174,28 @@ class TrajectoryRecorder:
         self.trajectory["metadata"]["agent_name"] = agent_name
         self._write_to_file()
 
+    def get_current_call_id(self) -> Optional[int]:
+        """Get the current call ID for the active phase.
+
+        Returns:
+            Current call_id or None if no phase is active.
+        """
+        return self._current_call_id
+
+    def get_run_id(self) -> str:
+        """Get the unique run ID (timestamp) for this trajectory.
+
+        Returns:
+            Run ID string (timestamp format).
+        """
+        return self._run_timestamp
+
+    def _get_next_call_id(self) -> int:
+        """Get the next sequential call ID."""
+        with self._call_id_lock:
+            self._call_counter += 1
+            return self._call_counter
+
     def start_phase(self, phase: Phase, context: Dict[str, Any] = None) -> None:
         """Start a new phase/conversation.
 
@@ -177,17 +207,31 @@ class TrajectoryRecorder:
             # Commit any existing conversation first
             self._commit_current_conversation()
 
+            # Generate a new sequential call ID for this phase
+            self._current_call_id = self._get_next_call_id()
+
             # Start new conversation
             self._current_phase = phase
             self._current_conversation = []
 
-            # Add system message with context
+            # Record this call in the calls list
+            call_start_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            call_record = {
+                "call_id": self._current_call_id,
+                "phase": phase.value,
+                "start_time": call_start_time,
+                "end_time": None,
+                "context": context or {},
+            }
+            self.trajectory["calls"].append(call_record)
+
+            # Add system message with context (including call_id)
             system_content = self._get_system_prompt(phase, context)
             self._current_conversation.append(
                 TrajectoryMessage(
                     role=MessageRole.SYSTEM.value,
                     content=system_content,
-                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    timestamp=call_start_time,
                 ).to_dict()
             )
 
@@ -337,8 +381,20 @@ class TrajectoryRecorder:
         if self._current_phase and self._current_conversation:
             phase_key = self._current_phase.value
             if phase_key in self.trajectory:
-                # Append a copy of the conversation
-                self.trajectory[phase_key].append(self._current_conversation.copy())
+                # Create a conversation entry with call_id
+                conversation_entry = {
+                    "call_id": self._current_call_id,
+                    "messages": self._current_conversation.copy(),
+                }
+                # Append the conversation entry
+                self.trajectory[phase_key].append(conversation_entry)
+
+            # Update the end_time in the calls list
+            if self._current_call_id is not None:
+                for call_record in self.trajectory["calls"]:
+                    if call_record["call_id"] == self._current_call_id:
+                        call_record["end_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        break
 
     def _write_to_file(self) -> None:
         """Write the current trajectory state to file."""
@@ -385,7 +441,10 @@ class TrajectoryRecorder:
         return self.trajectory_file
 
     def _collect_gemini_sessions(self) -> None:
-        """Collect and copy recent Gemini CLI session files to the trajectory directory."""
+        """Collect and copy recent Gemini CLI session files to the trajectory directory.
+
+        Also attempts to match Gemini sessions to call_ids based on timing and metadata files.
+        """
         if not GEMINI_SESSION_DIR.exists():
             return
 
@@ -400,8 +459,34 @@ class TrajectoryRecorder:
             gemini_sessions_dir = (
                 self.trajectories_dir / "gemini_sessions" / self._run_timestamp
             )
-            sessions_copied = []
+            sessions_info = []
 
+            # First, collect all call metadata files created by our agent
+            call_metadata_map = {}  # Maps call_id to metadata file info
+            for project_dir in GEMINI_SESSION_DIR.iterdir():
+                if not project_dir.is_dir() or project_dir.name == "bin":
+                    continue
+
+                chats_dir = project_dir / "chats"
+                if not chats_dir.exists():
+                    continue
+
+                # Look for metadata files we created
+                for metadata_file in chats_dir.glob("sds_call_*.json"):
+                    try:
+                        with open(metadata_file) as f:
+                            metadata = json.load(f)
+                            if metadata.get("run_id") == self._run_timestamp:
+                                call_id = metadata.get("call_id")
+                                if call_id:
+                                    call_metadata_map[call_id] = {
+                                        "metadata_file": metadata_file,
+                                        "start_time": metadata.get("start_time"),
+                                    }
+                    except Exception:
+                        pass
+
+            # Now collect session files
             for project_dir in GEMINI_SESSION_DIR.iterdir():
                 if not project_dir.is_dir() or project_dir.name == "bin":
                     continue
@@ -416,19 +501,103 @@ class TrajectoryRecorder:
                     if file_mtime >= run_start_ts:
                         # Copy session file to our trajectory directory
                         gemini_sessions_dir.mkdir(parents=True, exist_ok=True)
-                        dest_file = (
-                            gemini_sessions_dir
-                            / f"{project_dir.name}_{session_file.name}"
-                        )
-                        shutil.copy2(session_file, dest_file)
-                        sessions_copied.append(str(dest_file.relative_to(self.sds_dir)))
 
-            # Record copied session paths in trajectory
-            if sessions_copied:
-                self.trajectory["gemini_sessions"] = sessions_copied
+                        # Try to match session to a call_id
+                        # First try timing-based matching
+                        matched_call_id = self._match_session_to_call(file_mtime)
+
+                        # If we have metadata files, try to get a better match
+                        if call_metadata_map:
+                            # Find the closest metadata file by time
+                            best_metadata_match = None
+                            min_time_diff = float('inf')
+
+                            for call_id, meta_info in call_metadata_map.items():
+                                meta_file = meta_info["metadata_file"]
+                                meta_mtime = meta_file.stat().st_mtime
+
+                                # Check if session file was created shortly after metadata file
+                                time_diff = abs(file_mtime - meta_mtime)
+                                if time_diff < min_time_diff and time_diff < 10:  # Within 10 seconds
+                                    min_time_diff = time_diff
+                                    best_metadata_match = call_id
+
+                            if best_metadata_match:
+                                matched_call_id = best_metadata_match
+
+                        # Create a unique filename with call_id if available
+                        if matched_call_id is not None:
+                            dest_filename = f"gemini_session_call_{matched_call_id:03d}.json"
+                        else:
+                            dest_filename = f"gemini_session_{len(sessions_info) + 1:03d}.json"
+
+                        dest_file = gemini_sessions_dir / dest_filename
+                        shutil.copy2(session_file, dest_file)
+
+                        session_info = {
+                            "session_file": str(dest_file.relative_to(self.sds_dir)),
+                            "original_path": str(session_file),
+                            "modified_time": time.strftime(
+                                "%Y-%m-%d %H:%M:%S", time.localtime(file_mtime)
+                            ),
+                            "call_id": matched_call_id,
+                        }
+                        sessions_info.append(session_info)
+
+            # Record session info in trajectory
+            if sessions_info:
+                self.trajectory["gemini_sessions"] = sessions_info
 
         except Exception as e:
             logger.warning(f"Failed to collect Gemini sessions: {e}")
+
+    def _match_session_to_call(self, session_mtime: float) -> Optional[int]:
+        """Match a Gemini session file to a call_id based on timing.
+
+        Args:
+            session_mtime: Modified time of the session file (Unix timestamp)
+
+        Returns:
+            Matched call_id or None if no match found.
+        """
+        try:
+            # Find the call whose time range encompasses the session modification time
+            best_match = None
+            min_time_diff = float('inf')
+
+            for call_record in self.trajectory["calls"]:
+                call_start_str = call_record["start_time"]
+                call_end_str = call_record.get("end_time")
+
+                # Parse call start time
+                call_start = time.strptime(call_start_str, "%Y-%m-%d %H:%M:%S")
+                call_start_ts = time.mktime(call_start)
+
+                # If session was modified after call started
+                if session_mtime >= call_start_ts:
+                    time_diff = session_mtime - call_start_ts
+
+                    # If we have an end time, check if session is within the range
+                    if call_end_str:
+                        call_end = time.strptime(call_end_str, "%Y-%m-%d %H:%M:%S")
+                        call_end_ts = time.mktime(call_end)
+
+                        # Session modified during this call
+                        if call_start_ts <= session_mtime <= call_end_ts:
+                            if time_diff < min_time_diff:
+                                min_time_diff = time_diff
+                                best_match = call_record["call_id"]
+                    else:
+                        # No end time yet, use the closest call
+                        if time_diff < min_time_diff:
+                            min_time_diff = time_diff
+                            best_match = call_record["call_id"]
+
+            return best_match
+
+        except Exception as e:
+            logger.warning(f"Failed to match session to call: {e}")
+            return None
 
     def finalize(self, status: str = "completed") -> Path:
         """Finalize the trajectory recording.
@@ -529,4 +698,28 @@ def finalize_trajectory(status: str = "completed") -> Optional[Path]:
     recorder = get_trajectory()
     if recorder:
         return recorder.finalize(status)
+    return None
+
+
+def get_current_call_id() -> Optional[int]:
+    """Get the current call ID for the active phase.
+
+    Returns:
+        Current call_id or None if no trajectory is active.
+    """
+    recorder = get_trajectory()
+    if recorder:
+        return recorder.get_current_call_id()
+    return None
+
+
+def get_run_id() -> Optional[str]:
+    """Get the unique run ID for the current trajectory.
+
+    Returns:
+        Run ID string or None if no trajectory is active.
+    """
+    recorder = get_trajectory()
+    if recorder:
+        return recorder.get_run_id()
     return None

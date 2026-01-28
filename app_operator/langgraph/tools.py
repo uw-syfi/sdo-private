@@ -14,9 +14,34 @@ class ToolContext:
         self.filesystem = filesystem
 
     def resolve_path(self, path: str) -> Path:
-        candidate = (self.repo_root / path).resolve()
-        if self.repo_root not in candidate.parents and candidate != self.repo_root:
+        # Construct path without checking filesystem (for InMemoryFilesystem support)
+        # Use absolute() which constructs path without filesystem checks
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            candidate = path_obj
+        else:
+            candidate = self.repo_root / path
+
+        # Normalize .. and . without filesystem access
+        parts = []
+        for part in candidate.parts:
+            if part == "..":
+                if parts:
+                    parts.pop()
+            elif part != ".":
+                parts.append(part)
+
+        if parts:
+            candidate = Path(*parts)
+        else:
+            candidate = Path("/")
+
+        # Check if path escapes repository root
+        try:
+            candidate.relative_to(self.repo_root)
+        except ValueError:
             raise ValueError(f"Path escapes repository root: {path}")
+
         return candidate
 
 
