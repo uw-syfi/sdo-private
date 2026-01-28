@@ -44,6 +44,12 @@ def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
     @tool("Glob")
     def glob(pattern: str) -> List[str]:
         """Find files matching the pattern."""
+        if Path(pattern).is_absolute():
+            try:
+                pattern = str(Path(pattern).relative_to(context.repo_root))
+            except ValueError:
+                raise ValueError(f"Pattern escapes repository root: {pattern}")
+
         results = []
         for path in context.repo_root.glob(pattern):
             if path.is_file() or path.is_dir():
