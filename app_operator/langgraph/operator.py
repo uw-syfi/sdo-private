@@ -102,13 +102,17 @@ class LangGraphOperator:
                 "monitor_max": self.health_check_max_count,
                 "analysis_summary": None,
                 "last_fix_summary": None,
+                "token_usage": {"input": 0, "output": 0, "total": 0},
             }
 
             final_state = self.graph.invoke(initial_state)
+
+            if final_state:
+                usage = final_state.get("token_usage", {})
+                logger.info(f"Total Token Usage: {usage}")
+
             health_result = final_state.get("health_result") if final_state else None
-            self._deployed = bool(
-                health_result and health_result.get("success")
-            )
+            self._deployed = bool(health_result and health_result.get("success"))
             return 0
 
         except KeyboardInterrupt:

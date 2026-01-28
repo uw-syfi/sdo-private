@@ -28,6 +28,7 @@ from tools.trajectory import (
 )
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
+from app_operator.langgraph.models import get_model_context_limit
 
 
 BLUE = "\033[34m"
@@ -35,17 +36,51 @@ GREEN = "\033[32m"
 RESET = "\033[0m"
 
 
+def _extract_token_usage(message: BaseMessage) -> Dict[str, int]:
+    if not isinstance(message, AIMessage):
+        return {}
+
+    usage = {"input": 0, "output": 0, "total": 0}
+    metadata = message.response_metadata or {}
+
+    if "token_usage" in metadata:  # OpenAI
+        tu = metadata["token_usage"]
+        usage["input"] = tu.get("prompt_tokens", 0)
+        usage["output"] = tu.get("completion_tokens", 0)
+        usage["total"] = tu.get("total_tokens", 0)
+    elif "usage" in metadata:  # Anthropic
+        tu = metadata["usage"]
+        usage["input"] = tu.get("input_tokens", 0)
+        usage["output"] = tu.get("output_tokens", 0)
+        usage["total"] = usage["input"] + usage["output"]
+
+    return usage
+
+
+def _update_usage(state: OperatorState, new_usage: Dict[str, int]) -> None:
+    current = state.get("token_usage") or {"input": 0, "output": 0, "total": 0}
+    state["token_usage"] = {
+        "input": current.get("input", 0) + new_usage.get("input", 0),
+        "output": current.get("output", 0) + new_usage.get("output", 0),
+        "total": current.get("total", 0) + new_usage.get("total", 0),
+    }
+
+
 def _invoke_agent(
+    state: OperatorState,
     agent: Any,
     system_prompt: str,
     user_prompt: str,
     agent_name: str = "Agent",
+    context_limit: int = 128000,
 ) -> tuple[str, list[BaseMessage]]:
     full_prompt = f"{system_prompt}\n\n{user_prompt}"
     record_user_message(full_prompt)
 
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
     response_messages = list(messages)
+    total_usage = {"input": 0, "output": 0, "total": 0}
+    max_request_usage = 0
 
     print("\n" + "=" * 50)
     print(f"Executing {agent_name}...")
@@ -61,6 +96,14 @@ def _invoke_agent(
 
             for msg in new_messages:
                 if isinstance(msg, AIMessage):
+                    usage = _extract_token_usage(msg)
+                    total_usage["input"] += usage.get("input", 0)
+                    total_usage["output"] += usage.get("output", 0)
+                    total_usage["total"] += usage.get("total", 0)
+
+                    if usage.get("total", 0) > max_request_usage:
+                        max_request_usage = usage.get("total", 0)
+
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
                             print(
@@ -80,6 +123,12 @@ def _invoke_agent(
                     print(f"{GREEN}[Tool Result] {content}{RESET}")
 
     print("\n" + "=" * 50 + "\n")
+    if max_request_usage > 0:
+        pct = round((max_request_usage / context_limit) * 100, 1)
+        print(f"Token Usage: {pct}% ({max_request_usage}/{context_limit})")
+        print("-" * 50 + "\n")
+
+    _update_usage(state, total_usage)
 
     assistant_text = _last_assistant_text(response_messages)
     record_assistant_message(assistant_text)
@@ -195,6 +244,10 @@ def build_graph(
 
     loader = get_loader()
 
+    # Determine model context limit
+    model_name = config.agent.model or "gpt-4o"
+    context_limit = get_model_context_limit(model_name)
+
     def analyze_code(state: OperatorState) -> OperatorState:
         if state["analysis_done"]:
             return state
@@ -204,7 +257,12 @@ def build_graph(
         user_prompt = loader.render("code_analyzer/user.jinja2", repo_path=repo_path)
 
         _, messages = _invoke_agent(
-            analyze_agent, system_prompt, user_prompt, agent_name="Code Analyzer"
+            state,
+            analyze_agent,
+            system_prompt,
+            user_prompt,
+            agent_name="Code Analyzer",
+            context_limit=context_limit,
         )
 
         record_phase_end("success")
@@ -237,8 +295,22 @@ def build_graph(
             platform=config.deployment.platform,
         )
 
-        _invoke_agent(script_agent, "", deploy_prompt, agent_name="Script Generator")
-        _invoke_agent(script_agent, "", health_prompt, agent_name="Script Generator")
+        _, _ = _invoke_agent(
+            state,
+            script_agent,
+            "",
+            deploy_prompt,
+            agent_name="Script Generator",
+            context_limit=context_limit,
+        )
+        _, _ = _invoke_agent(
+            state,
+            script_agent,
+            "",
+            health_prompt,
+            agent_name="Script Generator",
+            context_limit=context_limit,
+        )
 
         record_phase_end("success")
         state["scripts_done"] = True
@@ -305,9 +377,14 @@ def build_graph(
         log_file_path = (
             repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
         )
-        health_check_log_path = (
-            repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
-        )
+        health_check_log_path = None
+        if health_result:
+            health_check_log_path = (
+                repo_path
+                / ".sds"
+                / "logs"
+                / f"health_check_attempt_{state['attempt']}.log"
+            )
 
         error_context = _prepare_error_context(
             deploy_result, health_result, log_file_path, health_check_log_path
@@ -341,7 +418,12 @@ def build_graph(
         )
 
         response, messages = _invoke_agent(
-            fix_agent, "", prompt, agent_name="Error Fixer"
+            state,
+            fix_agent,
+            "",
+            prompt,
+            agent_name="Error Fixer",
+            context_limit=context_limit,
         )
         state["messages"] = messages
 
@@ -410,7 +492,12 @@ def build_graph(
         )
 
         response, messages = _invoke_agent(
-            monitor_agent, "", prompt, agent_name="Health Monitor"
+            state,
+            monitor_agent,
+            "",
+            prompt,
+            agent_name="Health Monitor",
+            context_limit=context_limit,
         )
         state["messages"] = messages
 

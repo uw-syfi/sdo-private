@@ -16,3 +16,4 @@ class OperatorState(TypedDict):
     monitor_max: Optional[int]
     analysis_summary: Optional[str]
     last_fix_summary: Optional[str]
+    token_usage: dict  # {"input": int, "output": int, "total": int}
