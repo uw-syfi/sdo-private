@@ -1,3 +1,4 @@
+from .base import register_provider
 from typing import Optional, List
 import json
 import time
@@ -135,9 +136,6 @@ class ClaudeGenerationSession(CLIGenerationSession):
         if self.final_result:
             return self.final_result
         return "\n".join(self.stdout_lines)
-
-
-from .base import register_provider
 
 
 @register_provider("claude", "claude-code", "anthropic")

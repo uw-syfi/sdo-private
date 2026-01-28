@@ -1,3 +1,4 @@
+from .base import register_provider
 import json
 from typing import Optional, List
 
@@ -93,9 +94,6 @@ class OpencodeGenerationSession(CLIGenerationSession):
                 self._log_raw(line)
                 self._log_raw("\n")
                 self._at_line_start = True
-
-
-from .base import register_provider
 
 
 @register_provider("opencode")

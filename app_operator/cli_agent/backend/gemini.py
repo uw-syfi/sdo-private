@@ -1,3 +1,4 @@
+from .base import register_provider
 from typing import Optional, List
 import json
 import time
@@ -110,9 +111,6 @@ class GeminiGenerationSession(CLIGenerationSession):
                 self._log_raw(line)
                 self._log_raw("\n")
                 self._at_line_start = True
-
-
-from .base import register_provider
 
 
 @register_provider("gemini")
