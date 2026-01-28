@@ -4,7 +4,13 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Dict, Any, Optional
 
-from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage,
+    BaseMessage,
+    AIMessage,
+    ToolMessage,
+)
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import create_react_agent
 
@@ -33,8 +39,42 @@ def _invoke_agent(
     record_user_message(full_prompt)
 
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
-    result = agent.invoke({"messages": messages})
-    response_messages = result.get("messages", messages)
+    response_messages = list(messages)
+
+    print("\n" + "=" * 50)
+    print("Executing Agent...")
+    print("=" * 50 + "\n")
+
+    for chunk in agent.stream({"messages": messages}, stream_mode="updates"):
+        for node_name, updates in chunk.items():
+            new_messages = updates.get("messages", [])
+            if not new_messages:
+                continue
+
+            response_messages.extend(new_messages)
+
+            for msg in new_messages:
+                if isinstance(msg, AIMessage):
+                    if msg.tool_calls:
+                        print("\n[Agent Tool Call]")
+                        for tool_call in msg.tool_calls:
+                            print(f"  Tool: {tool_call['name']}")
+                            print(f"  Args: {tool_call['args']}")
+
+                    if msg.content:
+                        print("\n[Agent Thought/Response]")
+                        print(f"{msg.content}")
+
+                elif isinstance(msg, ToolMessage):
+                    print("\n[Tool Output]")
+                    content = str(msg.content)
+                    if len(content) > 500:
+                        print(f"{content[:500]}... (truncated)")
+                    else:
+                        print(f"{content}")
+
+    print("\n" + "=" * 50 + "\n")
+
     assistant_text = _last_assistant_text(response_messages)
     record_assistant_message(assistant_text)
     return assistant_text, response_messages
@@ -205,7 +245,9 @@ def build_graph(
             {"attempt": state["attempt"], "max_attempts": state["max_attempts"]},
         )
 
-        log_file = repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
+        log_file = (
+            repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
+        )
         result = _run_script(
             repo_path,
             filesystem,
@@ -227,10 +269,7 @@ def build_graph(
             return state
 
         log_file = (
-            repo_path
-            / ".sds"
-            / "logs"
-            / f"health_check_attempt_{state['attempt']}.log"
+            repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
         )
         result = _run_script(
             repo_path,
@@ -259,10 +298,7 @@ def build_graph(
             repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
         )
         health_check_log_path = (
-            repo_path
-            / ".sds"
-            / "logs"
-            / f"health_check_attempt_{state['attempt']}.log"
+            repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
         )
 
         error_context = _prepare_error_context(
@@ -379,7 +415,7 @@ def build_graph(
         return state
 
     def should_fix(state: OperatorState) -> str:
-        if state.get("health_result", {}).get("success"):
+        if (state.get("health_result") or {}).get("success"):
             return "monitor"
         if state["attempt"] < state["max_attempts"]:
             return "fix"
