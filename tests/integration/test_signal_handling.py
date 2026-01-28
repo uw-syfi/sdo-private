@@ -8,7 +8,7 @@ import pytest
 import signal
 import time
 import threading
-from app_operator.operator import AppOperator
+from app_operator.cli_agent.operator import AppOperator
 from tests.fixtures.agents import StubAgent
 
 

@@ -3,7 +3,7 @@ from typing import Optional, List
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
-from tools.trajectory import record_tool_call
+from app_operator.trajectory import record_tool_call
 
 
 class OpencodeGenerationSession(CLIGenerationSession):

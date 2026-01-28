@@ -14,8 +14,8 @@ from app_operator.prompts import get_loader
 from app_operator.deployment_context import analyze_repository, create_system_prompt
 from app_operator.cli_agent.subprocess_runner import SubprocessRunner
 from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
-from tools.healthcheck import run_health_check
-from tools.trajectory import (
+from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.trajectory import (
     Phase,
     record_phase_start,
     record_phase_end,

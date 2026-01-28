@@ -19,7 +19,7 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.deployment_context import analyze_repository, create_system_prompt
-from tools.trajectory import (
+from app_operator.trajectory import (
     Phase,
     record_phase_start,
 )

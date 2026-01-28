@@ -1,6 +1,6 @@
 import pytest
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
-from tools.healthcheck import run_health_check
+from app_operator.cli_agent.healthcheck import run_health_check
 
 
 class StubAgent:

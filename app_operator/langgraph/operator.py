@@ -10,7 +10,7 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.langgraph.llm import build_llm
 from app_operator.langgraph.graph import build_graph
-from tools.trajectory import init_trajectory, finalize_trajectory
+from app_operator.trajectory import init_trajectory, finalize_trajectory
 
 
 class LangGraphOperator:

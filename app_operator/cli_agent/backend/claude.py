@@ -11,7 +11,7 @@ from .claude_events import (
     MultiEvent,
     ResultEvent,
 )
-from tools.trajectory import record_tool_call
+from app_operator.trajectory import record_tool_call
 
 
 class ClaudeGenerationSession(CLIGenerationSession):

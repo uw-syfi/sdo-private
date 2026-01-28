@@ -221,7 +221,7 @@ class TestWorkingDirectoryErrors:
 
     def test_repository_path_validation(self, tmp_path):
         """Should validate that repository path exists."""
-        from app_operator.operator import AppOperator
+        from app_operator.cli_agent.operator import AppOperator
 
         nonexistent = tmp_path / "does_not_exist"
 
@@ -232,7 +232,7 @@ class TestWorkingDirectoryErrors:
 
     def test_repository_path_must_be_directory(self, tmp_path):
         """Repository path must be a directory, not a file."""
-        from app_operator.operator import AppOperator
+        from app_operator.cli_agent.operator import AppOperator
 
         # Create a file instead of directory
         file_path = tmp_path / "not_a_directory.txt"

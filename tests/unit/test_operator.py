@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 import signal
-from app_operator.operator import AppOperator
+from app_operator.cli_agent.operator import AppOperator
 
 
 @pytest.fixture

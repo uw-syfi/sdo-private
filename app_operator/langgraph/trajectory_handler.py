@@ -2,7 +2,7 @@ import time
 from typing import Dict, Any
 
 from langchain_core.messages import AIMessage, ToolMessage, BaseMessage
-from tools.trajectory import (
+from app_operator.trajectory import (
     record_user_message,
     record_assistant_message,
     record_tool_call,

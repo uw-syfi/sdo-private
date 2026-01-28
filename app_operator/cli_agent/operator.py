@@ -12,7 +12,7 @@ from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
-from tools.trajectory import init_trajectory, finalize_trajectory
+from app_operator.trajectory import init_trajectory, finalize_trajectory
 
 
 class AppOperator:
