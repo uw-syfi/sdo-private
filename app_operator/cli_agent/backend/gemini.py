@@ -112,6 +112,10 @@ class GeminiGenerationSession(CLIGenerationSession):
                 self._at_line_start = True
 
 
+from .base import register_provider
+
+
+@register_provider("gemini")
 class GeminiCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Gemini CLI tool."""
 

@@ -137,6 +137,10 @@ class ClaudeGenerationSession(CLIGenerationSession):
         return "\n".join(self.stdout_lines)
 
 
+from .base import register_provider
+
+
+@register_provider("claude", "claude-code", "anthropic")
 class ClaudeCodeCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Claude Code CLI tool."""
 
@@ -166,7 +170,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             "--output-format",
             "stream-json",
             "--verbose",
-            f'"{prompt}"'
+            f'"{prompt}"',
         ]
         if self.model:
             cmd.extend(["--model", self.model])

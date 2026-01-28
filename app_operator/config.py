@@ -28,26 +28,10 @@ class AgentConfig:
     model: Optional[str] = None
     location: Optional[str] = None
 
-    VALID_PROVIDERS = {
-        "codex",
-        "gemini",
-        "vertex",
-        "claude",
-        "claude-code",
-        "opencode",
-        "openai",
-        "anthropic",
-    }
-
     def __post_init__(self):
         """Validate configuration values after initialization."""
         if not isinstance(self.provider, str):
             raise TypeError(f"provider must be str, got {type(self.provider).__name__}")
-        if self.provider.lower() not in self.VALID_PROVIDERS:
-            raise ValueError(
-                f"Invalid provider: '{self.provider}'. "
-                f"Valid providers: {', '.join(sorted(self.VALID_PROVIDERS))}"
-            )
         if self.model is not None and not isinstance(self.model, str):
             raise TypeError(
                 f"model must be str or None, got {type(self.model).__name__}"

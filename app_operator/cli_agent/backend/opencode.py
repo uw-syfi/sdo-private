@@ -95,6 +95,10 @@ class OpencodeGenerationSession(CLIGenerationSession):
                 self._at_line_start = True
 
 
+from .base import register_provider
+
+
+@register_provider("opencode")
 class OpencodeCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Opencode CLI tool."""
 

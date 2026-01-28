@@ -3,6 +3,10 @@ from typing import Optional, List
 from .cli_agent import CLICodingAgent
 
 
+from .base import register_provider
+
+
+@register_provider("openai", "codex")
 class CodexCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Codex CLI tool."""
 
@@ -25,11 +29,7 @@ class CodexCodingAgent(CLICodingAgent):
         return "[Codex]"
 
     def _get_command(self, prompt: str) -> List[str]:
-        cmd = [
-            self.binary_path,
-            "exec",
-            "--dangerously-bypass-approvals-and-sandbox"
-        ]
+        cmd = [self.binary_path, "exec", "--dangerously-bypass-approvals-and-sandbox"]
         if self.model:
             cmd.extend(["--model", self.model])
         return cmd
