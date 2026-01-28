@@ -138,6 +138,27 @@ Next, use the `run` command to deploy and monitor the experiment using an AI age
 - **Auto-Scripting**: Automatically generates deployment and health check scripts if they are missing. Scripts are created in `<app-dir>/.sds`.
 - **Self-Healing Deployment**: If a deployment fails, the AI agent analyzes the error logs, identifies the root cause, and automatically fixes the scripts before retrying (up to 5 attempts).
 - **AI-Powered Analysis**: Provides intelligent analysis of health check results to suggest improvements.
+- **Trajectory Recording**: All agent interactions are recorded with sequential call IDs for analysis and debugging.
+
+**Outputs:**
+
+The operator creates the following in the `<app-dir>/.sds` directory:
+- `deploy.sh` and `health_check.sh`: Generated deployment and health check scripts
+- `logs/`: Deployment and monitoring logs
+- `trajectories/`: Agent interaction recordings
+  - `trajectory_YYYYMMDD-HHMMSS.json`: Complete interaction history with sequential call IDs
+  - `trajectory.json`: Symlink to the latest trajectory file
+  - `gemini_sessions/`: Gemini CLI session files (when using Gemini agent), correlated with call IDs
+
+**Trajectory Structure:**
+
+Each trajectory file contains:
+- `metadata`: Run information (run_id, timestamps, status)
+- `calls`: Sequential list of all agent calls with call_id, phase, start/end times, and context
+- Phase arrays (`exploration`, `script_generation`, `deployment`, `monitoring`): Conversations grouped by phase, each with its call_id
+- `gemini_sessions`: Gemini CLI sessions matched to call IDs (when using Gemini agent)
+
+This structure makes it easy to trace specific agent calls and correlate them with external session logs.
 
 ### Command Reference
 
