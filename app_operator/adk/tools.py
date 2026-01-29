@@ -51,7 +51,11 @@ def _build_list_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
             path: The directory path to list.
 
         Returns:
-            A dictionary containing the status and output.
+            A dictionary containing the operation result:
+            - 'status': 'success' if the directory exists, 'error' otherwise.
+            - 'output': A newline-separated list of file names if successful.
+            - 'error': Error message if status is 'error'.
+            - 'context': Metadata including 'path' and 'count' (number of files) or 'type'.
         """
         try:
             target = context.resolve_path(path)
@@ -99,7 +103,11 @@ def _build_find_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
             pattern: The glob pattern to search for.
 
         Returns:
-            A dictionary containing the status and list of matching files.
+            A dictionary containing the operation result:
+            - 'status': 'success' if the search completed, 'error' otherwise.
+            - 'output': A newline-separated list of matching file paths relative to repo root.
+            - 'error': Error message if status is 'error'.
+            - 'context': Metadata including 'pattern' and 'count' (number of matches).
         """
         try:
             if Path(pattern).is_absolute():
@@ -145,7 +153,11 @@ def _build_read_file(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
             path: The path to the file to read.
 
         Returns:
-            A dictionary containing the status and file content.
+            A dictionary containing the operation result:
+            - 'status': 'success' if the file was read, 'error' otherwise.
+            - 'output': The content of the file if successful.
+            - 'error': Error message if status is 'error'.
+            - 'context': Metadata including 'path' and 'bytes' (size of content).
         """
         try:
             target = context.resolve_path(path)
@@ -174,7 +186,11 @@ def _build_search_content(context: ToolContext) -> Callable[[str, str], Dict[str
             path: The directory or file path to search in.
 
         Returns:
-            A dictionary containing the status and matching lines.
+            A dictionary containing the operation result:
+            - 'status': 'success' if the search completed, 'error' otherwise.
+            - 'output': A newline-separated list of matches in format 'path:line:content'.
+            - 'error': Error message if status is 'error'.
+            - 'context': Metadata including 'pattern', 'path', and 'count' (number of matches).
         """
         try:
             target = context.resolve_path(path)
@@ -246,7 +262,11 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], Dict[str, An
             content: The content to write.
 
         Returns:
-            A dictionary containing the status and result message.
+            A dictionary containing the operation result:
+            - 'status': 'success' if the file was written, 'error' otherwise.
+            - 'output': A success message indicating bytes written.
+            - 'error': Error message if status is 'error'.
+            - 'context': Metadata including 'path' and 'bytes' (size of written content).
         """
         try:
             target = context.resolve_path(path)
@@ -292,7 +312,11 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], Dict[str, A
             timeout: The maximum time to wait for the command to complete.
 
         Returns:
-            A dictionary containing the status, output, and exit code.
+            A dictionary containing the operation result:
+            - 'status': 'success' if exit code is 0, 'error' otherwise.
+            - 'output': Standard output (stdout) if success, or standard error (stderr) if failed.
+            - 'error': Standard error (stderr) if status is 'error', else None.
+            - 'context': Metadata including 'command', 'exit_code', 'stdout', and 'stderr'.
         """
         try:
             # subprocess uses real system
@@ -350,7 +374,10 @@ def _build_finish_deployment(context: ToolContext) -> Callable[[], Dict[str, Any
         """Mark the deployment as successfully completed and finish the process.
 
         Returns:
-            A dictionary containing the status and result message.
+            A dictionary containing the operation result:
+            - 'status': Always 'success'.
+            - 'output': Always 'DEPLOYMENT_FINISHED'.
+            - 'context': Empty dictionary.
         """
         return {
             "status": "success",
