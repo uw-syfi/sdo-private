@@ -74,10 +74,6 @@ class AgentflowTUI(App):
     CSS = """
     RichLog {
         height: 1fr;
-        border: solid green;
-    }
-    Input {
-        width: 100%;
     }
     """
     
@@ -87,6 +83,7 @@ class AgentflowTUI(App):
 
     def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"], initial_prompt: str = None, **kwargs):
         super().__init__(**kwargs)
+        self.theme = "flexoki"
         self.engine_factory = engine_factory
         self.initial_prompt = initial_prompt
         self.input_queue = asyncio.Queue()
