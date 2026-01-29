@@ -46,6 +46,7 @@ def test_invalid_json():
     with pytest.raises(ValueError, match="Failed to parse JSON"):
         parse_agentflow_response(text)
 
+
 def test_extract_json_with_nested_backticks():
     """Test that JSON extraction works even if the script string contains markdown fences."""
     text = r"""

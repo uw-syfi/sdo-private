@@ -9,7 +9,10 @@ class TestAdkAgentRunner(unittest.IsolatedAsyncioTestCase):
         self.app_name = "test_app"
         self.recorder = MagicMock()
         self.repo_path = Path("/repo")
-        self.runner = AdkAgentRunner(app_name=self.app_name, recorder=self.recorder, repo_path=self.repo_path)
+        self.runner = AdkAgentRunner(
+            app_name=self.app_name,
+            recorder=self.recorder,
+            repo_path=self.repo_path)
 
     async def test_run_async_basic(self):
         # Create a mock agent with some tools

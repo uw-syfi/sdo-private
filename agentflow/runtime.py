@@ -111,7 +111,7 @@ def judge_loop(
         logger.info(f"Judge feedback: {feedback_data}")
 
         if feedback_data.get("status") == "done":
-            logger.info(f"Judge loop done")
+            logger.info("Judge loop done")
             return {
                 "final_output": current_output if current_output is not None else "",
                 "judge_feedback": feedback_data.get("feedback", ""),

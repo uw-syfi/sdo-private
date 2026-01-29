@@ -51,7 +51,7 @@ def test_judge_loop_worker_immediate_success():
 
     judge = MagicMock()
     judge.generate.side_effect = [
-        '{"status": "continue", "feedback": "Please start"}', # First check (pre-work)
+        '{"status": "continue", "feedback": "Please start"}',  # First check (pre-work)
         '{"status": "done", "feedback": "Good job"}'        # Second check (post-work)
     ]
 

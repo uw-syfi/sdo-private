@@ -1,7 +1,7 @@
-import pytest
 from unittest.mock import MagicMock
 from agentflow.engine import AgentflowEngine
 from agentflow.io import UserIO
+
 
 class MockIO(UserIO):
     def __init__(self):
@@ -11,10 +11,13 @@ class MockIO(UserIO):
     def read_prompt(self) -> str: return ""
     def ask_questions(self, questions): return []
     def prompt_int(self, label: str) -> int: return 0
+
     def info(self, message: str) -> None:
         self.info_messages.append(message)
+
     def print_stream(self, text: str) -> None:
         self.stream_output += text
+
 
 def test_on_event_thinking(tmp_path):
     engine = AgentflowEngine(
@@ -35,10 +38,10 @@ def test_on_event_thinking(tmp_path):
     part.thought = "I am thinking"
     part.function_call = None
     part.function_response = None
-    
+
     content = MagicMock()
     content.parts = [part]
-    
+
     event = MagicMock()
     event.content = content
     event.get_function_calls.return_value = []
@@ -54,15 +57,16 @@ def test_on_event_thinking(tmp_path):
     part2 = MagicMock()
     part2.text = "Hello world"
     part2.thought = None
-    
+
     content2 = MagicMock()
     content2.parts = [part2]
     event2 = MagicMock()
     event2.content = content2
-    
+
     engine._on_event(event2)
     assert "Hello world" in engine.io.stream_output
     assert engine._thinking_started is False
+
 
 def test_on_event_tool_call(tmp_path):
     engine = AgentflowEngine(
@@ -81,7 +85,7 @@ def test_on_event_tool_call(tmp_path):
     fn_call = MagicMock()
     fn_call.name = "my_tool"
     fn_call.args = {"arg1": "val1"}
-    
+
     event = MagicMock()
     event.content = None
     event.get_function_calls.return_value = [fn_call]
@@ -90,7 +94,9 @@ def test_on_event_tool_call(tmp_path):
     engine._on_event(event)
 
     print(f"DEBUG: info_messages: {engine.io.info_messages}")
-    assert any("[Tool Use] my_tool" in msg and "arg1" in msg and "val1" in msg for msg in engine.io.info_messages)
+    assert any(
+        "[Tool Use] my_tool" in msg and "arg1" in msg and "val1" in msg for msg in engine.io.info_messages)
+
 
 def test_on_event_tool_response(tmp_path):
     engine = AgentflowEngine(
@@ -109,7 +115,7 @@ def test_on_event_tool_response(tmp_path):
     fn_resp = MagicMock()
     fn_resp.name = "my_tool"
     fn_resp.response = {"output": "tool success"}
-    
+
     event = MagicMock()
     event.content = None
     event.get_function_calls.return_value = []
