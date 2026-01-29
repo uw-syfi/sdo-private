@@ -27,12 +27,12 @@ The generated Python script must:
 
 ## Available Runtime API
 
-The `agentflow.runtime` module provides an interface to Google ADK-powered agents.
+The `agentflow.runtime` module provides an interface to LangGraph-powered agents.
 
 Import from `agentflow.runtime`:
 
-### 1. create_agent(provider=None, model=None, config_path=None, repo_path=None, instruction=None, tools=None) -> GoogleAdkAgent
-Create a Google ADK agent instance.
+### 1. create_agent(provider=None, model=None, config_path=None, repo_path=None, instruction=None, tools=None) -> LangGraphAgent
+Create a LangGraph agent instance.
 
 **Parameters:**
 - `provider` (str, optional): Agent provider ("gemini", "vertex"). If None, loads from config.
@@ -50,7 +50,7 @@ Create a Google ADK agent instance.
 - `search_content`: Search for a regex pattern in files (grep).
 - `run_command`: Execute a shell command.
 
-**Returns:** GoogleAdkAgent instance with `.generate(prompt, timeout)` method.
+**Returns:** LangGraphAgent instance with `.generate(prompt, timeout)` method.
 
 **Examples:**
 ```python
@@ -89,7 +89,7 @@ Aggregate multiple responses into a single summary.
 
 **Use when:** You have multiple outputs that need to be combined or synthesized.
 
-### 4. judge_loop(judge, worker, task, max_iterations, timeout=300) -> Dict[str, str]
+### 4. judge_loop(judge, worker, task, max_iterations, timeout=3000) -> Dict[str, str]
 Iterative refinement loop where a judge evaluates worker output.
 
 **Parameters:**
@@ -97,7 +97,7 @@ Iterative refinement loop where a judge evaluates worker output.
 - `worker` (CodingAgent): Agent that performs the task and refines based on feedback.
 - `task` (str): Task description for the worker.
 - `max_iterations` (int): Maximum refinement iterations (use MAX_ITERATIONS constant).
-- `timeout` (int, default=300): Timeout in seconds for each agent call.
+- `timeout` (int, default=3000): Timeout in seconds for each agent call.
 
 **Returns:** Dict with keys:
   - `"final_output"` (str): The final refined output
