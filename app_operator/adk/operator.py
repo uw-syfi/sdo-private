@@ -1,5 +1,6 @@
 import time
 import re
+import asyncio
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -72,25 +73,29 @@ class AdkOperator:
 
     def run(self) -> int:
         """Run the operator lifecycle."""
+        return asyncio.run(self.run_async())
+
+    async def run_async(self) -> int:
+        """Run the operator lifecycle asynchronously."""
         try:
             # ensure sds dir exists
             self.filesystem.mkdir(self.sds_dir, parents=True, exist_ok=True)
             self.filesystem.mkdir(self.logs_dir, parents=True, exist_ok=True)
 
             # 1. Code Analysis
-            self._run_analysis()
+            await self._run_analysis()
 
             # 2. Script Generation
-            self._generate_scripts()
+            await self._generate_scripts()
 
             # 3. Deployment with Retries
-            if not self._deploy_with_retries():
+            if not await self._deploy_with_retries():
                 logger.error("Deployment failed after max attempts.")
                 self.recorder.finalize("failed")
                 return 1
 
             # 4. Monitoring
-            self._monitor()
+            await self._monitor()
 
             self.recorder.finalize("completed")
             return 0
@@ -102,7 +107,7 @@ class AdkOperator:
         finally:
             self._cleanup()
 
-    def _run_analysis(self) -> None:
+    async def _run_analysis(self) -> None:
         """Run code analysis phase."""
         logger.info("Starting Code Analysis...")
 
@@ -133,14 +138,14 @@ class AdkOperator:
 
             # Run agent
             logger.info("Analyzing codebase...")
-            response = self.runner.run_once(agent, user_prompt)
+            response = await self.runner.run_async(agent, user_prompt)
 
             # Save analysis (assuming response is markdown)
             analysis_file = self.sds_dir / "code_analysis.md"
             self.filesystem.write_text(analysis_file, response)
             logger.info(f"Code analysis saved to {analysis_file}")
 
-    def _generate_scripts(self) -> None:
+    async def _generate_scripts(self) -> None:
         """Generate deployment scripts."""
         logger.info("Generating Deployment Scripts...")
 
@@ -167,7 +172,7 @@ class AdkOperator:
                     platform=platform,
                 )
                 logger.info("Generating deploy.sh...")
-                self.runner.run_once(agent, prompt)
+                await self.runner.run_async(agent, prompt)
 
                 # Check if file created
                 if self.filesystem.exists(self.deploy_script):
@@ -189,7 +194,7 @@ class AdkOperator:
                     platform=platform,
                 )
                 logger.info("Generating health_check.sh...")
-                self.runner.run_once(agent, prompt)
+                await self.runner.run_async(agent, prompt)
 
                 # Check if file created
                 if self.filesystem.exists(self.health_check_script):
@@ -201,7 +206,7 @@ class AdkOperator:
                     r.set_phase_status("failed")
                     raise AgentError(msg)
 
-    def _deploy_with_retries(self) -> bool:
+    async def _deploy_with_retries(self) -> bool:
         """Deploy application using LoopAgent."""
         logger.info(
             f"Deploying with LoopAgent (max {self.max_deployment_attempts} retries)..."
@@ -254,7 +259,7 @@ class AdkOperator:
         with self.recorder.phase(Phase.DEPLOYMENT) as r:
             try:
                 # The user prompt triggers the loop
-                response = self.runner.run_once(
+                response = await self.runner.run_async(
                     loop_agent,
                     "Start the deployment process. Alternate between Deployer and Fixer until successful.",
                 )
@@ -277,7 +282,7 @@ class AdkOperator:
                 r.add_assistant_message(f"Deployment Loop failed: {e}")
                 return False
 
-    def _monitor(self) -> None:
+    async def _monitor(self) -> None:
         """Run health monitoring."""
         if not self.health_check_max_count:
             return
@@ -302,7 +307,7 @@ class AdkOperator:
 
             # Wait interval
             if i > 1:
-                time.sleep(self.health_check_interval)
+                await asyncio.sleep(self.health_check_interval)
 
             with self.recorder.phase(Phase.MONITORING, {"cycle": i}) as r:
                 # Run health check
@@ -340,7 +345,7 @@ class AdkOperator:
                     context=context,
                 )
 
-                response = self.runner.run_once(monitor_agent, prompt)
+                response = await self.runner.run_async(monitor_agent, prompt)
 
                 # Log analysis
                 analysis_log = monitor_logs / f"analysis_{i}.log"

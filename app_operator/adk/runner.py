@@ -109,10 +109,6 @@ class AdkAgentRunner:
 
         raise AttributeError("Runner does not provide a run_async() method")
 
-    def run_once(self, agent: LlmAgent, user_prompt: str) -> str:
-        """Run the agent once with the given prompt and return the assistant response."""
-        return asyncio.run(self.run_async(agent, user_prompt))
-
     def _asyncify_agent_tools(self, agent: LlmAgent) -> None:
         """Ensure all tools on the agent (and sub-agents) are async wrappers."""
         if hasattr(agent, "tools") and agent.tools:

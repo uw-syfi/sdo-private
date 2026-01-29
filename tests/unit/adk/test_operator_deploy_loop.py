@@ -27,8 +27,8 @@ def test_deploy_loop_success_first_try(tmp_path):
     with patch("app_operator.adk.operator.AdkAgentRunner") as MockRunner:
         runner_instance = MockRunner.return_value
 
-        # Mock run_once to simulate agent behavior
-        def mock_run_once(agent, prompt):
+        # Mock run_async to simulate agent behavior
+        async def mock_run_async(agent, prompt):
             prompt_str = str(prompt)
 
             # Check for CodeAnalyzer first
@@ -56,9 +56,12 @@ def test_deploy_loop_success_first_try(tmp_path):
             if "HealthMonitor" in str(agent.name):
                 return "Health OK"
 
+            if "DeploymentLoop" in str(agent.name):
+                return "Deployment Successful"
+
             return "Ok"
 
-        runner_instance.run_once.side_effect = mock_run_once
+        runner_instance.run_async.side_effect = mock_run_async
 
         # Need to patch build_adk_model and tools as well since they might fail if
         # dependencies missing
@@ -67,7 +70,10 @@ def test_deploy_loop_success_first_try(tmp_path):
             patch("app_operator.adk.operator.build_tools"),
             patch("app_operator.adk.operator.build_adk_agent") as mock_build_agent,
             patch(
-                "app_operator.adk.operator.time.sleep"
+                "app_operator.adk.operator.build_loop_agent"
+            ) as mock_build_loop_agent,
+            patch(
+                "app_operator.adk.operator.asyncio.sleep"
             ),  # Patch sleep to avoid waiting
         ):
             # Setup build_adk_agent to return a mock with name
@@ -77,6 +83,14 @@ def test_deploy_loop_success_first_try(tmp_path):
                 return m
 
             mock_build_agent.side_effect = side_effect_build_agent
+
+            # Setup build_loop_agent
+            def side_effect_build_loop_agent(name, sub_agents, max_iterations, tools):
+                m = MagicMock()
+                m.name = name
+                return m
+
+            mock_build_loop_agent.side_effect = side_effect_build_loop_agent
 
             operator = AdkOperator(str(repo_path), filesystem=fs, config=config)
 

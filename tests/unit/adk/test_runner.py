@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from app_operator.adk.runner import AdkAgentRunner
@@ -19,7 +20,10 @@ def test_runner_returns_text():
         mock_part.text = "Response text"
         mock_event.content.parts = [mock_part]
 
-        mock_instance.run.return_value = iter([mock_event])
+        async def mock_run_async(*args, **kwargs):
+            yield mock_event
 
-        result = runner_wrapper.run_once(agent, "Hello")
+        mock_instance.run_async = mock_run_async
+
+        result = asyncio.run(runner_wrapper.run_async(agent, "Hello"))
         assert result == "Response text"
