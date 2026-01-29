@@ -1,5 +1,4 @@
 import time
-import re
 import asyncio
 import subprocess
 from pathlib import Path
@@ -20,8 +19,6 @@ from app_operator.prompts.deployment_context import (
 )
 from app_operator.prompts.deployer import (
     create_generate_script_prompt,
-    create_fix_prompt,
-    prepare_error_context,
 )
 from app_operator.cli_agent.subprocess_runner import SubprocessRunner
 from app_operator.cli_agent.healthcheck import run_health_check

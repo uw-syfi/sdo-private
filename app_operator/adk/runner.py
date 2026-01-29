@@ -3,7 +3,7 @@ import functools
 import inspect
 import uuid
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Callable
 
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin

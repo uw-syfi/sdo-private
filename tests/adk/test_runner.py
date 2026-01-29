@@ -1,6 +1,6 @@
 import unittest
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 from app_operator.adk.runner import AdkAgentRunner, LlmAgent
 
@@ -21,7 +21,7 @@ class TestAdkAgentRunner(unittest.IsolatedAsyncioTestCase):
         # Mock the ADK Runner class and its instance
         with (
             patch("app_operator.adk.runner.Runner") as MockRunnerCls,
-            patch("app_operator.adk.runner.AdkTrajectoryPlugin") as MockPluginCls,
+            patch("app_operator.adk.runner.AdkTrajectoryPlugin"),
         ):
             # Setup the mock instance returned by Runner(...)
             mock_runner_instance = MockRunnerCls.return_value
