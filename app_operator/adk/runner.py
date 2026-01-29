@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import inspect
 import uuid
 from pathlib import Path
 from typing import Any, Callable, List, Optional
@@ -131,6 +132,12 @@ class AdkAgentRunner:
         @functools.wraps(tool)
         async def wrapper(*args, **kwargs):
             return await asyncio.to_thread(tool, *args, **kwargs)
+
+        try:
+            wrapper.__signature__ = inspect.signature(tool)
+        except (ValueError, TypeError):
+            # Fallback if signature cannot be obtained
+            pass
 
         return wrapper
 
