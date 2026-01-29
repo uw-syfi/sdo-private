@@ -6,6 +6,7 @@ from textual.widgets import Header, Footer, Input, RichLog, Label
 from textual import work
 from textual.binding import Binding
 from rich.text import Text
+from rich.panel import Panel
 
 from agentflow.io import UserIO, Colors
 
@@ -54,12 +55,21 @@ class TextualIO:
 
     def render_tool_end(self, name: str, output: str, status: str) -> None:
         symbol = ""
+        style = "blue"
         if status == "success":
-            symbol = "[green]✓[/] "
+            symbol = "✓"
+            style = "green"
         elif status == "error":
-            symbol = "[red]✗[/] "
+            symbol = "✗"
+            style = "red"
         
-        self.app.write_log(Text.from_markup(f"\n[bold blue][Tool Result] {name}: {symbol}[/]\n{output}"))
+        panel = Panel(
+            output,
+            title=f"{name} [{style}]{symbol}[/]",
+            border_style=style,
+            title_align="left",
+        )
+        self.app.write_log(panel)
 
     def render_error(self, message: str) -> None:
         self.app.write_log(Text.from_markup(f"[bold red]{message}[/]"))
