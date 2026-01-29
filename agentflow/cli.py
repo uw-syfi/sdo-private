@@ -9,7 +9,7 @@ from app_operator.adk.runner import AdkAgentRunner
 from app_operator.trajectory import init_trajectory
 from app_operator.config import load_config
 from app_operator.logger import logger
-from app_operator.prompts import get_loader
+from agentflow.prompts import get_loader
 
 
 def build_parser() -> argparse.ArgumentParser:

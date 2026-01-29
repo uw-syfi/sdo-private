@@ -7,7 +7,7 @@ from agentflow.storage import AgentflowStorage
 from app_operator.adk.runner import AdkAgentRunner
 from app_operator.adk.agent_factory import build_adk_agent
 from app_operator.exceptions import AgentError
-from app_operator.prompts import PromptLoader
+from agentflow.prompts import PromptLoader
 from google.genai import types
 
 
