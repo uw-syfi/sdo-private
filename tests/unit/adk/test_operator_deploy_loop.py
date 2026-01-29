@@ -124,3 +124,52 @@ def test_deploy_loop_success_first_try(tmp_path):
                         assert exit_code == 0
                         assert fs.exists(repo_path / ".sds" / "deploy.sh")
                         assert fs.exists(repo_path / ".sds" / "health_check.sh")
+
+
+def test_deploy_loop_handles_failure(tmp_path):
+    """Test that operator returns failure if LoopAgent fails."""
+    fs = InMemoryFilesystem()
+    repo_path = tmp_path
+    fs.directories.add(str(repo_path))
+
+    config = Config.from_dict(
+        {
+            "runtime": {"impl": "adk"},
+            "agent": {"model": "gemini-pro", "provider": "gemini"},
+        }
+    )
+
+    with patch("app_operator.adk.operator.AdkAgentRunner") as MockRunner:
+        runner_instance = MockRunner.return_value
+
+        async def mock_run_async(agent, prompt):
+            if "DeploymentLoop" in str(agent.name):
+                return "Deployment failed"
+            return "Ok"
+
+        runner_instance.run_async.side_effect = mock_run_async
+
+        with (
+            patch("app_operator.adk.operator.build_adk_model"),
+            patch("app_operator.adk.operator.build_tools"),
+            patch("app_operator.adk.operator.build_adk_agent"),
+            patch("app_operator.adk.operator.build_loop_agent"),
+            patch("app_operator.adk.operator.asyncio.sleep"),
+            patch(
+                "app_operator.adk.operator.analyze_repository", return_value="context"
+            ),
+        ):
+            operator = AdkOperator(str(repo_path), filesystem=fs, config=config)
+
+            # Ensure scripts exist so we skip generation (focus on deploy loop)
+            # We need to manually write them or let generate run.
+            # Let's let generate run, mock_run_async returns "Ok" which is interpreted?
+            # Script generation checks if file exists. If mock returns "Ok", file won't be created by agent.
+            # So we manually create them to skip generation errors.
+            fs.mkdir(repo_path / ".sds", parents=True, exist_ok=True)
+            fs.write_text(repo_path / ".sds" / "deploy.sh", "echo deploy")
+            fs.write_text(repo_path / ".sds" / "health_check.sh", "echo health")
+
+            exit_code = operator.run()
+
+            assert exit_code == 1

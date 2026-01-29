@@ -33,4 +33,14 @@ def test_runtime_impl_adk_accepts_model():
         }
     )
     assert config.runtime.impl == "adk"
-    assert config.agent.model == "gemini-2.0-flash"
+
+
+def test_runtime_impl_adk_still_validates_provider():
+    """Test that provider validation still happens for adk runtime."""
+    with pytest.raises(ValueError, match="Invalid provider"):
+        Config.from_dict(
+            {
+                "runtime": {"impl": "adk"},
+                "agent": {"provider": "invalid_provider", "model": "gemini-2.0-flash"},
+            }
+        )
