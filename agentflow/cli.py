@@ -2,8 +2,8 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from app_operator.agentflow.engine import AgentflowEngine
-from app_operator.agentflow.io import ConsoleIO
+from agentflow.engine import AgentflowEngine
+from agentflow.io import ConsoleIO
 from app_operator.adk.models import build_adk_model
 from app_operator.adk.runner import AdkAgentRunner
 from app_operator.trajectory import init_trajectory
@@ -36,7 +36,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Determine repo root
-    # This file is app_operator/agentflow/cli.py
+    # This file is agentflow/cli.py
     # parents[0]=agentflow, parents[1]=app_operator, parents[2]=root
     repo_root = Path(__file__).resolve().parents[2]
 

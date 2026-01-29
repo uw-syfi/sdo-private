@@ -222,7 +222,7 @@ The Agentflow module allows you to autonomously generate orchestrated Python scr
 Run the agentflow module using `uv` or directly with python:
 
 ```bash
-uv run -m app_operator.agentflow --prompt "Scrape hacker news and summarize top 3 AI stories" --loop-bound 10
+uv run -m agentflow --prompt "Scrape hacker news and summarize top 3 AI stories" --loop-bound 10
 ```
 
 **Options:**
@@ -238,5 +238,5 @@ uv run -m app_operator.agentflow --prompt "Scrape hacker news and summarize top 
 
 Generated scripts are saved in `agentflow_runs/<timestamp>/agentflow.py`. These scripts are standalone and include:
 - `MAX_ITERATIONS` constant for loop bounding.
-- Imports from `app_operator.agentflow.runtime` for agent orchestration tools (`fan_out`, `summarize`, `judge_loop`).
+- Imports from `agentflow.runtime` for agent orchestration tools (`fan_out`, `summarize`, `judge_loop`).
 

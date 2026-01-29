@@ -2,8 +2,8 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, List
 
-from app_operator.cli_agent.backend.base import CodingAgent, AGENT_REGISTRY
-from app_operator.cli_agent.backend.factory import create_agent_from_config
+from libs.agent_cli.base import CodingAgent, AGENT_REGISTRY
+from libs.agent_cli.factory import create_agent_from_config
 from app_operator.logger import logger
 
 

@@ -33,12 +33,12 @@ def test_build_adk_agent_wraps_async_tool():
         assert len(tools_passed) == 1
         assert isinstance(tools_passed[0], MockFunctionToolClass)
         assert call_kwargs["name"] == "test_agent"
-        assert call_kwargs["instructions"] == "instruction"
+        assert call_kwargs["instruction"] == "instruction"
         assert call_kwargs["model"] == "model"
 
 
 def test_build_adk_agent_wraps_sync_tool():
-    """Verify that sync tools are wrapped in an async wrapper then FunctionTool."""
+    """Verify that sync tools are wrapped in FunctionTool."""
 
     def sync_tool(x):
         return x * 2
@@ -57,20 +57,8 @@ def test_build_adk_agent_wraps_sync_tool():
             "test_agent", "instruction", "model", [sync_tool]
         )
 
-        # Verify FunctionTool was called with a wrapper
-        assert mock_init.called
-        args, _ = mock_init.call_args
-        wrapper = args[0]
-
-        # Wrapper should be a coroutine function (async)
-        assert asyncio.iscoroutinefunction(wrapper)
-        # Wrapper should preserve metadata via functools.wraps
-        assert wrapper.__name__ == "sync_tool"
-
-        # Execute wrapper to ensure it calls the sync tool correctly
-        # We use asyncio.run because the test function is synchronous
-        result = asyncio.run(wrapper(10))
-        assert result == 20
+        # Verify FunctionTool was called with the sync tool
+        mock_init.assert_called_with(sync_tool)
 
 
 def test_build_adk_agent_preserves_existing_function_tools():
@@ -130,7 +118,7 @@ def test_build_adk_agent_mixed_tools():
 
         # 2. Sync tool
         assert isinstance(tools_arg[1], MockToolClass)
-        assert asyncio.iscoroutinefunction(tools_arg[1].fn)
+        assert tools_arg[1].fn == tool2
 
         # 3. Existing tool
         assert tools_arg[2] is existing_tool

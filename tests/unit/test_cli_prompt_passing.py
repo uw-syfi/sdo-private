@@ -14,10 +14,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app_operator.cli_agent.backend.claude import ClaudeCodeCodingAgent
-from app_operator.cli_agent.backend.codex import CodexCodingAgent
-from app_operator.cli_agent.backend.gemini import GeminiCodingAgent
-from app_operator.cli_agent.backend.opencode import OpencodeCodingAgent
+from libs.agent_cli.claude import ClaudeCodeCodingAgent
+from libs.agent_cli.codex import CodexCodingAgent
+from libs.agent_cli.gemini import GeminiCodingAgent
+from libs.agent_cli.opencode import OpencodeCodingAgent
 
 
 class MockProcess:

@@ -2,8 +2,8 @@ import pytest
 import asyncio
 from unittest.mock import MagicMock
 
-from app_operator.agentflow.engine import AgentflowEngine
-from app_operator.agentflow.io import UserIO
+from agentflow.engine import AgentflowEngine
+from agentflow.io import UserIO
 from app_operator.prompts import get_loader
 
 
@@ -48,7 +48,7 @@ def test_engine_happy_path(tmp_path):
         ```json
         {
             "status": "ready",
-            "python_script": "import sys\\nfrom app_operator.agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
+            "python_script": "import sys\\nfrom agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
         }
         ```
         """
@@ -85,7 +85,7 @@ def test_engine_clarification_loop(tmp_path):
             """
         {
             "status": "ready",
-            "python_script": "import app_operator.agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"
+            "python_script": "import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"
         }
         """,
         ]
@@ -118,7 +118,7 @@ def test_engine_validation_failure_and_repair(tmp_path):
     runner = MockAdkRunner(
         responses=[
             "Not JSON",  # Fails parsing -> Repair
-            """{"status": "ready", "python_script": "import app_operator.agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}""",  # Repair success
+            """{"status": "ready", "python_script": "import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}""",  # Repair success
         ]
     )
 

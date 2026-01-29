@@ -21,7 +21,7 @@ The JSON structure must be:
 ## Script Requirements
 The generated Python script must:
 1. Be a standalone executable module (include `if __name__ == "__main__":`).
-2. Use the `app_operator.agentflow.runtime` module for agent operations.
+2. Use the `agentflow.runtime` module for agent operations.
 3. Define a global constant `MAX_ITERATIONS` (value provided by user context) to bound loops.
 4. Orchestrate agents using patterns like:
    - **Fan-out**: Use `runtime.fan_out(agent, prompts)` for parallel subtasks.
@@ -32,7 +32,7 @@ The generated Python script must:
 7. Print final results to stdout.
 
 ## Available Runtime Tools
-You can import the following from `app_operator.agentflow.runtime`:
+You can import the following from `agentflow.runtime`:
 - `create_agent(provider=None, model=None) -> CodingAgent`
 - `fan_out(agent, prompts, max_workers=4) -> List[str]`
 - `summarize(agent, responses, instruction) -> str`

@@ -98,7 +98,7 @@ This implementation uses existing coding agent CLIs to manage the application li
 *   **AppMonitor (`app_operator/cli_agent/agents/app_monitor.py`):**
     *   Monitors application health at regular intervals.
     *   Uses `HealthCheckTask` to execute checks and `CodingAgent` to analyze results.
-*   **Backend Providers (`app_operator/cli_agent/backend/`):**
+*   **Backend Providers (`libs.agent_cli/`):**
     *   Implements AI provider integrations (Claude, Gemini, Codex, Opencode).
     *   Each backend has event parsers for streaming output (`*_events.py`).
     *   Factory pattern (`factory.py`) for creating agent instances.

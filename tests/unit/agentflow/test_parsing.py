@@ -1,5 +1,5 @@
 import pytest
-from app_operator.agentflow.models import parse_agentflow_response
+from agentflow.models import parse_agentflow_response
 
 
 def test_extract_json_from_markdown():

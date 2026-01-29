@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import List, Tuple, Any
 
-from app_operator.agentflow.io import UserIO
-from app_operator.agentflow.models import AgentflowResult, parse_agentflow_response
-from app_operator.agentflow.storage import AgentflowStorage
+from agentflow.io import UserIO
+from agentflow.models import AgentflowResult, parse_agentflow_response
+from agentflow.storage import AgentflowStorage
 from app_operator.adk.runner import AdkAgentRunner
 from app_operator.adk.agent_factory import build_adk_agent
 from app_operator.exceptions import AgentError
@@ -134,12 +134,12 @@ class AgentflowEngine:
             errors.append(f"Script must define `MAX_ITERATIONS = {self.loop_bound}`")
 
         if (
-            "app_operator.cli_agent.backend" not in script_text
-            and "app_operator.agentflow.runtime" not in script_text
+            "libs.agent_cli" not in script_text
+            and "agentflow.runtime" not in script_text
             and "app_operator" not in script_text
         ):
             errors.append(
-                "Script must import from `app_operator.agentflow.runtime` or related modules"
+                "Script must import from `agentflow.runtime` or related modules"
             )
 
         if (

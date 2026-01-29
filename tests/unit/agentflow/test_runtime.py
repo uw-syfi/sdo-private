@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-from app_operator.agentflow.runtime import fan_out, summarize, judge_loop
+from agentflow.runtime import fan_out, summarize, judge_loop
 
 
 def test_fan_out():
