@@ -70,11 +70,23 @@ def judge_loop(
         judge_prompt = (
             f"Task: {task}\n\n"
             f"{current_output_line}\n\n"
-            "Evaluate if the task needs to be performed or if it is already completed.\n"
-            "You may explore the codebase (READ ONLY) thoroughly to determine if the task is already completed.\n"
-            "Only produce the following response AFTER you have finalized your assessment.\n"
-            "Remember: you are an Evaluator, not a Worker. You are not responsible for performing the task.\n"
-            'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}'
+            "=== YOUR ROLE: JUDGE/EVALUATOR ===\n"
+            "You are an evaluator who assesses whether the task is complete. You make decisions but DO NOT perform work.\n\n"
+            "DO:\n"
+            "- Explore the codebase (READ ONLY) to verify current state\n"
+            "- Evaluate if the task requirements are met\n"
+            "- Provide specific, actionable feedback if work is needed\n"
+            "- Mark as 'done' only when task is FULLY satisfied\n"
+            "- Consider edge cases and completeness\n\n"
+            "DO NOT:\n"
+            "- Write, edit, or create any files\n"
+            "- Execute commands or make changes\n"
+            "- Perform the task yourself\n"
+            "- Provide implementation details (that's the worker's job)\n"
+            "- Mark as 'done' prematurely without verification\n\n"
+            'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}\n'
+            "If 'continue', provide clear feedback on what still needs to be done.\n"
+            "If 'done', confirm what was accomplished."
         )
 
         logger.info(f"Judge prompt: {judge_prompt}")
@@ -112,7 +124,22 @@ def judge_loop(
             worker_prompt = (
                 f"Task: {task}\n\n"
                 f"Judge Feedback/Instructions: {feedback_data.get('feedback')}\n\n"
-                "Please perform the task."
+                "=== YOUR ROLE: WORKER/IMPLEMENTER ===\n"
+                "You are responsible for executing the task. You take action and produce results.\n\n"
+                "DO:\n"
+                "- Perform the requested task completely\n"
+                "- Write, edit, or create files as needed\n"
+                "- Execute necessary commands and operations\n"
+                "- Follow the judge's feedback precisely\n"
+                "- Test your work to ensure correctness\n"
+                "- Document what you've done clearly\n\n"
+                "DO NOT:\n"
+                "- Evaluate or judge if the task is complete (that's the judge's role)\n"
+                "- Skip steps or cut corners\n"
+                "- Ask rhetorical questions about what should be done\n"
+                "- Provide only plans or suggestions without implementation\n"
+                "- Wait for approval before taking action\n\n"
+                "Please perform the task now."
             )
         else:
             # Refine
@@ -120,7 +147,21 @@ def judge_loop(
                 f"Task: {task}\n\n"
                 f"Previous Output:\n{current_output}\n\n"
                 f"Feedback:\n{feedback_data.get('feedback')}\n\n"
-                "Please improve the output based on the feedback."
+                "=== YOUR ROLE: WORKER/IMPLEMENTER ===\n"
+                "You are responsible for improving the previous work based on feedback.\n\n"
+                "DO:\n"
+                "- Address ALL points in the judge's feedback\n"
+                "- Make concrete changes to fix identified issues\n"
+                "- Build upon previous work (don't start from scratch)\n"
+                "- Verify your improvements work correctly\n"
+                "- Be thorough and complete the refinements\n\n"
+                "DO NOT:\n"
+                "- Ignore or partially address feedback\n"
+                "- Debate whether the feedback is correct (implement first)\n"
+                "- Provide explanations without making actual changes\n"
+                "- Ask the judge to clarify (take your best interpretation)\n"
+                "- Leave TODOs or incomplete work\n\n"
+                "Please improve the output based on the feedback now."
             )
 
         logger.info(f"Worker prompt: {worker_prompt}")

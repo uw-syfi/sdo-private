@@ -42,22 +42,81 @@ class AgentflowEngine:
         self.agent_timeout = agent_timeout
         self.storage = AgentflowStorage(output_dir)
         self.work_dir = work_dir
+        self._thinking_started = False
 
     def _on_event(self, event: Any) -> None:
         """Handle ADK events for streaming output."""
+        # 1. Handle tool calls (ADK can yield these directly)
+        fn_calls = []
+        if hasattr(event, "get_function_calls"):
+            try:
+                fn_calls = event.get_function_calls()
+            except Exception:
+                pass
+
+        for fn_call in fn_calls:
+            name = getattr(fn_call, "name", "tool")
+            args = getattr(fn_call, "args", {})
+            self.io.info(f"\n[Tool Use] {name}({args})")
+
+        # 2. Handle tool responses
+        fn_resps = []
+        if hasattr(event, "get_function_responses"):
+            try:
+                fn_resps = event.get_function_responses()
+            except Exception:
+                pass
+
+        for fn_resp in fn_resps:
+            name = getattr(fn_resp, "name", "tool")
+            resp = getattr(fn_resp, "response", {})
+            # Extract meaningful output from tool response
+            output = ""
+            if isinstance(resp, dict):
+                output = resp.get("output") or resp.get("result") or str(resp)
+            else:
+                output = str(resp)
+            
+            # Truncate long output
+            if len(output) > 500:
+                output = output[:500] + "... (truncated)"
+            self.io.info(f"\n[Tool Result] {name}: {output}")
+
+        # 3. Handle content parts (text, thought)
         content = getattr(event, "content", None)
         if content:
             parts = getattr(content, "parts", None) or []
             for part in parts:
+                # Thinking
+                thought = getattr(part, "thought", None)
+                if thought:
+                    if not self._thinking_started:
+                        self.io.info("\n[Thinking]")
+                        self._thinking_started = True
+                    self.io.print_stream(thought)
+                    continue
+
+                # Text
                 text = getattr(part, "text", None)
                 if text:
+                    if self._thinking_started:
+                        self.io.info("")  # Newline after thinking block
+                        self._thinking_started = False
                     self.io.print_stream(text)
 
+                # Fallback for tool calls in parts
                 fn_call = getattr(part, "function_call", None)
-                if fn_call:
+                if fn_call and not fn_calls:
                     name = getattr(fn_call, "name", "tool")
                     args = getattr(fn_call, "args", {})
                     self.io.info(f"\n[Tool Use] {name}({args})")
+
+                # Fallback for tool responses in parts
+                fn_resp = getattr(part, "function_response", None)
+                if fn_resp and not fn_resps:
+                    name = getattr(fn_resp, "name", "tool")
+                    resp = getattr(fn_resp, "response", {})
+                    self.io.info(f"\n[Tool Result] {name}: {resp}")
 
     async def run_async(self, user_prompt: str) -> AgentflowResult:
         """Run the clarification loop and generate the script."""
@@ -79,6 +138,7 @@ class AgentflowEngine:
                     "Max clarifications exceeded without reaching 'ready' state."
                 )
 
+            self._thinking_started = False
             # Render prompts
             system_prompt = self.prompt_loader.render("agentflow/system.jinja2")
             user_msg = self.prompt_loader.render(
