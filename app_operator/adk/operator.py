@@ -218,7 +218,7 @@ class AdkOperator:
         fixer_prompt = (
             f"You are the Fixer. Your goal is to fix deployment or health check errors.\n"
             f"1. Analyze the output and errors from the previous Deployer attempt.\n"
-            f"2. Use tools like `read`, `grep`, `edit`, `ls` to investigate and fix the issues in the scripts or codebase.\n"
+            f"2. Use tools like `read`, `grep`, `write_file`, `ls` to investigate and fix the issues in the scripts or codebase.\n"
             f"3. After applying fixes, yield back to the Deployer to retry.\n"
             f"Context: Platform is {self.config.deployment.platform}."
         )
