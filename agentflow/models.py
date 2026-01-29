@@ -39,12 +39,31 @@ def extract_json(text: str) -> str:
     # Try to find ```json ... ``` or just ``` ... ```
     pattern = r"```(?:json)?\s*(.*?)\s*```"
     match = re.search(pattern, text, re.DOTALL)
+    
     if match:
-        return match.group(1)
+        candidate = match.group(1)
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass  # Try fallback if regex extraction isn't valid JSON
 
     # Fallback: look for the first { and last }
     start = text.find("{")
     end = text.rfind("}")
+    if start != -1 and end != -1:
+        candidate = text[start: end + 1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    # If we get here, neither method produced valid JSON.
+    # Return the regex match if it existed (most specific),
+    # otherwise the brace slice, otherwise the original text.
+    if match:
+        return match.group(1)
     if start != -1 and end != -1:
         return text[start: end + 1]
 
