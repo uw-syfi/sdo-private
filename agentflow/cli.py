@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--work-dir", default=".", help="Directory to run the generated script in"
     )
+    parser.add_argument(
+        "--no-run", action="store_true", help="Generate script but do not execute it"
+    )
     return parser
 
 
@@ -91,6 +94,9 @@ def main() -> int:
     try:
         result = asyncio.run(engine.run_async(user_prompt))
         io.info(f"\nSuccess! Script written to: {result.script_path}")
+
+        if args.no_run:
+            return 0
 
         # Execute the generated script
         import subprocess

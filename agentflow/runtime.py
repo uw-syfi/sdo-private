@@ -66,20 +66,16 @@ def judge_loop(
     current_output = None
 
     for i in range(max_iterations):
-        if current_output is None:
-            judge_prompt = (
-                f"Task: {task}\n\n"
-                "Current Output: (None - Worker has not started yet)\n\n"
-                "Evaluate if the task needs to be performed or if it is already completed.\n"
-                'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}'
-            )
-        else:
-            judge_prompt = (
-                f"Task: {task}\n\n"
-                f"Current Output:\n{current_output}\n\n"
-                "Evaluate if the output meets the requirements.\n"
-                'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}'
-            )
+        current_output_line = "Current Output: (None - Worker has not started yet)" if current_output is None else f"Current Output:\n{current_output}"
+        judge_prompt = (
+            f"Task: {task}\n\n"
+            f"{current_output_line}\n\n"
+            "Evaluate if the task needs to be performed or if it is already completed.\n"
+            "You may explore the codebase (READ ONLY) thoroughly to determine if the task is already completed.\n"
+            "Only produce the following response AFTER you have finalized your assessment.\n"
+            "Remember: you are an Evaluator, not a Worker. You are not responsible for performing the task.\n"
+            'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}'
+        )
 
         logger.info(f"Judge prompt: {judge_prompt}")
         judge_resp = judge.generate(prompt=judge_prompt, timeout=timeout)
