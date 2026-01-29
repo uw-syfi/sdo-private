@@ -1,11 +1,16 @@
 import json
 import asyncio
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, List, Any, Callable
 from pathlib import Path
 
-from app_operator.adk.agent_factory import build_adk_agent
-from app_operator.adk.runner import AdkAgentRunner
+from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools.function_tool import FunctionTool
+from google.genai import types
+
 from app_operator.adk.models import build_adk_model
 from app_operator.adk.tools import build_tools
 from app_operator.config import load_config
@@ -13,21 +18,39 @@ from app_operator.filesystem import RealFilesystem
 from app_operator.logger import logger
 
 
-class AdkWrapperAgent:
-    """Wrapper to make ADK agents behave like CodingAgents."""
+class GoogleAdkAgent:
+    """Agent implementation using Google ADK LlmAgent directly."""
 
     def __init__(
         self,
-        runner: AdkAgentRunner,
-        model: Any,
+        model_name: str,
         tools: List[Callable],
         instruction: str = "",
+        agent_name: str = "AgentflowWorker",
     ):
-        self.runner = runner
-        self.model = model
+        self.model_name = model_name
         self.tools = tools
         self.instruction = instruction
-        self.agent_name = "AgentflowWorker"
+        self.agent_name = agent_name
+        
+        # Prepare tools for ADK (wrap in FunctionTool)
+        self.adk_tools = []
+        for tool in self.tools:
+            if isinstance(tool, FunctionTool):
+                self.adk_tools.append(tool)
+            else:
+                self.adk_tools.append(FunctionTool(tool))
+
+        # Instantiate LlmAgent
+        self.llm_agent = LlmAgent(
+            name=self.agent_name,
+            description=f"SDS Agent: {self.agent_name}",
+            model=self.model_name,
+            tools=self.adk_tools,
+            instruction=self.instruction,
+        )
+        
+        self.session_service = InMemorySessionService()
 
     def generate(
         self,
@@ -37,22 +60,53 @@ class AdkWrapperAgent:
         silent: bool = False,
     ) -> str:
         """Generate response using ADK agent."""
-        # Create a new agent instance for this call
-        agent = build_adk_agent(
-            name=self.agent_name,
-            instruction=self.instruction or "You are a helpful coding assistant.",
-            model=self.model,
-            tools=self.tools,
+        return asyncio.run(self._generate_async(prompt, timeout))
+
+    async def _generate_async(self, prompt: str, timeout: int) -> str:
+        # Create a new session for each generation
+        session_id = str(uuid.uuid4())
+        await self.session_service.create_session(
+            app_name="agentflow", user_id="sds", session_id=session_id
         )
 
-        # Run async in this sync method
-        try:
-            return asyncio.run(self.runner.run_async(agent, prompt))
-        except Exception as e:
-            logger.error(f"Error during agent generation: {e}")
-            # If we are already in an event loop (unlikely for intended usage but possible),
-            # we might need handling. For generated scripts, usually strictly sync top-level.
-            raise
+        runner = Runner(
+            agent=self.llm_agent,
+            app_name="agentflow",
+            session_service=self.session_service,
+        )
+        
+        content = types.Content(role="user", parts=[types.Part(text=prompt)])
+        response_text = ""
+
+        if hasattr(runner, "run_async"):
+             async for event in runner.run_async(
+                user_id="sds", session_id=session_id, new_message=content
+            ):
+                text = self._extract_text(event)
+                if text:
+                    response_text = text
+                
+                if hasattr(event, "is_final_response") and event.is_final_response():
+                    if text:
+                        response_text = text
+                    break
+        else:
+             raise AttributeError("Runner does not provide run_async()")
+             
+        return response_text
+
+    def _extract_text(self, event: Any) -> str:
+        """Extract plain text content from an ADK event."""
+        content = getattr(event, "content", None)
+        if content is None:
+            return ""
+        parts = getattr(content, "parts", None) or []
+        texts = []
+        for part in parts:
+            text = getattr(part, "text", None)
+            if text:
+                texts.append(text)
+        return "".join(texts)
 
 
 def create_agent(
@@ -61,8 +115,8 @@ def create_agent(
     config_path: Optional[str] = None,
     repo_path: Optional[str] = None,
     instruction: Optional[str] = None,
-) -> AdkWrapperAgent:
-    """Create a coding agent instance using ADK.
+) -> GoogleAdkAgent:
+    """Create a coding agent instance using Google ADK.
 
     Args:
         provider: Agent provider ("gemini", "claude", "codex", "opencode").
@@ -72,7 +126,7 @@ def create_agent(
         instruction: System instruction for the agent.
 
     Returns:
-        AdkWrapperAgent: Configured coding agent.
+        GoogleAdkAgent: Configured coding agent.
     """
 
     # 1. Load configuration
@@ -81,31 +135,30 @@ def create_agent(
         config = load_config(target_dir, config_path)
     except Exception as e:
         logger.warning(f"Failed to load config: {e}. Using defaults.")
-        # Fallback or re-raise? load_config usually returns defaults if file missing but might raise on bad file.
-        # We'll assume it works or we let it fail.
         raise
 
     # 2. Setup ADK components
-    # Handle model override
+    # Handle overrides
+    if provider:
+        config.agent.provider = provider
     if model:
         config.agent.model = model
 
-    adk_model = build_adk_model(config)
+    adk_model_name = build_adk_model(config)
 
     repo_path_obj = Path(target_dir).resolve()
     filesystem = RealFilesystem()
     tools = build_tools(repo_path_obj, filesystem)
 
-    runner = AdkAgentRunner(
-        app_name="agentflow-adk",
-        repo_path=repo_path_obj,
+    return GoogleAdkAgent(
+        model_name=adk_model_name,
+        tools=tools,
+        instruction=instruction or ""
     )
-
-    return AdkWrapperAgent(runner, adk_model, tools, instruction=instruction or "")
 
 
 def fan_out(
-    agent: AdkWrapperAgent, prompts: List[str], max_workers: int = 4, timeout: int = 300
+    agent: GoogleAdkAgent, prompts: List[str], max_workers: int = 4, timeout: int = 300
 ) -> List[str]:
     """Execute multiple prompts in parallel using the same agent type."""
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -115,7 +168,7 @@ def fan_out(
         return [f.result() for f in futures]
 
 def summarize(
-    agent: AdkWrapperAgent, responses: List[str], instruction: str, timeout: int = 300
+    agent: GoogleAdkAgent, responses: List[str], instruction: str, timeout: int = 300
 ) -> str:
     """Summarize a list of responses."""
     combined_input = "\n\n---\n\n".join(responses)
@@ -123,8 +176,8 @@ def summarize(
     return agent.generate(prompt=prompt, timeout=timeout)
 
 def judge_loop(
-    judge: AdkWrapperAgent,
-    worker: AdkWrapperAgent,
+    judge: GoogleAdkAgent,
+    worker: GoogleAdkAgent,
     task: str,
     max_iterations: int,
     timeout: int = 3000,
