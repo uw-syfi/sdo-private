@@ -6,8 +6,6 @@ from agentflow.models import AgentflowResult
 
 def test_cli_no_run(tmp_path):
     with patch("agentflow.cli.load_config") as mock_load_config, \
-            patch("agentflow.cli.build_adk_model"), \
-            patch("agentflow.cli.AdkAgentRunner"), \
             patch("agentflow.cli.AgentflowEngine") as mock_engine_cls, \
             patch("agentflow.cli.ConsoleIO"), \
             patch("subprocess.run") as mock_subprocess_run:

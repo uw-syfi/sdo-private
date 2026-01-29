@@ -1,9 +1,11 @@
 import pytest
 import asyncio
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from agentflow.engine import AgentflowEngine
 from agentflow.io import UserIO
 from agentflow.prompts import get_loader
+from app_operator.config import Config, AgentConfig, OperatorConfig
 
 
 class MockIO(UserIO):
@@ -11,6 +13,7 @@ class MockIO(UserIO):
         self.answers = answers or []
         self.questions_asked = []
         self.info_messages = []
+        self.stream_output = ""
 
     def read_prompt(self) -> str:
         return "test prompt"
@@ -25,153 +28,174 @@ class MockIO(UserIO):
     def info(self, message: str) -> None:
         self.info_messages.append(message)
 
-
-class MockAdkRunner:
-    def __init__(self, responses=None):
-        self.responses = responses or []
-        self.call_count = 0
-        self.last_prompt = None
-
-    async def run_async(self, agent, prompt, on_event=None):
-        self.call_count += 1
-        self.last_prompt = prompt
-        if self.responses:
-            return self.responses.pop(0)
-        return ""
+    def print_stream(self, text: str) -> None:
+        self.stream_output += text
 
 
-def test_engine_happy_path(tmp_path):
-    runner = MockAdkRunner(
-        responses=[
-            """
-        ```json
-        {
-            "status": "ready",
-            "python_script": "import sys\\nfrom agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
-        }
-        ```
-        """
-        ]
+@pytest.fixture
+def mock_config():
+    return Config(
+        agent=AgentConfig(provider="gemini", model="gemini-1.5-pro"),
+        operator=OperatorConfig()
     )
 
-    io = MockIO()
-    loader = get_loader()
-    output_dir = tmp_path / "output"
 
-    engine = AgentflowEngine(
-        runner=runner,
-        model="mock-model",
+@pytest.fixture
+def mock_io():
+    return MockIO()
+
+
+@pytest.fixture
+def engine(tmp_path, mock_config, mock_io):
+    loader = get_loader()
+    return AgentflowEngine(
+        config=mock_config,
         prompt_loader=loader,
-        io=io,
+        io=mock_io,
         loop_bound=5,
         max_clarifications=2,
         agent_timeout=1,
-        output_dir=output_dir,
+        output_dir=tmp_path,
         work_dir=tmp_path,
     )
 
-    result = asyncio.run(engine.run_async("do something"))
 
-    assert result.script_text is not None
-    assert (output_dir / result.script_path.parent.name / "generated_script.py").exists()
-    assert result.clarifications == []
+def test_engine_happy_path(engine, tmp_path):
+    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
+            patch("agentflow.engine.build_llm"):
+
+        mock_agent = MagicMock()
+
+        async def mock_astream_events(*args, **kwargs):
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": MagicMock(content='''\
+                ```json
+                {
+                    "status": "ready",
+                    "python_script": "import sys\\nfrom agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
+                }
+                ```
+                ''')}
+            }
+
+        mock_agent.astream_events = mock_astream_events
+        mock_create_agent.return_value = mock_agent
+
+        result = asyncio.run(engine.run_async("do something"))
+
+        assert result.script_text is not None
+        assert (tmp_path / result.script_path.parent.name / "generated_script.py").exists()
+        assert result.clarifications == []
 
 
-def test_engine_clarification_loop(tmp_path):
+def test_engine_clarification_loop(engine, mock_io):
     # Sequence: Clarify -> Ready
-    runner = MockAdkRunner(
-        responses=[
-            """{"status": "clarify", "questions": ["Q1"]}""",
-            """
-        {
-            "status": "ready",
-            "python_script": "import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"
-        }
-        """,
+    # Since create_react_agent is called in a loop, we need to provide different mocks or behavior for each call
+    # Or better, the mock_astream_events can yield different things based on
+    # the prompt or just sequential calls.
+
+    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
+            patch("agentflow.engine.build_llm"):
+
+        mock_agent = MagicMock()
+
+        # We need an iterator for the responses
+        responses = [
+            "{\"status\": \"clarify\", \"questions\": [\"Q1\"]}",
+            "\n            {\n                \"status\": \"ready\",\n                \"python_script\": \"import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass\"\n            }\n            "
         ]
-    )
 
-    io = MockIO(answers=[["A1"]])
-    loader = get_loader()
+        call_count = 0
 
-    engine = AgentflowEngine(
-        runner=runner,
-        model="mock-model",
-        prompt_loader=loader,
-        io=io,
-        loop_bound=5,
-        max_clarifications=2,
-        agent_timeout=1,
-        output_dir=tmp_path,
-        work_dir=tmp_path,
-    )
+        async def mock_astream_events(*args, **kwargs):
+            nonlocal call_count
+            response = responses[call_count]
+            call_count += 1
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": MagicMock(content=response)}
+            }
 
-    result = asyncio.run(engine.run_async("task"))
+        mock_agent.astream_events = mock_astream_events
+        mock_create_agent.return_value = mock_agent
 
-    assert len(io.questions_asked) == 1
-    assert io.questions_asked[0] == "Q1"
-    assert result.clarifications == [("Q1", "A1")]
-    assert "MAX_ITERATIONS = 5" in result.script_text
+        # Prepare IO with answer
+        mock_io.answers = [["A1"]]
 
+        result = asyncio.run(engine.run_async("task"))
 
-def test_engine_validation_failure_and_repair(tmp_path):
-    # This test is tricky because repair is just a re-prompt.
-    runner = MockAdkRunner(
-        responses=[
-            "Not JSON",  # Fails parsing -> Repair
-            """{"status": "ready", "python_script": "import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}""",  # Repair success
-        ]
-    )
-
-    io = MockIO()
-    loader = get_loader()
-
-    engine = AgentflowEngine(
-        runner=runner,
-        model="mock-model",
-        prompt_loader=loader,
-        io=io,
-        loop_bound=5,
-        max_clarifications=2,
-        agent_timeout=1,
-        output_dir=tmp_path,
-        work_dir=tmp_path,
-    )
-
-    asyncio.run(engine.run_async("task"))
-
-    assert runner.call_count == 2
-    # Verify second call contained repair info
-    assert "PARSING ERROR" in runner.last_prompt
+        assert len(mock_io.questions_asked) == 1
+        assert mock_io.questions_asked[0] == "Q1"
+        assert result.clarifications == [("Q1", "A1")]
+        assert "MAX_ITERATIONS = 5" in result.script_text
 
 
-def test_engine_script_validation_error(tmp_path):
-    # Script missing MAX_ITERATIONS
-    runner = MockAdkRunner(
-        responses=[
-            """
-        {
-            "status": "ready",
-            "python_script": "print('bad script')"
-        }
-        """
-        ]
-    )
+def test_engine_validation_failure_and_repair(engine):
+    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
+            patch("agentflow.engine.build_llm"):
 
-    io = MockIO()
-    loader = get_loader()
+        mock_agent = MagicMock()
 
-    engine = AgentflowEngine(
-        runner=runner,
-        model="mock-model",
-        prompt_loader=loader,
-        io=io,
-        loop_bound=5,
-        max_clarifications=2,
-        agent_timeout=1,
-        output_dir=tmp_path,
-        work_dir=tmp_path,
-    )
+        # First call: Not JSON
+        # Second call (repair via ainvoke): Valid JSON
 
-    with pytest.raises(ValueError, match="Script validation failed"):
+        first_call_done = False
+
+        async def mock_astream_events(*args, **kwargs):
+            nonlocal first_call_done
+            if not first_call_done:
+                first_call_done = True
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {"chunk": MagicMock(content="Not JSON")}
+                }
+            else:
+                # Should not be reached via astream_events in this test logic because
+                # repair uses ainvoke
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {"chunk": MagicMock(content="Should not be here")}
+                }
+
+        async def mock_ainvoke_impl(*args, **kwargs):
+            # This is the repair call
+            return {
+                "messages": [
+                    MagicMock(
+                        content='''{"status": "ready", "python_script": "import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}''')
+                ]
+            }
+
+        mock_agent.astream_events = mock_astream_events
+        mock_agent.ainvoke = AsyncMock(side_effect=mock_ainvoke_impl)
+        mock_create_agent.return_value = mock_agent
+
         asyncio.run(engine.run_async("task"))
+
+        # Verify repair was attempted (ainvoke called)
+        assert mock_agent.ainvoke.called
+
+
+def test_engine_script_validation_error(engine):
+    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
+            patch("agentflow.engine.build_llm"):
+
+        mock_agent = MagicMock()
+
+        async def mock_astream_events(*args, **kwargs):
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": MagicMock(content='''\
+                {
+                    "status": "ready",
+                    "python_script": "print('bad script')"
+                }
+                ''')}
+            }
+
+        mock_agent.astream_events = mock_astream_events
+        mock_create_agent.return_value = mock_agent
+
+        with pytest.raises(ValueError, match="Script validation failed"):
+            asyncio.run(engine.run_async("task"))
