@@ -109,6 +109,15 @@ class AdkOperator:
         with self.recorder.phase(Phase.EXPLORATION) as _:
             # Load prompts
             system_prompt = get_loader().render("code_analyzer/system.jinja2")
+
+            # Patch system prompt to update tool names to match new ADK tools
+            system_prompt = system_prompt.replace("- **Glob**:", "- **find_files**:")
+            system_prompt = system_prompt.replace("- **Read**:", "- **read_file**:")
+            system_prompt = system_prompt.replace(
+                "- **Grep**:", "- **search_content**:"
+            )
+            system_prompt = system_prompt.replace("- **LS**:", "- **list_files**:")
+
             user_prompt = get_loader().render(
                 "code_analyzer/user.jinja2", repo_path=str(self.repo_path)
             )
@@ -201,10 +210,11 @@ class AdkOperator:
         # 1. Define Deployer Agent
         deployer_prompt = (
             "You are the Deployer. Your goal is to deploy the application and verify its health.\n"
-            "1. Run `.sds/deploy.sh start` using the `bash` tool.\n"
-            "2. If the deployment succeeds (exit code 0), run `.sds/health_check.sh` using the `bash` tool.\n"
+            "1. Run `.sds/deploy.sh start` using the `run_command` tool. Provide a timeout.\n"
+            "2. If the deployment succeeds (exit code 0), run `.sds/health_check.sh` using the `run_command` tool. Provide a timeout.\n"
             "3. If the health check also succeeds, you MUST call the `finish_deployment` tool immediately to complete the process.\n"
-            "4. If any step fails, stop and output 'Deployment failed' to yield to the Fixer."
+            "4. If any step fails, stop and output 'Deployment failed' to yield to the Fixer.\n"
+            "Check the 'status' key in the tool response. If 'status' is 'error', treating it as a failure."
         )
 
         deployer = build_adk_agent(
@@ -218,9 +228,10 @@ class AdkOperator:
         fixer_prompt = (
             f"You are the Fixer. Your goal is to fix deployment or health check errors.\n"
             f"1. Analyze the output and errors from the previous Deployer attempt.\n"
-            f"2. Use tools like `read`, `grep`, `write_file`, `ls` to investigate and fix the issues in the scripts or codebase.\n"
+            f"2. Use tools like `read_file`, `search_content`, `write_file`, `list_files`, `find_files` to investigate and fix the issues in the scripts or codebase.\n"
             f"3. After applying fixes, yield back to the Deployer to retry.\n"
-            f"Context: Platform is {self.config.deployment.platform}."
+            f"Context: Platform is {self.config.deployment.platform}.\n"
+            "Check the 'status' key in the tool response. If 'status' is 'error', the tool execution failed."
         )
 
         fixer = build_adk_agent(
@@ -313,8 +324,8 @@ class AdkOperator:
                 duration = time.time() - start_time
 
                 r.add_tool_call(
-                    tool="bash",
-                    args={"script": ".sds/health_check.sh"},
+                    tool="run_command",
+                    args={"command": ".sds/health_check.sh", "timeout": 120},
                     stdout=result.get("stdout", ""),
                     stderr=result.get("stderr", ""),
                     exit_code=result.get("exit_code", -1),

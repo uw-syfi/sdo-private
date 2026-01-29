@@ -1,7 +1,7 @@
 import re
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional
 
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 
@@ -43,57 +43,74 @@ class ToolContext:
         return candidate
 
 
-def _build_ls(context: ToolContext) -> Callable[[str], str]:
-    def ls(path: str = ".") -> str:
-        """List files in the specified directory."""
+def _build_list_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
+    def list_files(path: str) -> Dict[str, Any]:
+        """List files in the specified directory.
+
+        Args:
+            path: The directory path to list.
+
+        Returns:
+            A dictionary containing the status and output.
+        """
         try:
             target = context.resolve_path(path)
             if not context.filesystem.exists(target):
-                return f"Error: Path does not exist: {path}"
+                return {
+                    "status": "error",
+                    "error": f"Path does not exist: {path}",
+                    "context": {"path": path},
+                }
             if context.filesystem.exists(target) and not context.filesystem.is_dir(
                 target
             ):
-                result = target.name
-                return result
+                return {
+                    "status": "success",
+                    "output": target.name,
+                    "context": {"path": path, "type": "file"},
+                }
+
             # Use iterdir() from Path is unsafe if we want to use InMemoryFilesystem fully,
             # but FileSystemInterface doesn't have listdir.
             # However, app_operator/langgraph/tools.py uses target.iterdir().
             # RealFilesystem relies on Path.iterdir().
-            # InMemoryFilesystem doesn't implement iterdir() on path,
-            # but the existing test suite must work somehow.
-            # Let's check InMemoryFilesystem again. It stores paths in self.files/directories.
-            # But context.resolve_path returns a Path object.
-            # If we call target.iterdir(), it calls real filesystem.
-            # So ls() in langgraph/tools.py is actually broken for InMemoryFilesystem unless
-            # mocked or if target is not a real Path object.
-
-            # To fix this properly for ADK (and keep consistent with plan),
-            # I will use Path.iterdir() assuming RealFilesystem usage or
-            # if InMemoryFilesystem is used, maybe we don't test ls() with it
-            # or the tests mock Path.iterdir.
-            # Wait, the plan for tests says:
-            # "Use InMemoryFilesystem + stubbed AdkAgentRunner to simulate: ... Successful deploy"
-            # Deploy usually doesn't use LS tool directly, but "Script Generator" might.
-
-            # For now, I will use target.iterdir() to match langgraph implementation.
             entries = sorted(p.name for p in target.iterdir())
             result = "\n".join(entries)
-            return result
+            return {
+                "status": "success",
+                "output": result,
+                "context": {"path": path, "count": len(entries)},
+            }
         except Exception as e:
-            return f"Error: {str(e)}"
+            return {
+                "status": "error",
+                "error": str(e),
+                "context": {"path": path},
+            }
 
-    return ls
+    return list_files
 
 
-def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
-    def glob(pattern: str) -> List[str]:
-        """Find files matching the pattern."""
+def _build_find_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
+    def find_files(pattern: str) -> Dict[str, Any]:
+        """Find files matching the pattern.
+
+        Args:
+            pattern: The glob pattern to search for.
+
+        Returns:
+            A dictionary containing the status and list of matching files.
+        """
         try:
             if Path(pattern).is_absolute():
                 try:
                     pattern = str(Path(pattern).relative_to(context.repo_root))
                 except ValueError:
-                    return [f"Error: Pattern escapes repository root: {pattern}"]
+                    return {
+                        "status": "error",
+                        "error": f"Pattern escapes repository root: {pattern}",
+                        "context": {"pattern": pattern},
+                    }
 
             results = []
             # Similarly, context.repo_root.glob(pattern) uses real filesystem
@@ -105,29 +122,60 @@ def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
                     except ValueError:
                         continue
             results = sorted(results)
-            return results
+            return {
+                "status": "success",
+                "output": "\n".join(results),
+                "context": {"pattern": pattern, "count": len(results)},
+            }
         except Exception as e:
-            return [f"Error: {str(e)}"]
+            return {
+                "status": "error",
+                "error": str(e),
+                "context": {"pattern": pattern},
+            }
 
-    return glob
+    return find_files
 
 
-def _build_read(context: ToolContext) -> Callable[[str], str]:
-    def read(path: str) -> str:
-        """Read the content of a file."""
+def _build_read_file(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
+    def read_file(path: str) -> Dict[str, Any]:
+        """Read the content of a file.
+
+        Args:
+            path: The path to the file to read.
+
+        Returns:
+            A dictionary containing the status and file content.
+        """
         try:
             target = context.resolve_path(path)
             content = context.filesystem.read_text(target)
-            return content
+            return {
+                "status": "success",
+                "output": content,
+                "context": {"path": path, "bytes": len(content)},
+            }
         except Exception as e:
-            return f"Error: {str(e)}"
+            return {
+                "status": "error",
+                "error": str(e),
+                "context": {"path": path},
+            }
 
-    return read
+    return read_file
 
 
-def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
-    def grep(pattern: str, path: str = ".") -> List[str]:
-        """Search for a regex pattern in files."""
+def _build_search_content(context: ToolContext) -> Callable[[str, str], Dict[str, Any]]:
+    def search_content(pattern: str, path: str) -> Dict[str, Any]:
+        """Search for a regex pattern in files.
+
+        Args:
+            pattern: The regex pattern to search for.
+            path: The directory or file path to search in.
+
+        Returns:
+            A dictionary containing the status and matching lines.
+        """
         try:
             target = context.resolve_path(path)
             regex = re.compile(pattern)
@@ -145,7 +193,15 @@ def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
                             matches.append(f"{relative}:{idx}:{line.strip()}")
                 except Exception:
                     pass
-                return matches
+                return {
+                    "status": "success",
+                    "output": "\n".join(matches),
+                    "context": {
+                        "pattern": pattern,
+                        "path": path,
+                        "count": len(matches),
+                    },
+                }
 
             # Recursive search needs to use real filesystem for walking?
             # Or we can't easily implement grep recursively with FileSystemInterface
@@ -166,20 +222,40 @@ def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
                                 matches.append(f"{relative}:{idx}:{line.strip()}")
                     except Exception:
                         continue
-            return matches
+            return {
+                "status": "success",
+                "output": "\n".join(matches),
+                "context": {"pattern": pattern, "path": path, "count": len(matches)},
+            }
         except Exception as e:
-            return [f"Error: {str(e)}"]
+            return {
+                "status": "error",
+                "error": str(e),
+                "context": {"pattern": pattern, "path": path},
+            }
 
-    return grep
+    return search_content
 
 
-def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
-    def write_file(path: str, content: str) -> str:
-        """Write content to a file."""
+def _build_write_file(context: ToolContext) -> Callable[[str, str], Dict[str, Any]]:
+    def write_file(path: str, content: str) -> Dict[str, Any]:
+        """Write content to a file.
+
+        Args:
+            path: The path to the file to write.
+            content: The content to write.
+
+        Returns:
+            A dictionary containing the status and result message.
+        """
         try:
             target = context.resolve_path(path)
             if context.filesystem.is_dir(target):
-                return f"Error: Path is a directory: {path}"
+                return {
+                    "status": "error",
+                    "error": f"Path is a directory: {path}",
+                    "context": {"path": path},
+                }
 
             # Use filesystem interface for mkdir
             # InMemoryFilesystem requires exact path matching for validation,
@@ -192,16 +268,32 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
 
             context.filesystem.write_text(target, content)
             result = f"Wrote {len(content)} bytes to {path}"
-            return result
+            return {
+                "status": "success",
+                "output": result,
+                "context": {"path": path, "bytes": len(content)},
+            }
         except Exception as e:
-            return f"Error: {str(e)}"
+            return {
+                "status": "error",
+                "error": str(e),
+                "context": {"path": path},
+            }
 
     return write_file
 
 
-def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
-    def bash(command: str, timeout: int = 120) -> Dict[str, Any]:
-        """Execute a bash command."""
+def _build_run_command(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
+    def run_command(command: str, timeout: int) -> Dict[str, Any]:
+        """Execute a bash command.
+
+        Args:
+            command: The command to execute.
+            timeout: The maximum time to wait for the command to complete.
+
+        Returns:
+            A dictionary containing the status, output, and exit code.
+        """
         try:
             # subprocess uses real system
             result = subprocess.run(
@@ -213,53 +305,75 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
                 timeout=timeout,
             )
 
+            success = result.returncode == 0
             return {
-                "success": result.returncode == 0,
-                "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "status": "success" if success else "error",
+                "output": result.stdout if success else result.stderr,
+                "error": result.stderr if not success else None,
+                "context": {
+                    "command": command,
+                    "exit_code": result.returncode,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                },
             }
         except subprocess.TimeoutExpired:
             error_msg = f"Command timed out after {timeout} seconds"
             return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": error_msg,
+                "status": "error",
+                "error": error_msg,
+                "output": "",
+                "context": {
+                    "command": command,
+                    "exit_code": -1,
+                    "stderr": error_msg,
+                },
             }
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": error_msg,
+                "status": "error",
+                "error": error_msg,
+                "output": "",
+                "context": {
+                    "command": command,
+                    "exit_code": -1,
+                    "stderr": error_msg,
+                },
             }
 
-    return bash
+    return run_command
 
 
-def _build_finish_deployment(context: ToolContext) -> Callable[[], str]:
-    def finish_deployment() -> str:
-        """Mark the deployment as successfully completed and finish the process."""
-        return "DEPLOYMENT_FINISHED"
+def _build_finish_deployment(context: ToolContext) -> Callable[[], Dict[str, Any]]:
+    def finish_deployment() -> Dict[str, Any]:
+        """Mark the deployment as successfully completed and finish the process.
+
+        Returns:
+            A dictionary containing the status and result message.
+        """
+        return {
+            "status": "success",
+            "output": "DEPLOYMENT_FINISHED",
+            "context": {},
+        }
 
     return finish_deployment
 
 
 def build_tools(
-    repo_path: Path, filesystem: FileSystemInterface = None
+    repo_path: Path, filesystem: Optional[FileSystemInterface] = None
 ) -> List[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 
     context = ToolContext(repo_root=repo_path.resolve(), filesystem=filesystem)
     return [
-        _build_ls(context),
-        _build_glob(context),
-        _build_read(context),
-        _build_grep(context),
+        _build_list_files(context),
+        _build_find_files(context),
+        _build_read_file(context),
+        _build_search_content(context),
         _build_write_file(context),
-        _build_bash(context),
+        _build_run_command(context),
         _build_finish_deployment(context),
     ]
