@@ -1,4 +1,5 @@
 """Subprocess runner with threading, timeout handling, and progress monitoring."""
+
 import subprocess
 import threading
 import time
@@ -46,7 +47,7 @@ class SubprocessRunner:
         self.check_shutdown = check_shutdown
         self.time_func = time_func if time_func is not None else time.time
         self.sleep_func = sleep_func if sleep_func is not None else time.sleep
-        self.popen_func = popen_func if popen_func is not None else self.popen_func
+        self.popen_func = popen_func if popen_func is not None else subprocess.Popen
 
         self.process: Optional[self.popen_func] = None
         self.stdout_lines: List[str] = []
