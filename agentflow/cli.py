@@ -28,6 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir", default="agentflow_runs", help="Output directory"
     )
+    parser.add_argument(
+        "--work-dir", default=".", help="Directory to run the generated script in"
+    )
     return parser
 
 
@@ -77,6 +80,7 @@ def main() -> int:
     loop_bound = args.loop_bound if args.loop_bound is not None else 10
 
     output_dir = repo_root / args.output_dir
+    work_dir = Path(args.work_dir).resolve()
 
     engine = AgentflowEngine(
         runner=runner,
@@ -87,11 +91,33 @@ def main() -> int:
         max_clarifications=args.max_clarifications,
         agent_timeout=config.operator.agent_timeout,
         output_dir=output_dir,
+        work_dir=work_dir,
     )
 
     try:
         result = asyncio.run(engine.run_async(user_prompt))
         io.info(f"\nSuccess! Script written to: {result.script_path}")
+
+        # Execute the generated script
+        import subprocess
+        import sys
+        import os
+
+        if not work_dir.exists():
+            work_dir.mkdir(parents=True, exist_ok=True)
+
+        io.info(f"Executing script in {work_dir}...")
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
+
+        subprocess.run(
+            [sys.executable, str(result.script_path)],
+            cwd=work_dir,
+            env=env,
+            check=True,
+        )
+
         return 0
     except Exception as e:
         logger.error(f"Agentflow failed: {e}")

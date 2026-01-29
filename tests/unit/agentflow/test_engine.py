@@ -68,6 +68,7 @@ def test_engine_happy_path(tmp_path):
         max_clarifications=2,
         agent_timeout=1,
         output_dir=output_dir,
+        work_dir=tmp_path,
     )
 
     result = asyncio.run(engine.run_async("do something"))
@@ -103,6 +104,7 @@ def test_engine_clarification_loop(tmp_path):
         max_clarifications=2,
         agent_timeout=1,
         output_dir=tmp_path,
+        work_dir=tmp_path,
     )
 
     result = asyncio.run(engine.run_async("task"))
@@ -134,6 +136,7 @@ def test_engine_validation_failure_and_repair(tmp_path):
         max_clarifications=2,
         agent_timeout=1,
         output_dir=tmp_path,
+        work_dir=tmp_path,
     )
 
     asyncio.run(engine.run_async("task"))
@@ -168,6 +171,7 @@ def test_engine_script_validation_error(tmp_path):
         max_clarifications=2,
         agent_timeout=1,
         output_dir=tmp_path,
+        work_dir=tmp_path,
     )
 
     with pytest.raises(ValueError, match="Script validation failed"):

@@ -6,6 +6,14 @@ from agentflow.models import AgentflowResult, parse_agentflow_response
 from agentflow.storage import AgentflowStorage
 from app_operator.adk.runner import AdkAgentRunner
 from app_operator.adk.agent_factory import build_adk_agent
+from app_operator.adk.tools import (
+    ToolContext,
+    _build_read_file,
+    _build_list_files,
+    _build_find_files,
+    _build_search_content,
+)
+from app_operator.filesystem import RealFilesystem
 from app_operator.exceptions import AgentError
 from agentflow.prompts import PromptLoader
 from google.genai import types
@@ -24,6 +32,7 @@ class AgentflowEngine:
         max_clarifications: int,
         agent_timeout: int,
         output_dir: Path,
+        work_dir: Path,
     ) -> None:
         self.runner = runner
         self.model = model
@@ -33,6 +42,7 @@ class AgentflowEngine:
         self.max_clarifications = max_clarifications
         self.agent_timeout = agent_timeout
         self.storage = AgentflowStorage(output_dir)
+        self.work_dir = work_dir
 
     def _on_event(self, event: Any) -> None:
         """Handle ADK events for streaming output."""
@@ -54,6 +64,16 @@ class AgentflowEngine:
         """Run the clarification loop and generate the script."""
         qa_pairs: List[Tuple[str, str]] = []
 
+        # Setup tools
+        filesystem = RealFilesystem()
+        context = ToolContext(repo_root=self.work_dir, filesystem=filesystem)
+        tools = [
+            _build_read_file(context),
+            _build_list_files(context),
+            _build_find_files(context),
+            _build_search_content(context),
+        ]
+
         for round_idx in range(self.max_clarifications + 1):
             if round_idx == self.max_clarifications:
                 raise AgentError(
@@ -74,7 +94,7 @@ class AgentflowEngine:
                 name="Agentflow",
                 instruction=system_prompt,
                 model=self.model,
-                tools=[],
+                tools=tools,
             )
 
             # Call agent
