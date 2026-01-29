@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
-from agentflow.io import UserIO, Colors
+from agentflow.io import UserIO
 from agentflow.models import AgentflowResult, parse_agentflow_response, AgentflowResponse
 from agentflow.storage import AgentflowStorage
 from agentflow.prompts import PromptLoader
@@ -149,9 +149,9 @@ class AgentflowEngine:
                         
                         if text_chunk:
                             if not self._thinking_started:
-                                self.io.info(f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}")
+                                self.io.render_thinking_chunk("\n[Thinking]")
                                 self._thinking_started = True
-                            self.io.print_stream(f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}")
+                            self.io.render_thinking_chunk(text_chunk)
                             accumulated_text.append(text_chunk)
                     
                     elif kind == "on_tool_start":
@@ -162,13 +162,13 @@ class AgentflowEngine:
                         if self._thinking_started:
                              self.io.info("") # Newline
                              self._thinking_started = False
-                        self.io.info(f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}")
+                        self.io.render_tool_start(name, str(inputs))
 
                     elif kind == "on_tool_end":
                         name = event["name"]
                         output = event["data"].get("output")
                         
-                        symbol = ""
+                        status = "unknown" # Default
                         result_text = ""
                         
                         # Handle ToolMessage or simple output
@@ -186,21 +186,12 @@ class AgentflowEngine:
                                         content_dict = None
 
                                 if isinstance(content_dict, dict):
-                                    status = content_dict.get("status")
-                                    if status == "success":
-                                        symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                                    elif status == "error":
-                                        symbol = f"{Colors.RED}✗{Colors.ENDC} "
-                                    
+                                    status = content_dict.get("status", "unknown")
                                     result_text = str(content_dict.get("output", ""))
                                 else:
                                     result_text = content
                             elif isinstance(content, dict):
-                                status = content.get("status")
-                                if status == "success":
-                                    symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                                elif status == "error":
-                                    symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                                status = content.get("status", "unknown")
                                 result_text = str(content.get("output", ""))
                             else:
                                 result_text = str(content)
@@ -209,10 +200,11 @@ class AgentflowEngine:
 
                         if len(result_text) > 500:
                             result_text = result_text[:500] + "\n... (truncated)"
-                        self.io.info(f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}")
+                        
+                        self.io.render_tool_end(name, result_text, status)
+                
                 final_content = "".join(accumulated_text)
                 if self._thinking_started:
-                     self.io.print_stream(Colors.ENDC)
                      self.io.info("")
                      self._thinking_started = False
 
@@ -249,13 +241,13 @@ class AgentflowEngine:
                         )
                         response.validate()
                     except Exception as e:
-                        self.io.info(f"{Colors.RED}Response validation failed: {e}{Colors.ENDC}")
+                        self.io.render_error(f"Response validation failed: {e}")
 
                 if not response:
                     response = parse_agentflow_response(final_content)
             except ValueError as e:
                 # Attempt repair
-                self.io.info(f"{Colors.RED}Parsing failed, attempting repair...{Colors.ENDC}")
+                self.io.render_error(f"Parsing failed, attempting repair... {e}")
                 repair_msg_text = self.prompt_loader.render(
                     "agentflow/repair.jinja2", error=str(e), raw_response=final_content
                 )
@@ -280,7 +272,7 @@ class AgentflowEngine:
                 response = parse_agentflow_response(final_content)
 
             if response.status == "clarify":
-                self.io.info(f"{Colors.BOLD}{Colors.YELLOW}Agent needs clarification:{Colors.ENDC}")
+                self.io.render_info("Agent needs clarification:")
                 answers = await self.io.ask_questions(response.questions)
                 # Store Q&A
                 for q, a in zip(response.questions, answers):

@@ -1,9 +1,10 @@
 import asyncio
-from typing import List, Callable
+from typing import List, Callable, Union
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Input, Log
+from textual.widgets import Header, Footer, Input, RichLog
 from textual import work
 from textual.binding import Binding
+from rich.text import Text
 
 from agentflow.io import UserIO, Colors
 
@@ -20,23 +21,23 @@ class TextualIO:
     async def ask_questions(self, questions: List[str]) -> List[str]:
         answers = []
         for i, q in enumerate(questions, 1):
-            self.app.write_log(f"{Colors.BOLD}{Colors.YELLOW}Question {i}:{Colors.ENDC} {q}")
-            self.app.write_log(f"{Colors.CYAN}Answer: {Colors.ENDC}")
+            self.app.write_log(Text.from_markup(f"[bold yellow]Question {i}:[/] {q}"))
+            self.app.write_log(Text.from_markup("[cyan]Answer: [/]"))
             answer = await self.app.input_queue.get()
             answers.append(answer)
         return answers
 
     async def prompt_int(self, label: str) -> int:
         while True:
-            self.app.write_log(f"{Colors.BOLD}{label}: {Colors.ENDC}")
+            self.app.write_log(Text.from_markup(f"[bold]{label}: [/]"))
             val = await self.app.input_queue.get()
             try:
                 n = int(val)
                 if n > 0:
                     return n
-                self.app.write_log(f"{Colors.RED}Please enter a positive integer.{Colors.ENDC}")
+                self.app.write_log(Text.from_markup("[red]Please enter a positive integer.[/]"))
             except ValueError:
-                self.app.write_log(f"{Colors.RED}Invalid number. Please try again.{Colors.ENDC}")
+                self.app.write_log(Text.from_markup("[red]Invalid number. Please try again.[/]"))
 
     def info(self, message: str) -> None:
         self.app.write_log(message)
@@ -44,15 +45,39 @@ class TextualIO:
     def print_stream(self, text: str) -> None:
         self.app.print_stream(text)
 
+    def render_thinking_chunk(self, text: str) -> None:
+        self.app.print_stream(text)
+
+    def render_tool_start(self, name: str, inputs: str) -> None:
+        self.app.write_log(Text.from_markup(f"\n[bold blue][Tool Use] {name}({inputs})[/]"))
+
+    def render_tool_end(self, name: str, output: str, status: str) -> None:
+        symbol = ""
+        if status == "success":
+            symbol = "[green]✓[/] "
+        elif status == "error":
+            symbol = "[red]✗[/] "
+        
+        self.app.write_log(Text.from_markup(f"\n[bold blue][Tool Result] {name}: {symbol}[/]\n{output}"))
+
+    def render_error(self, message: str) -> None:
+        self.app.write_log(Text.from_markup(f"[bold red]{message}[/]"))
+
+    def render_success(self, message: str) -> None:
+        self.app.write_log(Text.from_markup(f"[bold green]{message}[/]"))
+
+    def render_info(self, message: str) -> None:
+        self.app.write_log(message)
+
 
 class AgentflowTUI(App):
     CSS = """
-    Log {
+    RichLog {
         height: 1fr;
         border: solid green;
     }
     Input {
-        dock: bottom;
+        width: 100%;
     }
     """
     
@@ -69,26 +94,26 @@ class AgentflowTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Log(id="log")
+        yield RichLog(id="log", wrap=True)
         yield Input(placeholder="Enter your prompt here...", id="input")
         yield Footer()
 
     async def on_mount(self) -> None:
-        self.log_widget = self.query_one(Log)
+        self.log_widget = self.query_one(RichLog)
         self.input_widget = self.query_one(Input)
         
-        self.write_log(f"{Colors.BOLD}{Colors.BLUE}Welcome to Agentflow TUI!{Colors.ENDC}")
+        self.write_log(Text.from_markup("[bold blue]Welcome to Agentflow TUI![/]"))
         
         if self.initial_prompt:
-            self.write_log(f"{Colors.CYAN}> {self.initial_prompt}{Colors.ENDC}")
+            self.write_log(Text.from_markup(f"[cyan]> {self.initial_prompt}[/]"))
             self.processing = True
             self.run_agentflow(self.initial_prompt)
         else:
             self.write_log("Please enter your prompt below.")
             self.input_widget.focus()
 
-    def write_log(self, message: str) -> None:
-        self.log_widget.write(message + "\n")
+    def write_log(self, message: Union[str, Text]) -> None:
+        self.log_widget.write(message)
 
     def print_stream(self, text: str) -> None:
         self.log_widget.write(text)
@@ -99,12 +124,12 @@ class AgentflowTUI(App):
         
         if not self.processing:
             # First input is the prompt
-            self.write_log(f"{Colors.CYAN}> {value}{Colors.ENDC}")
+            self.write_log(Text.from_markup(f"[cyan]> {value}[/]"))
             self.processing = True
             self.run_agentflow(value)
         else:
             # Input is answer to question
-            self.write_log(f"{Colors.CYAN}> {value}{Colors.ENDC}")
+            self.write_log(Text.from_markup(f"[cyan]> {value}[/]"))
             await self.input_queue.put(value)
 
     @work
@@ -114,13 +139,13 @@ class AgentflowTUI(App):
         
         try:
             result = await engine.run_async(user_prompt)
-            self.write_log(f"\n{Colors.GREEN}Success! Script written to: {result.script_path}{Colors.ENDC}")
+            self.write_log(Text.from_markup(f"\n[green]Success! Script written to: {result.script_path}[/]"))
             
             # Optionally execute?
             # For now just finish.
             self.write_log("\nExecution finished. You can exit with Ctrl+C or enter a new prompt to restart (if implemented).")
         except Exception as e:
-            self.write_log(f"\n{Colors.RED}Error: {e}{Colors.ENDC}")
+            self.write_log(Text.from_markup(f"\n[red]Error: {e}[/]"))
             import traceback
             traceback.print_exc()
         finally:
