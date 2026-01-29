@@ -31,7 +31,7 @@ def build_adk_agent(
         description=f"SDS Agent: {name}",
         model=model,
         tools=wrapped_tools,
-        instructions=instruction,
+        instruction=instruction,
     )
 
 

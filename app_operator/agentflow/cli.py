@@ -1,9 +1,12 @@
 import argparse
+import asyncio
 from pathlib import Path
 
 from app_operator.agentflow.engine import AgentflowEngine
 from app_operator.agentflow.io import ConsoleIO
-from app_operator.cli_agent.backend.factory import create_agent_from_config
+from app_operator.adk.models import build_adk_model
+from app_operator.adk.runner import AdkAgentRunner
+from app_operator.trajectory import init_trajectory
 from app_operator.config import load_config
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
@@ -39,16 +42,25 @@ def main() -> int:
 
     try:
         config = load_config(str(repo_root), args.config)
+        if args.model:
+            config.agent.model = args.model
     except Exception as e:
         logger.error(f"Failed to load config: {e}")
         return 1
 
+    # Setup Trajectory Recorder
+    recorder = init_trajectory(repo_root)
+    recorder.set_agent_name("Agentflow")
+
     try:
-        agent = create_agent_from_config(
-            target_dir=str(repo_root), config=config, model_override=args.model
+        model = build_adk_model(config)
+        runner = AdkAgentRunner(
+            app_name="sds-agentflow",
+            recorder=recorder,
+            repo_path=repo_root,
         )
     except Exception as e:
-        logger.error(f"Failed to initialize agent: {e}")
+        logger.error(f"Failed to initialize ADK: {e}")
         return 1
 
     io = ConsoleIO()
@@ -71,7 +83,8 @@ def main() -> int:
     output_dir = repo_root / args.output_dir
 
     engine = AgentflowEngine(
-        agent=agent,
+        runner=runner,
+        model=model,
         prompt_loader=get_loader(),
         io=io,
         loop_bound=loop_bound,
@@ -81,7 +94,7 @@ def main() -> int:
     )
 
     try:
-        result = engine.run(user_prompt)
+        result = asyncio.run(engine.run_async(user_prompt))
         io.info(f"\nSuccess! Script written to: {result.script_path}")
         return 0
     except Exception as e:

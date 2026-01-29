@@ -9,14 +9,19 @@ class AdkTrajectoryPlugin(BasePlugin):
 
     def __init__(self, recorder: TrajectoryRecorderProtocol):
         self.recorder = recorder
+        self.name = "AdkTrajectoryPlugin"
 
-    def before_model_callback(self, *, callback_context: Any, llm_request: Any) -> None:
+    async def before_model_callback(
+        self, *, callback_context: Any, llm_request: Any
+    ) -> None:
         """Called before sending a request to the model."""
         # We might record the prompt here, but SDS trajectory usually records
         # user messages separately.
         pass
 
-    def after_model_callback(self, *, callback_context: Any, llm_response: Any) -> None:
+    async def after_model_callback(
+        self, *, callback_context: Any, llm_response: Any
+    ) -> None:
         """Called after receiving a response from the model."""
         # Extract text from response. Response structure depends on ADK.
         # Assuming response has a text or content attribute.
@@ -33,7 +38,7 @@ class AdkTrajectoryPlugin(BasePlugin):
 
         self.recorder.add_assistant_message(content)
 
-    def before_tool_callback(
+    async def before_tool_callback(
         self, *, tool: Any, tool_args: Any, tool_context: Any
     ) -> None:
         """Called before executing a tool."""
@@ -42,7 +47,7 @@ class AdkTrajectoryPlugin(BasePlugin):
         # tool calls with outputs in one entry.
         pass
 
-    def after_tool_callback(
+    async def after_tool_callback(
         self, *, tool: Any, tool_args: Any, tool_context: Any, result: Any
     ) -> None:
         """Called after a tool execution completes."""
@@ -66,7 +71,7 @@ class AdkTrajectoryPlugin(BasePlugin):
             exit_code=exit_code,
         )
 
-    def on_tool_error_callback(
+    async def on_tool_error_callback(
         self, *, tool: Any, tool_args: Any, tool_context: Any, error: Exception
     ) -> None:
         """Called when a tool execution fails."""

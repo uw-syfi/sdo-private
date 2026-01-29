@@ -31,6 +31,12 @@ class AdkAgentRunner:
         )
 
         session_id = str(uuid.uuid4())
+
+        # Create session explicitly
+        await self.session_service.create_session(
+            app_name=self.app_name, user_id="sds", session_id=session_id
+        )
+
         response_text = ""
 
         if hasattr(runner, "run_async"):

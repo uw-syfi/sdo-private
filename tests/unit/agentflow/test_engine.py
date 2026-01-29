@@ -1,10 +1,10 @@
 import pytest
+import asyncio
 from unittest.mock import MagicMock
 
 from app_operator.agentflow.engine import AgentflowEngine
 from app_operator.agentflow.io import UserIO
 from app_operator.prompts import get_loader
-from tests.fixtures.agents import ConfigurableAgent
 
 
 class MockIO(UserIO):
@@ -27,24 +27,41 @@ class MockIO(UserIO):
         self.info_messages.append(message)
 
 
+class MockAdkRunner:
+    def __init__(self, responses=None):
+        self.responses = responses or []
+        self.call_count = 0
+        self.last_prompt = None
+
+    async def run_async(self, agent, prompt):
+        self.call_count += 1
+        self.last_prompt = prompt
+        if self.responses:
+            return self.responses.pop(0)
+        return ""
+
+
 def test_engine_happy_path(tmp_path):
-    agent = ConfigurableAgent()
-    # First response: ready directly
-    agent.set_default_response("""
-    ```json
-    {
-        "status": "ready",
-        "python_script": "import sys\\nfrom app_operator.agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
-    }
-    ```
-    """)
+    runner = MockAdkRunner(
+        responses=[
+            """
+        ```json
+        {
+            "status": "ready",
+            "python_script": "import sys\\nfrom app_operator.agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
+        }
+        ```
+        """
+        ]
+    )
 
     io = MockIO()
     loader = get_loader()
     output_dir = tmp_path / "output"
 
     engine = AgentflowEngine(
-        agent=agent,
+        runner=runner,
+        model="mock-model",
         prompt_loader=loader,
         io=io,
         loop_bound=5,
@@ -53,7 +70,7 @@ def test_engine_happy_path(tmp_path):
         output_dir=output_dir,
     )
 
-    result = engine.run("do something")
+    result = asyncio.run(engine.run_async("do something"))
 
     assert result.script_text is not None
     assert (output_dir / result.script_path.parent.name / "agentflow.py").exists()
@@ -62,29 +79,24 @@ def test_engine_happy_path(tmp_path):
 
 def test_engine_clarification_loop(tmp_path):
     # Sequence: Clarify -> Ready
-    # Since ConfigurableAgent is stateless regarding sequence, we can simulate by checking prompt content
-    # or using a more complex mock.
-    # Here I'll mock generate directly on a MagicMock wrapping
-    # ConfigurableAgent or just use MagicMock agent.
-
-    mock_agent = MagicMock()
-    mock_agent.generate.side_effect = [
-        # Round 1: Clarify
-        """{"status": "clarify", "questions": ["Q1"]}""",
-        # Round 2: Ready
-        """
+    runner = MockAdkRunner(
+        responses=[
+            """{"status": "clarify", "questions": ["Q1"]}""",
+            """
         {
             "status": "ready",
             "python_script": "import app_operator.agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"
         }
         """,
-    ]
+        ]
+    )
 
     io = MockIO(answers=[["A1"]])
     loader = get_loader()
 
     engine = AgentflowEngine(
-        agent=mock_agent,
+        runner=runner,
+        model="mock-model",
         prompt_loader=loader,
         io=io,
         loop_bound=5,
@@ -93,7 +105,7 @@ def test_engine_clarification_loop(tmp_path):
         output_dir=tmp_path,
     )
 
-    result = engine.run("task")
+    result = asyncio.run(engine.run_async("task"))
 
     assert len(io.questions_asked) == 1
     assert io.questions_asked[0] == "Q1"
@@ -103,19 +115,19 @@ def test_engine_clarification_loop(tmp_path):
 
 def test_engine_validation_failure_and_repair(tmp_path):
     # This test is tricky because repair is just a re-prompt.
-    # We can simulate invalid JSON first, then valid.
-
-    mock_agent = MagicMock()
-    mock_agent.generate.side_effect = [
-        "Not JSON",  # Fails parsing -> Repair
-        """{"status": "ready", "python_script": "import app_operator.agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}""",  # Repair success
-    ]
+    runner = MockAdkRunner(
+        responses=[
+            "Not JSON",  # Fails parsing -> Repair
+            """{"status": "ready", "python_script": "import app_operator.agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}""",  # Repair success
+        ]
+    )
 
     io = MockIO()
     loader = get_loader()
 
     engine = AgentflowEngine(
-        agent=mock_agent,
+        runner=runner,
+        model="mock-model",
         prompt_loader=loader,
         io=io,
         loop_bound=5,
@@ -124,29 +136,32 @@ def test_engine_validation_failure_and_repair(tmp_path):
         output_dir=tmp_path,
     )
 
-    engine.run("task")
+    asyncio.run(engine.run_async("task"))
 
-    assert mock_agent.generate.call_count == 2
+    assert runner.call_count == 2
     # Verify second call contained repair info
-    args, _ = mock_agent.generate.call_args
-    assert "Error parsing" in args[0]
+    assert "Error parsing" in runner.last_prompt
 
 
 def test_engine_script_validation_error(tmp_path):
     # Script missing MAX_ITERATIONS
-    mock_agent = MagicMock()
-    mock_agent.generate.return_value = """
-    {
-        "status": "ready",
-        "python_script": "print('bad script')"
-    }
-    """
+    runner = MockAdkRunner(
+        responses=[
+            """
+        {
+            "status": "ready",
+            "python_script": "print('bad script')"
+        }
+        """
+        ]
+    )
 
     io = MockIO()
     loader = get_loader()
 
     engine = AgentflowEngine(
-        agent=mock_agent,
+        runner=runner,
+        model="mock-model",
         prompt_loader=loader,
         io=io,
         loop_bound=5,
@@ -156,4 +171,4 @@ def test_engine_script_validation_error(tmp_path):
     )
 
     with pytest.raises(ValueError, match="Script validation failed"):
-        engine.run("task")
+        asyncio.run(engine.run_async("task"))

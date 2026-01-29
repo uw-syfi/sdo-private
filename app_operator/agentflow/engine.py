@@ -1,12 +1,14 @@
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 from app_operator.agentflow.io import UserIO
 from app_operator.agentflow.models import AgentflowResult, parse_agentflow_response
 from app_operator.agentflow.storage import AgentflowStorage
-from app_operator.cli_agent.backend.base import CodingAgent
+from app_operator.adk.runner import AdkAgentRunner
+from app_operator.adk.agent_factory import build_adk_agent
 from app_operator.exceptions import AgentError
 from app_operator.prompts import PromptLoader
+from google.genai import types
 
 
 class AgentflowEngine:
@@ -14,7 +16,8 @@ class AgentflowEngine:
 
     def __init__(
         self,
-        agent: CodingAgent,
+        runner: AdkAgentRunner,
+        model: Any,
         prompt_loader: PromptLoader,
         io: UserIO,
         loop_bound: int,
@@ -22,7 +25,8 @@ class AgentflowEngine:
         agent_timeout: int,
         output_dir: Path,
     ) -> None:
-        self.agent = agent
+        self.runner = runner
+        self.model = model
         self.prompt_loader = prompt_loader
         self.io = io
         self.loop_bound = loop_bound
@@ -30,7 +34,7 @@ class AgentflowEngine:
         self.agent_timeout = agent_timeout
         self.storage = AgentflowStorage(output_dir)
 
-    def run(self, user_prompt: str) -> AgentflowResult:
+    async def run_async(self, user_prompt: str) -> AgentflowResult:
         """Run the clarification loop and generate the script."""
         qa_pairs: List[Tuple[str, str]] = []
 
@@ -48,11 +52,18 @@ class AgentflowEngine:
                 qa_pairs=qa_pairs,
                 loop_bound=self.loop_bound,
             )
-            full_prompt = f"{system_prompt}\n\n{user_msg}"
+
+            # Build ADK agent
+            agent = build_adk_agent(
+                name="Agentflow",
+                instruction=system_prompt,
+                model=self.model,
+                tools=[],
+            )
 
             # Call agent
             self.io.info(f"Thinking... (Round {round_idx + 1})")
-            raw_response = self.agent.generate(full_prompt, timeout=self.agent_timeout)
+            raw_response = await self.runner.run_async(agent, user_msg)
 
             try:
                 response = parse_agentflow_response(raw_response)
@@ -62,9 +73,9 @@ class AgentflowEngine:
                 repair_msg = self.prompt_loader.render(
                     "agentflow/repair.jinja2", error=str(e), raw_response=raw_response
                 )
-                raw_response = self.agent.generate(
-                    repair_msg, timeout=self.agent_timeout
-                )
+                # Include context in repair
+                full_repair_prompt = f"{user_msg}\n\n{repair_msg}"
+                raw_response = await self.runner.run_async(agent, full_repair_prompt)
                 response = parse_agentflow_response(raw_response)
 
             if response.status == "clarify":
@@ -103,9 +114,10 @@ class AgentflowEngine:
         if (
             "app_operator.cli_agent.backend" not in script_text
             and "app_operator.agentflow.runtime" not in script_text
+            and "app_operator" not in script_text
         ):
             errors.append(
-                "Script must import from `app_operator.cli_agent.backend` or `app_operator.agentflow.runtime`"
+                "Script must import from `app_operator.agentflow.runtime` or related modules"
             )
 
         if (
@@ -115,27 +127,10 @@ class AgentflowEngine:
             errors.append('Script must include `if __name__ == "__main__":` block')
 
         if errors:
-            # In a more advanced version, we could loop back to the agent to fix these.
-            # For now, we raise to stop or could try one repair.
-            # Let's try one immediate repair via recursion or just fail for now as per plan
-            # "If validation fails once, call repair prompt"
-
-            # Since the run loop is the main driver, we should probably handle this there
-            # or raise a specific validation error that triggers a repair in the loop.
-            # For simplicity, I will raise ValueError and let the caller handle or just fail if not implemented in the loop.
-            # But the plan said: "If validation fails once, call repair prompt (template repair.jinja2) and re-validate"
-            # The current loop handles parsing errors. I should integrate logic verification there too.
-            # However, `run` loop is driven by "clarify" vs "ready".
-            # If "ready" produces invalid code, we should probably feedback into the loop?
-            # Or just fail.
-
-            # Plan says: "If validation fails once, call repair prompt... and re-validate"
-            # I'll implement a simple retry here within the method if I can access the agent,
-            # but ideally this should be part of the main loop or a sub-loop.
-
-            # Since I don't want to complicate `run` too much, I'll just raise for now,
-            # as implementing a robust repair loop for code logic inside `_validate` is tricky without passing state back.
-            # Actually, I can just append the error to the prompt and continue the loop if I change status to "clarify" effectively?
-            # No, "ready" means it thinks it's done.
-
-            raise ValueError("Script validation failed:\n" + "\n".join(errors))
+            # Include script snippet in error for debugging
+            snippet = (
+                script_text[:500] + "..." if len(script_text) > 500 else script_text
+            )
+            raise ValueError(
+                f"Script validation failed:\n{snippet}\n" + "\n".join(errors)
+            )
