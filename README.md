@@ -212,31 +212,31 @@ Initialize a new experiment from an existing application.
 - `APP_PATH`: Path to the source application directory
 - `EXP_NAME`: Name of the new experiment
 
-### AI-Assisted Contribution Workflow
 
-SDS supports AI-assisted contributions using coding agent skills (currently available in Claude, Gemini, and Opencode agents).
+### Agentflow Module
 
-**Workflow:**
+The Agentflow module allows you to autonomously generate orchestrated Python scripts for complex tasks using AI agents. It prompts for a user specification, runs a clarification loop, and produces a standalone script.
 
-1. **Create a branch**: Use the `git-branch` skill to create a new feature branch
-2. **Make commits**: Use the `git-commit` skill to create commits with AI-generated messages
-3. **Prepare PR**: Use the `pr-prepare` skill to generate a comprehensive PR description
-4. **Open PR**: Create a merge request on GitLab with the generated content
+**Usage:**
 
-**Example:**
+Run the agentflow module using `uv` or directly with python:
 
 ```bash
-# In Claude (use "/" prefix):
-/git-branch "add monitoring alerts"
-# ... edit files ...
-/git-commit
-/pr-prepare  # Automatically pushes branch to remote
-
-# In opencode or gemini-cli (no "/" prefix needed):
-git-branch "add monitoring alerts"
-# ... edit files ...
-git-commit
-pr-prepare  # Automatically pushes branch to remote
-
-# Then create MR on GitLab using the generated title and description
+uv run -m app_operator.agentflow --prompt "Scrape hacker news and summarize top 3 AI stories" --loop-bound 10
 ```
+
+**Options:**
+
+- `--prompt`: Initial user prompt (reads from stdin if omitted).
+- `--loop-bound`: Maximum iterations for loops in the generated script.
+- `--max-clarifications`: Maximum rounds of clarification questions (default: 5).
+- `--config`: Path to `sds.toml` (optional).
+- `--model`: Override the agent model defined in configuration.
+- `--output-dir`: Directory to save generated scripts (default: `agentflow_runs`).
+
+**Output:**
+
+Generated scripts are saved in `agentflow_runs/<timestamp>/agentflow.py`. These scripts are standalone and include:
+- `MAX_ITERATIONS` constant for loop bounding.
+- Imports from `app_operator.agentflow.runtime` for agent orchestration tools (`fan_out`, `summarize`, `judge_loop`).
+

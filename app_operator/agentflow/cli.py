@@ -1,0 +1,89 @@
+import argparse
+from pathlib import Path
+
+from app_operator.agentflow.engine import AgentflowEngine
+from app_operator.agentflow.io import ConsoleIO
+from app_operator.cli_agent.backend.factory import create_agent_from_config
+from app_operator.config import load_config
+from app_operator.logger import logger
+from app_operator.prompts import get_loader
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Agentflow: Autonomous script generator"
+    )
+    parser.add_argument("--prompt", help="Initial user prompt")
+    parser.add_argument("--config", help="Path to sds.toml config file")
+    parser.add_argument("--model", help="Override agent model")
+    parser.add_argument(
+        "--max-clarifications", type=int, default=5, help="Max clarification rounds"
+    )
+    parser.add_argument(
+        "--loop-bound", type=int, help="Execution loop bound for generated script"
+    )
+    parser.add_argument(
+        "--output-dir", default="agentflow_runs", help="Output directory"
+    )
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    # Determine repo root
+    # This file is app_operator/agentflow/cli.py
+    # parents[0]=agentflow, parents[1]=app_operator, parents[2]=root
+    repo_root = Path(__file__).resolve().parents[2]
+
+    try:
+        config = load_config(str(repo_root), args.config)
+    except Exception as e:
+        logger.error(f"Failed to load config: {e}")
+        return 1
+
+    try:
+        agent = create_agent_from_config(
+            target_dir=str(repo_root), config=config, model_override=args.model
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize agent: {e}")
+        return 1
+
+    io = ConsoleIO()
+
+    # Get prompt
+    user_prompt = args.prompt
+    if not user_prompt:
+        user_prompt = io.read_prompt()
+        if not user_prompt:
+            logger.error("No prompt provided.")
+            return 1
+
+    # Get loop bound
+    loop_bound = args.loop_bound
+    if loop_bound is None:
+        loop_bound = io.prompt_int(
+            "Enter loop bound (max iterations) for generated script"
+        )
+
+    output_dir = repo_root / args.output_dir
+
+    engine = AgentflowEngine(
+        agent=agent,
+        prompt_loader=get_loader(),
+        io=io,
+        loop_bound=loop_bound,
+        max_clarifications=args.max_clarifications,
+        agent_timeout=config.operator.agent_timeout,
+        output_dir=output_dir,
+    )
+
+    try:
+        result = engine.run(user_prompt)
+        io.info(f"\nSuccess! Script written to: {result.script_path}")
+        return 0
+    except Exception as e:
+        logger.error(f"Agentflow failed: {e}")
+        return 1

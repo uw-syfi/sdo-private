@@ -1,0 +1,19 @@
+User Request:
+"""
+{{ user_prompt }}
+"""
+
+{% if qa_pairs %}
+Clarification History:
+{% for q, a in qa_pairs %}
+Q: {{ q }}
+A: {{ a }}
+{% endfor %}
+{% endif %}
+
+Constraints:
+- You MUST define `MAX_ITERATIONS = {{ loop_bound }}` in the script.
+- The script must self-terminate after {{ loop_bound }} iterations in any loops.
+- Do not assume any external tools (like git, docker) unless explicitly requested.
+
+Respond in JSON only.
