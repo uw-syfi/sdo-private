@@ -1,7 +1,8 @@
 import asyncio
+import os
 from typing import List, Callable, Union
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Input, RichLog
+from textual.widgets import Header, Footer, Input, RichLog, Label
 from textual import work
 from textual.binding import Binding
 from rich.text import Text
@@ -81,16 +82,18 @@ class AgentflowTUI(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"], initial_prompt: str = None, **kwargs):
+    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"], initial_prompt: str = None, work_dir: str = ".", **kwargs):
         super().__init__(**kwargs)
         self.theme = "flexoki"
         self.engine_factory = engine_factory
         self.initial_prompt = initial_prompt
+        self.work_dir = work_dir
         self.input_queue = asyncio.Queue()
         self.processing = False
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Label(f"Workdir: {os.path.abspath(self.work_dir)}", classes="workdir")
         yield RichLog(id="log", wrap=True)
         yield Input(placeholder="Enter your prompt here...", id="input")
         yield Footer()
