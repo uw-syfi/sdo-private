@@ -1,10 +1,58 @@
 import json
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any, Callable
+from pathlib import Path
 
-from libs.agent_cli.base import CodingAgent, AGENT_REGISTRY
-from libs.agent_cli.factory import create_agent_from_config
+from app_operator.adk.agent_factory import build_adk_agent
+from app_operator.adk.runner import AdkAgentRunner
+from app_operator.adk.models import build_adk_model
+from app_operator.adk.tools import build_tools
+from app_operator.config import load_config
+from app_operator.filesystem import RealFilesystem
 from app_operator.logger import logger
+
+
+class AdkWrapperAgent:
+    """Wrapper to make ADK agents behave like CodingAgents."""
+
+    def __init__(
+        self,
+        runner: AdkAgentRunner,
+        model: Any,
+        tools: List[Callable],
+        instruction: str = "",
+    ):
+        self.runner = runner
+        self.model = model
+        self.tools = tools
+        self.instruction = instruction
+        self.agent_name = "AgentflowWorker"
+
+    def generate(
+        self,
+        prompt: str,
+        cwd: Optional[str] = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ) -> str:
+        """Generate response using ADK agent."""
+        # Create a new agent instance for this call
+        agent = build_adk_agent(
+            name=self.agent_name,
+            instruction=self.instruction or "You are a helpful coding assistant.",
+            model=self.model,
+            tools=self.tools,
+        )
+
+        # Run async in this sync method
+        try:
+            return asyncio.run(self.runner.run_async(agent, prompt))
+        except Exception as e:
+            logger.error(f"Error during agent generation: {e}")
+            # If we are already in an event loop (unlikely for intended usage but possible),
+            # we might need handling. For generated scripts, usually strictly sync top-level.
+            raise
 
 
 def create_agent(
@@ -12,26 +60,52 @@ def create_agent(
     model: Optional[str] = None,
     config_path: Optional[str] = None,
     repo_path: Optional[str] = None,
-) -> CodingAgent:
-    """Create a coding agent instance."""
-    provider = "gemini"
-    if provider is None:
-        # Load from config
-        target_dir = repo_path or "."
-        return create_agent_from_config(
-            target_dir, model_override=model, config_path=config_path
-        )
+    instruction: Optional[str] = None,
+) -> AdkWrapperAgent:
+    """Create a coding agent instance using ADK.
 
-    # Direct instantiation
-    provider_lower = provider.lower()
-    if provider_lower in AGENT_REGISTRY:
-        return AGENT_REGISTRY[provider_lower](model=model)
+    Args:
+        provider: Agent provider ("gemini", "claude", "codex", "opencode").
+        model: Model name override.
+        config_path: Path to sds.toml config file.
+        repo_path: Repository path for config loading.
+        instruction: System instruction for the agent.
 
-    raise ValueError(f"Unknown provider: {provider}")
+    Returns:
+        AdkWrapperAgent: Configured coding agent.
+    """
+
+    # 1. Load configuration
+    target_dir = repo_path or "."
+    try:
+        config = load_config(target_dir, config_path)
+    except Exception as e:
+        logger.warning(f"Failed to load config: {e}. Using defaults.")
+        # Fallback or re-raise? load_config usually returns defaults if file missing but might raise on bad file.
+        # We'll assume it works or we let it fail.
+        raise
+
+    # 2. Setup ADK components
+    # Handle model override
+    if model:
+        config.agent.model = model
+
+    adk_model = build_adk_model(config)
+
+    repo_path_obj = Path(target_dir).resolve()
+    filesystem = RealFilesystem()
+    tools = build_tools(repo_path_obj, filesystem)
+
+    runner = AdkAgentRunner(
+        app_name="agentflow-adk",
+        repo_path=repo_path_obj,
+    )
+
+    return AdkWrapperAgent(runner, adk_model, tools, instruction=instruction or "")
 
 
 def fan_out(
-    agent: CodingAgent, prompts: List[str], max_workers: int = 4, timeout: int = 300
+    agent: AdkWrapperAgent, prompts: List[str], max_workers: int = 4, timeout: int = 300
 ) -> List[str]:
     """Execute multiple prompts in parallel using the same agent type."""
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -40,33 +114,30 @@ def fan_out(
         ]
         return [f.result() for f in futures]
 
-
 def summarize(
-    agent: CodingAgent, responses: List[str], instruction: str, timeout: int = 300
+    agent: AdkWrapperAgent, responses: List[str], instruction: str, timeout: int = 300
 ) -> str:
     """Summarize a list of responses."""
     combined_input = "\n\n---\n\n".join(responses)
     prompt = f"{instruction}\n\nHere are the inputs to summarize:\n{combined_input}"
     return agent.generate(prompt=prompt, timeout=timeout)
 
-
 def judge_loop(
-    judge: CodingAgent,
-    worker: CodingAgent,
+    judge: AdkWrapperAgent,
+    worker: AdkWrapperAgent,
     task: str,
     max_iterations: int,
     timeout: int = 3000,
 ) -> Dict[str, str]:
-    """Iterative loop where a judge evaluates worker output.
-
-    The judge evaluates the task first (before any worker output).
-    If the judge determines the task is done or needs no action, the loop terminates.
-    Otherwise, the worker is engaged to produce or refine output.
-    """
+    """Iterative loop where a judge evaluates worker output."""
     current_output = None
 
     for i in range(max_iterations):
-        current_output_line = "Current Output: (None - Worker has not started yet)" if current_output is None else f"Current Output:\n{current_output}"
+        current_output_line = (
+            "Current Output: (None - Worker has not started yet)"
+            if current_output is None
+            else f"Current Output:\n{current_output}"
+        )
         judge_prompt = (
             f"Task: {task}\n\n"
             f"{current_output_line}\n\n"
@@ -84,7 +155,7 @@ def judge_loop(
             "- Perform the task yourself\n"
             "- Provide implementation details (that's the worker's job)\n"
             "- Mark as 'done' prematurely without verification\n\n"
-            'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}\n'
+            'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}\n' 
             "If 'continue', provide clear feedback on what still needs to be done.\n"
             "If 'done', confirm what was accomplished."
         )

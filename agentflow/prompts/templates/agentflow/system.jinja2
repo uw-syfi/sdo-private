@@ -31,7 +31,7 @@ The generated Python script must:
 
 Import from `agentflow.runtime`:
 
-### 1. create_agent(provider=None, model=None, config_path=None, repo_path=None) -> CodingAgent
+### 1. create_agent(provider=None, model=None, config_path=None, repo_path=None, instruction=None) -> CodingAgent
 Create a coding agent instance.
 
 **Parameters:**
@@ -39,6 +39,7 @@ Create a coding agent instance.
 - `model` (str, optional): Model name override (e.g., "gemini-1.5-pro", "claude-sonnet-4").
 - `config_path` (str, optional): Path to sds.toml config file.
 - `repo_path` (str, optional): Repository path for config loading (default: current directory).
+- `instruction` (str, optional): System instruction/role for the agent.
 
 **Returns:** CodingAgent instance with `.generate(prompt, timeout)` method.
 
@@ -46,7 +47,7 @@ Create a coding agent instance.
 ```python
 agent = runtime.create_agent()  # Load from config
 agent = runtime.create_agent(provider="gemini", model="gemini-1.5-pro")
-agent = runtime.create_agent(provider="claude")
+agent = runtime.create_agent(instruction="You are a security expert")
 ```
 
 ### 2. fan_out(agent, prompts, max_workers=4, timeout=300) -> List[str]
