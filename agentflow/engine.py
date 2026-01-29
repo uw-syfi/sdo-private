@@ -1,11 +1,20 @@
+import asyncio
 from pathlib import Path
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Callable
 
-from agentflow.io import UserIO
-from agentflow.models import AgentflowResult, parse_agentflow_response, get_agentflow_response_schema
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.tools import tool, StructuredTool
+from langgraph.prebuilt import create_react_agent
+from langgraph.graph import StateGraph
+from langchain_core.runnables import RunnableConfig
+
+from agentflow.io import UserIO, Colors
+from agentflow.models import AgentflowResult, parse_agentflow_response
 from agentflow.storage import AgentflowStorage
-from app_operator.adk.runner import AdkAgentRunner
-from app_operator.adk.agent_factory import build_adk_agent
+from agentflow.prompts import PromptLoader
+
+from app_operator.langgraph.llm import build_llm
+from app_operator.config import Config
 from app_operator.adk.tools import (
     ToolContext,
     _build_read_file,
@@ -15,7 +24,7 @@ from app_operator.adk.tools import (
 )
 from app_operator.filesystem import RealFilesystem
 from app_operator.exceptions import AgentError
-from agentflow.prompts import PromptLoader
+from app_operator.logger import logger
 
 
 class AgentflowEngine:
@@ -23,8 +32,7 @@ class AgentflowEngine:
 
     def __init__(
         self,
-        runner: AdkAgentRunner,
-        model: Any,
+        config: Config,
         prompt_loader: PromptLoader,
         io: UserIO,
         loop_bound: int,
@@ -33,8 +41,7 @@ class AgentflowEngine:
         output_dir: Path,
         work_dir: Path,
     ) -> None:
-        self.runner = runner
-        self.model = model
+        self.config = config
         self.prompt_loader = prompt_loader
         self.io = io
         self.loop_bound = loop_bound
@@ -44,79 +51,12 @@ class AgentflowEngine:
         self.work_dir = work_dir
         self._thinking_started = False
 
-    def _on_event(self, event: Any) -> None:
-        """Handle ADK events for streaming output."""
-        # 1. Handle tool calls (ADK can yield these directly)
-        fn_calls = []
-        if hasattr(event, "get_function_calls"):
-            try:
-                fn_calls = event.get_function_calls()
-            except Exception:
-                pass
-
-        for fn_call in fn_calls:
-            name = getattr(fn_call, "name", "tool")
-            args = getattr(fn_call, "args", {})
-            self.io.info(f"\n[Tool Use] {name}({args})")
-
-        # 2. Handle tool responses
-        fn_resps = []
-        if hasattr(event, "get_function_responses"):
-            try:
-                fn_resps = event.get_function_responses()
-            except Exception:
-                pass
-
-        for fn_resp in fn_resps:
-            name = getattr(fn_resp, "name", "tool")
-            resp = getattr(fn_resp, "response", {})
-            # Extract meaningful output from tool response
-            output = ""
-            if isinstance(resp, dict):
-                output = resp.get("output") or resp.get("result") or str(resp)
-            else:
-                output = str(resp)
-            
-            # Truncate long output
-            if len(output) > 500:
-                output = output[:500] + "... (truncated)"
-            self.io.info(f"\n[Tool Result] {name}: {output}")
-
-        # 3. Handle content parts (text, thought)
-        content = getattr(event, "content", None)
-        if content:
-            parts = getattr(content, "parts", None) or []
-            for part in parts:
-                # Thinking
-                thought = getattr(part, "thought", None)
-                if thought:
-                    if not self._thinking_started:
-                        self.io.info("\n[Thinking]")
-                        self._thinking_started = True
-                    self.io.print_stream(thought)
-                    continue
-
-                # Text
-                text = getattr(part, "text", None)
-                if text:
-                    if self._thinking_started:
-                        self.io.info("")  # Newline after thinking block
-                        self._thinking_started = False
-                    self.io.print_stream(text)
-
-                # Fallback for tool calls in parts
-                fn_call = getattr(part, "function_call", None)
-                if fn_call and not fn_calls:
-                    name = getattr(fn_call, "name", "tool")
-                    args = getattr(fn_call, "args", {})
-                    self.io.info(f"\n[Tool Use] {name}({args})")
-
-                # Fallback for tool responses in parts
-                fn_resp = getattr(part, "function_response", None)
-                if fn_resp and not fn_resps:
-                    name = getattr(fn_resp, "name", "tool")
-                    resp = getattr(fn_resp, "response", {})
-                    self.io.info(f"\n[Tool Result] {name}: {resp}")
+    def _wrap_tool(self, func: Callable, name: str) -> StructuredTool:
+        """Wrap a callable into a LangChain StructuredTool."""
+        # Use the function's docstring and name
+        t = tool(func)
+        t.name = name  # Ensure name is set correctly if needed
+        return t
 
     async def run_async(self, user_prompt: str) -> AgentflowResult:
         """Run the clarification loop and generate the script."""
@@ -125,12 +65,17 @@ class AgentflowEngine:
         # Setup tools
         filesystem = RealFilesystem()
         context = ToolContext(repo_root=self.work_dir, filesystem=filesystem)
+        
+        # Build specific tools used by Agentflow (read-only mostly)
         tools = [
-            _build_read_file(context),
-            _build_list_files(context),
-            _build_find_files(context),
-            _build_search_content(context),
+            self._wrap_tool(_build_read_file(context), "read_file"),
+            self._wrap_tool(_build_list_files(context), "list_files"),
+            self._wrap_tool(_build_find_files(context), "find_files"),
+            self._wrap_tool(_build_search_content(context), "search_content"),
         ]
+
+        # Build LLM
+        llm = build_llm(self.config)
 
         for round_idx in range(self.max_clarifications + 1):
             if round_idx == self.max_clarifications:
@@ -141,50 +86,177 @@ class AgentflowEngine:
             self._thinking_started = False
             # Render prompts
             system_prompt = self.prompt_loader.render("agentflow/system.jinja2")
-            user_msg = self.prompt_loader.render(
+            user_msg_text = self.prompt_loader.render(
                 "agentflow/user.jinja2",
                 user_prompt=user_prompt,
                 qa_pairs=qa_pairs,
                 loop_bound=self.loop_bound,
             )
 
-            # Build ADK agent
-            agent = build_adk_agent(
-                name="Agentflow",
-                instruction=system_prompt,
-                model=self.model,
-                tools=tools,
-                output_schema=get_agentflow_response_schema(),
-                generate_content_config={"response_mime_type": "application/json"},
-            )
+            # Create agent graph
+            # We recreate it each time to reset state or we could persist it, 
+            # but since we are changing the prompt (QA pairs), it's easier to treat each round as a fresh generation
+            # with full context in the prompt.
+            agent = create_react_agent(llm, tools, prompt=system_prompt)
 
-            # Call agent
             self.io.info(f"Thinking... (Round {round_idx + 1})")
-            raw_response = await self.runner.run_async(
-                agent, user_msg, on_event=self._on_event
-            )
-            # Ensure thought color is reset if we finished thinking
-            if self._thinking_started:
-                 self.io.print_stream(Colors.ENDC)
-                 self._thinking_started = False
+            
+            messages = [HumanMessage(content=user_msg_text)]
+            final_content = ""
+            
+            # Run with streaming
+            try:
+                # Use astream_events to capture thoughts and tool calls
+                async for event in agent.astream_events(
+                    {"messages": messages}, 
+                    version="v1",
+                    config={"recursion_limit": 50}
+                ):
+                    kind = event["event"]
+                    
+                    if kind == "on_chat_model_stream":
+                        content = event["data"]["chunk"].content
+                        if content:
+                            # If it's empty or just checking tool use, we might not want to print
+                            # But usually this is the thinking/text part
+                            if not self._thinking_started:
+                                self.io.info("\n[Thinking]")
+                                self._thinking_started = True
+                            self.io.print_stream(content)
+                    
+                    elif kind == "on_tool_start":
+                        name = event["name"]
+                        inputs = event["data"].get("input")
+                        self.io.info(f"\n[Tool Use] {name}({inputs})")
+                        if self._thinking_started:
+                             self.io.info("") # Newline
+                             self._thinking_started = False
 
-            self.io.info("")
+                    elif kind == "on_tool_end":
+                        name = event["name"]
+                        output = event["data"].get("output")
+                        # Truncate
+                        out_str = str(output)
+                        if len(out_str) > 500:
+                            out_str = out_str[:500] + "... (truncated)"
+                        self.io.info(f"\n[Tool Result] {name}: {out_str}")
+
+                # After streaming, we need the final response. 
+                # We can run invoke to get the full state, but since we streamed, we might have it.
+                # However, astream_events doesn't easily give the final aggregated message.
+                # Let's just run invoke for the result if we didn't capture it fully, 
+                # OR we can just use the accumulated output from stream if we tracked it.
+                # Better: astream_events is great for UI, but `ainvoke` is better for getting the final result.
+                # But we want both. 
+                # Actually, `agent.ainvoke` returns the state.
+                
+                # To avoid re-running, we can rely on the fact that `astream_events` 
+                # doesn't change the graph execution, it just streams what happens.
+                # But `astream_events` iterates through the generator.
+                # Wait, `astream_events` executes the graph.
+                
+                # The issue is getting the final result *after* consuming the stream without re-running.
+                # `astream_events` doesn't return the final state.
+                
+                # Alternative: `astream` returns chunks of the final state updates.
+                # But `astream` output is complex for ReAct agents.
+                
+                # Let's go back to `ainvoke` and use a print callback for tools?
+                # Actually, the user wants streaming.
+                
+                # Let's re-implement `astream_events` loop and accumulate the text.
+                accumulated_text = []
+                async for event in agent.astream_events(
+                    {"messages": messages}, 
+                    version="v1",
+                    config={"recursion_limit": 50}
+                ):
+                    kind = event["event"]
+                    if kind == "on_chat_model_stream":
+                        content = event["data"]["chunk"].content
+                        if content:
+                             # content can be a string or a list of dicts
+                             text_chunk = ""
+                             if isinstance(content, str):
+                                 text_chunk = content
+                             elif isinstance(content, list):
+                                 for part in content:
+                                     if isinstance(part, dict) and part.get("type") == "text":
+                                         text_chunk += part.get("text", "")
+                                     elif isinstance(part, str):
+                                         text_chunk += part
+                             
+                             if text_chunk:
+                                 if not self._thinking_started:
+                                    self.io.info("\n[Thinking]")
+                                    self._thinking_started = True
+                                 self.io.print_stream(text_chunk)
+                                 accumulated_text.append(text_chunk)
+                    elif kind == "on_tool_start":
+                        if self._thinking_started:
+                             self.io.info("")
+                             self._thinking_started = False
+                        self.io.info(f"\n[Tool Use] {event['name']}({event['data'].get('input')})")
+                    elif kind == "on_tool_end":
+                         out_str = str(event['data'].get('output'))
+                         if len(out_str) > 500: out_str = out_str[:500] + "..."
+                         self.io.info(f"\n[Tool Result] {event['name']}: {out_str}")
+                
+                final_content = "".join(accumulated_text)
+                if self._thinking_started:
+                     self.io.print_stream(Colors.ENDC)
+                     self.io.info("")
+                     self._thinking_started = False
+
+                if not final_content:
+                    # Fallback if streaming failed to capture or model didn't stream
+                    # Run invoke to get it (it will be cached or fast-ish if deterministic?) No.
+                    # Just run invoke if empty.
+                    logger.warning("Streaming yielded no content, running invoke...")
+                    result = await agent.ainvoke({"messages": messages})
+                    last_msg_content = result["messages"][-1].content
+                    if isinstance(last_msg_content, list):
+                        final_content = ""
+                        for part in last_msg_content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                final_content += part.get("text", "")
+                            elif isinstance(part, str):
+                                final_content += part
+                    else:
+                        final_content = str(last_msg_content)
+
+            except Exception as e:
+                logger.error(f"Error during agent execution: {e}")
+                raise AgentError(f"Agent execution failed: {e}")
+
 
             try:
-                response = parse_agentflow_response(raw_response)
+                response = parse_agentflow_response(final_content)
             except ValueError as e:
                 # Attempt repair
                 self.io.info(f"{Colors.RED}Parsing failed, attempting repair...{Colors.ENDC}")
-                repair_msg = self.prompt_loader.render(
-                    "agentflow/repair.jinja2", error=str(e), raw_response=raw_response
+                repair_msg_text = self.prompt_loader.render(
+                    "agentflow/repair.jinja2", error=str(e), raw_response=final_content
                 )
-                # Include context in repair
-                full_repair_prompt = f"{user_msg}\n\n{repair_msg}"
-                raw_response = await self.runner.run_async(
-                    agent, full_repair_prompt, on_event=self._on_event
-                )
+                
+                # Append repair message to history (simulated by extending messages)
+                messages.append(AIMessage(content=final_content))
+                messages.append(HumanMessage(content=repair_msg_text))
+                
+                result = await agent.ainvoke({"messages": messages})
+                last_msg_content = result["messages"][-1].content
+                if isinstance(last_msg_content, list):
+                    final_content = ""
+                    for part in last_msg_content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            final_content += part.get("text", "")
+                        elif isinstance(part, str):
+                            final_content += part
+                else:
+                    final_content = str(last_msg_content)
+                
                 self.io.info("")
-                response = parse_agentflow_response(raw_response)
+                response = parse_agentflow_response(final_content)
 
             if response.status == "clarify":
                 self.io.info(f"{Colors.BOLD}{Colors.YELLOW}Agent needs clarification:{Colors.ENDC}")

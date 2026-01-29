@@ -1,56 +1,58 @@
-import json
 import asyncio
-import uuid
+import json
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Dict, List, Any, Callable
+from typing import Optional, Dict, List, Any, Callable, Union
 from pathlib import Path
 
-from google.adk.agents import LlmAgent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools.function_tool import FunctionTool
-from google.genai import types
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.tools import tool, StructuredTool
+from langgraph.prebuilt import create_react_agent
 
-from app_operator.adk.models import build_adk_model
-from app_operator.adk.tools import build_tools
+from app_operator.langgraph.llm import build_llm
+from app_operator.adk.tools import build_tools, ToolContext
 from app_operator.config import load_config
 from app_operator.filesystem import RealFilesystem
 from app_operator.logger import logger
 
 
-class GoogleAdkAgent:
-    """Agent implementation using Google ADK LlmAgent directly."""
+class LangGraphAgent:
+    """Agent wrapper around LangGraph prebuilt React agent."""
 
     def __init__(
         self,
         model_name: str,
+        llm: Any,
         tools: List[Callable],
         instruction: str = "",
         agent_name: str = "AgentflowWorker",
     ):
         self.model_name = model_name
-        self.tools = tools
+        self.llm = llm
+        self.tools = self._wrap_tools(tools)
         self.instruction = instruction
         self.agent_name = agent_name
         
-        # Prepare tools for ADK (wrap in FunctionTool)
-        self.adk_tools = []
-        for tool in self.tools:
-            if isinstance(tool, FunctionTool):
-                self.adk_tools.append(tool)
-            else:
-                self.adk_tools.append(FunctionTool(tool))
-
-        # Instantiate LlmAgent
-        self.llm_agent = LlmAgent(
-            name=self.agent_name,
-            description=f"SDS Agent: {self.agent_name}",
-            model=self.model_name,
-            tools=self.adk_tools,
-            instruction=self.instruction,
+        # Create the graph
+        self.graph = create_react_agent(
+            model=self.llm,
+            tools=self.tools,
+            prompt=self.instruction
         )
-        
-        self.session_service = InMemorySessionService()
+
+    def _wrap_tools(self, tools: List[Callable]) -> List[StructuredTool]:
+        """Wrap ADK tools into LangChain StructuredTools."""
+        wrapped_tools = []
+        for t in tools:
+            if isinstance(t, StructuredTool):
+                wrapped_tools.append(t)
+            elif callable(t):
+                # Assume it's a function with docstrings
+                # ADK tools return a dict, we want to return the string output mostly,
+                # but returning the whole dict is also fine for the LLM to see status.
+                wrapped_tools.append(tool(t))
+            else:
+                logger.warning(f"Unknown tool type: {type(t)}")
+        return wrapped_tools
 
     def generate(
         self,
@@ -59,54 +61,59 @@ class GoogleAdkAgent:
         timeout: int = 300,
         silent: bool = False,
     ) -> str:
-        """Generate response using ADK agent."""
-        return asyncio.run(self._generate_async(prompt, timeout))
+        """Generate response using LangGraph agent."""
+        # Run in a separate thread if called from sync context to avoid blocking
+        # But since we are likely inside an async loop (or not), safest is to run_async
+        # However, generate() is sync API.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # If we are in an event loop, we can't use asyncio.run
+            # We assume this method is called from a thread or we use a blocking call
+            # But standard usage of generate() in generated scripts is sync.
+            # If the generated script is sync, asyncio.run works.
+            # If the generated script is running in an event loop, this will fail.
+            # Generated scripts are "if __name__ == '__main__': main()", so usually sync main.
+            return asyncio.run(self._generate_async(prompt, timeout))
+        else:
+            return asyncio.run(self._generate_async(prompt, timeout))
 
     async def _generate_async(self, prompt: str, timeout: int) -> str:
-        # Create a new session for each generation
-        session_id = str(uuid.uuid4())
-        await self.session_service.create_session(
-            app_name="agentflow", user_id="sds", session_id=session_id
-        )
-
-        runner = Runner(
-            agent=self.llm_agent,
-            app_name="agentflow",
-            session_service=self.session_service,
-        )
+        messages = [HumanMessage(content=prompt)]
         
-        content = types.Content(role="user", parts=[types.Part(text=prompt)])
-        response_text = ""
-
-        if hasattr(runner, "run_async"):
-             async for event in runner.run_async(
-                user_id="sds", session_id=session_id, new_message=content
-            ):
-                text = self._extract_text(event)
-                if text:
-                    response_text = text
-                
-                if hasattr(event, "is_final_response") and event.is_final_response():
-                    if text:
-                        response_text = text
-                    break
-        else:
-             raise AttributeError("Runner does not provide run_async()")
-             
-        return response_text
-
-    def _extract_text(self, event: Any) -> str:
-        """Extract plain text content from an ADK event."""
-        content = getattr(event, "content", None)
-        if content is None:
+        # Invoke the graph
+        # We might need to handle recursion limit or max steps
+        config = {"recursion_limit": 50}
+        
+        # Use asyncio.wait_for for timeout
+        try:
+            result = await asyncio.wait_for(
+                self.graph.ainvoke({"messages": messages}, config=config),
+                timeout=timeout
+            )
+            
+            last_message = result["messages"][-1]
+            if isinstance(last_message, AIMessage):
+                content = last_message.content
+                if isinstance(content, list):
+                    text_content = ""
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            text_content += part.get("text", "")
+                        elif isinstance(part, str):
+                            text_content += part
+                    return text_content
+                return str(content)
             return ""
-        parts = getattr(content, "parts", None) or []
-        texts = []
-        for part in parts:
-            text = getattr(part, "text", None)
-            if text:
-                texts.append(text)
-        return "".join(texts)
+            
+        except asyncio.TimeoutError:
+            return f"Error: Agent execution timed out after {timeout} seconds."
+        except Exception as e:
+            logger.error(f"Error in agent generation: {e}")
+            return f"Error: {str(e)}"
 
 
 def create_agent(
@@ -115,8 +122,8 @@ def create_agent(
     config_path: Optional[str] = None,
     repo_path: Optional[str] = None,
     instruction: Optional[str] = None,
-) -> GoogleAdkAgent:
-    """Create a coding agent instance using Google ADK.
+) -> LangGraphAgent:
+    """Create a coding agent instance using LangGraph.
 
     Args:
         provider: Agent provider ("gemini", "claude", "codex", "opencode").
@@ -126,58 +133,79 @@ def create_agent(
         instruction: System instruction for the agent.
 
     Returns:
-        GoogleAdkAgent: Configured coding agent.
+        LangGraphAgent: Configured coding agent.
     """
-
     # 1. Load configuration
     target_dir = repo_path or "."
     try:
         config = load_config(target_dir, config_path)
     except Exception as e:
         logger.warning(f"Failed to load config: {e}. Using defaults.")
+        # Create a dummy config if load fails, or re-raise?
+        # load_config usually raises.
         raise
 
-    # 2. Setup ADK components
-    # Handle overrides
+    # 2. Setup Components
     if provider:
         config.agent.provider = provider
     if model:
         config.agent.model = model
 
-    adk_model_name = build_adk_model(config)
+    llm = build_llm(config)
 
     repo_path_obj = Path(target_dir).resolve()
     filesystem = RealFilesystem()
     tools = build_tools(repo_path_obj, filesystem)
 
-    return GoogleAdkAgent(
-        model_name=adk_model_name,
+    return LangGraphAgent(
+        model_name=config.agent.model,
+        llm=llm,
         tools=tools,
         instruction=instruction or ""
     )
 
 
 def fan_out(
-    agent: GoogleAdkAgent, prompts: List[str], max_workers: int = 4, timeout: int = 300
+    agent: LangGraphAgent, prompts: List[str], max_workers: int = 4, timeout: int = 300
 ) -> List[str]:
     """Execute multiple prompts in parallel using the same agent type."""
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(agent.generate, prompt=p, timeout=timeout) for p in prompts
-        ]
-        return [f.result() for f in futures]
+    
+    async def _generate_with_semaphore(semaphore, prompt):
+        async with semaphore:
+            return await agent._generate_async(prompt, timeout)
+
+    async def _run_all():
+        semaphore = asyncio.Semaphore(max_workers)
+        tasks = [_generate_with_semaphore(semaphore, p) for p in prompts]
+        return await asyncio.gather(*tasks)
+
+    try:
+        # Check if we are already in an event loop
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # This is tricky if fan_out is called from a thread that doesn't have its own loop
+        # but the main thread does. 
+        # But usually generated scripts are sync.
+        return asyncio.run(_run_all())
+    else:
+        return asyncio.run(_run_all())
+
 
 def summarize(
-    agent: GoogleAdkAgent, responses: List[str], instruction: str, timeout: int = 300
+    agent: LangGraphAgent, responses: List[str], instruction: str, timeout: int = 300
 ) -> str:
     """Summarize a list of responses."""
     combined_input = "\n\n---\n\n".join(responses)
     prompt = f"{instruction}\n\nHere are the inputs to summarize:\n{combined_input}"
     return agent.generate(prompt=prompt, timeout=timeout)
 
+
 def judge_loop(
-    judge: GoogleAdkAgent,
-    worker: GoogleAdkAgent,
+    judge: LangGraphAgent,
+    worker: LangGraphAgent,
     task: str,
     max_iterations: int,
     timeout: int = 3000,

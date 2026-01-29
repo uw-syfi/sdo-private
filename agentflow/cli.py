@@ -4,8 +4,6 @@ from pathlib import Path
 
 from agentflow.engine import AgentflowEngine
 from agentflow.io import ConsoleIO
-from app_operator.adk.models import build_adk_model
-from app_operator.adk.runner import AdkAgentRunner
 from app_operator.config import load_config
 from app_operator.logger import logger
 from agentflow.prompts import get_loader
@@ -42,8 +40,8 @@ def main() -> int:
 
     # Determine repo root
     # This file is agentflow/cli.py
-    # parents[0]=agentflow, parents[1]=app_operator, parents[2]=root
-    repo_root = Path(__file__).resolve().parents[2]
+    # parents[0]=agentflow, parents[1]=root
+    repo_root = Path(__file__).resolve().parents[1]
 
     try:
         config = load_config(str(repo_root), args.config)
@@ -51,16 +49,6 @@ def main() -> int:
             config.agent.model = args.model
     except Exception as e:
         logger.error(f"Failed to load config: {e}")
-        return 1
-
-    try:
-        model = build_adk_model(config)
-        runner = AdkAgentRunner(
-            app_name="sds-agentflow",
-            repo_path=repo_root,
-        )
-    except Exception as e:
-        logger.error(f"Failed to initialize ADK: {e}")
         return 1
 
     io = ConsoleIO()
@@ -80,8 +68,7 @@ def main() -> int:
     work_dir = Path(args.work_dir).resolve()
 
     engine = AgentflowEngine(
-        runner=runner,
-        model=model,
+        config=config,
         prompt_loader=get_loader(),
         io=io,
         loop_bound=loop_bound,
