@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import patch
-from app_operator.cli_agent.backend.factory import create_agent_from_config
-from app_operator.cli_agent.backend.base import CodingAgent, register_provider
-from app_operator.cli_agent.backend.cli_agent import CLICodingAgent
+from libs.agent_cli.factory import create_agent_from_config
+from libs.agent_cli.base import CodingAgent, register_provider
+from libs.agent_cli.cli_agent import CLICodingAgent
 from app_operator.config import Config, AgentConfig
 
 
@@ -20,7 +20,7 @@ def mock_binaries(monkeypatch):
 
     # We need to patch shutil in the cli_agent module where it's used
     monkeypatch.setattr(
-        "app_operator.cli_agent.backend.cli_agent.shutil.which", mock_which
+        "libs.agent_cli.cli_agent.shutil.which", mock_which
     )
 
     # Also mock _check_cli to avoid running subprocess

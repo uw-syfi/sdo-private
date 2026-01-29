@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from app_operator.cli_agent.backend.claude import ClaudeCodeCodingAgent
+from libs.agent_cli.claude import ClaudeCodeCodingAgent
 
 
 @pytest.fixture
@@ -36,11 +36,11 @@ def mock_recorder():
 def claude_agent(mock_which, mock_env, mock_recorder):
     """Create a ClaudeCodeCodingAgent instance with mocked environment."""
     with patch(
-        "app_operator.cli_agent.backend.cli_agent._get_interactive_env",
+        "libs.agent_cli.cli_agent._get_interactive_env",
         return_value=mock_env,
     ):
         with patch(
-            "app_operator.cli_agent.backend.cli_agent.CLICodingAgent._check_cli"
+            "libs.agent_cli.cli_agent.CLICodingAgent._check_cli"
         ):
             agent = ClaudeCodeCodingAgent(recorder=mock_recorder)
             yield agent

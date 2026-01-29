@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from app_operator.cli_agent.backend.base import CodingAgent
+from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader

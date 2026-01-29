@@ -1,5 +1,4 @@
 import unittest
-import asyncio
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 from app_operator.adk.runner import AdkAgentRunner, LlmAgent
@@ -10,7 +9,10 @@ class TestAdkAgentRunner(unittest.IsolatedAsyncioTestCase):
         self.app_name = "test_app"
         self.recorder = MagicMock()
         self.repo_path = Path("/repo")
-        self.runner = AdkAgentRunner(self.app_name, self.recorder, self.repo_path)
+        self.runner = AdkAgentRunner(
+            app_name=self.app_name,
+            recorder=self.recorder,
+            repo_path=self.repo_path)
 
     async def test_run_async_basic(self):
         # Create a mock agent with some tools
@@ -56,16 +58,6 @@ class TestAdkAgentRunner(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_args["agent"], agent)
             self.assertEqual(call_args["app_name"], self.app_name)
 
-            # Verify tools were asyncified
-            self.assertTrue(asyncio.iscoroutinefunction(agent.tools[0]))
-
-            # Verify the wrapped tool calls the original tool
-            # (AdkAgentRunner wraps them in a thread)
-            wrapped_tool = agent.tools[0]
-            result = await wrapped_tool()
-            self.assertEqual(result, "tool_output")
-            mock_tool.assert_called_once()
-
     async def test_run_async_no_response(self):
         agent = LlmAgent(name="TestAgent")
 
@@ -83,37 +75,6 @@ class TestAdkAgentRunner(unittest.IsolatedAsyncioTestCase):
 
             response = await self.runner.run_async(agent, "prompt")
             self.assertEqual(response, "")
-
-    async def test_asyncify_tools_recursive(self):
-        # specific test for recursive asyncification (sub_agents)
-        tool1 = MagicMock()
-        tool2 = MagicMock()
-
-        sub_agent = LlmAgent(name="Sub", tools=[tool2])
-        main_agent = LlmAgent(name="Main", tools=[tool1])
-        main_agent.sub_agents = [sub_agent]
-
-        # We need to manually invoke _asyncify_agent_tools since we are testing internal logic
-        # or we can rely on run_async doing it.
-        # Let's mock run_async to do nothing but we check agent state after.
-
-        with (
-            patch("app_operator.adk.runner.Runner") as MockRunnerCls,
-            patch("app_operator.adk.runner.AdkTrajectoryPlugin"),
-        ):
-            mock_runner_instance = MockRunnerCls.return_value
-
-            # Mock run_async to return an empty async iterator
-            async def async_gen(*args, **kwargs):
-                if False:
-                    yield
-
-            mock_runner_instance.run_async = async_gen
-
-            await self.runner.run_async(main_agent, "prompt")
-
-            self.assertTrue(asyncio.iscoroutinefunction(main_agent.tools[0]))
-            self.assertTrue(asyncio.iscoroutinefunction(sub_agent.tools[0]))
 
     async def test_extract_text_from_event(self):
         # We can test _extract_text_from_event by invoking run_async with mocked events

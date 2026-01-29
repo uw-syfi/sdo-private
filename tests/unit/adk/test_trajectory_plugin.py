@@ -1,72 +1,75 @@
+import unittest
 from unittest.mock import MagicMock
 from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
 
 
-def test_after_model_callback_records_message():
-    recorder = MagicMock()
-    plugin = AdkTrajectoryPlugin(recorder)
+class TestAdkTrajectoryPlugin(unittest.IsolatedAsyncioTestCase):
+    async def test_after_model_callback_records_message(self):
+        recorder = MagicMock()
+        plugin = AdkTrajectoryPlugin(recorder)
 
-    response = MagicMock()
-    response.text = "Hello world"
+        response = MagicMock()
+        response.text = "Hello world"
 
-    plugin.after_model_callback(callback_context=None, llm_response=response)
+        await plugin.after_model_callback(callback_context=None, llm_response=response)
 
-    recorder.add_assistant_message.assert_called_once_with("Hello world")
+        recorder.add_assistant_message.assert_called_once_with("Hello world")
 
+    async def test_after_tool_callback_records_tool_call(self):
+        recorder = MagicMock()
+        plugin = AdkTrajectoryPlugin(recorder)
 
-def test_after_tool_callback_records_tool_call():
-    recorder = MagicMock()
-    plugin = AdkTrajectoryPlugin(recorder)
+        tool = MagicMock()
+        tool.name = "my_tool"
 
-    tool = MagicMock()
-    tool.name = "my_tool"
+        # Test simple string result
+        await plugin.after_tool_callback(
+            tool=tool, tool_args={"arg": "val"}, tool_context=None, result="Success"
+        )
 
-    # Test simple string result
-    plugin.after_tool_callback(
-        tool=tool, tool_args={"arg": "val"}, tool_context=None, result="Success"
-    )
+        recorder.add_tool_call.assert_called_with(
+            tool="my_tool",
+            args={"arg": "val"},
+            stdout="Success",
+            stderr="",
+            exit_code=0,
+        )
 
-    recorder.add_tool_call.assert_called_with(
-        tool="my_tool", args={"arg": "val"}, stdout="Success", stderr="", exit_code=0
-    )
+    async def test_after_tool_callback_records_bash_result(self):
+        recorder = MagicMock()
+        plugin = AdkTrajectoryPlugin(recorder)
 
+        tool = MagicMock()
+        tool.name = "bash"
 
-def test_after_tool_callback_records_bash_result():
-    recorder = MagicMock()
-    plugin = AdkTrajectoryPlugin(recorder)
+        # Test dict result (like bash tool)
+        result = {"stdout": "output", "stderr": "error", "exit_code": 1}
 
-    tool = MagicMock()
-    tool.name = "bash"
+        await plugin.after_tool_callback(
+            tool=tool, tool_args="ls", tool_context=None, result=result
+        )
 
-    # Test dict result (like bash tool)
-    result = {"stdout": "output", "stderr": "error", "exit_code": 1}
+        recorder.add_tool_call.assert_called_with(
+            tool="bash", args="ls", stdout="output", stderr="error", exit_code=1
+        )
 
-    plugin.after_tool_callback(
-        tool=tool, tool_args="ls", tool_context=None, result=result
-    )
+    async def test_on_tool_error_callback_records_error(self):
+        recorder = MagicMock()
+        plugin = AdkTrajectoryPlugin(recorder)
 
-    recorder.add_tool_call.assert_called_with(
-        tool="bash", args="ls", stdout="output", stderr="error", exit_code=1
-    )
+        tool = MagicMock()
+        tool.name = "broken_tool"
 
+        error = ValueError("Something went wrong")
 
-def test_on_tool_error_callback_records_error():
-    recorder = MagicMock()
-    plugin = AdkTrajectoryPlugin(recorder)
+        await plugin.on_tool_error_callback(
+            tool=tool, tool_args={}, tool_context=None, error=error
+        )
 
-    tool = MagicMock()
-    tool.name = "broken_tool"
-
-    error = ValueError("Something went wrong")
-
-    plugin.on_tool_error_callback(
-        tool=tool, tool_args={}, tool_context=None, error=error
-    )
-
-    recorder.add_tool_call.assert_called_with(
-        tool="broken_tool",
-        args={},
-        stdout="",
-        stderr="Something went wrong",
-        exit_code=1,
-    )
+        recorder.add_tool_call.assert_called_with(
+            tool="broken_tool",
+            args={},
+            stdout="",
+            stderr="Something went wrong",
+            exit_code=1,
+        )
