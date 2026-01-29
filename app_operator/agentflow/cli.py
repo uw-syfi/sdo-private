@@ -74,11 +74,7 @@ def main() -> int:
             return 1
 
     # Get loop bound
-    loop_bound = args.loop_bound
-    if loop_bound is None:
-        loop_bound = io.prompt_int(
-            "Enter loop bound (max iterations) for generated script"
-        )
+    loop_bound = args.loop_bound if args.loop_bound is not None else 10
 
     output_dir = repo_root / args.output_dir
 

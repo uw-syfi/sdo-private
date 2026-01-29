@@ -34,6 +34,22 @@ class AgentflowEngine:
         self.agent_timeout = agent_timeout
         self.storage = AgentflowStorage(output_dir)
 
+    def _on_event(self, event: Any) -> None:
+        """Handle ADK events for streaming output."""
+        content = getattr(event, "content", None)
+        if content:
+            parts = getattr(content, "parts", None) or []
+            for part in parts:
+                text = getattr(part, "text", None)
+                if text:
+                    self.io.print_stream(text)
+
+                fn_call = getattr(part, "function_call", None)
+                if fn_call:
+                    name = getattr(fn_call, "name", "tool")
+                    args = getattr(fn_call, "args", {})
+                    self.io.info(f"\n[Tool Use] {name}({args})")
+
     async def run_async(self, user_prompt: str) -> AgentflowResult:
         """Run the clarification loop and generate the script."""
         qa_pairs: List[Tuple[str, str]] = []
@@ -63,7 +79,10 @@ class AgentflowEngine:
 
             # Call agent
             self.io.info(f"Thinking... (Round {round_idx + 1})")
-            raw_response = await self.runner.run_async(agent, user_msg)
+            raw_response = await self.runner.run_async(
+                agent, user_msg, on_event=self._on_event
+            )
+            self.io.info("")
 
             try:
                 response = parse_agentflow_response(raw_response)
@@ -75,7 +94,10 @@ class AgentflowEngine:
                 )
                 # Include context in repair
                 full_repair_prompt = f"{user_msg}\n\n{repair_msg}"
-                raw_response = await self.runner.run_async(agent, full_repair_prompt)
+                raw_response = await self.runner.run_async(
+                    agent, full_repair_prompt, on_event=self._on_event
+                )
+                self.io.info("")
                 response = parse_agentflow_response(raw_response)
 
             if response.status == "clarify":

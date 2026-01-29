@@ -33,7 +33,7 @@ class MockAdkRunner:
         self.call_count = 0
         self.last_prompt = None
 
-    async def run_async(self, agent, prompt):
+    async def run_async(self, agent, prompt, on_event=None):
         self.call_count += 1
         self.last_prompt = prompt
         if self.responses:

@@ -20,22 +20,18 @@ class UserIO(Protocol):
         """Display information to the user."""
         ...
 
+    def print_stream(self, text: str) -> None:
+        """Print text to stdout without newline."""
+        ...
+
 
 class ConsoleIO:
     """Console implementation of UserIO."""
 
     def read_prompt(self) -> str:
         try:
-            print("Please enter your prompt (Ctrl+D to finish):")
-            lines = []
-            while True:
-                try:
-                    line = input()
-                    lines.append(line)
-                except EOFError:
-                    break
-            return "\n".join(lines)
-        except KeyboardInterrupt:
+            return input("Please enter your prompt: ")
+        except (KeyboardInterrupt, EOFError):
             return ""
 
     def ask_questions(self, questions: List[str]) -> List[str]:
@@ -62,3 +58,6 @@ class ConsoleIO:
 
     def info(self, message: str) -> None:
         print(message)
+
+    def print_stream(self, text: str) -> None:
+        print(text, end="", flush=True)

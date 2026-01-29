@@ -1,5 +1,6 @@
 import uuid
 from pathlib import Path
+from typing import Callable, Any, Optional
 
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
@@ -19,7 +20,12 @@ class AdkAgentRunner:
         self.repo_path = repo_path
         self.session_service = InMemorySessionService()
 
-    async def run_async(self, agent: LlmAgent, user_prompt: str) -> str:
+    async def run_async(
+        self,
+        agent: LlmAgent,
+        user_prompt: str,
+        on_event: Optional[Callable[[Any], None]] = None,
+    ) -> str:
         """Run the agent asynchronously once with the given prompt and return the assistant response."""
 
         # Create runner with trajectory plugin
@@ -44,6 +50,8 @@ class AdkAgentRunner:
             async for event in runner.run_async(
                 user_id="sds", session_id=session_id, new_message=content
             ):
+                if on_event:
+                    on_event(event)
                 # Prefer the final response event text; fallback to last text seen.
                 event_text = _extract_text_from_event(event)
                 if event_text:
