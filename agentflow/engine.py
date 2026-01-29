@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import List, Tuple, Any
 
 from agentflow.io import UserIO
-from agentflow.models import AgentflowResult, parse_agentflow_response
+from agentflow.models import AgentflowResult, parse_agentflow_response, get_agentflow_response_schema
 from agentflow.storage import AgentflowStorage
 from app_operator.adk.runner import AdkAgentRunner
 from app_operator.adk.agent_factory import build_adk_agent
@@ -154,6 +154,8 @@ class AgentflowEngine:
                 instruction=system_prompt,
                 model=self.model,
                 tools=tools,
+                output_schema=get_agentflow_response_schema(),
+                generate_content_config={"response_mime_type": "application/json"},
             )
 
             # Call agent
@@ -161,13 +163,18 @@ class AgentflowEngine:
             raw_response = await self.runner.run_async(
                 agent, user_msg, on_event=self._on_event
             )
+            # Ensure thought color is reset if we finished thinking
+            if self._thinking_started:
+                 self.io.print_stream(Colors.ENDC)
+                 self._thinking_started = False
+
             self.io.info("")
 
             try:
                 response = parse_agentflow_response(raw_response)
             except ValueError as e:
                 # Attempt repair
-                self.io.info("Parsing failed, attempting repair...")
+                self.io.info(f"{Colors.RED}Parsing failed, attempting repair...{Colors.ENDC}")
                 repair_msg = self.prompt_loader.render(
                     "agentflow/repair.jinja2", error=str(e), raw_response=raw_response
                 )
@@ -180,7 +187,7 @@ class AgentflowEngine:
                 response = parse_agentflow_response(raw_response)
 
             if response.status == "clarify":
-                self.io.info("Agent needs clarification:")
+                self.io.info(f"{Colors.BOLD}{Colors.YELLOW}Agent needs clarification:{Colors.ENDC}")
                 answers = self.io.ask_questions(response.questions)
                 # Store Q&A
                 for q, a in zip(response.questions, answers):

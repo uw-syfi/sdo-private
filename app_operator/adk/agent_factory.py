@@ -5,7 +5,7 @@ from google.adk.tools.function_tool import FunctionTool
 
 
 def build_adk_agent(
-    name: str, instruction: str, model: Any, tools: List[Callable]
+    name: str, instruction: str, model: Any, tools: List[Callable], **kwargs: Any
 ) -> LlmAgent:
     """Build a specialized ADK LLM agent.
 
@@ -14,6 +14,7 @@ def build_adk_agent(
         instruction: System instruction/prompt for the agent.
         model: Model handle/name.
         tools: List of tool functions.
+        **kwargs: Additional arguments passed to LlmAgent (e.g. output_schema).
 
     Returns:
         Configured LlmAgent instance.
@@ -32,6 +33,7 @@ def build_adk_agent(
         model=model,
         tools=wrapped_tools,
         instruction=instruction,
+        generate_content_config={"thinking_config": {"include_thoughts": True}},
     )
 
 
