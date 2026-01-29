@@ -1,5 +1,7 @@
 import asyncio
 import os
+import sys
+from pathlib import Path
 from typing import List, Callable, Union
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, RichLog, Label
@@ -92,12 +94,13 @@ class AgentflowTUI(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"], initial_prompt: str = None, work_dir: str = ".", **kwargs):
+    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"], initial_prompt: str = None, work_dir: str = ".", repo_root: str = None, **kwargs):
         super().__init__(**kwargs)
         self.theme = "flexoki"
         self.engine_factory = engine_factory
         self.initial_prompt = initial_prompt
         self.work_dir = work_dir
+        self.repo_root = repo_root
         self.input_queue = asyncio.Queue()
         self.processing = False
 
@@ -151,9 +154,64 @@ class AgentflowTUI(App):
             result = await engine.run_async(user_prompt)
             self.write_log(Text.from_markup(f"\n[green]Success! Script written to: {result.script_path}[/]"))
             
-            # Optionally execute?
-            # For now just finish.
-            self.write_log("\nExecution finished. You can exit with Ctrl+C or enter a new prompt to restart (if implemented).")
+            # Execute the generated script
+            self.write_log(Text.from_markup("\n[bold blue]Executing generated script...[/]"))
+            
+            env = os.environ.copy()
+            
+            # Determine repo root if not provided
+            repo_root_path = self.repo_root
+            if not repo_root_path:
+                current = Path.cwd().resolve()
+                for parent in [current, *current.parents]:
+                    if (parent / ".git").exists() or (parent / "sds.toml").exists():
+                        repo_root_path = str(parent)
+                        break
+                if not repo_root_path:
+                    repo_root_path = str(current)
+            
+            env["PYTHONPATH"] = f"{repo_root_path}:{env.get('PYTHONPATH', '')}"
+            
+            # Ensure work_dir exists
+            work_dir_path = Path(self.work_dir)
+            if not work_dir_path.exists():
+                work_dir_path.mkdir(parents=True, exist_ok=True)
+
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, str(result.script_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self.work_dir,
+                env=env
+            )
+
+            async def read_stream(stream, color_tag):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    try:
+                        decoded_line = line.decode().rstrip()
+                        self.write_log(Text.from_markup(f"[{color_tag}]{decoded_line}[/]"))
+                    except Exception:
+                         # Fallback for decoding errors
+                         self.write_log(Text.from_markup(f"[{color_tag}]{str(line)}[/]"))
+
+            await asyncio.gather(
+                read_stream(process.stdout, "white"),
+                read_stream(process.stderr, "red")
+            )
+            
+            return_code = await process.wait()
+            
+            if return_code == 0:
+                self.write_log(Text.from_markup(f"\n[bold green]Execution finished successfully (Exit Code: {return_code})[/]"))
+            else:
+                self.write_log(Text.from_markup(f"\n[bold red]Execution failed (Exit Code: {return_code})[/]"))
+
+            self.write_log("\nExecution finished. You can exit with Ctrl+C or enter a new prompt to restart.")
+            self.processing = False
+            
         except Exception as e:
             self.write_log(Text.from_markup(f"\n[red]Error: {e}[/]"))
             import traceback

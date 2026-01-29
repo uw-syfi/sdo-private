@@ -83,7 +83,7 @@ def main() -> int:
                     work_dir=work_dir,
                 )
             
-            app = AgentflowTUI(engine_factory, initial_prompt=args.prompt, work_dir=str(work_dir))
+            app = AgentflowTUI(engine_factory, initial_prompt=args.prompt, work_dir=str(work_dir), repo_root=str(repo_root))
             app.run()
             return 0
         except Exception as e:
