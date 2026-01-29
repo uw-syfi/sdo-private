@@ -369,25 +369,6 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], Dict[str, A
     return run_command
 
 
-def _build_finish_deployment(context: ToolContext) -> Callable[[], Dict[str, Any]]:
-    def finish_deployment() -> Dict[str, Any]:
-        """Mark the deployment as successfully completed and finish the process.
-
-        Returns:
-            A dictionary containing the operation result:
-            - 'status': Always 'success'.
-            - 'output': Always 'DEPLOYMENT_FINISHED'.
-            - 'context': Empty dictionary.
-        """
-        return {
-            "status": "success",
-            "output": "DEPLOYMENT_FINISHED",
-            "context": {},
-        }
-
-    return finish_deployment
-
-
 def build_tools(
     repo_path: Path, filesystem: Optional[FileSystemInterface] = None
 ) -> List[Callable[..., Any]]:
@@ -402,5 +383,4 @@ def build_tools(
         _build_search_content(context),
         _build_write_file(context),
         _build_run_command(context),
-        _build_finish_deployment(context),
     ]

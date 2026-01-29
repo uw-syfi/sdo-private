@@ -1,3 +1,5 @@
+import json
+import ast
 from pathlib import Path
 from typing import List, Tuple, Any, Callable
 
@@ -6,7 +8,7 @@ from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
 from agentflow.io import UserIO, Colors
-from agentflow.models import AgentflowResult, parse_agentflow_response
+from agentflow.models import AgentflowResult, parse_agentflow_response, AgentflowResponse
 from agentflow.storage import AgentflowStorage
 from agentflow.prompts import PromptLoader
 
@@ -55,6 +57,17 @@ class AgentflowEngine:
         t.name = name  # Ensure name is set correctly if needed
         return t
 
+    def _submit_response(self, status: str, questions: List[str] = None, python_script: str = None) -> str:
+        """
+        Submit the final response to the user.
+
+        Args:
+            status: 'clarify' if you have questions, or 'ready' if the script is complete.
+            questions: List of questions if status is 'clarify'.
+            python_script: The complete python script if status is 'ready'.
+        """
+        return "Response submitted."
+
     def _parse_chunk_content(self, content: Any) -> str:
         if isinstance(content, str):
             return content
@@ -85,6 +98,7 @@ class AgentflowEngine:
             self._wrap_tool(_build_list_files(context), "list_files"),
             self._wrap_tool(_build_find_files(context), "find_files"),
             self._wrap_tool(_build_search_content(context), "search_content"),
+            self._wrap_tool(self._submit_response, "submit_response"),
         ]
 
         # Build LLM
@@ -116,6 +130,7 @@ class AgentflowEngine:
             
             messages = [HumanMessage(content=user_msg_text)]
             final_content = ""
+            final_response_data = None
             
             # Run with streaming
             try:
@@ -134,46 +149,67 @@ class AgentflowEngine:
                         
                         if text_chunk:
                             if not self._thinking_started:
-                                self.io.info("\n[Thinking]")
+                                self.io.info(f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}")
                                 self._thinking_started = True
-                            self.io.print_stream(text_chunk)
+                            self.io.print_stream(f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}")
                             accumulated_text.append(text_chunk)
                     
                     elif kind == "on_tool_start":
                         name = event["name"]
                         inputs = event["data"].get("input")
+                        if name == "submit_response":
+                            final_response_data = inputs
                         if self._thinking_started:
                              self.io.info("") # Newline
                              self._thinking_started = False
-                        self.io.info(f"\n[Tool Use] {name}({inputs})")
+                        self.io.info(f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}")
 
                     elif kind == "on_tool_end":
                         name = event["name"]
                         output = event["data"].get("output")
                         
                         symbol = ""
-                        result_text = str(output)
+                        result_text = ""
                         
-                        if isinstance(output, dict):
-                            status = output.get("status")
-                            if status == "success":
-                                symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                            elif status == "error":
-                                symbol = f"{Colors.RED}✗{Colors.ENDC} "
-                            
-                            # render output without newlines
-                            raw_out = str(output.get("output", ""))
-                            # Escape newlines for display
-                            result_text = raw_out.replace("\n", "\\n")
-                        else:
-                             # Try to clean up string output if it wasn't a dict
-                             result_text = str(output).replace("\n", "\\n")
+                        # Handle ToolMessage or simple output
+                        content = getattr(output, "content", output)
+                        
+                        try:
+                            if isinstance(content, str):
+                                # Try parsing as JSON first
+                                try:
+                                    content_dict = json.loads(content)
+                                except json.JSONDecodeError:
+                                    try:
+                                        content_dict = ast.literal_eval(content)
+                                    except (ValueError, SyntaxError):
+                                        content_dict = None
 
-                        # Truncate
+                                if isinstance(content_dict, dict):
+                                    status = content_dict.get("status")
+                                    if status == "success":
+                                        symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
+                                    elif status == "error":
+                                        symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                                    
+                                    result_text = str(content_dict.get("output", ""))
+                                else:
+                                    result_text = content
+                            elif isinstance(content, dict):
+                                status = content.get("status")
+                                if status == "success":
+                                    symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
+                                elif status == "error":
+                                    symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                                result_text = str(content.get("output", ""))
+                            else:
+                                result_text = str(content)
+                        except Exception:
+                            result_text = str(content)
+
                         if len(result_text) > 500:
-                            result_text = result_text[:500] + "... (truncated)"
-                        self.io.info(f"\n[Tool Result] {name}: {symbol}{result_text}")
-
+                            result_text = result_text[:500] + "\n... (truncated)"
+                        self.io.info(f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}")
                 final_content = "".join(accumulated_text)
                 if self._thinking_started:
                      self.io.print_stream(Colors.ENDC)
@@ -203,7 +239,20 @@ class AgentflowEngine:
 
 
             try:
-                response = parse_agentflow_response(final_content)
+                response = None
+                if final_response_data:
+                    try:
+                        response = AgentflowResponse(
+                            status=final_response_data.get("status"),
+                            questions=final_response_data.get("questions", []) or [],
+                            python_script=final_response_data.get("python_script"),
+                        )
+                        response.validate()
+                    except Exception as e:
+                        self.io.info(f"{Colors.RED}Response validation failed: {e}{Colors.ENDC}")
+
+                if not response:
+                    response = parse_agentflow_response(final_content)
             except ValueError as e:
                 # Attempt repair
                 self.io.info(f"{Colors.RED}Parsing failed, attempting repair...{Colors.ENDC}")

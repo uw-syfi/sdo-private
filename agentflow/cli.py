@@ -38,10 +38,14 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    # Determine repo root
-    # This file is agentflow/cli.py
-    # parents[0]=agentflow, parents[1]=root
-    repo_root = Path(__file__).resolve().parents[1]
+    # Determine repo root by searching upwards for .git or sds.toml
+    # This ensures we find the project root regardless of where the command is run
+    # or where the package is installed.
+    repo_root = Path.cwd().resolve()
+    for parent in [repo_root, *repo_root.parents]:
+        if (parent / ".git").exists() or (parent / "sds.toml").exists():
+            repo_root = parent
+            break
 
     try:
         config = load_config(str(repo_root), args.config)

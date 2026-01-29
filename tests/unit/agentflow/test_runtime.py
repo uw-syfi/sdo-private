@@ -1,20 +1,23 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 from agentflow.runtime import fan_out, summarize, judge_loop
 
 
 def test_fan_out():
     agent = MagicMock()
-    # Mock return values for parallel calls
+    # Mock _generate_async as it is called by fan_out
+    agent._generate_async = AsyncMock(side_effect=["resp1", "resp2"])
+
+    # We also mock generate just in case, but fan_out calls _generate_async
     agent.generate.side_effect = ["resp1", "resp2"]
 
     results = fan_out(agent, ["p1", "p2"])
 
     assert results == ["resp1", "resp2"]
-    assert agent.generate.call_count == 2
-    # Verify called with keyword args
-    call_args_list = agent.generate.call_args_list
-    assert call_args_list[0].kwargs["prompt"] == "p1"
-    assert call_args_list[1].kwargs["prompt"] == "p2"
+    assert agent._generate_async.call_count == 2
+    # Verify called with keyword args (or positional)
+    call_args_list = agent._generate_async.call_args_list
+    assert call_args_list[0].args[0] == "p1"
+    assert call_args_list[1].args[0] == "p2"
 
 
 def test_summarize():

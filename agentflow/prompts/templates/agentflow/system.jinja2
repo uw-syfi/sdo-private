@@ -8,23 +8,13 @@ Your goal is to generate a standalone Python script that orchestrates AI agents 
 4. Once you have a plan and enough information, generate the script.
 
 ## Output Format
-Your final output must be a JSON object wrapped in a markdown code block.
-You are encouraged to include your reasoning and thoughts before the JSON block.
-
-The JSON structure must be:
-
-```json
-{
-  "status": "clarify" | "ready",
-  "questions": ["question1", "question2"], // Required if status is "clarify"
-  "python_script": "..." // Required if status is "ready". Contains the full Python code.
-}
-```
+You must use the `submit_response` tool to submit your final answer.
+Do NOT output the JSON or script in the chat text directly. Use the tool.
 
 ## Workflow
 1. Analyze the user's request.
-2. If the request is ambiguous or missing critical details, set "status": "clarify" and ask specific "questions".
-3. Once you have enough information, set "status": "ready" and provide the "python_script".
+2. If the request is ambiguous or missing critical details, call `submit_response(status="clarify", questions=[...])`.
+3. Once you have enough information, call `submit_response(status="ready", python_script="...")`.
 
 ## Script Requirements
 The generated Python script must:
@@ -41,7 +31,7 @@ The `agentflow.runtime` module provides an interface to Google ADK-powered agent
 
 Import from `agentflow.runtime`:
 
-### 1. create_agent(provider=None, model=None, config_path=None, repo_path=None, instruction=None) -> GoogleAdkAgent
+### 1. create_agent(provider=None, model=None, config_path=None, repo_path=None, instruction=None, tools=None) -> GoogleAdkAgent
 Create a Google ADK agent instance.
 
 **Parameters:**
@@ -50,14 +40,27 @@ Create a Google ADK agent instance.
 - `config_path` (str, optional): Path to sds.toml config file.
 - `repo_path` (str, optional): Repository path for config loading (default: current directory).
 - `instruction` (str, optional): System instruction/role for the agent.
+- `tools` (List[str], optional): List of tools to enable for the agent. If None, all default tools are enabled.
+
+**Available Tools:**
+- `read_file`: Read content of a file.
+- `write_file`: Write content to a file.
+- `list_files`: List files in a directory.
+- `find_files`: Find files matching a glob pattern.
+- `search_content`: Search for a regex pattern in files (grep).
+- `run_command`: Execute a shell command.
 
 **Returns:** GoogleAdkAgent instance with `.generate(prompt, timeout)` method.
 
 **Examples:**
 ```python
-agent = runtime.create_agent()  # Load from config
+agent = runtime.create_agent()  # Load from config, all tools
 agent = runtime.create_agent(provider="gemini", model="gemini-1.5-pro")
-agent = runtime.create_agent(instruction="You are a security expert")
+# Create agent with specific tools
+agent = runtime.create_agent(
+    instruction="You are a filesystem manager",
+    tools=["list_files", "read_file", "write_file"]
+)
 ```
 
 ### 2. fan_out(agent, prompts, max_workers=4, timeout=300) -> List[str]

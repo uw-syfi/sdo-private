@@ -214,7 +214,7 @@ class AdkOperator:
             "You are the Deployer. Your goal is to deploy the application and verify its health.\n"
             "1. Run `.sds/deploy.sh start` using the `run_command` tool. Provide a timeout.\n"
             "2. If the deployment succeeds (exit code 0), run `.sds/health_check.sh` using the `run_command` tool. Provide a timeout.\n"
-            "3. If the health check also succeeds, you MUST call the `finish_deployment` tool immediately to complete the process.\n"
+            "3. If the health check also succeeds, output 'Deployment Successful' to complete the process.\n"
             "4. If any step fails, stop and output 'Deployment failed' to yield to the Fixer.\n"
             "Check the 'status' key in the tool response. If 'status' is 'error', treating it as a failure."
         )

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import ast
 from typing import Optional, Dict, List, Any, Callable
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from app_operator.adk.tools import build_tools
 from app_operator.config import load_config
 from app_operator.filesystem import RealFilesystem
 from app_operator.logger import logger
+from agentflow.io import Colors
 
 
 class LangGraphAgent:
@@ -82,31 +84,106 @@ class LangGraphAgent:
 
     async def _generate_async(self, prompt: str, timeout: int) -> str:
         messages = [HumanMessage(content=prompt)]
-        
-        # Invoke the graph
-        # We might need to handle recursion limit or max steps
         config = {"recursion_limit": 50}
-        
-        # Use asyncio.wait_for for timeout
+
+        accumulated_text = []
+
+        async def run_stream():
+            thinking_started = False
+            async for event in self.graph.astream_events(
+                {"messages": messages}, 
+                version="v1",
+                config=config
+            ):
+                kind = event["event"]
+                
+                if kind == "on_chat_model_stream":
+                    content = event["data"]["chunk"].content
+                    text_chunk = ""
+                    if isinstance(content, str):
+                        text_chunk = content
+                    elif isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict):
+                                if part.get("type") == "text":
+                                    text_chunk += part.get("text", "")
+                                elif part.get("type") == "thinking":
+                                    text_chunk += part.get("thinking", "")
+                            elif isinstance(part, str):
+                                text_chunk += part
+                    
+                    if text_chunk:
+                        if not thinking_started:
+                            print(f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}", flush=True)
+                            thinking_started = True
+                        print(f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}", end="", flush=True)
+                        accumulated_text.append(text_chunk)
+                
+                elif kind == "on_tool_start":
+                    name = event["name"]
+                    inputs = event["data"].get("input")
+                    if thinking_started:
+                         print("", flush=True)
+                         thinking_started = False
+                    print(f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}", flush=True)
+
+                elif kind == "on_tool_end":
+                    name = event["name"]
+                    output = event["data"].get("output")
+                    
+                    symbol = ""
+                    result_text = ""
+                    
+                    # Handle ToolMessage or simple output
+                    content = getattr(output, "content", output)
+                    
+                    try:
+                        if isinstance(content, str):
+                            # Try parsing as JSON first
+                            try:
+                                content_dict = json.loads(content)
+                            except json.JSONDecodeError:
+                                try:
+                                    content_dict = ast.literal_eval(content)
+                                except (ValueError, SyntaxError):
+                                    content_dict = None
+
+                            if isinstance(content_dict, dict):
+                                status = content_dict.get("status")
+                                if status == "success":
+                                    symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
+                                elif status == "error":
+                                    symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                                
+                                result_text = str(content_dict.get("output", ""))
+                            else:
+                                result_text = content
+                        elif isinstance(content, dict):
+                             status = content.get("status")
+                             if status == "success":
+                                 symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
+                             elif status == "error":
+                                 symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                             result_text = str(content.get("output", ""))
+                        else:
+                             result_text = str(content)
+                    except Exception:
+                        result_text = str(content)
+
+                    if len(result_text) > 500:
+                        result_text = result_text[:500] + "\n... (truncated)"
+                    print(f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}", flush=True)
+
+            if thinking_started:
+                print("", flush=True)
+
         try:
-            result = await asyncio.wait_for(
-                self.graph.ainvoke({"messages": messages}, config=config),
-                timeout=timeout
-            )
+            await asyncio.wait_for(run_stream(), timeout=timeout)
             
-            last_message = result["messages"][-1]
-            if isinstance(last_message, AIMessage):
-                content = last_message.content
-                if isinstance(content, list):
-                    text_content = ""
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            text_content += part.get("text", "")
-                        elif isinstance(part, str):
-                            text_content += part
-                    return text_content
-                return str(content)
-            return ""
+            final_content = "".join(accumulated_text)
+            if not final_content:
+                 return ""
+            return final_content
             
         except asyncio.TimeoutError:
             return f"Error: Agent execution timed out after {timeout} seconds."
@@ -121,6 +198,7 @@ def create_agent(
     config_path: Optional[str] = None,
     repo_path: Optional[str] = None,
     instruction: Optional[str] = None,
+    tools: Optional[List[str]] = None,
 ) -> LangGraphAgent:
     """Create a coding agent instance using LangGraph.
 
@@ -130,6 +208,8 @@ def create_agent(
         config_path: Path to sds.toml config file.
         repo_path: Repository path for config loading.
         instruction: System instruction for the agent.
+        tools: List of tool names to enable (e.g., ["read_file", "run_command"]).
+               If None, all default tools are enabled.
 
     Returns:
         LangGraphAgent: Configured coding agent.
@@ -154,12 +234,27 @@ def create_agent(
 
     repo_path_obj = Path(target_dir).resolve()
     filesystem = RealFilesystem()
-    tools = build_tools(repo_path_obj, filesystem)
+    all_tools = build_tools(repo_path_obj, filesystem)
+
+    # Filter tools if requested
+    if tools:
+        selected_tools = []
+        available_tools_map = {t.__name__: t for t in all_tools}
+        
+        for tool_name in tools:
+            if tool_name in available_tools_map:
+                selected_tools.append(available_tools_map[tool_name])
+            else:
+                logger.warning(f"Tool '{tool_name}' not found. Available: {list(available_tools_map.keys())}")
+        
+        agent_tools = selected_tools
+    else:
+        agent_tools = all_tools
 
     return LangGraphAgent(
         model_name=config.agent.model,
         llm=llm,
-        tools=tools,
+        tools=agent_tools,
         instruction=instruction or ""
     )
 

@@ -14,6 +14,7 @@ class Colors:
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
     GRAY = "\033[90m"
+    LIGHT_GRAY = "\033[37m"
 
 
 class UserIO(Protocol):

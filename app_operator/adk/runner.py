@@ -63,7 +63,7 @@ class AdkAgentRunner:
                 event_text = _extract_text_from_event(event)
                 if event_text:
                     response_text += event_text
-                
+
                 if hasattr(event, "is_final_response") and event.is_final_response():
                     break
             return response_text
