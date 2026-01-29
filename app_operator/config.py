@@ -128,7 +128,7 @@ class OperatorConfig:
 class RuntimeConfig:
     impl: str = "cli_agent"
 
-    VALID_IMPLS = {"cli_agent", "langgraph"}
+    VALID_IMPLS = {"cli_agent", "langgraph", "adk"}
 
     def __post_init__(self):
         if not isinstance(self.impl, str):
@@ -148,11 +148,18 @@ class Config:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     def __post_init__(self):
+        self._validate_runtime_requirements()
+
+    def _validate_runtime_requirements(self) -> None:
+        """Validate requirements for specific runtimes."""
         if self.runtime.impl == "langgraph":
             if not self.agent.provider:
                 raise ValueError("agent.provider must be set for langgraph runtime")
             if not self.agent.model:
                 raise ValueError("agent.model must be set for langgraph runtime")
+        elif self.runtime.impl == "adk":
+            if not self.agent.model:
+                raise ValueError("agent.model must be set for adk runtime")
 
     @staticmethod
     def _validate_fields(
