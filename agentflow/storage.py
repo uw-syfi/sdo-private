@@ -14,7 +14,7 @@ class AgentflowStorage:
         run_dir = self.base_dir / timestamp
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        script_path = run_dir / "agentflow.py"
+        script_path = run_dir / "generated_script.py"
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(script_text)
 

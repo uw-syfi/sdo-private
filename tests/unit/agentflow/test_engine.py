@@ -74,7 +74,7 @@ def test_engine_happy_path(tmp_path):
     result = asyncio.run(engine.run_async("do something"))
 
     assert result.script_text is not None
-    assert (output_dir / result.script_path.parent.name / "agentflow.py").exists()
+    assert (output_dir / result.script_path.parent.name / "generated_script.py").exists()
     assert result.clarifications == []
 
 
@@ -143,7 +143,7 @@ def test_engine_validation_failure_and_repair(tmp_path):
 
     assert runner.call_count == 2
     # Verify second call contained repair info
-    assert "Error parsing" in runner.last_prompt
+    assert "PARSING ERROR" in runner.last_prompt
 
 
 def test_engine_script_validation_error(tmp_path):
