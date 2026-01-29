@@ -1,7 +1,6 @@
 import asyncio
 import json
-from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Dict, List, Any, Callable, Union
+from typing import Optional, Dict, List, Any, Callable
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage, AIMessage
@@ -9,7 +8,7 @@ from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
 from app_operator.langgraph.llm import build_llm
-from app_operator.adk.tools import build_tools, ToolContext
+from app_operator.adk.tools import build_tools
 from app_operator.config import load_config
 from app_operator.filesystem import RealFilesystem
 from app_operator.logger import logger

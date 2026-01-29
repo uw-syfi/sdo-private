@@ -1,12 +1,9 @@
-import asyncio
 from pathlib import Path
 from typing import List, Tuple, Any, Callable
 
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
-from langgraph.graph import StateGraph
-from langchain_core.runnables import RunnableConfig
 
 from agentflow.io import UserIO, Colors
 from agentflow.models import AgentflowResult, parse_agentflow_response
@@ -58,6 +55,22 @@ class AgentflowEngine:
         t.name = name  # Ensure name is set correctly if needed
         return t
 
+    def _parse_chunk_content(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text = ""
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        text += part.get("text", "")
+                    elif part.get("type") == "thinking":
+                        text += part.get("thinking", "")
+                elif isinstance(part, str):
+                    text += part
+            return text
+        return str(content)
+
     async def run_async(self, user_prompt: str) -> AgentflowResult:
         """Run the clarification loop and generate the script."""
         qa_pairs: List[Tuple[str, str]] = []
@@ -107,64 +120,6 @@ class AgentflowEngine:
             # Run with streaming
             try:
                 # Use astream_events to capture thoughts and tool calls
-                async for event in agent.astream_events(
-                    {"messages": messages}, 
-                    version="v1",
-                    config={"recursion_limit": 50}
-                ):
-                    kind = event["event"]
-                    
-                    if kind == "on_chat_model_stream":
-                        content = event["data"]["chunk"].content
-                        if content:
-                            # If it's empty or just checking tool use, we might not want to print
-                            # But usually this is the thinking/text part
-                            if not self._thinking_started:
-                                self.io.info("\n[Thinking]")
-                                self._thinking_started = True
-                            self.io.print_stream(content)
-                    
-                    elif kind == "on_tool_start":
-                        name = event["name"]
-                        inputs = event["data"].get("input")
-                        self.io.info(f"\n[Tool Use] {name}({inputs})")
-                        if self._thinking_started:
-                             self.io.info("") # Newline
-                             self._thinking_started = False
-
-                    elif kind == "on_tool_end":
-                        name = event["name"]
-                        output = event["data"].get("output")
-                        # Truncate
-                        out_str = str(output)
-                        if len(out_str) > 500:
-                            out_str = out_str[:500] + "... (truncated)"
-                        self.io.info(f"\n[Tool Result] {name}: {out_str}")
-
-                # After streaming, we need the final response. 
-                # We can run invoke to get the full state, but since we streamed, we might have it.
-                # However, astream_events doesn't easily give the final aggregated message.
-                # Let's just run invoke for the result if we didn't capture it fully, 
-                # OR we can just use the accumulated output from stream if we tracked it.
-                # Better: astream_events is great for UI, but `ainvoke` is better for getting the final result.
-                # But we want both. 
-                # Actually, `agent.ainvoke` returns the state.
-                
-                # To avoid re-running, we can rely on the fact that `astream_events` 
-                # doesn't change the graph execution, it just streams what happens.
-                # But `astream_events` iterates through the generator.
-                # Wait, `astream_events` executes the graph.
-                
-                # The issue is getting the final result *after* consuming the stream without re-running.
-                # `astream_events` doesn't return the final state.
-                
-                # Alternative: `astream` returns chunks of the final state updates.
-                # But `astream` output is complex for ReAct agents.
-                
-                # Let's go back to `ainvoke` and use a print callback for tools?
-                # Actually, the user wants streaming.
-                
-                # Let's re-implement `astream_events` loop and accumulate the text.
                 accumulated_text = []
                 async for event in agent.astream_events(
                     {"messages": messages}, 
@@ -172,36 +127,53 @@ class AgentflowEngine:
                     config={"recursion_limit": 50}
                 ):
                     kind = event["event"]
+                    
                     if kind == "on_chat_model_stream":
                         content = event["data"]["chunk"].content
-                        if content:
-                             # content can be a string or a list of dicts
-                             text_chunk = ""
-                             if isinstance(content, str):
-                                 text_chunk = content
-                             elif isinstance(content, list):
-                                 for part in content:
-                                     if isinstance(part, dict) and part.get("type") == "text":
-                                         text_chunk += part.get("text", "")
-                                     elif isinstance(part, str):
-                                         text_chunk += part
-                             
-                             if text_chunk:
-                                 if not self._thinking_started:
-                                    self.io.info("\n[Thinking]")
-                                    self._thinking_started = True
-                                 self.io.print_stream(text_chunk)
-                                 accumulated_text.append(text_chunk)
+                        text_chunk = self._parse_chunk_content(content)
+                        
+                        if text_chunk:
+                            if not self._thinking_started:
+                                self.io.info("\n[Thinking]")
+                                self._thinking_started = True
+                            self.io.print_stream(text_chunk)
+                            accumulated_text.append(text_chunk)
+                    
                     elif kind == "on_tool_start":
+                        name = event["name"]
+                        inputs = event["data"].get("input")
                         if self._thinking_started:
-                             self.io.info("")
+                             self.io.info("") # Newline
                              self._thinking_started = False
-                        self.io.info(f"\n[Tool Use] {event['name']}({event['data'].get('input')})")
+                        self.io.info(f"\n[Tool Use] {name}({inputs})")
+
                     elif kind == "on_tool_end":
-                         out_str = str(event['data'].get('output'))
-                         if len(out_str) > 500: out_str = out_str[:500] + "..."
-                         self.io.info(f"\n[Tool Result] {event['name']}: {out_str}")
-                
+                        name = event["name"]
+                        output = event["data"].get("output")
+                        
+                        symbol = ""
+                        result_text = str(output)
+                        
+                        if isinstance(output, dict):
+                            status = output.get("status")
+                            if status == "success":
+                                symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
+                            elif status == "error":
+                                symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                            
+                            # render output without newlines
+                            raw_out = str(output.get("output", ""))
+                            # Escape newlines for display
+                            result_text = raw_out.replace("\n", "\\n")
+                        else:
+                             # Try to clean up string output if it wasn't a dict
+                             result_text = str(output).replace("\n", "\\n")
+
+                        # Truncate
+                        if len(result_text) > 500:
+                            result_text = result_text[:500] + "... (truncated)"
+                        self.io.info(f"\n[Tool Result] {name}: {symbol}{result_text}")
+
                 final_content = "".join(accumulated_text)
                 if self._thinking_started:
                      self.io.print_stream(Colors.ENDC)
