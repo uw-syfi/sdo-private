@@ -59,13 +59,12 @@ class AdkAgentRunner:
             ):
                 if on_event:
                     on_event(event)
-                # Prefer the final response event text; fallback to last text seen.
+                # Accumulate text from events (deltas)
                 event_text = _extract_text_from_event(event)
                 if event_text:
-                    response_text = event_text
+                    response_text += event_text
+
                 if hasattr(event, "is_final_response") and event.is_final_response():
-                    if event_text:
-                        response_text = event_text
                     break
             return response_text
 

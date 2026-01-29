@@ -4,8 +4,6 @@ from pathlib import Path
 
 from agentflow.engine import AgentflowEngine
 from agentflow.io import ConsoleIO
-from app_operator.adk.models import build_adk_model
-from app_operator.adk.runner import AdkAgentRunner
 from app_operator.config import load_config
 from app_operator.logger import logger
 from agentflow.prompts import get_loader
@@ -40,10 +38,14 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    # Determine repo root
-    # This file is agentflow/cli.py
-    # parents[0]=agentflow, parents[1]=app_operator, parents[2]=root
-    repo_root = Path(__file__).resolve().parents[2]
+    # Determine repo root by searching upwards for .git or sds.toml
+    # This ensures we find the project root regardless of where the command is run
+    # or where the package is installed.
+    repo_root = Path.cwd().resolve()
+    for parent in [repo_root, *repo_root.parents]:
+        if (parent / ".git").exists() or (parent / "sds.toml").exists():
+            repo_root = parent
+            break
 
     try:
         config = load_config(str(repo_root), args.config)
@@ -51,16 +53,6 @@ def main() -> int:
             config.agent.model = args.model
     except Exception as e:
         logger.error(f"Failed to load config: {e}")
-        return 1
-
-    try:
-        model = build_adk_model(config)
-        runner = AdkAgentRunner(
-            app_name="sds-agentflow",
-            repo_path=repo_root,
-        )
-    except Exception as e:
-        logger.error(f"Failed to initialize ADK: {e}")
         return 1
 
     io = ConsoleIO()
@@ -80,8 +72,7 @@ def main() -> int:
     work_dir = Path(args.work_dir).resolve()
 
     engine = AgentflowEngine(
-        runner=runner,
-        model=model,
+        config=config,
         prompt_loader=get_loader(),
         io=io,
         loop_bound=loop_bound,

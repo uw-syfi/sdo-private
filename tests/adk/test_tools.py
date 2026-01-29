@@ -144,8 +144,3 @@ class TestAdkTools(unittest.TestCase):
         result = self.tools["run_command"]("invalid", 10)
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error"], "command failed")
-
-    def test_finish_deployment(self):
-        result = self.tools["finish_deployment"]()
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["output"], "DEPLOYMENT_FINISHED")

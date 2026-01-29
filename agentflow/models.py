@@ -34,6 +34,29 @@ class AgentflowResult:
     clarifications: List[Tuple[str, str]]
 
 
+def get_agentflow_response_schema() -> dict:
+    """Return the JSON schema for AgentflowResponse."""
+    return {
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["clarify", "ready"]
+            },
+            "questions": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            },
+            "python_script": {
+                "type": "string"
+            }
+        },
+        "required": ["status"]
+    }
+
+
 def extract_json(text: str) -> str:
     """Extract JSON from text, handling markdown fences."""
     # Try to find ```json ... ``` or just ``` ... ```
