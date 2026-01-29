@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import MagicMock, patch
 from app_operator.adk import agent_factory
 
@@ -19,7 +18,7 @@ def test_build_adk_agent_wraps_async_tool():
         patch("app_operator.adk.agent_factory.FunctionTool", new=MockFunctionToolClass),
         patch("app_operator.adk.agent_factory.LlmAgent") as MockLlmAgent,
     ):
-        agent = agent_factory.build_adk_agent(
+        agent_factory.build_adk_agent(
             "test_agent", "instruction", "model", [async_tool]
         )
 
@@ -51,9 +50,9 @@ def test_build_adk_agent_wraps_sync_tool():
 
     with (
         patch("app_operator.adk.agent_factory.FunctionTool", new=MockFunctionToolClass),
-        patch("app_operator.adk.agent_factory.LlmAgent") as MockLlmAgent,
+        patch("app_operator.adk.agent_factory.LlmAgent"),
     ):
-        agent = agent_factory.build_adk_agent(
+        agent_factory.build_adk_agent(
             "test_agent", "instruction", "model", [sync_tool]
         )
 

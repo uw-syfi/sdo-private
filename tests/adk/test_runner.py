@@ -1,5 +1,4 @@
 import unittest
-import asyncio
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 from app_operator.adk.runner import AdkAgentRunner, LlmAgent

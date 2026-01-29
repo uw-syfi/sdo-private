@@ -1,4 +1,3 @@
-from typing import Any
 import os
 from app_operator.config import Config
 from google import genai

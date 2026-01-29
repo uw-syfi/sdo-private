@@ -16,7 +16,6 @@ from app_operator.adk.tools import (
 from app_operator.filesystem import RealFilesystem
 from app_operator.exceptions import AgentError
 from agentflow.prompts import PromptLoader
-from google.genai import types
 
 
 class AgentflowEngine:

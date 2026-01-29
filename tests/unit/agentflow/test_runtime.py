@@ -29,18 +29,38 @@ def test_summarize():
     assert "Summarize this" in call_args.kwargs["prompt"]
 
 
-def test_judge_loop_immediate_success():
+def test_judge_loop_task_already_done():
+    """Test when judge decides task is done before worker starts."""
+    worker = MagicMock()
+    judge = MagicMock()
+    # Judge says done immediately
+    judge.generate.return_value = '{"status": "done", "feedback": "Task already completed"}'
+
+    result = judge_loop(judge, worker, "task", max_iterations=3)
+
+    assert result["final_output"] == ""
+    assert result["judge_feedback"] == "Task already completed"
+    assert result["iterations"] == "1"
+    worker.generate.assert_not_called()
+
+
+def test_judge_loop_worker_immediate_success():
+    """Test when worker succeeds on first attempt (after initial judge check)."""
     worker = MagicMock()
     worker.generate.return_value = "Work output"
 
     judge = MagicMock()
-    judge.generate.return_value = '{"status": "done", "feedback": "Good job"}'
+    judge.generate.side_effect = [
+        '{"status": "continue", "feedback": "Please start"}', # First check (pre-work)
+        '{"status": "done", "feedback": "Good job"}'        # Second check (post-work)
+    ]
 
     result = judge_loop(judge, worker, "task", max_iterations=3)
 
     assert result["final_output"] == "Work output"
     assert result["judge_feedback"] == "Good job"
-    assert result["iterations"] == "1"
+    assert result["iterations"] == "2"
+    assert worker.generate.call_count == 1
 
 
 def test_judge_loop_refinement():
@@ -49,15 +69,18 @@ def test_judge_loop_refinement():
 
     judge = MagicMock()
     judge.generate.side_effect = [
-        '{"status": "continue", "feedback": "Fix it"}',
-        '{"status": "done", "feedback": "Perfect"}',
+        '{"status": "continue", "feedback": "Start"}',      # 1. Pre-check
+        '{"status": "continue", "feedback": "Fix it"}',     # 2. Check bad output
+        '{"status": "done", "feedback": "Perfect"}',        # 3. Check good output
     ]
 
     result = judge_loop(judge, worker, "task", max_iterations=3)
 
     assert result["final_output"] == "Good output"
-    assert result["iterations"] == "2"
+    assert result["iterations"] == "3"
     assert worker.generate.call_count == 2
     # Check that feedback was passed to worker
+    # Worker call 0: Start
+    # Worker call 1: Fix it
     refine_call = worker.generate.call_args_list[1]
     assert "Fix it" in refine_call.kwargs["prompt"]

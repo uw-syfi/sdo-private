@@ -1,6 +1,5 @@
 import pytest
 import asyncio
-from unittest.mock import MagicMock
 
 from agentflow.engine import AgentflowEngine
 from agentflow.io import UserIO
