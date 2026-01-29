@@ -1,17 +1,7 @@
 from typing import Any, Callable, List, Optional
 
-# Assuming imports
-try:
-    from google.adk.agents import LlmAgent, LoopAgent
-except ImportError:
-
-    class LlmAgent:
-        def __init__(self, model, tools, instructions, name=None, description=None):
-            pass
-
-    class LoopAgent(LlmAgent):
-        def __init__(self, name, sub_agents, max_iterations=None, tools=None):
-            pass
+from google.adk.agents import LlmAgent, LoopAgent
+from google.adk.tools.function_tool import FunctionTool
 
 
 def build_adk_agent(
@@ -28,12 +18,20 @@ def build_adk_agent(
     Returns:
         Configured LlmAgent instance.
     """
+    # Wrap callables in FunctionTool
+    wrapped_tools = []
+    for tool in tools:
+        if isinstance(tool, FunctionTool):
+            wrapped_tools.append(tool)
+        else:
+            wrapped_tools.append(FunctionTool(tool))
+
     return LlmAgent(
         name=name,
         description=f"SDS Agent: {name}",
         model=model,
-        tools=tools,
-        instruction=instruction,
+        tools=wrapped_tools,
+        instructions=instruction,
     )
 
 
@@ -58,5 +56,4 @@ def build_loop_agent(
         name=name,
         sub_agents=sub_agents,
         max_iterations=max_iterations,
-        tools=tools,
     )

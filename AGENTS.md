@@ -186,6 +186,8 @@ This implementation uses a stateful graph to manage the lifecycle:
 
 ### Code Validation
 
+Always do the following after you're done with your code edits:
+
 *   **Formatting:** Run `@scripts/format_code.sh` on python code edits.
 *   **Linting:** Run `@scripts/check_errors.sh` on python code edits. Add `--fix` to automatically fix errors.
 

@@ -1,15 +1,7 @@
 from typing import Any
 
 from app_operator.trajectory import TrajectoryRecorderProtocol
-
-# Assuming the import path based on typical Google ADK structure
-# If this is incorrect, it will be caught during integration/testing
-try:
-    from google.adk.plugins import BasePlugin
-except ImportError:
-    # Fallback for type checking or if library not present during development
-    class BasePlugin:
-        pass
+from google.adk.plugins import BasePlugin
 
 
 class AdkTrajectoryPlugin(BasePlugin):
@@ -18,17 +10,13 @@ class AdkTrajectoryPlugin(BasePlugin):
     def __init__(self, recorder: TrajectoryRecorderProtocol):
         self.recorder = recorder
 
-    def before_model_callback(
-        self, *, callback_context: Any, llm_request: Any
-    ) -> None:
+    def before_model_callback(self, *, callback_context: Any, llm_request: Any) -> None:
         """Called before sending a request to the model."""
         # We might record the prompt here, but SDS trajectory usually records
         # user messages separately.
         pass
 
-    def after_model_callback(
-        self, *, callback_context: Any, llm_response: Any
-    ) -> None:
+    def after_model_callback(self, *, callback_context: Any, llm_response: Any) -> None:
         """Called after receiving a response from the model."""
         # Extract text from response. Response structure depends on ADK.
         # Assuming response has a text or content attribute.

@@ -5,10 +5,11 @@ from app_operator.adk.runner import AdkAgentRunner
 from app_operator.trajectory import NullTrajectoryRecorder
 
 
-def test_runner_returns_text():
+def test_run_async_basic():
     recorder = NullTrajectoryRecorder()
     runner_wrapper = AdkAgentRunner("app", recorder, Path("."))
 
+    # Agent is expected to be fully constructed (e.g. by build_adk_agent)
     agent = MagicMock()
 
     with patch("app_operator.adk.runner.Runner") as MockRunner:
