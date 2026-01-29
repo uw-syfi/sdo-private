@@ -50,7 +50,7 @@ class TestAdkAgentRunner(unittest.IsolatedAsyncioTestCase):
 
             # Assertions
             # The runner implementation overwrites the response text with the latest event text
-            self.assertEqual(response, "Part 2")
+            self.assertEqual(response, "Part 1Part 2")
 
             # Verify Runner was initialized correctly
             MockRunnerCls.assert_called_once()

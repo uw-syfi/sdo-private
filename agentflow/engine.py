@@ -281,7 +281,7 @@ class AgentflowEngine:
 
             if response.status == "clarify":
                 self.io.info(f"{Colors.BOLD}{Colors.YELLOW}Agent needs clarification:{Colors.ENDC}")
-                answers = self.io.ask_questions(response.questions)
+                answers = await self.io.ask_questions(response.questions)
                 # Store Q&A
                 for q, a in zip(response.questions, answers):
                     qa_pairs.append((q, a))

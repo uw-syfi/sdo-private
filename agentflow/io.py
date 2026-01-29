@@ -24,11 +24,11 @@ class UserIO(Protocol):
         """Read the initial user prompt."""
         ...
 
-    def ask_questions(self, questions: List[str]) -> List[str]:
+    async def ask_questions(self, questions: List[str]) -> List[str]:
         """Ask clarifying questions and return answers."""
         ...
 
-    def prompt_int(self, label: str) -> int:
+    async def prompt_int(self, label: str) -> int:
         """Prompt for an integer value."""
         ...
 
@@ -52,7 +52,7 @@ class ConsoleIO:
         except (KeyboardInterrupt, EOFError):
             return ""
 
-    def ask_questions(self, questions: List[str]) -> List[str]:
+    async def ask_questions(self, questions: List[str]) -> List[str]:
         answers = []
         for i, q in enumerate(questions, 1):
             click.echo(f"\n{Colors.BOLD}{Colors.YELLOW}Question {i}:{Colors.ENDC} {q}")
@@ -65,7 +65,7 @@ class ConsoleIO:
             answers.append(answer)
         return answers
 
-    def prompt_int(self, label: str) -> int:
+    async def prompt_int(self, label: str) -> int:
         while True:
             try:
                 click.echo(f"{Colors.BOLD}{label}: {Colors.ENDC}", nl=False)
