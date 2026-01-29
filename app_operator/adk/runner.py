@@ -13,7 +13,10 @@ from google.genai import types
 
 class AdkAgentRunner:
     def __init__(
-        self, app_name: str, recorder: TrajectoryRecorderProtocol, repo_path: Path
+        self,
+        app_name: str,
+        repo_path: Path,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
     ):
         self.app_name = app_name
         self.recorder = recorder
@@ -28,12 +31,16 @@ class AdkAgentRunner:
     ) -> str:
         """Run the agent asynchronously once with the given prompt and return the assistant response."""
 
+        plugins = []
+        if self.recorder:
+            plugins.append(AdkTrajectoryPlugin(self.recorder))
+
         # Create runner with trajectory plugin
         runner = Runner(
             agent=agent,
             app_name=self.app_name,
             session_service=self.session_service,
-            plugins=[AdkTrajectoryPlugin(self.recorder)],
+            plugins=plugins,
         )
 
         session_id = str(uuid.uuid4())

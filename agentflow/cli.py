@@ -6,7 +6,6 @@ from agentflow.engine import AgentflowEngine
 from agentflow.io import ConsoleIO
 from app_operator.adk.models import build_adk_model
 from app_operator.adk.runner import AdkAgentRunner
-from app_operator.trajectory import init_trajectory
 from app_operator.config import load_config
 from app_operator.logger import logger
 from agentflow.prompts import get_loader
@@ -51,15 +50,10 @@ def main() -> int:
         logger.error(f"Failed to load config: {e}")
         return 1
 
-    # Setup Trajectory Recorder
-    recorder = init_trajectory(repo_root)
-    recorder.set_agent_name("Agentflow")
-
     try:
         model = build_adk_model(config)
         runner = AdkAgentRunner(
             app_name="sds-agentflow",
-            recorder=recorder,
             repo_path=repo_root,
         )
     except Exception as e:
