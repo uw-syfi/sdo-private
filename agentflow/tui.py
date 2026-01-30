@@ -6,11 +6,10 @@ from typing import List, Callable, Union
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, RichLog, Label
 from textual import work
-from textual.binding import Binding
 from rich.text import Text
 from rich.panel import Panel
 
-from agentflow.io import UserIO, Colors
+from agentflow.io import UserIO
 
 class TextualIO:
     """UserIO implementation for Textual TUI."""

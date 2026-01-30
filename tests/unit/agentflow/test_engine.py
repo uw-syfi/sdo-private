@@ -1,7 +1,6 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 from agentflow.engine import AgentflowEngine
 from agentflow.io import UserIO
@@ -19,11 +18,11 @@ class MockIO(UserIO):
     def read_prompt(self) -> str:
         return "test prompt"
 
-    def ask_questions(self, questions):
+    async def ask_questions(self, questions):
         self.questions_asked.extend(questions)
         return self.answers.pop(0) if self.answers else ["mock answer"] * len(questions)
 
-    def prompt_int(self, label: str) -> int:
+    async def prompt_int(self, label: str) -> int:
         return 10
 
     def info(self, message: str) -> None:
@@ -31,6 +30,24 @@ class MockIO(UserIO):
 
     def print_stream(self, text: str) -> None:
         self.stream_output += text
+
+    def render_thinking_chunk(self, text: str) -> None:
+        self.stream_output += text
+
+    def render_tool_start(self, name: str, inputs: str) -> None:
+        self.info_messages.append(f"[Tool Use] {name}")
+
+    def render_tool_end(self, name: str, output: str, status: str) -> None:
+        self.info_messages.append(f"[Tool Result] {name}: {status}")
+
+    def render_error(self, message: str) -> None:
+        self.info_messages.append(f"Error: {message}")
+
+    def render_success(self, message: str) -> None:
+        self.info_messages.append(f"Success: {message}")
+
+    def render_info(self, message: str) -> None:
+        self.info_messages.append(f"Info: {message}")
 
 
 @pytest.fixture
@@ -53,7 +70,6 @@ def engine(tmp_path, mock_config, mock_io):
         config=mock_config,
         prompt_loader=loader,
         io=mock_io,
-        loop_bound=5,
         max_clarifications=2,
         agent_timeout=1,
         output_dir=tmp_path,
@@ -74,13 +90,17 @@ def test_engine_happy_path(engine, tmp_path):
                 ```json
                 {
                     "status": "ready",
-                    "python_script": "import sys\nfrom agentflow.runtime import *\nif __name__ == '__main__':\n    MAX_ITERATIONS = 5\n    pass"
+                    "python_script": "import sys\\nfrom agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
                 }
                 ```
                 ''')}
             }
 
+        async def mock_ainvoke(*args, **kwargs):
+            return {"messages": [MagicMock(content="fallback")]}
+
         mock_agent.astream_events = mock_astream_events
+        mock_agent.ainvoke = mock_ainvoke
         mock_create_agent.return_value = mock_agent
 
         result = asyncio.run(engine.run_async("do something"))
@@ -118,7 +138,11 @@ def test_engine_clarification_loop(engine, mock_io):
                 "data": {"chunk": MagicMock(content=response)}
             }
 
+        async def mock_ainvoke(*args, **kwargs):
+            return {"messages": [MagicMock(content="fallback")]}
+
         mock_agent.astream_events = mock_astream_events
+        mock_agent.ainvoke = mock_ainvoke
         mock_create_agent.return_value = mock_agent
 
         # Prepare IO with answer
@@ -159,7 +183,11 @@ def test_engine_validation_failure_and_repair(engine):
                     "data": {"chunk": MagicMock(content="Should not be here")}
                 }
 
+        repair_called = False
+
         async def mock_ainvoke(*args, **kwargs):
+            nonlocal repair_called
+            repair_called = True
             # This is the repair call
             return {
                 "messages": [
@@ -167,7 +195,6 @@ def test_engine_validation_failure_and_repair(engine):
                         content='''{"status": "ready", "python_script": "import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}''')
                 ]
             }
-
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke
         mock_create_agent.return_value = mock_agent
@@ -175,7 +202,7 @@ def test_engine_validation_failure_and_repair(engine):
         asyncio.run(engine.run_async("task"))
 
         # Verify repair was attempted (ainvoke called)
-        assert mock_agent.ainvoke.called
+        assert repair_called
 
 
 def test_engine_script_validation_error(engine):
@@ -195,7 +222,11 @@ def test_engine_script_validation_error(engine):
                 ''')}
             }
 
+        async def mock_ainvoke(*args, **kwargs):
+            return {"messages": [MagicMock(content="fallback")]}
+
         mock_agent.astream_events = mock_astream_events
+        mock_agent.ainvoke = mock_ainvoke
         mock_create_agent.return_value = mock_agent
 
         with pytest.raises(ValueError, match="Script validation failed"):

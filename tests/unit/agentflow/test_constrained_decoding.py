@@ -57,7 +57,6 @@ def test_submit_response_tool_usage(tmp_path, mock_config):
                     config=mock_config,
                     prompt_loader=mock_loader,
                     io=mock_io,
-                    loop_bound=10,
                     max_clarifications=1,
                     agent_timeout=10,
                     output_dir=tmp_path,

@@ -31,7 +31,7 @@ def test_cli_no_run(tmp_path):
         # Mock sys.executable for subprocess.run call
         with patch("sys.executable", "python3"):
             # Test with --no-run
-            with patch.object(sys, 'argv', ["agentflow", "--prompt", "test", "--no-run"]):
+            with patch.object(sys, 'argv', ["agentflow", "--prompt", "test", "--no-run", "--no-tui"]):
                 exit_code = main()
 
             assert exit_code == 0
@@ -42,7 +42,7 @@ def test_cli_no_run(tmp_path):
             mock_subprocess_run.reset_mock()
 
             # Test WITHOUT --no-run
-            with patch.object(sys, 'argv', ["agentflow", "--prompt", "test"]):
+            with patch.object(sys, 'argv', ["agentflow", "--prompt", "test", "--no-tui"]):
                 exit_code = main()
 
             assert exit_code == 0
