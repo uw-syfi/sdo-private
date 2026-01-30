@@ -8,6 +8,12 @@ This repository contains applications, tools, and infrastructure code for the SD
 
 ## Project Structure
 
+SDS consists of multiple AI-powered tools for autonomous infrastructure management and orchestration:
+
+- **Agentflow**: An autonomous script generation tool that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. Features an interactive TUI, clarification loops, and built-in orchestration patterns (fan_out, summarize, judge_loop).
+
+- **Application Operator**: An intelligent deployment and monitoring tool that autonomously deploys applications, self-corrects deployment errors, and performs continuous health monitoring using AI agents. Supports three runtime implementations (CLI Agent, LangGraph, ADK) and multiple AI providers.
+
 ```
 sds/
 ├── agentflow/            # Autonomous script generation module
