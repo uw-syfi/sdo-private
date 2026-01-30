@@ -60,8 +60,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# UV
-uv.lock
 sds.toml
 
 .codex
