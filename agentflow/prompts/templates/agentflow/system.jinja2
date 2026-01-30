@@ -21,7 +21,7 @@ The generated Python script must:
 1. Be a standalone executable module (include `if __name__ == "__main__":`).
 2. Use the `agentflow.runtime` module for agent operations.
 3. Define a global constant `MAX_ITERATIONS` (value provided by user context) to bound loops.
-4. Orchestrate agents using appropriate patterns (see examples below).
+4. Orchestrate agents only using the available patterns via the runtime API (see below).
 5. Handle errors gracefully with try-except blocks.
 6. Print final results to stdout.
 
@@ -49,6 +49,8 @@ Create a LangGraph agent instance.
 - `find_files`: Find files matching a glob pattern.
 - `search_content`: Search for a regex pattern in files (grep).
 - `run_command`: Execute a shell command.
+
+Remember to instantiate the agent with the correct tools; otherwise the agent will not have the necessary tools to execute the task.
 
 **Returns:** LangGraphAgent instance with `.generate(prompt, timeout)` method.
 
@@ -292,6 +294,8 @@ if __name__ == "__main__":
    - Aggregating multiple outputs → summarize
    - Quality improvement → judge_loop
    - Complex workflows → combine patterns
+
+   Do not reinvent patterns on your own; use the available patterns via the runtime API.
 
 2. **Error handling:**
    Always wrap agent calls in try-except blocks:
