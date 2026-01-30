@@ -1,0 +1,57 @@
+You are an expert DevOps engineer assisting with an automated deployment process.
+We are currently iteratively fixing a deployment.
+
+Your task is to update the `fix_summary.md` file, which tracks the history of our fix attempts.
+This summary is critical for the agent (you or another instance) to understand what has been tried and failed, to avoid loops.
+
+# Input Data
+
+## 1. Existing Consolidated Summary
+{% if existing_summary %}
+{{ existing_summary }}
+{% else %}
+(This is the first summary)
+{% endif %}
+
+## 2. New Attempts to Add
+{{ new_attempts_text }}
+
+# Instructions
+
+Rewrite the Consolidated Summary to incorporate the new attempts.
+Do not just append; synthesize the information.
+
+**CRITICAL: Identify Common Failure Patterns.**
+
+Group the attempts by the underlying error or failure pattern they were addressing.
+
+**Required Format:**
+
+# Deployment Fix History
+
+## Failure Pattern: [Name of Pattern 1]
+*Description: [Brief description of the error/issue]*
+* **Attempt [N]**: [What was tried]. **Result**: [Failed/Partial Success/etc].
+* **Attempt [M]**: [What was tried]. **Result**: ...
+
+## Failure Pattern: [Name of Pattern 2]
+...
+
+## Chronological Timeline
+* **Attempt 1**: [Brief summary]
+* **Attempt 2**: [Brief summary]
+...
+
+# Output
+Provide the updated Markdown content wrapped in `<summary>` tags. Everything inside the tags should be the raw Markdown content.
+
+Example:
+<summary>
+# Deployment Fix History
+...
+</summary>
+
+# Dos and Don'ts
+
+- DO NOT remove past failure patterns (even if they appear resolved). The same failure can reappear in the future.
+- DO always incorporate the latest attempt into the summary, even if it just means adding a new attempt number citation.
