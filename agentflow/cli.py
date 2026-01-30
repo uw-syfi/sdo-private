@@ -23,6 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-clarifications", type=int, default=5, help="Max clarification rounds"
     )
     parser.add_argument(
+        "--loop-bound", type=int, help="Execution loop bound for generated script"
+    )
+    parser.add_argument(
         "--output-dir", default="agentflow_runs", help="Output directory"
     )
     parser.add_argument(
@@ -62,6 +65,9 @@ def main() -> int:
     work_dir = Path(args.work_dir).resolve()
     prompt_loader = get_loader()
 
+    # Get loop bound
+    loop_bound = args.loop_bound if args.loop_bound is not None else 10
+
     if not args.no_tui:
         try:
             from agentflow.tui import AgentflowTUI
@@ -71,6 +77,7 @@ def main() -> int:
                     config=config,
                     prompt_loader=prompt_loader,
                     io=io,
+                    loop_bound=loop_bound,
                     max_clarifications=args.max_clarifications,
                     agent_timeout=config.operator.agent_timeout,
                     output_dir=output_dir,
@@ -104,6 +111,7 @@ def main() -> int:
         config=config,
         prompt_loader=prompt_loader,
         io=io,
+        loop_bound=loop_bound,
         max_clarifications=args.max_clarifications,
         agent_timeout=config.operator.agent_timeout,
         output_dir=output_dir,

@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from agentflow.engine import AgentflowEngine
 from agentflow.io import UserIO
@@ -70,6 +70,7 @@ def engine(tmp_path, mock_config, mock_io):
         config=mock_config,
         prompt_loader=loader,
         io=mock_io,
+        loop_bound=5,
         max_clarifications=2,
         agent_timeout=1,
         output_dir=tmp_path,
@@ -86,18 +87,18 @@ def test_engine_happy_path(engine, tmp_path):
         async def mock_astream_events(*args, **kwargs):
             yield {
                 "event": "on_chat_model_stream",
-                "data": {"chunk": MagicMock(content='''\
-                ```json
-                {
-                    "status": "ready",
-                    "python_script": "import sys\\nfrom agentflow.runtime import *\\nif __name__ == '__main__':\\n    MAX_ITERATIONS = 5\\n    pass"
-                }
-                ```
-                ''')}
+                "data": {"chunk": MagicMock(content=r'''
+```json
+{
+    "status": "ready",
+    "python_script": "import sys\nfrom agentflow.runtime import *\nif __name__ == '__main__':\n    MAX_ITERATIONS = 5\n    pass"
+}
+```
+''')}
             }
 
         async def mock_ainvoke(*args, **kwargs):
-            return {"messages": [MagicMock(content="fallback")]}
+            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
 
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke
@@ -123,8 +124,13 @@ def test_engine_clarification_loop(engine, mock_io):
 
         # We need an iterator for the responses
         responses = [
-            "{\"status\": \"clarify\", \"questions\": [\"Q1\"]}",
-            "\n            {\n                \"status\": \"ready\",\n                \"python_script\": \"import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass\"\n            }\n            "
+            r'{"status": "clarify", "questions": ["Q1"]}',
+            r'''
+            {
+                "status": "ready",
+                "python_script": "import agentflow.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"
+            }
+            '''
         ]
 
         call_count = 0
@@ -139,7 +145,7 @@ def test_engine_clarification_loop(engine, mock_io):
             }
 
         async def mock_ainvoke(*args, **kwargs):
-            return {"messages": [MagicMock(content="fallback")]}
+            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
 
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke
@@ -183,26 +189,23 @@ def test_engine_validation_failure_and_repair(engine):
                     "data": {"chunk": MagicMock(content="Should not be here")}
                 }
 
-        repair_called = False
-
-        async def mock_ainvoke(*args, **kwargs):
-            nonlocal repair_called
-            repair_called = True
+        async def mock_ainvoke_impl(*args, **kwargs):
             # This is the repair call
             return {
                 "messages": [
                     MagicMock(
-                        content='''{"status": "ready", "python_script": "import agentflow.runtime\\nMAX_ITERATIONS = 5\\nif __name__ == '__main__': pass"}''')
+                        content=r'''{"status": "ready", "python_script": "import agentflow.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"}''')
                 ]
             }
+
         mock_agent.astream_events = mock_astream_events
-        mock_agent.ainvoke = mock_ainvoke
+        mock_agent.ainvoke = AsyncMock(side_effect=mock_ainvoke_impl)
         mock_create_agent.return_value = mock_agent
 
         asyncio.run(engine.run_async("task"))
 
         # Verify repair was attempted (ainvoke called)
-        assert repair_called
+        assert mock_agent.ainvoke.called
 
 
 def test_engine_script_validation_error(engine):
@@ -223,7 +226,7 @@ def test_engine_script_validation_error(engine):
             }
 
         async def mock_ainvoke(*args, **kwargs):
-            return {"messages": [MagicMock(content="fallback")]}
+            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
 
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke

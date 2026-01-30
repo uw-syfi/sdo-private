@@ -34,6 +34,7 @@ class AgentflowEngine:
         config: Config,
         prompt_loader: PromptLoader,
         io: UserIO,
+        loop_bound: int,
         max_clarifications: int,
         agent_timeout: int,
         output_dir: Path,
@@ -42,6 +43,7 @@ class AgentflowEngine:
         self.config = config
         self.prompt_loader = prompt_loader
         self.io = io
+        self.loop_bound = loop_bound
         self.max_clarifications = max_clarifications
         self.agent_timeout = agent_timeout
         self.storage = AgentflowStorage(output_dir)
@@ -116,6 +118,7 @@ class AgentflowEngine:
                 "agentflow/user.jinja2",
                 user_prompt=user_prompt,
                 qa_pairs=qa_pairs,
+                loop_bound=self.loop_bound,
             )
 
             # Create agent graph
@@ -298,8 +301,8 @@ class AgentflowEngine:
         """Validate the generated script content."""
         errors = []
 
-        if "MAX_ITERATIONS =" not in script_text:
-            errors.append("Script must define `MAX_ITERATIONS` constant")
+        if f"MAX_ITERATIONS = {self.loop_bound}" not in script_text:
+            errors.append(f"Script must define `MAX_ITERATIONS = {self.loop_bound}`")
 
         if (
             "libs.agent_cli" not in script_text
