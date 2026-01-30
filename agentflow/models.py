@@ -62,7 +62,7 @@ def extract_json(text: str) -> str:
     # Try to find ```json ... ``` or just ``` ... ```
     pattern = r"```(?:json)?\s*(.*?)\s*```"
     match = re.search(pattern, text, re.DOTALL)
-    
+
     if match:
         candidate = match.group(1)
         try:

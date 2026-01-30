@@ -8,13 +8,26 @@ This repository contains applications, tools, and infrastructure code for the SD
 
 ## Project Structure
 
+SDS consists of multiple AI-powered tools for autonomous infrastructure management and orchestration:
+
+- **Agentflow**: An autonomous script generation tool that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. Features an interactive TUI, clarification loops, and built-in orchestration patterns (fan_out, summarize, judge_loop).
+
+- **Application Operator**: An intelligent deployment and monitoring tool that autonomously deploys applications, self-corrects deployment errors, and performs continuous health monitoring using AI agents. Supports three runtime implementations (CLI Agent, LangGraph, ADK) and multiple AI providers.
+
 ```
 sds/
+├── agentflow/            # Autonomous script generation module
+│   ├── cli.py            # CLI and TUI mode selection
+│   ├── engine.py         # Core clarification loop engine
+│   ├── runtime.py        # LangGraph agent runtime with orchestration patterns
+│   ├── tui.py            # Textual-based interactive TUI
+│   └── prompts/          # Jinja2 prompt templates
 ├── app_operator/         # Core operator logic
 │   ├── cli_agent/        # CLI-based agent implementation
 │   │   ├── agents/       # Specialized agents (deployer, monitor, code_analyzer)
 │   │   └── backend/      # Coding agent CLI backends (claude, gemini, codex, opencode)
 │   ├── langgraph/        # LangGraph-based implementation
+│   ├── adk/              # Google ADK-based implementation
 │   ├── commands/         # CLI commands (run, init_exp, viz_graph)
 │   └── prompts/          # Jinja2 prompt templates
 ├── apps/                 # Application code and configurations
@@ -27,9 +40,9 @@ sds/
 
 The Application Operator (`app_operator`) is a tool for deploying and monitoring applications with automated health checks and graceful lifecycle management. It also includes AI-powered script generation to automatically create deployment and health check scripts for any application repository.
 
-SDS provides three implementations of this high-level approach:
-- **CLI Agent Runtime (`cli_agent`)**: Communicates with external coding agents via their CLI interfaces for autonomous tasks.
-- **LangGraph Runtime (`langgraph`)**: Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes.
+SDS provides three runtime implementations of the Application Operator:
+- **CLI Agent Runtime (`cli_agent`)**: Default implementation that communicates with external coding agents via their CLI interfaces (supports all providers).
+- **LangGraph Runtime (`langgraph`)**: Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes using LangChain.
 - **ADK Runtime (`adk`)**: Uses Google's Agent Development Kit with Gemini models for deterministic orchestration of agent tasks.
 
 ### Key Features
@@ -93,12 +106,13 @@ Then edit `sds.toml` to configure your settings:
 ```toml
 [agent]
 provider = "codex"  # or "gemini", "claude", "opencode", "openai", "anthropic"
-model = "gpt-4o-mini" # required for langgraph runtime
+model = "gpt-4o-mini" # required for langgraph and adk runtimes
+# location = "us-central1" # optional: specify vertex AI location (default: us-central1)
 
 [operator]
 interval = 30 # Health check interval in seconds (default: 30)
 monitoring_max_iters = 5 # Maximum number of health monitoring iterations (default: 5)
-deployment_max_iters = 5 # Maximum deployment attempts (default: 5)
+deployment_max_iters = 20 # Maximum deployment attempts (default: 20)
 
 [deployment]
 platform = "docker" # Deployment platform: "docker" or "k8s" (default: "docker")
@@ -108,19 +122,27 @@ target = "local"    # Deployment target: "local" or "remote" (default: "local")
 impl = "cli_agent" # "cli_agent", "langgraph", or "adk"
 ```
 
-**LangGraph runtime requirements**
+**Runtime Requirements**
+
+**LangGraph runtime:**
 - Set `[runtime] impl = "langgraph"` to use the LangGraph implementation.
 - When using LangGraph, you must set both `agent.provider` and `agent.model`.
 - Provider mapping in LangGraph:
   - `codex`/`opencode`/`openai` → OpenAI
   - `claude`/`claude-code`/`anthropic` → Anthropic
-  - `gemini` → Gemini
+  - `gemini` → Gemini (via LangChain)
 
-**ADK runtime requirements**
-- Set `[runtime] impl = "adk"` to use the ADK implementation.
+**ADK runtime:**
+- Set `[runtime] impl = "adk"` to use Google's Agent Development Kit implementation.
 - Must set `agent.model` (e.g., "gemini-2.0-flash").
 - Only supports `gemini` or `vertex` providers.
 - Requires `google-adk` package.
+- Provides deterministic orchestration of agent tasks.
+
+**CLI Agent runtime (default):**
+- Set `[runtime] impl = "cli_agent"` to use the CLI-based implementation.
+- Communicates with external coding agents via their CLI interfaces.
+- Supports all providers: `codex`, `gemini`, `claude`, `claude-code`, `opencode`.
 
 ### Experiment Workflow
 
@@ -219,20 +241,43 @@ The Agentflow module allows you to autonomously generate orchestrated Python scr
 
 **Usage:**
 
-Run the agentflow module using `uv` or directly with python:
+Run the agentflow module using `uv` or directly with python. The module launches an interactive TUI (Terminal UI) by default:
+
+```bash
+uv run -m agentflow
+```
+
+Or provide a prompt directly:
 
 ```bash
 uv run -m agentflow --prompt "Scrape hacker news and summarize top 3 AI stories" --loop-bound 10
 ```
 
+For traditional CLI mode without the TUI:
+
+```bash
+uv run -m agentflow --no-tui --prompt "Your task description"
+```
+
 **Options:**
 
-- `--prompt`: Initial user prompt (reads from stdin if omitted).
-- `--loop-bound`: Maximum iterations for loops in the generated script.
+- `--prompt`: Initial user prompt (interactive if omitted in TUI mode, reads from stdin in CLI mode).
+- `--loop-bound`: Maximum iterations for loops in the generated script (default: 10).
 - `--max-clarifications`: Maximum rounds of clarification questions (default: 5).
-- `--config`: Path to `sds.toml` (optional).
+- `--config`: Path to `sds.toml` (optional, auto-detects repo root).
 - `--model`: Override the agent model defined in configuration.
 - `--output-dir`: Directory to save generated scripts (default: `agentflow_runs`).
+- `--work-dir`: Directory to execute the generated script in (default: current directory).
+- `--no-run`: Generate script but do not execute it.
+- `--no-tui`: Run in standard CLI mode instead of interactive TUI mode.
+
+**Features:**
+
+- **Interactive TUI Mode**: Rich terminal interface with real-time output streaming, thinking process visualization, and tool execution display.
+- **Automatic Repo Detection**: Automatically finds the project root by searching for `.git` or `sds.toml`.
+- **Clarification Loop**: Iteratively refines requirements through AI-powered questions before generating the final script.
+- **Script Validation**: Validates generated Python scripts for syntax and required components.
+- **Environment Setup**: Automatically configures `PYTHONPATH` and work directory for script execution.
 
 **Output:**
 

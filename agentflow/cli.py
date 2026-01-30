@@ -1,5 +1,8 @@
 import argparse
 import asyncio
+import sys
+import os
+import subprocess
 from pathlib import Path
 
 from agentflow.engine import AgentflowEngine
@@ -31,6 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-run", action="store_true", help="Generate script but do not execute it"
     )
+    parser.add_argument(
+        "--no-tui", action="store_true", help="Run in standard CLI mode instead of TUI"
+    )
     return parser
 
 
@@ -55,6 +61,42 @@ def main() -> int:
         logger.error(f"Failed to load config: {e}")
         return 1
 
+    output_dir = repo_root / args.output_dir
+    work_dir = Path(args.work_dir).resolve()
+    prompt_loader = get_loader()
+
+    # Get loop bound
+    loop_bound = args.loop_bound if args.loop_bound is not None else 10
+
+    if not args.no_tui:
+        try:
+            from agentflow.tui import AgentflowTUI
+
+            def engine_factory(io):
+                return AgentflowEngine(
+                    config=config,
+                    prompt_loader=prompt_loader,
+                    io=io,
+                    loop_bound=loop_bound,
+                    max_clarifications=args.max_clarifications,
+                    agent_timeout=config.operator.agent_timeout,
+                    output_dir=output_dir,
+                    work_dir=work_dir,
+                )
+
+            app = AgentflowTUI(
+                engine_factory,
+                initial_prompt=args.prompt,
+                work_dir=str(work_dir),
+                repo_root=str(repo_root))
+            app.run()
+            return 0
+        except Exception as e:
+            logger.error(f"TUI failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
+
     io = ConsoleIO()
 
     # Get prompt
@@ -65,15 +107,9 @@ def main() -> int:
             logger.error("No prompt provided.")
             return 1
 
-    # Get loop bound
-    loop_bound = args.loop_bound if args.loop_bound is not None else 10
-
-    output_dir = repo_root / args.output_dir
-    work_dir = Path(args.work_dir).resolve()
-
     engine = AgentflowEngine(
         config=config,
-        prompt_loader=get_loader(),
+        prompt_loader=prompt_loader,
         io=io,
         loop_bound=loop_bound,
         max_clarifications=args.max_clarifications,
@@ -90,10 +126,6 @@ def main() -> int:
             return 0
 
         # Execute the generated script
-        import subprocess
-        import sys
-        import os
-
         if not work_dir.exists():
             work_dir.mkdir(parents=True, exist_ok=True)
 

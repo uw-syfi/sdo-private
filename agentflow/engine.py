@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
-from agentflow.io import UserIO, Colors
+from agentflow.io import UserIO
 from agentflow.models import AgentflowResult, parse_agentflow_response, AgentflowResponse
 from agentflow.storage import AgentflowStorage
 from agentflow.prompts import PromptLoader
@@ -57,7 +57,8 @@ class AgentflowEngine:
         t.name = name  # Ensure name is set correctly if needed
         return t
 
-    def _submit_response(self, status: str, questions: List[str] = None, python_script: str = None) -> str:
+    def _submit_response(
+            self, status: str, questions: List[str] = None, python_script: str = None) -> str:
         """
         Submit the final response to the user.
 
@@ -91,7 +92,7 @@ class AgentflowEngine:
         # Setup tools
         filesystem = RealFilesystem()
         context = ToolContext(repo_root=self.work_dir, filesystem=filesystem)
-        
+
         # Build specific tools used by Agentflow (read-only mostly)
         tools = [
             self._wrap_tool(_build_read_file(context), "read_file"),
@@ -121,59 +122,59 @@ class AgentflowEngine:
             )
 
             # Create agent graph
-            # We recreate it each time to reset state or we could persist it, 
+            # We recreate it each time to reset state or we could persist it,
             # but since we are changing the prompt (QA pairs), it's easier to treat each round as a fresh generation
             # with full context in the prompt.
             agent = create_react_agent(llm, tools, prompt=system_prompt)
 
             self.io.info(f"Thinking... (Round {round_idx + 1})")
-            
+
             messages = [HumanMessage(content=user_msg_text)]
             final_content = ""
             final_response_data = None
-            
+
             # Run with streaming
             try:
                 # Use astream_events to capture thoughts and tool calls
                 accumulated_text = []
                 async for event in agent.astream_events(
-                    {"messages": messages}, 
+                    {"messages": messages},
                     version="v1",
                     config={"recursion_limit": 50}
                 ):
                     kind = event["event"]
-                    
+
                     if kind == "on_chat_model_stream":
                         content = event["data"]["chunk"].content
                         text_chunk = self._parse_chunk_content(content)
-                        
+
                         if text_chunk:
                             if not self._thinking_started:
-                                self.io.info(f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}")
+                                self.io.render_thinking_chunk("\nThinking: ")
                                 self._thinking_started = True
-                            self.io.print_stream(f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}")
+                            self.io.render_thinking_chunk(text_chunk)
                             accumulated_text.append(text_chunk)
-                    
+
                     elif kind == "on_tool_start":
                         name = event["name"]
                         inputs = event["data"].get("input")
                         if name == "submit_response":
                             final_response_data = inputs
                         if self._thinking_started:
-                             self.io.info("") # Newline
-                             self._thinking_started = False
-                        self.io.info(f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}")
+                            self.io.info("")  # Newline
+                            self._thinking_started = False
+                        self.io.render_tool_start(name, str(inputs))
 
                     elif kind == "on_tool_end":
                         name = event["name"]
                         output = event["data"].get("output")
-                        
-                        symbol = ""
+
+                        status = "unknown"  # Default
                         result_text = ""
-                        
+
                         # Handle ToolMessage or simple output
                         content = getattr(output, "content", output)
-                        
+
                         try:
                             if isinstance(content, str):
                                 # Try parsing as JSON first
@@ -186,21 +187,12 @@ class AgentflowEngine:
                                         content_dict = None
 
                                 if isinstance(content_dict, dict):
-                                    status = content_dict.get("status")
-                                    if status == "success":
-                                        symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                                    elif status == "error":
-                                        symbol = f"{Colors.RED}✗{Colors.ENDC} "
-                                    
+                                    status = content_dict.get("status", "unknown")
                                     result_text = str(content_dict.get("output", ""))
                                 else:
                                     result_text = content
                             elif isinstance(content, dict):
-                                status = content.get("status")
-                                if status == "success":
-                                    symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                                elif status == "error":
-                                    symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                                status = content.get("status", "unknown")
                                 result_text = str(content.get("output", ""))
                             else:
                                 result_text = str(content)
@@ -209,12 +201,13 @@ class AgentflowEngine:
 
                         if len(result_text) > 500:
                             result_text = result_text[:500] + "\n... (truncated)"
-                        self.io.info(f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}")
+
+                        self.io.render_tool_end(name, result_text, status)
+
                 final_content = "".join(accumulated_text)
                 if self._thinking_started:
-                     self.io.print_stream(Colors.ENDC)
-                     self.io.info("")
-                     self._thinking_started = False
+                    self.io.info("")
+                    self._thinking_started = False
 
                 if not final_content:
                     # Fallback if streaming failed to capture or model didn't stream
@@ -237,7 +230,6 @@ class AgentflowEngine:
                 logger.error(f"Error during agent execution: {e}")
                 raise AgentError(f"Agent execution failed: {e}")
 
-
             try:
                 response = None
                 if final_response_data:
@@ -249,21 +241,21 @@ class AgentflowEngine:
                         )
                         response.validate()
                     except Exception as e:
-                        self.io.info(f"{Colors.RED}Response validation failed: {e}{Colors.ENDC}")
+                        self.io.render_error(f"Response validation failed: {e}")
 
                 if not response:
                     response = parse_agentflow_response(final_content)
             except ValueError as e:
                 # Attempt repair
-                self.io.info(f"{Colors.RED}Parsing failed, attempting repair...{Colors.ENDC}")
+                self.io.render_error(f"Parsing failed, attempting repair... {e}")
                 repair_msg_text = self.prompt_loader.render(
                     "agentflow/repair.jinja2", error=str(e), raw_response=final_content
                 )
-                
+
                 # Append repair message to history (simulated by extending messages)
                 messages.append(AIMessage(content=final_content))
                 messages.append(HumanMessage(content=repair_msg_text))
-                
+
                 result = await agent.ainvoke({"messages": messages})
                 last_msg_content = result["messages"][-1].content
                 if isinstance(last_msg_content, list):
@@ -275,13 +267,13 @@ class AgentflowEngine:
                             final_content += part
                 else:
                     final_content = str(last_msg_content)
-                
+
                 self.io.info("")
                 response = parse_agentflow_response(final_content)
 
             if response.status == "clarify":
-                self.io.info(f"{Colors.BOLD}{Colors.YELLOW}Agent needs clarification:{Colors.ENDC}")
-                answers = self.io.ask_questions(response.questions)
+                self.io.render_info("Agent needs clarification:")
+                answers = await self.io.ask_questions(response.questions)
                 # Store Q&A
                 for q, a in zip(response.questions, answers):
                     qa_pairs.append((q, a))
