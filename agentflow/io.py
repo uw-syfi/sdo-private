@@ -60,7 +60,7 @@ class UserIO(Protocol):
     def render_success(self, message: str) -> None:
         """Render a success message."""
         ...
-    
+
     def render_info(self, message: str) -> None:
         """Render a general info message."""
         ...
@@ -120,8 +120,13 @@ class ConsoleIO:
             symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
         elif status == "error":
             symbol = f"{Colors.RED}✗{Colors.ENDC} "
-        
-        click.echo(f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n{Colors.LIGHT_GRAY}{output}{Colors.ENDC}")
+
+        click.echo(
+            f"\n{
+                Colors.BLUE}[Tool Result] {name}: {symbol}{
+                Colors.ENDC}\n{
+                Colors.LIGHT_GRAY}{output}{
+                    Colors.ENDC}")
 
     def render_error(self, message: str) -> None:
         click.echo(f"{Colors.RED}{message}{Colors.ENDC}")

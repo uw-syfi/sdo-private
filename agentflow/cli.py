@@ -61,11 +61,11 @@ def main() -> int:
     output_dir = repo_root / args.output_dir
     work_dir = Path(args.work_dir).resolve()
     prompt_loader = get_loader()
-    
+
     if not args.no_tui:
         try:
             from agentflow.tui import AgentflowTUI
-            
+
             def engine_factory(io):
                 return AgentflowEngine(
                     config=config,
@@ -76,8 +76,12 @@ def main() -> int:
                     output_dir=output_dir,
                     work_dir=work_dir,
                 )
-            
-            app = AgentflowTUI(engine_factory, initial_prompt=args.prompt, work_dir=str(work_dir), repo_root=str(repo_root))
+
+            app = AgentflowTUI(
+                engine_factory,
+                initial_prompt=args.prompt,
+                work_dir=str(work_dir),
+                repo_root=str(repo_root))
             app.run()
             return 0
         except Exception as e:

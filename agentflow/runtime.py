@@ -32,7 +32,7 @@ class LangGraphAgent:
         self.tools = self._wrap_tools(tools)
         self.instruction = instruction
         self.agent_name = agent_name
-        
+
         # Create the graph
         self.graph = create_react_agent(
             model=self.llm,
@@ -91,12 +91,12 @@ class LangGraphAgent:
         async def run_stream():
             thinking_started = False
             async for event in self.graph.astream_events(
-                {"messages": messages}, 
+                {"messages": messages},
                 version="v1",
                 config=config
             ):
                 kind = event["event"]
-                
+
                 if kind == "on_chat_model_stream":
                     content = event["data"]["chunk"].content
                     text_chunk = ""
@@ -111,32 +111,32 @@ class LangGraphAgent:
                                     text_chunk += part.get("thinking", "")
                             elif isinstance(part, str):
                                 text_chunk += part
-                    
+
                     if text_chunk:
                         if not thinking_started:
                             print(f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}", flush=True)
                             thinking_started = True
                         print(f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}", end="", flush=True)
                         accumulated_text.append(text_chunk)
-                
+
                 elif kind == "on_tool_start":
                     name = event["name"]
                     inputs = event["data"].get("input")
                     if thinking_started:
-                         print("", flush=True)
-                         thinking_started = False
+                        print("", flush=True)
+                        thinking_started = False
                     print(f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}", flush=True)
 
                 elif kind == "on_tool_end":
                     name = event["name"]
                     output = event["data"].get("output")
-                    
+
                     symbol = ""
                     result_text = ""
-                    
+
                     # Handle ToolMessage or simple output
                     content = getattr(output, "content", output)
-                    
+
                     try:
                         if isinstance(content, str):
                             # Try parsing as JSON first
@@ -154,37 +154,43 @@ class LangGraphAgent:
                                     symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
                                 elif status == "error":
                                     symbol = f"{Colors.RED}✗{Colors.ENDC} "
-                                
+
                                 result_text = str(content_dict.get("output", ""))
                             else:
                                 result_text = content
                         elif isinstance(content, dict):
-                             status = content.get("status")
-                             if status == "success":
-                                 symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                             elif status == "error":
-                                 symbol = f"{Colors.RED}✗{Colors.ENDC} "
-                             result_text = str(content.get("output", ""))
+                            status = content.get("status")
+                            if status == "success":
+                                symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
+                            elif status == "error":
+                                symbol = f"{Colors.RED}✗{Colors.ENDC} "
+                            result_text = str(content.get("output", ""))
                         else:
-                             result_text = str(content)
+                            result_text = str(content)
                     except Exception:
                         result_text = str(content)
 
                     if len(result_text) > 500:
                         result_text = result_text[:500] + "\n... (truncated)"
-                    print(f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}", flush=True)
+                    print(
+                        f"\n{
+                            Colors.BLUE}[Tool Result] {name}: {symbol}{
+                            Colors.ENDC}\n{
+                            Colors.LIGHT_GRAY}{result_text}{
+                            Colors.ENDC}",
+                        flush=True)
 
             if thinking_started:
                 print("", flush=True)
 
         try:
             await asyncio.wait_for(run_stream(), timeout=timeout)
-            
+
             final_content = "".join(accumulated_text)
             if not final_content:
-                 return ""
+                return ""
             return final_content
-            
+
         except asyncio.TimeoutError:
             return f"Error: Agent execution timed out after {timeout} seconds."
         except Exception as e:
@@ -240,13 +246,16 @@ def create_agent(
     if tools:
         selected_tools = []
         available_tools_map = {t.__name__: t for t in all_tools}
-        
+
         for tool_name in tools:
             if tool_name in available_tools_map:
                 selected_tools.append(available_tools_map[tool_name])
             else:
-                logger.warning(f"Tool '{tool_name}' not found. Available: {list(available_tools_map.keys())}")
-        
+                logger.warning(
+                    f"Tool '{tool_name}' not found. Available: {
+                        list(
+                            available_tools_map.keys())}")
+
         agent_tools = selected_tools
     else:
         agent_tools = all_tools
@@ -263,7 +272,7 @@ def fan_out(
     agent: LangGraphAgent, prompts: List[str], max_workers: int = 4, timeout: int = 300
 ) -> List[str]:
     """Execute multiple prompts in parallel using the same agent type."""
-    
+
     async def _generate_with_semaphore(semaphore, prompt):
         async with semaphore:
             return await agent._generate_async(prompt, timeout)
@@ -281,7 +290,7 @@ def fan_out(
 
     if loop and loop.is_running():
         # This is tricky if fan_out is called from a thread that doesn't have its own loop
-        # but the main thread does. 
+        # but the main thread does.
         # But usually generated scripts are sync.
         return asyncio.run(_run_all())
     else:
@@ -330,7 +339,7 @@ def judge_loop(
             "- Perform the task yourself\n"
             "- Provide implementation details (that's the worker's job)\n"
             "- Mark as 'done' prematurely without verification\n\n"
-            'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}\n' 
+            'Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}\n'
             "If 'continue', provide clear feedback on what still needs to be done.\n"
             "If 'done', confirm what was accomplished."
         )
@@ -342,7 +351,7 @@ def judge_loop(
             start = judge_resp.find("{")
             end = judge_resp.rfind("}")
             if start != -1 and end != -1:
-                json_str = judge_resp[start : end + 1]
+                json_str = judge_resp[start: end + 1]
                 feedback_data = json.loads(json_str)
             else:
                 # Fallback if no JSON found

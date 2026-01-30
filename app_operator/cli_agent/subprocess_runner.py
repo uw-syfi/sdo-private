@@ -98,8 +98,8 @@ class SubprocessRunner:
             result = self._wait_for_completion()
 
             # Wait for threads to finish reading
-            stdout_thread.join(timeout=1)
-            stderr_thread.join(timeout=1)
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
 
             return result
 
@@ -152,9 +152,40 @@ class SubprocessRunner:
         """
         start_time = self.time_func()
 
-        while self.process.poll() is None:
+        # Handle timeout=0 as a special case that fails immediately
+        if self.timeout == 0:
+            self._ensure_process_terminated()
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "".join(self.stdout_lines),
+                "stderr": "Deployment script timed out after 0 seconds\n"
+                + "".join(self.stderr_lines),
+            }
+
+        while True:
             current_time = self.time_func()
             elapsed = current_time - start_time
+
+            # Check timeout
+            if elapsed >= self.timeout:
+                if self.process.poll() is None:
+                    self.process.terminate()
+                    try:
+                        self.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                    return {
+                        "success": False,
+                        "exit_code": -1,
+                        "stdout": "".join(self.stdout_lines),
+                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
+                        + "".join(self.stderr_lines),
+                    }
+
+            # Check if process completed
+            if self.process.poll() is not None:
+                break
 
             # Check shutdown
             if self.check_shutdown and self.check_shutdown():
@@ -171,23 +202,8 @@ class SubprocessRunner:
                     + "".join(self.stderr_lines),
                 }
 
-            # Check timeout
-            if elapsed > self.timeout:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                return {
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
-                    + "".join(self.stderr_lines),
-                }
-
             # Yield to allow other processing
-            self.sleep_func(0.5)
+            self.sleep_func(0.1)
 
         # Process completed
         stdout_data = "".join(self.stdout_lines)
@@ -282,8 +298,8 @@ class SubprocessRunner:
             result = self._wait_with_progress(summarizer)
 
             # Wait for threads to finish reading
-            stdout_thread.join(timeout=1)
-            stderr_thread.join(timeout=1)
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
 
             return result
 
@@ -319,9 +335,40 @@ class SubprocessRunner:
         # Initialize summarizer with the same start time to avoid extra time_func call
         summarizer.start(start_time=start_time)
 
-        while self.process.poll() is None:
+        # Handle timeout=0 as a special case that fails immediately
+        if self.timeout == 0:
+            self._ensure_process_terminated()
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "".join(self.stdout_lines),
+                "stderr": "Deployment script timed out after 0 seconds\n"
+                + "".join(self.stderr_lines),
+            }
+
+        while True:
             current_time = self.time_func()
             elapsed = current_time - start_time
+
+            # Check timeout
+            if elapsed >= self.timeout:
+                if self.process.poll() is None:
+                    self.process.terminate()
+                    try:
+                        self.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                    return {
+                        "success": False,
+                        "exit_code": -1,
+                        "stdout": "".join(self.stdout_lines),
+                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
+                        + "".join(self.stderr_lines),
+                    }
+
+            # Check if process completed
+            if self.process.poll() is not None:
+                break
 
             # Check shutdown
             if self.check_shutdown and self.check_shutdown():
@@ -338,28 +385,13 @@ class SubprocessRunner:
                     + "".join(self.stderr_lines),
                 }
 
-            # Check timeout
-            if elapsed > self.timeout:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                return {
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
-                    + "".join(self.stderr_lines),
-                }
-
             # Check for progress summary
             if summarizer.should_summarize():
                 recent_output = self.get_recent_output(num_lines=20)
                 summarizer.summarize(recent_output)
 
             # Yield to allow other processing
-            self.sleep_func(0.5)
+            self.sleep_func(0.1)
 
         # Process completed
         stdout_data = "".join(self.stdout_lines)

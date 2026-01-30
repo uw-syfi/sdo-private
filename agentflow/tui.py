@@ -2,7 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import List, Callable, Union
+from typing import List, Callable, Union, TYPE_CHECKING
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, RichLog, Label
 from textual import work
@@ -11,9 +11,13 @@ from rich.panel import Panel
 
 from agentflow.io import UserIO
 
+if TYPE_CHECKING:
+    from agentflow.engine import AgentflowEngine
+
+
 class TextualIO:
     """UserIO implementation for Textual TUI."""
-    
+
     def __init__(self, app: "AgentflowTUI"):
         self.app = app
         self._thinking_buffer = ""
@@ -69,7 +73,7 @@ class TextualIO:
                 if line:
                     self.app.write_log(Text(line, style="italic dim"))
                 else:
-                    self.app.write_log("") 
+                    self.app.write_log("")
             # Keep the last partial line
             self._thinking_buffer = lines[-1]
 
@@ -87,7 +91,7 @@ class TextualIO:
         elif status == "error":
             symbol = "✗"
             style = "red"
-        
+
         panel = Panel(
             output,
             title=f"{name} [{style}]{symbol}[/]",
@@ -115,12 +119,13 @@ class AgentflowTUI(App):
         height: 1fr;
     }
     """
-    
+
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"], initial_prompt: str = None, work_dir: str = ".", repo_root: str = None, **kwargs):
+    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"],
+                 initial_prompt: str = None, work_dir: str = ".", repo_root: str = None, **kwargs):
         super().__init__(**kwargs)
         self.theme = "flexoki"
         self.engine_factory = engine_factory
@@ -140,9 +145,9 @@ class AgentflowTUI(App):
     async def on_mount(self) -> None:
         self.log_widget = self.query_one(RichLog)
         self.input_widget = self.query_one(Input)
-        
+
         self.write_log(Text.from_markup("[bold blue]Welcome to Agentflow TUI![/]"))
-        
+
         if self.initial_prompt:
             self.write_log(Text.from_markup(f"[cyan]> {self.initial_prompt}[/]"))
             self.processing = True
@@ -160,7 +165,7 @@ class AgentflowTUI(App):
     async def on_input_submitted(self, message: Input.Submitted) -> None:
         value = message.value
         self.input_widget.value = ""
-        
+
         if not self.processing:
             # First input is the prompt
             self.write_log(Text.from_markup(f"[cyan]> {value}[/]"))
@@ -175,16 +180,19 @@ class AgentflowTUI(App):
     async def run_agentflow(self, user_prompt: str):
         io = TextualIO(self)
         engine = self.engine_factory(io)
-        
+
         try:
             result = await engine.run_async(user_prompt)
-            self.write_log(Text.from_markup(f"\n[green]Success! Script written to: {result.script_path}[/]"))
-            
+            self.write_log(
+                Text.from_markup(
+                    f"\n[green]Success! Script written to: {
+                        result.script_path}[/]"))
+
             # Execute the generated script
             self.write_log(Text.from_markup("\n[bold blue]Executing generated script...[/]"))
-            
+
             env = os.environ.copy()
-            
+
             # Determine repo root if not provided
             repo_root_path = self.repo_root
             if not repo_root_path:
@@ -195,15 +203,16 @@ class AgentflowTUI(App):
                         break
                 if not repo_root_path:
                     repo_root_path = str(current)
-            
+
             env["PYTHONPATH"] = f"{repo_root_path}:{env.get('PYTHONPATH', '')}"
-            
+
             # Ensure work_dir exists
             work_dir_path = Path(self.work_dir)
             if not work_dir_path.exists():
                 work_dir_path.mkdir(parents=True, exist_ok=True)
 
-            self.write_log(Text.from_markup("[bold blue]┌── Script Execution Output ──────────────────────────────────────────[/]"))
+            self.write_log(Text.from_markup(
+                "[bold blue]┌── Script Execution Output ──────────────────────────────────────────[/]"))
 
             process = await asyncio.create_subprocess_exec(
                 sys.executable, str(result.script_path),
@@ -220,30 +229,39 @@ class AgentflowTUI(App):
                         break
                     try:
                         decoded_line = line.decode().rstrip()
-                        self.write_log(Text.from_markup(f"[bold blue]│[/] [{color_tag}]{decoded_line}[/]"))
+                        self.write_log(
+                            Text.from_markup(
+                                f"[bold blue]│[/] [{color_tag}]{decoded_line}[/]"))
                     except Exception:
-                         # Fallback for decoding errors
-                         self.write_log(Text.from_markup(f"[bold blue]│[/] [{color_tag}]{str(line)}[/]"))
+                        # Fallback for decoding errors
+                        self.write_log(Text.from_markup(
+                            f"[bold blue]│[/] [{color_tag}]{str(line)}[/]"))
 
             await asyncio.gather(
                 read_stream(process.stdout, "white"),
                 read_stream(process.stderr, "red")
             )
-            
-            return_code = await process.wait()
-            self.write_log(Text.from_markup("[bold blue]└─────────────────────────────────────────────────────────────────────[/]"))
-            
-            if return_code == 0:
-                self.write_log(Text.from_markup(f"\n[bold green]Execution finished successfully (Exit Code: {return_code})[/]"))
-            else:
-                self.write_log(Text.from_markup(f"\n[bold red]Execution failed (Exit Code: {return_code})[/]"))
 
-            self.write_log("\nExecution finished. You can exit with Ctrl+C or enter a new prompt to restart.")
+            return_code = await process.wait()
+            self.write_log(Text.from_markup(
+                "[bold blue]└─────────────────────────────────────────────────────────────────────[/]"))
+
+            if return_code == 0:
+                self.write_log(
+                    Text.from_markup(
+                        f"\n[bold green]Execution finished successfully (Exit Code: {return_code})[/]"))
+            else:
+                self.write_log(
+                    Text.from_markup(
+                        f"\n[bold red]Execution failed (Exit Code: {return_code})[/]"))
+
+            self.write_log(
+                "\nExecution finished. You can exit with Ctrl+C or enter a new prompt to restart.")
             self.processing = False
-            
+
         except Exception as e:
             self.write_log(Text.from_markup(f"\n[red]Error: {e}[/]"))
             import traceback
             traceback.print_exc()
         finally:
-             pass
+            pass
