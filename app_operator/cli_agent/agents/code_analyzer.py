@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -25,6 +26,7 @@ class CodeAnalyzerAgent:
         coding_agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        ui: Optional[OperatorUI] = None,
     ):
         """Initialize the code analyzer agent.
 
@@ -33,11 +35,13 @@ class CodeAnalyzerAgent:
             coding_agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
+            ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.ui = ui or NullOperatorUI()
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"
         self.issues_file = self.sds_dir / "deployment_issues.md"

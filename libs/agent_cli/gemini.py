@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
+from .events import AgentEventHandler
 from app_operator.trajectory import (
     get_current_call_id,
     get_run_id,
@@ -94,12 +95,16 @@ class GeminiGenerationSession(CLIGenerationSession):
         if isinstance(event, MessageEvent):
             if event.role == "assistant":
                 self.stdout_lines.append(event.content)
+                if self.event_handler:
+                    self.event_handler.on_thinking(event.content)
 
         elif isinstance(event, ToolUseEvent):
             if event.tool_id:
                 self.tool_map[event.tool_id] = event.tool_name
                 self.tool_start_times[event.tool_id] = time.time()
                 self.tool_args[event.tool_id] = event.parameters
+                if self.event_handler:
+                    self.event_handler.on_tool_call(event.tool_name, event.parameters)
 
         elif isinstance(event, ToolResultEvent):
             if event.tool_id:
@@ -116,6 +121,13 @@ class GeminiGenerationSession(CLIGenerationSession):
                     stdout=event.output,
                     duration=duration,
                 )
+
+                if self.event_handler:
+                    self.event_handler.on_tool_result(
+                        tool=event.tool_name_resolved,
+                        stdout=event.output,
+                        duration=duration,
+                    )
 
     def _render_event(self, event: GeminiEvent):
         """Render the event to stdout."""
@@ -167,14 +179,16 @@ class GeminiCodingAgent(CLICodingAgent):
         self,
         model: Optional[str] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        event_handler: Optional[AgentEventHandler] = None,
     ):
         """Initialize the Gemini coding agent.
 
         Args:
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
+            event_handler: Optional event handler for UI updates.
         """
-        super().__init__("gemini", model, recorder)
+        super().__init__("gemini", model, recorder, event_handler)
 
     @property
     def gemini_path(self) -> str:
@@ -218,4 +232,5 @@ class GeminiCodingAgent(CLICodingAgent):
             timeout=timeout,
             silent=silent,
             recorder=recorder,
+            event_handler=self.event_handler,
         )

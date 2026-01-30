@@ -34,7 +34,7 @@ def test_run_executes_health_check_task(monitor, stub_agent, monkeypatch):
 
     calls = {"count": 0}
 
-    def mock_run_health_check(repo, script, timeout=120):
+    def mock_run_health_check(repo, script, timeout=120, ui=None):
         calls["count"] += 1
         return mock_result
 
@@ -62,7 +62,7 @@ def test_run_respects_max_checks(monitor, monkeypatch):
 
     calls = {"count": 0}
 
-    def mock_run_health_check(repo, script, timeout=120):
+    def mock_run_health_check(repo, script, timeout=120, ui=None):
         calls["count"] += 1
         return mock_result
 

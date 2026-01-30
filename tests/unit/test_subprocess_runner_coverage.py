@@ -168,7 +168,10 @@ def test_wait_for_completion_terminate_fails_then_kill(runner_setup):
     runner.popen_func = MagicMock(return_value=mock_proc)
 
     # Force timeout
-    runner.time_func = MagicMock(side_effect=[0, timeout + 10])
+    # 1. run() start_time_mono
+    # 2. _wait_for_completion() start_time
+    # 3. loop check current_time
+    runner.time_func = MagicMock(side_effect=[0, 0, timeout + 10])
     runner.sleep_func = MagicMock()
 
     result = runner.run()

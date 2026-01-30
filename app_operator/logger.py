@@ -1,5 +1,9 @@
 import sys
+from typing import TYPE_CHECKING
 from loguru import logger
+
+if TYPE_CHECKING:
+    from app_operator.ui.base import OperatorUI
 
 
 def formatter(record):
@@ -19,6 +23,20 @@ def setup_logger():
         format=formatter,
         level="INFO",
     )
+
+
+def attach_ui_sink(ui: "OperatorUI", replace: bool = False) -> None:
+    """Attach the logger to the UI sink."""
+    if replace:
+        logger.remove()
+
+    def sink(message):
+        record = message.record
+        text = record["message"]
+        level = record["level"].name.lower()
+        ui.log(text, level)
+
+    logger.add(sink, format="{message}", level="INFO")
 
 
 # Initialize logger immediately
