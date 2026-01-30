@@ -8,11 +8,26 @@ SDS is an AI-native project designed to autonomously explore, validate, and evol
 
 ```
 sds/
+├── agentflow/            # Autonomous script generation module
+│   ├── __main__.py       # Entry point for `python -m agentflow`
+│   ├── cli.py            # CLI argument parsing and mode selection
+│   ├── engine.py         # Core clarification loop and orchestration engine
+│   ├── io.py             # I/O abstractions (ConsoleIO, TextualIO)
+│   ├── models.py         # Data models (AgentflowResponse, AgentflowResult)
+│   ├── runtime.py        # LangGraph agent runtime and orchestration patterns
+│   ├── storage.py        # Script storage management
+│   ├── tui.py            # Textual-based interactive TUI implementation
+│   └── prompts/          # Jinja2 prompt templates
+│       └── templates/agentflow/
+│           ├── system.jinja2   # System prompt with orchestration docs
+│           ├── user.jinja2     # User request template
+│           └── repair.jinja2   # Error correction template
 ├── app_operator/         # Core operator logic
 │   ├── cli_agent/        # CLI-based agent implementation
 │   │   ├── agents/       # Specialized agents (deployer, monitor, code_analyzer)
 │   │   └── backend/      # Coding agent CLI backends (claude, gemini, codex, opencode)
 │   ├── langgraph/        # LangGraph-based implementation
+│   ├── adk/              # Google ADK-based implementation
 │   ├── commands/         # CLI commands (run, init_exp, viz_graph)
 │   ├── prompts/          # Jinja2 prompt templates
 │   ├── config.py         # Configuration dataclasses
@@ -54,25 +69,27 @@ The **Application Operator** is a Python tool that autonomously deploys, monitor
 
 You can specify which AI provider to use for script generation and fixing by adding an `sds.toml` file to the target repository.
 
-The operator supports two different runtime implementations for the same high-level autonomous deployment and monitoring logic:
+The operator supports three different runtime implementations for the same high-level autonomous deployment and monitoring logic:
 
-*   **CLI Agent (`cli_agent`):** The default implementation. It interacts with the system by calling out to specialized coding agents (like Gemini, Claude, or Codex) through their CLI interfaces.
-*   **LangGraph (`langgraph`):** A modular and stateful implementation built using LangGraph. It models the deployment and monitoring process as a graph of specialized nodes and edges.
+*   **CLI Agent (`cli_agent`):** The default implementation. It interacts with the system by calling out to specialized coding agents (like Gemini, Claude, or Codex) through their CLI interfaces. Supports all providers.
+*   **LangGraph (`langgraph`):** A modular and stateful implementation built using LangGraph and LangChain. It models the deployment and monitoring process as a graph of specialized nodes and edges.
+*   **ADK (`adk`):** Uses Google's Agent Development Kit with Gemini models for deterministic orchestration of agent tasks. Only supports Gemini/Vertex providers.
 
 Example `sds.toml` configuration:
 
 ```toml
-[runtime]
-impl = "cli_agent" # or "langgraph"
-
 [agent]
-provider = "gemini"  # Valid: "gemini", "codex", "claude", "claude-code", "opencode"
-model = "gemini-1.5-pro" # optional
+provider = "gemini"  # Valid: "gemini", "codex", "claude", "claude-code", "opencode", "openai", "anthropic"
+model = "gemini-1.5-pro" # required for langgraph and adk runtimes
+# location = "us-central1" # optional: specify vertex AI location (default: us-central1)
+
+[runtime]
+impl = "cli_agent" # or "langgraph", "adk"
 
 [operator]
 interval = 30 # Health check interval in seconds (1-86400, default: 30)
 monitoring_max_iters = 5 # Maximum health monitoring iterations (>0, default: 5)
-deployment_max_iters = 5 # Maximum deployment attempts (>0, default: 5)
+deployment_max_iters = 20 # Maximum deployment attempts (>0, default: 20)
 agent_fix_timeout = 1800 # Agent fix timeout in seconds (>0, default: 1800 / 30 minutes)
 deploy_timeout = 900 # Deployment timeout in seconds (>0, default: 900 / 15 minutes)
 agent_timeout = 300 # Agent generation timeout in seconds (>0, default: 300 / 5 minutes)
@@ -138,9 +155,141 @@ This implementation uses a stateful graph to manage the lifecycle:
 *   **Commands (`app_operator/commands/`):**
     *   CLI command implementations: `run`, `init_exp`, `viz_graph`.
 
-## 2. Applications (`apps/deathstarbench/`)
+## 2. Agentflow Module (`agentflow/`)
 
-**DeathStarBench** is a suite of cloud microservices benchmarks.
+The **Agentflow** module is an autonomous script generation system that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. It features an interactive TUI, clarification loops, and supports advanced orchestration patterns.
+
+### Key Features
+
+*   **Interactive TUI Mode**: Textual-based rich terminal interface with real-time streaming output.
+*   **Clarification Loop**: Iteratively refines requirements through AI-powered questions before generating scripts.
+*   **Orchestration Patterns**: Built-in support for `fan_out`, `summarize`, and `judge_loop` patterns.
+*   **Automatic Repo Detection**: Finds project root by searching upward for `.git` or `sds.toml`.
+*   **Script Validation**: Validates syntax and required components before execution.
+*   **Environment Setup**: Configures `PYTHONPATH` and work directory automatically.
+
+### Architecture
+
+#### Core Components
+
+*   **AgentflowEngine (`engine.py`)**:
+    *   Manages the clarification loop (up to `max_clarifications` rounds).
+    *   Integrates with LangGraph for agent execution.
+    *   Streams thinking chunks, tool calls, and results.
+    *   Validates generated Python scripts before execution.
+    *   Handles response parsing and error repair.
+
+*   **I/O Abstraction (`io.py`)**:
+    *   **UserIO Protocol**: Duck-typed interface for user interaction.
+    *   **ConsoleIO**: ANSI-colored console output for CLI mode.
+    *   **TextualIO**: Rich Textual widgets for TUI mode with async support.
+    *   Both implement: `read_prompt()`, `ask_questions()`, `render_thinking_chunk()`, `render_tool_start/end()`, etc.
+
+*   **AgentflowTUI (`tui.py`)**:
+    *   Textual App implementation with `RichLog` widget.
+    *   Interactive input field for prompts and answers.
+    *   Work directory display in header.
+    *   Async script execution with live stdout/stderr streaming.
+    *   Uses `flexoki` theme for consistent styling.
+
+*   **LangGraphAgent (`runtime.py`)**:
+    *   Wraps LangGraph React agent for orchestration.
+    *   Implements streaming event handlers for thinking and tool use.
+    *   Provides `generate()` sync and `_generate_async()` async methods.
+    *   Supports parallelization through `fan_out()` for multi-task execution.
+
+*   **Orchestration Patterns (`runtime.py`)**:
+    1. **fan_out()**: Execute multiple independent prompts in parallel.
+    2. **summarize()**: Aggregate multiple responses into one.
+    3. **judge_loop()**: Iterative refinement with evaluation.
+    4. **Combined patterns**: Complex workflows combining multiple patterns.
+
+*   **Storage & Models**:
+    *   **AgentflowStorage (`storage.py`)**: Manages script output with timestamped directories.
+    *   **AgentflowResponse/Result (`models.py`)**: Pydantic models for structured data.
+
+*   **Prompt System (`prompts/`)**:
+    *   **system.jinja2**: Comprehensive system instructions (338 lines) with:
+        - Orchestration pattern documentation
+        - Available runtime API (create_agent, fan_out, summarize, judge_loop)
+        - Tool descriptions (read_file, write_file, list_files, find_files, search_content, run_command)
+        - Pattern examples with code blocks
+        - Best practices section
+    *   **user.jinja2**: User request with clarification history and validation checklist.
+    *   **repair.jinja2**: Error correction prompt for JSON parsing failures.
+
+### CLI Usage
+
+**Default TUI Mode:**
+```bash
+uv run -m agentflow
+```
+
+**With Initial Prompt:**
+```bash
+uv run -m agentflow --prompt "Scrape hacker news and summarize top 3 AI stories"
+```
+
+**CLI Mode (No TUI):**
+```bash
+uv run -m agentflow --no-tui --prompt "Your task"
+```
+
+**Available Flags:**
+- `--prompt`: Initial user prompt (interactive if omitted in TUI mode).
+- `--loop-bound`: Maximum iterations for loops (default: 10).
+- `--max-clarifications`: Maximum clarification rounds (default: 5).
+- `--config`: Path to `sds.toml` (optional, auto-detects repo root).
+- `--model`: Override agent model from configuration.
+- `--output-dir`: Output directory (default: `agentflow_runs`).
+- `--work-dir`: Execution directory (default: current directory).
+- `--no-run`: Generate script but don't execute it.
+- `--no-tui`: Use CLI mode instead of TUI.
+
+### Data Flow
+
+```
+User Input (TUI or CLI)
+    ↓
+Config loading (sds.toml)
+    ↓
+AgentflowEngine.run_async()
+    ├─→ Clarification Loop (rounds 0 to max_clarifications):
+    │   ├─→ Render system/user prompts
+    │   ├─→ Stream agent thinking (LangGraph events)
+    │   ├─→ Stream tool executions
+    │   └─→ Parse response (clarify/ready status)
+    │
+    ├─→ If status="clarify": ask_questions() → next round
+    ├─→ If status="ready": validate_script() → write to storage
+    │
+AgentflowStorage.write_script()
+    ↓
+Script Execution (in work_dir)
+    ├─→ Set PYTHONPATH to repo root
+    ├─→ Stream stdout/stderr with visual formatting
+    └─→ Return exit code
+```
+
+### Script Validation
+
+Generated scripts must satisfy:
+1. Define `MAX_ITERATIONS = {loop_bound}` constant.
+2. Import from `agentflow.runtime` or related modules.
+3. Include `if __name__ == "__main__":` block.
+4. Be valid Python with proper syntax.
+
+### Output Structure
+
+Scripts are saved in `agentflow_runs/<timestamp>/agentflow.py` with:
+- Timestamped directory for each run.
+- Standalone execution (no external dependencies except `agentflow.runtime`).
+- `MAX_ITERATIONS` constant for loop bounding.
+- Orchestration tools: `fan_out()`, `summarize()`, `judge_loop()`.
+
+## 3. Applications (`apps/deathstarbench/`)
+
+**DeathStarBench** is a suite of cloud microservices benchmarks used as target applications for the SDS operator.
 
 *   **Hotel Reservation:** A Go-based microservice application for booking hotels.
     *   **Tech Stack:** Go, gRPC, Consul, MongoDB, Memcached, Jaeger.
@@ -164,8 +313,10 @@ This implementation uses a stateful graph to manage the lifecycle:
 
 ## Usage Guide for LLM agents
 
-*   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs.
+*   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs in `.sds/logs/`.
+*   **When debugging agentflow scripts:** Check `agentflow_runs/<timestamp>/agentflow.py` and examine the clarification history.
 *   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
+*   **When adding agentflow features:** Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
 *   **When adding a new feature:** Think of what new behavior(s) are being introduced, and how you would test them. Test public behavior, not internal implementation details.
 *   **When fixing bugs:** Think of how to write test(s) to reproduce the issue first and then use them to verify your fix. The test should be part of your fix. If you cannot do so, you must defend your decision.
 
@@ -200,6 +351,7 @@ Always do the following after you're done with your code edits:
 *   Test organization by component:
     *   `tests/unit/config/`: Configuration validation tests
     *   `tests/unit/agents/`: Agent-specific tests (deployment, monitoring)
+    *   `tests/unit/agentflow/`: Agentflow module tests (engine, runtime, CLI, prompts)
     *   `tests/integration/`: End-to-end scenarios, signal handling, concurrency
 
 #### Running Tests
