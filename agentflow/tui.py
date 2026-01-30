@@ -17,12 +17,19 @@ class TextualIO:
     
     def __init__(self, app: "AgentflowTUI"):
         self.app = app
+        self._thinking_buffer = ""
+
+    def _flush_thinking(self) -> None:
+        if self._thinking_buffer:
+            self.app.write_log(Text(self._thinking_buffer, style="italic dim"))
+            self._thinking_buffer = ""
 
     def read_prompt(self) -> str:
         # Not used by engine in this flow
         return ""
 
     async def ask_questions(self, questions: List[str]) -> List[str]:
+        self._flush_thinking()
         answers = []
         for i, q in enumerate(questions, 1):
             self.app.write_log(Text.from_markup(f"[bold yellow]Question {i}:[/] {q}"))
@@ -32,6 +39,7 @@ class TextualIO:
         return answers
 
     async def prompt_int(self, label: str) -> int:
+        self._flush_thinking()
         while True:
             self.app.write_log(Text.from_markup(f"[bold]{label}: [/]"))
             val = await self.app.input_queue.get()
@@ -44,18 +52,34 @@ class TextualIO:
                 self.app.write_log(Text.from_markup("[red]Invalid number. Please try again.[/]"))
 
     def info(self, message: str) -> None:
+        self._flush_thinking()
         self.app.write_log(message)
 
     def print_stream(self, text: str) -> None:
+        self._flush_thinking()
         self.app.print_stream(text)
 
     def render_thinking_chunk(self, text: str) -> None:
-        self.app.print_stream(text)
+        self._thinking_buffer += text
+        if "\n" in self._thinking_buffer:
+            lines = self._thinking_buffer.split("\n")
+            # Write all complete lines
+            for line in lines[:-1]:
+                # Skip empty lines if they are just separators, but keep them if they are meaningful?
+                # RichLog writes a new line for each call.
+                if line:
+                    self.app.write_log(Text(line, style="italic dim"))
+                else:
+                    self.app.write_log("") 
+            # Keep the last partial line
+            self._thinking_buffer = lines[-1]
 
     def render_tool_start(self, name: str, inputs: str) -> None:
+        self._flush_thinking()
         self.app.write_log(Text.from_markup(f"\n[bold blue][Tool Use] {name}({inputs})[/]"))
 
     def render_tool_end(self, name: str, output: str, status: str) -> None:
+        self._flush_thinking()
         symbol = ""
         style = "blue"
         if status == "success":
@@ -74,12 +98,15 @@ class TextualIO:
         self.app.write_log(panel)
 
     def render_error(self, message: str) -> None:
+        self._flush_thinking()
         self.app.write_log(Text.from_markup(f"[bold red]{message}[/]"))
 
     def render_success(self, message: str) -> None:
+        self._flush_thinking()
         self.app.write_log(Text.from_markup(f"[bold green]{message}[/]"))
 
     def render_info(self, message: str) -> None:
+        self._flush_thinking()
         self.app.write_log(message)
 
 
@@ -177,6 +204,8 @@ class AgentflowTUI(App):
             if not work_dir_path.exists():
                 work_dir_path.mkdir(parents=True, exist_ok=True)
 
+            self.write_log(Text.from_markup("[bold blue]┌── Script Execution Output ──────────────────────────────────────────[/]"))
+
             process = await asyncio.create_subprocess_exec(
                 sys.executable, str(result.script_path),
                 stdout=asyncio.subprocess.PIPE,
@@ -192,10 +221,10 @@ class AgentflowTUI(App):
                         break
                     try:
                         decoded_line = line.decode().rstrip()
-                        self.write_log(Text.from_markup(f"[{color_tag}]{decoded_line}[/]"))
+                        self.write_log(Text.from_markup(f"[bold blue]│[/] [{color_tag}]{decoded_line}[/]"))
                     except Exception:
                          # Fallback for decoding errors
-                         self.write_log(Text.from_markup(f"[{color_tag}]{str(line)}[/]"))
+                         self.write_log(Text.from_markup(f"[bold blue]│[/] [{color_tag}]{str(line)}[/]"))
 
             await asyncio.gather(
                 read_stream(process.stdout, "white"),
@@ -203,6 +232,7 @@ class AgentflowTUI(App):
             )
             
             return_code = await process.wait()
+            self.write_log(Text.from_markup("[bold blue]└─────────────────────────────────────────────────────────────────────[/]"))
             
             if return_code == 0:
                 self.write_log(Text.from_markup(f"\n[bold green]Execution finished successfully (Exit Code: {return_code})[/]"))

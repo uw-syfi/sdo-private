@@ -149,7 +149,7 @@ class AgentflowEngine:
                         
                         if text_chunk:
                             if not self._thinking_started:
-                                self.io.render_thinking_chunk("\n[Thinking]")
+                                self.io.render_thinking_chunk("\nThinking: ")
                                 self._thinking_started = True
                             self.io.render_thinking_chunk(text_chunk)
                             accumulated_text.append(text_chunk)
