@@ -186,7 +186,8 @@ class AgentflowTUI(App):
             self.write_log(
                 Text.from_markup(
                     f"\n[green]Success! Script written to: {
-                        result.script_path}[/]"))
+                        result.script_path}"
+                    "[/]"))
 
             # Execute the generated script
             self.write_log(Text.from_markup("\n[bold blue]Executing generated script...[/]"))
