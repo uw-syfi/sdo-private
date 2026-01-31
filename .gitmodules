@@ -7,3 +7,6 @@
 [submodule "apps/onlineboutique"]
 	path = apps/onlineboutique
 	url = git@github.com:vic-lsh/microservices-demo.git
+[submodule "apps/fleetcast"]
+	path = apps/fleetcast
+	url = git@github.com:lilygn/FleetCast.git
