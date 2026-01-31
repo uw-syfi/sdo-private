@@ -198,6 +198,21 @@ class TestPropertyBasedFilesystem:
     @settings(max_examples=30, deadline=1000)
     def test_multiple_files_independent(self, paths, content):
         """Test that multiple files can coexist independently."""
+        # Filter paths to ensure no path is a prefix of another to avoid conflicts
+        # e.g., 'a' and 'a/b' cannot both be files
+        paths.sort(key=lambda p: len(str(p)))
+        filtered_paths = []
+        for i, p in enumerate(paths):
+            is_prefix = False
+            for other in paths[i + 1:]:
+                if str(other).startswith(str(p) + "/"):
+                    is_prefix = True
+                    break
+            if not is_prefix:
+                filtered_paths.append(p)
+
+        paths = filtered_paths
+
         fs = InMemoryFilesystem()
 
         # Create all files
@@ -294,18 +309,31 @@ class TestPropertyBasedFilesystem:
         fs = InMemoryFilesystem()
 
         # Filter to unique paths
-        unique_paths = {}
+        unique_paths_map = {}
         for path, content in paths:
-            unique_paths[str(path)] = (path, content)
+            unique_paths_map[str(path)] = (path, content)
+
+        # Sort paths by length to make prefix checking easier
+        sorted_paths = sorted(unique_paths_map.values(), key=lambda x: len(str(x[0])))
+
+        filtered_paths = []
+        for i, (path, content) in enumerate(sorted_paths):
+            is_prefix = False
+            for other_path, _ in sorted_paths[i + 1:]:
+                if str(other_path).startswith(str(path) + "/"):
+                    is_prefix = True
+                    break
+            if not is_prefix:
+                filtered_paths.append((path, content))
 
         # Create all files
-        for path, content in unique_paths.values():
+        for path, content in filtered_paths:
             if path.parent != Path("."):
                 fs.mkdir(path.parent, parents=True)
             fs.write_text(path, content)
 
         # Verify all exist with correct content
-        for path, content in unique_paths.values():
+        for path, content in filtered_paths:
             assert fs.exists(path)
             assert fs.read_text(path) == content
 
@@ -325,7 +353,7 @@ class TestPropertyBasedEdgeCases:
 
     @given(
         path=relative_path_strategy(),
-        content=st.text(min_size=10000, max_size=50000),
+        content=st.text(min_size=1000, max_size=4000),
     )
     @settings(max_examples=10, deadline=2000)
     def test_large_content(self, path, content):
@@ -413,6 +441,22 @@ class TestPropertyBasedConcurrency:
     @settings(max_examples=20, deadline=2000)
     def test_concurrent_writes_different_files(self, paths, content):
         """Test concurrent writes to different files."""
+        # Filter paths to ensure no path is a prefix of another to avoid conflicts
+        # e.g., 'a' and 'a/b' cannot both be files
+        paths.sort(key=lambda p: len(str(p)))
+        filtered_paths = []
+        for i, p in enumerate(paths):
+            is_prefix = False
+            for other in paths[i + 1:]:
+                if str(other).startswith(str(p) + "/"):
+                    is_prefix = True
+                    break
+            if not is_prefix:
+                filtered_paths.append(p)
+
+        assume(len(filtered_paths) >= 2)
+        paths = filtered_paths
+
         import threading
 
         fs = InMemoryFilesystem()

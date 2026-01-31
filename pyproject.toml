@@ -23,6 +23,8 @@ test = [
     "pytest>=8.0.0",
     "autopep8>=2.0.0",
     "ruff>=0.1.0",
+    "hypothesis>=6.0.0",
+    "pytest-xdist>=3.5.0",
 ]
 
 [project.scripts]
@@ -37,7 +39,7 @@ packages = ["app_operator", "agentflow", "libs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["apps", ".venv", "venv", "build", "dist"]
+norecursedirs = ["apps", ".venv", "venv", "build", "dist", ".hypothesis"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
