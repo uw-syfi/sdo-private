@@ -57,7 +57,14 @@ SDS provides three runtime implementations of the Application Operator:
 
 #### Installation
 
-From the project root:
+Clone the repository with submodules recursively to include all target applications in `apps/` (see `apps/README.md` for a comprehensive list):
+
+```bash
+git clone --recursive git@gitlab.cs.washington.edu:syslab/sds.git
+cd sds
+```
+
+Install dependencies:
 
 ```bash
 uv sync
