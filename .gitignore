@@ -69,3 +69,4 @@ opencode.json
 agent_graph.png
 agentflow_runs/
 .sds
+exp_config/
