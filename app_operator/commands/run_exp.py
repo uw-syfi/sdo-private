@@ -6,7 +6,6 @@ import threading
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List
 
 try:
     import tomllib
@@ -92,7 +91,7 @@ def run_experiment_task(
 
     # We write logs to the file
     with open(log_file, "w") as f_log:
-        f_log.write(f"=== Initializing Experiment ===\n")
+        f_log.write("=== Initializing Experiment ===\n")
         f_log.write(f"App: {app_path}\n")
         f_log.write(f"Exp: {exp_name}\n")
         f_log.write(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -113,7 +112,7 @@ def run_experiment_task(
 
         progress.update(task_id, description=f"[cyan]{app_name}[/]: Starting Run", completed=10)
 
-        f_log.write(f"\n=== Running Experiment ===\n")
+        f_log.write("\n=== Running Experiment ===\n")
         f_log.flush()
 
         # 2. Run Experiment
@@ -183,7 +182,7 @@ def run_experiment_task(
             tail_thread.join()
 
         # Save trajectory and session logs
-        f_log.write(f"\n=== Collecting Artifacts ===\n")
+        f_log.write("\n=== Collecting Artifacts ===\n")
 
         # Trajectories
         sds_traj_dir = exp_dir / ".sds" / "trajectories"
@@ -287,7 +286,7 @@ def run_command(args: argparse.Namespace) -> int:
             for future in as_completed(futures):
                 app = futures[future]
                 try:
-                    success = future.result()
+                    future.result()
                 except Exception as e:
                     logger.error(f"Error running {app}: {e}")
 
