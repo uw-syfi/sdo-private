@@ -13,3 +13,6 @@
 [submodule "apps/pitstop"]
 	path = apps/pitstop
 	url = git@github.com:EdwinVW/pitstop.git
+[submodule "apps/teastore-saga"]
+	path = apps/teastore-saga
+	url = git@github.com:t2-project/t2-project.git
