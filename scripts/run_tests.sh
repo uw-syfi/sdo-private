@@ -10,6 +10,21 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 echo "Running tests..."
 cd "$PROJECT_ROOT"
 
-# Run pytest via uv
-# Using --extra test to ensure pytest is available
-uv run --extra test pytest tests
+PYTEST_ARGS=()
+COVERAGE=false
+
+for arg in "$@"; do
+    if [ "$arg" == "--cov" ]; then
+        COVERAGE=true
+    else
+        PYTEST_ARGS+=("$arg")
+    fi
+done
+
+if [ "$COVERAGE" = true ]; then
+    # Run with coverage for main packages
+    uv run --extra test pytest "${PYTEST_ARGS[@]}" --cov=app_operator --cov=agentflow --cov-report=term-missing tests
+else
+    # Run standard pytest
+    uv run --extra test pytest "${PYTEST_ARGS[@]}" tests
+fi
