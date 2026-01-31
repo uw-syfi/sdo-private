@@ -7,7 +7,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.prompts import get_loader
+from app_operator.prompts import get_loader, reset_loader
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
 from app_operator.langgraph.models import get_model_context_limit
@@ -41,7 +41,9 @@ def build_graph(
     fix_agent = create_react_agent(llm, tools=tools)
     monitor_agent = create_react_agent(llm, tools=tools)
 
-    loader = get_loader()
+    # Reset and initialize loader with DSPy config
+    reset_loader()
+    loader = get_loader(config.dspy)
 
     # Determine model context limit
     model_name = config.agent.model or "gpt-4o"

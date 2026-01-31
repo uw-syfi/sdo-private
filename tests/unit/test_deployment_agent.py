@@ -51,6 +51,7 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
         deployment_config=None,
         operator_config=None,
         recorder=None,
+        dspy_config=None,
     ):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
@@ -91,6 +92,7 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
         deployment_config=None,
         operator_config=None,
         recorder=None,
+        dspy_config=None,
     ):
         return False, "boom"
 
@@ -325,6 +327,7 @@ def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monke
         error_context,
         deploy_script_path,
         health_check_script_path,
+        dspy_config=None,
     ):
         return f"prompt::{error_context}::{attempt}/{max_attempts}"
 

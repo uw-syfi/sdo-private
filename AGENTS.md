@@ -93,6 +93,32 @@ deployment_max_iters = 20 # Maximum deployment attempts (>0, default: 20)
 agent_fix_timeout = 1800 # Agent fix timeout in seconds (>0, default: 1800 / 30 minutes)
 deploy_timeout = 900 # Deployment timeout in seconds (>0, default: 900 / 15 minutes)
 agent_timeout = 300 # Agent generation timeout in seconds (>0, default: 300 / 5 minutes)
+
+# DSPy Prompt Optimization (optional)
+[dspy]
+use_optimized = false           # Use DSPy-optimized prompts (default: false)
+optimized_version = "latest"    # Version to use (e.g., "v1", "latest")
+fallback_to_baseline = true     # Fall back to Jinja2 on errors (default: true)
+enable_online_learning = false  # Enable feedback collection (default: false)
+feedback_sample_rate = 0.1      # Fraction of runs to collect feedback (0.0-1.0, default: 0.1)
+canary_deployment = false       # Enable canary rollout (default: false)
+canary_percentage = 0.0         # Percentage for canary (0.0-1.0, default: 0.0)
+
+[dspy.optimization]
+optimizer = "BootstrapFewShot"  # DSPy optimizer: BootstrapFewShot, BootstrapFewShotWithRandomSearch, MIPROv2, COPRO
+teacher_model = "claude-sonnet-4-5"  # Teacher model for optimization
+num_examples = 30               # Number of training examples (positive integer)
+validation_split = 0.2          # Validation data fraction (0.0-1.0)
+
+[dspy.optimization.metric_weights]
+success = 0.6      # Weight for deployment success (must sum to 1.0)
+efficiency = 0.25  # Weight for iteration efficiency
+tokens = 0.15      # Weight for token efficiency
+
+[dspy.auto_rollback]
+enabled = true                  # Enable automatic rollback on degradation
+success_rate_threshold = 0.05   # Rollback if success rate drops by this fraction (0.0-1.0)
+evaluation_window = 100         # Number of recent runs to evaluate (positive integer)
 ```
 
 **Note**: Invalid configuration values will raise `ValueError` or `TypeError` with clear error messages at initialization.
@@ -153,7 +179,163 @@ This implementation uses a stateful graph to manage the lifecycle:
     *   Templates organized by agent type: `deployer/`, `monitor/`, `code_analyzer/`.
     *   `PromptLoader` class for rendering templates with context.
 *   **Commands (`app_operator/commands/`):**
-    *   CLI command implementations: `run`, `init_exp`, `viz_graph`.
+    *   CLI command implementations: `run`, `init_exp`, `viz_graph`, `analyze_prompts`, `optimize_prompts`.
+*   **DSPy Integration (`app_operator/dspy_integration/`):**
+    *   **Configuration (`config.py`):** DSPy optimization settings, auto-rollback config, metric weights
+    *   **Data Loader (`data_loader.py`):** Load training examples from trajectory files with phase filtering
+    *   **Metrics (`metrics.py`):** DeploymentSuccessMetric, IterationEfficiencyMetric, TokenEfficiencyMetric, CompositeMetric
+    *   **Metrics Aggregator (`metrics_aggregator.py`):** Compute statistics and compare optimization versions
+    *   **Optimizer (`optimizer.py`):** Orchestrate DSPy optimization workflow with multiple optimizer support
+    *   **Signatures (`signatures.py`):** DSPy signatures for all 10 SDS prompts (deployer, monitor, agentflow)
+    *   **Cost Calculation (`cost.py`):** Token cost calculation for Claude, GPT, and Gemini models
+    *   **Feedback (`feedback.py`):** Online learning feedback collection
+    *   **Monitor (`monitor.py`):** Performance monitoring for auto-rollback
+
+### DSPy Prompt Optimization
+
+The Application Operator includes DSPy integration for offline prompt optimization. This allows you to automatically improve deployment success rates and efficiency by learning from historical trajectory data.
+
+**Implementation Status**:
+- ✅ **Phase 1-3**: Data pipeline, metrics, optimizer (COMPLETED)
+- ✅ **Phase 4.1**: Field mappings, module loading, PromptLoader extension (COMPLETED)
+- ✅ **Phase 4.2**: Runtime integration - agents use DSPy config (COMPLETED)
+- ✅ **Phase 4.3**: Trajectory integration for version tracking (COMPLETED)
+- ✅ **Phase 4.4**: Optimizer saves actual DSPy modules (COMPLETED)
+- ⏳ **Phase 4.5-4.6**: Integration tests, documentation (PENDING)
+
+#### Key Features
+
+*   **Offline Optimization:** Use DSPy to optimize prompts based on past deployment trajectories
+*   **Multiple Optimizers:** Support for BootstrapFewShot, BootstrapFewShotWithRandomSearch, MIPROv2, COPRO
+*   **Comprehensive Metrics:** Track success rates, iteration efficiency, and token costs
+*   **Version Management:** Auto-versioned optimized prompts with metadata
+*   **Runtime Integration:** ✅ PromptLoader supports DSPy with automatic fallback to Jinja2
+*   **Canary Deployment:** ✅ Deterministic hash-based routing (same repo → same version)
+*   **Trajectory Tracking:** ✅ Records prompt version and fallback events
+*   **Auto-Rollback:** Automatic rollback on performance degradation (pending Phase 4.4)
+*   **Online Learning:** Optional feedback collection during production runs (pending Phase 4.4)
+
+#### Workflow
+
+1. **Run the operator** to generate trajectory data:
+   ```bash
+   uv run -m app_operator run /path/to/app
+   ```
+
+2. **Analyze current performance** to establish baseline:
+   ```bash
+   uv run -m app_operator analyze-prompts --phase deployment
+   ```
+
+3. **Optimize prompts** using DSPy:
+   ```bash
+   uv run -m app_operator optimize-prompts \
+       --prompts deployer_fix_error deployer_summarize \
+       --optimizer BootstrapFewShot
+   ```
+
+4. **Enable optimized prompts** in `sds.toml`:
+   ```toml
+   [dspy]
+   use_optimized = true
+   optimized_version = "latest"
+   ```
+
+5. **Test optimized version** and compare:
+   ```bash
+   uv run -m app_operator run /path/to/app
+   uv run -m app_operator analyze-prompts \
+       --compare baseline_dir:optimized_dir
+   ```
+
+#### Available Prompts
+
+The DSPy integration provides signatures for 10 prompts across different agent types:
+
+**Deployer Prompts (4):**
+- `deployer_system` - System instructions for deployment agent
+- `deployer_generate_script` - Generate deploy.sh and health_check.sh
+- `deployer_fix_error` - Fix deployment errors (most critical for optimization)
+- `deployer_summarize` - Summarize deployment results
+
+**Code Analyzer Prompts (2):**
+- `code_analyzer_system` - System instructions for code analysis
+- `code_analyzer_user` - Analyze codebase for deployment
+
+**Monitor Prompts (1):**
+- `monitor_analyze_health` - Analyze application health
+
+**Agentflow Prompts (3):**
+- `agentflow_system` - System instructions for script generation
+- `agentflow_user` - Generate Python script from user request
+- `agentflow_repair` - Repair malformed JSON responses
+
+#### Metrics
+
+The optimization process uses a composite metric combining three factors:
+
+1. **Deployment Success (60% weight):** Binary metric for successful deployment
+2. **Iteration Efficiency (25% weight):** Rewards fewer iterations to success
+3. **Token Efficiency (15% weight):** Rewards lower token usage
+
+Metric weights are configurable in `sds.toml` under `[dspy.optimization.metric_weights]`.
+
+#### Data Pipeline
+
+```
+Trajectory Files (.sds/trajectories/*.json)
+    ↓
+TrajectoryDataLoader → Extract examples by phase
+    ↓
+MetricsAggregator → Compute statistics
+    ↓
+PromptOptimizer → Run DSPy optimization
+    ↓
+Save versioned prompts (app_operator/prompts/optimized/vN/)
+```
+
+#### Runtime Architecture (Phase 4)
+
+**PromptLoader Rendering Flow**:
+```
+agent calls render(template_name, **kwargs)
+    ↓
+Check: use_optimized? canary routing?
+    ↓
+├─→ YES: _render_dspy()
+│     ├─→ Load optimized module (cached)
+│     ├─→ Map kwargs → DSPy signature fields
+│     ├─→ Invoke DSPy module
+│     ├─→ Extract output field
+│     ├─→ On Error: Fallback to Jinja2
+│     └─→ Record version in trajectory
+│
+└─→ NO: _render_jinja2()
+      └─→ Record version in trajectory
+```
+
+**Key Components**:
+- **Field Mappings** (`field_mappings.py`): Maps Jinja2 kwargs to DSPy InputFields with auto + explicit mappings
+- **Module Loader** (`loader.py`): Loads and caches DSPy modules with version resolution ("latest" → vN)
+- **PromptLoader** (`prompts/__init__.py`): Extended to support both Jinja2 and DSPy rendering
+- **Trajectory** (`trajectory.py`): Records `prompt_version` and `fallback_occurred` for each conversation
+
+**Canary Deployment**:
+- Deterministic routing: `hash(repo_path) % 100 / 100.0 < canary_percentage`
+- Same repo always gets same version (predictable debugging)
+- Configurable percentage in `sds.toml`
+
+**Fallback Strategy**:
+- Transparent fallback on any DSPy error (missing file, corrupted JSON, invocation error)
+- Logged with context for debugging
+- Recorded in trajectory for analysis
+
+**Runtime Integration** (Phase 4.2):
+- **CLI Agent Runtime**: All agents (DeploymentAgent, AppMonitor, CodeAnalyzerAgent) accept and use `dspy_config`
+- **LangGraph Runtime**: Loader initialized with `config.dspy` in `build_graph()`
+- **Configuration Flow**: `sds.toml` → `Config.dspy` → Agent constructors → `get_loader(dspy_config)`
+- **Prompt Helpers**: All prompt functions (deployer, monitor, code_analyzer) pass `dspy_config` to loader
+- **Defensive Programming**: Error handling for mock configs in tests (canary_percentage validation)
 
 ## 2. Agentflow Module (`agentflow/`)
 
@@ -315,6 +497,9 @@ Scripts are saved in `agentflow_runs/<timestamp>/agentflow.py` with:
 
 *   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs in `.sds/logs/`.
 *   **When debugging agentflow scripts:** Check `agentflow_runs/<timestamp>/agentflow.py` and examine the clarification history.
+*   **When optimizing prompts:** Use `analyze-prompts` to establish baseline metrics, run `optimize-prompts` with `--dry-run` first to validate inputs, then compare results using `analyze-prompts --compare`.
+*   **When adding DSPy signatures:** Add the signature class to `app_operator/dspy_integration/signatures.py` and register it in the `SIGNATURES` dict. Include comprehensive field descriptions and docstrings.
+*   **When extending metrics:** Modify `app_operator/dspy_integration/metrics.py` and ensure weights in `CompositeMetric` sum to 1.0. Add corresponding tests.
 *   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
 *   **When adding agentflow features:** Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
 *   **When adding a new feature:** Think of what new behavior(s) are being introduced, and how you would test them. Test public behavior, not internal implementation details.
@@ -352,6 +537,7 @@ Always do the following after you're done with your code edits:
     *   `tests/unit/config/`: Configuration validation tests
     *   `tests/unit/agents/`: Agent-specific tests (deployment, monitoring)
     *   `tests/unit/agentflow/`: Agentflow module tests (engine, runtime, CLI, prompts)
+    *   `tests/unit/dspy_tests/`: DSPy integration tests (config, data loader, metrics, optimizer, signatures)
     *   `tests/integration/`: End-to-end scenarios, signal handling, concurrency
 
 #### Running Tests

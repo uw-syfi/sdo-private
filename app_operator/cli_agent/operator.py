@@ -99,7 +99,11 @@ class AppOperator:
 
         # Initialize agents
         self.analyzer = CodeAnalyzerAgent(
-            self.repo_path, self.agent, self.filesystem, recorder=self.recorder
+            self.repo_path,
+            self.agent,
+            self.filesystem,
+            recorder=self.recorder,
+            dspy_config=self.config.dspy,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,
@@ -108,9 +112,14 @@ class AppOperator:
             self.config.deployment,
             self.config.operator,
             recorder=self.recorder,
+            dspy_config=self.config.dspy,
         )
         self.monitor = AppMonitor(
-            self.repo_path, self.agent, self.filesystem, recorder=self.recorder
+            self.repo_path,
+            self.agent,
+            self.filesystem,
+            recorder=self.recorder,
+            dspy_config=self.config.dspy,
         )
 
     def _persist_deployment_config(self) -> None:

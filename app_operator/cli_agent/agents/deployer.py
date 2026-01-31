@@ -2,7 +2,10 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
 
 from libs.agent_cli.base import CodingAgent
 from libs.agent_cli.factory import create_agent_from_config
@@ -42,6 +45,7 @@ def generate_scripts(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
+    dspy_config: Optional['DSPyConfig'] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -56,6 +60,7 @@ def generate_scripts(
         deployment_config: Optional deployment configuration. If None, uses default.
         operator_config: Optional operator configuration for timeouts. If None, uses default.
         recorder: Optional trajectory recorder.
+        dspy_config: Optional DSPy configuration for optimized prompts.
 
     Returns:
         Tuple of (success: bool, message: str).
@@ -115,6 +120,7 @@ def generate_scripts(
                 deployment_config,
                 operator_config,
                 recorder=r,
+                dspy_config=dspy_config,
             )
 
             if not deploy_success:
@@ -131,6 +137,7 @@ def generate_scripts(
                 deployment_config,
                 operator_config,
                 recorder=r,
+                dspy_config=dspy_config,
             )
 
             if not health_check_success:
@@ -167,6 +174,7 @@ def _generate_deploy_script(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
+    dspy_config: Optional['DSPyConfig'] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
     if operator_config is None:
@@ -181,6 +189,7 @@ def _generate_deploy_script(
         repo_context=repo_context,
         target_dir=target_dir,
         platform=platform,
+        dspy_config=dspy_config,
     )
 
     try:
@@ -224,6 +233,7 @@ def _generate_health_check_script(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
+    dspy_config: Optional['DSPyConfig'] = None,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
     if operator_config is None:
@@ -238,6 +248,7 @@ def _generate_health_check_script(
         repo_context=repo_context,
         target_dir=target_dir,
         platform=platform,
+        dspy_config=dspy_config,
     )
 
     try:
@@ -283,6 +294,7 @@ class DeploymentAgent:
         deployment_config: Optional[DeploymentConfig] = None,
         operator_config: Optional[OperatorConfig] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        dspy_config: Optional['DSPyConfig'] = None,
     ):
         """Initialize the deployment agent.
 
@@ -293,6 +305,7 @@ class DeploymentAgent:
             deployment_config: Optional deployment configuration.
             operator_config: Optional operator configuration for timeouts.
             recorder: Optional trajectory recorder.
+            dspy_config: Optional DSPy configuration for optimized prompts.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
@@ -300,6 +313,7 @@ class DeploymentAgent:
         self.deployment_config = deployment_config or DeploymentConfig()
         self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.dspy_config = dspy_config
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -370,6 +384,7 @@ class DeploymentAgent:
                 self.deployment_config,
                 self.operator_config,
                 recorder=self.recorder,
+                dspy_config=self.dspy_config,
             )
 
             if success:
@@ -611,6 +626,7 @@ class DeploymentAgent:
             error_context,
             self.deploy_script,
             self.health_check_script,
+            dspy_config=self.dspy_config,
         )
 
         try:

@@ -1,6 +1,9 @@
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
 
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
@@ -25,6 +28,7 @@ class CodeAnalyzerAgent:
         coding_agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        dspy_config: Optional['DSPyConfig'] = None,
     ):
         """Initialize the code analyzer agent.
 
@@ -33,11 +37,13 @@ class CodeAnalyzerAgent:
             coding_agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
+            dspy_config: Optional DSPy configuration for optimized prompts.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.dspy_config = dspy_config
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"
         self.issues_file = self.sds_dir / "deployment_issues.md"
@@ -63,8 +69,8 @@ class CodeAnalyzerAgent:
                 self.filesystem.mkdir(self.sds_dir, exist_ok=True)
 
                 # Create the prompt
-                system_prompt = get_loader().render("code_analyzer/system.jinja2")
-                user_prompt = get_loader().render(
+                system_prompt = get_loader(self.dspy_config).render("code_analyzer/system.jinja2")
+                user_prompt = get_loader(self.dspy_config).render(
                     "code_analyzer/user.jinja2", repo_path=self.repo_path
                 )
 

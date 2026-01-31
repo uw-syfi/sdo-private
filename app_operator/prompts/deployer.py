@@ -1,6 +1,10 @@
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
+
 from app_operator.prompts import get_loader
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
 
 
 def prepare_error_context(
@@ -53,6 +57,7 @@ def create_generate_script_prompt(
     repo_context: str,
     target_dir: str,
     platform: str,
+    dspy_config: Optional['DSPyConfig'] = None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
 
@@ -62,11 +67,12 @@ def create_generate_script_prompt(
         repo_context: Context string describing the repository.
         target_dir: The directory where scripts will be generated.
         platform: The deployment platform (e.g., 'docker', 'kubernetes').
+        dspy_config: Optional DSPy configuration for optimized prompts.
 
     Returns:
         str: The rendered prompt.
     """
-    return get_loader().render(
+    return get_loader(dspy_config).render(
         "deployer/generate_script.jinja2",
         system_prompt=system_prompt,
         script_name=script_name,
@@ -83,6 +89,7 @@ def create_fix_prompt(
     error_context: str,
     deploy_script_path: Path,
     health_check_script_path: Path,
+    dspy_config: Optional['DSPyConfig'] = None,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.
 
@@ -93,6 +100,7 @@ def create_fix_prompt(
         error_context: Formatted error context.
         deploy_script_path: Path to the deploy script.
         health_check_script_path: Path to the health check script.
+        dspy_config: Optional DSPy configuration for optimized prompts.
 
     Returns:
         str: The rendered prompt.
@@ -110,7 +118,7 @@ def create_fix_prompt(
             "failing for a different reason."
         )
 
-    return get_loader().render(
+    return get_loader(dspy_config).render(
         "deployer/fix_error.jinja2",
         repo_path=repo_path,
         attempt=attempt,

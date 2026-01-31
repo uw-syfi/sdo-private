@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from app_operator.commands import run, init_exp, viz_graph
+from app_operator.commands import run, init_exp, viz_graph, analyze_prompts, optimize_prompts
 from app_operator.logger import logger
 
 # Load environment variables from .env file
@@ -45,8 +45,6 @@ def main() -> int:
     Returns:
         int: Exit code (0 for success, non-zero for failure).
     """
-    check_dependencies()
-
     parser = argparse.ArgumentParser(
         prog="operator",
         description="Codex-assisted deployment mode with automatic error fixing.",
@@ -83,16 +81,37 @@ Examples:
     )
     viz_graph.add_arguments(viz_graph_parser)
 
+    # 'analyze-prompts' command
+    analyze_prompts_parser = subparsers.add_parser(
+        "analyze-prompts", help="Analyze prompt performance from trajectory data"
+    )
+    analyze_prompts.add_arguments(analyze_prompts_parser)
+
+    # 'optimize-prompts' command
+    optimize_prompts_parser = subparsers.add_parser(
+        "optimize-prompts", help="Optimize prompts using DSPy"
+    )
+    optimize_prompts.add_arguments(optimize_prompts_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
     args = parser.parse_args()
+
+    # Check Docker dependencies for commands that need them
+    if args.command in ["run", "init-exp"]:
+        check_dependencies()
+
     if args.command == "run":
         return run.run_command(args)
     elif args.command == "init-exp":
         return init_exp.run_command(args)
     elif args.command == "viz-graph":
         return viz_graph.run_command(args)
+    elif args.command == "analyze-prompts":
+        return analyze_prompts.run_command(args)
+    elif args.command == "optimize-prompts":
+        return optimize_prompts.run_command(args)
     else:
         parser.print_help()
         return 1

@@ -4,7 +4,10 @@ import shutil
 import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Any, List
+from typing import Optional, Callable, Any, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
 
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
@@ -81,7 +84,9 @@ class HealthCheckTask(MonitoringTask):
         context = self._prepare_health_context(health_result, monitor.check_count)
 
         # Create analysis prompt
-        prompt = self._create_analysis_prompt(context, monitor.repo_path)
+        prompt = self._create_analysis_prompt(
+            context, monitor.repo_path, monitor.dspy_config
+        )
 
         try:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -156,9 +161,14 @@ class HealthCheckTask(MonitoringTask):
 
         return "\n".join(context_parts)
 
-    def _create_analysis_prompt(self, context: str, repo_path: Path) -> str:
+    def _create_analysis_prompt(
+        self,
+        context: str,
+        repo_path: Path,
+        dspy_config: Optional['DSPyConfig'] = None
+    ) -> str:
         """Create a prompt for the coding agent to analyze health check results."""
-        return get_loader().render(
+        return get_loader(dspy_config).render(
             "monitor/analyze_health.jinja2", repo_path=repo_path, context=context
         )
 
@@ -172,6 +182,7 @@ class AppMonitor:
         agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        dspy_config: Optional['DSPyConfig'] = None,
     ):
         """Initialize the monitor agent.
 
@@ -180,11 +191,13 @@ class AppMonitor:
             agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
+            dspy_config: Optional DSPy configuration for optimized prompts.
         """
         self.repo_path = repo_path
         self.agent = agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.dspy_config = dspy_config
         self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
