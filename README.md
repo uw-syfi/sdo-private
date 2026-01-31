@@ -245,6 +245,35 @@ Initialize a new experiment from an existing application.
 - `APP_PATH`: Path to the source application directory
 - `EXP_NAME`: Name of the new experiment
 
+#### `run-exp` - Run Multiple Experiments
+
+Orchestrate multiple experiments in parallel using a TOML configuration file.
+
+**Usage:**
+```bash
+./sds_operator run-exp <EXPERIMENT> [options]
+```
+
+**Arguments:**
+- `EXPERIMENT`: Name of the experiment (looks in `exp_config/<name>/config.toml`) or full path to a TOML config file.
+
+**Options:**
+- `--parallel <N>`: Maximum number of applications to run in parallel (default: 1)
+
+**Configuration File (`config.toml`):**
+```toml
+# List of application source paths to run experiments on
+apps = [
+    "apps/deathstarbench/hotelReservation",
+    "apps/deathstarbench/socialNetwork"
+]
+```
+
+**Output:**
+- Creates experiment directories in `exp/<app-name>/<exp-name>/`.
+- Saves logs and artifacts (trajectories, session files) in `exp_config/<exp-name>/logs/`.
+- Displays a progress bar showing the status of each application (initializing, coding, deploying, monitoring).
+
 
 ### Agentflow Module
 
