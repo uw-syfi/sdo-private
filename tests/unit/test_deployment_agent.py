@@ -419,17 +419,16 @@ def test_create_fix_prompt_includes_repo_and_scripts(agent):
     assert "2 of 5" in prompt
 
 
-def test_run_aborts_if_fix_fails(agent):
+def test_run_retries_if_fix_fails(agent):
     # This test verifies that if _fix_with_agent returns False (e.g. agent timeout/error),
-    # the deployment loop stops immediately and returns False.
+    # the deployment loop continues until max attempts are reached.
 
-    # We simulate a failure on the first attempt, and then _fix_with_agent returning False.
+    # We simulate a failure on all attempts, and _fix_with_agent returning False.
     deploy_results = iter(
         [
             {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom"},
-            # If the code was buggy, it might try a second time. We can either
-            # raise an error if called again, or just provide a result and assert call count.
-            {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom again"},
+            {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom"},
+            {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom"},
         ]
     )
 
@@ -454,10 +453,9 @@ def test_run_aborts_if_fix_fails(agent):
     _bind_method(agent, "_fix_with_agent", fake_fix)
 
     # Run with max_attempts=3.
-    # Attempt 1: fails. fake_fix returns False.
-    # Should abort immediately.
+    # It should retry 3 times.
     assert agent.run(max_attempts=3) is False
 
-    # Verify we only tried once
-    assert fix_calls["count"] == 1
-    assert deploy_calls["count"] == 1
+    # Verify we tried 3 times
+    assert fix_calls["count"] == 3
+    assert deploy_calls["count"] == 3

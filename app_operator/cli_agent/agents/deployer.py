@@ -486,7 +486,7 @@ class DeploymentAgent:
                         )
 
                         # Health check failed - ask agent to analyze and fix
-                        if not self._fix_with_agent(
+                        if self._fix_with_agent(
                             deploy_result,
                             health_result,
                             attempt,
@@ -494,9 +494,16 @@ class DeploymentAgent:
                             log_file_path,
                             health_check_log_path,
                         ):
-                            r.set_phase_status("failed")
-                            return False
-                        r.set_phase_status("needs_retry")
+                            r.set_phase_status("needs_retry")
+                        else:
+                            if attempt < absolute_max_attempts:
+                                logger.warning(
+                                    "Agent failed to fix (or crashed), but retrying..."
+                                )
+                                r.set_phase_status("needs_retry")
+                            else:
+                                r.set_phase_status("failed")
+                                return False
                 else:
                     res = deploy_result["exit_code"]
                     logger.error(f"Deployment script failed (exit code: {res})")
@@ -505,16 +512,23 @@ class DeploymentAgent:
                     )
 
                     # Deployment failed - ask agent to analyze and fix
-                    if not self._fix_with_agent(
+                    if self._fix_with_agent(
                         deploy_result,
                         None,
                         attempt,
                         absolute_max_attempts,
                         log_file_path,
                     ):
-                        r.set_phase_status("failed")
-                        return False
-                    r.set_phase_status("needs_retry")
+                        r.set_phase_status("needs_retry")
+                    else:
+                        if attempt < absolute_max_attempts:
+                            logger.warning(
+                                "Agent failed to fix (or crashed), but retrying..."
+                            )
+                            r.set_phase_status("needs_retry")
+                        else:
+                            r.set_phase_status("failed")
+                            return False
 
         return False
 
