@@ -3,48 +3,16 @@ from pathlib import Path
 from unittest.mock import Mock
 from app_operator.cli_agent.agents.deployer import generate_scripts
 from app_operator.prompts.deployment_context import analyze_repository
-
-
-class StubAgent:
-    def __init__(self, responses=None):
-        self.calls = []
-        self.responses = responses or [
-            "#!/bin/bash\necho deploy",
-            "#!/bin/bash\necho health",
-        ]
-        self.call_count = 0
-
-    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300) -> str:
-        self.calls.append((prompt, cwd, timeout))
-
-        # Simulate agent writing files
-        if cwd:
-            # We need to ensure .sds directory exists as the agent would create files there
-            # But the agent might expect the directory to exist or create it.
-            # In generate_scripts, .sds is created before calling agent.
-
-            sds_dir = Path(cwd) / ".sds"
-            # It should already exist because generate_scripts creates it.
-
-            content = self.responses[self.call_count % len(self.responses)]
-
-            # Determine which file to write based on prompt or call order
-            # The prompt contains the filename instructions.
-            filename = "deploy.sh"
-            if "Create the file at: .sds/health_check.sh" in prompt:
-                filename = "health_check.sh"
-            elif "Create the file at: .sds/deploy.sh" in prompt:
-                filename = "deploy.sh"
-
-            (sds_dir / filename).write_text(content, encoding="utf-8")
-
-        self.call_count += 1
-        return "I have generated the scripts."
+from tests.fixtures.agents import ScriptGeneratingAgent
 
 
 @pytest.fixture
 def stub_agent():
-    return StubAgent()
+    """Create a script-generating agent for testing."""
+    return ScriptGeneratingAgent(responses=[
+        "#!/bin/bash\necho deploy",
+        "#!/bin/bash\necho health",
+    ])
 
 
 def test_analyze_repository_detects_languages(tmp_path):

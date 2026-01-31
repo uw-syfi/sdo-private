@@ -13,7 +13,10 @@ class TestDeploymentProcessTimeouts:
     """Tests for deployment process timeout handling."""
 
     def test_deployment_timeout_captures_partial_output(self, tmp_path):
-        """When deployment times out, partial output should be captured."""
+        """When deployment times out, partial output should be captured.
+
+        Uses optimized sleep times to speed up the test.
+        """
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -25,7 +28,7 @@ class TestDeploymentProcessTimeouts:
         deploy_script.write_text(
             "#!/bin/bash\n"
             "echo 'Starting deployment'\n"
-            "sleep 10\n"  # Longer than timeout
+            "sleep 0.3\n"  # Longer than timeout
             "echo 'This should not appear'\n"
             "exit 0\n"
         )
@@ -39,7 +42,7 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         # Run with very short timeout
-        result = deployer.run_deploy_command("start", timeout=0.5)
+        result = deployer.run_deploy_command("start", timeout=0.1)
 
         # Should have timed out
         assert result["success"] is False

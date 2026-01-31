@@ -1,5 +1,5 @@
 import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from pathlib import Path
 
 import pytest
@@ -18,15 +18,11 @@ def mock_env():
 
 
 @pytest.fixture
-def mock_which():
-    """Mock shutil.which to return a fake binary path."""
-    with patch("shutil.which", return_value="/usr/bin/gemini"):
-        yield
-
-
-@pytest.fixture
-def gemini_agent(mock_which, mock_env):
+def gemini_agent(mock_subprocess, mock_env):
     """Create a GeminiCodingAgent instance with mocked environment."""
+    mock_popen, mock_which = mock_subprocess
+    mock_which.return_value = "/usr/bin/gemini"
+
     with patch(
         "libs.agent_cli.cli_agent._get_interactive_env",
         return_value=mock_env,
@@ -38,14 +34,7 @@ def gemini_agent(mock_which, mock_env):
             yield agent
 
 
-@pytest.fixture
-def mock_popen():
-    """Mock subprocess.Popen."""
-    with patch("subprocess.Popen") as mock:
-        yield mock
-
-
-def test_generate_from_fixture(gemini_agent, mock_popen):
+def test_generate_from_fixture(gemini_agent, mock_subprocess):
     """Test parsing a real stream dump from a fixture file."""
 
     if not FIXTURE_PATH.exists():
@@ -56,14 +45,11 @@ def test_generate_from_fixture(gemini_agent, mock_popen):
         fixture_lines = f.readlines()
 
     # Mock the process output
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
     # readline side effect needs to return each line, then empty string to signal EOF
     mock_process.stdout.readline.side_effect = fixture_lines + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-
-    mock_popen.return_value = mock_process
 
     # Capture stdout to verify rendering
     captured_stdout = io.StringIO()

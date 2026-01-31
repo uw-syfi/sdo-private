@@ -20,24 +20,6 @@ from libs.agent_cli.gemini import GeminiCodingAgent
 from libs.agent_cli.opencode import OpencodeCodingAgent
 
 
-class MockProcess:
-    """Mock subprocess.Popen for testing prompt passing."""
-
-    def __init__(self, *args, **kwargs):
-        self.pid = 12345
-        self.returncode = 0
-        self.stdout = MagicMock()
-        self.stderr = MagicMock()
-        self.stdin = MagicMock()
-        self.cmd = args[0] if args else []
-
-    def wait(self, timeout=None):
-        return self.returncode
-
-    def poll(self):
-        return self.returncode
-
-
 @pytest.fixture
 def mock_which():
     """Mock shutil.which to return a fake binary path."""
@@ -48,9 +30,42 @@ def mock_which():
     return which_impl
 
 
+@pytest.fixture
+def mock_process():
+    """Create a reusable mock process with standard behavior."""
+    process = MagicMock()
+    process.pid = 12345
+    process.returncode = 0
+    process.stdout.readline.side_effect = lambda: ""
+    process.stderr.readline.side_effect = lambda: ""
+    process.stdin.write = MagicMock()
+    process.wait.return_value = 0
+    process.poll.return_value = 0
+    return process
+
+
+@pytest.fixture
+def command_tracker(mock_process):
+    """Track subprocess calls and return captured commands and stdin writes."""
+    captured_commands = []
+    stdin_writes = []
+
+    def track_write(data):
+        stdin_writes.append(data)
+
+    mock_process.stdin.write = track_write
+
+    def track_popen(*args, **kwargs):
+        captured_commands.append(args[0] if args else [])
+        return mock_process
+
+    return track_popen, captured_commands, stdin_writes
+
+
 @pytest.fixture(
     params=[
-        ("claude", ClaudeCodeCodingAgent, True),  # (name, class, has_prompt_in_cmd)
+        # (name, class, has_prompt_in_cmd)
+        ("claude", ClaudeCodeCodingAgent, True),
         ("codex", CodexCodingAgent, False),
         ("gemini", GeminiCodingAgent, False),
         ("opencode", OpencodeCodingAgent, True),
@@ -67,23 +82,16 @@ def agent_info(request):
 # ============================================================================
 
 
-def test_agent_includes_prompt_in_command_when_required(agent_info, mock_which):
+def test_agent_includes_prompt_in_command_when_required(
+    agent_info, mock_which, command_tracker
+):
     """Test agents that require prompt in command line include it."""
     agent_name, agent_class, has_prompt_in_cmd = agent_info
     test_prompt = "Write a hello world function"
-
-    captured_commands = []
-
-    def track_popen(*args, **kwargs):
-        captured_commands.append(args[0] if args else [])
-        mock_process = MockProcess(*args, **kwargs)
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, captured_commands, _ = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = agent_class()
                 agent.generate(test_prompt, silent=True)
@@ -93,37 +101,21 @@ def test_agent_includes_prompt_in_command_when_required(agent_info, mock_which):
 
     if has_prompt_in_cmd:
         # For Claude and Opencode, prompt should be in the command
-        # Convert command list to string for easier checking
         cmd_str = " ".join(command)
         assert test_prompt in cmd_str, (
             f"{agent_name} should include prompt '{test_prompt}' in command, "
             f"but got: {cmd_str}"
         )
-    # Note: For agents that don't include prompt in command (Codex, Gemini),
-    # they pass it via stdin which is tested separately
 
 
-def test_agent_passes_prompt_via_stdin(agent_info, mock_which):
+def test_agent_passes_prompt_via_stdin(agent_info, mock_which, command_tracker):
     """Test all agents pass prompt via stdin."""
     agent_name, agent_class, _ = agent_info
     test_prompt = "Create a function to sort a list"
-
-    stdin_writes = []
-
-    def track_popen(*args, **kwargs):
-        mock_process = MockProcess(*args, **kwargs)
-
-        def track_write(data):
-            stdin_writes.append(data)
-
-        mock_process.stdin.write = track_write
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, _, stdin_writes = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = agent_class()
                 agent.generate(test_prompt, silent=True)
@@ -141,22 +133,13 @@ def test_agent_passes_prompt_via_stdin(agent_info, mock_which):
 # ============================================================================
 
 
-def test_claude_command_structure(mock_which):
+def test_claude_command_structure(mock_which, command_tracker):
     """Test Claude agent constructs correct command with prompt."""
     test_prompt = "Write a test function"
-
-    captured_commands = []
-
-    def track_popen(*args, **kwargs):
-        captured_commands.append(args[0] if args else [])
-        mock_process = MockProcess(*args, **kwargs)
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, captured_commands, _ = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = ClaudeCodeCodingAgent()
                 agent.generate(test_prompt, silent=True)
@@ -176,22 +159,13 @@ def test_claude_command_structure(mock_which):
     assert test_prompt in cmd_str
 
 
-def test_codex_command_structure(mock_which):
+def test_codex_command_structure(mock_which, command_tracker):
     """Test Codex agent constructs correct command."""
     test_prompt = "Write a test function"
-
-    captured_commands = []
-
-    def track_popen(*args, **kwargs):
-        captured_commands.append(args[0] if args else [])
-        mock_process = MockProcess(*args, **kwargs)
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, captured_commands, _ = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = CodexCodingAgent()
                 agent.generate(test_prompt, silent=True)
@@ -205,22 +179,13 @@ def test_codex_command_structure(mock_which):
     assert "--dangerously-bypass-approvals-and-sandbox" in cmd
 
 
-def test_gemini_command_structure(mock_which):
+def test_gemini_command_structure(mock_which, command_tracker):
     """Test Gemini agent constructs correct command."""
     test_prompt = "Write a test function"
-
-    captured_commands = []
-
-    def track_popen(*args, **kwargs):
-        captured_commands.append(args[0] if args else [])
-        mock_process = MockProcess(*args, **kwargs)
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, captured_commands, _ = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = GeminiCodingAgent()
                 agent.generate(test_prompt, silent=True)
@@ -234,22 +199,13 @@ def test_gemini_command_structure(mock_which):
     assert "stream-json" in cmd
 
 
-def test_opencode_command_structure(mock_which):
+def test_opencode_command_structure(mock_which, command_tracker):
     """Test Opencode agent constructs correct command with prompt."""
     test_prompt = "Write a test function"
-
-    captured_commands = []
-
-    def track_popen(*args, **kwargs):
-        captured_commands.append(args[0] if args else [])
-        mock_process = MockProcess(*args, **kwargs)
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, captured_commands, _ = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = OpencodeCodingAgent()
                 agent.generate(test_prompt, silent=True)
@@ -272,23 +228,16 @@ def test_opencode_command_structure(mock_which):
 # ============================================================================
 
 
-def test_agent_includes_model_in_command_when_specified(agent_info, mock_which):
+def test_agent_includes_model_in_command_when_specified(
+    agent_info, mock_which, command_tracker
+):
     """Test agents include --model flag when model is specified."""
     agent_name, agent_class, _ = agent_info
     test_model = "custom-model-v1"
-
-    captured_commands = []
-
-    def track_popen(*args, **kwargs):
-        captured_commands.append(args[0] if args else [])
-        mock_process = MockProcess(*args, **kwargs)
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, captured_commands, _ = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 # OpencodeCodingAgent has a default model, so skip for this test
                 if agent_class == OpencodeCodingAgent:
@@ -314,30 +263,17 @@ def test_agent_includes_model_in_command_when_specified(agent_info, mock_which):
 # ============================================================================
 
 
-def test_agent_handles_multiline_prompts(agent_info, mock_which):
+def test_agent_handles_multiline_prompts(agent_info, mock_which, command_tracker):
     """Test agents correctly handle prompts with multiple lines."""
     agent_name, agent_class, _ = agent_info
     test_prompt = """Write a function that:
 1. Takes a list of numbers
 2. Filters even numbers
 3. Returns the sum"""
-
-    stdin_writes = []
-
-    def track_popen(*args, **kwargs):
-        mock_process = MockProcess(*args, **kwargs)
-
-        def track_write(data):
-            stdin_writes.append(data)
-
-        mock_process.stdin.write = track_write
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, _, stdin_writes = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = agent_class()
                 agent.generate(test_prompt, silent=True)
@@ -349,27 +285,16 @@ def test_agent_handles_multiline_prompts(agent_info, mock_which):
     )
 
 
-def test_agent_handles_special_characters_in_prompt(agent_info, mock_which):
+def test_agent_handles_special_characters_in_prompt(
+    agent_info, mock_which, command_tracker
+):
     """Test agents handle prompts with special characters."""
     agent_name, agent_class, _ = agent_info
     test_prompt = "Fix bug in \"auth.js\" where user's password isn't validated"
-
-    stdin_writes = []
-
-    def track_popen(*args, **kwargs):
-        mock_process = MockProcess(*args, **kwargs)
-
-        def track_write(data):
-            stdin_writes.append(data)
-
-        mock_process.stdin.write = track_write
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, _, stdin_writes = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = agent_class()
                 agent.generate(test_prompt, silent=True)
@@ -381,27 +306,14 @@ def test_agent_handles_special_characters_in_prompt(agent_info, mock_which):
     )
 
 
-def test_agent_handles_empty_prompt(agent_info, mock_which):
+def test_agent_handles_empty_prompt(agent_info, mock_which, command_tracker):
     """Test agents handle empty prompts gracefully."""
     agent_name, agent_class, _ = agent_info
     test_prompt = ""
-
-    stdin_writes = []
-
-    def track_popen(*args, **kwargs):
-        mock_process = MockProcess(*args, **kwargs)
-
-        def track_write(data):
-            stdin_writes.append(data)
-
-        mock_process.stdin.write = track_write
-        mock_process.stdout.readline.side_effect = ["output\n", ""]
-        mock_process.stderr.readline.side_effect = [""]
-        return mock_process
+    track_popen, _, stdin_writes = command_tracker
 
     with patch("shutil.which", side_effect=mock_which):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
             with patch("subprocess.Popen", side_effect=track_popen):
                 agent = agent_class()
                 # Should not raise an exception

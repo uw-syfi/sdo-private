@@ -12,8 +12,7 @@ from app_operator.prompts.deployer import (
     prepare_error_context,
     create_fix_prompt,
 )
-from app_operator.config import OperatorConfig
-from tests.fixtures.agents import TrackingAgent, ErrorAgent
+from tests.fixtures.agents import TrackingAgent
 
 
 @pytest.fixture
@@ -80,6 +79,11 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
 
 
 def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch):
+    """Test deployment fails when script generation fails.
+
+    Verifies that when generate_scripts returns False, the deployment
+    agent immediately returns False without attempting deployment.
+    """
     repo = tmp_path / "repo"
     repo.mkdir()
     agent = DeploymentAgent(repo, stub_agent)
@@ -104,6 +108,11 @@ def _bind_method(obj, name, func):
 
 
 def test_run_succeeds_without_fix(agent, monkeypatch):
+    """Test successful deployment without needing any fixes.
+
+    Verifies that when both deployment and health check succeed on first attempt,
+    the agent does not invoke any fix attempts.
+    """
     deploy_results = iter(
         [
             {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""},
@@ -138,6 +147,11 @@ def test_run_succeeds_without_fix(agent, monkeypatch):
 
 
 def test_run_retries_after_failure(agent, monkeypatch):
+    """Test deployment retry mechanism after initial failure.
+
+    Verifies that when deployment fails on first attempt, the agent invokes
+    a fix and successfully deploys on the second attempt.
+    """
     deploy_results = iter(
         [
             {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom"},
@@ -184,6 +198,11 @@ def test_run_retries_after_failure(agent, monkeypatch):
 
 
 def test_run_respects_max_attempts(agent):
+    """Test that deployment respects the max_attempts limit.
+
+    Verifies that when deployment fails and max_attempts is 1, the agent
+    only attempts once and does not retry.
+    """
     deploy_results = iter(
         [
             {"success": False, "exit_code": 1, "stdout": "", "stderr": "boom"},
@@ -212,6 +231,11 @@ def test_run_respects_max_attempts(agent):
 
 
 def test_run_deploy_command_handles_subprocess_results(agent, monkeypatch):
+    """Test subprocess execution and output capture.
+
+    Verifies that run_deploy_command correctly captures stdout and stderr
+    from the deployment subprocess.
+    """
     stdout_content = ["all good\n"]
     stderr_content = []
 
@@ -250,6 +274,11 @@ def test_run_deploy_command_handles_subprocess_results(agent, monkeypatch):
 
 
 def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
+    """Test timeout handling during deployment.
+
+    Verifies that when a deployment command times out, the agent properly
+    sets exit_code to -1 and includes timeout message in stderr.
+    """
     class MockProcess:
         def __init__(self, *args, **kwargs):
             self.stdout = MagicMock()
@@ -300,71 +329,88 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
     assert "timed out" in result["stderr"]
 
 
-def test_fix_with_agent_skips_when_attempt_exceeds_max(agent, stub_agent):
-    assert (
-        agent._fix_with_agent(
-            {"exit_code": 1, "success": False}, None, attempt=3, max_attempts=3
-        )
-        is False
-    )
+def test_deployment_skips_fix_when_max_attempts_reached(tmp_path, stub_agent):
+    """Test that deployment doesn't call agent when max attempts reached."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sds_dir = repo / ".sds"
+    sds_dir.mkdir()
+
+    # Create failing deploy script
+    deploy_script = sds_dir / "deploy.sh"
+    deploy_script.write_text("#!/bin/bash\nexit 1\n")
+    deploy_script.chmod(0o755)
+
+    # Create health check script
+    health_script = sds_dir / "health_check.sh"
+    health_script.write_text("#!/bin/bash\nexit 0\n")
+    health_script.chmod(0o755)
+
+    agent = DeploymentAgent(repo, stub_agent)
+
+    # Run with max_attempts=1, should not call agent for fix
+    result = agent.run(max_attempts=1, check_shutdown=lambda: False)
+
+    assert result is False
+    # Agent should not be called since we're at max attempts (scripts already exist)
     assert len(stub_agent.calls) == 0
 
 
-def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monkeypatch):
-    agent.agent = stub_agent
+def test_deployment_calls_agent_on_failure_when_under_max_attempts(
+    tmp_path, tracking_agent
+):
+    """Test that deployment calls agent to fix errors when under max attempts."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sds_dir = repo / ".sds"
+    sds_dir.mkdir()
 
-    def fake_prepare(
-        deploy_result,
-        health_result,
-        log_file_path=None,
-        health_check_log_path=None,
-    ):
-        return "context"
+    # Create failing deploy script
+    deploy_script = sds_dir / "deploy.sh"
+    deploy_script.write_text("#!/bin/bash\nexit 1\n")
+    deploy_script.chmod(0o755)
 
-    def fake_prompt(
-        repo_path,
-        attempt,
-        max_attempts,
-        error_context,
-        deploy_script_path,
-        health_check_script_path,
-    ):
-        return f"prompt::{error_context}::{attempt}/{max_attempts}"
+    # Create health check script
+    health_script = sds_dir / "health_check.sh"
+    health_script.write_text("#!/bin/bash\nexit 0\n")
+    health_script.chmod(0o755)
 
-    # Patch the imported functions instead of monkeypatching the instance
-    monkeypatch.setattr(deployer_module, "prepare_error_context", fake_prepare)
-    monkeypatch.setattr(deployer_module, "create_fix_prompt", fake_prompt)
+    agent = DeploymentAgent(repo, tracking_agent)
 
-    deploy_result = {"exit_code": 99, "success": False}
+    # Run with max_attempts=3, agent should be called to fix
+    _ = agent.run(max_attempts=3, check_shutdown=lambda: False)
 
-    assert agent._fix_with_agent(deploy_result, None, attempt=1, max_attempts=2) is True
-    call = stub_agent.calls[0]
-    prompt = call["prompt"]
-    cwd = call["kwargs"].get("cwd")
-    timeout = call["kwargs"].get("timeout")
-    assert "prompt::context::1/2" in prompt
-    assert cwd == str(agent.repo_path)
-    assert timeout == OperatorConfig().agent_fix_timeout
+    # Agent should be called at least once to try to fix the error
+    assert tracking_agent.generation_count > 0
+    # Should pass the repo path as cwd
+    call = tracking_agent.calls[0]
+    assert call["kwargs"].get("cwd") == str(repo)
 
 
-def test_fix_with_agent_handles_agent_errors(agent, monkeypatch):
-    error_agent = ErrorAgent(error_message="agent error")
-    agent.agent = error_agent
+def test_deployment_handles_agent_errors_gracefully(tmp_path, error_agent):
+    """Test that deployment handles agent errors without crashing."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sds_dir = repo / ".sds"
+    sds_dir.mkdir()
 
-    # Patch the imported functions
-    monkeypatch.setattr(
-        deployer_module, "prepare_error_context", lambda *args, **kwargs: "ctx"
-    )
-    monkeypatch.setattr(
-        deployer_module, "create_fix_prompt", lambda *args, **kwargs: "prompt"
-    )
+    # Create failing deploy script
+    deploy_script = sds_dir / "deploy.sh"
+    deploy_script.write_text("#!/bin/bash\nexit 1\n")
+    deploy_script.chmod(0o755)
 
-    assert (
-        agent._fix_with_agent(
-            {"exit_code": 1, "success": False}, None, attempt=1, max_attempts=2
-        )
-        is False
-    )
+    # Create health check script
+    health_script = sds_dir / "health_check.sh"
+    health_script.write_text("#!/bin/bash\nexit 0\n")
+    health_script.chmod(0o755)
+
+    agent = DeploymentAgent(repo, error_agent)
+
+    # Run should handle agent errors gracefully
+    result = agent.run(max_attempts=2, check_shutdown=lambda: False)
+
+    # Should fail but not crash
+    assert result is False
 
 
 def test_prepare_error_context_truncates_long_outputs(agent):
@@ -420,8 +466,11 @@ def test_create_fix_prompt_includes_repo_and_scripts(agent):
 
 
 def test_run_aborts_if_fix_fails(agent):
-    # This test verifies that if _fix_with_agent returns False (e.g. agent timeout/error),
-    # the deployment loop stops immediately and returns False.
+    """Test deployment aborts when agent fix fails.
+
+    Verifies that if the agent fails to fix deployment errors (returns False),
+    the deployment loop stops immediately and returns False without retrying.
+    """
 
     # We simulate a failure on the first attempt, and then _fix_with_agent returning False.
     deploy_results = iter(

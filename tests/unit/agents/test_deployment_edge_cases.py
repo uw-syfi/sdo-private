@@ -299,12 +299,14 @@ class TestLogFileManagement:
         log_file_1 = sds_dir / "logs" / "deploy_attempt_1.log"
         assert log_file_1.exists()
 
-        # Second run (if we run again)
+        # Second run should continue numbering
         deployer2 = DeploymentAgent(repo, agent)
-        next_attempt = deployer2._get_next_attempt_number()
+        result2 = deployer2.run(max_attempts=1, check_shutdown=lambda: False)
+        assert result2 is True
 
-        # Should be 2 (continuing from previous run)
-        assert next_attempt == 2
+        # Should create log file with number 2
+        log_file_2 = sds_dir / "logs" / "deploy_attempt_2.log"
+        assert log_file_2.exists()
 
     def test_resume_after_previous_attempts(self, tmp_path):
         """Should resume attempt numbering from previous runs."""
@@ -321,10 +323,22 @@ class TestLogFileManagement:
         (logs_dir / "deploy_attempt_2.log").write_text("previous attempt 2")
         (logs_dir / "deploy_attempt_3.log").write_text("previous attempt 3")
 
+        # Create working deploy script
+        deploy_script = sds_dir / "deploy.sh"
+        deploy_script.write_text("#!/bin/bash\nexit 0\n")
+        deploy_script.chmod(0o755)
+
+        health_script = sds_dir / "health_check.sh"
+        health_script.write_text("#!/bin/bash\nexit 0\n")
+        health_script.chmod(0o755)
+
         agent = StubAgent()
         deployer = DeploymentAgent(repo, agent)
 
-        next_attempt = deployer._get_next_attempt_number()
+        # Run deployment which should create attempt 4
+        result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
+        assert result is True
 
-        # Should continue from 4
-        assert next_attempt == 4
+        # Should create log file numbered 4 (continuing from previous)
+        log_file_4 = sds_dir / "logs" / "deploy_attempt_4.log"
+        assert log_file_4.exists()
