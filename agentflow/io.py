@@ -122,7 +122,8 @@ class ConsoleIO:
             symbol = f"{Colors.RED}✗{Colors.ENDC} "
 
         click.echo(
-            f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
+            "\n"
+            f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
             f"{Colors.LIGHT_GRAY}{output}{Colors.ENDC}"
         )
 

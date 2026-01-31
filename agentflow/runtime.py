@@ -173,7 +173,8 @@ class LangGraphAgent:
                     if len(result_text) > 500:
                         result_text = result_text[:500] + "\n... (truncated)"
                     print(
-                        f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
+                        "\n"
+                        f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
                         f"{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}",
                         flush=True)
 
@@ -249,9 +250,7 @@ def create_agent(
                 selected_tools.append(available_tools_map[tool_name])
             else:
                 logger.warning(
-                    f"Tool '{tool_name}' not found. Available: {
-                        list(
-                            available_tools_map.keys())}")
+                    f"Tool '{tool_name}' not found. Available: {list(available_tools_map.keys())}")
 
         agent_tools = selected_tools
     else:
