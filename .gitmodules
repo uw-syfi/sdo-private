@@ -16,3 +16,9 @@
 [submodule "apps/teastore-saga"]
 	path = apps/teastore-saga
 	url = git@github.com:t2-project/t2-project.git
+[submodule "apps/teastore"]
+	path = apps/teastore
+	url = git@github.com:DescartesResearch/TeaStore.git
+[submodule "apps/sockshop-helidon"]
+	path = apps/sockshop-helidon
+	url = git@github.com:vic-lsh/sockshop-helidon.git
