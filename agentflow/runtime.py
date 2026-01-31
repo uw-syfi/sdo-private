@@ -173,11 +173,8 @@ class LangGraphAgent:
                     if len(result_text) > 500:
                         result_text = result_text[:500] + "\n... (truncated)"
                     print(
-                        f"\n{
-                            Colors.BLUE}[Tool Result] {name}: {symbol}{
-                            Colors.ENDC}\n{
-                            Colors.LIGHT_GRAY}{result_text}{
-                            Colors.ENDC}",
+                        f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
+                        f"{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}",
                         flush=True)
 
             if thinking_started:
