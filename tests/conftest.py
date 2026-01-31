@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import MagicMock
 from app_operator.logger import logger
 from app_operator.filesystem import InMemoryFilesystem
 from tests.fixtures.agents import (
@@ -55,6 +56,25 @@ def tracking_agent():
 def configurable_agent():
     """Agent with configurable responses for different scenarios."""
     return ConfigurableAgent()
+
+
+@pytest.fixture
+def mock_subprocess(monkeypatch):
+    """Mock subprocess operations for agent CLI tests."""
+    mock_popen = MagicMock()
+    mock_process = MagicMock()
+    mock_process.returncode = 0
+    mock_process.communicate.return_value = (b"", b"")
+    mock_process.poll.return_value = 0
+    mock_popen.return_value = mock_process
+
+    mock_which = MagicMock()
+    mock_which.return_value = "/usr/bin/agent"
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+    monkeypatch.setattr("shutil.which", mock_which)
+
+    return mock_popen, mock_which
 
 
 @pytest.fixture

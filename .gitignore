@@ -65,6 +65,7 @@ sds.toml
 .codex
 opencode.json
 
+.hypothesis
 agent_graph.png
 agentflow_runs/
 .sds

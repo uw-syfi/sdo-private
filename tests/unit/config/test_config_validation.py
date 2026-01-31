@@ -271,3 +271,66 @@ class TestConfigIntegration:
         """Config.from_dict should validate timeout values are positive."""
         with pytest.raises(ValueError, match="deploy_timeout must be positive"):
             Config.from_dict({"operator": {"deploy_timeout": -100}})
+
+    def test_interval_exactly_at_lower_boundary(self):
+        """Test interval at exactly 1 second (minimum valid)."""
+        config = OperatorConfig(interval=1)
+        assert config.interval == 1
+
+    def test_interval_just_over_upper_boundary(self):
+        """Test interval just over maximum (86401 seconds)."""
+        with pytest.raises(ValueError, match="interval too large"):
+            OperatorConfig(interval=86401)
+
+    def test_monitoring_max_iters_exactly_one(self):
+        """Test monitoring_max_iters at minimum valid value (1)."""
+        config = OperatorConfig(monitoring_max_iters=1)
+        assert config.monitoring_max_iters == 1
+
+    def test_deployment_max_iters_exactly_one(self):
+        """Test deployment_max_iters at minimum valid value (1)."""
+        config = OperatorConfig(deployment_max_iters=1)
+        assert config.deployment_max_iters == 1
+
+    def test_very_large_timeout_values(self):
+        """Test very large but valid timeout values."""
+        config = OperatorConfig(
+            agent_fix_timeout=86400,  # 24 hours
+            deploy_timeout=7200,       # 2 hours
+            agent_timeout=3600         # 1 hour
+        )
+        assert config.agent_fix_timeout == 86400
+        assert config.deploy_timeout == 7200
+        assert config.agent_timeout == 3600
+
+    def test_config_with_float_interval_rejected(self):
+        """Test that float values for interval are rejected."""
+        with pytest.raises(TypeError, match="interval must be int"):
+            OperatorConfig(interval=30.5)
+
+    def test_provider_with_whitespace(self):
+        """Test provider with leading/trailing whitespace is rejected."""
+        # Provider validation doesn't strip whitespace, so this should fail
+        with pytest.raises(ValueError, match="Invalid provider"):
+            AgentConfig(provider="  codex  ")
+
+    def test_empty_model_string(self):
+        """Test empty string for model."""
+        config = AgentConfig(model="")
+        assert config.model == ""
+
+    def test_very_long_model_name(self):
+        """Test very long model name."""
+        long_model = "a" * 1000
+        config = AgentConfig(model=long_model)
+        assert config.model == long_model
+
+    def test_special_characters_in_model_name(self):
+        """Test special characters in model name."""
+        config = AgentConfig(model="model-v1.5-beta_2024")
+        assert config.model == "model-v1.5-beta_2024"
+
+    def test_unicode_in_model_name(self):
+        """Test Unicode characters in model name."""
+        config = AgentConfig(model="模型-v1")
+        assert config.model == "模型-v1"

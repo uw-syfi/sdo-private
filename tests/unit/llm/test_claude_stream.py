@@ -16,13 +16,6 @@ def mock_env():
 
 
 @pytest.fixture
-def mock_which():
-    """Mock shutil.which to return a fake binary path."""
-    with patch("shutil.which", return_value="/usr/bin/claude"):
-        yield
-
-
-@pytest.fixture
 def mock_recorder():
     """Mock TrajectoryRecorder."""
     recorder = MagicMock()
@@ -33,8 +26,11 @@ def mock_recorder():
 
 
 @pytest.fixture
-def claude_agent(mock_which, mock_env, mock_recorder):
+def claude_agent(mock_subprocess, mock_env, mock_recorder):
     """Create a ClaudeCodeCodingAgent instance with mocked environment."""
+    mock_popen, mock_which = mock_subprocess
+    mock_which.return_value = "/usr/bin/claude"
+
     with patch(
         "libs.agent_cli.cli_agent._get_interactive_env",
         return_value=mock_env,
@@ -46,16 +42,10 @@ def claude_agent(mock_which, mock_env, mock_recorder):
             yield agent
 
 
-@pytest.fixture
-def mock_popen():
-    """Mock subprocess.Popen."""
-    with patch("subprocess.Popen") as mock:
-        yield mock
-
-
-def test_parse_system_event(claude_agent, mock_popen):
+def test_parse_system_event(claude_agent, mock_subprocess):
     """Test that system events are parsed and handled silently."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     system_event = {
@@ -68,9 +58,6 @@ def test_parse_system_event(claude_agent, mock_popen):
     stream_data = [json.dumps(system_event) + "\n"]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -84,9 +71,10 @@ def test_parse_system_event(claude_agent, mock_popen):
     assert "system" not in output.lower()
 
 
-def test_parse_text_streaming(claude_agent, mock_popen):
+def test_parse_text_streaming(claude_agent, mock_subprocess):
     """Test that multiple text events accumulate correctly."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     # Streaming: "Hello\n", "World"
@@ -114,9 +102,6 @@ def test_parse_text_streaming(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -135,9 +120,10 @@ def test_parse_text_streaming(claude_agent, mock_popen):
     assert "[Claude] World" in output
 
 
-def test_parse_tool_use(claude_agent, mock_popen):
+def test_parse_tool_use(claude_agent, mock_subprocess):
     """Test that tool use events render with truncation and blue color."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     long_params = {"data": "x" * 300}
@@ -162,9 +148,6 @@ def test_parse_tool_use(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -183,9 +166,10 @@ def test_parse_tool_use(claude_agent, mock_popen):
     assert "x" * 300 not in output
 
 
-def test_parse_tool_result(claude_agent, mock_popen):
+def test_parse_tool_result(claude_agent, mock_subprocess):
     """Test that tool results render with green color and record to trajectory."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     tool_id = "tool-456"
@@ -229,9 +213,6 @@ def test_parse_tool_result(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -255,9 +236,10 @@ def test_parse_tool_result(claude_agent, mock_popen):
     assert "File contents here" in output
 
 
-def test_tool_result_mapping(claude_agent, mock_popen):
+def test_tool_result_mapping(claude_agent, mock_subprocess):
     """Test that tool_use_id correctly maps to tool names."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     tool_id = "tool-789"
@@ -299,9 +281,6 @@ def test_tool_result_mapping(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -315,9 +294,10 @@ def test_tool_result_mapping(claude_agent, mock_popen):
         logger.remove(handler_id)
 
 
-def test_final_result_returned(claude_agent, mock_popen):
+def test_final_result_returned(claude_agent, mock_subprocess):
     """Test that result event's 'result' field becomes return value."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     final_summary = "This is the final result summary"
@@ -344,9 +324,6 @@ def test_final_result_returned(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     result = claude_agent.generate("Test")
 
@@ -354,9 +331,10 @@ def test_final_result_returned(claude_agent, mock_popen):
     assert result == final_summary
 
 
-def test_prefix_handling(claude_agent, mock_popen):
+def test_prefix_handling(claude_agent, mock_subprocess):
     """Test that [Claude] prefix appears on new lines correctly."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     stream_data = [
@@ -383,9 +361,6 @@ def test_prefix_handling(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -402,9 +377,10 @@ def test_prefix_handling(claude_agent, mock_popen):
     assert len(prefixed_lines) >= 2
 
 
-def test_multiline_streaming(claude_agent, mock_popen):
+def test_multiline_streaming(claude_agent, mock_subprocess):
     """Test that text with newlines preserves prefix behavior."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     stream_data = [
@@ -421,9 +397,6 @@ def test_multiline_streaming(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -440,9 +413,10 @@ def test_multiline_streaming(claude_agent, mock_popen):
     assert "[Claude] Line 3" in output
 
 
-def test_non_json_fallback(claude_agent, mock_popen):
+def test_non_json_fallback(claude_agent, mock_subprocess):
     """Test that non-JSON lines are logged as-is."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     stream_data = [
@@ -460,9 +434,6 @@ def test_non_json_fallback(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -479,9 +450,10 @@ def test_non_json_fallback(claude_agent, mock_popen):
     assert "[Claude] Valid JSON" in output
 
 
-def test_empty_tool_result(claude_agent, mock_popen):
+def test_empty_tool_result(claude_agent, mock_subprocess):
     """Test that empty tool results show success message."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     tool_id = "tool-empty"
@@ -523,9 +495,6 @@ def test_empty_tool_result(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
@@ -540,9 +509,10 @@ def test_empty_tool_result(claude_agent, mock_popen):
     assert "[Claude] \x1b[32mwrite_file ran successfully\x1b[0m" in output
 
 
-def test_trajectory_recording(claude_agent, mock_popen):
+def test_trajectory_recording(claude_agent, mock_subprocess):
     """Test that tool calls are recorded with correct args and duration."""
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     tool_id = "tool-traj"
@@ -585,9 +555,6 @@ def test_trajectory_recording(claude_agent, mock_popen):
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     claude_agent.generate("Test")
 
@@ -603,25 +570,24 @@ def test_trajectory_recording(claude_agent, mock_popen):
     assert call_args["duration"] >= 0
 
 
-def test_parse_real_fixture(claude_agent, mock_popen):
+def test_parse_real_fixture(claude_agent, mock_subprocess):
     """Test parsing the real fixture file."""
+    # Fix path since we moved the test file to tests/unit/llm
     fixture_path = (
-        Path(__file__).parent.parent / "fixtures" / "claude" / "example_stream_json.txt"
+        Path(__file__).parents[2] / "fixtures" / "claude" / "example_stream_json.txt"
     )
 
     if not fixture_path.exists():
-        pytest.skip("Fixture file not found")
+        pytest.skip(f"Fixture file not found at {fixture_path}")
 
-    mock_process = MagicMock()
+    mock_popen, _ = mock_subprocess
+    mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
     with open(fixture_path, "r") as f:
         stream_lines = f.readlines()
 
     mock_process.stdout.readline.side_effect = stream_lines + [""]
-    mock_process.stderr.readline.return_value = ""
-    mock_process.wait.return_value = 0
-    mock_popen.return_value = mock_process
 
     result = claude_agent.generate("Test")
 

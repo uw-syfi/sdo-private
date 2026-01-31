@@ -117,6 +117,11 @@ class SubprocessRunner:
             stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
+            # Update stdout/stderr with full content captured by threads
+            result["stdout"] = "".join(self.stdout_lines)
+            # Append captured stderr to any existing error message (e.g. timeout msg)
+            result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
+
             if self.ui and self.tool_name:
                 duration = self.time_func() - start_time_mono
                 self.ui.on_tool_result(
@@ -191,6 +196,8 @@ class SubprocessRunner:
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+            Note: stdout/stderr returned here only contain system messages.
+            Captured output is in self.*_lines and merged in run().
         """
         start_time = self.time_func()
 
@@ -200,9 +207,8 @@ class SubprocessRunner:
             return {
                 "success": False,
                 "exit_code": -1,
-                "stdout": "".join(self.stdout_lines),
-                "stderr": "Deployment script timed out after 0 seconds\n"
-                + "".join(self.stderr_lines),
+                "stdout": "",
+                "stderr": "Deployment script timed out after 0 seconds\n",
             }
 
         while True:
@@ -220,9 +226,8 @@ class SubprocessRunner:
                     return {
                         "success": False,
                         "exit_code": -1,
-                        "stdout": "".join(self.stdout_lines),
-                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
-                        + "".join(self.stderr_lines),
+                        "stdout": "",
+                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n",
                     }
 
             # Check if process completed
@@ -239,23 +244,19 @@ class SubprocessRunner:
                 return {
                     "success": False,
                     "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": "Deployment interrupted by shutdown request\n"
-                    + "".join(self.stderr_lines),
+                    "stdout": "",
+                    "stderr": "Deployment interrupted by shutdown request\n",
                 }
 
             # Yield to allow other processing
             self.sleep_func(0.1)
 
         # Process completed
-        stdout_data = "".join(self.stdout_lines)
-        stderr_data = "".join(self.stderr_lines)
-
         return {
             "success": self.process.returncode == 0,
             "exit_code": self.process.returncode,
-            "stdout": stdout_data,
-            "stderr": stderr_data,
+            "stdout": "",
+            "stderr": "",
         }
 
     def _ensure_process_terminated(self):
@@ -348,6 +349,11 @@ class SubprocessRunner:
             stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
+            # Update stdout/stderr with full content captured by threads
+            result["stdout"] = "".join(self.stdout_lines)
+            # Append captured stderr to any existing error message
+            result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
+
             if self.ui and self.tool_name:
                 duration = self.time_func() - start_time_mono
                 self.ui.on_tool_result(
@@ -403,6 +409,8 @@ class SubprocessRunner:
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+            Note: stdout/stderr returned here only contain system messages.
+            Captured output is in self.*_lines and merged in run().
         """
         start_time = self.time_func()
         # Initialize summarizer with the same start time to avoid extra time_func call
@@ -414,9 +422,8 @@ class SubprocessRunner:
             return {
                 "success": False,
                 "exit_code": -1,
-                "stdout": "".join(self.stdout_lines),
-                "stderr": "Deployment script timed out after 0 seconds\n"
-                + "".join(self.stderr_lines),
+                "stdout": "",
+                "stderr": "Deployment script timed out after 0 seconds\n",
             }
 
         while True:
@@ -434,9 +441,8 @@ class SubprocessRunner:
                     return {
                         "success": False,
                         "exit_code": -1,
-                        "stdout": "".join(self.stdout_lines),
-                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
-                        + "".join(self.stderr_lines),
+                        "stdout": "",
+                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n",
                     }
 
             # Check if process completed
@@ -453,9 +459,8 @@ class SubprocessRunner:
                 return {
                     "success": False,
                     "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": "Deployment interrupted by shutdown request\n"
-                    + "".join(self.stderr_lines),
+                    "stdout": "",
+                    "stderr": "Deployment interrupted by shutdown request\n",
                 }
 
             # Check for progress summary
@@ -467,12 +472,9 @@ class SubprocessRunner:
             self.sleep_func(0.1)
 
         # Process completed
-        stdout_data = "".join(self.stdout_lines)
-        stderr_data = "".join(self.stderr_lines)
-
         return {
             "success": self.process.returncode == 0,
             "exit_code": self.process.returncode,
-            "stdout": stdout_data,
-            "stderr": stderr_data,
+            "stdout": "",
+            "stderr": "",
         }
