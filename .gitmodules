@@ -22,3 +22,6 @@
 [submodule "apps/sockshop-helidon"]
 	path = apps/sockshop-helidon
 	url = git@github.com:vic-lsh/sockshop-helidon.git
+[submodule "apps/sockshop"]
+	path = apps/sockshop
+	url = git@github.com:vic-lsh/sockshop.git
