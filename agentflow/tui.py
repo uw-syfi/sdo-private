@@ -8,6 +8,7 @@ from textual.widgets import Header, Footer, Input, RichLog, Label
 from textual import work
 from rich.text import Text
 from rich.panel import Panel
+from rich import box
 
 from agentflow.io import UserIO
 
@@ -71,7 +72,7 @@ class TextualIO:
                 # Skip empty lines if they are just separators, but keep them if they are meaningful?
                 # RichLog writes a new line for each call.
                 if line:
-                    self.app.write_log(Text(line, style="italic dim"))
+                    self.app.write_log(Text(line, style="dim white"))
                 else:
                     self.app.write_log("")
             # Keep the last partial line
@@ -79,7 +80,9 @@ class TextualIO:
 
     def render_tool_start(self, name: str, inputs: str) -> None:
         self._flush_thinking()
-        self.app.write_log(Text.from_markup(f"\n[bold blue][Tool Use] {name}({inputs})[/]"))
+        self.app.write_log(
+            Text.from_markup(
+                f"\n[bold magenta]➜ Tool Use:[/] [cyan]{name}[/]([dim]{inputs}[/])"))
 
     def render_tool_end(self, name: str, output: str, status: str) -> None:
         self._flush_thinking()
@@ -97,6 +100,8 @@ class TextualIO:
             title=f"{name} [{style}]{symbol}[/]",
             border_style=style,
             title_align="left",
+            box=box.ROUNDED,
+            padding=(0, 1),
         )
         self.app.write_log(panel)
 
@@ -115,8 +120,68 @@ class TextualIO:
 
 class AgentflowTUI(App):
     CSS = """
+    Screen {
+        background: #050505;
+        color: #e0e0e0;
+    }
+
+    Header {
+        background: #0a0a0a;
+        color: #666666;
+        dock: top;
+        height: 1;
+        content-align: center middle;
+    }
+
+    Footer {
+        background: #0a0a0a;
+        color: #666666;
+        dock: bottom;
+        height: 1;
+    }
+
+    /* Style the footer keys to look like little buttons or distinct tags */
+    Footer > .footer-key {
+        background: #1a1a1a;
+        color: #aaaaaa;
+        padding: 0 1;
+    }
+
     RichLog {
         height: 1fr;
+        background: #050505;
+        padding: 1 2;
+        border: none;
+        scrollbar-background: #0a0a0a;
+        scrollbar-color: #333333;
+        color: #cccccc;
+    }
+
+    Input {
+        dock: bottom;
+        width: 100%;
+        height: 5;
+        background: #0f0f0f;
+        border: wide #333333;
+        color: #ffffff;
+        padding: 1 2;
+        margin: 0 0 0 0;
+    }
+
+    Input:focus {
+        border: wide #555555;
+        background: #141414;
+    }
+
+    .workdir {
+        background: #0a0a0a;
+        color: #444444;
+        padding: 0 2;
+        text-align: left;
+        text-style: italic;
+        dock: bottom;
+        height: 1;
+        width: 100%;
     }
     """
 
@@ -137,10 +202,10 @@ class AgentflowTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Footer()
+        yield Input(placeholder="Enter your prompt here...", id="input")
         yield Label(f"Workdir: {os.path.abspath(self.work_dir)}", classes="workdir")
         yield RichLog(id="log", wrap=True)
-        yield Input(placeholder="Enter your prompt here...", id="input")
-        yield Footer()
 
     async def on_mount(self) -> None:
         self.log_widget = self.query_one(RichLog)
@@ -153,7 +218,7 @@ class AgentflowTUI(App):
             self.processing = True
             self.run_agentflow(self.initial_prompt)
         else:
-            self.write_log("Please enter your prompt below.")
+            self.write_log("Type in a task that you want to delegate to agents")
             self.input_widget.focus()
 
     def write_log(self, message: Union[str, Text]) -> None:
