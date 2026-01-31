@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
+from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from libs.agent_cli.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig, OperatorConfig
@@ -283,6 +284,7 @@ class DeploymentAgent:
         deployment_config: Optional[DeploymentConfig] = None,
         operator_config: Optional[OperatorConfig] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        ui: Optional[OperatorUI] = None,
     ):
         """Initialize the deployment agent.
 
@@ -293,6 +295,7 @@ class DeploymentAgent:
             deployment_config: Optional deployment configuration.
             operator_config: Optional operator configuration for timeouts.
             recorder: Optional trajectory recorder.
+            ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
@@ -300,6 +303,7 @@ class DeploymentAgent:
         self.deployment_config = deployment_config or DeploymentConfig()
         self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.ui = ui or NullOperatorUI()
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -357,6 +361,7 @@ class DeploymentAgent:
             self.filesystem.exists(self.deploy_script)
             and self.filesystem.exists(self.health_check_script)
         ):
+            self.ui.set_stage("Script Generation")
             logger.info("Generating Deployment Scripts")
             logger.info(
                 f"Scripts not found in {self.sds_dir}, generating with "
@@ -396,6 +401,9 @@ class DeploymentAgent:
                 logger.info("Shutdown requested, aborting deployment")
                 return False
 
+            self.ui.set_stage(
+                "Deployment", detail=f"Attempt {attempt}/{absolute_max_attempts}"
+            )
             logger.info(f"--- Deployment Attempt #{attempt} ---")
 
             # Start deployment phase in trajectory
@@ -546,6 +554,9 @@ class DeploymentAgent:
             time_func=self._get_time,
             sleep_func=self._sleep,
             popen_func=subprocess.Popen,
+            ui=self.ui,
+            tool_name="deploy.sh",
+            tool_args={"command": command},
         )
 
         # Create progress summarizer
@@ -596,6 +607,9 @@ class DeploymentAgent:
             logger.error(f"Reached maximum attempts ({max_attempts}), giving up")
             return False
 
+        self.ui.set_stage(
+            "Fixing Deployment Issues", detail=f"Attempt {attempt}/{max_attempts}"
+        )
         logger.info(f"Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
 
         # Prepare error context

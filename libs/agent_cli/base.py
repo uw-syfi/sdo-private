@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Any
 
 from app_operator.trajectory import TrajectoryRecorderProtocol
 
@@ -26,6 +26,7 @@ class CodingAgent(ABC):
     """Abstract base class for coding agents."""
 
     recorder: TrajectoryRecorderProtocol
+    event_handler: Optional[Any] = None
 
     @abstractmethod
     def generate(

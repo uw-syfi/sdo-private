@@ -284,9 +284,12 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
     # Start, check 1 (timeout), check 2...
     times = [
         0,
+        0,  # SubprocessRunner constructor start_time
         DEFAULT_DEPLOY_TIMEOUT_SECS + 1,
         DEFAULT_DEPLOY_TIMEOUT_SECS + 2,
         DEFAULT_DEPLOY_TIMEOUT_SECS + 3,
+        DEFAULT_DEPLOY_TIMEOUT_SECS + 4,
+        DEFAULT_DEPLOY_TIMEOUT_SECS + 5,
     ]
     monkeypatch.setattr(deployer_module.time, "time", lambda: times.pop(0))
     monkeypatch.setattr(deployer_module.time, "sleep", lambda x: None)

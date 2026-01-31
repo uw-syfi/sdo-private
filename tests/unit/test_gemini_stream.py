@@ -28,9 +28,7 @@ def gemini_agent(mock_which, mock_env):
         "libs.agent_cli.cli_agent._get_interactive_env",
         return_value=mock_env,
     ):
-        with patch(
-            "libs.agent_cli.cli_agent.CLICodingAgent._check_cli"
-        ):
+        with patch("libs.agent_cli.cli_agent.CLICodingAgent._check_cli"):
             agent = GeminiCodingAgent()
             yield agent
 
@@ -149,3 +147,47 @@ def test_tool_result_empty_message(gemini_agent, mock_popen):
 
     # Verify "my_awesome_tool ran successfully" in Green
     assert "[Gemini] \x1b[32mmy_awesome_tool ran successfully\x1b[0m" in output
+
+
+def test_generate_emits_ui_events(gemini_agent, mock_popen):
+    """Test that UI events are emitted during generation."""
+    mock_process = MagicMock()
+    mock_process.returncode = 0
+
+    tool_id = "test-tool-123"
+    stream_data = [
+        json.dumps({"type": "message", "role": "assistant", "content": "Thinking..."})
+        + "\n",
+        json.dumps(
+            {
+                "type": "tool_use",
+                "tool_name": "test_tool",
+                "tool_id": tool_id,
+                "parameters": {"k": "v"},
+            }
+        )
+        + "\n",
+        json.dumps({"type": "tool_result", "tool_id": tool_id, "output": "Result"})
+        + "\n",
+    ]
+
+    mock_process.stdout.readline.side_effect = stream_data + [""]
+    mock_process.stderr.readline.return_value = ""
+    mock_process.wait.return_value = 0
+    mock_popen.return_value = mock_process
+
+    # Attach mock event handler
+    mock_ui = MagicMock()
+    gemini_agent.event_handler = mock_ui
+
+    gemini_agent.generate("Test")
+
+    # Verify calls
+    mock_ui.on_thinking.assert_called_with("Thinking...")
+    mock_ui.on_tool_call.assert_called_with("test_tool", {"k": "v"})
+
+    # Check tool result call
+    mock_ui.on_tool_result.assert_called()
+    call_args = mock_ui.on_tool_result.call_args[1]
+    assert call_args["tool"] == "test_tool"
+    assert call_args["stdout"] == "Result"

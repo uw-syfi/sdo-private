@@ -205,6 +205,10 @@ Deploy an application with autonomous error fixing and AI-powered health monitor
 
 **Options:**
 - `--config <FILE>`: Path to configuration file (default: `sds.toml` in target dir)
+- `--tui`: Enable the interactive Textual TUI (cli_agent runtime only)
+- `--config <FILE>`: Path to configuration file (default: `sds.toml` in target dir)
+
+**Note:** The standard CLI output is used by default. The interactive TUI can be enabled with `--tui` for the `cli_agent` runtime. Other runtimes (`langgraph`, `adk`) do not support TUI yet.
 
 #### `viz-graph` - Visualize Dependency Graph
 
@@ -269,7 +273,7 @@ uv run -m agentflow --no-tui --prompt "Your task description"
 - `--output-dir`: Directory to save generated scripts (default: `agentflow_runs`).
 - `--work-dir`: Directory to execute the generated script in (default: current directory).
 - `--no-run`: Generate script but do not execute it.
-- `--no-tui`: Run in standard CLI mode instead of interactive TUI mode.
+- `--tui`: Enable the interactive TUI (standard CLI mode is default).
 
 **Features:**
 

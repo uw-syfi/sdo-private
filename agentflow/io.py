@@ -122,11 +122,10 @@ class ConsoleIO:
             symbol = f"{Colors.RED}✗{Colors.ENDC} "
 
         click.echo(
-            f"\n{
-                Colors.BLUE}[Tool Result] {name}: {symbol}{
-                Colors.ENDC}\n{
-                Colors.LIGHT_GRAY}{output}{
-                    Colors.ENDC}")
+            "\n"
+            f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
+            f"{Colors.LIGHT_GRAY}{output}{Colors.ENDC}"
+        )
 
     def render_error(self, message: str) -> None:
         click.echo(f"{Colors.RED}{message}{Colors.ENDC}")

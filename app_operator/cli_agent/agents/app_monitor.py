@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Callable, Any, List
 
+from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -53,7 +54,9 @@ class HealthCheckTask(MonitoringTask):
             # Run health check
             start_time = time.time()
             health_result = run_health_check(
-                monitor.repo_path, monitor.health_check_script
+                monitor.repo_path,
+                monitor.health_check_script,
+                ui=monitor.ui,
             )
             duration = time.time() - start_time
 
@@ -172,6 +175,7 @@ class AppMonitor:
         agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        ui: Optional[OperatorUI] = None,
     ):
         """Initialize the monitor agent.
 
@@ -180,11 +184,13 @@ class AppMonitor:
             agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
+            ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.ui = ui or NullOperatorUI()
         self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
@@ -237,6 +243,7 @@ class AppMonitor:
 
             self.check_count += 1
 
+            self.ui.set_stage("Monitoring", detail=f"Cycle {self.check_count}")
             logger.info(f"Monitoring Cycle #{self.check_count}")
 
             # Run all registered monitoring tasks
