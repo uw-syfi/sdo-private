@@ -10,3 +10,6 @@
 [submodule "apps/fleetcast"]
 	path = apps/fleetcast
 	url = git@github.com:lilygn/FleetCast.git
+[submodule "apps/pitstop"]
+	path = apps/pitstop
+	url = git@github.com:EdwinVW/pitstop.git
