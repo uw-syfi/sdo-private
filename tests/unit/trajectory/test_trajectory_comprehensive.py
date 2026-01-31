@@ -11,12 +11,10 @@ import json
 import pytest
 import threading
 import time
-from pathlib import Path
 
 from app_operator.trajectory import (
     TrajectoryRecorder,
     Phase,
-    MessageRole,
     TrajectoryMessage,
 )
 

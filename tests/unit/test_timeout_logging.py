@@ -1,7 +1,6 @@
 import pytest
 import subprocess
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.healthcheck import run_health_check
 

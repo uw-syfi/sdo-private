@@ -7,7 +7,6 @@ Tests for prepare_error_context and create_fix_prompt functions covering:
 - Edge cases in template rendering
 """
 
-import pytest
 from pathlib import Path
 from app_operator.prompts.deployer import (
     prepare_error_context,

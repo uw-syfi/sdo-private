@@ -1,7 +1,6 @@
 """Unit tests for app_operator.commands.run module."""
 
 import argparse
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

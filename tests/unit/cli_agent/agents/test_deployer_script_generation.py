@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from unittest.mock import Mock
 from app_operator.cli_agent.agents.deployer import generate_scripts
 from app_operator.prompts.deployment_context import analyze_repository
