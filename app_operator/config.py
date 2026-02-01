@@ -206,12 +206,18 @@ class Config:
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
         cls._validate_dspy_fields(dspy_data)
 
+        # Create agent config first to access model info
+        agent_config = AgentConfig(**agent_data)
+
+        # Parse DSPy config and auto-populate runtime_model if not set
+        dspy_config = cls._parse_dspy_config(dspy_data, agent_config)
+
         return cls(
-            agent=AgentConfig(**agent_data),
+            agent=agent_config,
             operator=OperatorConfig(**operator_data),
             deployment=DeploymentConfig(**deployment_data),
             runtime=RuntimeConfig(**runtime_data),
-            dspy=cls._parse_dspy_config(dspy_data),
+            dspy=dspy_config,
         )
 
     @classmethod
@@ -263,8 +269,16 @@ class Config:
                     )
 
     @classmethod
-    def _parse_dspy_config(cls, dspy_data: dict) -> DSPyConfig:
-        """Parse DSPy configuration with nested sections."""
+    def _parse_dspy_config(cls, dspy_data: dict, agent_config: AgentConfig) -> DSPyConfig:
+        """Parse DSPy configuration with nested sections.
+
+        Args:
+            dspy_data: DSPy configuration data from TOML
+            agent_config: Agent configuration (used to auto-populate runtime_model)
+
+        Returns:
+            Parsed DSPy configuration
+        """
         if not dspy_data:
             return DSPyConfig()
 
@@ -273,9 +287,42 @@ class Config:
             DSPyAutoRollbackConfig,
         )
 
+        # Make a copy to avoid modifying the input
+        dspy_data = dict(dspy_data)
+
         # Extract nested sections
         optimization_data = dspy_data.pop("optimization", {})
         auto_rollback_data = dspy_data.pop("auto_rollback", {})
+
+        # Auto-populate runtime_model from agent config if not explicitly set
+        if "runtime_model" not in dspy_data and agent_config.model:
+            # Format: provider/model (matching agent config format)
+            provider = agent_config.provider
+            model = agent_config.model
+
+            # Check if using Vertex AI by looking at teacher_model or environment
+            using_vertex_ai = False
+            if optimization_data:
+                teacher_model = optimization_data.get("teacher_model", "")
+                if teacher_model.startswith("vertex_ai"):
+                    using_vertex_ai = True
+
+            # Map provider names to DSPy/LiteLLM format
+            if using_vertex_ai or provider == "vertex_ai":
+                # Use Vertex AI (service account authentication)
+                dspy_provider = "vertex_ai"
+            else:
+                # Use standard provider mapping
+                provider_mapping = {
+                    "gemini": "gemini",
+                    "claude": "anthropic",
+                    "anthropic": "anthropic",
+                    "codex": "openai",
+                    "openai": "openai",
+                }
+                dspy_provider = provider_mapping.get(provider, provider)
+
+            dspy_data["runtime_model"] = f"{dspy_provider}/{model}"
 
         # Create nested config objects
         optimization = DSPyOptimizationConfig(

@@ -85,7 +85,11 @@ class HealthCheckTask(MonitoringTask):
 
         # Create analysis prompt
         prompt = self._create_analysis_prompt(
-            context, monitor.repo_path, monitor.dspy_config
+            context,
+            monitor.repo_path,
+            health_result,
+            monitor.check_count,
+            monitor.dspy_config
         )
 
         try:
@@ -165,12 +169,39 @@ class HealthCheckTask(MonitoringTask):
         self,
         context: str,
         repo_path: Path,
+        health_result: dict,
+        check_count: int,
         dspy_config: Optional['DSPyConfig'] = None
     ) -> str:
-        """Create a prompt for the coding agent to analyze health check results."""
-        return get_loader(dspy_config).render(
-            "monitor/analyze_health.jinja2", repo_path=repo_path, context=context
+        """Create a prompt for the coding agent to analyze health check results.
+
+        Args:
+            context: Formatted health check context (for Jinja2)
+            repo_path: Repository path
+            health_result: Raw health check result dict
+            check_count: Current monitoring iteration
+            dspy_config: Optional DSPy configuration
+
+        Returns:
+            Rendered prompt string
+        """
+        # Pass both Jinja2 fields (context, repo_path) and DSPy fields
+        # (health_check_output, exit_code, iteration) to support both renderers
+        prompt = get_loader(dspy_config).render(
+            "monitor/analyze_health.jinja2",
+            # Jinja2 fields (for backward compatibility)
+            repo_path=repo_path,
+            context=context,
+            # DSPy fields (for DSPy signature)
+            health_check_output=health_result.get('stdout', ''),
+            exit_code=health_result.get('exit_code', -1),
+            iteration=check_count,
         )
+
+        # Ensure the prompt explicitly requests <exec_summary> format
+        prompt += "\n\nProvide your analysis with an executive summary wrapped in <exec_summary> tags. The summary must be 1-2 sentences maximum."
+
+        return prompt
 
 
 class AppMonitor:

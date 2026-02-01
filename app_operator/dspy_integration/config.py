@@ -5,7 +5,7 @@ auto-rollback parameters, and metric weights.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
 
 @dataclass
@@ -152,6 +152,7 @@ class DSPyConfig:
     Attributes:
         use_optimized: Whether to use optimized prompts (default: False)
         optimized_version: Version of optimized prompts to use (e.g., 'v1', 'latest')
+        runtime_model: Model to use for runtime DSPy invocation (auto-populated from agent.model)
         fallback_to_baseline: Fall back to Jinja2 if DSPy fails (default: True)
         enable_online_learning: Enable feedback collection during runs
         feedback_sample_rate: Fraction of runs to collect feedback from (0.0-1.0)
@@ -163,6 +164,7 @@ class DSPyConfig:
 
     use_optimized: bool = False
     optimized_version: str = "latest"
+    runtime_model: Optional[str] = None
     fallback_to_baseline: bool = True
     enable_online_learning: bool = False
     feedback_sample_rate: float = 0.1

@@ -68,3 +68,6 @@ opencode.json
 agent_graph.png
 agentflow_runs/
 .sds
+
+# DSPy optimization artifacts
+app_operator/prompts/optimized/

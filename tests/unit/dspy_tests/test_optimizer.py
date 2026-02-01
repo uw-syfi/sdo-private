@@ -240,3 +240,65 @@ class TestPromptOptimizer:
 
         # Should return average of metric scores
         assert 0.0 <= score <= 1.0
+
+    @patch("app_operator.dspy_integration.optimizer.dspy")
+    def test_configure_dspy_lm_with_provider_prefix(self, mock_dspy, tmp_path):
+        """Test LM configuration preserves provider/model format."""
+        test_cases = [
+            # (input_model, expected_model_str)
+            ("vertex_ai/gemini-2.0-flash-exp", "vertex_ai/gemini-2.0-flash-exp"),
+            ("anthropic/claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
+            ("openai/gpt-4", "openai/gpt-4"),
+            ("gemini/gemini-pro", "gemini/gemini-pro"),
+        ]
+
+        for input_model, expected_model_str in test_cases:
+            config = DSPyConfig(
+                optimization=DSPyOptimizationConfig(
+                    optimizer="BootstrapFewShot",
+                    teacher_model=input_model,
+                    num_examples=10,
+                    validation_split=0.2,
+                )
+            )
+            optimizer = PromptOptimizer(config, tmp_path)
+
+            # Mock the LM class
+            mock_lm_instance = Mock()
+            mock_dspy.LM.return_value = mock_lm_instance
+
+            optimizer._configure_dspy_lm()
+
+            # Verify LM was called with correct model string
+            mock_dspy.LM.assert_called_with(model=expected_model_str)
+
+    @patch("app_operator.dspy_integration.optimizer.dspy")
+    def test_configure_dspy_lm_without_provider_prefix(self, mock_dspy, tmp_path):
+        """Test LM configuration adds provider prefix when missing."""
+        test_cases = [
+            # (input_model, expected_model_str)
+            ("claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
+            ("gpt-4", "openai/gpt-4"),
+            ("o1-preview", "openai/o1-preview"),
+            ("gemini-pro", "gemini/gemini-pro"),
+        ]
+
+        for input_model, expected_model_str in test_cases:
+            config = DSPyConfig(
+                optimization=DSPyOptimizationConfig(
+                    optimizer="BootstrapFewShot",
+                    teacher_model=input_model,
+                    num_examples=10,
+                    validation_split=0.2,
+                )
+            )
+            optimizer = PromptOptimizer(config, tmp_path)
+
+            # Mock the LM class
+            mock_lm_instance = Mock()
+            mock_dspy.LM.return_value = mock_lm_instance
+
+            optimizer._configure_dspy_lm()
+
+            # Verify LM was called with correct model string
+            mock_dspy.LM.assert_called_with(model=expected_model_str)

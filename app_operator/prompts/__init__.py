@@ -48,6 +48,29 @@ class PromptLoader:
         # DSPy configuration
         self.dspy_config = dspy_config
         self.optimized_dir = Path(__file__).resolve().parent / "optimized"
+        self._dspy_configured = False  # Track if DSPy LM has been configured
+
+    def _configure_dspy_runtime(self):
+        """Configure DSPy with runtime LM (called once on first use)."""
+        if self._dspy_configured or not self.dspy_config:
+            return
+
+        if not self.dspy_config.runtime_model:
+            logger.warning("DSPy enabled but runtime_model not configured")
+            return
+
+        try:
+            import dspy
+
+            # Configure DSPy with the runtime model
+            lm = dspy.LM(model=self.dspy_config.runtime_model)
+            dspy.settings.configure(lm=lm)
+            self._dspy_configured = True
+            logger.info(f"Configured DSPy runtime with model: {self.dspy_config.runtime_model}")
+
+        except Exception as e:
+            logger.error(f"Failed to configure DSPy runtime: {e}")
+            # Don't raise - will fallback to Jinja2
 
     def render(self, template_name: str, **kwargs: Any) -> str:
         """Render a template with the given context.
@@ -170,6 +193,9 @@ class PromptLoader:
             map_kwargs_to_fields,
             get_output_field_name
         )
+
+        # Configure DSPy runtime LM (once on first use)
+        self._configure_dspy_runtime()
 
         # Load the optimized module
         module = load_optimized_module(

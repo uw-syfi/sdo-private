@@ -144,27 +144,64 @@ class PromptOptimizer:
 
         # Map model names to provider/model format for DSPy 3.x
         # DSPy uses LiteLLM format: "provider/model"
-        if "claude" in teacher_model.lower():
-            if not teacher_model.startswith("anthropic/"):
-                model_str = f"anthropic/{teacher_model}"
-            else:
-                model_str = teacher_model
+
+        # If already in provider/model format, use as-is
+        if "/" in teacher_model:
+            model_str = teacher_model
+        elif "claude" in teacher_model.lower():
+            model_str = f"anthropic/{teacher_model}"
         elif "gpt" in teacher_model.lower() or "o1" in teacher_model.lower():
-            if not teacher_model.startswith("openai/"):
-                model_str = f"openai/{teacher_model}"
-            else:
-                model_str = teacher_model
+            model_str = f"openai/{teacher_model}"
         elif "gemini" in teacher_model.lower():
-            if not teacher_model.startswith("gemini/"):
-                model_str = f"gemini/{teacher_model}"
-            else:
-                model_str = teacher_model
+            model_str = f"gemini/{teacher_model}"
         else:
-            # Try as-is (user may have provided provider/model format)
+            # Try as-is for unknown models
             model_str = teacher_model
 
         lm = dspy.LM(model=model_str)
         dspy.settings.configure(lm=lm)
+
+    def _convert_to_dspy_examples(
+        self,
+        trajectory_examples: List,
+        prompt_name: str,
+    ) -> List[dspy.Example]:
+        """Convert TrajectoryExample objects to dspy.Example objects.
+
+        Args:
+            trajectory_examples: List of TrajectoryExample objects
+            prompt_name: Name of the prompt being optimized
+
+        Returns:
+            List of dspy.Example objects suitable for DSPy optimization
+        """
+        dspy_examples = []
+
+        for traj_ex in trajectory_examples:
+            # For now, create simplified examples with basic fields
+            # In future, could parse prompt/response to extract structured data
+            if prompt_name == "deployer_fix_error":
+                example = dspy.Example(
+                    repo_path="/repo",
+                    error_context=traj_ex.prompt[:500] if traj_ex.prompt else "Error context",
+                    attempt=traj_ex.iterations,
+                    max_attempts=20,
+                    deploy_script="/path/deploy.sh",
+                    health_check_script="/path/health_check.sh",
+                    previous_summary="",
+                    fix_summary=traj_ex.response[:200] if traj_ex.response else "Fix applied"
+                ).with_inputs("repo_path", "error_context", "attempt", "max_attempts",
+                              "deploy_script", "health_check_script", "previous_summary")
+            else:
+                # Generic example for other prompt types
+                example = dspy.Example(
+                    input_text=traj_ex.prompt[:500] if traj_ex.prompt else "",
+                    output_text=traj_ex.response[:200] if traj_ex.response else ""
+                ).with_inputs("input_text")
+
+            dspy_examples.append(example)
+
+        return dspy_examples
 
     def _optimize_single_prompt(
         self,
@@ -177,8 +214,8 @@ class PromptOptimizer:
 
         Args:
             prompt_name: Name of the prompt to optimize
-            train_examples: Training examples
-            val_examples: Validation examples
+            train_examples: Training examples (TrajectoryExample objects)
+            val_examples: Validation examples (TrajectoryExample objects)
             metric: Metric for evaluation
 
         Returns:
@@ -211,12 +248,17 @@ class PromptOptimizer:
         print(f"  Using {num_examples} training examples")
         print(f"  Optimizer: {self.config.optimization.optimizer}")
 
+        # Convert TrajectoryExample objects to dspy.Example objects
+        print("  Converting trajectory examples to DSPy format...")
+        dspy_train = self._convert_to_dspy_examples(limited_train, prompt_name)
+        print(f"  Converted {len(dspy_train)} training examples")
+
         try:
             # Run optimization
+            # Note: BootstrapFewShot doesn't support valset parameter in DSPy 3.x
             optimized_module = optimizer.compile(
                 module,
-                trainset=limited_train[:10],  # Use subset for demo
-                valset=val_examples[:5] if val_examples else None,
+                trainset=dspy_train,  # Use converted examples
             )
 
             # Evaluate on validation set
