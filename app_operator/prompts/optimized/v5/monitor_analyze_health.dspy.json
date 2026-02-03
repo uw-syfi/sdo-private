@@ -1,0 +1,94 @@
+{
+  "prompt_name": "monitor_analyze_health",
+  "signature": "MonitorAnalyzeHealthSignature",
+  "demos": [
+    {
+      "_store": {
+        "augmented": true,
+        "input_text": "You are an expert DevOps engineer debugging deployment issues.\n\nYour task is to analyze deployment errors and fix the deployment scripts.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Deployment script: .sds/deploy.sh\n- Health check script: .sds/health_check.sh\n- Current attempt: 1 of 20\n\n## CRITICAL: Deployment Platform Awareness\n\n**BEFORE MAKING ANY FIXES, IDENTIFY THE DEPLOYMENT PLATFORM:**\n\n1. Read the deployment script (.sds/deploy.sh) to see what com",
+        "health_status": "The health check script returned a non-zero exit code. Further investigation of the health_check_output is needed to determine the root cause and overall application health. The application is currently considered unhealthy.",
+        "is_healthy": "False"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "input_text": "You are an expert DevOps engineer debugging deployment issues.\n\nYour task is to analyze deployment errors and fix the deployment scripts.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Deployment script: .sds/deploy.sh\n- Health check script: .sds/health_check.sh\n- Current attempt: 2 of 20\n\n## CRITICAL: Deployment Platform Awareness\n\n**BEFORE MAKING ANY FIXES, IDENTIFY THE DEPLOYMENT PLATFORM:**\n\n1. Read the deployment script (.sds/deploy.sh) to see what com",
+        "health_status": "The health check script returned a non-zero exit code. Further investigation of the health_check_output is needed to determine the root cause and overall application health. The application is currently considered unhealthy.",
+        "is_healthy": "False"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "input_text": "You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.\n\nYour task is to analyze health check results and provide actionable insights and suggestions.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Application is currently deployed and running\n- You are analyzing periodic health check results\n- Your suggestions will NOT be automatically applied\n\n## DO's:\n- Carefully analyze all health metrics and indicators\n- Identify any iss",
+        "health_status": "The health check script returned a non-zero exit code. Further investigation of the health_check_output is needed to determine the root cause and overall application health. The application is currently considered unhealthy.",
+        "is_healthy": "False"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "input_text": "You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.\n\nYour task is to analyze health check results and provide actionable insights and suggestions.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Application is currently deployed and running\n- You are analyzing periodic health check results\n- Your suggestions will NOT be automatically applied\n\n## DO's:\n- Carefully analyze all health metrics and indicators\n- Identify any iss",
+        "health_status": "The health check script returned a non-zero exit code. Further investigation of the health_check_output is needed to determine the root cause and overall application health. The application is currently considered unhealthy.",
+        "is_healthy": "False"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "input_text": "You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.\n\nYour task is to analyze health check results and provide actionable insights and suggestions.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Application is currently deployed and running\n- You are analyzing periodic health check results\n- Your suggestions will NOT be automatically applied\n\n## DO's:\n- Carefully analyze all health metrics and indicators\n- Identify any iss",
+        "output_text": "<exec_summary>The system is in a critical state with a health score of 51% due to numerous warnings related to endpoint checks, unimplemented database and cache checks, and missing performance metrics"
+      },
+      "_demos": [],
+      "_input_keys": "{'input_text'}"
+    },
+    {
+      "_store": {
+        "input_text": "You are an expert DevOps engineer generating deployment and health check scripts for applications.\n\nYour task is to analyze a repository and generate two bash scripts:\n1. deploy.sh - A comprehensive deployment script\n2. health_check.sh - A comprehensive health check script\n\n## Important Resources:\n- Check for `.sds/code_analysis.md` and `.sds/deployment_issues.md`. These files contain automated analysis of the codebase and potential deployment issues. Use them to inform your script generation.\n\n",
+        "output_text": "Okay, I will generate a `deploy.sh` script within the `.sds` directory, targeting Docker Compose as the deployment platform. The script will include the standard deployment commands, error handling, a"
+      },
+      "_demos": [],
+      "_input_keys": "{'input_text'}"
+    },
+    {
+      "_store": {
+        "input_text": "You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.\n\nYour task is to analyze health check results and provide actionable insights and suggestions.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Application is currently deployed and running\n- You are analyzing periodic health check results\n- Your suggestions will NOT be automatically applied\n\n## DO's:\n- Carefully analyze all health metrics and indicators\n- Identify any iss",
+        "output_text": "```text\n<exec_summary>The overall health status is critical due to numerous warnings, particularly with endpoint checks. Database, cache, and performance checks are not implemented, posing significant"
+      },
+      "_demos": [],
+      "_input_keys": "{'input_text'}"
+    },
+    {
+      "_store": {
+        "input_text": "You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.\n\nYour task is to analyze health check results and provide actionable insights and suggestions.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Application is currently deployed and running\n- You are analyzing periodic health check results\n- Your suggestions will NOT be automatically applied\n\n## DO's:\n- Carefully analyze all health metrics and indicators\n- Identify any iss",
+        "output_text": "<exec_summary>The overall health status is critical due to a high number of warnings (27 out of 49 checks). Endpoint checks are failing, and database/cache/performance checks are not yet implemented, "
+      },
+      "_demos": [],
+      "_input_keys": "{'input_text'}"
+    },
+    {
+      "_store": {
+        "input_text": "You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.\n\nYour task is to analyze health check results and provide actionable insights and suggestions.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Application is currently deployed and running\n- You are analyzing periodic health check results\n- Your suggestions will NOT be automatically applied\n\n## DO's:\n- Carefully analyze all health metrics and indicators\n- Identify any iss",
+        "output_text": "<exec_summary>The overall health assessment is critical with a health score of 51%.  Multiple warnings related to unimplemented checks and unknown services require investigation.</exec_summary>\n\n**Det"
+      },
+      "_demos": [],
+      "_input_keys": "{'input_text'}"
+    },
+    {
+      "_store": {
+        "input_text": "You are an expert SRE (Site Reliability Engineer) analyzing application health metrics.\n\nYour task is to analyze health check results and provide actionable insights and suggestions.\n\n## Context\n- Repository: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation\n- Application is currently deployed and running\n- You are analyzing periodic health check results\n- Your suggestions will NOT be automatically applied\n\n## DO's:\n- Carefully analyze all health metrics and indicators\n- Identify any iss",
+        "output_text": "<exec_summary>The system is in a critical state due to numerous warnings, primarily related to unimplemented endpoint, database, cache, and performance checks. While the containers are running and por"
+      },
+      "_demos": [],
+      "_input_keys": "{'input_text'}"
+    }
+  ]
+}

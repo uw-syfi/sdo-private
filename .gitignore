@@ -70,4 +70,4 @@ agentflow_runs/
 .sds
 
 # DSPy optimization artifacts
-app_operator/prompts/optimized/
+# app_operator/prompts/optimized/

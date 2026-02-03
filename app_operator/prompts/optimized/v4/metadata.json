@@ -1,0 +1,20 @@
+{
+  "version": "v4",
+  "config": {
+    "optimizer": "BootstrapFewShot",
+    "teacher_model": "vertex_ai/gemini-2.0-flash-exp",
+    "num_examples": 10,
+    "metric_weights": {
+      "success": 0.6,
+      "efficiency": 0.25,
+      "tokens": 0.15
+    }
+  },
+  "prompts": {
+    "deployer_fix_error": {
+      "validation_score": 0.6703947368421052,
+      "optimized": true,
+      "module_file": "deployer_fix_error.dspy.json"
+    }
+  }
+}
