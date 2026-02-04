@@ -3,10 +3,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app_operator.agents.deployer as deployer_module
-from app_operator.agents.deployer import (
+import app_operator.cli_agent.agents.deployer as deployer_module
+from app_operator.cli_agent.agents.deployer import (
     DeploymentAgent,
     DEFAULT_DEPLOY_TIMEOUT_SECS,
+)
+from app_operator.prompts.deployer import (
+    prepare_error_context,
+    create_fix_prompt,
 )
 from app_operator.config import OperatorConfig
 from tests.fixtures.agents import TrackingAgent, ErrorAgent
@@ -41,7 +45,12 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
     generated = {}
 
     def fake_generate_scripts(
-        directory, agent, filesystem=None, deployment_config=None, operator_config=None
+        directory,
+        agent,
+        filesystem=None,
+        deployment_config=None,
+        operator_config=None,
+        recorder=None,
     ):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
@@ -76,7 +85,12 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
     agent = DeploymentAgent(repo, stub_agent)
 
     def fake_generate_scripts(
-        directory, agent, filesystem=None, deployment_config=None, operator_config=None
+        directory,
+        agent,
+        filesystem=None,
+        deployment_config=None,
+        operator_config=None,
+        recorder=None,
     ):
         return False, "boom"
 
@@ -135,7 +149,7 @@ def test_run_retries_after_failure(agent, monkeypatch):
             {"success": True, "exit_code": 0, "stdout": "", "stderr": ""},
         ]
     )
-    fix_calls: list[tuple[int, int]] = []
+    fix_calls: list[tuple[int, int, int]] = []
 
     def fake_run_deploy(
         self,
@@ -150,7 +164,13 @@ def test_run_retries_after_failure(agent, monkeypatch):
         return next(health_results)
 
     def fake_fix(
-        self, deploy_result, health_result, attempt, max_attempts, log_file_path=None
+        self,
+        deploy_result,
+        health_result,
+        attempt,
+        max_attempts,
+        log_file_path=None,
+        health_check_log_path=None,
     ):
         fix_calls.append((attempt, max_attempts, deploy_result["exit_code"]))
         return True
@@ -291,7 +311,6 @@ def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monke
     agent.agent = stub_agent
 
     def fake_prepare(
-        self,
         deploy_result,
         health_result,
         log_file_path=None,
@@ -299,11 +318,19 @@ def test_fix_with_agent_calls_agent_and_returns_success(agent, stub_agent, monke
     ):
         return "context"
 
-    def fake_prompt(self, context, attempt, max_attempts):
-        return f"prompt::{context}::{attempt}/{max_attempts}"
+    def fake_prompt(
+        repo_path,
+        attempt,
+        max_attempts,
+        error_context,
+        deploy_script_path,
+        health_check_script_path,
+    ):
+        return f"prompt::{error_context}::{attempt}/{max_attempts}"
 
-    agent._prepare_error_context = MethodType(fake_prepare, agent)
-    agent._create_fix_prompt = MethodType(fake_prompt, agent)
+    # Patch the imported functions instead of monkeypatching the instance
+    monkeypatch.setattr(deployer_module, "prepare_error_context", fake_prepare)
+    monkeypatch.setattr(deployer_module, "create_fix_prompt", fake_prompt)
 
     deploy_result = {"exit_code": 99, "success": False}
 
@@ -321,14 +348,13 @@ def test_fix_with_agent_handles_agent_errors(agent, monkeypatch):
     error_agent = ErrorAgent(error_message="agent error")
     agent.agent = error_agent
 
-    def fake_prepare(self, *args, **kwargs):
-        return "ctx"
-
-    def fake_prompt(self, *args, **kwargs):
-        return "prompt"
-
-    agent._prepare_error_context = MethodType(fake_prepare, agent)
-    agent._create_fix_prompt = MethodType(fake_prompt, agent)
+    # Patch the imported functions
+    monkeypatch.setattr(
+        deployer_module, "prepare_error_context", lambda *args, **kwargs: "ctx"
+    )
+    monkeypatch.setattr(
+        deployer_module, "create_fix_prompt", lambda *args, **kwargs: "prompt"
+    )
 
     assert (
         agent._fix_with_agent(
@@ -339,7 +365,7 @@ def test_fix_with_agent_handles_agent_errors(agent, monkeypatch):
 
 
 def test_prepare_error_context_truncates_long_outputs(agent):
-    """Test that _prepare_error_context returns basic error context.
+    """Test that prepare_error_context returns basic error context.
 
     Note: The current implementation no longer includes stdout/stderr in the context
     (they are commented out). This test verifies the function works with long outputs
@@ -362,7 +388,8 @@ def test_prepare_error_context_truncates_long_outputs(agent):
         "stderr": health_stderr,
     }
 
-    context = agent._prepare_error_context(deploy_result, health_result)
+    # Call the standalone function
+    context = prepare_error_context(deploy_result, health_result)
 
     # The current implementation only includes basic status info, not stdout/stderr
     assert "## Deployment Script Result" in context
@@ -372,7 +399,15 @@ def test_prepare_error_context_truncates_long_outputs(agent):
 
 def test_create_fix_prompt_includes_repo_and_scripts(agent):
     context = "error context"
-    prompt = agent._create_fix_prompt(context, attempt=2, max_attempts=5)
+    # Call the standalone function
+    prompt = create_fix_prompt(
+        agent.repo_path,
+        attempt=2,
+        max_attempts=5,
+        error_context=context,
+        deploy_script_path=agent.deploy_script,
+        health_check_script_path=agent.health_check_script,
+    )
 
     assert str(agent.repo_path) in prompt
     assert str(agent.deploy_script) in prompt

@@ -1,6 +1,10 @@
 [agent]
-provider = "codex" # or "gemini", "claude", "opencode"
-# model = "gpt-4o-mini" # optional
+provider = "codex" # or "gemini", "claude", "opencode", "openai", "anthropic"
+# model = "gpt-4o-mini" # required for langgraph runtime
+# location = "us-central1" # optional: specify vertex AI location (default: us-central1)
+
+[runtime]
+impl = "cli_agent" # or "langgraph", "adk"
 
 [operator]
 interval = 30

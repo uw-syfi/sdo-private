@@ -24,6 +24,6 @@ fi
 # -r: recursive
 # -a: aggressive (level 1)
 # Using --extra test to ensure autopep8 is available
-uv run --extra test autopep8 $MODE -r -a --max-line-length 100 app_operator tools tests
+uv run --extra test autopep8 $MODE -r -a --max-line-length 100 app_operator tests
 
 echo "Formatting check complete."

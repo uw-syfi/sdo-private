@@ -68,7 +68,9 @@ class TestOperatorConfigValidation:
 
     def test_valid_config_accepted(self):
         """Valid configuration values should be accepted."""
-        config = OperatorConfig(interval=60, monitoring_max_iters=10, deployment_max_iters=3)
+        config = OperatorConfig(
+            interval=60, monitoring_max_iters=10, deployment_max_iters=3
+        )
         assert config.interval == 60
         assert config.monitoring_max_iters == 10
         assert config.deployment_max_iters == 3
@@ -129,7 +131,9 @@ class TestOperatorConfigValidation:
 
     def test_custom_timeout_values_accepted(self):
         """Custom timeout values should be accepted."""
-        config = OperatorConfig(agent_fix_timeout=3600, deploy_timeout=1800, agent_timeout=600)
+        config = OperatorConfig(
+            agent_fix_timeout=3600, deploy_timeout=1800, agent_timeout=600
+        )
         assert config.agent_fix_timeout == 3600
         assert config.deploy_timeout == 1800
         assert config.agent_timeout == 600
@@ -144,12 +148,12 @@ class TestAgentConfigValidation:
             AgentConfig(provider="invalid-provider")
 
     def test_provider_case_insensitive(self):
-        """Provider names should be case-insensitive."""
+        """Provider names should be case-insensitive and normalized."""
         config = AgentConfig(provider="CODEX")
-        assert config.provider == "CODEX"
+        assert config.provider == "codex"
 
         config = AgentConfig(provider="Gemini")
-        assert config.provider == "Gemini"
+        assert config.provider == "gemini"
 
     def test_valid_providers_accepted(self):
         """All valid providers should be accepted."""
@@ -178,6 +182,21 @@ class TestAgentConfigValidation:
         config = AgentConfig(provider="gemini", model="gemini-1.5-pro")
         assert config.model == "gemini-1.5-pro"
 
+    def test_location_type_checked(self):
+        """Location must be a string or None."""
+        with pytest.raises(TypeError, match="location must be str or None"):
+            AgentConfig(location=123)
+
+    def test_location_can_be_none(self):
+        """Location can be None (optional)."""
+        config = AgentConfig(provider="codex", location=None)
+        assert config.location is None
+
+    def test_location_can_be_string(self):
+        """Location can be a string."""
+        config = AgentConfig(provider="vertex", location="us-west1")
+        assert config.location == "us-west1"
+
     def test_default_config_valid(self):
         """Default agent config should be valid."""
         config = AgentConfig()
@@ -202,7 +221,9 @@ class TestConfigIntegration:
         """Full configuration with valid values should work."""
         config = Config(
             agent=AgentConfig(provider="claude", model="claude-3"),
-            operator=OperatorConfig(interval=60, monitoring_max_iters=10, deployment_max_iters=5)
+            operator=OperatorConfig(
+                interval=60, monitoring_max_iters=10, deployment_max_iters=5
+            ),
         )
         assert config.agent.provider == "claude"
         assert config.agent.model == "claude-3"
@@ -219,26 +240,24 @@ class TestConfigIntegration:
     def test_config_from_dict_validates(self):
         """Config.from_dict should trigger validation."""
         with pytest.raises(ValueError, match="interval must be positive"):
-            Config.from_dict({
-                "operator": {"interval": -1}
-            })
+            Config.from_dict({"operator": {"interval": -1}})
 
     def test_config_from_dict_with_invalid_provider(self):
         """Config.from_dict should validate provider."""
         with pytest.raises(ValueError, match="Invalid provider"):
-            Config.from_dict({
-                "agent": {"provider": "unknown"}
-            })
+            Config.from_dict({"agent": {"provider": "unknown"}})
 
     def test_config_from_dict_with_custom_timeouts(self):
         """Config.from_dict should accept custom timeout values."""
-        config = Config.from_dict({
-            "operator": {
-                "agent_fix_timeout": 3600,
-                "deploy_timeout": 1800,
-                "agent_timeout": 600
+        config = Config.from_dict(
+            {
+                "operator": {
+                    "agent_fix_timeout": 3600,
+                    "deploy_timeout": 1800,
+                    "agent_timeout": 600,
+                }
             }
-        })
+        )
         assert config.operator.agent_fix_timeout == 3600
         assert config.operator.deploy_timeout == 1800
         assert config.operator.agent_timeout == 600
@@ -246,13 +265,9 @@ class TestConfigIntegration:
     def test_config_from_dict_validates_timeout_types(self):
         """Config.from_dict should validate timeout types."""
         with pytest.raises(TypeError, match="agent_fix_timeout must be int"):
-            Config.from_dict({
-                "operator": {"agent_fix_timeout": "not-an-int"}
-            })
+            Config.from_dict({"operator": {"agent_fix_timeout": "not-an-int"}})
 
     def test_config_from_dict_validates_timeout_values(self):
         """Config.from_dict should validate timeout values are positive."""
         with pytest.raises(ValueError, match="deploy_timeout must be positive"):
-            Config.from_dict({
-                "operator": {"deploy_timeout": -100}
-            })
+            Config.from_dict({"operator": {"deploy_timeout": -100}})

@@ -1,7 +1,10 @@
 from types import MethodType
 import pytest
 
-from app_operator.agents.deployer import DeploymentAgent, DEFAULT_DEPLOY_TIMEOUT_SECS
+from app_operator.cli_agent.agents.deployer import (
+    DeploymentAgent,
+    DEFAULT_DEPLOY_TIMEOUT_SECS,
+)
 
 
 class StubAgent:

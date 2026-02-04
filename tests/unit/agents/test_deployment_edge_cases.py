@@ -4,7 +4,7 @@ These tests verify proper handling of boundary conditions and unusual
 scenarios in the deployment process.
 """
 
-from app_operator.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures.agents import StubAgent, ErrorAgent, TrackingAgent
 
 
@@ -251,7 +251,7 @@ class TestScriptGenerationEdgeCases:
 
     def test_script_generation_creates_valid_files(self, tmp_path):
         """Generated scripts should be valid and executable."""
-        from app_operator.agents.deployer import generate_scripts
+        from app_operator.cli_agent.agents.deployer import generate_scripts
 
         repo = tmp_path / "repo"
         repo.mkdir()

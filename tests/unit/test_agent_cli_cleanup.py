@@ -15,10 +15,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app_operator.agent_cli.base import CodingAgent
-from app_operator.agent_cli.claude import ClaudeCodeCodingAgent
-from app_operator.agent_cli.codex import CodexCodingAgent
-from app_operator.agent_cli.gemini import GeminiCodingAgent
+from libs.agent_cli.base import CodingAgent
+from libs.agent_cli.claude import ClaudeCodeCodingAgent
+from libs.agent_cli.codex import CodexCodingAgent
+from libs.agent_cli.gemini import GeminiCodingAgent
 
 
 class MockProcess:
@@ -511,7 +511,7 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", side_effect=track_popen):
                 with patch(
-                    "app_operator.agent_cli.cli_agent._get_interactive_env",
+                    "libs.agent_cli.cli_agent._get_interactive_env",
                     return_value=mock_env,
                 ):
                     agent = agent_class()
@@ -582,7 +582,7 @@ def test_multiple_generates_dont_leak_resources(agent_type, mock_which):
 
 def test_factory_creates_all_agent_types(mock_which):
     """Test factory can create all agent types."""
-    from app_operator.agent_cli.factory import create_agent_from_config
+    from libs.agent_cli.factory import create_agent_from_config
     from app_operator.config import Config, AgentConfig, OperatorConfig
 
     agents_to_test = [

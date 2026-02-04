@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from app_operator.agents.code_analyzer import CodeAnalyzerAgent
+from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from tests.fixtures.agents import StubAgent, ErrorAgent
 
 

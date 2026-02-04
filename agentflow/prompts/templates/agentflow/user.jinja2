@@ -1,0 +1,58 @@
+## User Request
+
+"""
+{{ user_prompt }}
+"""
+
+{% if qa_pairs %}
+## Clarification History
+
+{% for q, a in qa_pairs %}
+**Q:** {{ q }}
+**A:** {{ a }}
+
+{% endfor %}
+{% endif %}
+
+## Requirements & Constraints
+
+1. **MAX_ITERATIONS constant:** You MUST define `MAX_ITERATIONS = {{ loop_bound }}` as a global constant at the top of the script.
+
+2. **Loop bounds:** All loops (especially in judge_loop) must use MAX_ITERATIONS to prevent infinite execution.
+
+3. **Standalone script:** The script must be completely self-contained with all necessary imports.
+
+4. **Executable:** Must include `if __name__ == "__main__":` and call main().
+
+5. **Imports:** Must import from `agentflow.runtime` for orchestration functions.
+
+6. **No external dependencies:** Do not assume external tools (git, docker, npm, etc.) are available unless explicitly requested by the user.
+
+7. **Error handling:** Include try-except blocks around agent calls to handle failures gracefully.
+
+8. **Output:** Print final results to stdout clearly and readably.
+
+## Task Analysis Checklist
+
+Before generating the script, consider:
+
+1. **Task decomposition:** Can this task be broken into independent subtasks? → Use fan_out
+2. **Aggregation needed:** Do multiple outputs need to be combined? → Use summarize
+3. **Quality refinement:** Does output need iterative improvement? → Use judge_loop
+4. **Complex workflow:** Does this need multiple phases? → Combine patterns
+
+5. **Clarification needed:** Are any requirements ambiguous?
+   - If YES: Set status to "clarify" and ask specific questions
+   - If NO: Set status to "ready" and generate the script
+
+## Response Format
+
+Remember to respond with valid JSON only:
+
+```json
+{
+  "status": "clarify" | "ready",
+  "questions": ["question1", "question2"],  // Only if status is "clarify"
+  "python_script": "complete_script_here"    // Only if status is "ready"
+}
+```

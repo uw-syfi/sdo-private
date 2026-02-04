@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from app_operator.agent_cli.claude import ClaudeCodeCodingAgent
+from libs.agent_cli.claude import ClaudeCodeCodingAgent
 
 
 @pytest.fixture
@@ -23,13 +23,26 @@ def mock_which():
 
 
 @pytest.fixture
-def claude_agent(mock_which, mock_env):
+def mock_recorder():
+    """Mock TrajectoryRecorder."""
+    recorder = MagicMock()
+    recorder.add_tool_call = MagicMock()
+    recorder.add_user_message = MagicMock()
+    recorder.add_assistant_message = MagicMock()
+    return recorder
+
+
+@pytest.fixture
+def claude_agent(mock_which, mock_env, mock_recorder):
     """Create a ClaudeCodeCodingAgent instance with mocked environment."""
     with patch(
-        "app_operator.agent_cli.cli_agent._get_interactive_env", return_value=mock_env
+        "libs.agent_cli.cli_agent._get_interactive_env",
+        return_value=mock_env,
     ):
-        with patch("app_operator.agent_cli.cli_agent.CLICodingAgent._check_cli"):
-            agent = ClaudeCodeCodingAgent()
+        with patch(
+            "libs.agent_cli.cli_agent.CLICodingAgent._check_cli"
+        ):
+            agent = ClaudeCodeCodingAgent(recorder=mock_recorder)
             yield agent
 
 
@@ -223,13 +236,15 @@ def test_parse_tool_result(claude_agent, mock_popen):
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
     try:
-        with patch("app_operator.agent_cli.claude.record_tool_call") as mock_record:
-            claude_agent.generate("Test")
-            # Verify trajectory recording was called
-            mock_record.assert_called_once()
-            call_args = mock_record.call_args
-            assert call_args[1]["tool"] == "read_file"
-            assert call_args[1]["stdout"] == "File contents here"
+        claude_agent.generate("Test")
+        # Verify trajectory recording was called
+        mock_recorder = claude_agent.recorder
+        mock_recorder.add_tool_call.assert_called_once()
+        call_args = mock_recorder.add_tool_call.call_args
+        # Accessing call_args kwargs or positional args
+        # add_tool_call(tool=..., args=..., stdout=..., duration=...)
+        assert call_args.kwargs["tool"] == "read_file"
+        assert call_args.kwargs["stdout"] == "File contents here"
     finally:
         logger.remove(handler_id)
 
@@ -291,11 +306,11 @@ def test_tool_result_mapping(claude_agent, mock_popen):
     captured_stdout = io.StringIO()
     handler_id = logger.add(captured_stdout, format="{message}")
     try:
-        with patch("app_operator.agent_cli.claude.record_tool_call") as mock_record:
-            claude_agent.generate("Test")
-            # Verify the correct tool name was used
-            call_args = mock_record.call_args
-            assert call_args[1]["tool"] == "custom_tool"
+        claude_agent.generate("Test")
+        # Verify the correct tool name was used
+        mock_recorder = claude_agent.recorder
+        call_args = mock_recorder.add_tool_call.call_args
+        assert call_args.kwargs["tool"] == "custom_tool"
     finally:
         logger.remove(handler_id)
 
@@ -574,23 +589,25 @@ def test_trajectory_recording(claude_agent, mock_popen):
     mock_process.wait.return_value = 0
     mock_popen.return_value = mock_process
 
-    with patch("app_operator.agent_cli.claude.record_tool_call") as mock_record:
-        claude_agent.generate("Test")
+    claude_agent.generate("Test")
 
-        # Verify recording
-        mock_record.assert_called_once()
-        call_args = mock_record.call_args[1]
+    # Verify recording
+    mock_recorder = claude_agent.recorder
+    mock_recorder.add_tool_call.assert_called_once()
+    call_args = mock_recorder.add_tool_call.call_args[1]
 
-        assert call_args["tool"] == "bash"
-        assert call_args["args"] == tool_args
-        assert call_args["stdout"] == "total 0"
-        assert call_args["duration"] is not None
-        assert call_args["duration"] >= 0
+    assert call_args["tool"] == "bash"
+    assert call_args["args"] == tool_args
+    assert call_args["stdout"] == "total 0"
+    assert call_args["duration"] is not None
+    assert call_args["duration"] >= 0
 
 
 def test_parse_real_fixture(claude_agent, mock_popen):
     """Test parsing the real fixture file."""
-    fixture_path = Path(__file__).parent.parent / "fixtures" / "claude" / "example_stream_json.txt"
+    fixture_path = (
+        Path(__file__).parent.parent / "fixtures" / "claude" / "example_stream_json.txt"
+    )
 
     if not fixture_path.exists():
         pytest.skip("Fixture file not found")
@@ -606,18 +623,18 @@ def test_parse_real_fixture(claude_agent, mock_popen):
     mock_process.wait.return_value = 0
     mock_popen.return_value = mock_process
 
-    with patch("app_operator.agent_cli.claude.record_tool_call") as mock_record:
-        result = claude_agent.generate("Test")
+    result = claude_agent.generate("Test")
 
-        # Verify all lines parse without errors
-        assert result is not None
+    # Verify all lines parse without errors
+    assert result is not None
 
-        # The fixture has a result event at the end
-        assert "AI-native infrastructure automation system" in result
+    # The fixture has a result event at the end
+    assert "AI-native infrastructure automation system" in result
 
-        # Count tool calls (should be 38 based on fixture)
-        assert mock_record.call_count == 38
+    # Count tool calls (should be 38 based on fixture)
+    mock_recorder = claude_agent.recorder
+    assert mock_recorder.add_tool_call.call_count == 38
 
-        # Count text events by checking if result contains multiple parts
-        # The fixture should have processed text events successfully
-        assert len(result) > 100  # Result should be substantial
+    # Count text events by checking if result contains multiple parts
+    # The fixture should have processed text events successfully
+    assert len(result) > 100  # Result should be substantial

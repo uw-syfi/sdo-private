@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from app_operator.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 
 
 class MockProcess:
@@ -21,6 +21,7 @@ class MockProcess:
                     return next(iterator)
                 except StopIteration:
                     return ""
+
             return readline
 
         self.stdout.readline.side_effect = make_readline(self.stdout_iter)

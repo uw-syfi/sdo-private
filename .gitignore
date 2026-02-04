@@ -63,3 +63,10 @@ dmypy.json
 # UV
 uv.lock
 sds.toml
+
+.codex
+opencode.json
+
+agent_graph.png
+agentflow_runs/
+.sds
