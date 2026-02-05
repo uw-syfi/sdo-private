@@ -10,7 +10,7 @@ import dspy
 
 from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
-from app_operator.dspy_integration.metrics import CompositeMetric, PredictionQualityMetric
+from app_operator.dspy_integration.metrics import CompositeMetric, GroundTruthSimilarityMetric
 from app_operator.dspy_integration.signatures import get_signature, SIGNATURES
 from app_operator.dspy_integration.field_mappings import (
     map_kwargs_to_fields,
@@ -90,7 +90,7 @@ class PromptOptimizer:
     def optimize(
         self,
         prompt_names: List[str],
-        trajectories_dir: Path,
+        trajectories_dirs: List[Path],
         output_dir: Optional[Path] = None,
         dry_run: bool = False,
     ) -> Dict[str, Any]:
@@ -98,7 +98,8 @@ class PromptOptimizer:
 
         Args:
             prompt_names: List of prompt names to optimize
-            trajectories_dir: Directory containing trajectory files
+            trajectories_dirs: Directories containing trajectory files;
+                examples from all directories are merged before optimization.
             output_dir: Optional output directory for optimized prompts
             dry_run: If True, validate inputs but don't run optimization
 
@@ -117,29 +118,25 @@ class PromptOptimizer:
                 f"Valid prompts: {', '.join(sorted(SIGNATURES.keys()))}"
             )
 
-        # Load training data
-        print(f"Loading training data from {trajectories_dir}...")
-        data_loader = TrajectoryDataLoader(trajectories_dir)
-        examples = data_loader.load_examples(success_only=False)
+        # Load training data from all provided directories
+        print(f"Loading training data from {trajectories_dirs}...")
+        examples = []
+        for tdir in trajectories_dirs:
+            data_loader = TrajectoryDataLoader(tdir)
+            examples.extend(data_loader.load_examples(success_only=False))
 
         if not examples:
-            raise RuntimeError(f"No training examples found in {trajectories_dir}")
+            raise RuntimeError(f"No training examples found in {trajectories_dirs}")
 
         print(f"Loaded {len(examples)} training examples")
 
-        # Split into train/validation
-        split_idx = int(len(examples) * (1 - self.config.optimization.validation_split))
-        train_examples = examples[:split_idx]
-        val_examples = examples[split_idx:]
-
-        print(f"Train: {len(train_examples)}, Validation: {len(val_examples)}")
-
         if dry_run:
+            split_idx = int(len(examples) * (1 - self.config.optimization.validation_split))
             return {
                 "dry_run": True,
                 "prompt_names": prompt_names,
-                "train_examples": len(train_examples),
-                "val_examples": len(val_examples),
+                "train_examples": split_idx,
+                "val_examples": len(examples) - split_idx,
                 "config": {
                     "optimizer": self.config.optimization.optimizer,
                     "teacher_model": self.config.optimization.teacher_model,
@@ -151,33 +148,42 @@ class PromptOptimizer:
         print(f"Configuring DSPy with teacher model: {self.config.optimization.teacher_model}")
         self._configure_dspy_lm()
 
-        # Create composite metric with LLM judge so the prediction-quality
-        # slot actually varies across candidates (the default
-        # DeploymentSuccessMetric reads only historical example fields).
+        # Use GroundTruthSimilarityMetric for the prediction-quality slot:
+        # instant, deterministic, no LM call, and immune to the
+        # self-evaluation bias that plagues LLM judges when the same model
+        # generates both the prediction and the score.
         metric = CompositeMetric(
             success_weight=self.config.optimization.metric_weights["success"],
             efficiency_weight=self.config.optimization.metric_weights["efficiency"],
             token_weight=self.config.optimization.metric_weights["tokens"],
-            prediction_metric=PredictionQualityMetric(),
+            prediction_metric=GroundTruthSimilarityMetric(),
         )
 
         # Optimize each prompt
         results = {}
         for prompt_name in prompt_names:
-            # Filter examples to the relevant phase for this prompt
+            # Filter examples to the relevant phase for this prompt, then
+            # split into train/validation.  The split must happen *after*
+            # phase filtering so that small phases don't end up with zero
+            # validation examples while unrelated phases consume the budget.
             target_phase = PROMPT_PHASE_MAP.get(prompt_name)
             if target_phase:
-                prompt_train = [e for e in train_examples if e.phase == target_phase]
-                prompt_val = [e for e in val_examples if e.phase == target_phase]
+                phase_examples = [e for e in examples if e.phase == target_phase]
             else:
-                prompt_train = train_examples
-                prompt_val = val_examples
+                phase_examples = examples
 
-            if not prompt_train:
+            if not phase_examples:
                 print(f"\n  Skipping {prompt_name}: no training examples in phase '{target_phase}'")
                 results[prompt_name] = {"success": False,
                                         "error": f"No training examples for phase '{target_phase}'"}
                 continue
+
+            # Guarantee at least one training example.  Validation is skipped
+            # when the phase is too small to split meaningfully.
+            split_idx = max(1, int(len(phase_examples) *
+                            (1 - self.config.optimization.validation_split)))
+            prompt_train = phase_examples[:split_idx]
+            prompt_val = phase_examples[split_idx:]
 
             print(
                 f"\nOptimizing prompt: {prompt_name} (phase={target_phase}, train={
@@ -214,8 +220,8 @@ class PromptOptimizer:
             "success": True,
             "prompt_names": prompt_names,
             "output_dir": str(output_path),
-            "train_examples": len(train_examples),
-            "val_examples": len(val_examples),
+            "train_examples": len(examples),
+            "val_examples": 0,  # split is per-prompt after phase filtering
             "results": results,
         }
 
@@ -239,7 +245,9 @@ class PromptOptimizer:
             # Try as-is for unknown models
             model_str = teacher_model
 
-        lm = dspy.LM(model=model_str)
+        # Disable LiteLLM's request-level cache so that COPRO candidates
+        # with different instructions are not served stale responses.
+        lm = dspy.LM(model=model_str, cache=False)
         dspy.settings.configure(lm=lm)
 
     def _convert_to_dspy_examples(
@@ -267,16 +275,26 @@ class PromptOptimizer:
         output_field_name = get_output_field_name(prompt_name)
 
         dspy_examples = []
-        skipped = 0
+        skipped_no_kwargs = 0
+        skipped_wrong_prompt = 0
         for traj_ex in trajectory_examples:
             if traj_ex.prompt_kwargs is None:
-                skipped += 1
+                skipped_no_kwargs += 1
                 continue
 
             # Map recorded kwargs through explicit + auto mappings
             mapped = map_kwargs_to_fields(prompt_name, traj_ex.prompt_kwargs)
             # Filter to only fields declared in the signature
             fields = {k: mapped[k] for k in input_field_names if k in mapped}
+
+            # If none of the recorded kwargs match any input field this
+            # conversation belongs to a *different* prompt that shares the
+            # same phase (e.g. fix_error examples in the deployment phase
+            # when optimising deployer_summarize).  Using them would inject
+            # garbage into training — skip.
+            if not fields:
+                skipped_wrong_prompt += 1
+                continue
 
             # Fill any missing input fields with empty string
             for name in input_field_names:
@@ -295,9 +313,12 @@ class PromptOptimizer:
             example = dspy.Example(**fields).with_inputs(*input_field_names)
             dspy_examples.append(example)
 
-        if skipped:
+        if skipped_no_kwargs:
             print(
-                f"  Skipped {skipped} example(s) missing prompt_kwargs (no field mapping available)")
+                f"  Skipped {skipped_no_kwargs} example(s) missing prompt_kwargs")
+        if skipped_wrong_prompt:
+            print(
+                f"  Skipped {skipped_wrong_prompt} example(s) from a different prompt in the same phase")
 
         return dspy_examples
 
@@ -359,12 +380,6 @@ class PromptOptimizer:
 
         module = PromptModule(signature)
 
-        # Wrap metric to detect whether the teacher LM ran at all
-        tracking_metric = _MetricCallTracker(metric)
-
-        # Select optimizer
-        optimizer = self._create_optimizer(tracking_metric)
-
         # Limit training examples
         num_examples = min(
             len(train_examples),
@@ -384,8 +399,15 @@ class PromptOptimizer:
             print(f"  No usable training examples after conversion for {prompt_name}")
             return {
                 "success": False,
-                "error": "All training examples lacked prompt_kwargs and were skipped.",
+                "error": f"No examples with matching kwargs for '{prompt_name}'. "
+                "The trajectory may not contain any conversations that used this prompt.",
             }
+
+        # Wrap metric to detect whether the teacher LM ran at all
+        tracking_metric = _MetricCallTracker(metric)
+
+        # Select optimizer — pass len(dspy_train) so COPRO can set depth
+        optimizer = self._create_optimizer(tracking_metric, num_train_examples=len(dspy_train))
 
         try:
             # Convert validation examples for optimizers that need valset
@@ -405,7 +427,7 @@ class PromptOptimizer:
                 )
             elif optimizer_name == "COPRO":
                 optimized_module = optimizer.compile(
-                    module, trainset=dspy_train, eval_kwargs={}
+                    module, trainset=dspy_train, eval_kwargs={"num_threads": 4}
                 )
             else:
                 optimized_module = optimizer.compile(module, trainset=dspy_train)
@@ -444,11 +466,14 @@ class PromptOptimizer:
                 "error": str(e),
             }
 
-    def _create_optimizer(self, metric: CompositeMetric):
+    def _create_optimizer(self, metric: CompositeMetric, num_train_examples: int = 30):
         """Create DSPy optimizer based on config.
 
         Args:
             metric: Metric for evaluation
+            num_train_examples: Number of converted training examples (used to
+                tune COPRO depth — shallow depth avoids wasting LM calls when
+                the training set is small).
 
         Returns:
             DSPy optimizer instance
@@ -464,7 +489,10 @@ class PromptOptimizer:
         elif optimizer_name == "COPRO":
             # Vertex AI caps candidateCount at 8; COPRO passes n=breadth
             # at depth > 0, so breadth must stay <= 8.
-            return dspy.COPRO(metric=metric, breadth=8)
+            # Use shallow depth when the training set is small to avoid
+            # burning LM calls on refinement rounds that have no signal.
+            depth = 2 if num_train_examples <= 10 else 3
+            return dspy.COPRO(metric=metric, breadth=8, depth=depth)
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -474,8 +502,12 @@ class PromptOptimizer:
         examples: List,
         metric: CompositeMetric,
         prompt_name: str,
-    ) -> float:
+    ) -> Optional[float]:
         """Evaluate module on validation examples by invoking it.
+
+        Each example is converted individually so that examples which lack
+        prompt_kwargs (and therefore cannot be converted) are skipped without
+        shifting the alignment between trajectory and DSPy examples.
 
         Args:
             module: DSPy module to evaluate
@@ -484,11 +516,14 @@ class PromptOptimizer:
             prompt_name: Name of the prompt (used to convert examples)
 
         Returns:
-            Average score
+            Average score, or None when no examples convert to DSPy format.
         """
-        dspy_examples = self._convert_to_dspy_examples(examples, prompt_name)
         scores = []
-        for traj_ex, dspy_ex in zip(examples, dspy_examples):
+        for traj_ex in examples:
+            converted = self._convert_to_dspy_examples([traj_ex], prompt_name)
+            if not converted:
+                continue
+            dspy_ex = converted[0]
             try:
                 prediction = module(**dict(dspy_ex.inputs()))
                 score = metric(traj_ex, prediction)
@@ -496,7 +531,7 @@ class PromptOptimizer:
             except Exception:
                 pass
 
-        return sum(scores) / len(scores) if scores else 0.0
+        return sum(scores) / len(scores) if scores else None
 
     def _get_next_version(self) -> int:
         """Get next version number for optimized prompts.

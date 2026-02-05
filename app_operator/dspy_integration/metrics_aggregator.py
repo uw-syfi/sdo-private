@@ -293,15 +293,6 @@ class MetricsAggregator:
             else:
                 improvements["success_rate_improvement"] = None
 
-        # Duration (lower is better)
-        if "duration" in baseline and "duration" in optimized:
-            baseline_dur = baseline["duration"]["avg_seconds"]
-            optimized_dur = optimized["duration"]["avg_seconds"]
-            if baseline_dur > 0:
-                improvements["duration_reduction_pct"] = round(
-                    ((baseline_dur - optimized_dur) / baseline_dur) * 100, 2
-                )
-
         # Iteration efficiency (lower is better, so invert)
         if "iterations" in baseline and "iterations" in optimized:
             baseline_iter = baseline["iterations"]["avg"]

@@ -78,51 +78,6 @@ def optimized_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Duration comparison
-# ---------------------------------------------------------------------------
-
-class TestDurationComparison:
-    """Duration reduction appears in improvements when avg duration differs."""
-
-    def test_duration_reduction_computed(self, baseline_dir, optimized_dir):
-        agg = MetricsAggregator(baseline_dir)
-        comparison = agg.compare_versions(baseline_dir, optimized_dir)
-        impr = comparison["improvements"]
-
-        assert "duration_reduction_pct" in impr
-        # baseline avg=10 s, optimized avg=6 s → 40 % reduction
-        assert impr["duration_reduction_pct"] == 40.0
-
-    def test_duration_reduction_negative_on_regression(self, tmp_path):
-        """Optimized runs slower → negative reduction (regression)."""
-        slow = tmp_path / "slow"
-        slow.mkdir()
-        _write_trajectory(slow / "trajectory_s.json", [_conv(duration=20.0)])
-
-        fast = tmp_path / "fast"
-        fast.mkdir()
-        _write_trajectory(fast / "trajectory_f.json", [_conv(duration=5.0)])
-
-        agg = MetricsAggregator(fast)
-        comparison = agg.compare_versions(fast, slow)  # fast=baseline, slow=optimized
-        assert comparison["improvements"]["duration_reduction_pct"] == -300.0
-
-    def test_duration_zero_baseline_omits_key(self, tmp_path):
-        """When baseline avg duration is 0, the key is not included."""
-        zero = tmp_path / "zero"
-        zero.mkdir()
-        _write_trajectory(zero / "trajectory_z.json", [_conv(duration=0.0)])
-
-        nonzero = tmp_path / "nz"
-        nonzero.mkdir()
-        _write_trajectory(nonzero / "trajectory_nz.json", [_conv(duration=5.0)])
-
-        agg = MetricsAggregator(zero)
-        comparison = agg.compare_versions(zero, nonzero)
-        assert "duration_reduction_pct" not in comparison["improvements"]
-
-
-# ---------------------------------------------------------------------------
 # Fallback-rate comparison
 # ---------------------------------------------------------------------------
 
@@ -246,20 +201,7 @@ class TestPerPhaseComparison:
         deploy_impr = agg.compare_versions(b, o)["by_phase"]["deployment"]["improvements"]
 
         assert "success_rate_improvement" in deploy_impr
-        assert "duration_reduction_pct" in deploy_impr
         assert "fallback_rate_reduction_pct" in deploy_impr
-
-    def test_phase_duration_values_are_correct(self, tmp_path):
-        b = self._multi_phase_dir(tmp_path, "b", deploy_dur=20.0, monitor_dur=10.0)
-        o = self._multi_phase_dir(tmp_path, "o", deploy_dur=10.0, monitor_dur=5.0)
-
-        agg = MetricsAggregator(b)
-        comparison = agg.compare_versions(b, o)
-
-        # deployment: 20 → 10 = 50 % reduction
-        assert comparison["by_phase"]["deployment"]["improvements"]["duration_reduction_pct"] == 50.0
-        # monitoring: 10 → 5 = 50 % reduction
-        assert comparison["by_phase"]["monitoring"]["improvements"]["duration_reduction_pct"] == 50.0
 
     def test_unshared_phases_are_excluded(self, tmp_path):
         """A phase present only in one version must not appear in by_phase."""

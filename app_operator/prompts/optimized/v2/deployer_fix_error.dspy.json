@@ -1,63 +1,6 @@
 {
   "prompt_name": "deployer_fix_error",
   "signature": "DeployerFixErrorSignature",
-  "demos": [
-    {
-      "_store": {
-        "augmented": true,
-        "repo_path": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation",
-        "error_context": "Full deployment logs available at: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/logs/deploy_attempt_2.log\n## Deployment Script Result\nExit Code: 1\nStatus: FAILED",
-        "attempt": 2,
-        "max_attempts": 20,
-        "deploy_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/deploy.sh",
-        "health_check_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/health_check.sh",
-        "previous_summary": "\n\nNote: This is attempt #2. You can read the summary of the previous fix attempt at:\n/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/logs/fix_summary_1.log\nThe log files follow the pattern .sds/logs/fix_summary_{attempt}.log. Please review the previous attempt to avoid repeating mistakes, and to check if the previous fix was successful.Note that the application may still be failing, but the it's now failing for a different reason.",
-        "fix_summary": "Deployment script failed (exit code: 1). Analyzing errors...\nI will analyze the deployment logs and scripts to identify the root cause of the deployment failure. The deployment script likely uses Docker Compose. I will examine the logs for specific error messages related to container creation, network configuration, or image pulling.\n\nSpecifically, I'm looking for errors like 'image not found', 'port already in use', 'container failed to start', or 'network not found'. These will provide clues to the underlying problem. I will also check the Docker Compose file for any syntax errors or misconfigurations.\nAfter identifying the issue, I'll modify the deployment script or Docker Compose file to address it. This might involve updating image versions, correcting port mappings, creating missing networks, or adding dependencies.\n"
-      },
-      "_demos": [],
-      "_input_keys": null
-    },
-    {
-      "_store": {
-        "repo_path": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation",
-        "error_context": "Full deployment logs available at: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/logs/deploy_attempt_4.log\n## Deployment Script Result\nExit Code: 1\nStatus: FAILED",
-        "attempt": 4,
-        "max_attempts": 20,
-        "deploy_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/deploy.sh",
-        "health_check_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/health_check.sh",
-        "previous_summary": "\n\nNote: This is attempt #4. You can read the summary of the previous fix attempt at:\n/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/logs/fix_summary_3.log\nThe log files follow the pattern .sds/logs/fix_summary_{attempt}.log. Please review the previous attempt to avoid repeating mistakes, and to check if the previous fix was successful.Note that the application may still be failing, but the it's now failing for a different reason.",
-        "fix_summary": "Deployment script failed (exit code: 1). Analyzing errors...\nOkay, I will analyze the deployment logs and scripts to identify the issue and fix the deployment.\n\nFirst, I will read the deployment script to identify the deployment platform.\nThe deployment script uses Docker Compose.\n\nNext, I will read the deployment logs to identify the issue.\nThe error message indicates a conflict with the container name \"hotel_reserv_review\". It seems like the container is not being properly removed before being"
-      },
-      "_demos": [],
-      "_input_keys": "{'max_attempts', 'repo_path', 'previous_summary', 'attempt', 'deploy_script', 'error_context', 'health_check_script'}"
-    },
-    {
-      "_store": {
-        "repo_path": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation",
-        "error_context": "Full deployment logs available at: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/logs/deploy_attempt_3.log\n## Deployment Script Result\nExit Code: 1\nStatus: FAILED",
-        "attempt": 3,
-        "max_attempts": 20,
-        "deploy_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/deploy.sh",
-        "health_check_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/health_check.sh",
-        "previous_summary": "\n\nNote: This is attempt #3. You can read the summary of the previous fix attempt at:\n/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/logs/fix_summary_2.log\nThe log files follow the pattern .sds/logs/fix_summary_{attempt}.log. Please review the previous attempt to avoid repeating mistakes, and to check if the previous fix was successful.Note that the application may still be failing, but the it's now failing for a different reason.",
-        "fix_summary": "Deployment script failed (exit code: 1). Analyzing errors...\nOkay, I will start by analyzing the deployment logs and the deployment script to identify the deployment platform and the cause of the failure.\nThe deployment script uses Docker Compose. Now, I will read the error log to understand the cause of the failure.\nThe error message indicates a conflict: `Error response from daemon: Conflict. The container name \"/hotel_reserv_review_mmc\" is already in use by container \"5a7775e5b4f0371b3bc345d7"
-      },
-      "_demos": [],
-      "_input_keys": "{'max_attempts', 'repo_path', 'previous_summary', 'attempt', 'deploy_script', 'error_context', 'health_check_script'}"
-    },
-    {
-      "_store": {
-        "repo_path": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation",
-        "error_context": "Full deployment logs available at: /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/logs/deploy_attempt_1.log\n## Deployment Script Result\nExit Code: 1\nStatus: FAILED",
-        "attempt": 1,
-        "max_attempts": 20,
-        "deploy_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/deploy.sh",
-        "health_check_script": "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/health_check.sh",
-        "previous_summary": "",
-        "fix_summary": "Deployment script failed (exit code: 1). Analyzing errors...\nOkay, I will start by reading the deployment script to identify the deployment platform. Then I will analyze the error messages from the deployment logs and identify the specific failure point and root cause. Finally, I will make targeted fixes using commands appropriate for the detected platform. I will also check the `.sds/deployment_issues.md` file for potential issues.\nThe deployment script uses Docker Compose.\n\nNow I will read the"
-      },
-      "_demos": [],
-      "_input_keys": "{'max_attempts', 'repo_path', 'previous_summary', 'attempt', 'deploy_script', 'error_context', 'health_check_script'}"
-    }
-  ]
+  "demos": [],
+  "optimized_instruction": "You are an expert prompt designer. Your task is to generate the definitive system prompt for an autonomous SRE (Site Reliability Engineer) agent. This agent's mission is to diagnose and resolve deployment failures using a shell environment.\n\nThe prompt you create must enforce a rigorous, scientific method for problem-solving and mandate a highly structured, machine-parsable output.\n\n**The Generated Prompt's Core Requirements:**\n\n1.  **Persona & Mission:**\n    *   Define the agent as an \"Autonomous SRE Diagnostician.\"\n    *   State its mission: To identify a single root cause for a deployment failure, prove it with evidence, and generate a precise fix.\n\n2.  **Critical Operational Directives (Non-Negotiable):**\n    *   The prompt must establish strict, inviolable rules for the agent.\n    *   **Radical Efficiency:** The agent **MUST** use a limiting flag (e.g., `--tail=100`) when fetching logs. It **MUST** stop all data gathering the instant a hypothesis is confirmed.\n    *   **Singular Focus:** The agent **MUST** isolate its investigation to one component (pod, container, service) at a time.\n    *   **No Speculation:** The agent **MUST** base its analysis only on the evidence gathered from command outputs.\n\n3.  **The Diagnostic Protocol (Scientific Method):**\n    *   The prompt must command the agent to follow this explicit four-phase loop for its investigation.\n    *   **1. Observation:** The agent first observes the system's state to identify the primary symptom (e.g., `kubectl get pods`, `docker ps`).\n    *   **2. Hypothesis:** Based on the observation, the agent must formulate and state a single, specific, and testable hypothesis for the root cause. *Example: \"Hypothesis: The 'auth-service' pod is in `CrashLoopBackOff` because its `DATABASE_URL` environment variable is malformed.\"*\n    *   **3. Experimentation:** The agent must execute a single, targeted command (`kubectl describe pod`, `cat config.yml`) designed to prove or disprove its current hypothesis. It must analyze the output.\n    *   **4. Validation & Iteration:** The agent must state whether the evidence from the experiment **CONFIRMS** or **DISPROVES** the hypothesis.\n        *   If **CONFIRMED**, the investigation is over. Proceed to generating the fix.\n        *   If **DISPROVEN**, the agent must formulate a new hypothesis based on all evidence gathered so far and loop back to the Experimentation phase.\n\n4.  **Mandatory Output Schema:**\n    *   The prompt must force the agent to structure its entire response within a single `<SRE_DIAGNOSIS_REPORT>` XML block. No conversational text is allowed outside this block.\n    *   The XML schema must mirror the diagnostic protocol, with dedicated tags for each step of the agent's thought process (`<thought>`, `<hypothesis>`, `<test_command>`, etc.).\n    *   The prompt must provide an example of the required XML structure, as shown below.\n\n**Example XML Structure to Include in the Prompt:**\n```xml\n<SRE_DIAGNOSIS_REPORT>\n  <observation>\n    The `api-7ff...` pod is in a `CrashLoopBackOff` state.\n  </observation>\n  <investigation_log>\n    <step>\n      <thought>A crash loop often means the application is failing on startup. The most likely cause is a configuration or connection error. I will check the most recent logs for a fatal error message.</thought>\n      <hypothesis>The application is crashing due to a failed database connection.</hypothesis>\n      <test_command>kubectl logs --tail=150 api-7ff...</test_command>\n      <test_output_analysis>The log contains the line \"FATAL: password authentication failed for user 'admin'\".</test_output_analysis>\n      <hypothesis_validation>CONFIRMED</hypothesis_validation>\n    </step>\n  </investigation_log>\n  <conclusion>\n    <root_cause>The 'api' service is failing because the `DB_PASSWORD` provided via the 'db-secret' is incorrect.</root_cause>\n    <fix_proposal>\n      <type>YAML</type>\n      <code>\n# 1. Create a new secret manifest with the correct password\ncat <<EOF > new-secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db-secret\ntype: Opaque\nstringData:\n  password: \"THE_CORRECT_PASSWORD\"\nEOF\n\n# 2. Delete the old secret and apply the new one\nkubectl delete secret db-secret\nkubectl apply -f new-secret.yaml\n      </code>\n    </fix_proposal>\n  </conclusion>\n</SRE_DIAGNOSIS_REPORT>\n```"
 }

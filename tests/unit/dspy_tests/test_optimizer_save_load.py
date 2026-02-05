@@ -19,7 +19,7 @@ class TestOptimizerSaveModule:
 
         # Create a mock module with demos
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = [
             {"repo_path": "/repo1", "error_context": "Error 1", "fix_summary": "Fix 1"},
             {"repo_path": "/repo2", "error_context": "Error 2", "fix_summary": "Fix 2"},
@@ -37,7 +37,7 @@ class TestOptimizerSaveModule:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = [
             {"repo_path": "/repo1", "fix_summary": "Fix 1"},
         ]
@@ -60,7 +60,7 @@ class TestOptimizerSaveModule:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = []
 
         output_file = tmp_path / "deployer_fix_error.dspy.json"
@@ -79,7 +79,7 @@ class TestOptimizerSaveModule:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = []
 
         output_file = tmp_path / "deployer_fix_error.dspy.json"
@@ -105,7 +105,7 @@ class TestOptimizerSaveOptimizedPrompts:
             "deployer_fix_error": {
                 "success": True,
                 "validation_score": 0.85,
-                "optimized_module": Mock(predictor=Mock(demos=[])),
+                "optimized_module": Mock(predictor=Mock(spec=['demos'], demos=[])),
             }
         }
 
@@ -121,7 +121,7 @@ class TestOptimizerSaveOptimizedPrompts:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = []
 
         results = {
@@ -145,7 +145,7 @@ class TestOptimizerSaveOptimizedPrompts:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = []
 
         results = {
@@ -209,7 +209,7 @@ class TestRoundTripSaveLoad:
 
         # Create and save a module
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = [
             {"repo_path": "/repo1", "error_context": "Error", "fix_summary": "Fixed"},
         ]
@@ -238,11 +238,11 @@ class TestRoundTripSaveLoad:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module1 = Mock()
-        mock_module1.predictor = Mock()
+        mock_module1.predictor = Mock(spec=['demos'])
         mock_module1.predictor.demos = [{"data": "prompt1"}]
 
         mock_module2 = Mock()
-        mock_module2.predictor = Mock()
+        mock_module2.predictor = Mock(spec=['demos'])
         mock_module2.predictor.demos = [{"data": "prompt2"}]
 
         results = {
@@ -294,7 +294,7 @@ class TestRoundTripSaveLoad:
 
         # Create v1
         mock_module = Mock()
-        mock_module.predictor = Mock()
+        mock_module.predictor = Mock(spec=['demos'])
         mock_module.predictor.demos = [{"version": "v1"}]
 
         output_dir_v1 = tmp_path / "optimized" / "v1"
@@ -304,7 +304,7 @@ class TestRoundTripSaveLoad:
 
         # Create v2
         mock_module2 = Mock()
-        mock_module2.predictor = Mock()
+        mock_module2.predictor = Mock(spec=['demos'])
         mock_module2.predictor.demos = [{"version": "v2"}]
 
         output_dir_v2 = tmp_path / "optimized" / "v2"

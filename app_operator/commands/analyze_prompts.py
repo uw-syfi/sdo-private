@@ -256,12 +256,6 @@ def _print_comparison_table(comparison: dict):
             f"{optimized.get('iterations', {}).get('avg', 0):.2f}",
             _format_pct_improvement(improvements.get('iteration_reduction_pct')),
         ],
-        [
-            "Avg Duration",
-            f"{baseline.get('duration', {}).get('avg_seconds', 0):.2f}s",
-            f"{optimized.get('duration', {}).get('avg_seconds', 0):.2f}s",
-            _format_pct_improvement(improvements.get('duration_reduction_pct')),
-        ],
     ]
 
     # Add token usage comparison if available
@@ -336,12 +330,6 @@ def _print_comparison_table(comparison: dict):
     elif cost_reduction < 0:
         print("  ✗ Token costs increased")
 
-    dur_reduction = improvements.get("duration_reduction_pct") or 0
-    if dur_reduction > 0:
-        print("  ✓ Average duration reduced")
-    elif dur_reduction < 0:
-        print("  ✗ Average duration increased")
-
     if "fallback_rate_reduction_pct" in improvements:
         fb_reduction = improvements.get("fallback_rate_reduction_pct")
         if fb_reduction is None:
@@ -370,9 +358,6 @@ def _print_comparison_table(comparison: dict):
                 f"{b.get('iterations', {}).get('avg', 0):.2f}",
                 f"{o.get('iterations', {}).get('avg', 0):.2f}",
                 _format_pct_improvement(ph_impr.get("iteration_reduction_pct")),
-                f"{b.get('duration', {}).get('avg_seconds', 0):.2f}s",
-                f"{o.get('duration', {}).get('avg_seconds', 0):.2f}s",
-                _format_pct_improvement(ph_impr.get("duration_reduction_pct")),
             ])
 
         print(tabulate(
@@ -381,7 +366,6 @@ def _print_comparison_table(comparison: dict):
                 "Phase",
                 "Success (B)", "Success (O)", "Success Δ",
                 "Iters (B)", "Iters (O)", "Iters Δ",
-                "Duration (B)", "Duration (O)", "Duration Δ",
             ],
             tablefmt="grid",
         ))

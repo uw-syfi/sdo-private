@@ -25,7 +25,10 @@ def add_arguments(parser):
         nargs="+",
         help="One or more directories containing trajectory files "
              "(default: .sds/trajectories in current dir). "
-             "Examples from all directories are merged before optimization.",
+             "Examples from all directories are merged before optimization. "
+             "Use shell glob expansion to select multiple baseline runs: "
+             "exp/hotelReservation/baseline-*/.sds/trajectories. "
+             "WARNING: Do not mix baseline and optimizee trajectories in training data.",
     )
     parser.add_argument(
         "--output-dir",
@@ -137,7 +140,7 @@ def run_command(args) -> int:
         print("=" * 60 + "\n")
 
         print(f"Prompts to optimize: {', '.join(args.prompts)}")
-        print(f"Trajectories directory: {trajectories_dir}")
+        print(f"Trajectories directories: {trajectories_dirs}")
         print(f"Optimizer: {dspy_config.optimization.optimizer}")
         print(f"Teacher model: {dspy_config.optimization.teacher_model}")
         print(f"Max training examples: {dspy_config.optimization.num_examples}")
@@ -149,7 +152,7 @@ def run_command(args) -> int:
 
         result = optimizer.optimize(
             prompt_names=args.prompts,
-            trajectories_dir=trajectories_dir,
+            trajectories_dirs=trajectories_dirs,
             output_dir=args.output_dir,
             dry_run=args.dry_run,
         )

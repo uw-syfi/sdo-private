@@ -94,7 +94,7 @@ class TestPromptOptimizer:
         with pytest.raises(ValueError, match="Invalid prompt names"):
             optimizer.optimize(
                 prompt_names=["invalid_prompt", "another_invalid"],
-                trajectories_dir=trajectories_dir,
+                trajectories_dirs=[trajectories_dir],
             )
 
     def test_optimize_no_training_data(self, dspy_config, tmp_path):
@@ -107,8 +107,53 @@ class TestPromptOptimizer:
         with pytest.raises(RuntimeError, match="No training examples found"):
             optimizer.optimize(
                 prompt_names=["deployer_fix_error"],
-                trajectories_dir=empty_dir,
+                trajectories_dirs=[empty_dir],
             )
+
+    @patch("app_operator.dspy_integration.optimizer.TrajectoryDataLoader")
+    def test_optimize_single_example_per_phase_not_skipped(
+        self, mock_loader, dspy_config, tmp_path
+    ):
+        """A phase with exactly one example must not be skipped.
+
+        Previously int(1 * 0.8) == 0 put the sole example in val,
+        leaving train empty and triggering the skip path.
+        """
+        examples = [
+            TrajectoryExample(
+                trajectory_file="/t.json", run_id="r", phase="deployment",
+                call_id=1, prompt="p", response="r", success=True,
+                iterations=1, tool_calls=[], duration_seconds=1.0,
+                prompt_kwargs={
+                    "repo_path": "/repo", "error_context": "err",
+                    "attempt": 1, "max_attempts": 20,
+                    "deploy_script": "/repo/.sds/deploy.sh",
+                    "health_check_script": "/repo/.sds/health_check.sh",
+                },
+            )
+        ]
+        mock_loader.return_value.load_examples.return_value = examples
+
+        optimizer = PromptOptimizer(dspy_config, tmp_path)
+        optimizer._configure_dspy_lm = Mock()
+        optimizer._optimize_single_prompt = Mock(
+            return_value={"success": True, "optimized_module": Mock()}
+        )
+        optimizer._save_optimized_prompts = Mock()
+
+        result = optimizer.optimize(
+            prompt_names=["deployer_fix_error"],
+            trajectories_dirs=[tmp_path],
+        )
+
+        # Was not skipped — _optimize_single_prompt was reached
+        optimizer._optimize_single_prompt.assert_called_once()
+        prompt_name, train, val, _ = optimizer._optimize_single_prompt.call_args[0]
+        assert prompt_name == "deployer_fix_error"
+        assert len(train) == 1          # the single example goes to train
+        assert train[0].phase == "deployment"
+        assert len(val) == 0            # nothing left for val
+        assert result["success"] is True
 
     @patch("app_operator.dspy_integration.optimizer.dspy")
     @patch("app_operator.dspy_integration.optimizer.TrajectoryDataLoader")
@@ -146,7 +191,7 @@ class TestPromptOptimizer:
         with pytest.raises(RuntimeError, match="All prompts failed optimization"):
             optimizer.optimize(
                 prompt_names=["deployer_fix_error", "deployer_summarize"],
-                trajectories_dir=tmp_path,
+                trajectories_dirs=[tmp_path],
             )
 
         # No version directory should have been created
@@ -165,7 +210,7 @@ class TestPromptOptimizer:
 
         result = optimizer.optimize(
             prompt_names=["deployer_fix_error"],
-            trajectories_dir=tmp_path,
+            trajectories_dirs=[tmp_path],
             dry_run=True,
         )
 
@@ -582,7 +627,7 @@ class TestPromptOptimizer:
         # Verify compile was called with eval_kwargs
         call_kwargs = mock_optimizer_instance.compile.call_args[1]
         assert "eval_kwargs" in call_kwargs
-        assert call_kwargs["eval_kwargs"] == {}
+        assert call_kwargs["eval_kwargs"] == {"num_threads": 4}
 
     @patch("app_operator.dspy_integration.optimizer.dspy")
     def test_optimize_single_prompt_zero_traces_returns_failure(
@@ -695,7 +740,7 @@ class TestPromptOptimizer:
             optimizer._configure_dspy_lm()
 
             # Verify LM was called with correct model string
-            mock_dspy.LM.assert_called_with(model=expected_model_str)
+            mock_dspy.LM.assert_called_with(model=expected_model_str, cache=False)
 
     @patch("app_operator.dspy_integration.optimizer.dspy")
     def test_configure_dspy_lm_without_provider_prefix(self, mock_dspy, tmp_path):
@@ -726,4 +771,4 @@ class TestPromptOptimizer:
             optimizer._configure_dspy_lm()
 
             # Verify LM was called with correct model string
-            mock_dspy.LM.assert_called_with(model=expected_model_str)
+            mock_dspy.LM.assert_called_with(model=expected_model_str, cache=False)

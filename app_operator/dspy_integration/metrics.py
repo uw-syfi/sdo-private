@@ -8,6 +8,7 @@ Metrics for evaluating prompt performance:
 """
 
 import re
+import sys
 from typing import Any
 
 import dspy
@@ -249,8 +250,60 @@ class PredictionQualityMetric:
                 generated_prompt=pred_text,
             )
             return _parse_judge_score(result.score)
-        except Exception:
+        except Exception as e:
+            print(f"  [PredictionQualityMetric] judge call failed: {e}", file=sys.stderr)
             return 0.5
+
+
+class GroundTruthSimilarityMetric:
+    """Scores prediction quality by comparing to the ground-truth output in the example.
+
+    Uses ``difflib.SequenceMatcher`` to compute a character-level similarity
+    ratio between the predicted output and the ground-truth output field
+    recorded in the trajectory.  This is the preferred prediction metric for
+    COPRO / MIPROv2: it is instant (no LM call), deterministic, and immune to
+    the self-evaluation bias that makes LLM judges useless when the same model
+    generates both the prediction and the score.
+
+    The ground truth lives in the dspy.Example under the output field name
+    (typically ``rendered_prompt``).  If either side is missing the metric
+    returns 0.0.
+    """
+
+    # Output-field names to check, in priority order.  Matches the set used by
+    # ``_extract_prediction_text``.
+    _OUTPUT_FIELDS = ("rendered_prompt", "summary", "output", "system_prompt")
+
+    def __call__(self, example: Any, prediction: Any, trace: Any = None) -> float:
+        """Compute similarity between prediction and ground truth.
+
+        Args:
+            example: dspy.Example carrying the ground-truth output field
+            prediction: Model prediction (dspy.Prediction)
+            trace: Unused
+
+        Returns:
+            Similarity ratio between 0.0 and 1.0
+        """
+        from difflib import SequenceMatcher
+
+        if prediction is None:
+            return 0.0
+
+        pred_text = _extract_prediction_text(prediction)
+
+        # Pull ground truth from the same field in the example
+        gt_text = ""
+        for field in self._OUTPUT_FIELDS:
+            val = getattr(example, field, None)
+            if val:
+                gt_text = str(val)
+                break
+
+        if not pred_text or not gt_text:
+            return 0.0
+
+        return SequenceMatcher(None, pred_text, gt_text).ratio()
 
 
 class CompositeMetric:
@@ -260,9 +313,14 @@ class CompositeMetric:
     prediction-quality slot (weighted by ``success_weight``) defaults to
     ``DeploymentSuccessMetric`` — which reads only historical fields from the
     example and therefore cannot differentiate between candidates.  Pass
-    ``prediction_metric=PredictionQualityMetric()`` to plug in the LLM judge,
-    which scores the actual generated prompt and gives optimisers like COPRO a
-    real gradient to follow.
+    ``prediction_metric`` to plug in a metric that reads from the prediction:
+
+    * ``GroundTruthSimilarityMetric()`` — compares prediction to the recorded
+      ground-truth output.  Instant, deterministic, no LM call.  Preferred for
+      COPRO / MIPROv2.
+    * ``PredictionQualityMetric()`` — LLM judge.  Suffers from
+      self-evaluation bias when the judge and the generator share the same
+      model; avoid unless you can point the judge at a different provider.
     """
 
     def __init__(
@@ -284,7 +342,8 @@ class CompositeMetric:
             baseline_tokens: Baseline tokens for token metric
             prediction_metric: Metric for the prediction-quality slot.
                 Defaults to DeploymentSuccessMetric (backward-compatible).
-                Pass PredictionQualityMetric() for LLM-judge scoring.
+                Pass PredictionQualityMetric() for LLM-judge scoring or
+                GroundTruthSimilarityMetric() for deterministic comparison.
         """
         if abs(success_weight + efficiency_weight + token_weight - 1.0) > 0.01:
             raise ValueError("Metric weights must sum to 1.0")
