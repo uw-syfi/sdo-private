@@ -12,6 +12,8 @@ from lego_agent.models import LegoAgentResult, parse_lego_agent_response, LegoAg
 from lego_agent.storage import LegoAgentStorage
 from lego_agent.prompts import PromptLoader
 
+# SDS-REVIEW: Architecture - Tight coupling with `app_operator`.
+# If `lego_agent` is intended to be a reusable library, these dependencies should be inverted or abstracted.
 from app_operator.langgraph.llm import build_llm
 from app_operator.config import Config
 from app_operator.adk.tools import (
@@ -87,6 +89,8 @@ class LegoAgentEngine:
 
     async def run_async(self, user_prompt: str) -> LegoAgentResult:
         """Run the clarification loop and generate the script."""
+        # SDS-REVIEW: Architecture - High complexity method.
+        # Suggest splitting into: `_setup_agent()`, `_execute_round()`, `_process_stream()`, `_handle_response()`.
         qa_pairs: List[Tuple[str, str]] = []
 
         # Setup tools
@@ -122,6 +126,7 @@ class LegoAgentEngine:
             )
 
             # Create agent graph
+            # SDS-REVIEW: Performance - Recreating the agent graph every iteration is inefficient.
             # We recreate it each time to reset state or we could persist it,
             # but since we are changing the prompt (QA pairs), it's easier to treat each round as a fresh generation
             # with full context in the prompt.
@@ -135,6 +140,7 @@ class LegoAgentEngine:
 
             # Run with streaming
             try:
+                # SDS-REVIEW: Logic - Complex streaming logic. Extract to `_stream_agent_execution()`.
                 # Use astream_events to capture thoughts and tool calls
                 accumulated_text = []
                 async for event in agent.astream_events(
@@ -246,6 +252,7 @@ class LegoAgentEngine:
                 if not response:
                     response = parse_lego_agent_response(final_content)
             except ValueError as e:
+                # SDS-REVIEW: Logic - Repair logic should be encapsulated in `_repair_response()`.
                 # Attempt repair
                 self.io.render_error(f"Parsing failed, attempting repair... {e}")
                 repair_msg_text = self.prompt_loader.render(

@@ -243,6 +243,8 @@ class LegoAgentTUI(App):
 
     @work
     async def run_lego_agent(self, user_prompt: str):
+        # SDS-REVIEW: Architecture - TUI class contains execution logic.
+        # Script execution and environment setup should be delegated to an `Executor` service.
         io = TextualIO(self)
         engine = self.engine_factory(io)
 

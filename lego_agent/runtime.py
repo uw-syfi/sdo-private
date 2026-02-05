@@ -18,6 +18,9 @@ from lego_agent.io import Colors
 
 class LangGraphAgent:
     """Agent wrapper around LangGraph prebuilt React agent."""
+    # SDS-REVIEW: Architecture - Duplicate logic.
+    # Streaming and tool handling logic overlaps significantly with `lego_agent.engine.LegoAgentEngine`.
+    # Suggest extracting a common `BaseAgent` or `StreamProcessor`.
 
     def __init__(
         self,
@@ -285,6 +288,9 @@ def fan_out(
         loop = None
 
     if loop and loop.is_running():
+        # SDS-REVIEW: Concurrency - `asyncio.run()` cannot be called when an event loop is running.
+        # This check detects the loop but then calls the forbidden function.
+        # Should probably return `loop.run_until_complete(...)` or just fail/warn if async is expected.
         # This is tricky if fan_out is called from a thread that doesn't have its own loop
         # but the main thread does.
         # But usually generated scripts are sync.
@@ -297,6 +303,7 @@ def summarize(
     agent: LangGraphAgent, responses: List[str], instruction: str, timeout: int = 300
 ) -> str:
     """Summarize a list of responses."""
+    # SDS-REVIEW: Documentation - Missing args/return type description in docstring.
     combined_input = "\n\n---\n\n".join(responses)
     prompt = f"{instruction}\n\nHere are the inputs to summarize:\n{combined_input}"
     return agent.generate(prompt=prompt, timeout=timeout)
