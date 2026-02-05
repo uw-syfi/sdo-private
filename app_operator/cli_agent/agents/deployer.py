@@ -711,13 +711,22 @@ class DeploymentAgent:
             match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
             if match:
                 summary_text = match.group(1).strip()
-                log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
-                self.filesystem.mkdir(log_file.parent, parents=True, exist_ok=True)
-                self.filesystem.write_text(log_file, summary_text)
-                logger.info(f"Saved fix summary to {log_file}")
+            else:
+                # Fallback: use the full response or a truncated version as summary
+                logger.warning(f"Agent did not provide summary in expected format for attempt {attempt}")
+                summary_text = f"Agent attempted to fix deployment issues (no structured summary provided).\n\nFull response:\n{response}"
+                # Optionally truncate if too long
+                if len(summary_text) > 2000:
+                    summary_text = summary_text[:1900] + "...\n[Response truncated]"
+            
+            # Always save some summary
+            log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
+            self.filesystem.mkdir(log_file.parent, parents=True, exist_ok=True)
+            self.filesystem.write_text(log_file, summary_text)
+            logger.info(f"Saved fix summary to {log_file}")
 
-                # Update consolidated summary
-                self._update_consolidated_summary(attempt, summary_text)
+            # Always update consolidated summary
+            self._update_consolidated_summary(attempt, summary_text)
 
             logger.info("Agent response received")
 
