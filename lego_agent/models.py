@@ -59,6 +59,8 @@ def get_lego_agent_response_schema() -> dict:
 
 def extract_json(text: str) -> str:
     """Extract JSON from text, handling markdown fences."""
+    # SDS-REVIEW: Architecture - Utility function in models module.
+    # Suggest moving to `lego_agent.utils` or `lego_agent.parsing`.
     # Try to find ```json ... ``` or just ``` ... ```
     pattern = r"```(?:json)?\s*(.*?)\s*```"
     match = re.search(pattern, text, re.DOTALL)

@@ -14,8 +14,8 @@ class PromptLoader:
                            Defaults to the 'templates' directory in this package.
         """
         if templates_dir is None:
-            # Assumes this file is in agentflow/prompts/__init__.py
-            # and templates/ is in agentflow/prompts/templates
+            # Assumes this file is in lego_agent/prompts/__init__.py
+            # and templates/ is in lego_agent/prompts/templates
             self.templates_dir = Path(__file__).resolve().parent / "templates"
         else:
             self.templates_dir = Path(templates_dir)

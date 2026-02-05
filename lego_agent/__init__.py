@@ -1,1 +1,1 @@
-# agentflow package
+# lego_agent package

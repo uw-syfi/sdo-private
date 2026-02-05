@@ -41,6 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # SDS-REVIEW: Architecture - This function is too long (high complexity).
+    # It mixes config loading, TUI initialization, and CLI execution.
+    # Suggest refactoring into: `setup_config()`, `run_tui()`, `run_cli()`.
     parser = build_parser()
     args = parser.parse_args()
 
@@ -66,6 +69,7 @@ def main() -> int:
     prompt_loader = get_loader()
 
     # Get loop bound
+    # SDS-REVIEW: Magic Number - Default loop bound '10' is hardcoded. Define as constant.
     loop_bound = args.loop_bound if args.loop_bound is not None else 10
 
     if not args.no_tui:
@@ -92,6 +96,8 @@ def main() -> int:
             app.run()
             return 0
         except Exception as e:
+            # SDS-REVIEW: Error Handling - Avoid bare `print_exc()`.
+            # Use `logger.exception()` or a dedicated error handler.
             logger.error(f"TUI failed: {e}")
             import traceback
             traceback.print_exc()
@@ -134,6 +140,9 @@ def main() -> int:
         env = os.environ.copy()
         env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
 
+        # SDS-REVIEW: Security - Arbitrary code execution.
+        # Ensure the user is aware they are executing generated code.
+        # Consider adding a prompt confirmation here (if not --no-tui/interactive).
         subprocess.run(
             [sys.executable, str(result.script_path)],
             cwd=work_dir,
