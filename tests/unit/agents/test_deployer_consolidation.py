@@ -1,8 +1,7 @@
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
-from app_operator.cli_agent.agents.deployer import DeploymentAgent, FIX_SUMMARY_CONSOLIDATION_INTERVAL
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures.agents import ConfigurableAgent, StubAgent
 
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import sys
@@ -6,11 +8,11 @@ from typing import List, Callable, Union
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, RichLog, Label
 from textual import work
-from textual.binding import Binding
 from rich.text import Text
 from rich.panel import Panel
 
-from agentflow.io import UserIO, Colors
+from agentflow.engine import AgentflowEngine
+from agentflow.io import UserIO
 
 class TextualIO:
     """UserIO implementation for Textual TUI."""
@@ -121,7 +123,7 @@ class AgentflowTUI(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"], initial_prompt: str = None, work_dir: str = ".", repo_root: str = None, **kwargs):
+    def __init__(self, engine_factory: Callable[[UserIO], AgentflowEngine], initial_prompt: str = None, work_dir: str = ".", repo_root: str = None, **kwargs):
         super().__init__(**kwargs)
         self.theme = "flexoki"
         self.engine_factory = engine_factory

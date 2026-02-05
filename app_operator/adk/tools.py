@@ -219,22 +219,20 @@ def _build_search_content(context: ToolContext) -> Callable[[str, str], Dict[str
                     },
                 }
 
-            # Recursive search needs to use real filesystem for walking?
-            # Or we can't easily implement grep recursively with FileSystemInterface
-            # as it lacks walk/glob methods.
-            # Mirroring langgraph tool which uses target.rglob("*") (real fs).
+            # Recursive search over files under the target path.
+            # We enumerate with Path.rglob (real filesystem), but always read file
+            # contents through the injected filesystem interface.
             for file_path in target.rglob("*"):
                 if file_path.is_file():
                     try:
-                        # For rglob results (Path objects), we should route through filesystem interface
-                        # to support InMemoryFilesystem if it had a way to lookup from Path.
-                        # But InMemoryFilesystem stores strings.
-                        # Since langgraph implementation effectively uses real FS for enumeration, I will too.
-                        # But I will use context.filesystem.read_text for reading content.
-                        content = context.filesystem.read_text(file_path)
+                        # Normalize to a real Path constructed from the string form.
+                        # This makes tests that mock Path objects (with __str__ set
+                        # to the in-memory key) work correctly with InMemoryFilesystem.
+                        fs_path = Path(str(file_path))
+                        content = context.filesystem.read_text(fs_path)
                         for idx, line in enumerate(content.splitlines(), start=1):
                             if regex.search(line):
-                                relative = file_path.relative_to(context.repo_root)
+                                relative = fs_path.relative_to(context.repo_root)
                                 matches.append(f"{relative}:{idx}:{line.strip()}")
                     except Exception:
                         continue
