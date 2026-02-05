@@ -178,6 +178,12 @@ def load_optimized_module(
             module.demos = state['demos']
             logger.debug(f"Loaded {len(module.demos)} demonstrations")
 
+        # Restore optimized instruction if present (COPRO / MIPROv2 artifact)
+        if state.get('optimized_instruction'):
+            module.signature = module.signature.with_instructions(state['optimized_instruction'])
+            logger.debug(
+                f"Restored optimized instruction ({len(state['optimized_instruction'])} chars)")
+
         # Store in cache
         _module_cache.set(cache_key, module)
         logger.debug(f"Cached module as {cache_key}")

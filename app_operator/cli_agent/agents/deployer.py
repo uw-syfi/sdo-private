@@ -190,6 +190,7 @@ def _generate_deploy_script(
         target_dir=target_dir,
         platform=platform,
         dspy_config=dspy_config,
+        recorder=recorder,
     )
 
     try:
@@ -249,6 +250,7 @@ def _generate_health_check_script(
         target_dir=target_dir,
         platform=platform,
         dspy_config=dspy_config,
+        recorder=recorder,
     )
 
     try:
@@ -434,12 +436,13 @@ class DeploymentAgent:
                     return False
 
                 # Record the deployment tool call
+                deploy_ec = deploy_result.get("exit_code")
                 r.add_tool_call(
                     tool="bash",
                     args={"script": ".sds/deploy.sh start"},
                     stdout=deploy_result.get("stdout", ""),
                     stderr=deploy_result.get("stderr", ""),
-                    exit_code=int(deploy_result.get("exit_code", -1) or -1),
+                    exit_code=int(deploy_ec) if deploy_ec is not None else -1,
                     duration=deploy_duration,
                 )
 
@@ -469,12 +472,13 @@ class DeploymentAgent:
                     health_duration = time.time() - health_start
 
                     # Record health check tool call
+                    health_ec = health_result.get("exit_code")
                     r.add_tool_call(
                         tool="bash",
                         args={"script": ".sds/health_check.sh"},
                         stdout=health_result.get("stdout", ""),
                         stderr=health_result.get("stderr", ""),
-                        exit_code=int(health_result.get("exit_code", -1) or -1),
+                        exit_code=int(health_ec) if health_ec is not None else -1,
                         duration=health_duration,
                     )
 
@@ -503,6 +507,36 @@ class DeploymentAgent:
                         ):
                             r.set_phase_status("failed")
                             return False
+
+                        # Re-run health check before committing to a full
+                        # re-deploy.  If the agent only fixed health_check.sh
+                        # (e.g. wrong service names) the containers are already
+                        # healthy and a restart would be wasteful.
+                        recheck_log = (
+                            self.sds_dir / "logs" / f"health_recheck_attempt_{attempt}.log"
+                        )
+                        recheck = run_health_check(
+                            self.repo_path,
+                            self.health_check_script,
+                            log_file_path=recheck_log,
+                        )
+                        recheck_ec = recheck.get("exit_code")
+                        r.add_tool_call(
+                            tool="bash",
+                            args={"script": ".sds/health_check.sh (post-fix recheck)"},
+                            stdout=recheck.get("stdout", ""),
+                            stderr=recheck.get("stderr", ""),
+                            exit_code=int(recheck_ec) if recheck_ec is not None else -1,
+                        )
+
+                        if recheck["success"]:
+                            logger.success(
+                                "Health check passed after agent fix. Deployment successful!")
+                            r.add_assistant_message(
+                                "Health check passed after agent fix. Deployment successful!"
+                            )
+                            return True
+
                         r.set_phase_status("needs_retry")
                 else:
                     res = deploy_result["exit_code"]
@@ -627,6 +661,7 @@ class DeploymentAgent:
             self.deploy_script,
             self.health_check_script,
             dspy_config=self.dspy_config,
+            recorder=self.recorder,
         )
 
         try:

@@ -1,0 +1,60 @@
+{
+  "prompt_name": "deployer_summarize",
+  "signature": "DeployerSummarizeSignature",
+  "demos": [
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment script failed (exit code: 1). Analyzing errors..."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment script failed (exit code: 1). Analyzing errors...\nThe deployment failed. Analyzing the deployment logs and script to identify the deployment platform and failure reason."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment script failed (exit code: 1). Analyzing errors...\nOkay, I will start analyzing the deployment logs and scripts to identify the cause of the failure. My approach will be as follows:\n\n1.  **Identify the deployment platform:** Determine whether Docker Compose, Kubernetes, or another platform is being used.\n2.  **Analyze the logs:** Carefully examine the deployment logs for error messages, stack traces, or other clues indicating the point of failure.\n3.  **Review the deployment script:** Inspect the deployment script (e.g., `docker-compose.yml`, `kubectl apply` manifest) for syntax errors, misconfigurations, or resource conflicts.\n4.  **Check `.sds/deployment_issues.md`:** Review this file for documented issues and solutions from previous deployments.\n5.  **Formulate a fix:** Based on the analysis, determine the appropriate fix. This might involve modifying the deployment script, updating environment variables, or taking other corrective actions.\n6.  **Apply the fix:** Implement the fix using the appropriate commands (e.g., `docker compose up`, `kubectl apply`).\n7.  **Test the deployment:** After applying the fix, re-run the deployment and verify that it is successful.\n8.  **Document the issue and solution:** If the deployment fails, add an entry to the `.sds/deployment_issues.md` file.\nThe deployment script uses Docker Compose.\n\nNow I will read the deployment logs to"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment script failed (exit code: 1). Analyzing errors...\nThe deployment utilizes Docker Compose. The error indicates a container name conflict (\"/hotel_reserv_review_mmc\" is already in use). This suggests a previous deployment may not have been fully cleaned up, or a container with the same name is still running."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "deployment_log": "You are an AI operator (GeminiCodingAgent) responsible for deploying the application and fixing any deployment errors. Deployment attempt 5 of 20.",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment script executed successfully (exit code: 0)\nHealth check passed. Deployment successful!\nPhase completed with status: success"
+      },
+      "_demos": [],
+      "_input_keys": "{'health_check_result', 'success', 'deployment_log'}"
+    }
+  ]
+}

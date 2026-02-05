@@ -1,0 +1,17 @@
+{
+  "prompt_name": "deployer_summarize",
+  "signature": "DeployerSummarizeSignature",
+  "demos": [
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "rendered_prompt": "Can you provide a one-line summary of the current deployment activity, wrapped in <output_msg>...</output_msg> XML tags?"
+      },
+      "_demos": [],
+      "_input_keys": null
+    }
+  ]
+}

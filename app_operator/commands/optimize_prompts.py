@@ -22,7 +22,10 @@ def add_arguments(parser):
     parser.add_argument(
         "--trajectories-dir",
         type=Path,
-        help="Directory containing trajectory files (default: .sds/trajectories)",
+        nargs="+",
+        help="One or more directories containing trajectory files "
+             "(default: .sds/trajectories in current dir). "
+             "Examples from all directories are merged before optimization.",
     )
     parser.add_argument(
         "--output-dir",
@@ -89,13 +92,15 @@ def run_command(args) -> int:
         print("Use --list-prompts to see available prompts", file=sys.stderr)
         return 1
 
-    # Determine trajectories directory
-    trajectories_dir = args.trajectories_dir
-    if trajectories_dir is None:
-        trajectories_dir = Path.cwd() / ".sds" / "trajectories"
+    # Determine trajectories directories
+    trajectories_dirs = args.trajectories_dir
+    if trajectories_dirs is None:
+        trajectories_dirs = [Path.cwd() / ".sds" / "trajectories"]
 
-    if not trajectories_dir.exists():
-        print(f"Error: Trajectories directory not found: {trajectories_dir}", file=sys.stderr)
+    missing = [d for d in trajectories_dirs if not d.exists()]
+    if missing:
+        for d in missing:
+            print(f"Error: Trajectories directory not found: {d}", file=sys.stderr)
         print("Run the operator first to generate trajectory data.", file=sys.stderr)
         return 1
 

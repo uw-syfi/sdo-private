@@ -1,0 +1,39 @@
+{
+  "prompt_name": "deployer_summarize",
+  "signature": "DeployerSummarizeSignature",
+  "demos": [
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "rendered_prompt": "You are a DevOps assistant. Your task is to provide a concise, one-line summary of the current deployment status based on the provided logs.\n\nDeployment Log:\n```\n\n```\n\nHealth Check Result:\n```\n\n```\n\nSuccess Status: ``\n\nBased on the information above, provide a one-line summary of the current situation. The summary must be wrapped in `<output_msg>...</output_msg>` XML tags. Do not include any other text or explanations."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "rendered_prompt": "You will be provided with the output from a deployment command. Your task is to provide a one-line summary of what happened.\n\nDeployment Log:\n```\n\n```\n\nHealth Check Result:\n```\n\n```\n\nDeployment Status: Not specified.\n\nBased on the logs, provide a one-line summary of the current activity, wrapped in <output_msg>...</output_msg> XML tags. Do not add any other text or debug information."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "rendered_prompt": "Analyze the following deployment information and provide a one-line summary of the current activity, wrapped in `<output_msg>...</output_msg>` XML tags. Do not include any other text or debug information.\n\n**Deployment Log:**\n```\n\n```\n\n**Health Check Result:**\n```\n\n```\n\n**Success Status:**\n```\n\n```"
+      },
+      "_demos": [],
+      "_input_keys": null
+    }
+  ]
+}

@@ -1,11 +1,16 @@
 """Tests for DSPy metrics."""
 
 import pytest
+from unittest.mock import Mock
 from app_operator.dspy_integration.metrics import (
     DeploymentSuccessMetric,
     IterationEfficiencyMetric,
     TokenEfficiencyMetric,
+    PredictionQualityMetric,
     CompositeMetric,
+    _parse_judge_score,
+    _extract_prediction_text,
+    _extract_error_context,
 )
 from app_operator.dspy_integration.data_loader import TrajectoryExample
 
@@ -233,6 +238,12 @@ class TestCompositeMetric:
                 token_weight=0.1,
             )
 
+    def test_composite_returns_zero_for_none_prediction(self, successful_example):
+        """CompositeMetric returns 0.0 when prediction is None."""
+        metric = CompositeMetric()
+        score = metric(successful_example, None)
+        assert score == 0.0
+
     def test_perfect_score(self):
         """Test perfect score with ideal example."""
         metric = CompositeMetric(max_iterations=20, baseline_tokens=10000)
@@ -242,7 +253,7 @@ class TestCompositeMetric:
             iterations = 1
             token_usage = {"input": 100, "output": 100}
 
-        score = metric(PerfectExample(), None)
+        score = metric(PerfectExample(), "some output")
         # Should be very high (close to 1.0)
         assert score > 0.9
 
@@ -255,7 +266,7 @@ class TestCompositeMetric:
             iterations = 5
             token_usage = {"input": 1000, "output": 1000}
 
-        score = metric(PoorExample(), None)
+        score = metric(PoorExample(), "some output")
         # Should be very low
         assert score < 0.3
 
@@ -269,7 +280,7 @@ class TestCompositeMetric:
             baseline_tokens=10000,
         )
 
-        score = metric(successful_example, None)
+        score = metric(successful_example, "some output")
 
         # Should be between 0 and 1
         assert 0.0 <= score <= 1.0
@@ -288,3 +299,107 @@ class TestCompositeMetric:
         assert metric.success_weight == 0.5
         assert metric.efficiency_weight == 0.3
         assert metric.token_weight == 0.2
+
+    def test_custom_prediction_metric_is_called(self):
+        """prediction_metric replaces DeploymentSuccessMetric in the composite."""
+        custom = Mock(return_value=0.7)
+        metric = CompositeMetric(prediction_metric=custom)
+
+        class Ex:
+            success = True
+            iterations = 1
+            token_usage = {"input": 100, "output": 100}
+
+        score = metric(Ex(), "prediction")
+
+        custom.assert_called_once()
+        # 0.7*0.6 + efficiency*0.25 + token*0.15 — verify it ran and contributed
+        assert 0.0 < score <= 1.0
+
+
+class TestParseJudgeScore:
+    """Tests for _parse_judge_score."""
+
+    def test_clean_integer(self):
+        assert _parse_judge_score("8") == 0.8
+
+    def test_integer_embedded_in_text(self):
+        assert _parse_judge_score("I'd rate this a 7 out of 10") == 0.7
+
+    def test_no_integer_returns_neutral(self):
+        assert _parse_judge_score("no score here") == 0.5
+
+    def test_clamped_above_10(self):
+        assert _parse_judge_score("15") == 1.0
+
+    def test_zero(self):
+        assert _parse_judge_score("0") == 0.0
+
+
+class TestExtractHelpers:
+    """Tests for _extract_prediction_text and _extract_error_context."""
+
+    def test_extract_prediction_rendered_prompt(self):
+        pred = Mock(spec=["rendered_prompt"])
+        pred.rendered_prompt = "the prompt"
+        assert _extract_prediction_text(pred) == "the prompt"
+
+    def test_extract_prediction_fallback_to_str(self):
+        pred = Mock(spec=[])  # no known fields
+        assert _extract_prediction_text(pred) == str(pred)
+
+    def test_extract_error_context_present(self):
+        ex = Mock(spec=["error_context"])
+        ex.error_context = "Connection refused"
+        assert _extract_error_context(ex) == "Connection refused"
+
+    def test_extract_error_context_missing(self):
+        ex = Mock(spec=[])
+        assert _extract_error_context(ex) == ""
+
+
+class TestPredictionQualityMetric:
+    """Tests for PredictionQualityMetric."""
+
+    def test_returns_zero_for_none_prediction(self):
+        metric = PredictionQualityMetric()
+        assert metric(Mock(), None) == 0.0
+
+    def test_calls_judge_and_parses_score(self):
+        """Judge is invoked and score is parsed correctly."""
+        mock_judge = Mock(return_value=Mock(score="8"))
+
+        metric = PredictionQualityMetric()
+        metric._judge = mock_judge  # bypass lazy init
+
+        example = Mock(spec=["error_context"])
+        example.error_context = "Connection refused"
+        prediction = Mock(spec=["rendered_prompt"])
+        prediction.rendered_prompt = "Fix the connection error."
+
+        score = metric(example, prediction)
+
+        assert score == 0.8
+        mock_judge.assert_called_once_with(
+            error_context="Connection refused",
+            generated_prompt="Fix the connection error.",
+        )
+
+    def test_falls_back_to_neutral_on_judge_error(self):
+        """Any exception from the judge returns 0.5."""
+        mock_judge = Mock(side_effect=Exception("LM error"))
+
+        metric = PredictionQualityMetric()
+        metric._judge = mock_judge
+
+        example = Mock(spec=["error_context"])
+        example.error_context = "err"
+        prediction = Mock(spec=["rendered_prompt"])
+        prediction.rendered_prompt = "some prompt"
+
+        assert metric(example, prediction) == 0.5
+
+    def test_judge_lazy_init(self):
+        """Judge is not created until first call."""
+        metric = PredictionQualityMetric()
+        assert metric._judge is None  # not yet created

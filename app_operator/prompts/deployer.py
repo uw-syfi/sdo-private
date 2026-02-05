@@ -58,6 +58,7 @@ def create_generate_script_prompt(
     target_dir: str,
     platform: str,
     dspy_config: Optional['DSPyConfig'] = None,
+    recorder=None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
 
@@ -68,6 +69,7 @@ def create_generate_script_prompt(
         target_dir: The directory where scripts will be generated.
         platform: The deployment platform (e.g., 'docker', 'kubernetes').
         dspy_config: Optional DSPy configuration for optimized prompts.
+        recorder: Optional trajectory recorder for kwargs capture.
 
     Returns:
         str: The rendered prompt.
@@ -79,6 +81,7 @@ def create_generate_script_prompt(
         repo_context=repo_context,
         target_dir=target_dir,
         platform=platform,
+        _trajectory_recorder=recorder,
     )
 
 
@@ -90,6 +93,7 @@ def create_fix_prompt(
     deploy_script_path: Path,
     health_check_script_path: Path,
     dspy_config: Optional['DSPyConfig'] = None,
+    recorder=None,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.
 
@@ -101,6 +105,7 @@ def create_fix_prompt(
         deploy_script_path: Path to the deploy script.
         health_check_script_path: Path to the health check script.
         dspy_config: Optional DSPy configuration for optimized prompts.
+        recorder: Optional trajectory recorder for kwargs capture.
 
     Returns:
         str: The rendered prompt.
@@ -127,4 +132,5 @@ def create_fix_prompt(
         previous_summary_note=previous_summary_note,
         deploy_script=deploy_script_path,
         health_check_script=health_check_script_path,
+        _trajectory_recorder=recorder,
     )

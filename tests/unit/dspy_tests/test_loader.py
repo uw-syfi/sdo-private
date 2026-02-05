@@ -58,6 +58,10 @@ class TestDSPyModuleCache:
 class TestGlobalCache:
     """Tests for global cache functions."""
 
+    def setup_method(self):
+        """Reset global cache before each test for isolation."""
+        reset_cache()
+
     def test_get_cache_returns_singleton(self):
         """get_cache should return the same instance."""
         cache1 = get_cache()

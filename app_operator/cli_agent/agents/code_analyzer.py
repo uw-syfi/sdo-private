@@ -69,9 +69,14 @@ class CodeAnalyzerAgent:
                 self.filesystem.mkdir(self.sds_dir, exist_ok=True)
 
                 # Create the prompt
-                system_prompt = get_loader(self.dspy_config).render("code_analyzer/system.jinja2")
+                system_prompt = get_loader(self.dspy_config).render(
+                    "code_analyzer/system.jinja2",
+                    _trajectory_recorder=self.recorder,
+                )
                 user_prompt = get_loader(self.dspy_config).render(
-                    "code_analyzer/user.jinja2", repo_path=self.repo_path
+                    "code_analyzer/user.jinja2",
+                    repo_path=self.repo_path,
+                    _trajectory_recorder=self.recorder,
                 )
 
                 logger.info(

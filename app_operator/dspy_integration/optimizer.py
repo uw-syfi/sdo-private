@@ -10,8 +10,60 @@ import dspy
 
 from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
-from app_operator.dspy_integration.metrics import CompositeMetric
+from app_operator.dspy_integration.metrics import CompositeMetric, PredictionQualityMetric
 from app_operator.dspy_integration.signatures import get_signature, SIGNATURES
+from app_operator.dspy_integration.field_mappings import (
+    map_kwargs_to_fields,
+    get_output_field_name,
+)
+
+
+class _MetricCallTracker:
+    """Wraps a metric to count successful invocations during compile.
+
+    BootstrapFewShot calls the metric only when the teacher LM succeeds.
+    If call_count is 0 after compile, every example failed before evaluation
+    (e.g. due to auth errors) and no real bootstrapping occurred.
+    """
+
+    def __init__(self, metric: CompositeMetric):
+        self.metric = metric
+        self.call_count = 0
+
+    def __call__(self, *args, **kwargs):
+        result = self.metric(*args, **kwargs)
+        self.call_count += 1
+        return result
+
+
+PROMPT_PHASE_MAP: Dict[str, str] = {
+    "deployer_system": "deployment",
+    "deployer_fix_error": "deployment",
+    "deployer_summarize": "deployment",
+    "deployer_generate_script": "script_generation",
+    "code_analyzer_system": "exploration",
+    "code_analyzer_user": "exploration",
+    "monitor_analyze_health": "monitoring",
+    "agentflow_system": "script_generation",
+    "agentflow_user": "script_generation",
+    "agentflow_repair": "script_generation",
+}
+
+# Reverse map: prompt name → Jinja2 template path.
+# Used to re-render ground-truth prompts from stored prompt_kwargs when
+# rendered_prompt was not recorded in the trajectory.
+PROMPT_TO_TEMPLATE: Dict[str, str] = {
+    "deployer_system": "deployer/system.jinja2",
+    "deployer_fix_error": "deployer/fix_error.jinja2",
+    "deployer_summarize": "deployer/summarize.jinja2",
+    "deployer_generate_script": "deployer/generate_script.jinja2",
+    "code_analyzer_system": "code_analyzer/system.jinja2",
+    "code_analyzer_user": "code_analyzer/user.jinja2",
+    "monitor_analyze_health": "monitor/analyze_health.jinja2",
+    "agentflow_system": "agentflow/system.jinja2",
+    "agentflow_user": "agentflow/user.jinja2",
+    "agentflow_repair": "agentflow/repair.jinja2",
+}
 
 
 class PromptOptimizer:
@@ -99,24 +151,53 @@ class PromptOptimizer:
         print(f"Configuring DSPy with teacher model: {self.config.optimization.teacher_model}")
         self._configure_dspy_lm()
 
-        # Create composite metric
+        # Create composite metric with LLM judge so the prediction-quality
+        # slot actually varies across candidates (the default
+        # DeploymentSuccessMetric reads only historical example fields).
         metric = CompositeMetric(
             success_weight=self.config.optimization.metric_weights["success"],
             efficiency_weight=self.config.optimization.metric_weights["efficiency"],
             token_weight=self.config.optimization.metric_weights["tokens"],
+            prediction_metric=PredictionQualityMetric(),
         )
 
         # Optimize each prompt
         results = {}
         for prompt_name in prompt_names:
-            print(f"\nOptimizing prompt: {prompt_name}")
+            # Filter examples to the relevant phase for this prompt
+            target_phase = PROMPT_PHASE_MAP.get(prompt_name)
+            if target_phase:
+                prompt_train = [e for e in train_examples if e.phase == target_phase]
+                prompt_val = [e for e in val_examples if e.phase == target_phase]
+            else:
+                prompt_train = train_examples
+                prompt_val = val_examples
+
+            if not prompt_train:
+                print(f"\n  Skipping {prompt_name}: no training examples in phase '{target_phase}'")
+                results[prompt_name] = {"success": False,
+                                        "error": f"No training examples for phase '{target_phase}'"}
+                continue
+
+            print(
+                f"\nOptimizing prompt: {prompt_name} (phase={target_phase}, train={
+                    len(prompt_train)}, val={
+                    len(prompt_val)})")
             result = self._optimize_single_prompt(
                 prompt_name,
-                train_examples,
-                val_examples,
+                prompt_train,
+                prompt_val,
                 metric,
             )
             results[prompt_name] = result
+
+        # Bail out if every prompt failed — nothing worth saving
+        if not any(r.get("success") for r in results.values()):
+            errors = {name: r.get("error", "unknown error")
+                      for name, r in results.items()}
+            raise RuntimeError(
+                f"All prompts failed optimization: {errors}"
+            )
 
         # Save optimized prompts
         if output_dir:
@@ -168,6 +249,12 @@ class PromptOptimizer:
     ) -> List[dspy.Example]:
         """Convert TrajectoryExample objects to dspy.Example objects.
 
+        Uses signature-driven generic conversion. Input fields are populated
+        from prompt_kwargs via map_kwargs_to_fields. The output field is
+        populated from rendered_prompt (the ground-truth instruction prompt
+        recorded at render time), falling back to an empty string when not
+        available. Examples without prompt_kwargs are skipped.
+
         Args:
             trajectory_examples: List of TrajectoryExample objects
             prompt_name: Name of the prompt being optimized
@@ -175,33 +262,70 @@ class PromptOptimizer:
         Returns:
             List of dspy.Example objects suitable for DSPy optimization
         """
+        signature = get_signature(prompt_name)
+        input_field_names = list(signature.input_fields.keys())
+        output_field_name = get_output_field_name(prompt_name)
+
         dspy_examples = []
-
+        skipped = 0
         for traj_ex in trajectory_examples:
-            # For now, create simplified examples with basic fields
-            # In future, could parse prompt/response to extract structured data
-            if prompt_name == "deployer_fix_error":
-                example = dspy.Example(
-                    repo_path="/repo",
-                    error_context=traj_ex.prompt[:500] if traj_ex.prompt else "Error context",
-                    attempt=traj_ex.iterations,
-                    max_attempts=20,
-                    deploy_script="/path/deploy.sh",
-                    health_check_script="/path/health_check.sh",
-                    previous_summary="",
-                    fix_summary=traj_ex.response[:200] if traj_ex.response else "Fix applied"
-                ).with_inputs("repo_path", "error_context", "attempt", "max_attempts",
-                              "deploy_script", "health_check_script", "previous_summary")
-            else:
-                # Generic example for other prompt types
-                example = dspy.Example(
-                    input_text=traj_ex.prompt[:500] if traj_ex.prompt else "",
-                    output_text=traj_ex.response[:200] if traj_ex.response else ""
-                ).with_inputs("input_text")
+            if traj_ex.prompt_kwargs is None:
+                skipped += 1
+                continue
 
+            # Map recorded kwargs through explicit + auto mappings
+            mapped = map_kwargs_to_fields(prompt_name, traj_ex.prompt_kwargs)
+            # Filter to only fields declared in the signature
+            fields = {k: mapped[k] for k in input_field_names if k in mapped}
+
+            # Fill any missing input fields with empty string
+            for name in input_field_names:
+                if name not in fields:
+                    fields[name] = ""
+
+            # Set the output field: prefer recorded rendered_prompt; fall back
+            # to re-rendering the Jinja2 template from stored prompt_kwargs.
+            if traj_ex.rendered_prompt:
+                fields[output_field_name] = traj_ex.rendered_prompt
+            else:
+                fields[output_field_name] = self._rerender_from_kwargs(
+                    prompt_name, traj_ex.prompt_kwargs
+                )
+
+            example = dspy.Example(**fields).with_inputs(*input_field_names)
             dspy_examples.append(example)
 
+        if skipped:
+            print(
+                f"  Skipped {skipped} example(s) missing prompt_kwargs (no field mapping available)")
+
         return dspy_examples
+
+    def _rerender_from_kwargs(self, prompt_name: str, prompt_kwargs: Dict[str, Any]) -> str:
+        """Re-render a Jinja2 template from stored prompt_kwargs.
+
+        Used as fallback when rendered_prompt was not recorded in the
+        trajectory (i.e. trajectories produced before that recording was
+        added).  Silently returns empty string on any rendering error.
+
+        Args:
+            prompt_name: Name of the prompt
+            prompt_kwargs: Stored kwargs from the trajectory
+
+        Returns:
+            Rendered prompt string, or empty string on failure
+        """
+        template_name = PROMPT_TO_TEMPLATE.get(prompt_name)
+        if not template_name:
+            return ""
+
+        try:
+            from app_operator.prompts import PromptLoader
+
+            loader = PromptLoader(templates_dir=self.prompts_dir / "templates")
+            return loader._render_jinja2(template_name, prompt_kwargs)
+        except Exception:
+            return ""
 
     def _optimize_single_prompt(
         self,
@@ -235,8 +359,11 @@ class PromptOptimizer:
 
         module = PromptModule(signature)
 
+        # Wrap metric to detect whether the teacher LM ran at all
+        tracking_metric = _MetricCallTracker(metric)
+
         # Select optimizer
-        optimizer = self._create_optimizer(metric)
+        optimizer = self._create_optimizer(tracking_metric)
 
         # Limit training examples
         num_examples = min(
@@ -253,17 +380,54 @@ class PromptOptimizer:
         dspy_train = self._convert_to_dspy_examples(limited_train, prompt_name)
         print(f"  Converted {len(dspy_train)} training examples")
 
+        if not dspy_train:
+            print(f"  No usable training examples after conversion for {prompt_name}")
+            return {
+                "success": False,
+                "error": "All training examples lacked prompt_kwargs and were skipped.",
+            }
+
         try:
-            # Run optimization
-            # Note: BootstrapFewShot doesn't support valset parameter in DSPy 3.x
-            optimized_module = optimizer.compile(
-                module,
-                trainset=dspy_train,  # Use converted examples
-            )
+            # Convert validation examples for optimizers that need valset
+            dspy_val = self._convert_to_dspy_examples(val_examples, prompt_name)
+
+            # Dispatch compile args per optimizer type (DSPy 3.1.2 signatures)
+            optimizer_name = self.config.optimization.optimizer
+            if optimizer_name == "BootstrapFewShot":
+                optimized_module = optimizer.compile(module, trainset=dspy_train)
+            elif optimizer_name == "BootstrapFewShotWithRandomSearch":
+                optimized_module = optimizer.compile(
+                    module, trainset=dspy_train, valset=dspy_val
+                )
+            elif optimizer_name == "MIPROv2":
+                optimized_module = optimizer.compile(
+                    module, trainset=dspy_train, valset=dspy_val
+                )
+            elif optimizer_name == "COPRO":
+                optimized_module = optimizer.compile(
+                    module, trainset=dspy_train, eval_kwargs={}
+                )
+            else:
+                optimized_module = optimizer.compile(module, trainset=dspy_train)
+
+            # BootstrapFewShot silently swallows per-example failures and
+            # populates demos from the training set even when the teacher LM
+            # never ran successfully.  The metric wrapper is the reliable
+            # signal: if it was never called, every example failed before
+            # evaluation (e.g. auth error, bad provider string).
+            if tracking_metric.call_count == 0:
+                print("  Optimization produced 0 successful traces — teacher model likely failed")
+                return {
+                    "success": False,
+                    "error": "Bootstrapping produced 0 successful traces. "
+                             "Check teacher model auth and training data.",
+                }
 
             # Evaluate on validation set
             if val_examples:
-                val_score = self._evaluate(optimized_module, val_examples[:5], metric)
+                val_score = self._evaluate(
+                    optimized_module, val_examples[:5], metric, prompt_name
+                )
             else:
                 val_score = None
 
@@ -298,7 +462,9 @@ class PromptOptimizer:
         elif optimizer_name == "MIPROv2":
             return dspy.MIPROv2(metric=metric)
         elif optimizer_name == "COPRO":
-            return dspy.COPRO(metric=metric)
+            # Vertex AI caps candidateCount at 8; COPRO passes n=breadth
+            # at depth > 0, so breadth must stay <= 8.
+            return dspy.COPRO(metric=metric, breadth=8)
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -307,22 +473,25 @@ class PromptOptimizer:
         module: dspy.Module,
         examples: List,
         metric: CompositeMetric,
+        prompt_name: str,
     ) -> float:
-        """Evaluate module on examples.
+        """Evaluate module on validation examples by invoking it.
 
         Args:
             module: DSPy module to evaluate
-            examples: Validation examples
+            examples: Validation examples (TrajectoryExample objects)
             metric: Metric for evaluation
+            prompt_name: Name of the prompt (used to convert examples)
 
         Returns:
             Average score
         """
+        dspy_examples = self._convert_to_dspy_examples(examples, prompt_name)
         scores = []
-        for example in examples:
+        for traj_ex, dspy_ex in zip(examples, dspy_examples):
             try:
-                # Simple evaluation (would need proper input mapping)
-                score = metric(example, None)
+                prediction = module(**dict(dspy_ex.inputs()))
+                score = metric(traj_ex, prediction)
                 scores.append(score)
             except Exception:
                 pass
@@ -450,28 +619,39 @@ class PromptOptimizer:
                 "demos": [],
             }
 
-            # Extract demonstrations if they exist
+            # Extract demonstrations if they exist (BootstrapFewShot)
             if hasattr(predictor, 'demos') and predictor.demos:
-                # Convert demos to serializable format
                 serializable_demos = []
                 for demo in predictor.demos:
                     if isinstance(demo, dict):
                         serializable_demos.append(demo)
                     elif hasattr(demo, '__dict__'):
-                        # DSPy Example objects have __dict__
                         serializable_demos.append(dict(demo.__dict__))
                     else:
-                        # Try to convert to dict
                         try:
                             serializable_demos.append(dict(demo))
                         except (TypeError, ValueError):
-                            # If conversion fails, use string representation
                             serializable_demos.append(str(demo))
 
                 module_state["demos"] = serializable_demos
                 print(f"    Saved {len(serializable_demos)} demonstrations")
-            else:
-                print("    No demonstrations to save")
+
+            # Extract the optimized instruction if present (COPRO / MIPROv2
+            # rewrite predictor.signature.instructions; BootstrapFewShot does
+            # not touch it).
+            if hasattr(predictor, 'signature') and hasattr(
+                predictor.signature, 'instructions'
+            ):
+                module_state["optimized_instruction"] = (
+                    predictor.signature.instructions
+                )
+                print(
+                    f"    Saved optimized instruction "
+                    f"({len(predictor.signature.instructions)} chars)"
+                )
+
+            if not module_state["demos"] and "optimized_instruction" not in module_state:
+                print("    No optimization artifacts to save")
 
             # Save to JSON
             with open(output_file, 'w') as f:

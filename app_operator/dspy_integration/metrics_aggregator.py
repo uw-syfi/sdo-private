@@ -89,12 +89,25 @@ class MetricsAggregator:
         successes = [ex.success for ex in examples]
         success_rate = sum(successes) / len(successes) if successes else 0.0
 
-        # Iteration metrics
-        iterations_list = [ex.iterations for ex in examples]
+        # Group by run for iteration stats — each run contributes one value
+        # (all examples in the same run share the same iterations count)
+        runs: Dict[str, list] = defaultdict(list)
+        for ex in examples:
+            runs[ex.run_id].append(ex)
+
+        iterations_list = [exs[0].iterations for exs in runs.values()]
         avg_iterations = statistics.mean(iterations_list) if iterations_list else 0.0
         median_iterations = statistics.median(iterations_list) if iterations_list else 0.0
         max_iterations = max(iterations_list) if iterations_list else 0
         min_iterations = min(iterations_list) if iterations_list else 0
+
+        # Split runs into successful vs failed (a run succeeded if any example in it succeeded)
+        successful_run_iters = [
+            exs[0].iterations for exs in runs.values() if any(
+                ex.success for ex in exs)]
+        failed_run_iters = [
+            exs[0].iterations for exs in runs.values() if not any(
+                ex.success for ex in exs)]
 
         # Duration metrics
         durations = [ex.duration_seconds for ex in examples]
@@ -104,6 +117,10 @@ class MetricsAggregator:
         # Token metrics
         examples_with_tokens = [ex for ex in examples if ex.token_usage is not None]
         token_metrics = self._compute_token_metrics(examples_with_tokens, model)
+
+        # Fallback metrics
+        fallback_count = sum(1 for ex in examples if ex.fallback_occurred)
+        fallback_rate = fallback_count / len(examples)
 
         # Success vs failure breakdown
         successful = [ex for ex in examples if ex.success]
@@ -120,8 +137,8 @@ class MetricsAggregator:
                 "min": min_iterations,
                 "max": max_iterations,
                 "by_success": {
-                    "successful_avg": round(statistics.mean([ex.iterations for ex in successful]), 2) if successful else 0.0,
-                    "failed_avg": round(statistics.mean([ex.iterations for ex in failed]), 2) if failed else 0.0,
+                    "successful_avg": round(statistics.mean(successful_run_iters), 2) if successful_run_iters else 0.0,
+                    "failed_avg": round(statistics.mean(failed_run_iters), 2) if failed_run_iters else 0.0,
                 },
             },
             "duration": {
@@ -130,6 +147,8 @@ class MetricsAggregator:
                 "total_hours": round(total_duration / 3600, 2),
             },
             "tokens": token_metrics,
+            "fallback_rate": round(fallback_rate, 4),
+            "fallback_count": fallback_count,
         }
 
         return metrics
@@ -170,6 +189,10 @@ class MetricsAggregator:
             "avg_output": round(avg_output, 2),
             "avg_total": round((total_tokens / len(examples)) if examples else 0, 2),
         }
+
+        # Propagate estimation flag if any example used estimated counts
+        if any(ex.token_usage.get("estimated") for ex in examples):
+            metrics["estimated"] = True
 
         # Calculate costs if model is provided
         if model:
@@ -224,6 +247,23 @@ class MetricsAggregator:
             ),
         }
 
+        # Per-phase comparison for phases present in both versions
+        baseline_by_phase = baseline_metrics.get("by_phase", {})
+        optimized_by_phase = optimized_metrics.get("by_phase", {})
+        shared_phases = set(baseline_by_phase.keys()) & set(optimized_by_phase.keys())
+
+        comparison["by_phase"] = {
+            phase: {
+                "baseline": baseline_by_phase[phase],
+                "optimized": optimized_by_phase[phase],
+                "improvements": self._calculate_improvements(
+                    baseline_by_phase[phase],
+                    optimized_by_phase[phase],
+                ),
+            }
+            for phase in sorted(shared_phases)
+        }
+
         return comparison
 
     def _calculate_improvements(
@@ -251,7 +291,16 @@ class MetricsAggregator:
                     ((optimized_sr - baseline_sr) / baseline_sr) * 100, 2
                 )
             else:
-                improvements["success_rate_improvement"] = "N/A (baseline=0)"
+                improvements["success_rate_improvement"] = None
+
+        # Duration (lower is better)
+        if "duration" in baseline and "duration" in optimized:
+            baseline_dur = baseline["duration"]["avg_seconds"]
+            optimized_dur = optimized["duration"]["avg_seconds"]
+            if baseline_dur > 0:
+                improvements["duration_reduction_pct"] = round(
+                    ((baseline_dur - optimized_dur) / baseline_dur) * 100, 2
+                )
 
         # Iteration efficiency (lower is better, so invert)
         if "iterations" in baseline and "iterations" in optimized:
@@ -262,13 +311,21 @@ class MetricsAggregator:
                     ((baseline_iter - optimized_iter) / baseline_iter) * 100, 2
                 )
 
-        # Cost savings
+        # Token usage (lower is better)
         if (
             "tokens" in baseline
             and "tokens" in optimized
             and baseline["tokens"].get("available")
             and optimized["tokens"].get("available")
         ):
+            baseline_tokens = baseline["tokens"].get("total", 0)
+            optimized_tokens = optimized["tokens"].get("total", 0)
+            if baseline_tokens > 0:
+                improvements["token_reduction_pct"] = round(
+                    ((baseline_tokens - optimized_tokens) / baseline_tokens) * 100, 2
+                )
+
+            # Cost savings (requires --model flag)
             baseline_cost = baseline["tokens"].get("cost_usd", {})
             optimized_cost = optimized["tokens"].get("cost_usd", {})
 
@@ -282,5 +339,19 @@ class MetricsAggregator:
                     improvements["cost_savings_usd"] = round(
                         baseline_total - optimized_total, 4
                     )
+
+        # Fallback rate (lower is better)
+        if "fallback_rate" in baseline and "fallback_rate" in optimized:
+            baseline_fr = baseline["fallback_rate"]
+            optimized_fr = optimized["fallback_rate"]
+            if baseline_fr > 0:
+                improvements["fallback_rate_reduction_pct"] = round(
+                    ((baseline_fr - optimized_fr) / baseline_fr) * 100, 2
+                )
+            elif optimized_fr > 0:
+                # Baseline had zero fallbacks, optimized introduced some — regression
+                improvements["fallback_rate_reduction_pct"] = None
+            else:
+                improvements["fallback_rate_reduction_pct"] = 0.0
 
         return improvements

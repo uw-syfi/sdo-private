@@ -294,35 +294,38 @@ class Config:
         optimization_data = dspy_data.pop("optimization", {})
         auto_rollback_data = dspy_data.pop("auto_rollback", {})
 
-        # Auto-populate runtime_model from agent config if not explicitly set
-        if "runtime_model" not in dspy_data and agent_config.model:
-            # Format: provider/model (matching agent config format)
-            provider = agent_config.provider
-            model = agent_config.model
+        # Auto-populate runtime_model if not explicitly set.
+        #
+        # The [agent] model is consumed by the CLI coding agent (e.g. the
+        # Gemini CLI) and may not be a valid litellm model string.  For
+        # example, "gemini-3-pro-preview" works via the CLI but does not
+        # exist as a Vertex AI publisher model.
+        #
+        # teacher_model, on the other hand, is already a fully-qualified
+        # litellm model string (e.g. "vertex_ai/gemini-2.5-pro") that has
+        # been validated during optimization.  Use it as the default when
+        # available; fall back to mapping [agent] provider/model only when
+        # no teacher_model is configured.
+        if "runtime_model" not in dspy_data:
+            teacher_model = optimization_data.get("teacher_model", "")
+            if "/" in teacher_model:
+                # teacher_model is already a qualified litellm string
+                dspy_data["runtime_model"] = teacher_model
+            elif agent_config.model:
+                # No teacher_model available; derive from agent config
+                provider = agent_config.provider
+                model = agent_config.model
 
-            # Check if using Vertex AI by looking at teacher_model or environment
-            using_vertex_ai = False
-            if optimization_data:
-                teacher_model = optimization_data.get("teacher_model", "")
-                if teacher_model.startswith("vertex_ai"):
-                    using_vertex_ai = True
-
-            # Map provider names to DSPy/LiteLLM format
-            if using_vertex_ai or provider == "vertex_ai":
-                # Use Vertex AI (service account authentication)
-                dspy_provider = "vertex_ai"
-            else:
-                # Use standard provider mapping
                 provider_mapping = {
                     "gemini": "gemini",
+                    "vertex": "vertex_ai",
                     "claude": "anthropic",
                     "anthropic": "anthropic",
                     "codex": "openai",
                     "openai": "openai",
                 }
                 dspy_provider = provider_mapping.get(provider, provider)
-
-            dspy_data["runtime_model"] = f"{dspy_provider}/{model}"
+                dspy_data["runtime_model"] = f"{dspy_provider}/{model}"
 
         # Create nested config objects
         optimization = DSPyOptimizationConfig(

@@ -29,38 +29,66 @@ class DeployerGenerateScriptSignature(dspy.Signature):
     code_analysis = dspy.InputField(desc="Code analysis summary")
     deployment_issues = dspy.InputField(desc="Identified deployment issues")
 
-    deployment_script = dspy.OutputField(desc="Generated deploy.sh script")
+    deployment_script = dspy.OutputField(
+        desc="Generated deploy.sh script. The start command must use "
+             "'docker compose up --build -d' (not plain 'up -d') so that "
+             "images are always built from the current source."
+    )
     health_check_script = dspy.OutputField(desc="Generated health_check.sh script")
 
 
 class DeployerFixErrorSignature(dspy.Signature):
-    """Fix deployment errors.
+    """Generate the instruction prompt for a DevOps coding agent to diagnose
+    and fix a deployment failure.
 
-    Analyzes deployment failures and fixes the deployment scripts.
+    The produced prompt will be sent directly to the coding agent. It should
+    guide the agent through platform detection, error analysis, targeted fixes,
+    and producing a <summary> of findings.
+
+    Context size guardrails apply: the agent must use --tail for container logs,
+    diagnose one service at a time, and stop reading once the root cause is
+    identified.
     """
 
-    repo_path = dspy.InputField(desc="Path to the repository")
-    error_context = dspy.InputField(desc="Error messages and logs from failed deployment")
-    attempt = dspy.InputField(desc="Current attempt number")
-    max_attempts = dspy.InputField(desc="Maximum number of attempts")
-    deploy_script = dspy.InputField(desc="Path to deploy.sh")
-    health_check_script = dspy.InputField(desc="Path to health_check.sh")
-    previous_summary = dspy.InputField(desc="Summary of previous fix attempt", default="")
+    repo_path = dspy.InputField(desc="Path to the repository being deployed")
+    error_context = dspy.InputField(
+        desc="Error messages and logs from the failed deployment attempt, "
+        "including the exit code and status")
+    attempt = dspy.InputField(desc="Current deployment attempt number")
+    max_attempts = dspy.InputField(desc="Maximum number of deployment attempts allowed")
+    deploy_script = dspy.InputField(
+        desc="Full path to the deploy.sh script (e.g. /path/to/repo/.sds/deploy.sh)")
+    health_check_script = dspy.InputField(
+        desc="Full path to the health_check.sh script (e.g. /path/to/repo/.sds/health_check.sh)")
+    previous_summary = dspy.InputField(
+        desc="Note pointing to the log file containing the previous fix attempt summary. "
+        "Includes the log file path pattern .sds/logs/fix_summary_{attempt}.log. "
+        "Empty string if this is the first attempt.",
+        default="")
 
-    fix_summary = dspy.OutputField(desc="Summary of issues found and fixes applied")
+    rendered_prompt = dspy.OutputField(
+        desc="The full instruction prompt to send to the coding agent. Must include "
+        "deployment platform detection guidance, step-by-step error analysis "
+        "instructions, and a directive to produce a <summary> of findings "
+        "stating the issue(s), fix(es), and deployment platform.")
 
 
 class DeployerSummarizeSignature(dspy.Signature):
-    """Summarize deployment results.
+    """Generate the instruction prompt for a coding agent to summarize the
+    recent output of a deployment command.
 
-    Creates a concise summary of the deployment outcome.
+    The produced prompt will be sent directly to the coding agent. It should
+    ask for a one-line summary of current activity, wrapped in
+    <output_msg>...</output_msg> XML tags, with no other text or debug info.
     """
 
-    deployment_log = dspy.InputField(desc="Full deployment log output")
-    health_check_result = dspy.InputField(desc="Health check results")
-    success = dspy.InputField(desc="Whether deployment succeeded")
+    deployment_log = dspy.InputField(
+        desc="Recent output snippet from the deployment command")
 
-    summary = dspy.OutputField(desc="Concise deployment summary")
+    rendered_prompt = dspy.OutputField(
+        desc="The full instruction prompt to send to the coding agent. Must ask "
+        "for a one-line summary wrapped in <output_msg>...</output_msg> XML tags, "
+        "with no other text or debug info.")
 
 
 class CodeAnalyzerSystemSignature(dspy.Signature):

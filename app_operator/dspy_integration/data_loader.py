@@ -4,6 +4,7 @@ Loads training examples from trajectory files for prompt optimization.
 """
 
 import json
+import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass
@@ -24,6 +25,9 @@ class TrajectoryExample:
     tool_calls: List[Dict[str, Any]]
     duration_seconds: float
     token_usage: Optional[Dict[str, int]] = None
+    prompt_kwargs: Optional[Dict[str, Any]] = None
+    rendered_prompt: Optional[str] = None
+    fallback_occurred: bool = False
 
 
 class TrajectoryDataLoader:
@@ -99,6 +103,7 @@ class TrajectoryDataLoader:
 
             for phase in phases_to_process:
                 phase_data = trajectory.get(phase, [])
+                phase_attempt_count = len(phase_data)
                 for conversation in phase_data:
                     call_id = conversation.get("call_id")
                     messages = conversation.get("messages", [])
@@ -119,9 +124,12 @@ class TrajectoryDataLoader:
 
                     # Calculate metrics
                     success = self._determine_success(messages, phase, overall_success)
-                    iterations = len([m for m in messages if m.get("role") == "assistant"])
+                    iterations = phase_attempt_count
                     duration = self._calculate_duration(messages)
                     token_usage = self._extract_token_usage(messages)
+                    prompt_kwargs = conversation.get("prompt_kwargs")
+                    rendered_prompt = conversation.get("rendered_prompt")
+                    fallback_occurred = conversation.get("fallback_occurred", False)
 
                     example = TrajectoryExample(
                         trajectory_file=file_path,
@@ -135,6 +143,9 @@ class TrajectoryDataLoader:
                         tool_calls=tool_calls,
                         duration_seconds=duration,
                         token_usage=token_usage,
+                        prompt_kwargs=prompt_kwargs,
+                        rendered_prompt=rendered_prompt,
+                        fallback_occurred=fallback_occurred,
                     )
 
                     examples.append(example)
@@ -142,11 +153,18 @@ class TrajectoryDataLoader:
         return examples
 
     def _extract_prompt(self, messages: List[Dict[str, Any]]) -> str:
-        """Extract the user prompt from messages."""
+        """Extract the prompt from messages.
+
+        Prefers the first user message. Falls back to the system message
+        for phases (e.g. deployment) that only record system-level context.
+        """
+        system_content = ""
         for msg in messages:
             if msg.get("role") == "user":
                 return msg.get("content", "")
-        return ""
+            if msg.get("role") == "system" and not system_content:
+                system_content = msg.get("content", "")
+        return system_content
 
     def _extract_response(self, messages: List[Dict[str, Any]]) -> str:
         """Extract assistant response (concatenate all assistant messages)."""
@@ -181,22 +199,55 @@ class TrajectoryDataLoader:
         if phase == "deployment":
             tool_calls = [m for m in messages if m.get("role") == "tool_call"]
             if tool_calls:
-                # Check last tool call exit code
                 last_call = tool_calls[-1]
                 exit_code = last_call.get("exit_code")
                 if exit_code is not None:
-                    return exit_code == 0
+                    if exit_code == 0:
+                        return True
+                    # exit_code=-1 typically means docker-compose ran in the
+                    # background and the shell didn't get a clean exit.  Fall
+                    # back to stdout for the real verdict.
+                    if exit_code == -1:
+                        stdout = (last_call.get("stdout") or "").lower()
+                        if "success" in stdout or "healthy" in stdout:
+                            return True
+                    return False
 
-        # For monitoring, check if no errors were reported
+        # For monitoring, use the exec_summary produced by the agent as the
+        # authoritative signal.  It is a concise verdict written by the LLM
+        # itself, so checking it avoids false positives from error-related
+        # keywords that appear in the detailed body (e.g. "No critical errors
+        # detected", "Log Noise/Errors").
         if phase == "monitoring":
-            for msg in messages:
-                if msg.get("role") == "assistant":
-                    content = msg.get("content", "").lower()
-                    if any(word in content for word in ["error", "failed", "failure"]):
-                        return False
+            summary = self._extract_exec_summary(messages)
+            if summary:
+                summary_lower = summary.lower()
+                if any(w in summary_lower for w in [
+                    "fully operational", "healthy", "all checks passing",
+                ]):
+                    return True
+                if any(w in summary_lower for w in [
+                    "unhealthy", "critical failure", "system down",
+                ]):
+                    return False
+            # No exec_summary or inconclusive — fall through to overall status
+            return overall_success
 
         # Default to overall trajectory success
         return overall_success
+
+    def _extract_exec_summary(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+        """Extract the <exec_summary> block from assistant messages, if present."""
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                match = re.search(
+                    r"<exec_summary>(.*?)</exec_summary>",
+                    msg.get("content", ""),
+                    re.DOTALL,
+                )
+                if match:
+                    return match.group(1).strip()
+        return None
 
     def _calculate_duration(self, messages: List[Dict[str, Any]]) -> float:
         """Calculate total duration from message timestamps and durations."""
@@ -207,8 +258,42 @@ class TrajectoryDataLoader:
                 total_duration += duration
         return total_duration
 
-    def _extract_token_usage(self, messages: List[Dict[str, Any]]) -> Optional[Dict[str, int]]:
-        """Extract token usage from messages (if available)."""
-        # Token usage would be added in Phase 2 trajectory enhancement
-        # For now, return None
-        return None
+    # Gemini CLI session files store per-message token counts, but those
+    # counts are not copied into the trajectory messages.  Estimate from
+    # character lengths instead (~4 chars / token is the standard
+    # approximation for most LLM tokenizers).
+    _CHARS_PER_TOKEN = 4.0
+
+    def _extract_token_usage(self, messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Estimate token usage from message content lengths.
+
+        Input tokens are approximated from system, user, and tool_call
+        messages (including args and stdout).  Output tokens come from
+        assistant messages.  Returns None when there is no content to
+        measure.
+        """
+        input_chars = 0
+        output_chars = 0
+
+        for msg in messages:
+            content = msg.get("content") or ""
+            role = msg.get("role")
+
+            if role in ("system", "user", "tool_call"):
+                input_chars += len(content)
+                # tool args and stdout are part of the context fed back to the model
+                if msg.get("args"):
+                    input_chars += len(str(msg["args"]))
+                if msg.get("stdout"):
+                    input_chars += len(msg["stdout"])
+            elif role == "assistant":
+                output_chars += len(content)
+
+        if input_chars == 0 and output_chars == 0:
+            return None
+
+        return {
+            "input": round(input_chars / self._CHARS_PER_TOKEN),
+            "output": round(output_chars / self._CHARS_PER_TOKEN),
+            "estimated": True,
+        }

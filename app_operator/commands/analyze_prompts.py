@@ -52,6 +52,10 @@ def run_command(args) -> int:
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
+    # Comparison mode
+    if args.compare:
+        return _compare_mode(args.compare, args.phase, args.model, args.format)
+
     # Determine trajectories directory
     trajectories_dir = args.trajectories_dir
     if trajectories_dir is None:
@@ -61,10 +65,6 @@ def run_command(args) -> int:
         print(f"Error: Trajectories directory not found: {trajectories_dir}", file=sys.stderr)
         print("Run the operator first to generate trajectory data.", file=sys.stderr)
         return 1
-
-    # Comparison mode
-    if args.compare:
-        return _compare_mode(args.compare, args.phase, args.model, args.format)
 
     # Single directory analysis mode
     aggregator = MetricsAggregator(trajectories_dir)
@@ -219,6 +219,13 @@ def _print_table_format(metrics: dict, trajectories_dir: Path):
         print()
 
 
+def _format_pct_improvement(value) -> str:
+    """Format a percentage improvement value, handling None as N/A."""
+    if value is None:
+        return "N/A"
+    return f"{value:+.2f}%"
+
+
 def _print_comparison_table(comparison: dict):
     """Print comparison results in table format."""
     print("\n" + "=" * 60)
@@ -241,15 +248,33 @@ def _print_comparison_table(comparison: dict):
             "Success Rate",
             f"{baseline.get('success_rate', 0) * 100:.2f}%",
             f"{optimized.get('success_rate', 0) * 100:.2f}%",
-            f"{improvements.get('success_rate_improvement', 0):+.2f}%",
+            _format_pct_improvement(improvements.get('success_rate_improvement')),
         ],
         [
             "Avg Iterations",
             f"{baseline.get('iterations', {}).get('avg', 0):.2f}",
             f"{optimized.get('iterations', {}).get('avg', 0):.2f}",
-            f"{improvements.get('iteration_reduction_pct', 0):+.2f}%",
+            _format_pct_improvement(improvements.get('iteration_reduction_pct')),
+        ],
+        [
+            "Avg Duration",
+            f"{baseline.get('duration', {}).get('avg_seconds', 0):.2f}s",
+            f"{optimized.get('duration', {}).get('avg_seconds', 0):.2f}s",
+            _format_pct_improvement(improvements.get('duration_reduction_pct')),
         ],
     ]
+
+    # Add token usage comparison if available
+    baseline_tokens = baseline.get("tokens", {})
+    optimized_tokens = optimized.get("tokens", {})
+    if baseline_tokens.get("available") and optimized_tokens.get("available"):
+        token_label = "Total Tokens (est.)" if baseline_tokens.get("estimated") else "Total Tokens"
+        comp_table.append([
+            token_label,
+            f"{baseline_tokens.get('total', 0):,}",
+            f"{optimized_tokens.get('total', 0):,}",
+            _format_pct_improvement(improvements.get('token_reduction_pct')),
+        ])
 
     # Add cost comparison if available
     if "cost_reduction_pct" in improvements:
@@ -260,7 +285,7 @@ def _print_comparison_table(comparison: dict):
             "Total Cost",
             f"${baseline_cost:.4f}",
             f"${optimized_cost:.4f}",
-            f"{improvements['cost_reduction_pct']:+.2f}%",
+            _format_pct_improvement(improvements.get('cost_reduction_pct')),
         ])
 
         if "cost_savings_usd" in improvements:
@@ -271,24 +296,93 @@ def _print_comparison_table(comparison: dict):
                 f"${improvements['cost_savings_usd']:.4f}",
             ])
 
+    # Add fallback rate comparison if available
+    if "fallback_rate_reduction_pct" in improvements:
+        baseline_fr = baseline.get("fallback_rate", 0)
+        optimized_fr = optimized.get("fallback_rate", 0)
+        comp_table.append([
+            "Fallback Rate",
+            f"{baseline_fr * 100:.2f}%",
+            f"{optimized_fr * 100:.2f}%",
+            _format_pct_improvement(improvements.get('fallback_rate_reduction_pct')),
+        ])
+
     print(tabulate(comp_table, headers="firstrow", tablefmt="grid"))
     print()
 
     # Summary
     print("Summary:")
-    if improvements.get("success_rate_improvement", 0) > 0:
+    sr_improvement = improvements.get("success_rate_improvement") or 0
+    if sr_improvement > 0:
         print("  ✓ Success rate improved")
-    elif improvements.get("success_rate_improvement", 0) < 0:
+    elif sr_improvement < 0:
         print("  ✗ Success rate degraded")
 
-    if improvements.get("iteration_reduction_pct", 0) > 0:
+    iter_reduction = improvements.get("iteration_reduction_pct") or 0
+    if iter_reduction > 0:
         print("  ✓ Iteration efficiency improved")
-    elif improvements.get("iteration_reduction_pct", 0) < 0:
+    elif iter_reduction < 0:
         print("  ✗ More iterations needed")
 
-    if improvements.get("cost_reduction_pct", 0) > 0:
+    token_reduction = improvements.get("token_reduction_pct") or 0
+    if token_reduction > 0:
+        print("  ✓ Token usage reduced")
+    elif token_reduction < 0:
+        print("  ✗ Token usage increased")
+
+    cost_reduction = improvements.get("cost_reduction_pct") or 0
+    if cost_reduction > 0:
         print("  ✓ Token costs reduced")
-    elif improvements.get("cost_reduction_pct", 0) < 0:
+    elif cost_reduction < 0:
         print("  ✗ Token costs increased")
 
+    dur_reduction = improvements.get("duration_reduction_pct") or 0
+    if dur_reduction > 0:
+        print("  ✓ Average duration reduced")
+    elif dur_reduction < 0:
+        print("  ✗ Average duration increased")
+
+    if "fallback_rate_reduction_pct" in improvements:
+        fb_reduction = improvements.get("fallback_rate_reduction_pct")
+        if fb_reduction is None:
+            print("  ✗ Fallback rate increased from zero")
+        elif fb_reduction > 0:
+            print("  ✓ Fallback rate reduced")
+        elif fb_reduction < 0:
+            print("  ✗ Fallback rate increased")
+
     print()
+
+    # Per-phase breakdown
+    by_phase = comparison.get("by_phase", {})
+    if by_phase:
+        print("Per-Phase Comparison:")
+        phase_rows = []
+        for phase_name, phase_data in by_phase.items():
+            b = phase_data["baseline"]
+            o = phase_data["optimized"]
+            ph_impr = phase_data["improvements"]
+            phase_rows.append([
+                phase_name.capitalize(),
+                f"{b.get('success_rate', 0) * 100:.2f}%",
+                f"{o.get('success_rate', 0) * 100:.2f}%",
+                _format_pct_improvement(ph_impr.get("success_rate_improvement")),
+                f"{b.get('iterations', {}).get('avg', 0):.2f}",
+                f"{o.get('iterations', {}).get('avg', 0):.2f}",
+                _format_pct_improvement(ph_impr.get("iteration_reduction_pct")),
+                f"{b.get('duration', {}).get('avg_seconds', 0):.2f}s",
+                f"{o.get('duration', {}).get('avg_seconds', 0):.2f}s",
+                _format_pct_improvement(ph_impr.get("duration_reduction_pct")),
+            ])
+
+        print(tabulate(
+            phase_rows,
+            headers=[
+                "Phase",
+                "Success (B)", "Success (O)", "Success Δ",
+                "Iters (B)", "Iters (O)", "Iters Δ",
+                "Duration (B)", "Duration (O)", "Duration Δ",
+            ],
+            tablefmt="grid",
+        ))
+        print()

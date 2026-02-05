@@ -89,7 +89,8 @@ class HealthCheckTask(MonitoringTask):
             monitor.repo_path,
             health_result,
             monitor.check_count,
-            monitor.dspy_config
+            monitor.dspy_config,
+            recorder=monitor.recorder,
         )
 
         try:
@@ -171,7 +172,8 @@ class HealthCheckTask(MonitoringTask):
         repo_path: Path,
         health_result: dict,
         check_count: int,
-        dspy_config: Optional['DSPyConfig'] = None
+        dspy_config: Optional['DSPyConfig'] = None,
+        recorder=None,
     ) -> str:
         """Create a prompt for the coding agent to analyze health check results.
 
@@ -181,6 +183,7 @@ class HealthCheckTask(MonitoringTask):
             health_result: Raw health check result dict
             check_count: Current monitoring iteration
             dspy_config: Optional DSPy configuration
+            recorder: Optional trajectory recorder for kwargs capture
 
         Returns:
             Rendered prompt string
@@ -196,6 +199,7 @@ class HealthCheckTask(MonitoringTask):
             health_check_output=health_result.get('stdout', ''),
             exit_code=health_result.get('exit_code', -1),
             iteration=check_count,
+            _trajectory_recorder=recorder,
         )
 
         # Ensure the prompt explicitly requests <exec_summary> format

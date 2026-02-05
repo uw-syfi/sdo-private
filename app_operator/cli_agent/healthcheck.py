@@ -72,9 +72,20 @@ def run_health_check(
     except subprocess.TimeoutExpired as e:
         error_msg = f"Health check timed out after {timeout} seconds"
 
-        # Capture partial output
-        stdout_output = e.stdout if e.stdout else ""
-        stderr_output = e.stderr if e.stderr else error_msg
+        # Capture partial output; e.stdout/e.stderr are bytes even when
+        # text=True was passed to subprocess.run, so decode if needed.
+        stdout_output = (
+            e.stdout.decode(
+                "utf-8",
+                errors="replace") if isinstance(
+                e.stdout,
+                bytes) else e.stdout) or ""
+        stderr_output = (
+            e.stderr.decode(
+                "utf-8",
+                errors="replace") if isinstance(
+                e.stderr,
+                bytes) else e.stderr) or error_msg
 
         if log_file:
             try:

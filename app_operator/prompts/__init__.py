@@ -87,11 +87,15 @@ class PromptLoader:
         # Convert template name to prompt name
         prompt_name = self._template_to_prompt_name(template_name)
 
+        # Record structured kwargs in trajectory before routing
+        self._record_prompt_kwargs(kwargs)
+
         # Check if we should use DSPy
         if self._should_use_dspy(prompt_name, kwargs):
             try:
                 result = self._render_dspy(prompt_name, kwargs)
                 logger.info(f"Successfully rendered {prompt_name} using DSPy")
+                self._record_rendered_prompt(kwargs, result)
                 return result
             except Exception as e:
                 logger.warning(
@@ -102,7 +106,9 @@ class PromptLoader:
                 self._record_fallback(kwargs)
 
         # Fall back to Jinja2 (or default path)
-        return self._render_jinja2(template_name, kwargs)
+        result = self._render_jinja2(template_name, kwargs)
+        self._record_rendered_prompt(kwargs, result)
+        return result
 
     def _template_to_prompt_name(self, template_name: str) -> str:
         """Convert template file name to prompt name.
@@ -126,6 +132,8 @@ class PromptLoader:
     def _should_use_dspy(self, prompt_name: str, kwargs: dict) -> bool:
         """Determine if DSPy should be used for this prompt.
 
+        Returns False early if no optimized module exists for this prompt,
+        avoiding noisy error/fallback paths for prompts that were never optimized.
         Handles canary deployment routing based on deterministic hashing.
 
         Args:
@@ -139,6 +147,12 @@ class PromptLoader:
             return False
 
         if not self.dspy_config.use_optimized:
+            return False
+
+        # Check whether an optimized module actually exists for this prompt
+        # before routing to DSPy. Prompts that were never optimized should
+        # silently use Jinja2.
+        if not self._optimized_module_exists(prompt_name):
             return False
 
         # Canary deployment - deterministic routing based on repo_path
@@ -172,8 +186,26 @@ class PromptLoader:
                 )
                 return False
 
-        # Normal mode - use DSPy for all prompts
+        # Normal mode - use DSPy for prompts that have optimized modules
         return True
+
+    def _optimized_module_exists(self, prompt_name: str) -> bool:
+        """Check whether an optimized module file exists for this prompt.
+
+        Args:
+            prompt_name: Name of the prompt
+
+        Returns:
+            True if the module file exists in the target version directory
+        """
+        from app_operator.dspy_integration.loader import resolve_version
+
+        resolved = resolve_version(self.optimized_dir, self.dspy_config.optimized_version)
+        if resolved is None:
+            return False
+
+        module_file = self.optimized_dir / resolved / f"{prompt_name}.dspy.json"
+        return module_file.exists()
 
     def _render_dspy(self, prompt_name: str, kwargs: dict) -> str:
         """Render using DSPy optimized module.
@@ -276,6 +308,32 @@ class PromptLoader:
         recorder = kwargs.get('_trajectory_recorder')
         if recorder and hasattr(recorder, 'record_fallback'):
             recorder.record_fallback()
+
+    def _record_prompt_kwargs(self, kwargs: dict) -> None:
+        """Record the structured kwargs in the trajectory.
+
+        The recorder itself filters internal keys and converts types.
+
+        Args:
+            kwargs: Template context (may contain trajectory_recorder)
+        """
+        recorder = kwargs.get('_trajectory_recorder')
+        if recorder and hasattr(recorder, 'record_prompt_kwargs'):
+            recorder.record_prompt_kwargs(kwargs)
+
+    def _record_rendered_prompt(self, kwargs: dict, rendered_prompt: str) -> None:
+        """Record the rendered prompt string in the trajectory.
+
+        This captures the ground-truth output that DSPy optimization should
+        learn to produce — the instruction prompt sent to the coding agent.
+
+        Args:
+            kwargs: Template context (may contain trajectory_recorder)
+            rendered_prompt: The rendered prompt string
+        """
+        recorder = kwargs.get('_trajectory_recorder')
+        if recorder and hasattr(recorder, 'record_rendered_prompt'):
+            recorder.record_rendered_prompt(rendered_prompt)
 
 
 # Global instance for easy access

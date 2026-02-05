@@ -12,12 +12,11 @@ from typing import Any, Dict
 # Format: {prompt_name: {jinja2_kwarg: dspy_field_name}}
 EXPLICIT_MAPPINGS: Dict[str, Dict[str, str]] = {
     "deployer_fix_error": {
-        "error_log": "error_context",  # Jinja2 uses error_log, DSPy uses error_context
+        "previous_summary_note": "previous_summary",
     },
     "deployer_summarize": {
-        "log": "deployment_log",  # Jinja2 uses log, DSPy uses deployment_log
+        "output_snippet": "deployment_log",
     },
-    # Add more explicit mappings as needed
 }
 
 
@@ -51,12 +50,12 @@ def map_kwargs_to_fields(prompt_name: str, kwargs: Dict[str, Any]) -> Dict[str, 
     Examples:
         >>> map_kwargs_to_fields('deployer_fix_error', {
         ...     'repo_path': Path('/repo'),
-        ...     'error_log': 'Error occurred',
+        ...     'previous_summary_note': 'Previous attempt timed out',
         ...     'attempt': 1
         ... })
         {
             'repo_path': '/repo',
-            'error_context': 'Error occurred',
+            'previous_summary': 'Previous attempt timed out',
             'attempt': 1
         }
     """
@@ -93,8 +92,8 @@ def get_output_field_name(prompt_name: str) -> str:
     OUTPUT_FIELDS = {
         "deployer_system": "system_prompt",
         "deployer_generate_script": "deployment_script",  # Note: also has health_check_script
-        "deployer_fix_error": "fix_summary",
-        "deployer_summarize": "summary",
+        "deployer_fix_error": "rendered_prompt",
+        "deployer_summarize": "rendered_prompt",
         "code_analyzer_system": "system_prompt",
         "code_analyzer_user": "code_analysis",  # Note: also has deployment_issues
         "monitor_analyze_health": "health_status",  # Note: also has is_healthy

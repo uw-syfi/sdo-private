@@ -1,0 +1,50 @@
+{
+  "prompt_name": "deployer_summarize",
+  "signature": "DeployerSummarizeSignature",
+  "demos": [
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment failed. No specific logs or health check results provided to determine the cause of failure."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment failed with exit code 1. No health check results provided. Root cause analysis is required based on deployment logs to determine the failure reason."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment failed with exit code 1. Further analysis of deployment logs is required to determine the root cause. Health check results are unavailable."
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "Deployment failed with exit code 1. No health check results available. Likely a deployment configuration issue."
+      },
+      "_demos": [],
+      "_input_keys": null
+    }
+  ]
+}

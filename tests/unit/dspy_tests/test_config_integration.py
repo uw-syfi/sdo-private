@@ -200,7 +200,7 @@ class TestConfigIntegration:
         config = Config.from_dict({
             "agent": {
                 "provider": "gemini",
-                "model": "gemini-2.0-flash-exp",
+                "model": "gemini-3-pro-preview",
             },
             "dspy": {
                 "use_optimized": True,
@@ -208,7 +208,7 @@ class TestConfigIntegration:
         })
 
         # Should auto-populate runtime_model from agent config
-        assert config.dspy.runtime_model == "gemini/gemini-2.0-flash-exp"
+        assert config.dspy.runtime_model == "gemini/gemini-3-pro-preview"
 
     def test_runtime_model_auto_populated_anthropic(self):
         """Test runtime_model auto-population for Anthropic provider."""
@@ -229,7 +229,7 @@ class TestConfigIntegration:
         config = Config.from_dict({
             "agent": {
                 "provider": "gemini",
-                "model": "gemini-2.0-flash-exp",
+                "model": "gemini-3-pro-preview",
             },
             "dspy": {
                 "use_optimized": True,
@@ -251,23 +251,43 @@ class TestConfigIntegration:
         # Should remain None
         assert config.dspy.runtime_model is None
 
-    def test_runtime_model_auto_detects_vertex_ai(self):
-        """Test runtime_model auto-detects Vertex AI from teacher_model."""
+    def test_runtime_model_defaults_to_teacher_model(self):
+        """Test runtime_model defaults to teacher_model when available.
+
+        The [agent] model is for the CLI coding agent and may not be a valid
+        litellm model (e.g. gemini-3-pro-preview works via the Gemini CLI but
+        not on Vertex AI).  teacher_model is already a qualified litellm string
+        that is known to work, so it is preferred as the default.
+        """
         config = Config.from_dict({
             "agent": {
                 "provider": "gemini",
-                "model": "gemini-2.0-flash-exp",
+                "model": "gemini-3-pro-preview",
             },
             "dspy": {
                 "use_optimized": True,
                 "optimization": {
-                    "teacher_model": "vertex_ai/gemini-2.0-flash-exp",
+                    "teacher_model": "vertex_ai/gemini-2.5-pro",
                 }
             }
         })
 
-        # Should auto-detect vertex_ai from teacher_model
-        assert config.dspy.runtime_model == "vertex_ai/gemini-2.0-flash-exp"
+        # teacher_model is a qualified litellm string; used as default
+        assert config.dspy.runtime_model == "vertex_ai/gemini-2.5-pro"
+
+    def test_runtime_model_vertex_ai_when_agent_provider_is_vertex(self):
+        """Test runtime_model uses vertex_ai when [agent] provider is vertex."""
+        config = Config.from_dict({
+            "agent": {
+                "provider": "vertex",
+                "model": "gemini-2.5-pro",
+            },
+            "dspy": {
+                "use_optimized": True,
+            }
+        })
+
+        assert config.dspy.runtime_model == "vertex_ai/gemini-2.5-pro"
 
     def test_runtime_model_uses_gemini_when_not_vertex(self):
         """Test runtime_model uses gemini provider when not using Vertex AI."""

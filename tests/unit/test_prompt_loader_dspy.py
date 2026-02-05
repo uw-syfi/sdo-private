@@ -1,6 +1,6 @@
 """Tests for PromptLoader with DSPy integration."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from app_operator.prompts import PromptLoader, reset_loader, get_loader
 from app_operator.dspy_integration.config import DSPyConfig
@@ -220,8 +220,23 @@ class TestTrajectoryIntegration:
 
         mock_recorder.set_prompt_version.assert_called_once_with('jinja2')
 
-    def test_record_fallback(self, tmp_path):
-        """Should record fallback events."""
+    def test_record_rendered_prompt_jinja2(self, tmp_path):
+        """Should record the rendered prompt string in trajectory."""
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        template_file = templates_dir / "test.jinja2"
+        template_file.write_text("Hello {{ name }}!")
+
+        mock_recorder = Mock()
+        loader = PromptLoader(templates_dir=templates_dir)
+
+        loader.render('test.jinja2', name='World', _trajectory_recorder=mock_recorder)
+
+        mock_recorder.record_rendered_prompt.assert_called_once_with("Hello World!")
+
+    @patch('app_operator.dspy_integration.loader.load_optimized_module')
+    def test_record_fallback(self, mock_load, tmp_path):
+        """Should record fallback when DSPy module exists but invocation fails."""
         templates_dir = tmp_path / "templates"
         templates_dir.mkdir()
         deployer_dir = templates_dir / "deployer"
@@ -229,8 +244,15 @@ class TestTrajectoryIntegration:
         template_file = deployer_dir / "system.jinja2"
         template_file.write_text("System {{ repo_path }}")
 
+        # Set up optimized dir with the module file so _optimized_module_exists
+        # returns True; patch load_optimized_module to return None to trigger
+        # the fallback path inside _render_dspy.
         optimized_dir = tmp_path / "optimized"
-        optimized_dir.mkdir()
+        v1_dir = optimized_dir / "v1"
+        v1_dir.mkdir(parents=True)
+        (v1_dir / "deployer_system.dspy.json").write_text("{}")
+
+        mock_load.return_value = None  # Simulate load failure
 
         config = DSPyConfig(use_optimized=True, optimized_version="v1")
         loader = PromptLoader(templates_dir=templates_dir, dspy_config=config)
@@ -243,5 +265,6 @@ class TestTrajectoryIntegration:
             _trajectory_recorder=mock_recorder
         )
 
-        # Should record fallback since DSPy module doesn't exist
+        # DSPy was attempted (module file existed) but load returned None →
+        # fallback to Jinja2 and fallback event recorded
         mock_recorder.record_fallback.assert_called_once()

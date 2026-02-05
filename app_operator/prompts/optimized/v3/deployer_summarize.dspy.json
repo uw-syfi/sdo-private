@@ -1,0 +1,50 @@
+{
+  "prompt_name": "deployer_summarize",
+  "signature": "DeployerSummarizeSignature",
+  "demos": [
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "<output_msg>Deployment failed, analyzing logs to determine cause.</output_msg>"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "<output_msg>Deployment in progress, but no recent output to summarize.</output_msg>"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "<output_msg>Deployment in progress, but no recent output to summarize.</output_msg>"
+      },
+      "_demos": [],
+      "_input_keys": null
+    },
+    {
+      "_store": {
+        "augmented": true,
+        "deployment_log": "",
+        "health_check_result": "",
+        "success": "",
+        "summary": "<output_msg>Deployment failed due to container name conflict. Analyzing possible solutions.</output_msg>"
+      },
+      "_demos": [],
+      "_input_keys": null
+    }
+  ]
+}

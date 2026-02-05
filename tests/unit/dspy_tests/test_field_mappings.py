@@ -52,44 +52,42 @@ class TestMapKwargsToFields:
         assert result['attempt'] == 1
         assert result['max_attempts'] == 3
 
-    def test_explicit_mapping_error_log(self):
-        """error_log should map to error_context for deployer_fix_error."""
+    def test_explicit_mapping_previous_summary_note(self):
+        """previous_summary_note should map to previous_summary for deployer_fix_error."""
         kwargs = {
             'repo_path': Path('/repo'),
-            'error_log': 'Error occurred',
+            'previous_summary_note': 'Previous attempt timed out',
             'attempt': 1,
         }
         result = map_kwargs_to_fields('deployer_fix_error', kwargs)
 
-        assert 'error_context' in result
-        assert result['error_context'] == 'Error occurred'
-        assert 'error_log' not in result  # Original key not in result
+        assert 'previous_summary' in result
+        assert result['previous_summary'] == 'Previous attempt timed out'
+        assert 'previous_summary_note' not in result
 
     def test_explicit_mapping_deployment_log(self):
-        """log should map to deployment_log for deployer_summarize."""
+        """output_snippet should map to deployment_log for deployer_summarize."""
         kwargs = {
-            'log': 'Deployment output...',
-            'health_check_result': 'OK',
-            'success': True,
+            'output_snippet': 'Deployment output...',
         }
         result = map_kwargs_to_fields('deployer_summarize', kwargs)
 
         assert 'deployment_log' in result
         assert result['deployment_log'] == 'Deployment output...'
-        assert 'log' not in result
+        assert 'output_snippet' not in result
 
     def test_mixed_mapping(self):
         """Should handle both explicit and auto mappings."""
         kwargs = {
             'repo_path': Path('/repo'),
-            'error_log': 'Error',  # Explicit mapping
+            'previous_summary_note': 'Timed out',  # Explicit mapping
             'attempt': 2,  # Auto mapping
             'deploy_script': '/repo/.sds/deploy.sh',  # Auto mapping
         }
         result = map_kwargs_to_fields('deployer_fix_error', kwargs)
 
         assert result['repo_path'] == '/repo'
-        assert result['error_context'] == 'Error'
+        assert result['previous_summary'] == 'Timed out'
         assert result['attempt'] == 2
         assert result['deploy_script'] == '/repo/.sds/deploy.sh'
 
@@ -112,8 +110,8 @@ class TestGetOutputFieldName:
         """Test output fields for deployer prompts."""
         assert get_output_field_name('deployer_system') == 'system_prompt'
         assert get_output_field_name('deployer_generate_script') == 'deployment_script'
-        assert get_output_field_name('deployer_fix_error') == 'fix_summary'
-        assert get_output_field_name('deployer_summarize') == 'summary'
+        assert get_output_field_name('deployer_fix_error') == 'rendered_prompt'
+        assert get_output_field_name('deployer_summarize') == 'rendered_prompt'
 
     def test_code_analyzer_prompts(self):
         """Test output fields for code analyzer prompts."""
@@ -145,7 +143,7 @@ class TestGetAllOutputFields:
     def test_single_output_prompt(self):
         """Single-output prompts should return dict with primary field."""
         result = get_all_output_fields('deployer_fix_error')
-        assert result == {'fix_summary': 'fix_summary'}
+        assert result == {'rendered_prompt': 'rendered_prompt'}
 
     def test_deployer_generate_script(self):
         """deployer_generate_script has two outputs."""

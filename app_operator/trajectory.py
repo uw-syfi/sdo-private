@@ -95,6 +95,8 @@ class TrajectoryRecorderProtocol(Protocol):
     def set_agent_name(self, agent_name: str) -> None: ...
     def set_prompt_version(self, version: str) -> None: ...
     def record_fallback(self) -> None: ...
+    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
+    def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
     def phase(
@@ -162,6 +164,8 @@ class TrajectoryRecorder:
 
         # Prompt version tracking for DSPy integration
         self._current_prompt_version: Optional[str] = None
+        self._current_prompt_kwargs: Optional[Dict[str, Any]] = None
+        self._current_rendered_prompt: Optional[str] = None
         self._fallback_occurred: bool = False
 
         # Prevent double finalization
@@ -340,6 +344,33 @@ class TrajectoryRecorder:
         """Record that a fallback from DSPy to Jinja2 occurred."""
         self._fallback_occurred = True
 
+    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None:
+        """Record the structured kwargs passed to a prompt render call.
+
+        Filters out internal keys (starting with '_') and converts Path values
+        to strings for JSON serialization.
+
+        Args:
+            kwargs: The keyword arguments passed to the prompt renderer.
+        """
+        filtered = {
+            k: str(v) if isinstance(v, Path) else v
+            for k, v in kwargs.items()
+            if not k.startswith("_")
+        }
+        self._current_prompt_kwargs = filtered
+
+    def record_rendered_prompt(self, rendered_prompt: str) -> None:
+        """Record the rendered prompt string returned by the prompt renderer.
+
+        This is the string sent to the coding agent as its instruction prompt.
+        Stored in the trajectory as ground-truth output for DSPy optimization.
+
+        Args:
+            rendered_prompt: The rendered prompt string.
+        """
+        self._current_rendered_prompt = rendered_prompt
+
     def end_phase(self, status: Optional[str] = None) -> None:
         """End the current phase, commit conversation, and save to file."""
         with self._conversation_lock:
@@ -389,6 +420,14 @@ class TrajectoryRecorder:
                 if self._fallback_occurred:
                     conversation_entry["fallback_occurred"] = True
 
+                # Add recorded prompt kwargs if available
+                if self._current_prompt_kwargs is not None:
+                    conversation_entry["prompt_kwargs"] = self._current_prompt_kwargs
+
+                # Add rendered prompt if recorded
+                if self._current_rendered_prompt is not None:
+                    conversation_entry["rendered_prompt"] = self._current_rendered_prompt
+
                 # Append the conversation entry
                 self.trajectory[phase_key].append(conversation_entry)
 
@@ -406,6 +445,8 @@ class TrajectoryRecorder:
 
             # Reset prompt tracking for next conversation
             self._current_prompt_version = None
+            self._current_prompt_kwargs = None
+            self._current_rendered_prompt = None
             self._fallback_occurred = False
 
     def _write_to_file(self) -> None:
@@ -706,6 +747,18 @@ class NullTrajectoryRecorder:
         pass
 
     def set_agent_name(self, agent_name: str) -> None:
+        pass
+
+    def set_prompt_version(self, version: str) -> None:
+        pass
+
+    def record_fallback(self) -> None:
+        pass
+
+    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None:
+        pass
+
+    def record_rendered_prompt(self, rendered_prompt: str) -> None:
         pass
 
     @contextmanager

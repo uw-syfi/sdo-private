@@ -20,6 +20,9 @@ CRITICAL REQUIREMENTS:
 1. **Target Platform: Docker**
    {% if script_name == "deploy.sh" %}
    - Use `docker compose` or `docker` commands as appropriate for the repo.
+   - CRITICAL: The `start` command MUST use `docker compose up --build -d`, not
+     plain `up -d`.  Without `--build`, Docker reuses cached images and never
+     compiles the current source code.  Every deployment must build from source.
    {% else %}
    - Use `docker compose ps` or `docker ps`.
    - Check container status.
@@ -39,6 +42,9 @@ CRITICAL REQUIREMENTS:
    - Use SCRIPT_DIR to determine paths relative to the script location
    {% if script_name == "deploy.sh" %}
    - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
+   - CRITICAL: The command MUST be accepted as a positional argument ($1), NOT via a flag.
+     The operator calls the script as: deploy.sh <command> (e.g. deploy.sh start)
+     Do NOT use getopts or -c flags. Parse $1 directly in a case statement.
    - Make it robust, well-documented, and production-ready
    - Include proper error handling and colored output
    - The script should work when executed from the .sds directory

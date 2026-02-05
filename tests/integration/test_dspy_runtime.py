@@ -262,7 +262,7 @@ def test_dspy_enabled_uses_optimized_modules(temp_repo, dspy_config_enabled):
     assert (temp_repo / ".sds" / "health_check.sh").exists()
 
 
-def test_canary_deployment_routing(temp_repo, dspy_config_canary):
+def test_canary_deployment_routing(temp_repo, tmp_path, dspy_config_canary):
     """
     Test that canary deployment routes deterministically based on repo path.
 
@@ -274,8 +274,16 @@ def test_canary_deployment_routing(temp_repo, dspy_config_canary):
     from app_operator.prompts import PromptLoader
     import hashlib
 
+    # Set up an optimized dir with the module file so the existence check
+    # passes and the canary hash logic is actually exercised.
+    optimized_dir = tmp_path / "optimized"
+    v1_dir = optimized_dir / "v1"
+    v1_dir.mkdir(parents=True)
+    (v1_dir / "deployer_generate_script.dspy.json").write_text("{}")
+
     # Test deterministic routing
     loader = PromptLoader(dspy_config=dspy_config_canary)
+    loader.optimized_dir = optimized_dir
 
     # Calculate expected routing
     repo_path_str = str(temp_repo)
@@ -304,7 +312,15 @@ def test_canary_deployment_distribution(tmp_path, dspy_config_canary):
     """
     from app_operator.prompts import PromptLoader
 
+    # Set up an optimized dir with the module file so _optimized_module_exists
+    # returns True, allowing the canary hash logic to actually run.
+    optimized_dir = tmp_path / "optimized"
+    v1_dir = optimized_dir / "v1"
+    v1_dir.mkdir(parents=True)
+    (v1_dir / "deployer_generate_script.dspy.json").write_text("{}")
+
     loader = PromptLoader(dspy_config=dspy_config_canary)
+    loader.optimized_dir = optimized_dir
 
     # Create 100 different repo paths
     num_repos = 100

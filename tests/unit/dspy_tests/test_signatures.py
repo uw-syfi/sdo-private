@@ -60,7 +60,7 @@ class TestSignatures:
         assert "error_context" in fields
         assert "attempt" in fields
         assert "max_attempts" in fields
-        assert "fix_summary" in fields
+        assert "rendered_prompt" in fields
 
     def test_agentflow_user_signature_fields(self):
         """Test AgentflowUserSignature has expected fields."""
