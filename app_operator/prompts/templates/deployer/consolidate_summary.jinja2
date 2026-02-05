@@ -18,8 +18,8 @@ This summary is critical for the agent (you or another instance) to understand w
 
 # Instructions
 
-Rewrite the Consolidated Summary to incorporate the new attempts.
-Do not just append; synthesize the information.
+Rewrite the Consolidated Summary to incorporate the new attempts **without removing any existing sections or attempts**.
+Always preserve prior content; only add or merge the new attempt information.
 
 **CRITICAL: Identify Common Failure Patterns.**
 
@@ -43,7 +43,7 @@ Group the attempts by the underlying error or failure pattern they were addressi
 ...
 
 # Output
-Provide the updated Markdown content wrapped in `<summary>` tags. Everything inside the tags should be the raw Markdown content.
+Provide the updated Markdown content wrapped in `<summary>` tags. **Always include both opening `<summary>` and closing `</summary>` tags**. Everything inside the tags should be the raw Markdown content.
 
 Example:
 <summary>
@@ -54,4 +54,7 @@ Example:
 # Dos and Don'ts
 
 - DO NOT remove past failure patterns (even if they appear resolved). The same failure can reappear in the future.
+- DO NOT delete or rewrite existing attempts. If a failure pattern already exists, add the new attempt under it; otherwise, create a new pattern section.
+- DO NOT delete timeline entries. Either append a new timeline bullet for the new attempt, or, if an existing timeline bullet for that attempt already exists, augment it by adding the new attempt number.
 - DO always incorporate the latest attempt into the summary, even if it just means adding a new attempt number citation.
+- If in doubt, prefer appending while keeping all previous content intact.
