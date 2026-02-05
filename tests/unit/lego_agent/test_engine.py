@@ -2,9 +2,9 @@ import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from agentflow.engine import AgentflowEngine
-from agentflow.io import UserIO
-from agentflow.prompts import get_loader
+from lego_agent.engine import LegoAgentEngine
+from lego_agent.io import UserIO
+from lego_agent.prompts import get_loader
 from app_operator.config import Config, AgentConfig, OperatorConfig
 
 
@@ -66,7 +66,7 @@ def mock_io():
 @pytest.fixture
 def engine(tmp_path, mock_config, mock_io):
     loader = get_loader()
-    return AgentflowEngine(
+    return LegoAgentEngine(
         config=mock_config,
         prompt_loader=loader,
         io=mock_io,
@@ -79,8 +79,8 @@ def engine(tmp_path, mock_config, mock_io):
 
 
 def test_engine_happy_path(engine, tmp_path):
-    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
-            patch("agentflow.engine.build_llm"):
+    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
+            patch("lego_agent.engine.build_llm"):
 
         mock_agent = MagicMock()
 
@@ -91,7 +91,7 @@ def test_engine_happy_path(engine, tmp_path):
 ```json
 {
     "status": "ready",
-    "python_script": "import sys\nfrom agentflow.runtime import *\nif __name__ == '__main__':\n    MAX_ITERATIONS = 5\n    pass"
+    "python_script": "import sys\nfrom lego_agent.runtime import *\nif __name__ == '__main__':\n    MAX_ITERATIONS = 5\n    pass"
 }
 ```
 ''')}
@@ -117,8 +117,8 @@ def test_engine_clarification_loop(engine, mock_io):
     # Or better, the mock_astream_events can yield different things based on
     # the prompt or just sequential calls.
 
-    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
-            patch("agentflow.engine.build_llm"):
+    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
+            patch("lego_agent.engine.build_llm"):
 
         mock_agent = MagicMock()
 
@@ -128,7 +128,7 @@ def test_engine_clarification_loop(engine, mock_io):
             r'''
             {
                 "status": "ready",
-                "python_script": "import agentflow.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"
+                "python_script": "import lego_agent.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"
             }
             '''
         ]
@@ -163,8 +163,8 @@ def test_engine_clarification_loop(engine, mock_io):
 
 
 def test_engine_validation_failure_and_repair(engine):
-    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
-            patch("agentflow.engine.build_llm"):
+    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
+            patch("lego_agent.engine.build_llm"):
 
         mock_agent = MagicMock()
 
@@ -194,7 +194,7 @@ def test_engine_validation_failure_and_repair(engine):
             return {
                 "messages": [
                     MagicMock(
-                        content=r'''{"status": "ready", "python_script": "import agentflow.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"}''')
+                        content=r'''{"status": "ready", "python_script": "import lego_agent.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"}''')
                 ]
             }
 
@@ -209,8 +209,8 @@ def test_engine_validation_failure_and_repair(engine):
 
 
 def test_engine_script_validation_error(engine):
-    with patch("agentflow.engine.create_react_agent") as mock_create_agent, \
-            patch("agentflow.engine.build_llm"):
+    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
+            patch("lego_agent.engine.build_llm"):
 
         mock_agent = MagicMock()
 

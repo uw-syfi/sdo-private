@@ -7,10 +7,10 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
-from agentflow.io import UserIO
-from agentflow.models import AgentflowResult, parse_agentflow_response, AgentflowResponse
-from agentflow.storage import AgentflowStorage
-from agentflow.prompts import PromptLoader
+from lego_agent.io import UserIO
+from lego_agent.models import LegoAgentResult, parse_lego_agent_response, LegoAgentResponse
+from lego_agent.storage import LegoAgentStorage
+from lego_agent.prompts import PromptLoader
 
 from app_operator.langgraph.llm import build_llm
 from app_operator.config import Config
@@ -26,8 +26,8 @@ from app_operator.exceptions import AgentError
 from app_operator.logger import logger
 
 
-class AgentflowEngine:
-    """Core logic for the Agentflow process."""
+class LegoAgentEngine:
+    """Core logic for the LegoAgent process."""
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class AgentflowEngine:
         self.loop_bound = loop_bound
         self.max_clarifications = max_clarifications
         self.agent_timeout = agent_timeout
-        self.storage = AgentflowStorage(output_dir)
+        self.storage = LegoAgentStorage(output_dir)
         self.work_dir = work_dir
         self._thinking_started = False
 
@@ -85,7 +85,7 @@ class AgentflowEngine:
             return text
         return str(content)
 
-    async def run_async(self, user_prompt: str) -> AgentflowResult:
+    async def run_async(self, user_prompt: str) -> LegoAgentResult:
         """Run the clarification loop and generate the script."""
         qa_pairs: List[Tuple[str, str]] = []
 
@@ -93,7 +93,7 @@ class AgentflowEngine:
         filesystem = RealFilesystem()
         context = ToolContext(repo_root=self.work_dir, filesystem=filesystem)
 
-        # Build specific tools used by Agentflow (read-only mostly)
+        # Build specific tools used by LegoAgent (read-only mostly)
         tools = [
             self._wrap_tool(_build_read_file(context), "read_file"),
             self._wrap_tool(_build_list_files(context), "list_files"),
@@ -113,9 +113,9 @@ class AgentflowEngine:
 
             self._thinking_started = False
             # Render prompts
-            system_prompt = self.prompt_loader.render("agentflow/system.jinja2")
+            system_prompt = self.prompt_loader.render("lego_agent/system.jinja2")
             user_msg_text = self.prompt_loader.render(
-                "agentflow/user.jinja2",
+                "lego_agent/user.jinja2",
                 user_prompt=user_prompt,
                 qa_pairs=qa_pairs,
                 loop_bound=self.loop_bound,
@@ -234,7 +234,7 @@ class AgentflowEngine:
                 response = None
                 if final_response_data:
                     try:
-                        response = AgentflowResponse(
+                        response = LegoAgentResponse(
                             status=final_response_data.get("status"),
                             questions=final_response_data.get("questions", []) or [],
                             python_script=final_response_data.get("python_script"),
@@ -244,12 +244,12 @@ class AgentflowEngine:
                         self.io.render_error(f"Response validation failed: {e}")
 
                 if not response:
-                    response = parse_agentflow_response(final_content)
+                    response = parse_lego_agent_response(final_content)
             except ValueError as e:
                 # Attempt repair
                 self.io.render_error(f"Parsing failed, attempting repair... {e}")
                 repair_msg_text = self.prompt_loader.render(
-                    "agentflow/repair.jinja2", error=str(e), raw_response=final_content
+                    "lego_agent/repair.jinja2", error=str(e), raw_response=final_content
                 )
 
                 # Append repair message to history (simulated by extending messages)
@@ -269,7 +269,7 @@ class AgentflowEngine:
                     final_content = str(last_msg_content)
 
                 self.io.info("")
-                response = parse_agentflow_response(final_content)
+                response = parse_lego_agent_response(final_content)
 
             if response.status == "clarify":
                 self.io.render_info("Agent needs clarification:")
@@ -289,7 +289,7 @@ class AgentflowEngine:
                 # Write to file
                 script_path = self.storage.write_script(script_text)
 
-                return AgentflowResult(
+                return LegoAgentResult(
                     script_path=script_path,
                     script_text=script_text,
                     clarifications=qa_pairs,
@@ -306,11 +306,11 @@ class AgentflowEngine:
 
         if (
             "libs.agent_cli" not in script_text
-            and "agentflow.runtime" not in script_text
+            and "lego_agent.runtime" not in script_text
             and "app_operator" not in script_text
         ):
             errors.append(
-                "Script must import from `agentflow.runtime` or related modules"
+                "Script must import from `lego_agent.runtime` or related modules"
             )
 
         if (

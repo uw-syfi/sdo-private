@@ -1,5 +1,5 @@
 import pytest
-from agentflow.prompts import get_loader, reset_loader
+from lego_agent.prompts import get_loader, reset_loader
 
 
 @pytest.fixture
@@ -13,19 +13,19 @@ def loader():
 def test_loader_initialization(loader):
     # Verify that the loader is correctly pointing to the templates directory
     assert loader.templates_dir.exists()
-    assert (loader.templates_dir / "agentflow").exists()
+    assert (loader.templates_dir / "lego_agent").exists()
 
 
-def test_agentflow_system_prompt(loader):
-    rendered = loader.render("agentflow/system.jinja2")
+def test_lego_agent_system_prompt(loader):
+    rendered = loader.render("lego_agent/system.jinja2")
     assert rendered is not None
     # Add assertions based on expected content if known,
     # but at least check it renders.
 
 
-def test_agentflow_user_prompt(loader):
+def test_lego_agent_user_prompt(loader):
     rendered = loader.render(
-        "agentflow/user.jinja2",
+        "lego_agent/user.jinja2",
         user_prompt="TEST_PROMPT",
         qa_pairs=[],
         loop_bound=10
@@ -34,9 +34,9 @@ def test_agentflow_user_prompt(loader):
     assert "MAX_ITERATIONS = 10" in rendered
 
 
-def test_agentflow_repair_prompt(loader):
+def test_lego_agent_repair_prompt(loader):
     rendered = loader.render(
-        "agentflow/repair.jinja2",
+        "lego_agent/repair.jinja2",
         error="TEST_ERROR",
         raw_response="RAW_RESPONSE"
     )

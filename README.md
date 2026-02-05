@@ -7,7 +7,7 @@ SDS is an AI-native approach that embeds agentic LLMs into the full systems life
 The repository consists of two primary tools:
 
 - **sds_operator**: An intelligent deployment and monitoring tool that autonomously manages applications. It generates deployment/health scripts, self-corrects errors, and performs continuous monitoring using AI agents.
-- **agentflow (experimental)**: An autonomous script generation tool that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows using patterns like `fan_out`, `summarize`, and `judge_loop`.
+- **lego_agent (experimental)**: An autonomous script generation tool that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows using patterns like `fan_out`, `summarize`, and `judge_loop`.
 
 ---
 
@@ -64,21 +64,21 @@ This looks for configuration in `exp_config/<exp-name>/config.toml`. See `exp_co
 
 ---
 
-## Running Agentflow (Experimental)
+## Running LegoAgent (Experimental)
 
-Agentflow uses an interactive clarification loop to refine requirements before generating orchestration scripts.
+LegoAgent uses an interactive clarification loop to refine requirements before generating orchestration scripts.
 
 ### Interactive TUI (Recommended)
 Launch the terminal UI to interact with the agent:
 ```bash
-uv run -m agentflow
+uv run -m lego_agent
 ```
 
 ### CLI Mode
 Provide a prompt directly from the terminal:
 ```bash
-./sds_agentflow --prompt "Improve application test coverage to >= 80%" --loop-bound 5
-./sds_agentflow --prompt "Improve the frontend application till it follows all React best practices" --loop-bound 5
+./sds_lego_agent --prompt "Improve application test coverage to >= 80%" --loop-bound 5
+./sds_lego_agent --prompt "Improve the frontend application till it follows all React best practices" --loop-bound 5
 ```
 
 ---
@@ -98,8 +98,8 @@ The operator creates a `.sds/` directory in the target application with:
 - `logs/`: Detailed logs for every deployment and monitoring attempt.
 - `trajectories/`: Structured JSON recordings of all agent interactions, including sequential call IDs and correlation with external session logs (e.g., Gemini sessions).
 
-### Agentflow Features & Orchestration
-Agentflow is designed for complex task automation:
+### LegoAgent Features & Orchestration
+LegoAgent is designed for complex task automation:
 - **Clarification Loop**: AI-powered questions to resolve ambiguities before script generation.
 - **Orchestration Patterns**: Built-in support for `fan_out` (parallel execution), `summarize` (aggregation), and `judge_loop` (iterative refinement).
 - **Validation**: Generated scripts are validated for syntax and safety before execution.

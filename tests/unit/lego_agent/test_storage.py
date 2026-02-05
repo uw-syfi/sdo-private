@@ -1,21 +1,21 @@
-"""Tests for agentflow storage module."""
+"""Tests for lego_agent storage module."""
 
 from pathlib import Path
 from unittest.mock import patch
 
 
-from agentflow.storage import AgentflowStorage
+from lego_agent.storage import LegoAgentStorage
 
 
 def test_storage_initialization(tmp_path):
-    """Test AgentflowStorage initialization."""
-    storage = AgentflowStorage(tmp_path)
+    """Test LegoAgentStorage initialization."""
+    storage = LegoAgentStorage(tmp_path)
     assert storage.base_dir == tmp_path
 
 
 def test_write_script_creates_directory(tmp_path):
     """Test that write_script creates timestamped directory."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "print('hello')"
 
     script_path = storage.write_script(script_text)
@@ -29,7 +29,7 @@ def test_write_script_creates_directory(tmp_path):
 
 def test_write_script_creates_file(tmp_path):
     """Test that write_script creates the script file."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "print('hello world')"
 
     script_path = storage.write_script(script_text)
@@ -42,7 +42,7 @@ def test_write_script_creates_file(tmp_path):
 
 def test_write_script_content(tmp_path):
     """Test that write_script writes correct content."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "#!/usr/bin/env python3\nprint('test script')\n"
 
     script_path = storage.write_script(script_text)
@@ -53,7 +53,7 @@ def test_write_script_content(tmp_path):
 
 def test_write_script_timestamp_format(tmp_path):
     """Test that directory name follows timestamp format."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "print('test')"
 
     with patch("time.strftime") as mock_strftime:
@@ -66,7 +66,7 @@ def test_write_script_timestamp_format(tmp_path):
 
 def test_write_script_multiple_scripts_different_timestamps(tmp_path):
     """Test writing multiple scripts creates separate directories."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
 
     timestamps = ["20240101-120000", "20240101-120001"]
     paths = []
@@ -85,7 +85,7 @@ def test_write_script_multiple_scripts_different_timestamps(tmp_path):
 
 def test_write_script_overwrites_if_same_timestamp(tmp_path):
     """Test that writing with same timestamp overwrites the file."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
 
     with patch("time.strftime") as mock_strftime:
         mock_strftime.return_value = "20240101-120000"
@@ -106,7 +106,7 @@ def test_write_script_overwrites_if_same_timestamp(tmp_path):
 
 def test_write_script_unicode_content(tmp_path):
     """Test writing script with unicode characters."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "# 你好世界\nprint('Hello 🌍')\n"
 
     script_path = storage.write_script(script_text)
@@ -117,7 +117,7 @@ def test_write_script_unicode_content(tmp_path):
 
 def test_write_script_empty_content(tmp_path):
     """Test writing empty script."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = ""
 
     script_path = storage.write_script(script_text)
@@ -129,7 +129,7 @@ def test_write_script_empty_content(tmp_path):
 
 def test_write_script_multiline_content(tmp_path):
     """Test writing multiline script."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = """#!/usr/bin/env python3
 import sys
 import os
@@ -149,7 +149,7 @@ if __name__ == "__main__":
 
 def test_write_script_returns_path(tmp_path):
     """Test that write_script returns a Path object."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "print('test')"
 
     result = storage.write_script(script_text)
@@ -161,7 +161,7 @@ def test_write_script_returns_path(tmp_path):
 def test_base_dir_nonexistent_creates_on_write(tmp_path):
     """Test that non-existent base directory is created on write."""
     nonexistent = tmp_path / "nonexistent" / "nested"
-    storage = AgentflowStorage(nonexistent)
+    storage = LegoAgentStorage(nonexistent)
 
     script_path = storage.write_script("print('test')")
 
@@ -172,7 +172,7 @@ def test_base_dir_nonexistent_creates_on_write(tmp_path):
 
 def test_write_script_preserves_newlines(tmp_path):
     """Test that newline content is written correctly."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
 
     # Test with standard Unix newlines
     script_text_lf = "line1\nline2\nline3\n"
@@ -185,7 +185,7 @@ def test_write_script_preserves_newlines(tmp_path):
 
 def test_write_script_with_special_characters_in_content(tmp_path):
     """Test writing script with special characters."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "# Special chars: !@#$%^&*()[]{}<>?/\\|;:'\",.\n"
 
     script_path = storage.write_script(script_text)
@@ -194,7 +194,7 @@ def test_write_script_with_special_characters_in_content(tmp_path):
 
 def test_write_script_very_long_content(tmp_path):
     """Test writing very long script content."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     # Create a script with 10,000 lines
     script_text = "\n".join([f"# Line {i}" for i in range(10000)])
 
@@ -205,7 +205,7 @@ def test_write_script_very_long_content(tmp_path):
 def test_write_script_concurrent_writes_different_timestamps(tmp_path):
     """Test concurrent writes with different timestamps create separate files."""
     import threading
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     results = []
 
     def write_script(index):
@@ -229,7 +229,7 @@ def test_write_script_concurrent_writes_different_timestamps(tmp_path):
 
 def test_write_script_with_tabs_and_spaces(tmp_path):
     """Test writing script with mixed tabs and spaces."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "\tindented with tab\n    indented with spaces\n"
 
     script_path = storage.write_script(script_text)
@@ -238,7 +238,7 @@ def test_write_script_with_tabs_and_spaces(tmp_path):
 
 def test_write_script_with_null_bytes_raises_error(tmp_path):
     """Test that writing script with null bytes raises an error."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     # Null bytes are not valid in file content
     script_text = "line1\x00line2"
 
@@ -254,13 +254,13 @@ def test_write_script_with_null_bytes_raises_error(tmp_path):
 
 def test_storage_base_dir_is_path_object(tmp_path):
     """Test that base_dir is stored as Path object."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     assert isinstance(storage.base_dir, Path)
 
 
 def test_write_script_windows_line_endings(tmp_path):
     """Test writing script with Windows-style line endings."""
-    storage = AgentflowStorage(tmp_path)
+    storage = LegoAgentStorage(tmp_path)
     script_text = "line1\r\nline2\r\nline3\r\n"
 
     script_path = storage.write_script(script_text)

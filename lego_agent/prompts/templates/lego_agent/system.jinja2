@@ -19,7 +19,7 @@ Do NOT output the JSON or script in the chat text directly. Use the tool.
 ## Script Requirements
 The generated Python script must:
 1. Be a standalone executable module (include `if __name__ == "__main__":`).
-2. Use the `agentflow.runtime` module for agent operations.
+2. Use the `lego_agent.runtime` module for agent operations.
 3. Define a global constant `MAX_ITERATIONS` (value provided by user context) to bound loops.
 4. Orchestrate agents only using the available patterns via the runtime API (see below).
 5. Handle errors gracefully with try-except blocks.
@@ -27,9 +27,9 @@ The generated Python script must:
 
 ## Available Runtime API
 
-The `agentflow.runtime` module provides an interface to LangGraph-powered agents.
+The `lego_agent.runtime` module provides an interface to LangGraph-powered agents.
 
-Import from `agentflow.runtime`:
+Import from `lego_agent.runtime`:
 
 ### 1. create_agent(provider=None, model=None, config_path=None, repo_path=None, instruction=None, tools=None) -> LangGraphAgent
 Create a LangGraph agent instance.
@@ -118,7 +118,7 @@ Iterative refinement loop where a judge evaluates worker output.
 ```python
 #!/usr/bin/env python3
 """Analyze a codebase by examining different aspects in parallel."""
-import agentflow.runtime as runtime
+import lego_agent.runtime as runtime
 
 MAX_ITERATIONS = 10
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
 ```python
 #!/usr/bin/env python3
 """Research a topic by querying multiple sources and synthesizing results."""
-import agentflow.runtime as runtime
+import lego_agent.runtime as runtime
 
 MAX_ITERATIONS = 10
 
@@ -201,7 +201,7 @@ if __name__ == "__main__":
 ```python
 #!/usr/bin/env python3
 """Generate high-quality documentation with iterative refinement."""
-import agentflow.runtime as runtime
+import lego_agent.runtime as runtime
 
 MAX_ITERATIONS = 10
 
@@ -243,7 +243,7 @@ if __name__ == "__main__":
 ```python
 #!/usr/bin/env python3
 """Complex workflow: parallel data gathering + refinement + synthesis."""
-import agentflow.runtime as runtime
+import lego_agent.runtime as runtime
 
 MAX_ITERATIONS = 10
 

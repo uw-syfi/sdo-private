@@ -5,16 +5,16 @@ import os
 import subprocess
 from pathlib import Path
 
-from agentflow.engine import AgentflowEngine
-from agentflow.io import ConsoleIO
+from lego_agent.engine import LegoAgentEngine
+from lego_agent.io import ConsoleIO
 from app_operator.config import load_config
 from app_operator.logger import logger
-from agentflow.prompts import get_loader
+from lego_agent.prompts import get_loader
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Agentflow: Autonomous script generator"
+        description="LegoAgent: Autonomous script generator"
     )
     parser.add_argument("--prompt", help="Initial user prompt")
     parser.add_argument("--config", help="Path to sds.toml config file")
@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--loop-bound", type=int, help="Execution loop bound for generated script"
     )
     parser.add_argument(
-        "--output-dir", default="agentflow_runs", help="Output directory"
+        "--output-dir", default="lego_agent_runs", help="Output directory"
     )
     parser.add_argument(
         "--work-dir", default=".", help="Directory to run the generated script in"
@@ -70,10 +70,10 @@ def main() -> int:
 
     if not args.no_tui:
         try:
-            from agentflow.tui import AgentflowTUI
+            from lego_agent.tui import LegoAgentTUI
 
             def engine_factory(io):
-                return AgentflowEngine(
+                return LegoAgentEngine(
                     config=config,
                     prompt_loader=prompt_loader,
                     io=io,
@@ -84,7 +84,7 @@ def main() -> int:
                     work_dir=work_dir,
                 )
 
-            app = AgentflowTUI(
+            app = LegoAgentTUI(
                 engine_factory,
                 initial_prompt=args.prompt,
                 work_dir=str(work_dir),
@@ -107,7 +107,7 @@ def main() -> int:
             logger.error("No prompt provided.")
             return 1
 
-    engine = AgentflowEngine(
+    engine = LegoAgentEngine(
         config=config,
         prompt_loader=prompt_loader,
         io=io,
@@ -143,5 +143,5 @@ def main() -> int:
 
         return 0
     except Exception as e:
-        logger.error(f"Agentflow failed: {e}")
+        logger.error(f"LegoAgent failed: {e}")
         return 1

@@ -10,16 +10,16 @@ from rich.text import Text
 from rich.panel import Panel
 from rich import box
 
-from agentflow.io import UserIO
+from lego_agent.io import UserIO
 
 if TYPE_CHECKING:
-    from agentflow.engine import AgentflowEngine
+    from lego_agent.engine import LegoAgentEngine
 
 
 class TextualIO:
     """UserIO implementation for Textual TUI."""
 
-    def __init__(self, app: "AgentflowTUI"):
+    def __init__(self, app: "LegoAgentTUI"):
         self.app = app
         self._thinking_buffer = ""
 
@@ -118,7 +118,7 @@ class TextualIO:
         self.app.write_log(message)
 
 
-class AgentflowTUI(App):
+class LegoAgentTUI(App):
     CSS = """
     Screen {
         background: #050505;
@@ -189,7 +189,7 @@ class AgentflowTUI(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, engine_factory: Callable[[UserIO], "AgentflowEngine"],
+    def __init__(self, engine_factory: Callable[[UserIO], "LegoAgentEngine"],
                  initial_prompt: str = None, work_dir: str = ".", repo_root: str = None, **kwargs):
         super().__init__(**kwargs)
         self.theme = "flexoki"
@@ -211,12 +211,12 @@ class AgentflowTUI(App):
         self.log_widget = self.query_one(RichLog)
         self.input_widget = self.query_one(Input)
 
-        self.write_log(Text.from_markup("[bold blue]Welcome to Agentflow TUI![/]"))
+        self.write_log(Text.from_markup("[bold blue]Welcome to LegoAgent TUI![/]"))
 
         if self.initial_prompt:
             self.write_log(Text.from_markup(f"[cyan]> {self.initial_prompt}[/]"))
             self.processing = True
-            self.run_agentflow(self.initial_prompt)
+            self.run_lego_agent(self.initial_prompt)
         else:
             self.write_log("Type in a task that you want to delegate to agents")
             self.input_widget.focus()
@@ -235,14 +235,14 @@ class AgentflowTUI(App):
             # First input is the prompt
             self.write_log(Text.from_markup(f"[cyan]> {value}[/]"))
             self.processing = True
-            self.run_agentflow(value)
+            self.run_lego_agent(value)
         else:
             # Input is answer to question
             self.write_log(Text.from_markup(f"[cyan]> {value}[/]"))
             await self.input_queue.put(value)
 
     @work
-    async def run_agentflow(self, user_prompt: str):
+    async def run_lego_agent(self, user_prompt: str):
         io = TextualIO(self)
         engine = self.engine_factory(io)
 
@@ -250,9 +250,8 @@ class AgentflowTUI(App):
             result = await engine.run_async(user_prompt)
             self.write_log(
                 Text.from_markup(
-                    f"\n[green]Success! Script written to: {
-                        result.script_path}"
-                    "[/]"))
+                    f"\n[green]Success! Script written to: {result.script_path}[/]"
+                ))
 
             # Execute the generated script
             self.write_log(Text.from_markup("\n[bold blue]Executing generated script...[/]"))

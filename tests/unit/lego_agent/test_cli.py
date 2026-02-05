@@ -1,13 +1,13 @@
 import sys
 from unittest.mock import MagicMock, patch
-from agentflow.cli import main
-from agentflow.models import AgentflowResult
+from lego_agent.cli import main
+from lego_agent.models import LegoAgentResult
 
 
 def test_cli_no_run(tmp_path):
-    with patch("agentflow.cli.load_config") as mock_load_config, \
-            patch("agentflow.cli.AgentflowEngine") as mock_engine_cls, \
-            patch("agentflow.cli.ConsoleIO"), \
+    with patch("lego_agent.cli.load_config") as mock_load_config, \
+            patch("lego_agent.cli.LegoAgentEngine") as mock_engine_cls, \
+            patch("lego_agent.cli.ConsoleIO"), \
             patch("subprocess.run") as mock_subprocess_run:
 
         # Setup mocks
@@ -16,7 +16,7 @@ def test_cli_no_run(tmp_path):
         mock_load_config.return_value = mock_config
 
         mock_engine_instance = mock_engine_cls.return_value
-        result = AgentflowResult(
+        result = LegoAgentResult(
             script_path=tmp_path / "generated_script.py",
             script_text="print('hello')",
             clarifications=[]
@@ -31,7 +31,7 @@ def test_cli_no_run(tmp_path):
         # Mock sys.executable for subprocess.run call
         with patch("sys.executable", "python3"):
             # Test with --no-run
-            with patch.object(sys, 'argv', ["agentflow", "--prompt", "test", "--no-run", "--no-tui"]):
+            with patch.object(sys, 'argv', ["lego_agent", "--prompt", "test", "--no-run", "--no-tui"]):
                 exit_code = main()
 
             assert exit_code == 0
@@ -42,7 +42,7 @@ def test_cli_no_run(tmp_path):
             mock_subprocess_run.reset_mock()
 
             # Test WITHOUT --no-run
-            with patch.object(sys, 'argv', ["agentflow", "--prompt", "test", "--no-tui"]):
+            with patch.object(sys, 'argv', ["lego_agent", "--prompt", "test", "--no-tui"]):
                 exit_code = main()
 
             assert exit_code == 0

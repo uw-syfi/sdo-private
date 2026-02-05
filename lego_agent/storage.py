@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 
 
-class AgentflowStorage:
+class LegoAgentStorage:
     """Handles storage of generated scripts."""
 
     def __init__(self, base_dir: Path) -> None:

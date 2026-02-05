@@ -13,7 +13,7 @@ from app_operator.adk.tools import build_tools
 from app_operator.config import load_config
 from app_operator.filesystem import RealFilesystem
 from app_operator.logger import logger
-from agentflow.io import Colors
+from lego_agent.io import Colors
 
 
 class LangGraphAgent:
@@ -25,7 +25,7 @@ class LangGraphAgent:
         llm: Any,
         tools: List[Callable],
         instruction: str = "",
-        agent_name: str = "AgentflowWorker",
+        agent_name: str = "LegoAgentWorker",
     ):
         self.model_name = model_name
         self.llm = llm

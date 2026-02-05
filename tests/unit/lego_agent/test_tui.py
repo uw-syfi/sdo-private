@@ -1,13 +1,13 @@
-"""Tests for agentflow TUI module."""
+"""Tests for lego_agent TUI module."""
 
 import pytest
 from unittest.mock import AsyncMock
 
-from agentflow.tui import TextualIO
+from lego_agent.tui import TextualIO
 
 
 class MockApp:
-    """Mock AgentflowTUI app for testing TextualIO."""
+    """Mock LegoAgentTUI app for testing TextualIO."""
 
     def __init__(self):
         self.logs = []

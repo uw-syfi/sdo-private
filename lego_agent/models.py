@@ -6,7 +6,7 @@ from typing import List, Literal, Optional, Tuple
 
 
 @dataclass
-class AgentflowResponse:
+class LegoAgentResponse:
     """Structured response from the agent."""
 
     status: Literal["clarify", "ready"]
@@ -26,16 +26,16 @@ class AgentflowResponse:
 
 
 @dataclass
-class AgentflowResult:
-    """Result of an Agentflow run."""
+class LegoAgentResult:
+    """Result of an LegoAgent run."""
 
     script_path: Path
     script_text: str
     clarifications: List[Tuple[str, str]]
 
 
-def get_agentflow_response_schema() -> dict:
-    """Return the JSON schema for AgentflowResponse."""
+def get_lego_agent_response_schema() -> dict:
+    """Return the JSON schema for LegoAgentResponse."""
     return {
         "type": "object",
         "properties": {
@@ -93,15 +93,15 @@ def extract_json(text: str) -> str:
     return text
 
 
-def parse_agentflow_response(text: str) -> AgentflowResponse:
-    """Parse agent response text into AgentflowResponse."""
+def parse_lego_agent_response(text: str) -> LegoAgentResponse:
+    """Parse agent response text into LegoAgentResponse."""
     json_text = extract_json(text)
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse JSON response: {e}\nRaw text: {text}")
 
-    response = AgentflowResponse(
+    response = LegoAgentResponse(
         status=data.get("status"),
         questions=data.get("questions", []),
         python_script=data.get("python_script"),

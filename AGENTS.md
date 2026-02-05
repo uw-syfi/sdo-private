@@ -8,17 +8,17 @@ SDS is an AI-native project designed to autonomously explore, validate, and evol
 
 ```
 sds/
-├── agentflow/            # Autonomous script generation module
-│   ├── __main__.py       # Entry point for `python -m agentflow`
+├── lego_agent/            # Autonomous script generation module
+│   ├── __main__.py       # Entry point for `python -m lego_agent`
 │   ├── cli.py            # CLI argument parsing and mode selection
 │   ├── engine.py         # Core clarification loop and orchestration engine
 │   ├── io.py             # I/O abstractions (ConsoleIO, TextualIO)
-│   ├── models.py         # Data models (AgentflowResponse, AgentflowResult)
+│   ├── models.py         # Data models (LegoAgentResponse, LegoAgentResult)
 │   ├── runtime.py        # LangGraph agent runtime and orchestration patterns
 │   ├── storage.py        # Script storage management
 │   ├── tui.py            # Textual-based interactive TUI implementation
 │   └── prompts/          # Jinja2 prompt templates
-│       └── templates/agentflow/
+│       └── templates/lego_agent/
 │           ├── system.jinja2   # System prompt with orchestration docs
 │           ├── user.jinja2     # User request template
 │           └── repair.jinja2   # Error correction template
@@ -155,9 +155,9 @@ This implementation uses a stateful graph to manage the lifecycle:
 *   **Commands (`app_operator/commands/`):**
     *   CLI command implementations: `run`, `init_exp`, `viz_graph`.
 
-## 2. Agentflow Module (`agentflow/`)
+## 2. LegoAgent Module (`lego_agent/`)
 
-The **Agentflow** module is an autonomous script generation system that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. It features an interactive TUI, clarification loops, and supports advanced orchestration patterns.
+The **LegoAgent** module is an autonomous script generation system that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. It features an interactive TUI, clarification loops, and supports advanced orchestration patterns.
 
 ### Key Features
 
@@ -172,7 +172,7 @@ The **Agentflow** module is an autonomous script generation system that uses AI 
 
 #### Core Components
 
-*   **AgentflowEngine (`engine.py`)**:
+*   **LegoAgentEngine (`engine.py`)**:
     *   Manages the clarification loop (up to `max_clarifications` rounds).
     *   Integrates with LangGraph for agent execution.
     *   Streams thinking chunks, tool calls, and results.
@@ -185,7 +185,7 @@ The **Agentflow** module is an autonomous script generation system that uses AI 
     *   **TextualIO**: Rich Textual widgets for TUI mode with async support.
     *   Both implement: `read_prompt()`, `ask_questions()`, `render_thinking_chunk()`, `render_tool_start/end()`, etc.
 
-*   **AgentflowTUI (`tui.py`)**:
+*   **LegoAgentTUI (`tui.py`)**:
     *   Textual App implementation with `RichLog` widget.
     *   Interactive input field for prompts and answers.
     *   Work directory display in header.
@@ -205,8 +205,8 @@ The **Agentflow** module is an autonomous script generation system that uses AI 
     4. **Combined patterns**: Complex workflows combining multiple patterns.
 
 *   **Storage & Models**:
-    *   **AgentflowStorage (`storage.py`)**: Manages script output with timestamped directories.
-    *   **AgentflowResponse/Result (`models.py`)**: Pydantic models for structured data.
+    *   **LegoAgentStorage (`storage.py`)**: Manages script output with timestamped directories.
+    *   **LegoAgentResponse/Result (`models.py`)**: Pydantic models for structured data.
 
 *   **Prompt System (`prompts/`)**:
     *   **system.jinja2**: Comprehensive system instructions (338 lines) with:
@@ -222,17 +222,17 @@ The **Agentflow** module is an autonomous script generation system that uses AI 
 
 **Default TUI Mode:**
 ```bash
-uv run -m agentflow
+uv run -m lego_agent
 ```
 
 **With Initial Prompt:**
 ```bash
-uv run -m agentflow --prompt "Scrape hacker news and summarize top 3 AI stories"
+uv run -m lego_agent --prompt "Scrape hacker news and summarize top 3 AI stories"
 ```
 
 **CLI Mode (No TUI):**
 ```bash
-uv run -m agentflow --no-tui --prompt "Your task"
+uv run -m lego_agent --no-tui --prompt "Your task"
 ```
 
 **Available Flags:**
@@ -241,7 +241,7 @@ uv run -m agentflow --no-tui --prompt "Your task"
 - `--max-clarifications`: Maximum clarification rounds (default: 5).
 - `--config`: Path to `sds.toml` (optional, auto-detects repo root).
 - `--model`: Override agent model from configuration.
-- `--output-dir`: Output directory (default: `agentflow_runs`).
+- `--output-dir`: Output directory (default: `lego_agent_runs`).
 - `--work-dir`: Execution directory (default: current directory).
 - `--no-run`: Generate script but don't execute it.
 - `--no-tui`: Use CLI mode instead of TUI.
@@ -253,7 +253,7 @@ User Input (TUI or CLI)
     ↓
 Config loading (sds.toml)
     ↓
-AgentflowEngine.run_async()
+LegoAgentEngine.run_async()
     ├─→ Clarification Loop (rounds 0 to max_clarifications):
     │   ├─→ Render system/user prompts
     │   ├─→ Stream agent thinking (LangGraph events)
@@ -263,7 +263,7 @@ AgentflowEngine.run_async()
     ├─→ If status="clarify": ask_questions() → next round
     ├─→ If status="ready": validate_script() → write to storage
     │
-AgentflowStorage.write_script()
+LegoAgentStorage.write_script()
     ↓
 Script Execution (in work_dir)
     ├─→ Set PYTHONPATH to repo root
@@ -275,15 +275,15 @@ Script Execution (in work_dir)
 
 Generated scripts must satisfy:
 1. Define `MAX_ITERATIONS = {loop_bound}` constant.
-2. Import from `agentflow.runtime` or related modules.
+2. Import from `lego_agent.runtime` or related modules.
 3. Include `if __name__ == "__main__":` block.
 4. Be valid Python with proper syntax.
 
 ### Output Structure
 
-Scripts are saved in `agentflow_runs/<timestamp>/agentflow.py` with:
+Scripts are saved in `lego_agent_runs/<timestamp>/lego_agent.py` with:
 - Timestamped directory for each run.
-- Standalone execution (no external dependencies except `agentflow.runtime`).
+- Standalone execution (no external dependencies except `lego_agent.runtime`).
 - `MAX_ITERATIONS` constant for loop bounding.
 - Orchestration tools: `fan_out()`, `summarize()`, `judge_loop()`.
 
@@ -314,9 +314,9 @@ Scripts are saved in `agentflow_runs/<timestamp>/agentflow.py` with:
 ## Usage Guide for LLM agents
 
 *   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs in `.sds/logs/`.
-*   **When debugging agentflow scripts:** Check `agentflow_runs/<timestamp>/agentflow.py` and examine the clarification history.
+*   **When debugging lego_agent scripts:** Check `lego_agent_runs/<timestamp>/lego_agent.py` and examine the clarification history.
 *   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
-*   **When adding agentflow features:** Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
+*   **When adding lego_agent features:** Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
 *   **When adding a new feature:** Think of what new behavior(s) are being introduced, and how you would test them. Test public behavior, not internal implementation details.
 *   **When fixing bugs:** Think of how to write test(s) to reproduce the issue first and then use them to verify your fix. The test should be part of your fix. If you cannot do so, you must defend your decision.
 
@@ -351,7 +351,7 @@ Always do the following after you're done with your code edits:
 *   Test organization by component:
     *   `tests/unit/config/`: Configuration validation tests
     *   `tests/unit/agents/`: Agent-specific tests (deployment, monitoring)
-    *   `tests/unit/agentflow/`: Agentflow module tests (engine, runtime, CLI, prompts)
+    *   `tests/unit/lego_agent/`: LegoAgent module tests (engine, runtime, CLI, prompts)
     *   `tests/integration/`: End-to-end scenarios, signal handling, concurrency
 
 #### Running Tests

@@ -1,12 +1,12 @@
 from unittest.mock import MagicMock, patch
-from agentflow.runtime import create_agent
+from lego_agent.runtime import create_agent
 
 
-@patch("agentflow.runtime.load_config")
-@patch("agentflow.runtime.build_llm")
-@patch("agentflow.runtime.build_tools")
-@patch("agentflow.runtime.RealFilesystem")
-@patch("agentflow.runtime.LangGraphAgent")
+@patch("lego_agent.runtime.load_config")
+@patch("lego_agent.runtime.build_llm")
+@patch("lego_agent.runtime.build_tools")
+@patch("lego_agent.runtime.RealFilesystem")
+@patch("lego_agent.runtime.LangGraphAgent")
 def test_create_agent_with_tools_filtering(
     MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig
 ):
@@ -38,11 +38,11 @@ def test_create_agent_with_tools_filtering(
     assert "unused_tool" not in names
 
 
-@patch("agentflow.runtime.load_config")
-@patch("agentflow.runtime.build_llm")
-@patch("agentflow.runtime.build_tools")
-@patch("agentflow.runtime.RealFilesystem")
-@patch("agentflow.runtime.LangGraphAgent")
+@patch("lego_agent.runtime.load_config")
+@patch("lego_agent.runtime.build_llm")
+@patch("lego_agent.runtime.build_tools")
+@patch("lego_agent.runtime.RealFilesystem")
+@patch("lego_agent.runtime.LangGraphAgent")
 def test_create_agent_default_tools(
     MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig
 ):

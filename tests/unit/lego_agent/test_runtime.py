@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock, AsyncMock
-from agentflow.runtime import fan_out, summarize, judge_loop
+from lego_agent.runtime import fan_out, summarize, judge_loop
 
 
 def test_fan_out():
