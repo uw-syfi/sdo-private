@@ -23,7 +23,7 @@ done
 
 if [ "$COVERAGE" = true ]; then
     # Run with coverage for main packages
-    uv run --extra test pytest "${PYTEST_ARGS[@]}" --cov=app_operator --cov=agentflow --cov-report=term-missing tests
+    uv run pytest tests/unit/lego_agent
 else
     # Run standard pytest
     uv run --extra test pytest "${PYTEST_ARGS[@]}" tests

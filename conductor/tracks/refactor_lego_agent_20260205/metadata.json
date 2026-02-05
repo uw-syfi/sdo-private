@@ -1,0 +1,8 @@
+{
+  "track_id": "refactor_lego_agent_20260205",
+  "type": "refactor",
+  "status": "new",
+  "created_at": "2026-02-05T15:00:00Z",
+  "updated_at": "2026-02-05T15:00:00Z",
+  "description": "Stabilize project structure and refactor `agentflow` to `lego_agent`"
+}

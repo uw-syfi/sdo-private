@@ -276,8 +276,7 @@ def run_command(args: argparse.Namespace) -> int:
         with ThreadPoolExecutor(max_workers=args.parallel) as executor:
             for app in apps:
                 task_id = progress.add_task(
-                    f"[white]{
-                        Path(app).name}[/]: Pending",
+                    f"[white]{Path(app).name}[/]: Pending",
                     total=100,
                     start=False)
                 futures[executor.submit(run_experiment_task, app, exp_name,

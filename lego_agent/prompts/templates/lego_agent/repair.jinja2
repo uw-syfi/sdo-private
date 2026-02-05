@@ -1,0 +1,56 @@
+## PARSING ERROR - Response Format Correction Required
+
+**Error encountered:**
+```
+{{ error }}
+```
+
+**Your previous raw response:**
+```
+{{ raw_response }}
+```
+
+## What went wrong
+
+Your previous response could not be parsed as valid JSON. Common issues:
+
+1. **Markdown formatting:** Did you wrap the JSON in ```json code blocks? Don't do this - output raw JSON only.
+2. **Extra text:** Did you include explanatory text outside the JSON object? Remove it.
+3. **String escaping:** Did you forget to escape quotes in the python_script string? Use proper escaping.
+4. **Invalid JSON syntax:** Missing commas, trailing commas, unquoted keys, etc.
+5. **Missing required fields:**
+   - If status is "clarify", you need a "questions" array
+   - If status is "ready", you need a "python_script" string
+
+## How to fix
+
+Generate a valid JSON response with this exact structure:
+
+```
+{
+  "status": "clarify",
+  "questions": ["question1", "question2"]
+}
+```
+
+OR
+
+```
+{
+  "status": "ready",
+  "python_script": "#!/usr/bin/env python3\n\"\"\"Script description.\"\"\"\nimport lego_agent.runtime as runtime\n\nMAX_ITERATIONS = 10\n\ndef main():\n    # Your code here\n    pass\n\nif __name__ == \"__main__\":\n    main()"
+}
+```
+
+## Critical reminders for python_script
+
+When status is "ready":
+- Escape newlines as `\n`
+- Escape quotes as `\"`
+- Escape backslashes as `\\`
+- The entire script must be a single string value
+- Include all required elements: imports, MAX_ITERATIONS, main(), if __name__ block
+
+## Your corrected response
+
+Provide ONLY the corrected JSON below, with no additional text or markdown formatting:
