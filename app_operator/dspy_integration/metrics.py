@@ -5,6 +5,7 @@ Metrics for evaluating prompt performance:
 - IterationEfficiencyMetric: Number of iterations/retries
 - TokenEfficiencyMetric: Token usage efficiency
 - PredictionQualityMetric: LLM-judge score of generated prompt quality
+- HealthCheckQualityMetric: Validates health check scripts are non-trivial (prevents reward hacking)
 """
 
 import re
@@ -306,6 +307,103 @@ class GroundTruthSimilarityMetric:
         return SequenceMatcher(None, pred_text, gt_text).ratio()
 
 
+class HealthCheckQualityMetric:
+    """Metric for health check script quality to prevent reward hacking.
+
+    This metric validates that generated health_check.sh scripts are non-trivial
+    and actually perform meaningful checks rather than just exiting with success.
+
+    A trivial script that always passes would be something like:
+        #!/bin/bash
+        exit 0
+
+    A legitimate health check script should:
+    - Be at least 20 lines of actual code (excluding comments/blank lines)
+    - Contain meaningful checks (curl, nc, docker, redis-cli, mongo, etc.)
+    - Check multiple aspects (ports, endpoints, containers, databases)
+    """
+
+    # Keywords indicating real health checks
+    VALID_CHECK_PATTERNS = [
+        "curl",          # HTTP endpoint checks
+        "nc -",          # Network/port checks
+        "docker",        # Container status checks
+        "redis-cli",     # Redis connectivity
+        "mongo ",        # MongoDB connectivity
+        "psql",          # PostgreSQL connectivity
+        "mysql",         # MySQL connectivity
+        "wget",          # Alternative HTTP checks
+        "telnet",        # Alternative network checks
+        "systemctl",     # Service status checks
+        "grep -",        # Log analysis
+        "ps aux",        # Process checks
+    ]
+
+    MIN_NON_TRIVIAL_LINES = 20  # Minimum lines of actual code
+    MIN_CHECK_COMMANDS = 2      # Minimum number of different check types
+
+    def __call__(self, example: Any, prediction: Any, trace: Any = None) -> float:
+        """Evaluate health check script quality.
+
+        Args:
+            example: TrajectoryExample with health_check_script field
+            prediction: Model prediction (unused)
+            trace: Optional execution trace
+
+        Returns:
+            Score between 0.0 and 1.0:
+            - 0.0: Trivial/always-passing script (reward hacking)
+            - 1.0: Comprehensive health check script
+            - 0.5: Script not available or couldn't determine quality
+        """
+        if not hasattr(example, "health_check_script"):
+            return 0.5  # Unknown, neutral score
+
+        script = example.health_check_script
+        if script is None:
+            return 0.5  # Unknown, neutral score
+
+        if not script or len(script.strip()) < 10:
+            return 0.0  # Empty or trivial
+
+        lines = script.split("\n")
+
+        # Count non-trivial lines (exclude comments, blank lines, shebang)
+        non_trivial_lines = 0
+        for line in lines:
+            stripped = line.strip()
+            # Skip blank lines, comments, and shebang
+            if stripped and not stripped.startswith("#"):
+                non_trivial_lines += 1
+
+        # Check for trivial "exit 0" only scripts
+        if non_trivial_lines <= 2:
+            # Check if it's just "exit 0" or similar
+            code_lines = [
+                line.strip()
+                for line in lines
+                if line.strip() and not line.strip().startswith("#")
+            ]
+            if any("exit 0" in line for line in code_lines) and len(code_lines) <= 2:
+                return 0.0  # Reward hacking detected
+
+        # Count number of different check command types
+        check_commands_found = 0
+        script_lower = script.lower()
+        for pattern in self.VALID_CHECK_PATTERNS:
+            if pattern.lower() in script_lower:
+                check_commands_found += 1
+
+        # Calculate score based on multiple factors
+        line_score = min(1.0, non_trivial_lines / self.MIN_NON_TRIVIAL_LINES)
+        check_score = min(1.0, check_commands_found / self.MIN_CHECK_COMMANDS)
+
+        # Weighted combination: 60% lines, 40% check diversity
+        quality_score = (line_score * 0.6) + (check_score * 0.4)
+
+        return quality_score
+
+
 class CompositeMetric:
     """Composite metric that combines multiple metrics with weights.
 
@@ -325,12 +423,14 @@ class CompositeMetric:
 
     def __init__(
         self,
-        success_weight: float = 0.6,
+        success_weight: float = 0.5,
         efficiency_weight: float = 0.25,
         token_weight: float = 0.15,
+        health_check_weight: float = 0.1,
         max_iterations: int = 20,
         baseline_tokens: int = 10000,
         prediction_metric=None,
+        include_health_check_quality: bool = True,
     ):
         """Initialize composite metric.
 
@@ -338,23 +438,40 @@ class CompositeMetric:
             success_weight: Weight for the prediction-quality slot
             efficiency_weight: Weight for iteration efficiency
             token_weight: Weight for token efficiency
+            health_check_weight: Weight for health check script quality (prevents reward hacking)
             max_iterations: Max iterations for efficiency metric
             baseline_tokens: Baseline tokens for token metric
             prediction_metric: Metric for the prediction-quality slot.
                 Defaults to DeploymentSuccessMetric (backward-compatible).
                 Pass PredictionQualityMetric() for LLM-judge scoring or
                 GroundTruthSimilarityMetric() for deterministic comparison.
+            include_health_check_quality: Whether to include health check quality in scoring.
+                Recommended to prevent reward hacking (trivial health checks that always pass).
         """
-        if abs(success_weight + efficiency_weight + token_weight - 1.0) > 0.01:
-            raise ValueError("Metric weights must sum to 1.0")
+        # Allow old configurations without health_check_weight
+        if include_health_check_quality:
+            expected_sum = success_weight + efficiency_weight + token_weight + health_check_weight
+            if abs(expected_sum - 1.0) > 0.01:
+                raise ValueError(
+                    f"Metric weights must sum to 1.0, got {expected_sum:.3f}. "
+                    f"With health_check_quality enabled, ensure all four weights sum to 1.0."
+                )
+        else:
+            # Backward compatibility: if health check quality is disabled, only validate 3 weights
+            if abs(success_weight + efficiency_weight + token_weight - 1.0) > 0.01:
+                raise ValueError("Metric weights (excluding health_check) must sum to 1.0")
+            health_check_weight = 0.0
 
         self.prediction_metric = prediction_metric or DeploymentSuccessMetric()
         self.efficiency_metric = IterationEfficiencyMetric(max_iterations)
         self.token_metric = TokenEfficiencyMetric(baseline_tokens)
+        self.health_check_metric = HealthCheckQualityMetric() if include_health_check_quality else None
 
         self.success_weight = success_weight
         self.efficiency_weight = efficiency_weight
         self.token_weight = token_weight
+        self.health_check_weight = health_check_weight
+        self.include_health_check_quality = include_health_check_quality
 
     def __call__(self, example: Any, prediction: Any, trace: Any = None) -> float:
         """Evaluate composite metric.
@@ -379,5 +496,10 @@ class CompositeMetric:
             + efficiency_score * self.efficiency_weight
             + token_score * self.token_weight
         )
+
+        # Add health check quality if enabled
+        if self.include_health_check_quality and self.health_check_metric:
+            health_check_score = self.health_check_metric(example, prediction, trace)
+            composite_score += health_check_score * self.health_check_weight
 
         return composite_score

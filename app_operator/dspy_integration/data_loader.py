@@ -28,6 +28,7 @@ class TrajectoryExample:
     prompt_kwargs: Optional[Dict[str, Any]] = None
     rendered_prompt: Optional[str] = None
     fallback_occurred: bool = False
+    health_check_script: Optional[str] = None  # Content of health_check.sh for quality validation
 
 
 class TrajectoryDataLoader:
@@ -131,6 +132,9 @@ class TrajectoryDataLoader:
                     rendered_prompt = conversation.get("rendered_prompt")
                     fallback_occurred = conversation.get("fallback_occurred", False)
 
+                    # Extract health check script content from repo filesystem
+                    health_check_script = self._extract_health_check_script(trajectory)
+
                     example = TrajectoryExample(
                         trajectory_file=file_path,
                         run_id=run_id,
@@ -146,6 +150,7 @@ class TrajectoryDataLoader:
                         prompt_kwargs=prompt_kwargs,
                         rendered_prompt=rendered_prompt,
                         fallback_occurred=fallback_occurred,
+                        health_check_script=health_check_script,
                     )
 
                     examples.append(example)
@@ -297,3 +302,27 @@ class TrajectoryDataLoader:
             "output": round(output_chars / self._CHARS_PER_TOKEN),
             "estimated": True,
         }
+
+    def _extract_health_check_script(self, trajectory: Dict[str, Any]) -> Optional[str]:
+        """Extract health_check.sh content from the repository filesystem.
+
+        Args:
+            trajectory: Trajectory dictionary with metadata.repo_path
+
+        Returns:
+            Content of health_check.sh file, or None if not found
+        """
+        repo_path = trajectory.get("metadata", {}).get("repo_path")
+        if not repo_path:
+            return None
+
+        health_check_path = Path(repo_path) / ".sds" / "health_check.sh"
+        try:
+            if health_check_path.exists():
+                return health_check_path.read_text()
+        except Exception:
+            # Ignore errors reading health check script (file may have been deleted,
+            # permissions, etc.)
+            pass
+
+        return None

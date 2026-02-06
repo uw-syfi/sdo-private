@@ -111,9 +111,10 @@ num_examples = 30               # Number of training examples (positive integer)
 validation_split = 0.2          # Validation data fraction (0.0-1.0)
 
 [dspy.optimization.metric_weights]
-success = 0.6      # Weight for deployment success (must sum to 1.0)
-efficiency = 0.25  # Weight for iteration efficiency
-tokens = 0.15      # Weight for token efficiency
+success = 0.5        # Weight for deployment success (must sum to 1.0)
+efficiency = 0.25    # Weight for iteration efficiency
+tokens = 0.15        # Weight for token efficiency
+health_check = 0.1   # Weight for health check script quality (prevents reward hacking)
 
 [dspy.auto_rollback]
 enabled = true                  # Enable automatic rollback on degradation
@@ -272,11 +273,17 @@ The DSPy integration provides signatures for 10 prompts across different agent t
 
 #### Metrics
 
-The optimization process uses a composite metric combining three factors:
+The optimization process uses a composite metric combining four factors:
 
-1. **Deployment Success (60% weight):** Binary metric for successful deployment
+1. **Deployment Success (50% weight):** Binary metric for successful deployment
 2. **Iteration Efficiency (25% weight):** Rewards fewer iterations to success
 3. **Token Efficiency (15% weight):** Rewards lower token usage
+4. **Health Check Quality (10% weight):** Validates health check scripts are non-trivial to prevent reward hacking
+
+The **Health Check Quality metric** prevents "reward hacking" by ensuring generated `health_check.sh` scripts actually perform meaningful checks rather than trivial always-passing scripts (e.g., `#!/bin/bash\nexit 0`). It evaluates:
+- Script complexity (minimum 20 lines of actual code)
+- Presence of real check commands (curl, nc, docker, redis-cli, mongo, etc.)
+- Diversity of check types (ports, endpoints, containers, databases)
 
 Metric weights are configurable in `sds.toml` under `[dspy.optimization.metric_weights]`.
 

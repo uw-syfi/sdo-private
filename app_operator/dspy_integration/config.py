@@ -25,9 +25,10 @@ class DSPyOptimizationConfig:
     num_examples: int = 30
     validation_split: float = 0.2
     metric_weights: Dict[str, float] = field(default_factory=lambda: {
-        "success": 0.6,
+        "success": 0.5,
         "efficiency": 0.25,
         "tokens": 0.15,
+        "health_check": 0.1,
     })
 
     def __post_init__(self):
@@ -76,11 +77,16 @@ class DSPyOptimizationConfig:
                 f"metric_weights must be dict, got {type(self.metric_weights).__name__}"
             )
 
-        required_metrics = {"success", "efficiency", "tokens"}
-        if set(self.metric_weights.keys()) != required_metrics:
+        # Support both old format (3 weights) and new format (4 weights with health_check)
+        required_metrics_new = {"success", "efficiency", "tokens", "health_check"}
+        required_metrics_old = {"success", "efficiency", "tokens"}
+
+        provided_metrics = set(self.metric_weights.keys())
+        if provided_metrics not in (required_metrics_old, required_metrics_new):
             raise ValueError(
-                f"metric_weights must contain exactly {required_metrics}, "
-                f"got {set(self.metric_weights.keys())}"
+                f"metric_weights must contain either {required_metrics_old} (legacy) "
+                f"or {required_metrics_new} (with health check quality), "
+                f"got {provided_metrics}"
             )
 
         for metric, weight in self.metric_weights.items():

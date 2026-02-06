@@ -152,12 +152,27 @@ class PromptOptimizer:
         # instant, deterministic, no LM call, and immune to the
         # self-evaluation bias that plagues LLM judges when the same model
         # generates both the prediction and the score.
-        metric = CompositeMetric(
-            success_weight=self.config.optimization.metric_weights["success"],
-            efficiency_weight=self.config.optimization.metric_weights["efficiency"],
-            token_weight=self.config.optimization.metric_weights["tokens"],
-            prediction_metric=GroundTruthSimilarityMetric(),
-        )
+        metric_weights = self.config.optimization.metric_weights
+
+        # Support both legacy (3 weights) and new (4 weights with health_check) format
+        if "health_check" in metric_weights:
+            metric = CompositeMetric(
+                success_weight=metric_weights["success"],
+                efficiency_weight=metric_weights["efficiency"],
+                token_weight=metric_weights["tokens"],
+                health_check_weight=metric_weights["health_check"],
+                prediction_metric=GroundTruthSimilarityMetric(),
+                include_health_check_quality=True,
+            )
+        else:
+            # Legacy format without health check quality (backward compatibility)
+            metric = CompositeMetric(
+                success_weight=metric_weights["success"],
+                efficiency_weight=metric_weights["efficiency"],
+                token_weight=metric_weights["tokens"],
+                prediction_metric=GroundTruthSimilarityMetric(),
+                include_health_check_quality=False,
+            )
 
         # Optimize each prompt
         results = {}

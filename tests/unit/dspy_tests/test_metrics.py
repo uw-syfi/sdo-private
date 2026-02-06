@@ -7,6 +7,7 @@ from app_operator.dspy_integration.metrics import (
     IterationEfficiencyMetric,
     TokenEfficiencyMetric,
     PredictionQualityMetric,
+    HealthCheckQualityMetric,
     CompositeMetric,
     _parse_judge_score,
     _extract_prediction_text,
@@ -30,6 +31,12 @@ def successful_example():
         tool_calls=[{"exit_code": 0}],
         duration_seconds=120.0,
         token_usage={"input": 500, "output": 300, "total": 800},
+        health_check_script="""#!/bin/bash
+curl http://localhost:8080
+nc -z localhost 3306
+docker compose ps
+exit 0
+""",
     )
 
 
@@ -48,6 +55,7 @@ def failed_example():
         tool_calls=[{"exit_code": 1}],
         duration_seconds=300.0,
         token_usage={"input": 1000, "output": 600, "total": 1600},
+        health_check_script="#!/bin/bash\nexit 0\n",  # Trivial health check
     )
 
 
@@ -222,20 +230,45 @@ class TestTokenEfficiencyMetric:
 class TestCompositeMetric:
     """Tests for CompositeMetric."""
 
-    def test_default_weights(self):
-        """Test initialization with default weights."""
+    def test_default_weights_with_health_check(self):
+        """Test initialization with default weights including health check."""
         metric = CompositeMetric()
-        assert metric.success_weight == 0.6
+        assert metric.success_weight == 0.5
         assert metric.efficiency_weight == 0.25
         assert metric.token_weight == 0.15
+        assert metric.health_check_weight == 0.1
+        assert metric.include_health_check_quality is True
 
-    def test_weights_sum_validation(self):
-        """Test that weights must sum to 1.0."""
+    def test_disable_health_check_quality(self):
+        """Test disabling health check quality validation (backward compatibility)."""
+        metric = CompositeMetric(
+            success_weight=0.6,
+            efficiency_weight=0.25,
+            token_weight=0.15,
+            include_health_check_quality=False,
+        )
+        assert metric.health_check_weight == 0.0
+        assert metric.health_check_metric is None
+        assert metric.include_health_check_quality is False
+
+    def test_weights_sum_validation_with_health_check(self):
+        """Test that weights must sum to 1.0 when health check is enabled."""
         with pytest.raises(ValueError, match="Metric weights must sum to 1.0"):
             CompositeMetric(
                 success_weight=0.5,
                 efficiency_weight=0.3,
                 token_weight=0.1,
+                health_check_weight=0.05,  # Only sums to 0.95
+            )
+
+    def test_weights_sum_validation_without_health_check(self):
+        """Test that weights validation works when health check is disabled."""
+        with pytest.raises(ValueError, match="Metric weights .* must sum to 1.0"):
+            CompositeMetric(
+                success_weight=0.5,
+                efficiency_weight=0.3,
+                token_weight=0.1,  # Only sums to 0.9
+                include_health_check_quality=False,
             )
 
     def test_composite_returns_zero_for_none_prediction(self, successful_example):
@@ -259,7 +292,14 @@ class TestCompositeMetric:
 
     def test_poor_score(self):
         """Test poor score with suboptimal example."""
-        metric = CompositeMetric(max_iterations=5, baseline_tokens=500)
+        metric = CompositeMetric(
+            success_weight=0.6,
+            efficiency_weight=0.25,
+            token_weight=0.15,
+            max_iterations=5,
+            baseline_tokens=500,
+            include_health_check_quality=False,
+        )
 
         class PoorExample:
             success = False
@@ -270,6 +310,67 @@ class TestCompositeMetric:
         # Should be very low
         assert score < 0.3
 
+    def test_health_check_quality_affects_score(self):
+        """Test that health check quality is factored into composite score."""
+        metric = CompositeMetric(
+            success_weight=0.5,
+            efficiency_weight=0.25,
+            token_weight=0.15,
+            health_check_weight=0.1,
+            max_iterations=20,
+            baseline_tokens=10000,
+            include_health_check_quality=True,
+        )
+
+        # Example with good health check
+        class GoodHealthCheck:
+            success = True
+            iterations = 2
+            token_usage = {"input": 500, "output": 300}
+            health_check_script = """#!/bin/bash
+curl http://localhost:8080
+nc -z localhost 3306
+docker compose ps
+redis-cli ping
+mongo --eval "db.stats()"
+exit 0
+"""
+
+        # Example with trivial health check (reward hacking)
+        class TrivialHealthCheck:
+            success = True
+            iterations = 2
+            token_usage = {"input": 500, "output": 300}
+            health_check_script = "#!/bin/bash\nexit 0\n"
+
+        score_good = metric(GoodHealthCheck(), "some output")
+        score_trivial = metric(TrivialHealthCheck(), "some output")
+
+        # Good health check should score higher
+        assert score_good > score_trivial, \
+            f"Good health check ({score_good}) should score higher than trivial ({score_trivial})"
+
+    def test_missing_health_check_neutral_impact(self):
+        """Test that missing health check has neutral impact (0.5)."""
+        metric = CompositeMetric(
+            success_weight=0.5,
+            efficiency_weight=0.25,
+            token_weight=0.15,
+            health_check_weight=0.1,
+            include_health_check_quality=True,
+        )
+
+        class NoHealthCheck:
+            success = True
+            iterations = 1
+            token_usage = {"input": 100, "output": 100}
+            # No health_check_script attribute
+
+        score = metric(NoHealthCheck(), "some output")
+        # Should get base score + neutral (0.5) health check contribution
+        # 0.5 * 1.0 + 0.25 * 1.0 + 0.15 * ~1.0 + 0.1 * 0.5 = ~0.95
+        assert 0.90 <= score <= 1.0
+
     def test_composite_calculation(self, successful_example):
         """Test weighted composite calculation."""
         metric = CompositeMetric(
@@ -278,6 +379,7 @@ class TestCompositeMetric:
             token_weight=0.15,
             max_iterations=20,
             baseline_tokens=10000,
+            include_health_check_quality=False,
         )
 
         score = metric(successful_example, "some output")
@@ -294,6 +396,7 @@ class TestCompositeMetric:
             success_weight=0.5,
             efficiency_weight=0.3,
             token_weight=0.2,
+            include_health_check_quality=False,
         )
 
         assert metric.success_weight == 0.5
@@ -403,3 +506,213 @@ class TestPredictionQualityMetric:
         """Judge is not created until first call."""
         metric = PredictionQualityMetric()
         assert metric._judge is None  # not yet created
+
+
+class TestHealthCheckQualityMetric:
+    """Tests for HealthCheckQualityMetric to prevent reward hacking."""
+
+    def test_trivial_exit_zero_script(self):
+        """Trivial script with only 'exit 0' should get 0.0 score."""
+        metric = HealthCheckQualityMetric()
+
+        class MockExample:
+            health_check_script = """#!/bin/bash
+exit 0
+"""
+
+        score = metric(MockExample(), None)
+        assert score == 0.0, "Trivial 'exit 0' script should score 0.0"
+
+    def test_empty_script(self):
+        """Empty script should get 0.0 score."""
+        metric = HealthCheckQualityMetric()
+
+        class MockExample:
+            health_check_script = ""
+
+        score = metric(MockExample(), None)
+        assert score == 0.0
+
+    def test_comprehensive_health_check(self):
+        """Comprehensive health check script should get high score."""
+        metric = HealthCheckQualityMetric()
+
+        # Realistic health check script with multiple checks
+        script = """#!/bin/bash
+set -e
+
+# Check docker
+docker compose ps
+
+# Check ports
+nc -z localhost 8080
+nc -z localhost 3306
+
+# Check HTTP endpoints
+curl -f http://localhost:8080/health
+curl -f http://localhost:8081/status
+
+# Check Redis
+docker compose exec -T redis redis-cli ping
+
+# Check MongoDB
+docker compose exec -T mongodb mongo --eval "db.stats()"
+
+# Check logs
+docker compose logs --tail=50
+
+exit 0
+"""
+
+        class MockExample:
+            health_check_script = script
+
+        score = metric(MockExample(), None)
+        assert score >= 0.7, f"Comprehensive health check should score >= 0.7, got {score}"
+
+    def test_partial_health_check(self):
+        """Partial health check with some checks should get medium score."""
+        metric = HealthCheckQualityMetric()
+
+        script = """#!/bin/bash
+# Basic health check
+
+# Check if containers are running
+docker compose ps
+
+# Check main port
+nc -z localhost 8080
+
+echo "Health check passed"
+exit 0
+"""
+
+        class MockExample:
+            health_check_script = script
+
+        score = metric(MockExample(), None)
+        assert 0.3 <= score <= 0.7, f"Partial health check should score between 0.3-0.7, got {score}"
+
+    def test_missing_health_check_script(self):
+        """Missing health_check_script attribute should return neutral score."""
+        metric = HealthCheckQualityMetric()
+
+        class MockExample:
+            pass
+
+        score = metric(MockExample(), None)
+        assert score == 0.5, "Missing health check script should return neutral 0.5"
+
+    def test_none_health_check_script(self):
+        """None health_check_script should return neutral score."""
+        metric = HealthCheckQualityMetric()
+
+        class MockExample:
+            health_check_script = None
+
+        score = metric(MockExample(), None)
+        assert score == 0.5
+
+    def test_count_check_commands(self):
+        """Script with multiple check command types should score higher."""
+        metric = HealthCheckQualityMetric()
+
+        # Script with curl, nc, and docker
+        script_multi = """#!/bin/bash
+curl http://localhost:8080
+nc -z localhost 3306
+docker compose ps
+exit 0
+"""
+
+        # Script with only curl
+        script_single = """#!/bin/bash
+curl http://localhost:8080
+curl http://localhost:8081
+curl http://localhost:8082
+exit 0
+"""
+
+        class Example1:
+            health_check_script = script_multi
+
+        class Example2:
+            health_check_script = script_single
+
+        score_multi = metric(Example1(), None)
+        score_single = metric(Example2(), None)
+
+        # Multiple check types should score higher than single type
+        assert score_multi > score_single, \
+            "Multiple check types should score higher than single type"
+
+    def test_line_count_matters(self):
+        """Scripts with more non-trivial lines should score higher."""
+        metric = HealthCheckQualityMetric()
+
+        # Short script (10 lines of actual code)
+        short_script = """#!/bin/bash
+# Health check
+curl http://localhost:8080
+curl http://localhost:8081
+curl http://localhost:8082
+curl http://localhost:8083
+curl http://localhost:8084
+curl http://localhost:8085
+curl http://localhost:8086
+curl http://localhost:8087
+exit 0
+"""
+
+        # Long script (30+ lines of actual code)
+        long_script = """#!/bin/bash
+set -e
+echo "Starting health check"
+
+# Check containers
+docker compose ps
+docker compose ps --services --filter "status=running"
+
+# Check ports
+nc -z localhost 8080
+nc -z localhost 8081
+nc -z localhost 3306
+nc -z localhost 6379
+nc -z localhost 27017
+
+# Check HTTP endpoints
+curl -f http://localhost:8080/health
+curl -f http://localhost:8081/status
+curl -f http://localhost:8082/ready
+
+# Check Redis
+docker compose exec -T redis redis-cli ping
+docker compose exec -T redis redis-cli info
+
+# Check MongoDB
+docker compose exec -T mongodb mongo --eval "db.stats()"
+docker compose exec -T mongodb mongo --eval "db.version()"
+
+# Check MySQL
+docker compose exec -T mysql mysql -u root -ppassword -e "SELECT 1"
+
+# Check logs
+docker compose logs --tail=50
+docker compose logs --tail=50 | grep -i error
+
+echo "Health check completed successfully"
+exit 0
+"""
+
+        class ShortExample:
+            health_check_script = short_script
+
+        class LongExample:
+            health_check_script = long_script
+
+        score_short = metric(ShortExample(), None)
+        score_long = metric(LongExample(), None)
+
+        # Longer scripts should generally score higher
+        assert score_long > score_short, \
+            f"Longer comprehensive script should score higher: {score_long} > {score_short}"
