@@ -3,11 +3,12 @@
 import { useLegoAgent } from './hooks/useLegoAgent';
 import { TerminalLog } from './components/TerminalLog';
 import { InputArea } from './components/InputArea';
+import { GraphView } from './components/GraphView';
 import { Terminal, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function Home() {
-  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, updateCwd, dirOptions, listDirs, model, thinkingBudget } = useLegoAgent();
+  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, updateCwd, dirOptions, listDirs, model, thinkingBudget, graphConfig } = useLegoAgent();
 
   return (
     <main className="flex h-screen flex-col font-mono bg-background text-foreground selection:bg-brand/30">
@@ -47,10 +48,19 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        <div className="flex-1 w-full max-w-5xl mx-auto flex flex-col min-h-0">
-            <TerminalLog logs={logs} />
+      <div className="flex-1 flex overflow-hidden relative">
+        <div className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 w-full max-w-5xl mx-auto flex flex-col min-h-0">
+                <TerminalLog logs={logs} />
+            </div>
         </div>
+        
+        {/* Graph View Sidebar */}
+        {graphConfig && (
+            <div className="w-80 shrink-0 border-l border-border bg-background/50 overflow-hidden">
+                <GraphView config={graphConfig} />
+            </div>
+        )}
       </div>
 
       {/* Input Area */}

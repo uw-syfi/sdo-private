@@ -51,9 +51,13 @@ class TextualIO:
                 n = int(val)
                 if n > 0:
                     return n
-                self.app.write_log(Text.from_markup("[red]Please enter a positive integer.[/]"))
+                self.app.write_log(
+                    Text.from_markup("[red]Please enter a positive integer.[/]")
+                )
             except ValueError:
-                self.app.write_log(Text.from_markup("[red]Invalid number. Please try again.[/]"))
+                self.app.write_log(
+                    Text.from_markup("[red]Invalid number. Please try again.[/]")
+                )
 
     def info(self, message: str) -> None:
         self._flush_thinking()
@@ -82,7 +86,9 @@ class TextualIO:
         self._flush_thinking()
         self.app.write_log(
             Text.from_markup(
-                f"\n[bold magenta]➜ Tool Use:[/] [cyan]{name}[/]([dim]{inputs}[/])"))
+                f"\n[bold magenta]➜ Tool Use:[/] [cyan]{name}[/]([dim]{inputs}[/])"
+            )
+        )
 
     def render_tool_end(self, name: str, output: str, status: str) -> None:
         self._flush_thinking()
@@ -116,6 +122,12 @@ class TextualIO:
     def render_info(self, message: str) -> None:
         self._flush_thinking()
         self.app.write_log(message)
+
+    def render_graph(self, config: dict) -> None:
+        self._flush_thinking()
+        # For TUI, we could render a tree widget, but TextualIO just logs.
+        # We'll rely on the log message from engine.
+        pass
 
 
 class LegoAgentTUI(App):
@@ -189,8 +201,14 @@ class LegoAgentTUI(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, engine_factory: Callable[[UserIO], "LegoAgentEngine"],
-                 initial_prompt: str = None, work_dir: str = ".", repo_root: str = None, **kwargs):
+    def __init__(
+        self,
+        engine_factory: Callable[[UserIO], "LegoAgentEngine"],
+        initial_prompt: str = None,
+        work_dir: str = ".",
+        repo_root: str = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.theme = "flexoki"
         self.engine_factory = engine_factory
@@ -253,10 +271,13 @@ class LegoAgentTUI(App):
             self.write_log(
                 Text.from_markup(
                     f"\n[green]Success! Script written to: {result.script_path}[/]"
-                ))
+                )
+            )
 
             # Execute the generated script
-            self.write_log(Text.from_markup("\n[bold blue]Executing generated script...[/]"))
+            self.write_log(
+                Text.from_markup("\n[bold blue]Executing generated script...[/]")
+            )
 
             env = os.environ.copy()
 
@@ -278,15 +299,19 @@ class LegoAgentTUI(App):
             if not work_dir_path.exists():
                 work_dir_path.mkdir(parents=True, exist_ok=True)
 
-            self.write_log(Text.from_markup(
-                "[bold blue]┌── Script Execution Output ──────────────────────────────────────────[/]"))
+            self.write_log(
+                Text.from_markup(
+                    "[bold blue]┌── Script Execution Output ──────────────────────────────────────────[/]"
+                )
+            )
 
             process = await asyncio.create_subprocess_exec(
-                sys.executable, str(result.script_path),
+                sys.executable,
+                str(result.script_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.work_dir,
-                env=env
+                env=env,
             )
 
             async def read_stream(stream, color_tag):
@@ -298,37 +323,50 @@ class LegoAgentTUI(App):
                         decoded_line = line.decode().rstrip()
                         self.write_log(
                             Text.from_markup(
-                                f"[bold blue]│[/] [{color_tag}]{decoded_line}[/]"))
+                                f"[bold blue]│[/] [{color_tag}]{decoded_line}[/]"
+                            )
+                        )
                     except Exception:
                         # Fallback for decoding errors
-                        self.write_log(Text.from_markup(
-                            f"[bold blue]│[/] [{color_tag}]{str(line)}[/]"))
+                        self.write_log(
+                            Text.from_markup(
+                                f"[bold blue]│[/] [{color_tag}]{str(line)}[/]"
+                            )
+                        )
 
             await asyncio.gather(
-                read_stream(process.stdout, "white"),
-                read_stream(process.stderr, "red")
+                read_stream(process.stdout, "white"), read_stream(process.stderr, "red")
             )
 
             return_code = await process.wait()
-            self.write_log(Text.from_markup(
-                "[bold blue]└─────────────────────────────────────────────────────────────────────[/]"))
+            self.write_log(
+                Text.from_markup(
+                    "[bold blue]└─────────────────────────────────────────────────────────────────────[/]"
+                )
+            )
 
             if return_code == 0:
                 self.write_log(
                     Text.from_markup(
-                        f"\n[bold green]Execution finished successfully (Exit Code: {return_code})[/]"))
+                        f"\n[bold green]Execution finished successfully (Exit Code: {return_code})[/]"
+                    )
+                )
             else:
                 self.write_log(
                     Text.from_markup(
-                        f"\n[bold red]Execution failed (Exit Code: {return_code})[/]"))
+                        f"\n[bold red]Execution failed (Exit Code: {return_code})[/]"
+                    )
+                )
 
             self.write_log(
-                "\nExecution finished. You can exit with Ctrl+C or enter a new prompt to restart.")
+                "\nExecution finished. You can exit with Ctrl+C or enter a new prompt to restart."
+            )
             self.processing = False
 
         except Exception as e:
             self.write_log(Text.from_markup(f"\n[red]Error: {e}[/]"))
             import traceback
+
             traceback.print_exc()
         finally:
             pass

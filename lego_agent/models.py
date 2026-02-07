@@ -11,7 +11,7 @@ class LegoAgentResponse:
 
     status: Literal["clarify", "ready"]
     questions: List[str] = field(default_factory=list)
-    python_script: Optional[str] = None
+    yaml_config: Optional[str] = None
 
     def validate(self) -> None:
         """Validate the response consistency."""
@@ -19,8 +19,8 @@ class LegoAgentResponse:
             if not self.questions:
                 raise ValueError("Status is 'clarify' but no questions provided.")
         elif self.status == "ready":
-            if not self.python_script:
-                raise ValueError("Status is 'ready' but no python_script provided.")
+            if not self.yaml_config:
+                raise ValueError("Status is 'ready' but no yaml_config provided.")
         else:
             raise ValueError(f"Invalid status: {self.status}")
 
@@ -30,6 +30,7 @@ class LegoAgentResult:
     """Result of an LegoAgent run."""
 
     script_path: Path
+    config_path: Path
     script_text: str
     clarifications: List[Tuple[str, str]]
 
@@ -39,21 +40,11 @@ def get_lego_agent_response_schema() -> dict:
     return {
         "type": "object",
         "properties": {
-            "status": {
-                "type": "string",
-                "enum": ["clarify", "ready"]
-            },
-            "questions": {
-                "type": "array",
-                "items": {
-                    "type": "string"
-                }
-            },
-            "python_script": {
-                "type": "string"
-            }
+            "status": {"type": "string", "enum": ["clarify", "ready"]},
+            "questions": {"type": "array", "items": {"type": "string"}},
+            "yaml_config": {"type": "string"},
         },
-        "required": ["status"]
+        "required": ["status"],
     }
 
 
@@ -77,7 +68,7 @@ def extract_json(text: str) -> str:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1:
-        candidate = text[start: end + 1]
+        candidate = text[start : end + 1]
         try:
             json.loads(candidate)
             return candidate
@@ -90,7 +81,7 @@ def extract_json(text: str) -> str:
     if match:
         return match.group(1)
     if start != -1 and end != -1:
-        return text[start: end + 1]
+        return text[start : end + 1]
 
     return text
 
@@ -106,7 +97,7 @@ def parse_lego_agent_response(text: str) -> LegoAgentResponse:
     response = LegoAgentResponse(
         status=data.get("status"),
         questions=data.get("questions", []),
-        python_script=data.get("python_script"),
+        yaml_config=data.get("yaml_config"),
     )
     response.validate()
     return response

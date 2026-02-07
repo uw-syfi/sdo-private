@@ -9,6 +9,7 @@ export function useLegoAgent() {
   const [dirOptions, setDirOptions] = useState<string[]>([]);
   const [model, setModel] = useState<string | undefined>(undefined);
   const [thinkingBudget, setThinkingBudget] = useState<number | undefined>(undefined);
+  const [graphConfig, setGraphConfig] = useState<any>(null);
   const ws = useRef<WebSocket | null>(null);
 
   const addLog = useCallback((event: AgentEvent) => {
@@ -95,6 +96,9 @@ export function useLegoAgent() {
         }
     } else if (event.type === 'dir_options' && event.options) {
         setDirOptions(event.options);
+    } else if (event.type === 'graph' && event.config) {
+        setGraphConfig(event.config);
+        addLog({ type: 'log', message: 'Graph execution plan received', level: 'info' });
     }
   }, []);
 
@@ -195,6 +199,7 @@ export function useLegoAgent() {
     listDirs,
     updateCwd,
     model,
-    thinkingBudget
+    thinkingBudget,
+    graphConfig
   };
 }

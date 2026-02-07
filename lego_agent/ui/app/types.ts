@@ -1,5 +1,5 @@
 export interface AgentEvent {
-  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result" | "init" | "dir_options" | "path_validation";
+  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result" | "init" | "dir_options" | "path_validation" | "graph";
   // specific fields
   text?: string;
   name?: string;
@@ -18,6 +18,7 @@ export interface AgentEvent {
   thinking_budget?: number;
   path?: string;
   valid?: boolean;
+  config?: any;
 }
 
 export interface LogItem {
