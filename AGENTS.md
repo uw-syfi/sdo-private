@@ -385,6 +385,7 @@ Always do the following after you're done with your code edits:
 
 *   **Unit tests** (`tests/unit/`): Fast, isolated tests for individual components
 *   **Integration tests** (`tests/integration/`): Test component interactions and real behavior
+*   **Frontend tests** (`lego_agent/ui/app/components/__tests__/`): Jest/React Testing Library tests for UI components.
 *   Test organization by component:
     *   `tests/unit/config/`: Configuration validation tests
     *   `tests/unit/agents/`: Agent-specific tests (deployment, monitoring)
@@ -393,8 +394,10 @@ Always do the following after you're done with your code edits:
 
 #### Running Tests
 
-*   Run all tests: `uv run pytest tests/`
+*   Run all tests (backend + frontend): `scripts/run_tests.sh`
+*   Run python tests: `uv run pytest tests/`
 *   Run specific category: `uv run pytest tests/unit/` or `uv run pytest tests/integration/`
+*   Run frontend tests: `cd lego_agent/ui && npm test`
 *   Run with coverage: `uv run pytest tests/ --cov=app_operator`
 *   Check if tests pass after you've modified the codebase's behavior.
 *   Don't run the sds_operator directly to test; it is a long-running process that will not terminate.
@@ -412,37 +415,28 @@ def test_deployment_succeeds_after_retry():
     assert result is True
     assert log_file.exists()
     assert "deployment successful" in log_file.read_text()
-
-# ❌ AVOID: Test internal method calls or private details
-def test_deployment():
-    mock_deployer._fix_with_agent.assert_called_once()  # Brittle! Couples to implementation
-    assert deployer._retry_count == 2  # Private detail, not part of contract
 ```
 
-**Why:** Tests coupled to implementation break when refactoring code structure, even if behavior remains identical. Testing the contract ensures tests remain valid as long as the external API is unchanged.
+**2. Write Testable, Robust, Clean Frontend Code**
 
-**2. Test Properties and Invariants, Not Execution Paths**
+For the `lego_agent` UI, we prioritize robustness and testability:
 
-Focus on **what properties must hold**, not the specific code path taken to achieve them.
+*   **Component Isolation**: Build components (e.g., `TerminalLog`, `InputArea`) that rely on props rather than global state where possible.
+*   **Interaction Testing**: Use `@testing-library/react` to test user interactions (clicks, inputs) rather than internal component state.
+*   **Robustness**: Ensure components handle loading states, empty data, and error states gracefully (e.g., connection loss).
+*   **Clean Code**: Keep components small and focused. Extract logic into hooks (e.g., `useLegoAgent`) to separate concerns from the view layer.
 
-```python
-# ✅ GOOD: Test desired properties
-def test_deployment_creates_required_files():
-    deployer.run()
-    assert (repo / ".sds" / "deploy.sh").exists()
-    assert (repo / ".sds" / "health_check.sh").exists()
-    # Property: all required files exist, regardless of how they were created
-
-# ❌ AVOID: Test specific execution sequence
-def test_deployment():
-    assert deployer._generate_deploy_script() is called first
-    assert deployer._generate_health_check() is called second
-    # Too specific - if we change order or combine generation, test breaks
+```typescript
+// ✅ GOOD: Testing user interaction and prop handling
+it('calls onSendPrompt when submitting prompt', () => {
+  render(<InputArea onSendPrompt={mockSend} status="connected" />);
+  fireEvent.click(screen.getByText('Run'));
+  expect(mockSend).toHaveBeenCalled();
+});
 ```
-
-**Why:** Testing properties makes tests resilient to refactoring. Code can be reorganized, optimized, or rewritten as long as it maintains required properties.
 
 **3. Prefer Test Doubles Over Mocks for Maintainability**
+
 
 Use **simple test double classes** instead of mock frameworks for clearer, more maintainable tests. Implement features in a test-double-friendly way.
 
