@@ -16,7 +16,11 @@ sds/
 │   ├── models.py         # Data models (LegoAgentResponse, LegoAgentResult)
 │   ├── runtime.py        # LangGraph agent runtime and orchestration patterns
 │   ├── storage.py        # Script storage management
+│   ├── server.py         # FastAPI WebSocket server for Web UI
 │   ├── tui.py            # Textual-based interactive TUI implementation
+│   ├── ui/               # Next.js Web UI
+│   │   ├── app/          # App Router components
+│   │   └── ...
 │   └── prompts/          # Jinja2 prompt templates
 │       └── templates/lego_agent/
 │           ├── system.jinja2   # System prompt with orchestration docs
@@ -161,7 +165,8 @@ The **LegoAgent** module is an autonomous script generation system that uses AI 
 
 ### Key Features
 
-*   **Interactive TUI Mode**: Textual-based rich terminal interface with real-time streaming output.
+*   **Web UI Mode**: Modern Next.js interface with real-time visualization of agent thinking and tool usage.
+*   **Interactive TUI Mode**: Textual-based rich terminal interface (legacy).
 *   **Clarification Loop**: Iteratively refines requirements through AI-powered questions before generating scripts.
 *   **Orchestration Patterns**: Built-in support for `fan_out`, `summarize`, and `judge_loop` patterns.
 *   **Automatic Repo Detection**: Finds project root by searching upward for `.git` or `sds.toml`.
@@ -179,11 +184,23 @@ The **LegoAgent** module is an autonomous script generation system that uses AI 
     *   Validates generated Python scripts before execution.
     *   Handles response parsing and error repair.
 
+*   **Web UI Server (`server.py`)**:
+    *   FastAPI application serving a WebSocket endpoint (`/ws`).
+    *   **WebIO**: Adapts the `UserIO` protocol to WebSocket events.
+    *   Streams "thinking", "tool_start", "tool_end" events to the frontend.
+    *   Handles "start" and "answer" events from the frontend.
+
+*   **Web Frontend (`ui/`)**:
+    *   Next.js application using Tailwind CSS and React.
+    *   **TerminalLog**: Renders the agent's stream in a terminal-like view.
+    *   **InputArea**: Dynamic form for prompts and clarification answers.
+    *   Connects to the backend via WebSocket.
+
 *   **I/O Abstraction (`io.py`)**:
     *   **UserIO Protocol**: Duck-typed interface for user interaction.
+    *   **WebIO**: WebSocket-based implementation for the Web UI.
     *   **ConsoleIO**: ANSI-colored console output for CLI mode.
-    *   **TextualIO**: Rich Textual widgets for TUI mode with async support.
-    *   Both implement: `read_prompt()`, `ask_questions()`, `render_thinking_chunk()`, `render_tool_start/end()`, etc.
+    *   **TextualIO**: Rich Textual widgets for TUI mode.
 
 *   **LegoAgentTUI (`tui.py`)**:
     *   Textual App implementation with `RichLog` widget.
@@ -218,7 +235,13 @@ The **LegoAgent** module is an autonomous script generation system that uses AI 
     *   **user.jinja2**: User request with clarification history and validation checklist.
     *   **repair.jinja2**: Error correction prompt for JSON parsing failures.
 
-### CLI Usage
+### Usage
+
+**Web UI Mode (Recommended):**
+```bash
+./scripts/start_lego_ui.sh
+```
+This starts the backend on port 8000 and the frontend on port 3000. Open `http://localhost:3000` in your browser.
 
 **Default TUI Mode:**
 ```bash
@@ -243,10 +266,24 @@ uv run -m lego_agent --no-tui --prompt "Your task"
 - `--model`: Override agent model from configuration.
 - `--output-dir`: Output directory (default: `lego_agent_runs`).
 - `--work-dir`: Execution directory (default: current directory).
-- `--no-run`: Generate script but don't execute it.
+- `--no-run`: Generate script but do not execute it.
 - `--no-tui`: Use CLI mode instead of TUI.
 
-### Data Flow
+### Data Flow (Web UI)
+
+```
+Browser (Next.js) <── WebSocket ──> FastAPI (server.py)
+                                        ↓
+                                LegoAgentEngine
+                                        ↓
+                                    Clarification Loop
+                                        ↓
+                                    Script Generation
+                                        ↓
+                                    Execution
+```
+
+### Data Flow (TUI/CLI)
 
 ```
 User Input (TUI or CLI)
