@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import sys
 import traceback
@@ -10,7 +9,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from lego_agent.engine import LegoAgentEngine
-from lego_agent.io import UserIO
 from lego_agent.prompts import get_loader
 from app_operator.config import load_config
 from app_operator.logger import logger
@@ -247,7 +245,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     suggestions = sorted(suggestions)[:20]
                     await io._send_event("dir_options", {"options": suggestions})
 
-                except Exception as e:
+                except Exception:
                     # Silently fail for list dirs (e.g. permission error)
                     await io._send_event("dir_options", {"options": []})
 

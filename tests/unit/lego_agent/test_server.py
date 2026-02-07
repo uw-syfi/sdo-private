@@ -1,14 +1,10 @@
 import asyncio
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketState
 
 from lego_agent.server import WebIO, app
-
-
-from pathlib import Path
 
 
 class MockWebSocket:
@@ -91,7 +87,7 @@ def test_websocket_connection():
     # Note: TestClient with WebSocket requires httpx or similar, but FastAPI TestClient wraps Starlette's.
     # Starlette's TestClient supports websocket_connect.
 
-    with client.websocket_connect("/ws") as websocket:
+    with client.websocket_connect("/ws"):
         # We can send data
         # But our server logic relies on `load_config` which might fail if not mocked or in wrong dir.
         pass
@@ -101,8 +97,8 @@ def test_websocket_connection():
 async def test_server_logic(tmp_path):
     # We can mock the dependencies of websocket_endpoint
     with (
-        patch("lego_agent.server.load_config") as mock_config,
-        patch("lego_agent.server.get_loader") as mock_loader,
+        patch("lego_agent.server.load_config"),
+        patch("lego_agent.server.get_loader"),
         patch("lego_agent.server.LegoAgentEngine") as mock_engine_cls,
     ):
         mock_engine = AsyncMock()
