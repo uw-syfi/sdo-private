@@ -209,10 +209,19 @@ export function InputArea({
           "bg-background border-t border-border p-4 transition-all duration-200"
       )}>
         {/* Working Directory Line */}
-        <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground relative z-20">
-            <Terminal className="w-3 h-3" />
+        <div className="mb-3 relative z-20 group/cwd-container">
+            <div className="flex items-center justify-between mb-1.5 px-1">
+                <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 flex items-center gap-1.5 cursor-pointer" onClick={() => workDirInputRef.current?.focus()}>
+                    <Terminal className="w-3 h-3" />
+                    Working Directory
+                </label>
+                {status !== 'running' && (
+                    <span className="text-[10px] text-brand/60 font-medium opacity-0 group-hover/cwd-container:opacity-100 transition-opacity">
+                        Click to change
+                    </span>
+                )}
+            </div>
             <div className="relative w-full flex items-center group/cwd">
-                <span className="text-brand font-bold mr-2 shrink-0">cwd:</span>
                 <input 
                     ref={workDirInputRef}
                     type="text"
@@ -225,10 +234,10 @@ export function InputArea({
                     onKeyDown={handleWorkDirKeyDown}
                     disabled={status === 'running'}
                     className={cn(
-                        "w-full text-xs font-mono px-2 py-1 rounded-sm focus:outline-none transition-all",
+                        "w-full text-xs font-mono px-3 py-2 rounded-md border transition-all duration-200 shadow-sm",
                         status === 'running' 
-                            ? "bg-transparent text-muted-foreground cursor-not-allowed opacity-70" 
-                            : "bg-muted/30 hover:bg-muted/50 focus:bg-muted/50 text-foreground/80 focus:text-foreground focus:ring-1 focus:ring-brand/30 cursor-text"
+                            ? "bg-muted/10 border-transparent text-muted-foreground cursor-not-allowed opacity-70" 
+                            : "bg-background/50 border-border hover:border-brand/40 focus:border-brand text-foreground focus:bg-background focus:ring-4 focus:ring-brand/10 cursor-text"
                     )}
                     placeholder="/path/to/working/directory"
                     autoComplete="off"
@@ -236,7 +245,7 @@ export function InputArea({
                 {showDirSuggestions && dirOptions.length > 0 && (
                     <div 
                         ref={suggestionsRef}
-                        className="absolute bottom-full left-0 w-full mb-1 bg-popover border border-border shadow-lg max-h-60 overflow-y-auto z-50"
+                        className="absolute bottom-full left-0 w-full mb-1 bg-popover border border-border shadow-lg max-h-60 overflow-y-auto z-50 rounded-md"
                     >
                         {dirOptions.map((opt, i) => (
                             <button
@@ -245,7 +254,7 @@ export function InputArea({
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => handleSuggestionClick(opt)}
                                 className={cn(
-                                    "w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-muted transition-colors truncate block",
+                                    "w-full text-left px-3 py-2 text-xs font-mono hover:bg-muted transition-colors truncate block border-b border-border/40 last:border-0",
                                     i === selectedIndex && "bg-muted text-brand font-bold"
                                 )}
                             >
