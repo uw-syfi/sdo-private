@@ -66,7 +66,12 @@ export function InputArea({
   // Hide suggestions when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (workDirInputRef.current && !workDirInputRef.current.contains(event.target as Node)) {
+      if (
+          workDirInputRef.current && 
+          !workDirInputRef.current.contains(event.target as Node) &&
+          suggestionsRef.current && 
+          !suggestionsRef.current.contains(event.target as Node)
+      ) {
         setShowDirSuggestions(false);
       }
     };
@@ -116,10 +121,11 @@ export function InputArea({
   const handleSuggestionClick = (path: string) => {
       const newPath = path.endsWith('/') ? path : path + '/';
       setWorkDir(newPath);
-      // Keep suggestions open
-      // setShowDirSuggestions(false);
       if (onListDirs) onListDirs(newPath);
+      
+      // Focus first, then hide suggestions to ensure onFocus doesn't re-open them immediately
       workDirInputRef.current?.focus();
+      setShowDirSuggestions(false);
   };
 
   // Initialize answers array when questions arrive
@@ -235,6 +241,7 @@ export function InputArea({
                             <button
                                 key={opt}
                                 type="button"
+                                onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => handleSuggestionClick(opt)}
                                 className={cn(
                                     "w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-muted/50 transition-colors truncate block",

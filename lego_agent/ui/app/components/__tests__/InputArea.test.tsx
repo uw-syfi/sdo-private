@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { InputArea } from '../InputArea';
 import '@testing-library/jest-dom';
 
@@ -143,7 +143,7 @@ describe('InputArea', () => {
     expect(dirInput).toHaveValue('/tmp/foo/');
   });
 
-  it('supports arrow key navigation in directory suggestions', () => {
+  it('supports arrow key navigation in directory suggestions (circular)', () => {
     const mockListDirs = jest.fn();
     const suggestions = ['/tmp/a', '/tmp/b', '/tmp/c'];
     
@@ -164,16 +164,148 @@ describe('InputArea', () => {
     fireEvent.focus(dirInput);
     
     // Initial selection should be index 0 (/tmp/a)
-    // Press Down Arrow -> index 1 (/tmp/b)
+    const optionA = screen.getByText('/tmp/a');
+    const optionB = screen.getByText('/tmp/b');
+    const optionC = screen.getByText('/tmp/c');
+
+    // Check active class on A (index 0)
+    expect(optionA).toHaveClass('bg-muted/50');
+    expect(optionB).not.toHaveClass('bg-muted/50');
+
+    // Press Down -> index 1 (B)
     fireEvent.keyDown(dirInput, { key: 'ArrowDown' });
+    expect(optionB).toHaveClass('bg-muted/50');
+
+    // Press Down -> index 2 (C)
+    fireEvent.keyDown(dirInput, { key: 'ArrowDown' });
+    expect(optionC).toHaveClass('bg-muted/50');
+
+    // Press Down (Circular) -> index 0 (A)
+    fireEvent.keyDown(dirInput, { key: 'ArrowDown' });
+    expect(optionA).toHaveClass('bg-muted/50');
+
+    // Press Up (Circular) -> index 2 (C)
+    fireEvent.keyDown(dirInput, { key: 'ArrowUp' });
+    expect(optionC).toHaveClass('bg-muted/50');
     
-    // Press Enter to select
+    // Press Enter to select C
     fireEvent.keyDown(dirInput, { key: 'Enter' });
     
     // Should update value AND append slash for next level
-    expect(dirInput).toHaveValue('/tmp/b/');
-    
-    // Should trigger list dirs for next level
-    expect(mockListDirs).toHaveBeenCalledWith('/tmp/b/');
+    expect(dirInput).toHaveValue('/tmp/c/');
+    expect(mockListDirs).toHaveBeenCalledWith('/tmp/c/');
   });
+
+  it('selects suggestion on click', () => {
+    const mockListDirs = jest.fn();
+    const suggestions = ['/tmp/click'];
+    
+    render(
+      <InputArea
+        onSendPrompt={mockOnSendPrompt}
+        onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
+        pendingQuestions={null}
+        status="connected"
+        initialCwd="/tmp/"
+        dirOptions={suggestions}
+        onListDirs={mockListDirs}
+      />
+    );
+
+    const dirInput = screen.getByDisplayValue('/tmp/');
+    fireEvent.focus(dirInput);
+    
+    const option = screen.getByText('/tmp/click');
+    fireEvent.click(option);
+
+    expect(dirInput).toHaveValue('/tmp/click/');
+    expect(mockListDirs).toHaveBeenCalledWith('/tmp/click/');
+    
+    // Should maintain focus
+    expect(dirInput).toHaveFocus();
+
+    // Dropdown should be closed
+    expect(screen.queryByRole('button', { name: '/tmp/click' })).not.toBeInTheDocument();
+  });
+
+  it('closes suggestions when clicking outside', () => {
+    const mockListDirs = jest.fn();
+    const suggestions = ['/tmp/foo'];
+    
+    render(
+      <InputArea
+        onSendPrompt={mockOnSendPrompt}
+        onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
+        pendingQuestions={null}
+        status="connected"
+        initialCwd="/tmp/"
+        dirOptions={suggestions}
+        onListDirs={mockListDirs}
+      />
+    );
+
+    const dirInput = screen.getByDisplayValue('/tmp/');
+    fireEvent.focus(dirInput);
+    
+    expect(screen.getByText('/tmp/foo')).toBeInTheDocument();
+
+    // Click outside (e.g., on body)
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByText('/tmp/foo')).not.toBeInTheDocument();
+  });
+
+  it('updates workDir when initialCwd prop changes', () => {
+    const { rerender } = render(
+      <InputArea
+        onSendPrompt={mockOnSendPrompt}
+        onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
+        pendingQuestions={null}
+        status="connected"
+        initialCwd="/initial/path"
+      />
+    );
+
+    expect(screen.getByDisplayValue('/initial/path')).toBeInTheDocument();
+
+    // Rerender with new prop
+    rerender(
+      <InputArea
+        onSendPrompt={mockOnSendPrompt}
+        onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
+        pendingQuestions={null}
+        status="connected"
+        initialCwd="/new/path"
+      />
+    );
+
+    expect(screen.getByDisplayValue('/new/path')).toBeInTheDocument();
+  });
+
+  it('does not crash or select if no suggestions available', () => {
+      render(
+        <InputArea
+          onSendPrompt={mockOnSendPrompt}
+          onSendAnswers={mockOnSendAnswers}
+          onStop={mockOnStop}
+          pendingQuestions={null}
+          status="connected"
+          initialCwd="/tmp/"
+          dirOptions={[]}
+        />
+      );
+  
+      const dirInput = screen.getByDisplayValue('/tmp/');
+      fireEvent.focus(dirInput);
+      
+      // Press Enter
+      fireEvent.keyDown(dirInput, { key: 'Enter' });
+      
+      // Should not have changed
+      expect(dirInput).toHaveValue('/tmp/');
+    });
 });
