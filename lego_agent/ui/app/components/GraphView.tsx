@@ -38,6 +38,7 @@ export function GraphView({ className }: GraphViewProps) {
       if (nodes.length > 0) {
           computeLayout(nodes, edges);
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length, edges.length, computeLayout]);
 
   return (

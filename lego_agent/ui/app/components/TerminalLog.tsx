@@ -33,22 +33,22 @@ export function TerminalLog({ logs }: TerminalLogProps) {
   );
 }
 
-function LogEntry({ item }: { item: LogItem }) {
-  const { event } = item;
-  const timestamp = new Date(item.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-  const Header = ({ children, className }: { children: React.ReactNode, className?: string }) => (
+const Header = ({ children, className, timestamp }: { children: React.ReactNode, className?: string, timestamp: string }) => (
     <div className={cn("flex items-start gap-3 opacity-60 mb-1", className)}>
         <span className="text-xs text-muted-foreground select-none shrink-0">[{timestamp}]</span>
         {children}
     </div>
   );
 
+function LogEntry({ item }: { item: LogItem }) {
+  const { event } = item;
+  const timestamp = new Date(item.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
   if (event.type === 'thinking') {
     if (!event.text) return null;
     return (
         <div className="group animate-in fade-in duration-300">
-            <Header>
+            <Header timestamp={timestamp}>
                 <span className="text-xs uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-2">
                      <Cpu className="w-3 h-3" /> Thinking
                 </span>
@@ -63,7 +63,7 @@ function LogEntry({ item }: { item: LogItem }) {
   if (event.type === 'tool_start') {
     return (
         <div className="group mt-4 mb-2">
-            <Header>
+            <Header timestamp={timestamp}>
                 <span className="text-xs uppercase tracking-wider font-bold text-brand flex items-center gap-2">
                     <Activity className="w-3 h-3" /> Executing
                 </span>
@@ -84,7 +84,7 @@ function LogEntry({ item }: { item: LogItem }) {
     const isError = event.status === 'error';
     return (
       <div className="group mb-4">
-         <Header>
+         <Header timestamp={timestamp}>
             <span className={cn(
                 "text-xs uppercase tracking-wider font-bold flex items-center gap-2",
                 isError ? "text-error" : "text-success"

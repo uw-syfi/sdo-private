@@ -100,7 +100,7 @@ export function useLegoAgent() {
         setGraphConfig(event.config);
         addLog({ type: 'log', message: 'Graph execution plan received', level: 'info' });
     }
-  }, []);
+  }, [addLog]);
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return;

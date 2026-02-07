@@ -3,9 +3,26 @@ import { useGraphStore, AgentNodeData } from '../store/graphStore';
 import { LogItem } from '../types';
 import { Node, Edge, MarkerType } from 'reactflow';
 
+interface GraphConfigNode {
+  id?: string;
+  type?: string;
+  label?: string;
+  name?: string;
+  instruction?: string;
+  task?: string;
+  steps?: GraphConfigNode[];
+  worker?: GraphConfigNode;
+  judge?: GraphConfigNode;
+  [key: string]: any;
+}
+
+interface GraphConfig {
+  workflow: GraphConfigNode;
+}
+
 interface GraphAdapterProps {
   logs: LogItem[];
-  graphConfig: any;
+  graphConfig: GraphConfig;
 }
 
 export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
@@ -20,7 +37,7 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
     
     const createId = () => Math.random().toString(36).substr(2, 9);
     
-    const parseNode = (configNode: any, parentId?: string): string => {
+    const parseNode = (configNode: GraphConfigNode, parentId?: string): string => {
        const id = configNode.id || createId(); 
        // Store generated ID back to configNode to reuse if needed (mutating local copy logic)
        configNode.id = id;
@@ -34,9 +51,9 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
          id,
          type: isGroup ? 'group' : 'agent',
          data: {
-            label,
+            label: label || 'Agent',
             status: 'pending',
-            pattern: type as any,
+            pattern: type as AgentNodeData['pattern'],
             logs: [],
             currentThought: configNode.instruction || configNode.task
          },
@@ -48,15 +65,16 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
        // For judge_loop, we skip steps processing to avoid redundant edges if worker/judge are also in steps
        if (configNode.steps && type !== 'judge_loop') {
            let prevId: string | null = null;
-           configNode.steps.forEach((step: any) => {
+           configNode.steps.forEach((step: GraphConfigNode) => {
                const stepId = parseNode(step, id);
                if (type === 'chain' && prevId) {
-                   newEdges.push({ 
-                       id: `${prevId}-${stepId}`, 
-                       source: prevId, 
-                       target: stepId,
-                       markerEnd: { type: MarkerType.ArrowClosed }
-                   });
+                  newEdges.push({ 
+                      id: `${prevId}-${stepId}`, 
+                      source: prevId, 
+                      target: stepId,
+                      sourceHandle: 'source-bottom',
+                      markerEnd: { type: MarkerType.ArrowClosed }
+                  });
                }
                prevId = stepId;
            });
@@ -70,16 +88,17 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
            const workerId = parseNode(workerNode, id);
            const judgeId = parseNode(judgeNode, id);
            
-           newEdges.push({ 
-               id: `${workerId}-${judgeId}`, 
-               source: workerId, 
-               target: judgeId, 
-               label: 'attempt',
-               targetHandle: 'target-bottom',
-               type: 'smoothstep',
-               markerEnd: { type: MarkerType.ArrowClosed },
-               animated: true
-           });
+          newEdges.push({ 
+              id: `${workerId}-${judgeId}`, 
+              source: workerId, 
+              target: judgeId, 
+              label: 'attempt',
+              sourceHandle: 'source-bottom',
+              targetHandle: 'target-bottom',
+              type: 'smoothstep',
+              markerEnd: { type: MarkerType.ArrowClosed },
+              animated: true
+          });
            newEdges.push({ 
                id: `${judgeId}-${workerId}`, 
                source: judgeId, 
