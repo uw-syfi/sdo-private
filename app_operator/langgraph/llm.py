@@ -30,7 +30,13 @@ def build_llm(config: Config) -> BaseChatModel:
     if provider == "openai":
         return ChatOpenAI(model=model)
     if provider == "anthropic":
-        return ChatAnthropic(model=model)
+        kwargs = {"model": model}
+        if config.agent.thinking_budget:
+            kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": config.agent.thinking_budget,
+            }
+        return ChatAnthropic(**kwargs)
     if provider == "gemini":
         try:
             return ChatGoogleGenerativeAI(model=model)
