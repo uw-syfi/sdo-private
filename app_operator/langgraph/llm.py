@@ -39,7 +39,11 @@ def build_llm(config: Config) -> BaseChatModel:
         return ChatAnthropic(**kwargs)
     if provider == "gemini":
         try:
-            return ChatGoogleGenerativeAI(model=model)
+            kwargs = {"model": model}
+            if config.agent.thinking_budget:
+                kwargs["thinking_budget"] = config.agent.thinking_budget
+                kwargs["include_thoughts"] = True
+            return ChatGoogleGenerativeAI(**kwargs)
         except Exception as e:
             # If API key is missing, try falling back to Vertex AI
             if "API key required" in str(e):
@@ -47,12 +51,18 @@ def build_llm(config: Config) -> BaseChatModel:
                 kwargs = {"model": model, "vertexai": True}
                 if location:
                     kwargs["location"] = location
+                if config.agent.thinking_budget:
+                    kwargs["thinking_budget"] = config.agent.thinking_budget
+                    kwargs["include_thoughts"] = True
                 return ChatGoogleGenerativeAI(**kwargs)
             raise
     if provider == "vertex":
         kwargs = {"model": model, "vertexai": True}
         if location:
             kwargs["location"] = location
+        if config.agent.thinking_budget:
+            kwargs["thinking_budget"] = config.agent.thinking_budget
+            kwargs["include_thoughts"] = True
         return ChatGoogleGenerativeAI(**kwargs)
 
     raise ValueError(f"Unsupported langgraph provider: {config.agent.provider}")
