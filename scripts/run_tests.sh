@@ -12,26 +12,49 @@ cd "$PROJECT_ROOT"
 
 PYTEST_ARGS=()
 COVERAGE=false
+RUN_PYTHON=true
+RUN_JS=true
 
-for arg in "$@"; do
-    if [ "$arg" == "--cov" ]; then
-        COVERAGE=true
-    else
-        PYTEST_ARGS+=("$arg")
-    fi
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --cov)
+            COVERAGE=true
+            shift
+            ;;
+        --python-only)
+            RUN_JS=false
+            shift
+            ;;
+        --js-only)
+            RUN_PYTHON=false
+            shift
+            ;;
+        *)
+            PYTEST_ARGS+=("$1")
+            shift
+            ;;
+    esac
 done
 
-if [ "$COVERAGE" = true ]; then
-    # Run with coverage for main packages
-    uv run pytest tests/unit/lego_agent
-else
-    # Run standard pytest
-    uv run --extra test pytest "${PYTEST_ARGS[@]}" tests
+if [ "$RUN_PYTHON" = true ]; then
+    if [ "$COVERAGE" = true ]; then
+        # Run with coverage for main packages
+        uv run pytest tests/unit/lego_agent
+    else
+        # Run standard pytest
+        uv run --extra test pytest "${PYTEST_ARGS[@]}" tests
+    fi
 fi
 
 # Run frontend tests
-if [ -d "lego_agent/ui" ]; then
+if [ "$RUN_JS" = true ] && [ -d "lego_agent/ui" ]; then
     echo "Running frontend tests..."
     cd lego_agent/ui
+    if [ "$CI" = "true" ] && [ -f "package-lock.json" ]; then
+        npm ci
+    else
+        npm install
+    fi
     npm test
 fi
