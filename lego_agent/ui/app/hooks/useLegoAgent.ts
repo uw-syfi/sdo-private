@@ -7,37 +7,15 @@ export function useLegoAgent() {
   const [pendingQuestions, setPendingQuestions] = useState<string[] | null>(null);
   const ws = useRef<WebSocket | null>(null);
 
-  const connect = useCallback(() => {
-    if (ws.current?.readyState === WebSocket.OPEN) return;
-
-    setStatus('connecting');
-    // Assume server is on port 8000
-    const socket = new WebSocket('ws://localhost:8000/ws');
-
-    socket.onopen = () => {
-      setStatus('connected');
-      addLog({ type: 'log', message: 'Connected to LegoAgent Server', level: 'success' });
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const data: AgentEvent = JSON.parse(event.data);
-        handleEvent(data);
-      } catch (e) {
-        console.error("Failed to parse message", event.data);
-      }
-    };
-
-    socket.onclose = () => {
-      setStatus('disconnected');
-      addLog({ type: 'log', message: 'Disconnected from server', level: 'error' });
-      ws.current = null;
-    };
-
-    ws.current = socket;
+  const addLog = useCallback((event: AgentEvent) => {
+    setLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(7),
+      event,
+      timestamp: Date.now()
+    }]);
   }, []);
 
-  const handleEvent = (event: AgentEvent) => {
+  const handleEvent = useCallback((event: AgentEvent) => {
     setLogs(prev => {
         // Coalesce thinking events
         if (event.type === 'thinking' && prev.length > 0) {
@@ -85,15 +63,37 @@ export function useLegoAgent() {
     } else if (event.type === 'execution_result') {
       setStatus('connected'); // Back to idle/connected state
     }
-  };
+  }, []);
 
-  const addLog = (event: AgentEvent) => {
-    setLogs(prev => [...prev, {
-      id: Math.random().toString(36).substring(7),
-      event,
-      timestamp: Date.now()
-    }]);
-  };
+  const connect = useCallback(() => {
+    if (ws.current?.readyState === WebSocket.OPEN) return;
+
+    setStatus('connecting');
+    // Assume server is on port 8000
+    const socket = new WebSocket('ws://localhost:8000/ws');
+
+    socket.onopen = () => {
+      setStatus('connected');
+      addLog({ type: 'log', message: 'Connected to LegoAgent Server', level: 'success' });
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data: AgentEvent = JSON.parse(event.data);
+        handleEvent(data);
+      } catch {
+        console.error("Failed to parse message", event.data);
+      }
+    };
+
+    socket.onclose = () => {
+      setStatus('disconnected');
+      addLog({ type: 'log', message: 'Disconnected from server', level: 'error' });
+      ws.current = null;
+    };
+
+    ws.current = socket;
+  }, [addLog, handleEvent]);
 
   const sendPrompt = (prompt: string) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
@@ -128,6 +128,7 @@ export function useLegoAgent() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line
     connect();
     return () => {
       ws.current?.close();
