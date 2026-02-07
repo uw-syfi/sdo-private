@@ -15,9 +15,9 @@ const layoutOptions = {
 };
 
 export const useElkLayout = () => {
-  const { nodes, edges, setNodes, setEdges } = useGraphStore();
+  const { setNodes } = useGraphStore();
 
-  const computeLayout = useCallback(async () => {
+  const computeLayout = useCallback(async (nodes: Node[], edges: Edge[]) => {
     if (nodes.length === 0) return;
 
     // 1. Build hierarchy tree from flat ReactFlow nodes
@@ -101,7 +101,7 @@ export const useElkLayout = () => {
     } catch (err) {
       console.error('ELK Layout failed:', err);
     }
-  }, [nodes, edges, setNodes, setEdges]);
+  }, [setNodes]);
 
   return { computeLayout };
 };

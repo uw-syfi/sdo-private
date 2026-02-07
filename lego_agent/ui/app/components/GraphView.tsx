@@ -37,7 +37,7 @@ export function GraphView({ className }: GraphViewProps) {
       // Debounce or check if layout needed? 
       // For now run on structure change
       if (nodes.length > 0) {
-          computeLayout();
+          computeLayout(nodes, edges);
       }
   }, [nodes.length, edges.length, computeLayout]);
 
