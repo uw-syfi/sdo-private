@@ -70,3 +70,5 @@ agent_graph.png
 agentflow_runs/
 .sds
 exp_config/
+lego_agent_runs/
+!lego_agent/ui/lib/

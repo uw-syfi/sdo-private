@@ -16,11 +16,14 @@ dependencies = [
     "google-adk>=0.1.0",
     "click>=8.0.0",
     "textual>=0.52.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
     "autopep8>=2.0.0",
     "ruff>=0.1.0",
     "hypothesis>=6.0.0",
