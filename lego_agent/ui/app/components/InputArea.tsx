@@ -1,19 +1,126 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Play, Square } from 'lucide-react';
+import { Send, Play, Square, Folder } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface InputAreaProps {
-  onSendPrompt: (prompt: string) => void;
+  onSendPrompt: (prompt: string, workDir: string) => void;
   onSendAnswers: (answers: string[]) => void;
   onStop: () => void;
   pendingQuestions: string[] | null;
   status: string;
+  initialCwd: string;
+  dirOptions?: string[];
+  onListDirs?: (path: string) => void;
 }
 
-export function InputArea({ onSendPrompt, onSendAnswers, onStop, pendingQuestions, status }: InputAreaProps) {
+export function InputArea({ 
+    onSendPrompt, 
+    onSendAnswers, 
+    onStop, 
+    pendingQuestions, 
+    status, 
+    initialCwd,
+    dirOptions = [],
+    onListDirs
+}: InputAreaProps) {
   const [input, setInput] = useState('');
+  const [workDir, setWorkDir] = useState(initialCwd);
+  const [showDirSuggestions, setShowDirSuggestions] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const workDirInputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (initialCwd && initialCwd !== '.') {
+      setWorkDir(initialCwd);
+    }
+  }, [initialCwd]);
+
+  // Reset selected index when options change
+  useEffect(() => {
+      setSelectedIndex(0);
+  }, [dirOptions]);
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (suggestionsRef.current && showDirSuggestions) {
+        const selectedElement = suggestionsRef.current.children[selectedIndex] as HTMLElement;
+        if (selectedElement) {
+            const container = suggestionsRef.current;
+            const itemTop = selectedElement.offsetTop;
+            const itemBottom = itemTop + selectedElement.offsetHeight;
+            const containerTop = container.scrollTop;
+            const containerBottom = containerTop + container.offsetHeight;
+
+            if (itemTop < containerTop) {
+                container.scrollTop = itemTop;
+            } else if (itemBottom > containerBottom) {
+                container.scrollTop = itemBottom - container.offsetHeight;
+            }
+        }
+    }
+  }, [selectedIndex, showDirSuggestions, dirOptions]);
+
+  // Hide suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (workDirInputRef.current && !workDirInputRef.current.contains(event.target as Node)) {
+        setShowDirSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const handleWorkDirChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setWorkDir(val);
+      if (onListDirs) {
+          onListDirs(val);
+          setShowDirSuggestions(true);
+      }
+  };
+
+  const handleWorkDirKeyDown = (e: React.KeyboardEvent) => {
+      if (dirOptions.length === 0 || !showDirSuggestions) {
+          // If no suggestions, maybe Enter/Tab should do something else?
+          // For now, let default happen or handled elsewhere.
+          return;
+      }
+
+      if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIndex(prev => (prev + 1) % dirOptions.length);
+      } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIndex(prev => (prev - 1 + dirOptions.length) % dirOptions.length);
+      } else if (e.key === 'Tab' || e.key === 'Enter') {
+          e.preventDefault();
+          const selected = dirOptions[selectedIndex];
+          if (selected) {
+              // Append / to trigger listing of children
+              const newPath = selected.endsWith('/') ? selected : selected + '/';
+              setWorkDir(newPath);
+              // Keep suggestions open for next level
+              // setShowDirSuggestions(false); 
+              if (onListDirs) onListDirs(newPath);
+          }
+      }
+  };
+
+  const handleSuggestionClick = (path: string) => {
+      const newPath = path.endsWith('/') ? path : path + '/';
+      setWorkDir(newPath);
+      // Keep suggestions open
+      // setShowDirSuggestions(false);
+      if (onListDirs) onListDirs(newPath);
+      workDirInputRef.current?.focus();
+  };
 
   // Initialize answers array when questions arrive
   useEffect(() => {
@@ -37,7 +144,7 @@ export function InputArea({ onSendPrompt, onSendAnswers, onStop, pendingQuestion
         onSendAnswers(answers);
     } else {
         if (!input.trim()) return;
-        onSendPrompt(input);
+        onSendPrompt(input, workDir);
         setInput('');
         if (textareaRef.current) textareaRef.current.style.height = 'auto';
     }
@@ -99,9 +206,49 @@ export function InputArea({ onSendPrompt, onSendAnswers, onStop, pendingQuestion
   return (
     <form onSubmit={handleSubmit} className="relative group">
       <div className={cn(
-          "bg-card border border-input shadow-sm rounded-xl overflow-hidden transition-all duration-200",
+          "bg-card border border-input shadow-sm rounded-xl overflow-visible transition-all duration-200 relative",
           "focus-within:ring-2 focus-within:ring-ring focus-within:border-input"
       )}>
+        <div className="flex items-center gap-2 px-4 py-2 bg-muted/30 border-b border-border relative z-20">
+            <Folder className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <div className="relative w-full">
+                <input 
+                    ref={workDirInputRef}
+                    type="text"
+                    value={workDir}
+                    onChange={handleWorkDirChange}
+                    onFocus={() => {
+                        if (onListDirs) onListDirs(workDir);
+                        setShowDirSuggestions(true);
+                    }}
+                    onKeyDown={handleWorkDirKeyDown}
+                    className="bg-transparent w-full text-xs font-mono text-muted-foreground focus:outline-none placeholder:text-muted-foreground/50"
+                    placeholder="Working Directory (absolute path)"
+                    autoComplete="off"
+                />
+                {showDirSuggestions && dirOptions.length > 0 && (
+                    <div 
+                        ref={suggestionsRef}
+                        className="absolute bottom-full left-0 w-full mb-2 bg-popover border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto z-50"
+                    >
+                        {dirOptions.map((opt, i) => (
+                            <button
+                                key={opt}
+                                type="button"
+                                onClick={() => handleSuggestionClick(opt)}
+                                className={cn(
+                                    "w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-muted/50 transition-colors truncate block",
+                                    i === selectedIndex && "bg-muted/50 text-brand-blue font-semibold"
+                                )}
+                            >
+                                {opt}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+
         <textarea
             ref={textareaRef}
             value={input}

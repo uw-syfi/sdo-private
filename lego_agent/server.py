@@ -137,6 +137,9 @@ async def websocket_endpoint(websocket: WebSocket):
             repo_root = parent
             break
 
+    # Send init event with absolute CWD
+    await io._send_event("init", {"cwd": str(repo_root)})
+
     try:
         config = load_config(str(repo_root), None)
     except Exception as e:
@@ -159,6 +162,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if event_type == "start":
                 user_prompt = data.get("prompt")
+                # Work dir is passed from frontend, defaulting to repo root if not provided (though UI should enforce)
+                user_work_dir = data.get("work_dir")
+
                 if not user_prompt:
                     continue
 
@@ -174,6 +180,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 while not input_queue.empty():
                     input_queue.get_nowait()
 
+                # Resolve work dir
+                exec_work_dir = (
+                    Path(user_work_dir).resolve() if user_work_dir else work_dir
+                )
+
                 # Run engine in background task so we can keep receiving messages (like answers)
                 current_task = asyncio.create_task(
                     run_engine_and_script(
@@ -181,7 +192,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         config,
                         prompt_loader,
                         output_dir,
-                        work_dir,
+                        exec_work_dir,
                         repo_root,
                         user_prompt,
                     )
@@ -198,6 +209,40 @@ async def websocket_endpoint(websocket: WebSocket):
                         "log", {"message": "Agent stopped by user", "level": "error"}
                     )
                     await io._send_event("execution_result", {"exit_code": -1})
+
+            elif event_type == "list_dirs":
+                path_str = data.get("path", "")
+                if not path_str:
+                    path_str = str(repo_root)
+
+                try:
+                    suggestions = []
+                    # Determine search directory and prefix
+                    path_obj = Path(path_str)
+
+                    if path_str.endswith(os.sep):
+                        search_dir = path_obj
+                        prefix = ""
+                    else:
+                        search_dir = path_obj.parent
+                        prefix = path_obj.name
+
+                    if search_dir.exists() and search_dir.is_dir():
+                        for item in search_dir.iterdir():
+                            if item.is_dir():
+                                if prefix:
+                                    if item.name.startswith(prefix):
+                                        suggestions.append(str(item))
+                                else:
+                                    suggestions.append(str(item))
+
+                    # Sort and limit
+                    suggestions = sorted(suggestions)[:20]
+                    await io._send_event("dir_options", {"options": suggestions})
+
+                except Exception as e:
+                    # Silently fail for list dirs (e.g. permission error)
+                    await io._send_event("dir_options", {"options": []})
 
             elif event_type == "answer":
                 # Put answer into queue for the waiting engine

@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir", default="lego_agent_runs", help="Output directory"
     )
     parser.add_argument(
-        "--work-dir", default=".", help="Directory to run the generated script in"
+        "--work-dir", required=True, help="Directory to run the generated script in"
     )
     parser.add_argument(
         "--no-run", action="store_true", help="Generate script but do not execute it"
@@ -92,7 +92,8 @@ def main() -> int:
                 engine_factory,
                 initial_prompt=args.prompt,
                 work_dir=str(work_dir),
-                repo_root=str(repo_root))
+                repo_root=str(repo_root),
+            )
             app.run()
             return 0
         except Exception as e:
@@ -100,6 +101,7 @@ def main() -> int:
             # Use `logger.exception()` or a dedicated error handler.
             logger.error(f"TUI failed: {e}")
             import traceback
+
             traceback.print_exc()
             return 1
 

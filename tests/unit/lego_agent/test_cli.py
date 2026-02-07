@@ -5,11 +5,12 @@ from lego_agent.models import LegoAgentResult
 
 
 def test_cli_no_run(tmp_path):
-    with patch("lego_agent.cli.load_config") as mock_load_config, \
-            patch("lego_agent.cli.LegoAgentEngine") as mock_engine_cls, \
-            patch("lego_agent.cli.ConsoleIO"), \
-            patch("subprocess.run") as mock_subprocess_run:
-
+    with (
+        patch("lego_agent.cli.load_config") as mock_load_config,
+        patch("lego_agent.cli.LegoAgentEngine") as mock_engine_cls,
+        patch("lego_agent.cli.ConsoleIO"),
+        patch("subprocess.run") as mock_subprocess_run,
+    ):
         # Setup mocks
         mock_config = MagicMock()
         mock_config.operator.agent_timeout = 300
@@ -19,7 +20,7 @@ def test_cli_no_run(tmp_path):
         result = LegoAgentResult(
             script_path=tmp_path / "generated_script.py",
             script_text="print('hello')",
-            clarifications=[]
+            clarifications=[],
         )
 
         # Helper to make async return
@@ -31,7 +32,19 @@ def test_cli_no_run(tmp_path):
         # Mock sys.executable for subprocess.run call
         with patch("sys.executable", "python3"):
             # Test with --no-run
-            with patch.object(sys, 'argv', ["lego_agent", "--prompt", "test", "--no-run", "--no-tui"]):
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "lego_agent",
+                    "--prompt",
+                    "test",
+                    "--no-run",
+                    "--no-tui",
+                    "--work-dir",
+                    ".",
+                ],
+            ):
                 exit_code = main()
 
             assert exit_code == 0
@@ -42,7 +55,11 @@ def test_cli_no_run(tmp_path):
             mock_subprocess_run.reset_mock()
 
             # Test WITHOUT --no-run
-            with patch.object(sys, 'argv', ["lego_agent", "--prompt", "test", "--no-tui"]):
+            with patch.object(
+                sys,
+                "argv",
+                ["lego_agent", "--prompt", "test", "--no-tui", "--work-dir", "."],
+            ):
                 exit_code = main()
 
             assert exit_code == 0

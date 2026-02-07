@@ -1,5 +1,5 @@
 export interface AgentEvent {
-  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result";
+  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result" | "init" | "dir_options";
   // specific fields
   text?: string;
   name?: string;
@@ -12,6 +12,8 @@ export interface AgentEvent {
   stream?: "stdout" | "stderr";
   data?: string;
   exit_code?: number;
+  cwd?: string;
+  options?: string[];
 }
 
 export interface LogItem {

@@ -5,6 +5,8 @@ export function useLegoAgent() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'running'>('disconnected');
   const [pendingQuestions, setPendingQuestions] = useState<string[] | null>(null);
+  const [cwd, setCwd] = useState<string>('.');
+  const [dirOptions, setDirOptions] = useState<string[]>([]);
   const ws = useRef<WebSocket | null>(null);
 
   const addLog = useCallback((event: AgentEvent) => {
@@ -62,6 +64,10 @@ export function useLegoAgent() {
       setPendingQuestions(event.questions);
     } else if (event.type === 'execution_result') {
       setStatus('connected'); // Back to idle/connected state
+    } else if (event.type === 'init' && event.cwd) {
+        setCwd(event.cwd);
+    } else if (event.type === 'dir_options' && event.options) {
+        setDirOptions(event.options);
     }
   }, []);
 
@@ -95,7 +101,7 @@ export function useLegoAgent() {
     ws.current = socket;
   }, [addLog, handleEvent]);
 
-  const sendPrompt = (prompt: string) => {
+  const sendPrompt = (prompt: string, workDir: string) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
       // Try to connect if not connected?
       // For now assume connected.
@@ -105,7 +111,7 @@ export function useLegoAgent() {
     // Clear logs on new run
     setLogs([]); 
     setStatus('running');
-    ws.current.send(JSON.stringify({ type: 'start', prompt }));
+    ws.current.send(JSON.stringify({ type: 'start', prompt, work_dir: workDir }));
   };
 
   const stopAgent = () => {
@@ -127,6 +133,11 @@ export function useLegoAgent() {
     });
   };
 
+  const listDirs = (path: string) => {
+      if (!ws.current) return;
+      ws.current.send(JSON.stringify({ type: 'list_dirs', path }));
+  };
+
   useEffect(() => {
     // eslint-disable-next-line
     connect();
@@ -142,6 +153,9 @@ export function useLegoAgent() {
     sendPrompt,
     sendAnswers,
     stopAgent,
-    connect
+    connect,
+    cwd,
+    dirOptions,
+    listDirs
   };
 }

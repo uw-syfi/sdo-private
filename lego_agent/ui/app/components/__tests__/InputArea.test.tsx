@@ -20,12 +20,15 @@ describe('InputArea', () => {
         onStop={mockOnStop}
         pendingQuestions={null}
         status="connected"
+        initialCwd="/tmp/test"
       />
     );
 
-    const input = screen.getByPlaceholderText('Enter your prompt here...');
+    const input = screen.getByPlaceholderText('Describe your task...');
     expect(input).toBeInTheDocument();
     expect(screen.getByText('Run')).toBeInTheDocument();
+    // Check for work dir input
+    expect(screen.getByDisplayValue('/tmp/test')).toBeInTheDocument();
   });
 
   it('calls onSendPrompt when submitting prompt', () => {
@@ -36,14 +39,15 @@ describe('InputArea', () => {
         onStop={mockOnStop}
         pendingQuestions={null}
         status="connected"
+        initialCwd="."
       />
     );
 
-    const input = screen.getByPlaceholderText('Enter your prompt here...');
+    const input = screen.getByPlaceholderText('Describe your task...');
     fireEvent.change(input, { target: { value: 'test prompt' } });
     fireEvent.click(screen.getByText('Run'));
 
-    expect(mockOnSendPrompt).toHaveBeenCalledWith('test prompt');
+    expect(mockOnSendPrompt).toHaveBeenCalledWith('test prompt', '.');
   });
 
   it('renders Stop button when running', () => {
@@ -54,6 +58,7 @@ describe('InputArea', () => {
         onStop={mockOnStop}
         pendingQuestions={null}
         status="running"
+        initialCwd="."
       />
     );
 
@@ -73,13 +78,14 @@ describe('InputArea', () => {
         onStop={mockOnStop}
         pendingQuestions={questions}
         status="connected"
+        initialCwd="."
       />
     );
 
-    expect(screen.getByText('Clarification Needed:')).toBeInTheDocument();
+    expect(screen.getByText('Clarification Needed')).toBeInTheDocument();
     expect(screen.getByText('Q1?')).toBeInTheDocument();
     expect(screen.getByText('Q2?')).toBeInTheDocument();
-    expect(screen.getAllByPlaceholderText('Your answer...')).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText('Type your answer...')).toHaveLength(2);
     expect(screen.getByText('Stop')).toBeInTheDocument();
   });
 
@@ -92,29 +98,82 @@ describe('InputArea', () => {
         onStop={mockOnStop}
         pendingQuestions={questions}
         status="connected"
+        initialCwd="."
       />
     );
 
-    const input = screen.getByPlaceholderText('Your answer...');
+    const input = screen.getByPlaceholderText('Type your answer...');
     fireEvent.change(input, { target: { value: 'Answer 1' } });
     fireEvent.click(screen.getByText('Submit Answers'));
 
     expect(mockOnSendAnswers).toHaveBeenCalledWith(['Answer 1']);
   });
 
-  it('calls onStop when clicking stop during questions', () => {
-    const questions = ['Q1?'];
+  it('shows directory suggestions and selects on tab', () => {
+    const mockListDirs = jest.fn();
+    const suggestions = ['/tmp/foo', '/tmp/bar'];
+    
     render(
       <InputArea
         onSendPrompt={mockOnSendPrompt}
         onSendAnswers={mockOnSendAnswers}
         onStop={mockOnStop}
-        pendingQuestions={questions}
+        pendingQuestions={null}
         status="connected"
+        initialCwd="/tmp/"
+        dirOptions={suggestions}
+        onListDirs={mockListDirs}
       />
     );
 
-    fireEvent.click(screen.getByText('Stop'));
-    expect(mockOnStop).toHaveBeenCalled();
+    const dirInput = screen.getByDisplayValue('/tmp/');
+    fireEvent.focus(dirInput);
+    
+    // Suggestion dropdown should appear
+    expect(screen.getByText('/tmp/foo')).toBeInTheDocument();
+    
+    // Type more
+    fireEvent.change(dirInput, { target: { value: '/tmp/f' } });
+    expect(mockListDirs).toHaveBeenCalledWith('/tmp/f');
+
+    // Press Tab
+    fireEvent.keyDown(dirInput, { key: 'Tab' });
+    
+    // Should update value and append slash
+    expect(dirInput).toHaveValue('/tmp/foo/');
+  });
+
+  it('supports arrow key navigation in directory suggestions', () => {
+    const mockListDirs = jest.fn();
+    const suggestions = ['/tmp/a', '/tmp/b', '/tmp/c'];
+    
+    render(
+      <InputArea
+        onSendPrompt={mockOnSendPrompt}
+        onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
+        pendingQuestions={null}
+        status="connected"
+        initialCwd="/tmp/"
+        dirOptions={suggestions}
+        onListDirs={mockListDirs}
+      />
+    );
+
+    const dirInput = screen.getByDisplayValue('/tmp/');
+    fireEvent.focus(dirInput);
+    
+    // Initial selection should be index 0 (/tmp/a)
+    // Press Down Arrow -> index 1 (/tmp/b)
+    fireEvent.keyDown(dirInput, { key: 'ArrowDown' });
+    
+    // Press Enter to select
+    fireEvent.keyDown(dirInput, { key: 'Enter' });
+    
+    // Should update value AND append slash for next level
+    expect(dirInput).toHaveValue('/tmp/b/');
+    
+    // Should trigger list dirs for next level
+    expect(mockListDirs).toHaveBeenCalledWith('/tmp/b/');
   });
 });

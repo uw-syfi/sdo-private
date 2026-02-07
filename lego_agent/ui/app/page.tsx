@@ -6,7 +6,7 @@ import { InputArea } from './components/InputArea';
 import { Bot } from 'lucide-react';
 
 export default function Home() {
-  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent } = useLegoAgent();
+  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, dirOptions, listDirs } = useLegoAgent();
 
   return (
     <main className="flex h-screen flex-col font-sans selection:bg-primary/20">
@@ -42,6 +42,9 @@ export default function Home() {
                 onStop={stopAgent} 
                 pendingQuestions={pendingQuestions}
                 status={status}
+                initialCwd={cwd}
+                dirOptions={dirOptions}
+                onListDirs={listDirs}
             />
          </div>
       </div>
