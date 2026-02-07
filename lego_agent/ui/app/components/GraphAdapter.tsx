@@ -122,7 +122,10 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
             }
         }
     }
-  }, [logs, nodes, addNodeLog, updateNodeStatus, updateNodeThought]);
+    // We intentionally omit 'nodes' from dependency array to avoid infinite loop
+    // We only want to process when 'logs' actually changes (new log arrived)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs, addNodeLog, updateNodeStatus, updateNodeThought]);
 
   return null;
 }
