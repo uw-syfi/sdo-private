@@ -112,6 +112,9 @@ export function InputArea({
               setWorkDir(newPath);
               if (onListDirs) onListDirs(newPath);
           }
+      } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowDirSuggestions(false);
       }
   };
 
