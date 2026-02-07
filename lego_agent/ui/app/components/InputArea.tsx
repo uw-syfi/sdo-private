@@ -211,8 +211,8 @@ export function InputArea({
         {/* Working Directory Line */}
         <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground relative z-20">
             <Terminal className="w-3 h-3" />
-            <div className="relative w-full flex items-center">
-                <span className="text-brand font-bold mr-2">cwd:</span>
+            <div className="relative w-full flex items-center group/cwd">
+                <span className="text-brand font-bold mr-2 shrink-0">cwd:</span>
                 <input 
                     ref={workDirInputRef}
                     type="text"
@@ -223,7 +223,13 @@ export function InputArea({
                         setShowDirSuggestions(true);
                     }}
                     onKeyDown={handleWorkDirKeyDown}
-                    className="bg-transparent w-full text-xs font-mono text-muted-foreground focus:outline-none focus:text-foreground placeholder:text-muted-foreground/30 transition-colors"
+                    disabled={status === 'running'}
+                    className={cn(
+                        "w-full text-xs font-mono px-2 py-1 rounded-sm focus:outline-none transition-all",
+                        status === 'running' 
+                            ? "bg-transparent text-muted-foreground cursor-not-allowed opacity-70" 
+                            : "bg-muted/30 hover:bg-muted/50 focus:bg-muted/50 text-foreground/80 focus:text-foreground focus:ring-1 focus:ring-brand/30 cursor-text"
+                    )}
                     placeholder="/path/to/working/directory"
                     autoComplete="off"
                 />

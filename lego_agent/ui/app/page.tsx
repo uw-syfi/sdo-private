@@ -18,13 +18,15 @@ export default function Home() {
                 <Terminal className="w-4 h-4" />
                 <span className="font-bold text-sm tracking-tight">LegoAgent</span>
             </div>
-            <div className="h-4 w-px bg-border mx-1" />
-            <div className="flex items-center gap-2">
-                 <Circle className={cn("w-2 h-2 fill-current", 
-                    status === 'connected' || status === 'running' ? "text-success animate-pulse" : "text-error"
-                 )} />
-                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{status}</span>
-            </div>
+            {(status === 'disconnected' || status === 'connecting') && (
+                <>
+                    <div className="h-4 w-px bg-border mx-1" />
+                    <div className="flex items-center gap-2">
+                         <Circle className="w-2 h-2 fill-current text-error" />
+                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{status}</span>
+                    </div>
+                </>
+            )}
         </div>
 
         {/* Status Info */}
