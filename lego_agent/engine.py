@@ -271,10 +271,18 @@ class LegoAgentEngine:
 
                 if not response:
                     response = parse_lego_agent_response(final_content)
+
+                # Validate YAML immediately to trigger repair loop if needed
+                if response.status == "ready":
+                    if not response.yaml_config:
+                        raise ValueError("Status is ready but no yaml_config provided.")
+                    self._validate_config(response.yaml_config)
             except ValueError as e:
                 # SDS-REVIEW: Logic - Repair logic should be encapsulated in `_repair_response()`.
                 # Attempt repair
-                self.io.render_error(f"Parsing failed, attempting repair... {e}")
+                self.io.render_error(
+                    f"Parsing/Validation failed, attempting repair... {e}"
+                )
                 repair_msg_text = self.prompt_loader.render(
                     "lego_agent/repair.jinja2", error=str(e), raw_response=final_content
                 )
@@ -297,6 +305,11 @@ class LegoAgentEngine:
 
                 self.io.info("")
                 response = parse_lego_agent_response(final_content)
+                # Verify repair
+                if response.status == "ready":
+                    if not response.yaml_config:
+                        raise ValueError("Status is ready but no yaml_config provided.")
+                    self._validate_config(response.yaml_config)
 
             if response.status == "clarify":
                 self.io.render_info("Agent needs clarification:")
