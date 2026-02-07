@@ -40,8 +40,8 @@ export const useElkLayout = () => {
       const isJudgeLoop = node.data?.pattern === 'judge_loop';
       const elkNode = {
         id: node.id,
-        width: node.width || 200, 
-        height: node.height || 64,
+        width: node.width ?? (typeof node.style?.width === 'number' ? node.style.width : 200), 
+        height: node.height ?? (typeof node.style?.height === 'number' ? node.style.height : 64),
         layoutOptions: {
             ...(isJudgeLoop ? { 
                 'elk.direction': 'RIGHT',
@@ -151,7 +151,23 @@ export const useElkLayout = () => {
           layoutedGraph.children.forEach((child: any) => processNode(child));
       }
 
-      setNodes(nextNodes);
+      // Check if nodes actually changed to prevent infinite loops
+      const hasChanges = nextNodes.some((newNode) => {
+          const oldNode = nodes.find((n) => n.id === newNode.id);
+          if (!oldNode) return true;
+          
+          const posChanged = Math.abs(newNode.position.x - oldNode.position.x) > 1 || 
+                             Math.abs(newNode.position.y - oldNode.position.y) > 1;
+          
+          const sizeChanged = Math.abs(Number(newNode.style?.width) - Number(oldNode.style?.width)) > 1 ||
+                              Math.abs(Number(newNode.style?.height) - Number(oldNode.style?.height)) > 1;
+                              
+          return posChanged || sizeChanged;
+      });
+
+      if (hasChanges) {
+          setNodes(nextNodes);
+      }
       
     } catch (err) {
       console.error('ELK Layout failed:', err);

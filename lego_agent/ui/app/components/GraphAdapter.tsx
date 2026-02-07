@@ -59,7 +59,7 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
          },
          position: { x: 0, y: 0 },
          parentNode: parentId,
-         ...(isGroup ? { style: { width: type === 'judge_loop' ? 500 : 400, height: 300 } } : {})
+         ...(type === 'judge_loop' ? { style: { width: 500, height: 300 } } : {})
        });
        
        // For judge_loop, we skip steps processing to avoid redundant edges if worker/judge are also in steps
