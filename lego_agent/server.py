@@ -251,6 +251,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Silently fail for list dirs (e.g. permission error)
                     await io._send_event("dir_options", {"options": []})
 
+            elif event_type == "validate_path":
+                path_str = data.get("path", "")
+                valid = False
+                try:
+                    if path_str:
+                        p = Path(path_str)
+                        valid = p.exists() and p.is_dir()
+                except Exception:
+                    pass
+
+                await io._send_event(
+                    "path_validation", {"path": path_str, "valid": valid}
+                )
+
             elif event_type == "answer":
                 # Put answer into queue for the waiting engine
                 await input_queue.put(data)

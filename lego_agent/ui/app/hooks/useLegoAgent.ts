@@ -70,6 +70,29 @@ export function useLegoAgent() {
         setCwd(event.cwd);
         if (event.model) setModel(event.model);
         if (event.thinking_budget !== undefined) setThinkingBudget(event.thinking_budget);
+        
+        // Check for saved CWD
+        const savedCwd = localStorage.getItem('lego_agent_cwd');
+        if (savedCwd && savedCwd !== event.cwd && ws.current) {
+             ws.current.send(JSON.stringify({ type: 'validate_path', path: savedCwd }));
+        }
+    } else if (event.type === 'path_validation') {
+        if (event.valid && event.path) {
+            setCwd(event.path);
+            setLogs(prev => [...prev, {
+                id: Math.random().toString(36).substring(7),
+                event: { type: 'log', message: `Restored working directory: ${event.path}`, level: 'info' },
+                timestamp: Date.now()
+            }]);
+        } else if (event.path) {
+            // Invalid path, clear storage
+             localStorage.removeItem('lego_agent_cwd');
+             setLogs(prev => [...prev, {
+                id: Math.random().toString(36).substring(7),
+                event: { type: 'log', message: `Saved directory not found: ${event.path}, using default`, level: 'error' },
+                timestamp: Date.now()
+            }]);
+        }
     } else if (event.type === 'dir_options' && event.options) {
         setDirOptions(event.options);
     }
@@ -115,6 +138,10 @@ export function useLegoAgent() {
     // Clear logs on new run
     setLogs([]); 
     setStatus('running');
+    
+    // Save CWD
+    localStorage.setItem('lego_agent_cwd', workDir);
+    
     ws.current.send(JSON.stringify({ type: 'start', prompt, work_dir: workDir }));
   };
 
