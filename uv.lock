@@ -3075,6 +3075,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "fastapi" },
     { name = "google-adk" },
     { name = "jinja2" },
     { name = "langchain-anthropic" },
@@ -3085,6 +3086,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "textual" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -3101,6 +3103,7 @@ test = [
 requires-dist = [
     { name = "autopep8", marker = "extra == 'test'", specifier = ">=2.0.0" },
     { name = "click", specifier = ">=8.0.0" },
+    { name = "fastapi", specifier = ">=0.109.0" },
     { name = "google-adk", specifier = ">=0.1.0" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.0.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
@@ -3116,6 +3119,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'test'", specifier = ">=0.1.0" },
     { name = "textual", specifier = ">=0.52.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
+    { name = "uvicorn", specifier = ">=0.27.0" },
 ]
 provides-extras = ["test"]
 
