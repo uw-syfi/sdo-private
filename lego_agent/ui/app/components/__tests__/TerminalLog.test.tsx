@@ -40,6 +40,6 @@ describe('TerminalLog', () => {
       
       const { container } = render(<TerminalLog logs={logs} />);
       expect(screen.getByText('Error occurred')).toBeInTheDocument();
-      expect(container.querySelector('.text-destructive')).toBeInTheDocument();
+      expect(container.querySelector('.text-error')).toBeInTheDocument();
   });
 });

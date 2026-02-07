@@ -1,73 +1,80 @@
 @import "tailwindcss";
 
 :root {
-  /* Light Mode - Clean White/Gray */
+  /* Light Mode - Clean Technical */
   --background: #ffffff;
-  --foreground: #0f172a; /* Slate 900 */
+  --foreground: #09090b; /* Zinc 950 */
   
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #09090b;
   
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
+  --popover-foreground: #09090b;
   
-  --primary: #18181b;
-  --primary-foreground: #fafafa;
+  --primary: #18181b; /* Zinc 900 */
+  --primary-foreground: #fafafa; /* Zinc 50 */
   
-  --secondary: #f1f5f9; /* Slate 100 */
-  --secondary-foreground: #0f172a;
+  --secondary: #f4f4f5; /* Zinc 100 */
+  --secondary-foreground: #18181b;
   
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b; /* Slate 500 */
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a; /* Zinc 500 */
   
-  --accent: #f1f5f9;
-  --accent-foreground: #0f172a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
   
   --destructive: #ef4444;
   --destructive-foreground: #fafafa;
   
-  --border: #e2e8f0; /* Slate 200 */
-  --input: #e2e8f0;
-  --ring: #0f172a;
+  --border: #e4e4e7; /* Zinc 200 */
+  --input: #e4e4e7;
+  --ring: #18181b;
   
-  --radius: 0.5rem;
+  --radius: 0.375rem; /* 6px - sharper */
   
-  /* Brand Accent - Electric Blue */
-  --brand-blue: #0070f3;
+  /* Brand & Status Colors */
+  --brand: #7c3aed; /* Violet 600 */
+  --success: #0d9488; /* Teal 600 */
+  --error: #e11d48; /* Rose 600 */
+  --warning: #d97706; /* Amber 600 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Dark Mode - Cool Dark Gray (Opencode inspired) */
-    --background: #0b0c0f; /* Deep dark blue-gray */
-    --foreground: #e2e8f0; /* Slate 200 */
+    /* Dark Mode - Opencode Inspired (Deep & Technical) */
+    --background: #09090b; /* Zinc 950 */
+    --foreground: #fafafa; /* Zinc 50 */
     
-    --card: #131418; /* Slightly lighter card bg */
-    --card-foreground: #e2e8f0;
+    --card: #09090b;
+    --card-foreground: #fafafa;
     
-    --popover: #0b0c0f;
-    --popover-foreground: #e2e8f0;
+    --popover: #09090b;
+    --popover-foreground: #fafafa;
     
-    --primary: #e2e8f0;
-    --primary-foreground: #0f172a;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
     
-    --secondary: #1e293b; /* Slate 800 */
-    --secondary-foreground: #e2e8f0;
+    --secondary: #27272a; /* Zinc 800 */
+    --secondary-foreground: #fafafa;
     
-    --muted: #1e293b;
-    --muted-foreground: #94a3b8; /* Slate 400 */
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa; /* Zinc 400 */
     
-    --accent: #1e293b;
-    --accent-foreground: #e2e8f0;
+    --accent: #27272a;
+    --accent-foreground: #fafafa;
     
     --destructive: #7f1d1d;
     --destructive-foreground: #fafafa;
     
-    --border: #1e293b;
-    --input: #1e293b;
-    --ring: #cbd5e1;
+    --border: #27272a;
+    --input: #27272a;
+    --ring: #d4d4d8; /* Zinc 300 */
     
-    --brand-blue: #3366ff;
+    /* Brand & Status Colors (Dark Mode) */
+    --brand: #a78bfa; /* Violet 400 */
+    --success: #2dd4bf; /* Teal 400 */
+    --error: #fb7185; /* Rose 400 */
+    --warning: #fbbf24; /* Amber 400 */
   }
 }
 
@@ -103,7 +110,10 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   
-  --color-brand-blue: var(--brand-blue);
+  --color-brand: var(--brand);
+  --color-success: var(--success);
+  --color-error: var(--error);
+  --color-warning: var(--warning);
   
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);

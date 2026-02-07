@@ -24,9 +24,10 @@ describe('InputArea', () => {
       />
     );
 
-    const input = screen.getByPlaceholderText('Describe your task...');
+    const input = screen.getByPlaceholderText('Enter command or instructions...');
     expect(input).toBeInTheDocument();
-    expect(screen.getByText('Run')).toBeInTheDocument();
+    // No Run button anymore, uses Enter
+    // expect(screen.getByText('Run')).toBeInTheDocument(); 
     // Check for work dir input
     expect(screen.getByDisplayValue('/tmp/test')).toBeInTheDocument();
   });
@@ -43,9 +44,9 @@ describe('InputArea', () => {
       />
     );
 
-    const input = screen.getByPlaceholderText('Describe your task...');
+    const input = screen.getByPlaceholderText('Enter command or instructions...');
     fireEvent.change(input, { target: { value: 'test prompt' } });
-    fireEvent.click(screen.getByText('Run'));
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(mockOnSendPrompt).toHaveBeenCalledWith('test prompt', '.');
   });
@@ -62,10 +63,10 @@ describe('InputArea', () => {
       />
     );
 
-    expect(screen.getByText('Stop')).toBeInTheDocument();
-    expect(screen.queryByText('Run')).not.toBeInTheDocument();
+    expect(screen.getByText('Stop Process')).toBeInTheDocument();
+    expect(screen.queryByText('Return to execute')).not.toBeInTheDocument();
     
-    fireEvent.click(screen.getByText('Stop'));
+    fireEvent.click(screen.getByText('Stop Process'));
     expect(mockOnStop).toHaveBeenCalled();
   });
 
@@ -82,11 +83,11 @@ describe('InputArea', () => {
       />
     );
 
-    expect(screen.getByText('Clarification Needed')).toBeInTheDocument();
+    expect(screen.getByText('Clarification Required', { exact: false })).toBeInTheDocument();
     expect(screen.getByText('Q1?')).toBeInTheDocument();
     expect(screen.getByText('Q2?')).toBeInTheDocument();
-    expect(screen.getAllByPlaceholderText('Type your answer...')).toHaveLength(2);
-    expect(screen.getByText('Stop')).toBeInTheDocument();
+    expect(screen.getAllByPlaceholderText('Type answer...')).toHaveLength(2);
+    expect(screen.getByText('Cancel')).toBeInTheDocument();
   });
 
   it('calls onSendAnswers when submitting answers', () => {
@@ -102,7 +103,7 @@ describe('InputArea', () => {
       />
     );
 
-    const input = screen.getByPlaceholderText('Type your answer...');
+    const input = screen.getByPlaceholderText('Type answer...');
     fireEvent.change(input, { target: { value: 'Answer 1' } });
     fireEvent.click(screen.getByText('Submit Answers'));
 
@@ -169,24 +170,24 @@ describe('InputArea', () => {
     const optionC = screen.getByText('/tmp/c');
 
     // Check active class on A (index 0)
-    expect(optionA).toHaveClass('bg-muted/50');
-    expect(optionB).not.toHaveClass('bg-muted/50');
+    expect(optionA).toHaveClass('bg-muted');
+    expect(optionB).not.toHaveClass('bg-muted');
 
     // Press Down -> index 1 (B)
     fireEvent.keyDown(dirInput, { key: 'ArrowDown' });
-    expect(optionB).toHaveClass('bg-muted/50');
+    expect(optionB).toHaveClass('bg-muted');
 
     // Press Down -> index 2 (C)
     fireEvent.keyDown(dirInput, { key: 'ArrowDown' });
-    expect(optionC).toHaveClass('bg-muted/50');
+    expect(optionC).toHaveClass('bg-muted');
 
     // Press Down (Circular) -> index 0 (A)
     fireEvent.keyDown(dirInput, { key: 'ArrowDown' });
-    expect(optionA).toHaveClass('bg-muted/50');
+    expect(optionA).toHaveClass('bg-muted');
 
     // Press Up (Circular) -> index 2 (C)
     fireEvent.keyDown(dirInput, { key: 'ArrowUp' });
-    expect(optionC).toHaveClass('bg-muted/50');
+    expect(optionC).toHaveClass('bg-muted');
     
     // Press Enter to select C
     fireEvent.keyDown(dirInput, { key: 'Enter' });

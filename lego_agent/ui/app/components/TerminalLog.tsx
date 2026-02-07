@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { LogItem } from '../types';
 import { cn } from '@/lib/utils';
-import { PenTool, CheckCircle2, AlertCircle, Cpu, ArrowRight } from 'lucide-react';
+import { ChevronRight, Terminal, Activity, Check, X, HelpCircle, Cpu } from 'lucide-react';
 
 interface TerminalLogProps {
   logs: LogItem[];
@@ -16,15 +16,15 @@ export function TerminalLog({ logs }: TerminalLogProps) {
 
   if (logs.length === 0) {
     return (
-        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground opacity-50 space-y-4">
-            <Cpu className="w-12 h-12" />
-            <p className="text-sm">Ready to build something amazing.</p>
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground opacity-50 space-y-4 font-mono">
+            <Terminal className="w-12 h-12" />
+            <p className="text-sm">&gt; Awaiting command...</p>
         </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
+    <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 font-mono text-sm selection:bg-white/20">
       {logs.map((item) => (
         <LogEntry key={item.id} item={item} />
       ))}
@@ -35,23 +35,26 @@ export function TerminalLog({ logs }: TerminalLogProps) {
 
 function LogEntry({ item }: { item: LogItem }) {
   const { event } = item;
+  const timestamp = new Date(item.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const Header = ({ children, className }: { children: React.ReactNode, className?: string }) => (
+    <div className={cn("flex items-start gap-3 opacity-60 mb-1", className)}>
+        <span className="text-xs text-muted-foreground select-none shrink-0">[{timestamp}]</span>
+        {children}
+    </div>
+  );
 
   if (event.type === 'thinking') {
-    // Accumulate thinking text. If it's just a small chunk, it might look jumpy, but usually it comes in streams.
-    // We'll style it as a subtle "thought" block.
     if (!event.text) return null;
     return (
-        <div className="flex gap-4 group">
-            <div className="w-8 flex flex-col items-center pt-1">
-                 <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                    <Cpu className="w-4 h-4 text-muted-foreground" />
-                 </div>
-                 <div className="w-px h-full bg-border my-2 group-last:hidden" />
-            </div>
-            <div className="flex-1 pb-6">
-                <div className="text-sm text-muted-foreground italic leading-relaxed whitespace-pre-wrap font-mono">
-                    {event.text}
-                </div>
+        <div className="group animate-in fade-in duration-300">
+            <Header>
+                <span className="text-xs uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-2">
+                     <Cpu className="w-3 h-3" /> Thinking
+                </span>
+            </Header>
+            <div className="pl-[4.5rem] text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                {event.text}
             </div>
         </div>
     );
@@ -59,18 +62,17 @@ function LogEntry({ item }: { item: LogItem }) {
 
   if (event.type === 'tool_start') {
     return (
-        <div className="flex gap-4 group">
-             <div className="w-8 flex flex-col items-center pt-1">
-                 <div className="w-8 h-8 rounded-full bg-brand-blue/10 flex items-center justify-center border border-brand-blue/20">
-                    <PenTool className="w-4 h-4 text-brand-blue" />
+        <div className="group mt-4 mb-2">
+            <Header>
+                <span className="text-xs uppercase tracking-wider font-bold text-brand flex items-center gap-2">
+                    <Activity className="w-3 h-3" /> Executing
+                </span>
+            </Header>
+            <div className="pl-[4.5rem]">
+                 <div className="text-brand font-bold mb-1">
+                    &gt; {event.name}
                  </div>
-                 <div className="w-px h-full bg-border my-2 group-last:hidden" />
-            </div>
-            <div className="flex-1 pb-6">
-                 <div className="text-xs font-semibold text-brand-blue mb-1.5 flex items-center gap-2 font-mono">
-                    Running Tool <ArrowRight className="w-3 h-3" /> {event.name}
-                 </div>
-                 <div className="bg-muted/50 rounded-md border border-border p-3 font-mono text-xs overflow-x-auto text-foreground/80">
+                 <div className="bg-muted/30 border border-border rounded p-2 text-xs overflow-x-auto text-foreground/90">
                     {event.input}
                  </div>
             </div>
@@ -81,30 +83,22 @@ function LogEntry({ item }: { item: LogItem }) {
   if (event.type === 'tool_end') {
     const isError = event.status === 'error';
     return (
-      <div className="flex gap-4 group">
-         <div className="w-8 flex flex-col items-center pt-1">
-             <div className={cn(
-                 "w-8 h-8 rounded-full flex items-center justify-center border",
-                 isError 
-                    ? "bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
-                    : "bg-emerald-100 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800"
-             )}>
-                {isError 
-                    ? <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400" /> 
-                    : <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                }
-             </div>
-             <div className="w-px h-full bg-border my-2 group-last:hidden" />
-         </div>
-         <div className="flex-1 pb-6">
-            <div className={cn("text-xs font-semibold mb-1.5", isError ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
-                {isError ? "Tool Failed" : "Tool Completed"}
-            </div>
+      <div className="group mb-4">
+         <Header>
+            <span className={cn(
+                "text-xs uppercase tracking-wider font-bold flex items-center gap-2",
+                isError ? "text-error" : "text-success"
+            )}>
+                {isError ? <X className="w-3 h-3" /> : <Check className="w-3 h-3" />}
+                {isError ? "Failed" : "Completed"}
+            </span>
+         </Header>
+         <div className="pl-[4.5rem]">
             <div className={cn(
-                "rounded-md border p-3 font-mono text-xs overflow-x-auto max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-muted-foreground/20",
+                "border-l-2 pl-3 py-1 text-xs overflow-x-auto max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-muted-foreground/20",
                 isError 
-                    ? "bg-red-50/50 dark:bg-red-950/10 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300" 
-                    : "bg-emerald-50/50 dark:bg-emerald-950/10 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300"
+                    ? "border-error/50 text-error/90" 
+                    : "border-success/50 text-success"
             )}>
                 {event.output}
             </div>
@@ -118,17 +112,15 @@ function LogEntry({ item }: { item: LogItem }) {
      const isSuccess = event.level === 'success';
      
      return (
-        <div className="flex gap-4 group">
-             <div className="w-8 flex flex-col items-center pt-1">
-                 <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 mt-2" />
-                 <div className="w-px h-full bg-border my-2 group-last:hidden" />
-             </div>
-             <div className="flex-1 pb-4 pt-1">
-                <div className={cn("text-sm", 
-                    isError ? "text-destructive" : isSuccess ? "text-emerald-600" : "text-muted-foreground"
-                )}>
-                    {event.message}
-                </div>
+        <div className="group">
+             <div className="flex items-start gap-3">
+                 <span className="text-xs text-muted-foreground select-none shrink-0 mt-0.5">[{timestamp}]</span>
+                 <div className={cn("flex-1 leading-relaxed", 
+                     isError ? "text-error" : isSuccess ? "text-success" : "text-foreground"
+                 )}>
+                     {isError && <span className="font-bold mr-2">ERROR:</span>}
+                     {event.message}
+                 </div>
              </div>
         </div>
      );
@@ -136,16 +128,15 @@ function LogEntry({ item }: { item: LogItem }) {
 
   if (event.type === 'question') {
      return (
-        <div className="flex gap-4 group">
-             <div className="w-8 flex flex-col items-center pt-1">
-                 <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center border border-amber-200 dark:border-amber-800">
-                    <span className="text-amber-600 dark:text-amber-400 font-bold text-lg">?</span>
-                 </div>
+        <div className="group my-4 border border-warning/30 bg-warning/5 rounded p-4">
+             <div className="flex items-center gap-3 mb-2">
+                 <span className="text-xs text-warning select-none">[{timestamp}]</span>
+                 <span className="text-xs uppercase tracking-wider font-bold text-warning flex items-center gap-2">
+                     <HelpCircle className="w-3 h-3" /> Clarification Needed
+                 </span>
              </div>
-             <div className="flex-1 py-2">
-                <div className="text-amber-600 dark:text-amber-400 font-medium">
-                    The agent requires clarification. Please check the input area.
-                </div>
+             <div className="pl-[4.5rem] text-warning font-medium">
+                The agent requires input. Please check the command line below.
              </div>
         </div>
      );
@@ -153,21 +144,19 @@ function LogEntry({ item }: { item: LogItem }) {
 
   if (event.type === 'script_execution') {
       return (
-          <div className="flex gap-4 group pl-4 border-l-2 border-primary/20 ml-3.5 my-1">
-              <div className="flex-1 font-mono text-xs text-muted-foreground">
-                  <span className={event.stream === 'stderr' ? 'text-destructive' : ''}>
-                      {event.data}
-                  </span>
-              </div>
+          <div className="pl-[4.5rem] text-xs text-muted-foreground">
+              <span className={event.stream === 'stderr' ? 'text-error' : ''}>
+                  {event.data}
+              </span>
           </div>
       );
   }
   
   if (event.type === 'execution_result') {
       return (
-          <div className="flex gap-4 group pl-4 ml-3.5 my-2">
-              <div className="flex-1 text-xs font-medium text-muted-foreground border-t border-border pt-2">
-                  Process exited with code {event.exit_code}
+          <div className="pl-[4.5rem] mt-1 mb-3">
+              <div className="text-xs font-bold text-muted-foreground">
+                  &gt; Process exited with code {event.exit_code}
               </div>
           </div>
       );
