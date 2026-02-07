@@ -6,12 +6,12 @@ import { InputArea } from './components/InputArea';
 import { Bot } from 'lucide-react';
 
 export default function Home() {
-  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, dirOptions, listDirs } = useLegoAgent();
+  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, dirOptions, listDirs, model, thinkingBudget } = useLegoAgent();
 
   return (
     <main className="flex h-screen flex-col font-sans selection:bg-primary/20">
       {/* Header */}
-      <header className="h-16 border-b border-border flex items-center px-6 bg-background/50 backdrop-blur-sm shrink-0 z-10 sticky top-0">
+      <header className="h-16 border-b border-border flex items-center px-6 bg-background/50 backdrop-blur-sm shrink-0 z-10 sticky top-0 justify-between">
         <div className="flex items-center gap-3">
             <div className="bg-primary/10 p-2 rounded-lg">
                 <Bot className="text-primary w-5 h-5" />
@@ -22,6 +22,20 @@ export default function Home() {
                     <span className={`h-1.5 w-1.5 rounded-full ${status === 'connected' || status === 'running' ? 'bg-emerald-500 shadow-emerald-500/50 shadow-sm' : 'bg-red-500'}`} />
                     <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{status}</span>
                 </div>
+            </div>
+        </div>
+
+        {/* Model Info */}
+        <div className="flex items-center gap-6 text-xs text-muted-foreground">
+            {model && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-secondary/50 rounded-full border border-border/50">
+                    <span className="font-medium text-foreground">Model</span>
+                    <span className="font-mono">{model}</span>
+                </div>
+            )}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-secondary/50 rounded-full border border-border/50">
+                <span className="font-medium text-foreground">Thinking</span>
+                <span className="font-mono">{thinkingBudget ? `${thinkingBudget} tok` : 'off'}</span>
             </div>
         </div>
       </header>

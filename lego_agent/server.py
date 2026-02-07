@@ -137,9 +137,6 @@ async def websocket_endpoint(websocket: WebSocket):
             repo_root = parent
             break
 
-    # Send init event with absolute CWD
-    await io._send_event("init", {"cwd": str(repo_root)})
-
     try:
         config = load_config(str(repo_root), None)
     except Exception as e:
@@ -148,6 +145,16 @@ async def websocket_endpoint(websocket: WebSocket):
         )
         await websocket.close()
         return
+
+    # Send init event with absolute CWD and config info
+    await io._send_event(
+        "init",
+        {
+            "cwd": str(repo_root),
+            "model": config.agent.model,
+            "thinking_budget": config.agent.thinking_budget,
+        },
+    )
 
     prompt_loader = get_loader()
     output_dir = repo_root / "lego_agent_runs"

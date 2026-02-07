@@ -7,6 +7,8 @@ export function useLegoAgent() {
   const [pendingQuestions, setPendingQuestions] = useState<string[] | null>(null);
   const [cwd, setCwd] = useState<string>('.');
   const [dirOptions, setDirOptions] = useState<string[]>([]);
+  const [model, setModel] = useState<string | undefined>(undefined);
+  const [thinkingBudget, setThinkingBudget] = useState<number | undefined>(undefined);
   const ws = useRef<WebSocket | null>(null);
 
   const addLog = useCallback((event: AgentEvent) => {
@@ -66,6 +68,8 @@ export function useLegoAgent() {
       setStatus('connected'); // Back to idle/connected state
     } else if (event.type === 'init' && event.cwd) {
         setCwd(event.cwd);
+        if (event.model) setModel(event.model);
+        if (event.thinking_budget !== undefined) setThinkingBudget(event.thinking_budget);
     } else if (event.type === 'dir_options' && event.options) {
         setDirOptions(event.options);
     }
@@ -156,6 +160,8 @@ export function useLegoAgent() {
     connect,
     cwd,
     dirOptions,
-    listDirs
+    listDirs,
+    model,
+    thinkingBudget
   };
 }

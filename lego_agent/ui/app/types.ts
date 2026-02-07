@@ -14,6 +14,8 @@ export interface AgentEvent {
   exit_code?: number;
   cwd?: string;
   options?: string[];
+  model?: string;
+  thinking_budget?: number;
 }
 
 export interface LogItem {
