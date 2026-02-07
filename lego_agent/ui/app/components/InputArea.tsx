@@ -11,6 +11,7 @@ interface InputAreaProps {
   initialCwd: string;
   dirOptions?: string[];
   onListDirs?: (path: string) => void;
+  onCwdChange?: (cwd: string) => void;
 }
 
 export function InputArea({ 
@@ -21,7 +22,8 @@ export function InputArea({
     status, 
     initialCwd,
     dirOptions = [],
-    onListDirs
+    onListDirs,
+    onCwdChange
 }: InputAreaProps) {
   const [input, setInput] = useState('');
   const [workDir, setWorkDir] = useState(initialCwd);
@@ -117,6 +119,7 @@ export function InputArea({
       const newPath = path.endsWith('/') ? path : path + '/';
       setWorkDir(newPath);
       if (onListDirs) onListDirs(newPath);
+      if (onCwdChange) onCwdChange(newPath);
       
       workDirInputRef.current?.focus();
       setShowDirSuggestions(false);
@@ -231,6 +234,7 @@ export function InputArea({
                         if (onListDirs) onListDirs(workDir);
                         setShowDirSuggestions(true);
                     }}
+                    onBlur={() => onCwdChange?.(workDir)}
                     onKeyDown={handleWorkDirKeyDown}
                     disabled={status === 'running'}
                     className={cn(

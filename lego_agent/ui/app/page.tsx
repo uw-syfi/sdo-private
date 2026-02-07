@@ -7,7 +7,7 @@ import { Terminal, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function Home() {
-  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, dirOptions, listDirs, model, thinkingBudget } = useLegoAgent();
+  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, updateCwd, dirOptions, listDirs, model, thinkingBudget } = useLegoAgent();
 
   return (
     <main className="flex h-screen flex-col font-mono bg-background text-foreground selection:bg-brand/30">
@@ -65,6 +65,7 @@ export default function Home() {
                 initialCwd={cwd}
                 dirOptions={dirOptions}
                 onListDirs={listDirs}
+                onCwdChange={updateCwd}
             />
          </div>
       </div>

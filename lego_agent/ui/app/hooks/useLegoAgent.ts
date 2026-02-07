@@ -169,6 +169,11 @@ export function useLegoAgent() {
       ws.current.send(JSON.stringify({ type: 'list_dirs', path }));
   };
 
+  const updateCwd = (newCwd: string) => {
+      setCwd(newCwd);
+      localStorage.setItem('lego_agent_cwd', newCwd);
+  };
+
   useEffect(() => {
     // eslint-disable-next-line
     connect();
@@ -188,6 +193,7 @@ export function useLegoAgent() {
     cwd,
     dirOptions,
     listDirs,
+    updateCwd,
     model,
     thinkingBudget
   };
