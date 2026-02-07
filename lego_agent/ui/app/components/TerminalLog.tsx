@@ -24,7 +24,7 @@ export function TerminalLog({ logs }: TerminalLogProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+    <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
       {logs.map((item) => (
         <LogEntry key={item.id} item={item} />
       ))}

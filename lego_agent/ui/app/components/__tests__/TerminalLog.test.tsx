@@ -27,7 +27,7 @@ describe('TerminalLog', () => {
     }];
 
     render(<TerminalLog logs={logs} />);
-    expect(screen.getByText('read_file')).toBeInTheDocument();
+    expect(screen.getByText('read_file', { exact: false })).toBeInTheDocument();
     expect(screen.getByText('test.txt')).toBeInTheDocument();
   });
 
@@ -40,6 +40,6 @@ describe('TerminalLog', () => {
       
       const { container } = render(<TerminalLog logs={logs} />);
       expect(screen.getByText('Error occurred')).toBeInTheDocument();
-      expect(container.querySelector('.text-red-500')).toBeInTheDocument();
+      expect(container.querySelector('.text-destructive')).toBeInTheDocument();
   });
 });

@@ -28,7 +28,7 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        <div className="flex-1 w-full max-w-3xl mx-auto flex flex-col">
+        <div className="flex-1 w-full max-w-3xl mx-auto flex flex-col min-h-0">
             <TerminalLog logs={logs} />
         </div>
       </div>
