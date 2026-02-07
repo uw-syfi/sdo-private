@@ -6,7 +6,7 @@ import { InputArea } from './components/InputArea';
 import { TerminalSquare } from 'lucide-react';
 
 export default function Home() {
-  const { logs, status, pendingQuestions, sendPrompt, sendAnswers } = useLegoAgent();
+  const { logs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent } = useLegoAgent();
 
   return (
     <main className="flex h-screen flex-col bg-black text-white font-sans">
@@ -29,7 +29,8 @@ export default function Home() {
       <div className="shrink-0">
         <InputArea 
             onSendPrompt={sendPrompt} 
-            onSendAnswers={sendAnswers} 
+            onSendAnswers={sendAnswers}
+            onStop={stopAgent} 
             pendingQuestions={pendingQuestions}
             status={status}
         />

@@ -151,6 +151,8 @@ async def websocket_endpoint(websocket: WebSocket):
     work_dir = repo_root  # Default to repo root for execution context
 
     try:
+        current_task: Optional[asyncio.Task] = None
+
         while True:
             data = await websocket.receive_json()
             event_type = data.get("type")
@@ -160,8 +162,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not user_prompt:
                     continue
 
+                # Cancel existing task if running
+                if current_task and not current_task.done():
+                    current_task.cancel()
+                    try:
+                        await current_task
+                    except asyncio.CancelledError:
+                        pass
+
+                # Drain input queue to remove stale answers
+                while not input_queue.empty():
+                    input_queue.get_nowait()
+
                 # Run engine in background task so we can keep receiving messages (like answers)
-                asyncio.create_task(
+                current_task = asyncio.create_task(
                     run_engine_and_script(
                         io,
                         config,
@@ -172,6 +186,18 @@ async def websocket_endpoint(websocket: WebSocket):
                         user_prompt,
                     )
                 )
+
+            elif event_type == "stop":
+                if current_task and not current_task.done():
+                    current_task.cancel()
+                    try:
+                        await current_task
+                    except asyncio.CancelledError:
+                        pass
+                    await io._send_event(
+                        "log", {"message": "Agent stopped by user", "level": "error"}
+                    )
+                    await io._send_event("execution_result", {"exit_code": -1})
 
             elif event_type == "answer":
                 # Put answer into queue for the waiting engine

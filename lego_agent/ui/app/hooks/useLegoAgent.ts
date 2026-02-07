@@ -102,10 +102,19 @@ export function useLegoAgent() {
       return;
     }
     
-    // Clear logs on new run? optional.
+    // Clear logs on new run
     setLogs([]); 
     setStatus('running');
     ws.current.send(JSON.stringify({ type: 'start', prompt }));
+  };
+
+  const stopAgent = () => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    
+    ws.current.send(JSON.stringify({ type: 'stop' }));
+    setStatus('connected');
+    setPendingQuestions(null);
+    addLog({ type: 'log', message: 'Stopping agent...', level: 'info' });
   };
 
   const sendAnswers = (answers: string[]) => {
@@ -131,6 +140,7 @@ export function useLegoAgent() {
     pendingQuestions,
     sendPrompt,
     sendAnswers,
+    stopAgent,
     connect
   };
 }

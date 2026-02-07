@@ -6,6 +6,7 @@ import '@testing-library/jest-dom';
 describe('InputArea', () => {
   const mockOnSendPrompt = jest.fn();
   const mockOnSendAnswers = jest.fn();
+  const mockOnStop = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -16,6 +17,7 @@ describe('InputArea', () => {
       <InputArea
         onSendPrompt={mockOnSendPrompt}
         onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
         pendingQuestions={null}
         status="connected"
       />
@@ -31,6 +33,7 @@ describe('InputArea', () => {
       <InputArea
         onSendPrompt={mockOnSendPrompt}
         onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
         pendingQuestions={null}
         status="connected"
       />
@@ -43,12 +46,31 @@ describe('InputArea', () => {
     expect(mockOnSendPrompt).toHaveBeenCalledWith('test prompt');
   });
 
+  it('renders Stop button when running', () => {
+    render(
+      <InputArea
+        onSendPrompt={mockOnSendPrompt}
+        onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
+        pendingQuestions={null}
+        status="running"
+      />
+    );
+
+    expect(screen.getByText('Stop')).toBeInTheDocument();
+    expect(screen.queryByText('Run')).not.toBeInTheDocument();
+    
+    fireEvent.click(screen.getByText('Stop'));
+    expect(mockOnStop).toHaveBeenCalled();
+  });
+
   it('renders inputs for answers when pending questions exist', () => {
     const questions = ['Q1?', 'Q2?'];
     render(
       <InputArea
         onSendPrompt={mockOnSendPrompt}
         onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
         pendingQuestions={questions}
         status="connected"
       />
@@ -58,6 +80,7 @@ describe('InputArea', () => {
     expect(screen.getByText('Q1?')).toBeInTheDocument();
     expect(screen.getByText('Q2?')).toBeInTheDocument();
     expect(screen.getAllByPlaceholderText('Your answer...')).toHaveLength(2);
+    expect(screen.getByText('Stop')).toBeInTheDocument();
   });
 
   it('calls onSendAnswers when submitting answers', () => {
@@ -66,6 +89,7 @@ describe('InputArea', () => {
       <InputArea
         onSendPrompt={mockOnSendPrompt}
         onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
         pendingQuestions={questions}
         status="connected"
       />
@@ -76,5 +100,21 @@ describe('InputArea', () => {
     fireEvent.click(screen.getByText('Submit Answers'));
 
     expect(mockOnSendAnswers).toHaveBeenCalledWith(['Answer 1']);
+  });
+
+  it('calls onStop when clicking stop during questions', () => {
+    const questions = ['Q1?'];
+    render(
+      <InputArea
+        onSendPrompt={mockOnSendPrompt}
+        onSendAnswers={mockOnSendAnswers}
+        onStop={mockOnStop}
+        pendingQuestions={questions}
+        status="connected"
+      />
+    );
+
+    fireEvent.click(screen.getByText('Stop'));
+    expect(mockOnStop).toHaveBeenCalled();
   });
 });

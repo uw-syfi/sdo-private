@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { Send, Play } from 'lucide-react';
+import { Send, Play, Square } from 'lucide-react';
 
 interface InputAreaProps {
   onSendPrompt: (prompt: string) => void;
   onSendAnswers: (answers: string[]) => void;
+  onStop: () => void;
   pendingQuestions: string[] | null;
   status: string;
 }
 
-export function InputArea({ onSendPrompt, onSendAnswers, pendingQuestions, status }: InputAreaProps) {
+export function InputArea({ onSendPrompt, onSendAnswers, onStop, pendingQuestions, status }: InputAreaProps) {
   const [input, setInput] = useState('');
   const [answers, setAnswers] = useState<string[]>([]);
 
@@ -53,12 +54,21 @@ export function InputArea({ onSendPrompt, onSendAnswers, pendingQuestions, statu
                 </div>
             ))}
         </div>
-        <button
-          type="submit"
-          className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center gap-2"
-        >
-          <Send size={16} /> Submit Answers
-        </button>
+        <div className="flex gap-2 mt-4">
+            <button
+              type="submit"
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center gap-2"
+            >
+              <Send size={16} /> Submit Answers
+            </button>
+            <button
+              type="button"
+              onClick={onStop}
+              className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center gap-2"
+            >
+              <Square size={16} fill="currentColor" /> Stop
+            </button>
+        </div>
       </form>
     );
   }
@@ -71,15 +81,24 @@ export function InputArea({ onSendPrompt, onSendAnswers, pendingQuestions, statu
         onChange={(e) => setInput(e.target.value)}
         placeholder={status === 'running' ? "Agent is working..." : "Enter your prompt here..."}
         className="flex-1 bg-black border border-zinc-700 rounded p-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
-        disabled={status === 'running'}
       />
-      <button
-        type="submit"
-        disabled={status === 'running' || !input.trim()}
-        className="bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center gap-2 transition-colors"
-      >
-        <Play size={16} /> Run
-      </button>
+      {status === 'running' ? (
+        <button
+          type="button"
+          onClick={onStop}
+          className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center gap-2 transition-colors"
+        >
+          <Square size={16} fill="currentColor" /> Stop
+        </button>
+      ) : (
+        <button
+          type="submit"
+          disabled={!input.trim()}
+          className="bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center gap-2 transition-colors"
+        >
+          <Play size={16} /> Run
+        </button>
+      )}
     </form>
   );
 }
