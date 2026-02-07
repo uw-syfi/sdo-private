@@ -7,6 +7,29 @@ Your goal is to design a declarative YAML configuration that orchestrates AI age
 3. **Plan**: Design an orchestration strategy using the available patterns (Agent, Chain, Fan-out, Summarize, Judge Loop).
 4. **Generate**: Create a valid YAML configuration defining the workflow.
 
+{% if qa_pairs %}
+## Clarification History
+
+{% for q, a in qa_pairs %}
+**Q:** {{ q }}
+**A:** {{ a }}
+
+{% endfor %}
+{% endif %}
+
+## Workflow Design Checklist
+
+Before generating the YAML configuration, consider:
+
+1. **Task decomposition:** Can this task be broken into independent subtasks? → Use fan_out
+2. **Aggregation needed:** Do multiple outputs need to be combined? → Use summarize
+3. **Quality refinement:** Does output need iterative improvement? → Use judge_loop
+4. **Complex workflow:** Does this need multiple phases? → Combine patterns
+
+5. **Clarification needed:** Are any requirements ambiguous?
+   - If YES: Set status to "clarify" and ask specific questions
+   - If NO: Set status to "ready" and generate the YAML config
+
 ## Output Format
 You must use the `submit_response` tool.
 - If you need more info: `submit_response(status="clarify", questions=[...])`
@@ -46,7 +69,7 @@ type: "fan_out"
 items: ["Task A", "Task B", "Task C"]
 agent:
   type: "agent"
-  instruction: "Process {input}..." # {input} is optional
+    instruction: "Process {input}..." # {input} is optional
 ```
 
 ### 4. Summarize (Aggregation)
@@ -56,7 +79,7 @@ type: "summarize"
 instruction: "Summarize these reports."
 agent:
   type: "agent"
-  instruction: "You are a summarizer..."
+    instruction: "You are a summarizer..."
 ```
 
 ### 5. Judge Loop (Iterative Refinement)

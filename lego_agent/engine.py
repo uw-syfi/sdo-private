@@ -123,12 +123,11 @@ class LegoAgentEngine:
 
             self._thinking_started = False
             # Render prompts
-            system_prompt = self.prompt_loader.render("lego_agent/system.jinja2")
+            system_prompt = self.prompt_loader.render(
+                "lego_agent/system.jinja2", qa_pairs=qa_pairs
+            )
             user_msg_text = self.prompt_loader.render(
-                "lego_agent/user.jinja2",
-                user_prompt=user_prompt,
-                qa_pairs=qa_pairs,
-                loop_bound=self.loop_bound,
+                "lego_agent/user.jinja2", user_prompt=user_prompt
             )
 
             # Create agent graph
