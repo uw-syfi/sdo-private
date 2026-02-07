@@ -2,8 +2,7 @@ import React, { useEffect } from 'react';
 import ReactFlow, { 
     Background, 
     Controls, 
-    Panel, 
-    MiniMap 
+    Panel 
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useGraphStore } from '../store/graphStore';
@@ -55,10 +54,6 @@ export function GraphView({ className }: GraphViewProps) {
       >
         <Background color="#1e293b" gap={20} />
         <Controls className="bg-slate-900 border-slate-800 text-slate-400" />
-        <MiniMap 
-            nodeColor={(n) => n.type === 'group' ? '#1e293b' : '#3b82f6'} 
-            className="bg-slate-900 border-slate-800"
-        />
         
         <Panel position="top-right" className="bg-slate-900/80 p-2 rounded border border-slate-800 text-xs text-slate-400">
             Active: {nodes.filter(n => n.data.status === 'active').length}

@@ -42,10 +42,11 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
          },
          position: { x: 0, y: 0 },
          parentNode: parentId,
-         ...(isGroup ? { style: { width: 400, height: 300 } } : {})
+         ...(isGroup ? { style: { width: type === 'judge_loop' ? 500 : 400, height: 300 } } : {})
        });
        
-       if (configNode.steps) {
+       // For judge_loop, we skip steps processing to avoid redundant edges if worker/judge are also in steps
+       if (configNode.steps && type !== 'judge_loop') {
            let prevId: string | null = null;
            configNode.steps.forEach((step: any) => {
                const stepId = parseNode(step, id);
@@ -62,14 +63,20 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
        }
        
        if (configNode.worker && configNode.judge) {
-           const workerId = parseNode(configNode.worker, id);
-           const judgeId = parseNode(configNode.judge, id);
+           // Clone to ensure unique IDs if the agent object is reused
+           const workerNode = { ...configNode.worker, id: undefined }; 
+           const judgeNode = { ...configNode.judge, id: undefined };
+           
+           const workerId = parseNode(workerNode, id);
+           const judgeId = parseNode(judgeNode, id);
            
            newEdges.push({ 
                id: `${workerId}-${judgeId}`, 
                source: workerId, 
                target: judgeId, 
                label: 'attempt',
+               targetHandle: 'target-bottom',
+               type: 'smoothstep',
                markerEnd: { type: MarkerType.ArrowClosed },
                animated: true
            });
@@ -78,6 +85,8 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
                source: judgeId, 
                target: workerId, 
                label: 'critique', 
+               sourceHandle: 'source-top',
+               type: 'smoothstep',
                style: { strokeDasharray: 5 },
                markerEnd: { type: MarkerType.ArrowClosed }
            });

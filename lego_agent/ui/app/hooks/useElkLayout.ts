@@ -25,19 +25,28 @@ export const useElkLayout = () => {
       id: 'root',
       layoutOptions,
       children: [],
-      edges: edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+      edges: [],
     };
 
     const nodeMap = new Map();
+    const parentMap = new Map();
     
-    // Initialize ELK nodes
+    // Initialize ELK nodes and parent map
     nodes.forEach((node) => {
+      if (node.parentNode) {
+          parentMap.set(node.id, node.parentNode);
+      }
+      
+      const isJudgeLoop = node.data?.pattern === 'judge_loop';
       const elkNode = {
         id: node.id,
-        width: node.width || 200, // Compact width
-        height: node.height || 64, // Compact height
+        width: node.width || 200, 
+        height: node.height || 64,
         layoutOptions: {
-            // 'elk.padding': '[top=20,left=20,bottom=20,right=20]'
+            ...(isJudgeLoop ? { 
+                'elk.direction': 'RIGHT',
+                'elk.spacing.nodeNode': '80'
+            } : {})
         },
         children: [],
         edges: [],
@@ -53,12 +62,58 @@ export const useElkLayout = () => {
         if (parent) {
           parent.children.push(elkNode);
         } else {
-            // Parent not found, fallback to root
             graph.children.push(elkNode);
         }
       } else {
         graph.children.push(elkNode);
       }
+    });
+
+    // Helper to find LCA
+    const getAncestors = (id: string) => {
+        const ancestors = [];
+        let current = id;
+        while (current) {
+            ancestors.unshift(current);
+            current = parentMap.get(current);
+        }
+        return ancestors;
+    };
+
+    // Distribute edges to LCA
+    edges.forEach((edge) => {
+        const sourceAncestors = getAncestors(edge.source);
+        const targetAncestors = getAncestors(edge.target);
+        
+        // Find LCA
+        let lcaId = 'root';
+        const minLen = Math.min(sourceAncestors.length, targetAncestors.length);
+        
+        for (let i = 0; i < minLen; i++) {
+            if (sourceAncestors[i] === targetAncestors[i]) {
+                lcaId = sourceAncestors[i];
+            } else {
+                break;
+            }
+        }
+        
+        const elkEdge = { 
+            id: edge.id, 
+            sources: [edge.source], 
+            targets: [edge.target] 
+        };
+
+        if (lcaId === 'root') {
+            graph.edges.push(elkEdge);
+        } else {
+            const lcaNode = nodeMap.get(lcaId);
+            if (lcaNode) {
+                lcaNode.edges.push(elkEdge);
+            } else {
+                // Fallback to root if LCA not found (shouldn't happen)
+                graph.edges.push(elkEdge);
+            }
+        }
     });
 
     try {

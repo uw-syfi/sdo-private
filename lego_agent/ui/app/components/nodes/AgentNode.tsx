@@ -24,6 +24,7 @@ const AgentNode = ({ data, selected }: NodeProps<AgentNodeData>) => {
       data.status === 'done' && "border-slate-700 bg-slate-900"
     )}>
       <Handle type="target" position={Position.Top} className="!bg-slate-600 !w-2 !h-2" />
+      <Handle type="source" position={Position.Top} id="source-top" className="!bg-slate-600 !w-2 !h-2" style={{ left: '70%' }} />
       
       <div className="flex items-center gap-3 w-full">
         <div className={cn(
@@ -46,6 +47,7 @@ const AgentNode = ({ data, selected }: NodeProps<AgentNodeData>) => {
         <StatusIcon status={data.status} />
       </div>
 
+      <Handle type="target" position={Position.Bottom} id="target-bottom" className="!bg-slate-600 !w-2 !h-2" style={{ left: '30%' }} />
       <Handle type="source" position={Position.Bottom} className="!bg-slate-600 !w-2 !h-2" />
     </div>
   );
