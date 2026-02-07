@@ -8,7 +8,11 @@ from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
 from lego_agent.io import UserIO
-from lego_agent.models import LegoAgentResult, parse_lego_agent_response, LegoAgentResponse
+from lego_agent.models import (
+    LegoAgentResult,
+    parse_lego_agent_response,
+    LegoAgentResponse,
+)
 from lego_agent.storage import LegoAgentStorage
 from lego_agent.prompts import PromptLoader
 
@@ -60,7 +64,8 @@ class LegoAgentEngine:
         return t
 
     def _submit_response(
-            self, status: str, questions: List[str] = None, python_script: str = None) -> str:
+        self, status: str, questions: List[str] = None, python_script: str = None
+    ) -> str:
         """
         Submit the final response to the user.
 
@@ -144,9 +149,7 @@ class LegoAgentEngine:
                 # Use astream_events to capture thoughts and tool calls
                 accumulated_text = []
                 async for event in agent.astream_events(
-                    {"messages": messages},
-                    version="v1",
-                    config={"recursion_limit": 50}
+                    {"messages": messages}, version="v1", config={"recursion_limit": 50}
                 ):
                     kind = event["event"]
 
@@ -166,6 +169,19 @@ class LegoAgentEngine:
                         inputs = event["data"].get("input")
                         if name == "submit_response":
                             final_response_data = inputs
+                            # Optimization: If response is valid, stop agent immediately
+                            # to avoid re-invoking the LLM with the tool output.
+                            if inputs:
+                                try:
+                                    LegoAgentResponse(
+                                        status=inputs.get("status"),
+                                        questions=inputs.get("questions", []) or [],
+                                        python_script=inputs.get("python_script"),
+                                    ).validate()
+                                    break
+                                except Exception:
+                                    pass
+
                         if self._thinking_started:
                             self.io.info("")  # Newline
                             self._thinking_started = False
