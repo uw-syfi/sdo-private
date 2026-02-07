@@ -28,3 +28,10 @@ else
     # Run standard pytest
     uv run --extra test pytest "${PYTEST_ARGS[@]}" tests
 fi
+
+# Run frontend tests
+if [ -d "lego_agent/ui" ]; then
+    echo "Running frontend tests..."
+    cd lego_agent/ui
+    npm test
+fi
