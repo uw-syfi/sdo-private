@@ -172,7 +172,7 @@ export default function Home() {
                     <span>Global Logs</span>
                     <span className="text-[10px] bg-secondary px-1.5 py-0.5 rounded">{logs.length}</span>
                 </div>
-                <div className="flex-1 overflow-auto">
+                <div className="flex-1 flex flex-col min-h-0">
                      <TerminalLog logs={logs} />
                 </div>
             </div>
