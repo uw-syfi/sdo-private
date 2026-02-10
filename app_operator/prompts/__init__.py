@@ -9,6 +9,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# GEPA-style seed prompts: minimal starting points for optimization
+SEED_TEMPLATE_MAP = {
+    "deployer_system": "seeds/deployer_system.jinja2",
+    "deployer_fix_error": "seeds/deployer_fix_error.jinja2",
+    "deployer_summarize": "seeds/deployer_summarize.jinja2",
+    "deployer_generate_script": "seeds/deployer_generate_script.jinja2",
+    "deployer_generate_deploy_script": "seeds/deployer_generate_deploy_script.jinja2",
+    "deployer_generate_health_check": "seeds/deployer_generate_health_check.jinja2",
+    "code_analyzer_system": "seeds/code_analyzer_system.jinja2",
+    "code_analyzer_user": "seeds/code_analyzer_user.jinja2",
+    "monitor_analyze_health": "seeds/monitor_analyze_health.jinja2",
+    "agentflow_system": "seeds/agentflow_system.jinja2",
+    "agentflow_user": "seeds/agentflow_user.jinja2",
+    "agentflow_repair": "seeds/agentflow_repair.jinja2",
+}
+
 
 class PromptLoader:
     """Helper class to load and render Jinja2 templates or DSPy modules for prompts."""
@@ -16,7 +32,7 @@ class PromptLoader:
     def __init__(
         self,
         templates_dir: str | Path = None,
-        dspy_config: Optional['DSPyConfig'] = None
+        dspy_config: Optional["DSPyConfig"] = None,
     ):
         """Initialize the loader.
 
@@ -66,7 +82,9 @@ class PromptLoader:
             lm = dspy.LM(model=self.dspy_config.runtime_model)
             dspy.settings.configure(lm=lm)
             self._dspy_configured = True
-            logger.info(f"Configured DSPy runtime with model: {self.dspy_config.runtime_model}")
+            logger.info(
+                f"Configured DSPy runtime with model: {self.dspy_config.runtime_model}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to configure DSPy runtime: {e}")
@@ -126,7 +144,7 @@ class PromptLoader:
             'monitor_analyze_health'
         """
         # Remove .jinja2 extension and convert path separators to underscores
-        name = template_name.replace('.jinja2', '').replace('/', '_')
+        name = template_name.replace(".jinja2", "").replace("/", "_")
         return name
 
     def _should_use_dspy(self, prompt_name: str, kwargs: dict) -> bool:
@@ -158,7 +176,7 @@ class PromptLoader:
         # Canary deployment - deterministic routing based on repo_path
         if self.dspy_config.canary_deployment:
             # Use repo_path for deterministic routing
-            repo_path = kwargs.get('repo_path', '')
+            repo_path = kwargs.get("repo_path", "")
             if repo_path:
                 try:
                     # Hash repo_path to get deterministic percentage
@@ -200,7 +218,9 @@ class PromptLoader:
         """
         from app_operator.dspy_integration.loader import resolve_version
 
-        resolved = resolve_version(self.optimized_dir, self.dspy_config.optimized_version)
+        resolved = resolve_version(
+            self.optimized_dir, self.dspy_config.optimized_version
+        )
         if resolved is None:
             return False
 
@@ -223,7 +243,7 @@ class PromptLoader:
         from app_operator.dspy_integration.loader import load_optimized_module
         from app_operator.dspy_integration.field_mappings import (
             map_kwargs_to_fields,
-            get_output_field_name
+            get_output_field_name,
         )
 
         # Configure DSPy runtime LM (once on first use)
@@ -231,9 +251,7 @@ class PromptLoader:
 
         # Load the optimized module
         module = load_optimized_module(
-            prompt_name,
-            self.optimized_dir,
-            self.dspy_config.optimized_version
+            prompt_name, self.optimized_dir, self.dspy_config.optimized_version
         )
 
         if module is None:
@@ -243,7 +261,9 @@ class PromptLoader:
         fields = map_kwargs_to_fields(prompt_name, kwargs)
 
         # Invoke the module
-        logger.debug(f"Invoking DSPy module for {prompt_name} with fields: {list(fields.keys())}")
+        logger.debug(
+            f"Invoking DSPy module for {prompt_name} with fields: {list(fields.keys())}"
+        )
         result = module(**fields)
 
         # Extract the primary output field
@@ -256,7 +276,9 @@ class PromptLoader:
         output = getattr(result, output_field)
 
         # Record prompt version in trajectory if available
-        self._record_prompt_version(kwargs, f"dspy_{self.dspy_config.optimized_version}")
+        self._record_prompt_version(
+            kwargs, f"dspy_{self.dspy_config.optimized_version}"
+        )
 
         return output
 
@@ -274,6 +296,15 @@ class PromptLoader:
             RuntimeError: If Jinja2 rendering fails
         """
         try:
+            # Check for seed override
+            if self.dspy_config and self.dspy_config.use_seeds:
+                prompt_name = self._template_to_prompt_name(template_name)
+                if prompt_name in SEED_TEMPLATE_MAP:
+                    template_name = SEED_TEMPLATE_MAP[prompt_name]
+                    logger.debug(
+                        f"Using seed template for {prompt_name}: {template_name}"
+                    )
+
             template = self.env.get_template(template_name)
             result = template.render(**kwargs)
 
@@ -295,8 +326,8 @@ class PromptLoader:
             version: Version identifier (e.g., 'jinja2', 'dspy_v1')
         """
         # Check if trajectory recorder is passed in kwargs
-        recorder = kwargs.get('_trajectory_recorder')
-        if recorder and hasattr(recorder, 'set_prompt_version'):
+        recorder = kwargs.get("_trajectory_recorder")
+        if recorder and hasattr(recorder, "set_prompt_version"):
             recorder.set_prompt_version(version)
 
     def _record_fallback(self, kwargs: dict) -> None:
@@ -305,8 +336,8 @@ class PromptLoader:
         Args:
             kwargs: Template context (may contain trajectory_recorder)
         """
-        recorder = kwargs.get('_trajectory_recorder')
-        if recorder and hasattr(recorder, 'record_fallback'):
+        recorder = kwargs.get("_trajectory_recorder")
+        if recorder and hasattr(recorder, "record_fallback"):
             recorder.record_fallback()
 
     def _record_prompt_kwargs(self, kwargs: dict) -> None:
@@ -317,8 +348,8 @@ class PromptLoader:
         Args:
             kwargs: Template context (may contain trajectory_recorder)
         """
-        recorder = kwargs.get('_trajectory_recorder')
-        if recorder and hasattr(recorder, 'record_prompt_kwargs'):
+        recorder = kwargs.get("_trajectory_recorder")
+        if recorder and hasattr(recorder, "record_prompt_kwargs"):
             recorder.record_prompt_kwargs(kwargs)
 
     def _record_rendered_prompt(self, kwargs: dict, rendered_prompt: str) -> None:
@@ -331,8 +362,8 @@ class PromptLoader:
             kwargs: Template context (may contain trajectory_recorder)
             rendered_prompt: The rendered prompt string
         """
-        recorder = kwargs.get('_trajectory_recorder')
-        if recorder and hasattr(recorder, 'record_rendered_prompt'):
+        recorder = kwargs.get("_trajectory_recorder")
+        if recorder and hasattr(recorder, "record_rendered_prompt"):
             recorder.record_rendered_prompt(rendered_prompt)
 
 
@@ -340,7 +371,7 @@ class PromptLoader:
 _loader = None
 
 
-def get_loader(dspy_config: Optional['DSPyConfig'] = None) -> PromptLoader:
+def get_loader(dspy_config: Optional["DSPyConfig"] = None) -> PromptLoader:
     """Get or create the global PromptLoader instance.
 
     Args:

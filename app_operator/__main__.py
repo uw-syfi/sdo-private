@@ -5,7 +5,14 @@ import sys
 
 from dotenv import load_dotenv
 
-from app_operator.commands import run, init_exp, viz_graph, analyze_prompts, optimize_prompts
+from app_operator.commands import (
+    run,
+    init_exp,
+    viz_graph,
+    analyze_prompts,
+    optimize_prompts,
+    e2e_optimize,
+)
 from app_operator.logger import logger
 
 # Load environment variables from .env file
@@ -93,6 +100,12 @@ Examples:
     )
     optimize_prompts.add_arguments(optimize_prompts_parser)
 
+    # 'e2e-optimize' command
+    e2e_optimize_parser = subparsers.add_parser(
+        "e2e-optimize", help="Run end-to-end optimization loop"
+    )
+    e2e_optimize.add_arguments(e2e_optimize_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
@@ -112,6 +125,8 @@ Examples:
         return analyze_prompts.run_command(args)
     elif args.command == "optimize-prompts":
         return optimize_prompts.run_command(args)
+    elif args.command == "e2e-optimize":
+        return e2e_optimize.run_command(args)
     else:
         parser.print_help()
         return 1

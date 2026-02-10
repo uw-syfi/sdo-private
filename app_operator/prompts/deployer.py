@@ -57,7 +57,7 @@ def create_generate_script_prompt(
     repo_context: str,
     target_dir: str,
     platform: str,
-    dspy_config: Optional['DSPyConfig'] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
     recorder=None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
@@ -74,12 +74,40 @@ def create_generate_script_prompt(
     Returns:
         str: The rendered prompt.
     """
+    if script_name == "deploy.sh":
+        template_name = "deployer/generate_deploy_script.jinja2"
+    elif script_name == "health_check.sh":
+        template_name = "deployer/generate_health_check.jinja2"
+    else:
+        # Fallback for other scripts or backward compatibility
+        template_name = "deployer/generate_script.jinja2"
+
+    # Read code analysis and deployment issues if available
+    # This ensures kwargs match the DSPy signatures for optimization
+    code_analysis = ""
+    deployment_issues = ""
+    try:
+        sds_dir = Path(target_dir) / ".sds"
+        ca_path = sds_dir / "code_analysis.md"
+        di_path = sds_dir / "deployment_issues.md"
+
+        if ca_path.exists():
+            code_analysis = ca_path.read_text()
+        if di_path.exists():
+            deployment_issues = di_path.read_text()
+    except Exception:
+        # Ignore filesystem errors during prompt generation
+        pass
+
     return get_loader(dspy_config).render(
-        "deployer/generate_script.jinja2",
+        template_name,
         system_prompt=system_prompt,
         script_name=script_name,
         repo_context=repo_context,
         target_dir=target_dir,
+        repo_path=target_dir,  # Map target_dir to repo_path for signature
+        code_analysis=code_analysis,
+        deployment_issues=deployment_issues,
         platform=platform,
         _trajectory_recorder=recorder,
     )
@@ -92,7 +120,7 @@ def create_fix_prompt(
     error_context: str,
     deploy_script_path: Path,
     health_check_script_path: Path,
-    dspy_config: Optional['DSPyConfig'] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
     recorder=None,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.

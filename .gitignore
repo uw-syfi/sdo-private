@@ -34,6 +34,8 @@ venv.bak/
 
 # PyCharm
 .idea/
+opt*/
+e2e_optimization/
 
 # VS Code
 .vscode/

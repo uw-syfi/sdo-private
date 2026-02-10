@@ -91,6 +91,8 @@ def get_output_field_name(prompt_name: str) -> str:
     # Map prompt names to their primary output field
     OUTPUT_FIELDS = {
         "deployer_system": "system_prompt",
+        "deployer_generate_deploy_script": "deployment_script",
+        "deployer_generate_health_check": "health_check_script",
         "deployer_generate_script": "deployment_script",  # Note: also has health_check_script
         "deployer_fix_error": "rendered_prompt",
         "deployer_summarize": "rendered_prompt",

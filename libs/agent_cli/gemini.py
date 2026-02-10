@@ -60,6 +60,9 @@ class GeminiGenerationSession(CLIGenerationSession):
         # Write metadata file to correlate with trajectory
         self._write_call_metadata()
 
+        if not self.silent:
+            self._log_raw(f"{self.log_prefix} Input Prompt:\n{prompt}\n")
+
         # Call parent implementation
         return super().run(prompt)
 

@@ -45,7 +45,7 @@ def generate_scripts(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
-    dspy_config: Optional['DSPyConfig'] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -174,7 +174,7 @@ def _generate_deploy_script(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
-    dspy_config: Optional['DSPyConfig'] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
     if operator_config is None:
@@ -234,7 +234,7 @@ def _generate_health_check_script(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
-    dspy_config: Optional['DSPyConfig'] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
     if operator_config is None:
@@ -296,7 +296,7 @@ class DeploymentAgent:
         deployment_config: Optional[DeploymentConfig] = None,
         operator_config: Optional[OperatorConfig] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
-        dspy_config: Optional['DSPyConfig'] = None,
+        dspy_config: Optional["DSPyConfig"] = None,
     ):
         """Initialize the deployment agent.
 
@@ -513,7 +513,9 @@ class DeploymentAgent:
                         # (e.g. wrong service names) the containers are already
                         # healthy and a restart would be wasteful.
                         recheck_log = (
-                            self.sds_dir / "logs" / f"health_recheck_attempt_{attempt}.log"
+                            self.sds_dir
+                            / "logs"
+                            / f"health_recheck_attempt_{attempt}.log"
                         )
                         recheck = run_health_check(
                             self.repo_path,
@@ -531,7 +533,8 @@ class DeploymentAgent:
 
                         if recheck["success"]:
                             logger.success(
-                                "Health check passed after agent fix. Deployment successful!")
+                                "Health check passed after agent fix. Deployment successful!"
+                            )
                             r.add_assistant_message(
                                 "Health check passed after agent fix. Deployment successful!"
                             )
@@ -605,6 +608,7 @@ class DeploymentAgent:
             initial_delay=15.0,
             summary_interval=30.0,
             time_func=self._get_time,
+            recorder=self.recorder,
         )
 
         # Start the subprocess with progress monitoring

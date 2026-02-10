@@ -101,7 +101,7 @@ class OperatorConfig:
     deployment_max_iters: int = 5
     agent_fix_timeout: int = 1800
     deploy_timeout: int = 900
-    agent_timeout: int = 300
+    agent_timeout: int = 900
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
@@ -192,7 +192,8 @@ class Config:
             "deployment",
             "runtime",
             "dspy",
-            "fault_injection"}
+            "fault_injection",
+        }
         unrecognized_sections = set(data.keys()) - recognized_sections
         if unrecognized_sections:
             raise UnrecognizedSectionError(
@@ -214,7 +215,9 @@ class Config:
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
         cls._validate_dspy_fields(dspy_data)
-        cls._validate_fields(fault_injection_data, "fault_injection", FaultInjectionConfig)
+        cls._validate_fields(
+            fault_injection_data, "fault_injection", FaultInjectionConfig
+        )
 
         # Create agent config first to access model info
         agent_config = AgentConfig(**agent_data)
@@ -280,7 +283,9 @@ class Config:
                     )
 
     @classmethod
-    def _parse_dspy_config(cls, dspy_data: dict, agent_config: AgentConfig) -> DSPyConfig:
+    def _parse_dspy_config(
+        cls, dspy_data: dict, agent_config: AgentConfig
+    ) -> DSPyConfig:
         """Parse DSPy configuration with nested sections.
 
         Args:
@@ -339,10 +344,16 @@ class Config:
                 dspy_data["runtime_model"] = f"{dspy_provider}/{model}"
 
         # Create nested config objects
-        optimization = DSPyOptimizationConfig(
-            **optimization_data) if optimization_data else DSPyOptimizationConfig()
-        auto_rollback = DSPyAutoRollbackConfig(
-            **auto_rollback_data) if auto_rollback_data else DSPyAutoRollbackConfig()
+        optimization = (
+            DSPyOptimizationConfig(**optimization_data)
+            if optimization_data
+            else DSPyOptimizationConfig()
+        )
+        auto_rollback = (
+            DSPyAutoRollbackConfig(**auto_rollback_data)
+            if auto_rollback_data
+            else DSPyAutoRollbackConfig()
+        )
 
         # Create main DSPy config with nested objects
         return DSPyConfig(

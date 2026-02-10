@@ -16,11 +16,43 @@ class DeployerSystemSignature(dspy.Signature):
     repo_path = dspy.InputField(desc="Path to the repository being deployed")
     agent_name = dspy.InputField(desc="Name of the deployment agent")
 
-    system_prompt = dspy.OutputField(desc="Comprehensive system instructions for deployment")
+    system_prompt = dspy.OutputField(
+        desc="Comprehensive system instructions for deployment"
+    )
+
+
+class DeployerGenerateDeployScriptSignature(dspy.Signature):
+    """Generate deployment script (deploy.sh).
+
+    Analyzes the codebase and generates an appropriate deployment script.
+    """
+
+    repo_path = dspy.InputField(desc="Path to the repository")
+    code_analysis = dspy.InputField(desc="Code analysis summary")
+    deployment_issues = dspy.InputField(desc="Identified deployment issues")
+
+    deployment_script = dspy.OutputField(
+        desc="Generated deploy.sh script. The start command must use "
+        "'docker compose up --build -d' (not plain 'up -d') so that "
+        "images are always built from the current source."
+    )
+
+
+class DeployerGenerateHealthCheckSignature(dspy.Signature):
+    """Generate health check script (health_check.sh).
+
+    Analyzes the codebase and generates an appropriate health check script.
+    """
+
+    repo_path = dspy.InputField(desc="Path to the repository")
+    code_analysis = dspy.InputField(desc="Code analysis summary")
+    deployment_issues = dspy.InputField(desc="Identified deployment issues")
+
+    health_check_script = dspy.OutputField(desc="Generated health_check.sh script")
 
 
 class DeployerGenerateScriptSignature(dspy.Signature):
-    """Generate deployment and health check scripts.
+    """Generate deployment and health check scripts (Legacy/Combined).
 
     Analyzes the codebase and generates appropriate deployment scripts.
     """
@@ -31,8 +63,8 @@ class DeployerGenerateScriptSignature(dspy.Signature):
 
     deployment_script = dspy.OutputField(
         desc="Generated deploy.sh script. The start command must use "
-             "'docker compose up --build -d' (not plain 'up -d') so that "
-             "images are always built from the current source."
+        "'docker compose up --build -d' (not plain 'up -d') so that "
+        "images are always built from the current source."
     )
     health_check_script = dspy.OutputField(desc="Generated health_check.sh script")
 
@@ -53,24 +85,29 @@ class DeployerFixErrorSignature(dspy.Signature):
     repo_path = dspy.InputField(desc="Path to the repository being deployed")
     error_context = dspy.InputField(
         desc="Error messages and logs from the failed deployment attempt, "
-        "including the exit code and status")
+        "including the exit code and status"
+    )
     attempt = dspy.InputField(desc="Current deployment attempt number")
     max_attempts = dspy.InputField(desc="Maximum number of deployment attempts allowed")
     deploy_script = dspy.InputField(
-        desc="Full path to the deploy.sh script (e.g. /path/to/repo/.sds/deploy.sh)")
+        desc="Full path to the deploy.sh script (e.g. /path/to/repo/.sds/deploy.sh)"
+    )
     health_check_script = dspy.InputField(
-        desc="Full path to the health_check.sh script (e.g. /path/to/repo/.sds/health_check.sh)")
+        desc="Full path to the health_check.sh script (e.g. /path/to/repo/.sds/health_check.sh)"
+    )
     previous_summary = dspy.InputField(
         desc="Note pointing to the log file containing the previous fix attempt summary. "
         "Includes the log file path pattern .sds/logs/fix_summary_{attempt}.log. "
         "Empty string if this is the first attempt.",
-        default="")
+        default="",
+    )
 
     rendered_prompt = dspy.OutputField(
         desc="The full instruction prompt to send to the coding agent. Must include "
         "deployment platform detection guidance, step-by-step error analysis "
         "instructions, and a directive to produce a <summary> of findings "
-        "stating the issue(s), fix(es), and deployment platform.")
+        "stating the issue(s), fix(es), and deployment platform."
+    )
 
 
 class DeployerSummarizeSignature(dspy.Signature):
@@ -83,12 +120,14 @@ class DeployerSummarizeSignature(dspy.Signature):
     """
 
     deployment_log = dspy.InputField(
-        desc="Recent output snippet from the deployment command")
+        desc="Recent output snippet from the deployment command"
+    )
 
     rendered_prompt = dspy.OutputField(
         desc="The full instruction prompt to send to the coding agent. Must ask "
         "for a one-line summary wrapped in <output_msg>...</output_msg> XML tags, "
-        "with no other text or debug info.")
+        "with no other text or debug info."
+    )
 
 
 class CodeAnalyzerSystemSignature(dspy.Signature):
@@ -113,7 +152,8 @@ class CodeAnalyzerUserSignature(dspy.Signature):
     file_tree = dspy.InputField(desc="Repository file tree structure")
 
     code_analysis = dspy.OutputField(
-        desc="Analysis of codebase structure and deployment requirements")
+        desc="Analysis of codebase structure and deployment requirements"
+    )
     deployment_issues = dspy.OutputField(desc="Potential deployment issues identified")
 
 
@@ -141,7 +181,8 @@ class AgentflowSystemSignature(dspy.Signature):
     loop_bound = dspy.InputField(desc="Maximum iterations for loops")
 
     system_prompt = dspy.OutputField(
-        desc="Comprehensive system instructions with orchestration patterns")
+        desc="Comprehensive system instructions with orchestration patterns"
+    )
 
 
 class AgentflowUserSignature(dspy.Signature):
@@ -151,13 +192,17 @@ class AgentflowUserSignature(dspy.Signature):
     """
 
     user_request = dspy.InputField(desc="User's task description")
-    clarification_history = dspy.InputField(desc="Previous clarification Q&A", default="")
+    clarification_history = dspy.InputField(
+        desc="Previous clarification Q&A", default=""
+    )
     work_dir = dspy.InputField(desc="Working directory")
     loop_bound = dspy.InputField(desc="Maximum loop iterations")
 
     script_code = dspy.OutputField(desc="Generated Python script")
     status = dspy.OutputField(desc="Status: 'ready' or 'clarify'")
-    questions = dspy.OutputField(desc="Clarification questions if status='clarify'", default="")
+    questions = dspy.OutputField(
+        desc="Clarification questions if status='clarify'", default=""
+    )
 
 
 class AgentflowRepairSignature(dspy.Signature):
@@ -175,6 +220,8 @@ class AgentflowRepairSignature(dspy.Signature):
 # Signature registry for easy lookup
 SIGNATURES = {
     "deployer_system": DeployerSystemSignature,
+    "deployer_generate_deploy_script": DeployerGenerateDeployScriptSignature,
+    "deployer_generate_health_check": DeployerGenerateHealthCheckSignature,
     "deployer_generate_script": DeployerGenerateScriptSignature,
     "deployer_fix_error": DeployerFixErrorSignature,
     "deployer_summarize": DeployerSummarizeSignature,

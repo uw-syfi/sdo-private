@@ -1,0 +1,42 @@
+{{ system_prompt }}
+
+Generate a comprehensive deploy.sh bash script for the following repository:
+
+{{ repo_context }}
+
+Target directory: {{ target_dir }}
+
+CRITICAL REQUIREMENTS:
+
+{% if platform == "k8s" %}
+1. **Target Platform: Kubernetes**
+   - Use `kubectl` commands.
+   - Ensure you handle manifest application and pod readiness.
+{% elif platform == "docker" %}
+1. **Target Platform: Docker**
+   - Use `docker compose` or `docker` commands as appropriate for the repo.
+   - CRITICAL: The `start` command MUST use `docker compose up --build -d`, not
+     plain `up -d`.  Without `--build`, Docker reuses cached images and never
+     compiles the current source code.  Every deployment must build from source.
+{% else %}
+1. **Deployment Platform Detection**:
+   - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
+   - Use the appropriate commands.
+{% endif %}
+
+2. **Script Requirements**:
+   - Create the file at: .sds/deploy.sh
+   - Use SCRIPT_DIR to determine paths relative to the script location
+   - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
+   - CRITICAL: The command MUST be accepted as a positional argument ($1), NOT via a flag.
+     The operator calls the script as: deploy.sh <command> (e.g. deploy.sh start)
+     Do NOT use getopts or -c flags. Parse $1 directly in a case statement.
+   - Make it robust, well-documented, and production-ready
+   - Include proper error handling and colored output
+   - The script should work when executed from the .sds directory
+   - Check for correct prerequisites
+
+3. **Platform-Specific Commands**:
+   - Use the commands that match the detected/target platform (see System Prompt).
+
+You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content.

@@ -4,13 +4,17 @@ Orchestrates the prompt optimization process using DSPy.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import dspy
 
 from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
-from app_operator.dspy_integration.metrics import CompositeMetric, GroundTruthSimilarityMetric
+from app_operator.dspy_integration.metrics import (
+    CompositeMetric,
+    GroundTruthSimilarityMetric,
+)
 from app_operator.dspy_integration.signatures import get_signature, SIGNATURES
 from app_operator.dspy_integration.field_mappings import (
     map_kwargs_to_fields,
@@ -41,6 +45,8 @@ PROMPT_PHASE_MAP: Dict[str, str] = {
     "deployer_fix_error": "deployment",
     "deployer_summarize": "deployment",
     "deployer_generate_script": "script_generation",
+    "deployer_generate_deploy_script": "script_generation",
+    "deployer_generate_health_check": "script_generation",
     "code_analyzer_system": "exploration",
     "code_analyzer_user": "exploration",
     "monitor_analyze_health": "monitoring",
@@ -57,6 +63,8 @@ PROMPT_TO_TEMPLATE: Dict[str, str] = {
     "deployer_fix_error": "deployer/fix_error.jinja2",
     "deployer_summarize": "deployer/summarize.jinja2",
     "deployer_generate_script": "deployer/generate_script.jinja2",
+    "deployer_generate_deploy_script": "deployer/generate_deploy_script.jinja2",
+    "deployer_generate_health_check": "deployer/generate_health_check.jinja2",
     "code_analyzer_system": "code_analyzer/system.jinja2",
     "code_analyzer_user": "code_analyzer/user.jinja2",
     "monitor_analyze_health": "monitor/analyze_health.jinja2",
@@ -72,6 +80,8 @@ SEED_TO_TEMPLATE: Dict[str, str] = {
     "deployer_fix_error": "seeds/deployer_fix_error.jinja2",
     "deployer_summarize": "seeds/deployer_summarize.jinja2",
     "deployer_generate_script": "seeds/deployer_generate_script.jinja2",
+    "deployer_generate_deploy_script": "seeds/deployer_generate_deploy_script.jinja2",
+    "deployer_generate_health_check": "seeds/deployer_generate_health_check.jinja2",
     "code_analyzer_system": "seeds/code_analyzer_system.jinja2",
     "code_analyzer_user": "seeds/code_analyzer_user.jinja2",
     "monitor_analyze_health": "seeds/monitor_analyze_health.jinja2",
@@ -148,7 +158,9 @@ class PromptOptimizer:
         print(f"Loaded {len(examples)} training examples")
 
         if dry_run:
-            split_idx = int(len(examples) * (1 - self.config.optimization.validation_split))
+            split_idx = int(
+                len(examples) * (1 - self.config.optimization.validation_split)
+            )
             return {
                 "dry_run": True,
                 "prompt_names": prompt_names,
@@ -162,7 +174,9 @@ class PromptOptimizer:
             }
 
         # Configure DSPy LM
-        print(f"Configuring DSPy with teacher model: {self.config.optimization.teacher_model}")
+        print(
+            f"Configuring DSPy with teacher model: {self.config.optimization.teacher_model}"
+        )
         self._configure_dspy_lm()
 
         # Use GroundTruthSimilarityMetric for the prediction-quality slot:
@@ -205,22 +219,31 @@ class PromptOptimizer:
                 phase_examples = examples
 
             if not phase_examples:
-                print(f"\n  Skipping {prompt_name}: no training examples in phase '{target_phase}'")
-                results[prompt_name] = {"success": False,
-                                        "error": f"No training examples for phase '{target_phase}'"}
+                print(
+                    f"\n  Skipping {prompt_name}: no training examples in phase '{target_phase}'"
+                )
+                results[prompt_name] = {
+                    "success": False,
+                    "error": f"No training examples for phase '{target_phase}'",
+                }
                 continue
 
             # Guarantee at least one training example.  Validation is skipped
             # when the phase is too small to split meaningfully.
-            split_idx = max(1, int(len(phase_examples) *
-                            (1 - self.config.optimization.validation_split)))
+            split_idx = max(
+                1,
+                int(
+                    len(phase_examples)
+                    * (1 - self.config.optimization.validation_split)
+                ),
+            )
             prompt_train = phase_examples[:split_idx]
             prompt_val = phase_examples[split_idx:]
 
             print(
-                f"\nOptimizing prompt: {prompt_name} (phase={target_phase}, train={
-                    len(prompt_train)}, val={
-                    len(prompt_val)})")
+                f"\nOptimizing prompt: {prompt_name} (phase={target_phase}, "
+                f"train={len(prompt_train)}, val={len(prompt_val)})"
+            )
             result = self._optimize_single_prompt(
                 prompt_name,
                 prompt_train,
@@ -231,11 +254,10 @@ class PromptOptimizer:
 
         # Bail out if every prompt failed — nothing worth saving
         if not any(r.get("success") for r in results.values()):
-            errors = {name: r.get("error", "unknown error")
-                      for name, r in results.items()}
-            raise RuntimeError(
-                f"All prompts failed optimization: {errors}"
-            )
+            errors = {
+                name: r.get("error", "unknown error") for name, r in results.items()
+            }
+            raise RuntimeError(f"All prompts failed optimization: {errors}")
 
         # Save optimized prompts
         if output_dir:
@@ -279,7 +301,15 @@ class PromptOptimizer:
 
         # Disable LiteLLM's request-level cache so that COPRO candidates
         # with different instructions are not served stale responses.
-        lm = dspy.LM(model=model_str, cache=False)
+        kwargs = {"model": model_str, "cache": False}
+
+        # Explicitly pass VERTEX_LOCATION if present in environment
+        # This fixes issues where litellm defaults to us-central1 despite env var
+        vertex_location = os.environ.get("VERTEX_LOCATION")
+        if vertex_location:
+            kwargs["vertex_location"] = vertex_location
+
+        lm = dspy.LM(**kwargs)
         dspy.settings.configure(lm=lm)
 
     def _convert_to_dspy_examples(
@@ -346,15 +376,17 @@ class PromptOptimizer:
             dspy_examples.append(example)
 
         if skipped_no_kwargs:
-            print(
-                f"  Skipped {skipped_no_kwargs} example(s) missing prompt_kwargs")
+            print(f"  Skipped {skipped_no_kwargs} example(s) missing prompt_kwargs")
         if skipped_wrong_prompt:
             print(
-                f"  Skipped {skipped_wrong_prompt} example(s) from a different prompt in the same phase")
+                f"  Skipped {skipped_wrong_prompt} example(s) from a different prompt in the same phase"
+            )
 
         return dspy_examples
 
-    def _rerender_from_kwargs(self, prompt_name: str, prompt_kwargs: Dict[str, Any]) -> str:
+    def _rerender_from_kwargs(
+        self, prompt_name: str, prompt_kwargs: Dict[str, Any]
+    ) -> str:
         """Re-render a Jinja2 template from stored prompt_kwargs.
 
         Used as fallback when rendered_prompt was not recorded in the
@@ -415,10 +447,7 @@ class PromptOptimizer:
         module = PromptModule(signature)
 
         # Limit training examples
-        num_examples = min(
-            len(train_examples),
-            self.config.optimization.num_examples
-        )
+        num_examples = min(len(train_examples), self.config.optimization.num_examples)
         limited_train = train_examples[:num_examples]
 
         print(f"  Using {num_examples} training examples")
@@ -441,7 +470,9 @@ class PromptOptimizer:
         tracking_metric = _MetricCallTracker(metric)
 
         # Select optimizer — pass len(dspy_train) so COPRO can set depth
-        optimizer = self._create_optimizer(tracking_metric, num_train_examples=len(dspy_train))
+        optimizer = self._create_optimizer(
+            tracking_metric, num_train_examples=len(dspy_train)
+        )
 
         try:
             # Convert validation examples for optimizers that need valset
@@ -472,11 +503,13 @@ class PromptOptimizer:
             # signal: if it was never called, every example failed before
             # evaluation (e.g. auth error, bad provider string).
             if tracking_metric.call_count == 0:
-                print("  Optimization produced 0 successful traces — teacher model likely failed")
+                print(
+                    "  Optimization produced 0 successful traces — teacher model likely failed"
+                )
                 return {
                     "success": False,
                     "error": "Bootstrapping produced 0 successful traces. "
-                             "Check teacher model auth and training data.",
+                    "Check teacher model auth and training data.",
                 }
 
             # Evaluate on validation set
@@ -674,7 +707,7 @@ class PromptOptimizer:
         """
         try:
             # Extract the predictor from the wrapper module
-            if hasattr(module, 'predictor'):
+            if hasattr(module, "predictor"):
                 predictor = module.predictor
             else:
                 # If it's already a Predict module
@@ -689,12 +722,12 @@ class PromptOptimizer:
             }
 
             # Extract demonstrations if they exist (BootstrapFewShot)
-            if hasattr(predictor, 'demos') and predictor.demos:
+            if hasattr(predictor, "demos") and predictor.demos:
                 serializable_demos = []
                 for demo in predictor.demos:
                     if isinstance(demo, dict):
                         serializable_demos.append(demo)
-                    elif hasattr(demo, '__dict__'):
+                    elif hasattr(demo, "__dict__"):
                         serializable_demos.append(dict(demo.__dict__))
                     else:
                         try:
@@ -708,22 +741,23 @@ class PromptOptimizer:
             # Extract the optimized instruction if present (COPRO / MIPROv2
             # rewrite predictor.signature.instructions; BootstrapFewShot does
             # not touch it).
-            if hasattr(predictor, 'signature') and hasattr(
-                predictor.signature, 'instructions'
+            if hasattr(predictor, "signature") and hasattr(
+                predictor.signature, "instructions"
             ):
-                module_state["optimized_instruction"] = (
-                    predictor.signature.instructions
-                )
+                module_state["optimized_instruction"] = predictor.signature.instructions
                 print(
                     f"    Saved optimized instruction "
                     f"({len(predictor.signature.instructions)} chars)"
                 )
 
-            if not module_state["demos"] and "optimized_instruction" not in module_state:
+            if (
+                not module_state["demos"]
+                and "optimized_instruction" not in module_state
+            ):
                 print("    No optimization artifacts to save")
 
             # Save to JSON
-            with open(output_file, 'w') as f:
+            with open(output_file, "w") as f:
                 json.dump(module_state, f, indent=2, default=str)
 
         except Exception as e:

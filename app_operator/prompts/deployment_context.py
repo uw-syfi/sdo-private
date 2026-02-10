@@ -5,7 +5,13 @@ from app_operator.prompts import get_loader
 
 def create_system_prompt(platform: str) -> str:
     """Create the system prompt for deployment script generation."""
-    return get_loader().render("deployer/system.jinja2", platform=platform)
+    # Note: repo_path is not available here, so we don't pass it.
+    # The default template doesn't need it.
+    # If the seed template needs it, it will fail unless we provide it.
+    # However, create_system_prompt is called without repo_path info in deployer.py
+    return get_loader().render(
+        "deployer/system.jinja2", platform=platform, repo_path="."
+    )
 
 
 def analyze_repository(repo_path: Path) -> str:
@@ -16,7 +22,9 @@ def analyze_repository(repo_path: Path) -> str:
     if (repo_path / ".sds" / "code_analysis.md").exists():
         context_parts.append("- Found code analysis: .sds/code_analysis.md")
     if (repo_path / ".sds" / "deployment_issues.md").exists():
-        context_parts.append("- Found deployment issues report: .sds/deployment_issues.md")
+        context_parts.append(
+            "- Found deployment issues report: .sds/deployment_issues.md"
+        )
 
     if (repo_path / "docker-compose.yml").exists():
         context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")

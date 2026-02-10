@@ -24,12 +24,14 @@ class DSPyOptimizationConfig:
     teacher_model: str = "claude-sonnet-4-5"
     num_examples: int = 30
     validation_split: float = 0.2
-    metric_weights: Dict[str, float] = field(default_factory=lambda: {
-        "success": 0.5,
-        "efficiency": 0.25,
-        "tokens": 0.15,
-        "health_check": 0.1,
-    })
+    metric_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "success": 0.5,
+            "efficiency": 0.25,
+            "tokens": 0.15,
+            "health_check": 0.1,
+        }
+    )
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -57,9 +59,7 @@ class DSPyOptimizationConfig:
                 f"num_examples must be int, got {type(self.num_examples).__name__}"
             )
         if self.num_examples <= 0:
-            raise ValueError(
-                f"num_examples must be positive, got {self.num_examples}"
-            )
+            raise ValueError(f"num_examples must be positive, got {self.num_examples}")
 
         # Validate validation_split
         if not isinstance(self.validation_split, (int, float)):
@@ -103,9 +103,7 @@ class DSPyOptimizationConfig:
 
         total_weight = sum(self.metric_weights.values())
         if not (0.99 <= total_weight <= 1.01):  # Allow small floating point error
-            raise ValueError(
-                f"metric_weights must sum to 1.0, got {total_weight:.3f}"
-            )
+            raise ValueError(f"metric_weights must sum to 1.0, got {total_weight:.3f}")
 
 
 @dataclass
@@ -125,9 +123,7 @@ class DSPyAutoRollbackConfig:
     def __post_init__(self):
         """Validate configuration after initialization."""
         if not isinstance(self.enabled, bool):
-            raise TypeError(
-                f"enabled must be bool, got {type(self.enabled).__name__}"
-            )
+            raise TypeError(f"enabled must be bool, got {type(self.enabled).__name__}")
 
         if not isinstance(self.success_rate_threshold, (int, float)):
             raise TypeError(
@@ -169,6 +165,7 @@ class DSPyConfig:
     """
 
     use_optimized: bool = False
+    use_seeds: bool = False
     optimized_version: str = "latest"
     runtime_model: Optional[str] = None
     fallback_to_baseline: bool = True
@@ -176,9 +173,7 @@ class DSPyConfig:
     feedback_sample_rate: float = 0.1
     canary_deployment: bool = False
     canary_percentage: float = 0.0
-    optimization: DSPyOptimizationConfig = field(
-        default_factory=DSPyOptimizationConfig
-    )
+    optimization: DSPyOptimizationConfig = field(default_factory=DSPyOptimizationConfig)
     auto_rollback: DSPyAutoRollbackConfig = field(
         default_factory=DSPyAutoRollbackConfig
     )
@@ -190,7 +185,15 @@ class DSPyConfig:
                 f"use_optimized must be bool, got {type(self.use_optimized).__name__}"
             )
 
-        if not isinstance(self.optimized_version, str) or not self.optimized_version.strip():
+        if not isinstance(self.use_seeds, bool):
+            raise TypeError(
+                f"use_seeds must be bool, got {type(self.use_seeds).__name__}"
+            )
+
+        if (
+            not isinstance(self.optimized_version, str)
+            or not self.optimized_version.strip()
+        ):
             raise ValueError(
                 f"optimized_version must be a non-empty string, "
                 f"got '{self.optimized_version}'"
@@ -250,6 +253,4 @@ class DSPyConfig:
 
         # Canary deployment requires use_optimized
         if self.canary_deployment and not self.use_optimized:
-            raise ValueError(
-                "canary_deployment requires use_optimized=true"
-            )
+            raise ValueError("canary_deployment requires use_optimized=true")

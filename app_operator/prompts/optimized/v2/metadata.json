@@ -2,24 +2,52 @@
   "version": "v2",
   "config": {
     "optimizer": "COPRO",
-    "teacher_model": "vertex_ai/gemini-2.5-pro",
+    "teacher_model": "vertex_ai/gemini-3-pro-preview",
     "num_examples": 30,
     "metric_weights": {
-      "success": 0.6,
+      "success": 0.5,
       "efficiency": 0.25,
-      "tokens": 0.15
+      "tokens": 0.15,
+      "health_check": 0.1
     }
   },
   "prompts": {
     "deployer_fix_error": {
-      "validation_score": 0.3660632857142857,
+      "validation_score": 0.2779064724714745,
       "optimized": true,
       "module_file": "deployer_fix_error.dspy.json"
     },
-    "deployer_summarize": {
-      "validation_score": 0.35402613004484307,
+    "deployer_generate_deploy_script": {
+      "validation_score": 0.45219540879610864,
       "optimized": true,
-      "module_file": "deployer_summarize.dspy.json"
+      "module_file": "deployer_generate_deploy_script.dspy.json"
+    },
+    "deployer_generate_health_check": {
+      "validation_score": 0.45555198116291074,
+      "optimized": true,
+      "module_file": "deployer_generate_health_check.dspy.json"
+    },
+    "deployer_system": {
+      "validation_score": 0.27343542372696544,
+      "optimized": true,
+      "module_file": "deployer_system.dspy.json"
+    },
+    "deployer_summarize": {
+      "optimized": false,
+      "error": "No examples with matching kwargs for 'deployer_summarize'. The trajectory may not contain any conversations that used this prompt."
+    },
+    "deployer_generate_script": {
+      "validation_score": 0.4514503930789423,
+      "optimized": true,
+      "module_file": "deployer_generate_script.dspy.json"
+    },
+    "code_analyzer_system": {
+      "optimized": false,
+      "error": "No training examples for phase 'exploration'"
+    },
+    "code_analyzer_user": {
+      "optimized": false,
+      "error": "No training examples for phase 'exploration'"
     }
   }
 }
