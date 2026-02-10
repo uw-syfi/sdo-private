@@ -65,6 +65,12 @@ def add_arguments(parser):
         action="store_true",
         help="List available prompts and exit",
     )
+    parser.add_argument(
+        "--use-seeds",
+        action="store_true",
+        help="Use minimal GEPA-style seed prompts instead of baseline templates "
+             "(start small and let optimizer discover effective patterns)",
+    )
 
 
 def run_command(args) -> int:
@@ -131,7 +137,7 @@ def run_command(args) -> int:
     prompts_dir = Path(__file__).parent.parent / "prompts"
 
     # Create optimizer
-    optimizer = PromptOptimizer(dspy_config, prompts_dir)
+    optimizer = PromptOptimizer(dspy_config, prompts_dir, use_seeds=args.use_seeds)
 
     # Run optimization
     try:
@@ -141,6 +147,7 @@ def run_command(args) -> int:
 
         print(f"Prompts to optimize: {', '.join(args.prompts)}")
         print(f"Trajectories directories: {trajectories_dirs}")
+        print(f"Starting from: {'GEPA-style seeds' if args.use_seeds else 'Baseline templates'}")
         print(f"Optimizer: {dspy_config.optimization.optimizer}")
         print(f"Teacher model: {dspy_config.optimization.teacher_model}")
         print(f"Max training examples: {dspy_config.optimization.num_examples}")

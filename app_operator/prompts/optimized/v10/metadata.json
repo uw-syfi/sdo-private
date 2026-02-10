@@ -1,0 +1,21 @@
+{
+  "version": "v10",
+  "config": {
+    "optimizer": "COPRO",
+    "teacher_model": "vertex_ai/gemini-2.5-pro",
+    "num_examples": 50,
+    "metric_weights": {
+      "success": 0.5,
+      "efficiency": 0.25,
+      "tokens": 0.15,
+      "health_check": 0.1
+    }
+  },
+  "prompts": {
+    "deployer_fix_error": {
+      "validation_score": 0.46192234172592833,
+      "optimized": true,
+      "module_file": "deployer_fix_error.dspy.json"
+    }
+  }
+}

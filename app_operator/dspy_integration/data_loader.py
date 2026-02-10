@@ -7,7 +7,7 @@ import json
 import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -29,6 +29,10 @@ class TrajectoryExample:
     rendered_prompt: Optional[str] = None
     fallback_occurred: bool = False
     health_check_script: Optional[str] = None  # Content of health_check.sh for quality validation
+    fault_injected: bool = False
+    fault_ids: List[str] = field(default_factory=list)
+    fault_categories: List[str] = field(default_factory=list)
+    fault_severities: List[str] = field(default_factory=list)
 
 
 class TrajectoryDataLoader:
@@ -97,6 +101,15 @@ class TrajectoryDataLoader:
             if success_only and not overall_success:
                 continue
 
+            # Extract fault injection metadata
+            fault_meta = trajectory.get("metadata", {}).get("fault_injection", {})
+            fault_injected = bool(
+                fault_meta.get("enabled") and fault_meta.get(
+                    "num_faults_injected", 0) > 0)
+            fault_ids = fault_meta.get("fault_ids", [])
+            fault_categories = fault_meta.get("categories", [])
+            fault_severities = fault_meta.get("severities", [])
+
             # Extract examples from each phase
             phases_to_process = ["deployment", "monitoring", "script_generation"]
             if phase_filter:
@@ -151,6 +164,10 @@ class TrajectoryDataLoader:
                         rendered_prompt=rendered_prompt,
                         fallback_occurred=fallback_occurred,
                         health_check_script=health_check_script,
+                        fault_injected=fault_injected,
+                        fault_ids=list(fault_ids),
+                        fault_categories=list(fault_categories),
+                        fault_severities=list(fault_severities),
                     )
 
                     examples.append(example)

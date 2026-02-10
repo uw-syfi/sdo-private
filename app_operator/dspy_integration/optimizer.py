@@ -65,6 +65,21 @@ PROMPT_TO_TEMPLATE: Dict[str, str] = {
     "agentflow_repair": "agentflow/repair.jinja2",
 }
 
+# GEPA-style seed prompts: minimal starting points for optimization
+# Use with use_seeds=True to start from simple prompts and let optimizer discover details
+SEED_TO_TEMPLATE: Dict[str, str] = {
+    "deployer_system": "seeds/deployer_system.jinja2",
+    "deployer_fix_error": "seeds/deployer_fix_error.jinja2",
+    "deployer_summarize": "seeds/deployer_summarize.jinja2",
+    "deployer_generate_script": "seeds/deployer_generate_script.jinja2",
+    "code_analyzer_system": "seeds/code_analyzer_system.jinja2",
+    "code_analyzer_user": "seeds/code_analyzer_user.jinja2",
+    "monitor_analyze_health": "seeds/monitor_analyze_health.jinja2",
+    "agentflow_system": "seeds/agentflow_system.jinja2",
+    "agentflow_user": "seeds/agentflow_user.jinja2",
+    "agentflow_repair": "seeds/agentflow_repair.jinja2",
+}
+
 
 class PromptOptimizer:
     """Orchestrate DSPy prompt optimization workflow.
@@ -76,16 +91,18 @@ class PromptOptimizer:
     4. Save optimized prompts
     """
 
-    def __init__(self, config: DSPyConfig, prompts_dir: Path):
+    def __init__(self, config: DSPyConfig, prompts_dir: Path, use_seeds: bool = False):
         """Initialize optimizer.
 
         Args:
             config: DSPy configuration
             prompts_dir: Directory containing prompt templates
+            use_seeds: If True, use minimal GEPA-style seed prompts instead of baseline templates
         """
         self.config = config
         self.prompts_dir = Path(prompts_dir)
         self.optimized_dir = prompts_dir / "optimized"
+        self.use_seeds = use_seeds
 
     def optimize(
         self,
@@ -351,7 +368,9 @@ class PromptOptimizer:
         Returns:
             Rendered prompt string, or empty string on failure
         """
-        template_name = PROMPT_TO_TEMPLATE.get(prompt_name)
+        # Use seed templates if enabled (GEPA approach)
+        template_map = SEED_TO_TEMPLATE if self.use_seeds else PROMPT_TO_TEMPLATE
+        template_name = template_map.get(prompt_name)
         if not template_name:
             return ""
 

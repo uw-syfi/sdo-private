@@ -1,3 +1,4 @@
+import json
 import signal
 import threading
 from pathlib import Path
@@ -93,6 +94,20 @@ class AppOperator:
         # Initialize trajectory recorder
         self.recorder = TrajectoryRecorder(self.repo_path)
         self.recorder.set_agent_name(self.agent.__class__.__name__)
+
+        # Pick up fault injection metadata if present
+        fault_meta_path = self.sds_dir / "fault_injection.json"
+        if fault_meta_path.exists():
+            try:
+                with open(fault_meta_path) as f:
+                    fault_meta = json.load(f)
+                self.recorder.record_fault_injection(fault_meta)
+                logger.info(
+                    f"Loaded fault injection metadata: "
+                    f"{fault_meta.get('num_faults_injected', 0)} fault(s)"
+                )
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Failed to load fault injection metadata: {e}")
 
         # Attach recorder to agent
         self.agent.recorder = self.recorder

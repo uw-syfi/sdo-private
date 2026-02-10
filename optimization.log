@@ -1,0 +1,101 @@
+nohup: ignoring input
+2026-02-09 19:50:35 | INFO     | Loaded configuration from /mnt/nvme1/khoav/Research/sds/sds.toml
+2026/02/09 19:51:23 INFO dspy.teleprompt.copro_optimizer: Iteration Depth: 1/3.
+2026/02/09 19:51:23 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #1/8 for Predictor 1 of 1.
+2026/02/09 19:54:27 INFO dspy.evaluate.evaluate: Average Metric: 2.3309606354910515 / 24 (9.7%)
+2026/02/09 19:54:27 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #2/8 for Predictor 1 of 1.
+2026/02/09 19:57:31 INFO dspy.evaluate.evaluate: Average Metric: 2.419311880152782 / 24 (10.1%)
+2026/02/09 19:57:31 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #3/8 for Predictor 1 of 1.
+2026/02/09 20:00:37 INFO dspy.evaluate.evaluate: Average Metric: 2.380488913783781 / 24 (9.9%)
+2026/02/09 20:00:37 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #4/8 for Predictor 1 of 1.
+2026/02/09 20:03:18 INFO dspy.evaluate.evaluate: Average Metric: 2.503733270478707 / 24 (10.4%)
+2026/02/09 20:03:18 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #5/8 for Predictor 1 of 1.
+2026/02/09 20:06:30 INFO dspy.evaluate.evaluate: Average Metric: 2.261198217242014 / 24 (9.4%)
+2026/02/09 20:06:30 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #6/8 for Predictor 1 of 1.
+2026/02/09 20:08:55 INFO dspy.evaluate.evaluate: Average Metric: 2.404534200247727 / 24 (10.0%)
+2026/02/09 20:08:55 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #7/8 for Predictor 1 of 1.
+2026/02/09 20:11:23 INFO dspy.evaluate.evaluate: Average Metric: 2.300220151346017 / 24 (9.6%)
+2026/02/09 20:11:23 INFO dspy.teleprompt.copro_optimizer: At Depth 1/3, Evaluating Prompt Candidate #8/8 for Predictor 1 of 1.
+2026/02/09 20:13:39 INFO dspy.evaluate.evaluate: Average Metric: 2.4286318676563248 / 24 (10.1%)
+2026/02/09 20:14:42 INFO dspy.teleprompt.copro_optimizer: Iteration Depth: 2/3.
+2026/02/09 20:14:42 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #1/8 for Predictor 1 of 1.
+2026/02/09 20:17:57 INFO dspy.evaluate.evaluate: Average Metric: 2.4659181251516213 / 24 (10.3%)
+2026/02/09 20:17:57 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #2/8 for Predictor 1 of 1.
+2026/02/09 20:21:33 INFO dspy.evaluate.evaluate: Average Metric: 2.264232361433075 / 24 (9.4%)
+2026/02/09 20:21:33 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #3/8 for Predictor 1 of 1.
+2026/02/09 20:23:49 INFO dspy.evaluate.evaluate: Average Metric: 2.4563809881602756 / 24 (10.2%)
+2026/02/09 20:23:49 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #4/8 for Predictor 1 of 1.
+2026/02/09 20:27:01 INFO dspy.evaluate.evaluate: Average Metric: 2.342748224504831 / 24 (9.8%)
+2026/02/09 20:27:01 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #5/8 for Predictor 1 of 1.
+2026/02/09 20:30:12 INFO dspy.evaluate.evaluate: Average Metric: 2.377058676483018 / 24 (9.9%)
+2026/02/09 20:30:12 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #6/8 for Predictor 1 of 1.
+2026/02/09 20:34:02 INFO dspy.evaluate.evaluate: Average Metric: 2.245186731018935 / 24 (9.4%)
+2026/02/09 20:34:02 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #7/8 for Predictor 1 of 1.
+2026/02/09 20:37:01 INFO dspy.evaluate.evaluate: Average Metric: 2.2363308766552925 / 24 (9.3%)
+2026/02/09 20:37:01 INFO dspy.teleprompt.copro_optimizer: At Depth 2/3, Evaluating Prompt Candidate #8/8 for Predictor 1 of 1.
+2026/02/09 20:40:56 INFO dspy.evaluate.evaluate: Average Metric: 2.383584142299142 / 24 (9.9%)
+2026/02/09 20:41:55 INFO dspy.teleprompt.copro_optimizer: Iteration Depth: 3/3.
+2026/02/09 20:41:55 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #1/8 for Predictor 1 of 1.
+2026/02/09 20:44:54 INFO dspy.evaluate.evaluate: Average Metric: 2.4082775208603 / 24 (10.0%)
+2026/02/09 20:44:54 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #2/8 for Predictor 1 of 1.
+2026/02/09 20:48:38 INFO dspy.evaluate.evaluate: Average Metric: 2.328368932163622 / 24 (9.7%)
+2026/02/09 20:48:38 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #3/8 for Predictor 1 of 1.
+2026/02/09 20:52:20 INFO dspy.evaluate.evaluate: Average Metric: 2.426341939743001 / 24 (10.1%)
+2026/02/09 20:52:20 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #4/8 for Predictor 1 of 1.
+2026/02/09 20:55:07 INFO dspy.evaluate.evaluate: Average Metric: 2.3285316628207644 / 24 (9.7%)
+2026/02/09 20:55:07 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #5/8 for Predictor 1 of 1.
+2026/02/09 20:58:23 INFO dspy.evaluate.evaluate: Average Metric: 2.345129520400542 / 24 (9.8%)
+2026/02/09 20:58:23 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #6/8 for Predictor 1 of 1.
+2026/02/09 21:01:19 INFO dspy.evaluate.evaluate: Average Metric: 2.301629768150429 / 24 (9.6%)
+2026/02/09 21:01:19 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #7/8 for Predictor 1 of 1.
+2026/02/09 21:04:55 INFO dspy.evaluate.evaluate: Average Metric: 2.4366348207833552 / 24 (10.2%)
+2026/02/09 21:04:55 INFO dspy.teleprompt.copro_optimizer: At Depth 3/3, Evaluating Prompt Candidate #8/8 for Predictor 1 of 1.
+2026/02/09 21:07:21 INFO dspy.evaluate.evaluate: Average Metric: 2.4665388051118535 / 24 (10.3%)
+
+============================================================
+DSPy Prompt Optimization
+============================================================
+
+Prompts to optimize: deployer_fix_error
+Trajectories directories: [PosixPath('/mnt/nvme1/khoav/Research/sds/.sds/trajectories')]
+Starting from: GEPA-style seeds
+Optimizer: COPRO
+Teacher model: vertex_ai/gemini-2.5-pro
+Max training examples: 50
+Validation split: 0.2
+Metric weights: {'success': 0.5, 'efficiency': 0.25, 'tokens': 0.15, 'health_check': 0.1}
+Loading training data from [PosixPath('/mnt/nvme1/khoav/Research/sds/.sds/trajectories')]...
+Loaded 892 training examples
+Configuring DSPy with teacher model: vertex_ai/gemini-2.5-pro
+
+Optimizing prompt: deployer_fix_error (phase=deployment, train=360, val=90)
+  Using 50 training examples
+  Optimizer: COPRO
+  Converting trajectory examples to DSPy format...
+  Skipped 26 example(s) missing prompt_kwargs
+  Converted 24 training examples
+  Skipped 29 example(s) missing prompt_kwargs
+  Skipped 1 example(s) missing prompt_kwargs
+
+Saving optimized prompts to /mnt/nvme1/khoav/Research/sds/app_operator/prompts/optimized/v10
+    Saved optimized instruction (2795 chars)
+  Saved optimized module: /mnt/nvme1/khoav/Research/sds/app_operator/prompts/optimized/v10/deployer_fix_error.dspy.json
+  Saved metadata to /mnt/nvme1/khoav/Research/sds/app_operator/prompts/optimized/v10/metadata.json
+
+============================================================
+Optimization Results
+============================================================
+
+✓ Optimization completed successfully!
+  Output directory: /mnt/nvme1/khoav/Research/sds/app_operator/prompts/optimized/v10
+  Training examples: 892
+  Validation examples: 0
+
+Per-prompt results:
+  ✓ deployer_fix_error: validation score = 0.462
+
+Optimized prompts saved to: /mnt/nvme1/khoav/Research/sds/app_operator/prompts/optimized/v10
+To use optimized prompts, update sds.toml:
+  [dspy]
+  use_optimized = true
+  optimized_version = "v10"

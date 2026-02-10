@@ -97,6 +97,7 @@ class TrajectoryRecorderProtocol(Protocol):
     def record_fallback(self) -> None: ...
     def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
     def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
+    def record_fault_injection(self, metadata: Dict[str, Any]) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
     def phase(
@@ -370,6 +371,15 @@ class TrajectoryRecorder:
             rendered_prompt: The rendered prompt string.
         """
         self._current_rendered_prompt = rendered_prompt
+
+    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
+        """Record fault injection metadata in the trajectory.
+
+        Args:
+            metadata: Fault injection report from FaultReport.to_trajectory_metadata().
+        """
+        self.trajectory["metadata"]["fault_injection"] = metadata
+        self._write_to_file()
 
     def end_phase(self, status: Optional[str] = None) -> None:
         """End the current phase, commit conversation, and save to file."""
@@ -759,6 +769,9 @@ class NullTrajectoryRecorder:
         pass
 
     def record_rendered_prompt(self, rendered_prompt: str) -> None:
+        pass
+
+    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
         pass
 
     @contextmanager

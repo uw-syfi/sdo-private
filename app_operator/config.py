@@ -9,6 +9,7 @@ from dataclasses import dataclass, field, fields
 from app_operator.logger import logger
 from app_operator.exceptions import ConfigurationError
 from app_operator.dspy_integration.config import DSPyConfig
+from app_operator.fault_injection.config import FaultInjectionConfig
 
 
 class UnrecognizedSectionError(ConfigurationError):
@@ -148,6 +149,7 @@ class Config:
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
+    fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
     def __post_init__(self):
         self._validate_runtime_requirements()
@@ -184,7 +186,13 @@ class Config:
     @classmethod
     def from_dict(cls, data: dict) -> "Config":
         # Validate top-level sections
-        recognized_sections = {"agent", "operator", "deployment", "runtime", "dspy"}
+        recognized_sections = {
+            "agent",
+            "operator",
+            "deployment",
+            "runtime",
+            "dspy",
+            "fault_injection"}
         unrecognized_sections = set(data.keys()) - recognized_sections
         if unrecognized_sections:
             raise UnrecognizedSectionError(
@@ -199,12 +207,14 @@ class Config:
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
         dspy_data = data.get("dspy", {})
+        fault_injection_data = data.get("fault_injection", {})
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
         cls._validate_dspy_fields(dspy_data)
+        cls._validate_fields(fault_injection_data, "fault_injection", FaultInjectionConfig)
 
         # Create agent config first to access model info
         agent_config = AgentConfig(**agent_data)
@@ -218,6 +228,7 @@ class Config:
             deployment=DeploymentConfig(**deployment_data),
             runtime=RuntimeConfig(**runtime_data),
             dspy=dspy_config,
+            fault_injection=FaultInjectionConfig(**fault_injection_data),
         )
 
     @classmethod

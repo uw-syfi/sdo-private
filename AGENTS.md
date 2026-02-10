@@ -29,6 +29,7 @@ sds/
 │   ├── langgraph/        # LangGraph-based implementation
 │   ├── adk/              # Google ADK-based implementation
 │   ├── commands/         # CLI commands (run, init_exp, viz_graph)
+│   ├── fault_injection/  # SREGym-inspired fault injection for training data
 │   ├── prompts/          # Jinja2 prompt templates
 │   ├── config.py         # Configuration dataclasses
 │   ├── exceptions.py     # Custom exception hierarchy
@@ -120,6 +121,16 @@ health_check = 0.1   # Weight for health check script quality (prevents reward h
 enabled = true                  # Enable automatic rollback on degradation
 success_rate_threshold = 0.05   # Rollback if success rate drops by this fraction (0.0-1.0)
 evaluation_window = 100         # Number of recent runs to evaluate (positive integer)
+
+[fault_injection]
+enabled = true                    # Enable fault injection for training data (default: false)
+num_faults = 2                    # Number of faults per run (1-5, default: 2)
+categories = ["misconfiguration", "correlated"]  # Fault categories to include (default: all)
+severities = ["low", "medium", "high"]           # Severity levels (default: all)
+exclude_faults = []               # Fault IDs to exclude (default: [])
+seed = 42                         # Random seed for reproducibility (default: None)
+backup_compose = true             # Back up compose files before injection (default: true)
+platform = "compose"              # Target platform: "compose" or "k8s" (default: "compose")
 ```
 
 **Note**: Invalid configuration values will raise `ValueError` or `TypeError` with clear error messages at initialization.
@@ -191,6 +202,15 @@ This implementation uses a stateful graph to manage the lifecycle:
     *   **Cost Calculation (`cost.py`):** Token cost calculation for Claude, GPT, and Gemini models
     *   **Feedback (`feedback.py`):** Online learning feedback collection
     *   **Monitor (`monitor.py`):** Performance monitoring for auto-rollback
+*   **Fault Injection (`app_operator/fault_injection/`):**
+    *   **Models (`models.py`):** Fault, FaultResult, FaultCategory, FaultSeverity enums/dataclasses
+    *   **Config (`config.py`):** FaultInjectionConfig with validation (`[fault_injection]` in sds.toml)
+    *   **Base (`base.py`):** FaultInjector ABC and ComposeManipulator utility
+    *   **Compose Faults (`compose_faults.py`):** 22 Docker Compose fault implementations + COMPOSE_FAULTS catalog
+    *   **Registry (`registry.py`):** FaultRegistry for filtering and selecting faults
+    *   **Injector (`injector.py`):** FaultInjectionOrchestrator for backup/inject/revert workflow
+    *   **Reporter (`reporter.py`):** FaultReport for trajectory metadata bridge
+    *   **CLI (`cli.py`):** Standalone CLI (`inject`/`revert`/`list`) for shell script integration
 
 ### DSPy Prompt Optimization
 
@@ -343,6 +363,48 @@ Check: use_optimized? canary routing?
 - **Configuration Flow**: `sds.toml` → `Config.dspy` → Agent constructors → `get_loader(dspy_config)`
 - **Prompt Helpers**: All prompt functions (deployer, monitor, code_analyzer) pass `dspy_config` to loader
 - **Defensive Programming**: Error handling for mock configs in tests (canary_percentage validation)
+
+### Fault Injection for Training Data
+
+The operator includes an SREGym-inspired fault injection module that modifies Docker Compose files before operator runs to generate diverse training trajectories for GEPA/DSPy optimization.
+
+#### Fault Taxonomy (22 types)
+
+- **Misconfiguration (6):** wrong_port_mapping, missing_env_var, wrong_image_tag, wrong_entrypoint, bad_volume_mount, duplicate_port_conflict
+- **Security (3):** removed_auth_config, exposed_debug_port, privileged_container
+- **Metastable (5):** resource_limit_cpu, resource_limit_memory, restart_loop_trigger, slow_healthcheck, tmpfs_too_small
+- **Correlated (5):** remove_dependency, break_shared_database, cascading_port_change, remove_shared_network, remove_shared_volume
+- **Infrastructure (3):** dns_override, init_failure, read_only_rootfs
+
+#### CLI Usage
+
+```bash
+# List all available faults
+uv run -m app_operator.fault_injection.cli list
+
+# Inject faults into a repo's compose file
+uv run -m app_operator.fault_injection.cli inject \
+    --repo-path /path/to/app --num-faults 2 --seed 42
+
+# Revert to original compose file
+uv run -m app_operator.fault_injection.cli revert --repo-path /path/to/app
+```
+
+#### Training Data Collection with Faults
+
+```bash
+# Collect training data with fault injection enabled
+scripts/collect_training_data.sh -f hotel
+scripts/collect_training_data.sh -f --num-faults 3 --fault-seed 100 hotel
+```
+
+#### Design
+
+1. **YAML manipulation (not Docker runtime):** Modifies docker-compose.yml before `docker compose up`. Simpler, reproducible, no elevated privileges needed.
+2. **Standalone CLI + shell script:** Faults injected before operator runs, keeping operator unaware of faults. Preserves self-healing integrity.
+3. **Backup-based revert:** `.sds-fault-backup` file works without git.
+4. **Seeded random:** Reproducible fault selection. Shell script uses `seed + run_number` for diversity.
+5. **ABC for extensibility:** `FaultInjector` ABC + `Fault.platform` field enables future `K8sFaultInjector` without changing registry/config/orchestrator.
 
 ## 2. Agentflow Module (`agentflow/`)
 
@@ -507,6 +569,7 @@ Scripts are saved in `agentflow_runs/<timestamp>/agentflow.py` with:
 *   **When optimizing prompts:** Use `analyze-prompts` to establish baseline metrics, run `optimize-prompts` with `--dry-run` first to validate inputs, then compare results using `analyze-prompts --compare`.
 *   **When adding DSPy signatures:** Add the signature class to `app_operator/dspy_integration/signatures.py` and register it in the `SIGNATURES` dict. Include comprehensive field descriptions and docstrings.
 *   **When extending metrics:** Modify `app_operator/dspy_integration/metrics.py` and ensure weights in `CompositeMetric` sum to 1.0. Add corresponding tests.
+*   **When adding fault types:** Add the `Fault` to `COMPOSE_FAULTS` in `compose_faults.py`, implement the `_inject_*` method in `ComposeFaultInjector`, register it in the dispatch table, and add tests in `test_compose_faults.py`.
 *   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
 *   **When adding agentflow features:** Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
 *   **When adding a new feature:** Think of what new behavior(s) are being introduced, and how you would test them. Test public behavior, not internal implementation details.
@@ -545,6 +608,7 @@ Always do the following after you're done with your code edits:
     *   `tests/unit/agents/`: Agent-specific tests (deployment, monitoring)
     *   `tests/unit/agentflow/`: Agentflow module tests (engine, runtime, CLI, prompts)
     *   `tests/unit/dspy_tests/`: DSPy integration tests (config, data loader, metrics, optimizer, signatures)
+    *   `tests/unit/fault_injection/`: Fault injection tests (models, config, compose faults, registry, reporter, injector, data loader)
     *   `tests/integration/`: End-to-end scenarios, signal handling, concurrency
 
 #### Running Tests

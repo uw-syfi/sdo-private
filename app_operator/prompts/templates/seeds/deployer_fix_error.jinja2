@@ -1,0 +1,8 @@
+A deployment has failed. Analyze the error and fix the deployment scripts.
+
+Error: {{ error_context }}
+Attempt: {{ attempt }} of {{ max_attempts }}
+Scripts: {{ deploy_script }}, {{ health_check_script }}
+{% if previous_summary_note %}Previous attempt: {{ previous_summary_note }}{% endif %}
+
+Identify the root cause and fix the issue.
