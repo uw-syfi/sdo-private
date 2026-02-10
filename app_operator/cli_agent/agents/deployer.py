@@ -7,6 +7,7 @@ from typing import Optional, Callable, Dict, Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
 
+from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from libs.agent_cli.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig, OperatorConfig
@@ -297,6 +298,7 @@ class DeploymentAgent:
         operator_config: Optional[OperatorConfig] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
         dspy_config: Optional["DSPyConfig"] = None,
+        ui: Optional[OperatorUI] = None,
     ):
         """Initialize the deployment agent.
 
@@ -308,6 +310,7 @@ class DeploymentAgent:
             operator_config: Optional operator configuration for timeouts.
             recorder: Optional trajectory recorder.
             dspy_config: Optional DSPy configuration for optimized prompts.
+            ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
@@ -316,6 +319,7 @@ class DeploymentAgent:
         self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
+        self.ui = ui or NullOperatorUI()
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -373,6 +377,7 @@ class DeploymentAgent:
             self.filesystem.exists(self.deploy_script)
             and self.filesystem.exists(self.health_check_script)
         ):
+            self.ui.set_stage("Script Generation")
             logger.info("Generating Deployment Scripts")
             logger.info(
                 f"Scripts not found in {self.sds_dir}, generating with "
@@ -413,6 +418,9 @@ class DeploymentAgent:
                 logger.info("Shutdown requested, aborting deployment")
                 return False
 
+            self.ui.set_stage(
+                "Deployment", detail=f"Attempt {attempt}/{absolute_max_attempts}"
+            )
             logger.info(f"--- Deployment Attempt #{attempt} ---")
 
             # Start deployment phase in trajectory
@@ -497,7 +505,7 @@ class DeploymentAgent:
                         )
 
                         # Health check failed - ask agent to analyze and fix
-                        if not self._fix_with_agent(
+                        if self._fix_with_agent(
                             deploy_result,
                             health_result,
                             attempt,
@@ -505,42 +513,52 @@ class DeploymentAgent:
                             log_file_path,
                             health_check_log_path,
                         ):
-                            r.set_phase_status("failed")
-                            return False
-
-                        # Re-run health check before committing to a full
-                        # re-deploy.  If the agent only fixed health_check.sh
-                        # (e.g. wrong service names) the containers are already
-                        # healthy and a restart would be wasteful.
-                        recheck_log = (
-                            self.sds_dir
-                            / "logs"
-                            / f"health_recheck_attempt_{attempt}.log"
-                        )
-                        recheck = run_health_check(
-                            self.repo_path,
-                            self.health_check_script,
-                            log_file_path=recheck_log,
-                        )
-                        recheck_ec = recheck.get("exit_code")
-                        r.add_tool_call(
-                            tool="bash",
-                            args={"script": ".sds/health_check.sh (post-fix recheck)"},
-                            stdout=recheck.get("stdout", ""),
-                            stderr=recheck.get("stderr", ""),
-                            exit_code=int(recheck_ec) if recheck_ec is not None else -1,
-                        )
-
-                        if recheck["success"]:
-                            logger.success(
-                                "Health check passed after agent fix. Deployment successful!"
+                            # Re-run health check before committing to a full
+                            # re-deploy.  If the agent only fixed health_check.sh
+                            # (e.g. wrong service names) the containers are already
+                            # healthy and a restart would be wasteful.
+                            recheck_log = (
+                                self.sds_dir
+                                / "logs"
+                                / f"health_recheck_attempt_{attempt}.log"
                             )
-                            r.add_assistant_message(
-                                "Health check passed after agent fix. Deployment successful!"
+                            recheck = run_health_check(
+                                self.repo_path,
+                                self.health_check_script,
+                                log_file_path=recheck_log,
                             )
-                            return True
+                            recheck_ec = recheck.get("exit_code")
+                            r.add_tool_call(
+                                tool="bash",
+                                args={
+                                    "script": ".sds/health_check.sh (post-fix recheck)"
+                                },
+                                stdout=recheck.get("stdout", ""),
+                                stderr=recheck.get("stderr", ""),
+                                exit_code=int(recheck_ec)
+                                if recheck_ec is not None
+                                else -1,
+                            )
 
-                        r.set_phase_status("needs_retry")
+                            if recheck["success"]:
+                                logger.success(
+                                    "Health check passed after agent fix. Deployment successful!"
+                                )
+                                r.add_assistant_message(
+                                    "Health check passed after agent fix. Deployment successful!"
+                                )
+                                return True
+
+                            r.set_phase_status("needs_retry")
+                        else:
+                            if attempt < absolute_max_attempts:
+                                logger.warning(
+                                    "Agent failed to fix (or crashed), but retrying..."
+                                )
+                                r.set_phase_status("needs_retry")
+                            else:
+                                r.set_phase_status("failed")
+                                return False
                 else:
                     res = deploy_result["exit_code"]
                     logger.error(f"Deployment script failed (exit code: {res})")
@@ -549,16 +567,23 @@ class DeploymentAgent:
                     )
 
                     # Deployment failed - ask agent to analyze and fix
-                    if not self._fix_with_agent(
+                    if self._fix_with_agent(
                         deploy_result,
                         None,
                         attempt,
                         absolute_max_attempts,
                         log_file_path,
                     ):
-                        r.set_phase_status("failed")
-                        return False
-                    r.set_phase_status("needs_retry")
+                        r.set_phase_status("needs_retry")
+                    else:
+                        if attempt < absolute_max_attempts:
+                            logger.warning(
+                                "Agent failed to fix (or crashed), but retrying..."
+                            )
+                            r.set_phase_status("needs_retry")
+                        else:
+                            r.set_phase_status("failed")
+                            return False
 
         return False
 
@@ -598,6 +623,9 @@ class DeploymentAgent:
             time_func=self._get_time,
             sleep_func=self._sleep,
             popen_func=subprocess.Popen,
+            ui=self.ui,
+            tool_name="deploy.sh",
+            tool_args={"command": command},
         )
 
         # Create progress summarizer
@@ -649,6 +677,9 @@ class DeploymentAgent:
             logger.error(f"Reached maximum attempts ({max_attempts}), giving up")
             return False
 
+        self.ui.set_stage(
+            "Fixing Deployment Issues", detail=f"Attempt {attempt}/{max_attempts}"
+        )
         logger.info(f"Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
 
         # Prepare error context

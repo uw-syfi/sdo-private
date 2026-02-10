@@ -184,28 +184,39 @@ class ScriptGeneratingAgent(CodingAgent):
     integration testing the deployment flow.
     """
 
-    def __init__(self, generate_valid_scripts: bool = True):
+    def __init__(
+        self,
+        generate_valid_scripts: bool = True,
+        responses: Optional[List[str]] = None,
+    ):
         """Initialize the script generating agent.
 
         Args:
             generate_valid_scripts: If True, generate working scripts.
                                    If False, generate broken scripts.
+            responses: Custom script contents (if None, uses defaults).
         """
         self.generate_valid_scripts = generate_valid_scripts
-        self.calls: List[str] = []
+        self.calls: List[tuple[str, Optional[str], int]] = []
+        self.responses = responses or [
+            "#!/bin/bash\necho deploy",
+            "#!/bin/bash\necho health",
+        ]
+        self.call_count = 0
 
-    def generate(self, prompt: str, cwd: Optional[str] = None, **kwargs) -> str:
+    def generate(self, prompt: str, cwd: Optional[str] = None, timeout: int = 300, **kwargs) -> str:
         """Generate scripts based on the prompt.
 
         Args:
             prompt: The prompt requesting script generation.
             cwd: Working directory for script creation.
+            timeout: Timeout for generation.
             **kwargs: Additional arguments.
 
         Returns:
             str: A response indicating script generation.
         """
-        self.calls.append(prompt)
+        self.calls.append((prompt, cwd, timeout))
 
         if cwd is None:
             return "No working directory specified"
@@ -218,28 +229,35 @@ class ScriptGeneratingAgent(CodingAgent):
         # Create .sds directory if needed
         sds_dir.mkdir(exist_ok=True)
 
-        if "deploy.sh" in prompt.lower():
-            deploy_script = sds_dir / "deploy.sh"
-            if self.generate_valid_scripts:
-                deploy_script.write_text(
-                    "#!/bin/bash\necho 'Deployment successful'\nexit 0\n"
-                )
-            else:
-                deploy_script.write_text(
-                    "#!/bin/bash\necho 'Deployment failed'\nexit 1\n"
-                )
-            deploy_script.chmod(0o755)
+        # Determine which file to write based on prompt
+        filename = None
+        if "Create the file at: .sds/health_check.sh" in prompt:
+            filename = "health_check.sh"
+        elif "Create the file at: .sds/deploy.sh" in prompt:
+            filename = "deploy.sh"
+        elif "deploy.sh" in prompt.lower():
+            filename = "deploy.sh"
+        elif "health_check.sh" in prompt.lower():
+            filename = "health_check.sh"
 
-        if "health_check.sh" in prompt.lower():
-            health_script = sds_dir / "health_check.sh"
-            if self.generate_valid_scripts:
-                health_script.write_text(
-                    "#!/bin/bash\necho 'Health check passed'\nexit 0\n"
-                )
+        if filename:
+            script_path = sds_dir / filename
+            # Use custom response if provided, otherwise use defaults
+            if self.responses and self.call_count < len(self.responses):
+                content = self.responses[self.call_count % len(self.responses)]
+            elif self.generate_valid_scripts:
+                if filename == "deploy.sh":
+                    content = "#!/bin/bash\necho 'Deployment successful'\nexit 0\n"
+                else:
+                    content = "#!/bin/bash\necho 'Health check passed'\nexit 0\n"
             else:
-                health_script.write_text(
-                    "#!/bin/bash\necho 'Health check failed'\nexit 1\n"
-                )
-            health_script.chmod(0o755)
+                if filename == "deploy.sh":
+                    content = "#!/bin/bash\necho 'Deployment failed'\nexit 1\n"
+                else:
+                    content = "#!/bin/bash\necho 'Health check failed'\nexit 1\n"
 
-        return "Scripts generated successfully"
+            script_path.write_text(content, encoding="utf-8")
+            script_path.chmod(0o755)
+
+        self.call_count += 1
+        return "I have generated the scripts."

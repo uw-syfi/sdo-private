@@ -5,6 +5,7 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
 
+from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -29,6 +30,7 @@ class CodeAnalyzerAgent:
         filesystem: Optional[FileSystemInterface] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
         dspy_config: Optional["DSPyConfig"] = None,
+        ui: Optional[OperatorUI] = None,
     ):
         """Initialize the code analyzer agent.
 
@@ -38,12 +40,14 @@ class CodeAnalyzerAgent:
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
             dspy_config: Optional DSPy configuration for optimized prompts.
+            ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
+        self.ui = ui or NullOperatorUI()
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"
         self.issues_file = self.sds_dir / "deployment_issues.md"

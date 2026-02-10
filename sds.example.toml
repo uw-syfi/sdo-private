@@ -2,6 +2,7 @@
 provider = "codex" # or "gemini", "claude", "opencode", "openai", "anthropic"
 # model = "gpt-4o-mini" # required for langgraph runtime
 # location = "us-central1" # optional: specify vertex AI location (default: us-central1)
+# thinking_budget = 16000 # optional: enable thinking for supported models (e.g. claude-3-7, gemini-2.0-flash-thinking)
 
 [runtime]
 impl = "cli_agent" # or "langgraph", "adk"

@@ -13,6 +13,7 @@ from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
+from app_operator.ui import OperatorUI, NullOperatorUI
 from app_operator.trajectory import TrajectoryRecorder
 
 
@@ -34,6 +35,7 @@ class AppOperator:
         agent: Optional[CodingAgent] = None,
         filesystem: Optional[FileSystemInterface] = None,
         config: Optional[Config] = None,
+        ui: Optional[OperatorUI] = None,
     ):
         """Initialize the application operator.
 
@@ -45,11 +47,13 @@ class AppOperator:
             agent: Optional coding agent to use. If None, creates one from config.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             config: Optional configuration object.
+            ui: Optional UI interface.
         """
         self.health_check_interval = health_check_interval
         self.health_check_max_count = health_check_max_count
         self.max_deployment_attempts = max_deployment_attempts
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+        self.ui = ui or NullOperatorUI()
 
         # Convert to Path and resolve only for real filesystem
         # (InMemoryFilesystem doesn't need symlink resolution)
@@ -88,6 +92,10 @@ class AppOperator:
         else:
             self.agent = agent
 
+        # Attach UI to agent if supported
+        if hasattr(self.agent, "event_handler"):
+            self.agent.event_handler = self.ui
+
         self._shutdown_requested = False
         self._deployed = False
 
@@ -119,6 +127,7 @@ class AppOperator:
             self.filesystem,
             recorder=self.recorder,
             dspy_config=self.config.dspy,
+            ui=self.ui,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,
@@ -128,6 +137,7 @@ class AppOperator:
             self.config.operator,
             recorder=self.recorder,
             dspy_config=self.config.dspy,
+            ui=self.ui,
         )
         self.monitor = AppMonitor(
             self.repo_path,
@@ -135,6 +145,7 @@ class AppOperator:
             self.filesystem,
             recorder=self.recorder,
             dspy_config=self.config.dspy,
+            ui=self.ui,
         )
 
     def _persist_deployment_config(self) -> None:
@@ -174,11 +185,15 @@ class AppOperator:
             logger.info(f"Deployment Platform: {self.config.deployment.platform}")
             logger.info(f"Deployment Target: {self.config.deployment.target}")
 
+            self.ui.set_stage("Initializing")
+
             # Step 1: Code Analysis
+            self.ui.set_stage("Code Analysis")
             self.analyzer.run()
 
             # Step 2: Deploy with automatic error fixing (includes script
             # generation)
+            self.ui.set_stage("Deployment")
             if not self.deployer.run(
                 max_attempts=self.max_deployment_attempts,
                 check_shutdown=lambda: self._shutdown_requested,
@@ -189,6 +204,7 @@ class AppOperator:
             self._deployed = True
 
             # Step 3: Monitor health and provide analysis
+            self.ui.set_stage("Monitoring")
             self.monitor.run(
                 interval=self.health_check_interval,
                 max_checks=self.health_check_max_count,
@@ -209,6 +225,10 @@ class AppOperator:
             traceback.print_exc()
             return 1
         finally:
+            self.ui.close(
+                status="completed" if self._deployed else "failed",
+                exit_code=0 if self._deployed else 1,
+            )
             self._cleanup()
             self.recorder.finalize("completed" if self._deployed else "failed")
 

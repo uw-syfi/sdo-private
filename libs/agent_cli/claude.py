@@ -12,6 +12,7 @@ from .claude_events import (
     MultiEvent,
     ResultEvent,
 )
+from .events import AgentEventHandler
 from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
@@ -62,12 +63,16 @@ class ClaudeGenerationSession(CLIGenerationSession):
         """Update internal state based on the event."""
         if isinstance(event, TextEvent):
             self.stdout_lines.append(event.text)
+            if self.event_handler:
+                self.event_handler.on_thinking(event.text)
 
         elif isinstance(event, ToolUseEvent):
             if event.tool_id:
                 self.tool_map[event.tool_id] = event.tool_name
                 self.tool_start_times[event.tool_id] = time.time()
                 self.tool_args[event.tool_id] = event.parameters
+                if self.event_handler:
+                    self.event_handler.on_tool_call(event.tool_name, event.parameters)
 
         elif isinstance(event, ToolResultEvent):
             if event.tool_id:
@@ -84,6 +89,12 @@ class ClaudeGenerationSession(CLIGenerationSession):
                     stdout=event.output,
                     duration=duration,
                 )
+                if self.event_handler:
+                    self.event_handler.on_tool_result(
+                        tool=event.tool_name_resolved,
+                        stdout=event.output,
+                        duration=duration,
+                    )
 
         elif isinstance(event, ResultEvent):
             # Store the final result from the result event
@@ -146,14 +157,16 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         self,
         model: Optional[str] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        event_handler: Optional[AgentEventHandler] = None,
     ):
         """Initialize the Claude Code coding agent.
 
         Args:
             model: Optional model name to use with Claude Code. If None, uses default.
             recorder: Trajectory recorder instance.
+            event_handler: Optional event handler for UI updates.
         """
-        super().__init__("claude", model, recorder)
+        super().__init__("claude", model, recorder, event_handler)
 
     @property
     def claude_path(self) -> str:
@@ -197,4 +210,5 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             timeout=timeout,
             silent=silent,
             recorder=recorder,
+            event_handler=self.event_handler,
         )

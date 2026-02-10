@@ -9,6 +9,7 @@ from typing import Optional, Callable, Any, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
 
+from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -56,7 +57,9 @@ class HealthCheckTask(MonitoringTask):
             # Run health check
             start_time = time.time()
             health_result = run_health_check(
-                monitor.repo_path, monitor.health_check_script
+                monitor.repo_path,
+                monitor.health_check_script,
+                ui=monitor.ui,
             )
             duration = time.time() - start_time
 
@@ -172,7 +175,7 @@ class HealthCheckTask(MonitoringTask):
         repo_path: Path,
         health_result: dict,
         check_count: int,
-        dspy_config: Optional['DSPyConfig'] = None,
+        dspy_config: Optional["DSPyConfig"] = None,
         recorder=None,
     ) -> str:
         """Create a prompt for the coding agent to analyze health check results.
@@ -196,8 +199,8 @@ class HealthCheckTask(MonitoringTask):
             repo_path=repo_path,
             context=context,
             # DSPy fields (for DSPy signature)
-            health_check_output=health_result.get('stdout', ''),
-            exit_code=health_result.get('exit_code', -1),
+            health_check_output=health_result.get("stdout", ""),
+            exit_code=health_result.get("exit_code", -1),
             iteration=check_count,
             _trajectory_recorder=recorder,
         )
@@ -217,7 +220,8 @@ class AppMonitor:
         agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
-        dspy_config: Optional['DSPyConfig'] = None,
+        dspy_config: Optional["DSPyConfig"] = None,
+        ui: Optional[OperatorUI] = None,
     ):
         """Initialize the monitor agent.
 
@@ -227,12 +231,14 @@ class AppMonitor:
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
             dspy_config: Optional DSPy configuration for optimized prompts.
+            ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
+        self.ui = ui or NullOperatorUI()
         self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
@@ -285,6 +291,7 @@ class AppMonitor:
 
             self.check_count += 1
 
+            self.ui.set_stage("Monitoring", detail=f"Cycle {self.check_count}")
             logger.info(f"Monitoring Cycle #{self.check_count}")
 
             # Run all registered monitoring tasks
