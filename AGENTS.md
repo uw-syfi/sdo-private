@@ -12,12 +12,11 @@ sds/
 │   ├── __main__.py       # Entry point for `python -m lego_agent`
 │   ├── cli.py            # CLI argument parsing and mode selection
 │   ├── engine.py         # Core clarification loop and orchestration engine
-│   ├── io.py             # I/O abstractions (ConsoleIO, TextualIO)
+│   ├── io.py             # I/O abstractions (ConsoleIO)
 │   ├── models.py         # Data models (LegoAgentResponse, LegoAgentResult)
 │   ├── runtime.py        # LangGraph agent runtime and orchestration patterns
 │   ├── storage.py        # Script storage management
 │   ├── server.py         # FastAPI WebSocket server for Web UI
-│   ├── tui.py            # Textual-based interactive TUI implementation
 │   ├── ui/               # Next.js Web UI
 │   │   ├── app/          # App Router components
 │   │   └── ...
@@ -161,12 +160,11 @@ This implementation uses a stateful graph to manage the lifecycle:
 
 ## 2. LegoAgent Module (`lego_agent/`)
 
-The **LegoAgent** module is an autonomous script generation system that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. It features an interactive TUI, clarification loops, and supports advanced orchestration patterns.
+The **LegoAgent** module is an autonomous script generation system that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. It features clarification loops and supports advanced orchestration patterns.
 
 ### Key Features
 
 *   **Web UI Mode**: Modern Next.js interface with real-time visualization of agent thinking and tool usage.
-*   **Interactive TUI Mode**: Textual-based rich terminal interface (legacy).
 *   **Clarification Loop**: Iteratively refines requirements through AI-powered questions before generating scripts.
 *   **Orchestration Patterns**: Built-in support for `fan_out`, `summarize`, and `judge_loop` patterns.
 *   **Automatic Repo Detection**: Finds project root by searching upward for `.git` or `sds.toml`.
@@ -200,14 +198,6 @@ The **LegoAgent** module is an autonomous script generation system that uses AI 
     *   **UserIO Protocol**: Duck-typed interface for user interaction.
     *   **WebIO**: WebSocket-based implementation for the Web UI.
     *   **ConsoleIO**: ANSI-colored console output for CLI mode.
-    *   **TextualIO**: Rich Textual widgets for TUI mode.
-
-*   **LegoAgentTUI (`tui.py`)**:
-    *   Textual App implementation with `RichLog` widget.
-    *   Interactive input field for prompts and answers.
-    *   Work directory display in header.
-    *   Async script execution with live stdout/stderr streaming.
-    *   Uses `flexoki` theme for consistent styling.
 
 *   **LangGraphAgent (`runtime.py`)**:
     *   Wraps LangGraph React agent for orchestration.
@@ -243,7 +233,7 @@ The **LegoAgent** module is an autonomous script generation system that uses AI 
 ```
 This starts the backend on port 8000 and the frontend on port 3000. Open `http://localhost:3000` in your browser.
 
-**Default TUI Mode:**
+**Default CLI Mode:**
 ```bash
 uv run -m lego_agent
 ```
@@ -253,13 +243,8 @@ uv run -m lego_agent
 uv run -m lego_agent --prompt "Scrape hacker news and summarize top 3 AI stories"
 ```
 
-**CLI Mode (No TUI):**
-```bash
-uv run -m lego_agent --no-tui --prompt "Your task"
-```
-
 **Available Flags:**
-- `--prompt`: Initial user prompt (interactive if omitted in TUI mode).
+- `--prompt`: Initial user prompt (interactive if omitted).
 - `--loop-bound`: Maximum iterations for loops (default: 10).
 - `--max-clarifications`: Maximum clarification rounds (default: 5).
 - `--config`: Path to `sds.toml` (optional, auto-detects repo root).
@@ -267,7 +252,6 @@ uv run -m lego_agent --no-tui --prompt "Your task"
 - `--output-dir`: Output directory (default: `lego_agent_runs`).
 - `--work-dir`: Execution directory (default: current directory).
 - `--no-run`: Generate script but do not execute it.
-- `--no-tui`: Use CLI mode instead of TUI.
 
 ### Data Flow (Web UI)
 
@@ -283,10 +267,10 @@ Browser (Next.js) <── WebSocket ──> FastAPI (server.py)
                                     Execution
 ```
 
-### Data Flow (TUI/CLI)
+### Data Flow (CLI)
 
 ```
-User Input (TUI or CLI)
+User Input (CLI)
     ↓
 Config loading (sds.toml)
     ↓
@@ -353,7 +337,7 @@ Scripts are saved in `lego_agent_runs/<timestamp>/lego_agent.py` with:
 *   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs in `.sds/logs/`.
 *   **When debugging lego_agent scripts:** Check `lego_agent_runs/<timestamp>/lego_agent.py` and examine the clarification history.
 *   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
-*   **When adding lego_agent features:** Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
+*   **When adding lego_agent features:** Test both Web UI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
 *   **When adding a new feature:** Think of what new behavior(s) are being introduced, and how you would test them. Test public behavior, not internal implementation details.
 *   **When fixing bugs:** Think of how to write test(s) to reproduce the issue first and then use them to verify your fix. The test should be part of your fix. If you cannot do so, you must defend your decision.
 

@@ -80,17 +80,10 @@ Run the agent directly from the terminal without the UI. Note that `--work-dir` 
 
 ```bash
 # Using the wrapper script
-./sds_lego_agent --no-tui --prompt "Improve application test coverage to >= 80%" --work-dir .
+./sds_lego_agent --prompt "Improve application test coverage to >= 80%" --work-dir .
 
 # Or using uv directly
-uv run -m lego_agent --no-tui --prompt "Your task description" --work-dir .
-```
-
-### Legacy TUI Mode
-> **Note**: The TUI mode is deprecated and will be removed in future versions.
-
-```bash
-uv run -m lego_agent
+uv run -m lego_agent --prompt "Your task description" --work-dir .
 ```
 
 ---
