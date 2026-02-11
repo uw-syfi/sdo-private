@@ -38,11 +38,13 @@ export function InputArea({
     if (initialCwd && initialCwd !== '.') {
       setWorkDir(initialCwd);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCwd]);
 
   // Reset selected index when options change
   useEffect(() => {
       setSelectedIndex(0);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirOptions]);
 
   // Scroll selected item into view

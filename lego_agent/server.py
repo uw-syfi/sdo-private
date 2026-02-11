@@ -120,6 +120,13 @@ class WebIO:
         await self._flush_thinking()
         await self._send_event("log", {"message": message, "level": level})
 
+    def render_graph(self, config: Dict[str, Any]) -> None:
+        asyncio.create_task(self._send_graph_async(config))
+
+    async def _send_graph_async(self, config: Dict[str, Any]):
+        await self._flush_thinking()
+        await self._send_event("graph", {"config": config})
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

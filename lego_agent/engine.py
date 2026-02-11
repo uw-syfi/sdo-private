@@ -1,5 +1,6 @@
 import json
 import ast
+import yaml
 from pathlib import Path
 from typing import List, Tuple, Any, Callable
 
@@ -64,7 +65,7 @@ class LegoAgentEngine:
         return t
 
     def _submit_response(
-        self, status: str, questions: List[str] = None, python_script: str = None
+        self, status: str, questions: List[str] = None, yaml_config: str = None
     ) -> str:
         """
         Submit the final response to the user.
@@ -72,7 +73,7 @@ class LegoAgentEngine:
         Args:
             status: 'clarify' if you have questions, or 'ready' if the script is complete.
             questions: List of questions if status is 'clarify'.
-            python_script: The complete python script if status is 'ready'.
+            yaml_config: The complete yaml config if status is 'ready'.
         """
         return "Response submitted."
 
@@ -122,12 +123,11 @@ class LegoAgentEngine:
 
             self._thinking_started = False
             # Render prompts
-            system_prompt = self.prompt_loader.render("lego_agent/system.jinja2")
+            system_prompt = self.prompt_loader.render(
+                "lego_agent/system.jinja2", qa_pairs=qa_pairs
+            )
             user_msg_text = self.prompt_loader.render(
-                "lego_agent/user.jinja2",
-                user_prompt=user_prompt,
-                qa_pairs=qa_pairs,
-                loop_bound=self.loop_bound,
+                "lego_agent/user.jinja2", user_prompt=user_prompt
             )
 
             # Create agent graph
@@ -154,7 +154,10 @@ class LegoAgentEngine:
                     kind = event["event"]
 
                     if kind == "on_chat_model_stream":
-                        content = event["data"]["chunk"].content
+                        chunk = event["data"].get("chunk")
+                        if not chunk:
+                            continue
+                        content = chunk.content
                         text_chunk = self._parse_chunk_content(content)
 
                         if text_chunk:
@@ -176,7 +179,7 @@ class LegoAgentEngine:
                                     LegoAgentResponse(
                                         status=inputs.get("status"),
                                         questions=inputs.get("questions", []) or [],
-                                        python_script=inputs.get("python_script"),
+                                        yaml_config=inputs.get("yaml_config"),
                                     ).validate()
                                     break
                                 except Exception:
@@ -259,7 +262,7 @@ class LegoAgentEngine:
                         response = LegoAgentResponse(
                             status=final_response_data.get("status"),
                             questions=final_response_data.get("questions", []) or [],
-                            python_script=final_response_data.get("python_script"),
+                            yaml_config=final_response_data.get("yaml_config"),
                         )
                         response.validate()
                     except Exception as e:
@@ -267,10 +270,18 @@ class LegoAgentEngine:
 
                 if not response:
                     response = parse_lego_agent_response(final_content)
+
+                # Validate YAML immediately to trigger repair loop if needed
+                if response.status == "ready":
+                    if not response.yaml_config:
+                        raise ValueError("Status is ready but no yaml_config provided.")
+                    self._validate_config(response.yaml_config)
             except ValueError as e:
                 # SDS-REVIEW: Logic - Repair logic should be encapsulated in `_repair_response()`.
                 # Attempt repair
-                self.io.render_error(f"Parsing failed, attempting repair... {e}")
+                self.io.render_error(
+                    f"Parsing/Validation failed, attempting repair... {e}"
+                )
                 repair_msg_text = self.prompt_loader.render(
                     "lego_agent/repair.jinja2", error=str(e), raw_response=final_content
                 )
@@ -293,6 +304,11 @@ class LegoAgentEngine:
 
                 self.io.info("")
                 response = parse_lego_agent_response(final_content)
+                # Verify repair
+                if response.status == "ready":
+                    if not response.yaml_config:
+                        raise ValueError("Status is ready but no yaml_config provided.")
+                    self._validate_config(response.yaml_config)
 
             if response.status == "clarify":
                 self.io.render_info("Agent needs clarification:")
@@ -302,51 +318,55 @@ class LegoAgentEngine:
                     qa_pairs.append((q, a))
 
             elif response.status == "ready":
-                script_text = response.python_script
-                if not script_text:
-                    raise AgentError("Status is ready but no script provided.")
+                yaml_text = response.yaml_config
+                if not yaml_text:
+                    raise AgentError("Status is ready but no yaml_config provided.")
 
-                # Validate script
-                self._validate_script(script_text)
+                # Validate config
+                self._validate_config(yaml_text)
 
-                # Write to file
-                script_path = self.storage.write_script(script_text)
+                # Write YAML config
+                config_path = self.storage.write_config(yaml_text)
+
+                # Render graph in UI
+                try:
+                    config_dict = yaml.safe_load(yaml_text)
+                    self.io.render_graph(config_dict)
+                except Exception as e:
+                    logger.warning(f"Failed to render graph: {e}")
+
+                # Generate Python launcher script
+                launcher_script = (
+                    f"#!/usr/bin/env python3\n"
+                    f"import sys\n"
+                    f"from pathlib import Path\n"
+                    f"from lego_agent.runtime import run_yaml\n\n"
+                    f"MAX_ITERATIONS = {self.loop_bound}\n\n"
+                    f"if __name__ == '__main__':\n"
+                    f"    config_path = '{config_path}'\n"
+                    f"    run_yaml(config_path)\n"
+                )
+
+                script_path = self.storage.write_script(launcher_script)
 
                 return LegoAgentResult(
                     script_path=script_path,
-                    script_text=script_text,
+                    config_path=config_path,
+                    script_text=launcher_script,
                     clarifications=qa_pairs,
                 )
 
         raise AgentError("Unreachable code")
 
-    def _validate_script(self, script_text: str) -> None:
-        """Validate the generated script content."""
-        errors = []
-
-        if f"MAX_ITERATIONS = {self.loop_bound}" not in script_text:
-            errors.append(f"Script must define `MAX_ITERATIONS = {self.loop_bound}`")
-
-        if (
-            "libs.agent_cli" not in script_text
-            and "lego_agent.runtime" not in script_text
-            and "app_operator" not in script_text
-        ):
-            errors.append(
-                "Script must import from `lego_agent.runtime` or related modules"
-            )
-
-        if (
-            'if __name__ == "__main__":' not in script_text
-            and "if __name__ == '__main__':" not in script_text
-        ):
-            errors.append('Script must include `if __name__ == "__main__":` block')
-
-        if errors:
-            # Include script snippet in error for debugging
-            snippet = (
-                script_text[:500] + "..." if len(script_text) > 500 else script_text
-            )
-            raise ValueError(
-                f"Script validation failed:\n{snippet}\n" + "\n".join(errors)
-            )
+    def _validate_config(self, yaml_text: str) -> None:
+        """Validate the generated YAML config."""
+        try:
+            config = yaml.safe_load(yaml_text)
+            if not isinstance(config, dict):
+                raise ValueError("YAML must be a dictionary")
+            if "workflow" not in config:
+                raise ValueError("YAML must contain 'workflow' key")
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML: {e}")
+        except Exception as e:
+            raise ValueError(f"Config validation failed: {e}")

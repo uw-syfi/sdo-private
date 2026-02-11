@@ -19,6 +19,7 @@ def test_cli_no_run(tmp_path):
         mock_engine_instance = mock_engine_cls.return_value
         result = LegoAgentResult(
             script_path=tmp_path / "generated_script.py",
+            config_path=tmp_path / "generated_config.yaml",
             script_text="print('hello')",
             clarifications=[],
         )
@@ -40,7 +41,6 @@ def test_cli_no_run(tmp_path):
                     "--prompt",
                     "test",
                     "--no-run",
-                    "--no-tui",
                     "--work-dir",
                     ".",
                 ],
@@ -58,7 +58,7 @@ def test_cli_no_run(tmp_path):
             with patch.object(
                 sys,
                 "argv",
-                ["lego_agent", "--prompt", "test", "--no-tui", "--work-dir", "."],
+                ["lego_agent", "--prompt", "test", "--work-dir", "."],
             ):
                 exit_code = main()
 

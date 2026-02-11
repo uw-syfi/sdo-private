@@ -34,16 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-run", action="store_true", help="Generate script but do not execute it"
     )
-    parser.add_argument(
-        "--no-tui", action="store_true", help="Run in standard CLI mode instead of TUI"
-    )
     return parser
 
 
 def main() -> int:
-    # SDS-REVIEW: Architecture - This function is too long (high complexity).
-    # It mixes config loading, TUI initialization, and CLI execution.
-    # Suggest refactoring into: `setup_config()`, `run_tui()`, `run_cli()`.
     parser = build_parser()
     args = parser.parse_args()
 
@@ -71,39 +65,6 @@ def main() -> int:
     # Get loop bound
     # SDS-REVIEW: Magic Number - Default loop bound '10' is hardcoded. Define as constant.
     loop_bound = args.loop_bound if args.loop_bound is not None else 10
-
-    if not args.no_tui:
-        try:
-            from lego_agent.tui import LegoAgentTUI
-
-            def engine_factory(io):
-                return LegoAgentEngine(
-                    config=config,
-                    prompt_loader=prompt_loader,
-                    io=io,
-                    loop_bound=loop_bound,
-                    max_clarifications=args.max_clarifications,
-                    agent_timeout=config.operator.agent_timeout,
-                    output_dir=output_dir,
-                    work_dir=work_dir,
-                )
-
-            app = LegoAgentTUI(
-                engine_factory,
-                initial_prompt=args.prompt,
-                work_dir=str(work_dir),
-                repo_root=str(repo_root),
-            )
-            app.run()
-            return 0
-        except Exception as e:
-            # SDS-REVIEW: Error Handling - Avoid bare `print_exc()`.
-            # Use `logger.exception()` or a dedicated error handler.
-            logger.error(f"TUI failed: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return 1
 
     io = ConsoleIO()
 

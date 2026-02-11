@@ -9,7 +9,7 @@ from app_operator.config import Config, AgentConfig, OperatorConfig
 def mock_config():
     return Config(
         agent=AgentConfig(provider="gemini", model="gemini-1.5-pro"),
-        operator=OperatorConfig()
+        operator=OperatorConfig(),
     )
 
 
@@ -28,26 +28,30 @@ def test_submit_response_tool_usage(tmp_path, mock_config):
             # Event 1: Thinking
             yield {
                 "event": "on_chat_model_stream",
-                "data": {"chunk": MagicMock(content="I am ready.")}
+                "data": {"chunk": MagicMock(content="I am ready.")},
             }
             # Event 2: Tool Use
             yield {
                 "event": "on_tool_start",
                 "name": "submit_response",
-                "data": {"input": {
-                    "status": "ready",
-                    "python_script": "import lego_agent.runtime\nMAX_ITERATIONS = 10\nif __name__ == \"__main__\": pass"
-                }}
+                "data": {
+                    "input": {
+                        "status": "ready",
+                        "yaml_config": "workflow: ...",
+                        "python_script": 'import lego_agent.runtime\nMAX_ITERATIONS = 10\nif __name__ == "__main__": pass',
+                    }
+                },
             }
             # Event 3: Tool End
             yield {
                 "event": "on_tool_end",
                 "name": "submit_response",
-                "data": {"output": "Response submitted."}
+                "data": {"output": "Response submitted."},
             }
 
         async def mock_ainvoke(*args, **kwargs):
             return {"messages": [MagicMock(content="fallback")]}
+
         mock_agent.ainvoke = mock_ainvoke
         mock_agent.astream_events = mock_astream_events
         # Patch create_react_agent and build_llm
@@ -61,7 +65,7 @@ def test_submit_response_tool_usage(tmp_path, mock_config):
                     max_clarifications=1,
                     agent_timeout=10,
                     output_dir=tmp_path,
-                    work_dir=tmp_path
+                    work_dir=tmp_path,
                 )
 
                 result = await engine.run_async("test prompt")
