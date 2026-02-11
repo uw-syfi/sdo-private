@@ -11,8 +11,8 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 if [ -d "$PROJECT_ROOT/lego_agent/ui" ]; then
     echo "Running frontend tests..."
     cd "$PROJECT_ROOT/lego_agent/ui"
-    # Install dependencies if node_modules is missing
-    if [ ! -d "node_modules" ]; then
+    # Install dependencies if node_modules is missing or if running in CI
+    if [ -n "$CI" ] || [ ! -d "node_modules" ]; then
         echo "Installing frontend dependencies..."
         npm ci
     fi
