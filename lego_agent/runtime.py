@@ -452,7 +452,7 @@ class JudgeLoop(Runnable):
                 start = judge_resp.find("{")
                 end = judge_resp.rfind("}")
                 if start != -1 and end != -1:
-                    json_str = judge_resp[start : end + 1]
+                    json_str = judge_resp[start: end + 1]
                     feedback_data = json.loads(json_str)
                 else:
                     feedback_data = {

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 from lego_agent.runtime import fan_out, summarize, judge_loop
 
 
