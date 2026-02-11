@@ -1,5 +1,0 @@
-[agent]
-provider = "gemini"
-
-[operator]
-interval = 30

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "bash .cursor/hooks/post_edit.sh"
+      }
+    ],
+    "afterTabFileEdit": [
+      {
+        "command": "bash .cursor/hooks/post_edit.sh"
+      }
+    ]
+  }
+}

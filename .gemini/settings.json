@@ -1,5 +1,35 @@
 {
   "context": {
     "fileName": "AGENTS.md"
+  },
+  "mcpServers": {
+    "context7": {
+      "httpUrl": "https://mcp.context7.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CONTEXT7_API_KEY}"
+      }
+    }
+  },
+  "hooks": {
+    "AfterTool": [
+      {
+        "matcher": "write_file|replace|Edit",
+        "sequential": true,
+        "hooks": [
+          {
+            "name": "check-errors-after-edit",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/scripts/check-errors.sh",
+            "description": "Run check_errors.sh --fix after edits"
+          },
+          {
+            "name": "format-code-after-edit",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/scripts/format_code.sh",
+            "description": "Run format_code.sh after edits"
+          }
+        ]
+      }
+    ]
   }
 }

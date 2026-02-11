@@ -1,102 +1,138 @@
-# SDS
+# SDS (Self-Defining Systems)
 
-SDS (Self-Defining Systems) is an AI-native approach that embeds agentic LLMs into the full systems lifecycle—specification, design, implementation, and operation—to autonomously explore, validate, and evolve infrastructure.
+SDS is an AI-native approach that embeds agentic LLMs into the full systems lifecycle—specification, design, implementation, and operation—to autonomously explore, validate, and evolve infrastructure.
 
-## Overview
+## Components
 
-This repository contains applications, tools, and infrastructure code for the SDS project.
+The repository consists of two primary tools:
 
-## Project Structure
+- **sds_operator**: An intelligent deployment and monitoring tool that autonomously manages applications. It generates deployment/health scripts, self-corrects errors, and performs continuous monitoring using AI agents.
+- **lego_agent (experimental)**: An autonomous script generation tool that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows using patterns like `fan_out`, `summarize`, and `judge_loop`.
 
-```
-sds/
-├── app_operator/    # Application operators and management tools
-│   ├── agents/      # Specialized agents (deployer, monitor)
-│   └── ...
-├── apps/            # Application code and configurations
-├── scripts/         # Helper scripts (formatting, checks)
-├── sds_operator     # CLI tool for running the operator
-├── tests/           # Unit tests
-└── tools/           # Shared tools/utilities
-```
+---
 
-## Application Operator
+## Getting Started
 
-The Application Operator (`app_operator`) is a tool for deploying and monitoring applications with automated health checks and graceful lifecycle management. It also includes AI-powered script generation to automatically create deployment and health check scripts for any application repository.
+### Installation
 
-### Key Features
-
-- **AI-Powered Script Generation**: Automatically generate deployment and health check scripts for any repository using LLM analysis
-- **Automated Deployment**: Deploy applications with a single command
-- **Continuous Health Monitoring**: Periodic health checks with intelligent summaries
-- **Graceful Lifecycle Management**: Clean startup and shutdown handling
-- **LLM-Powered Insights**: Health check summaries generated using OpenAI models
-
-### Quick Start
-
-#### Installation
-
-From the project root:
+Clone the repository with submodules recursively to include target applications:
 
 ```bash
+git clone --recursive git@gitlab.cs.washington.edu:syslab/sds.git
+cd sds
 uv sync
 ```
 
-Or using pip:
+### Environment Setup
+
+1. **API Keys**: Create a `.env` file in the project root with your keys (OpenAI, Gemini/Vertex, Anthropic).
+2. **Configuration**: Copy the example configuration and edit it to select your preferred agent provider and runtime:
+   ```bash
+   cp sds.example.toml sds.toml
+   ```
+
+---
+
+## Running SDS Operator
+
+The `sds_operator` manages the deployment and health lifecycle of applications.
+
+### Single Application Run
+To deploy and monitor a specific application directory (this will auto-generate scripts if missing):
+```bash
+./sds_operator run apps/deathstarbench/hotelReservation
+```
+
+### Experiment Workflow
+For controlled experiments, use the `init-exp` and `run` commands:
+
+1. **Initialize**: Create an isolated experiment environment from an existing app.
+   ```bash
+   ./sds_operator init-exp apps/deathstarbench/hotelReservation my-test-run
+   ```
+2. **Run**: Execute the operator on the created experiment.
+   ```bash
+   ./sds_operator run exp/hotelReservation/my-test-run
+   ```
+
+### Multi-Experiment Runs
+To orchestrate multiple experiments in parallel using a configuration file:
+```bash
+./sds_operator run-exp <exp-name> --parallel 2
+```
+This looks for configuration in `exp_config/<exp-name>/config.toml`. See `exp_config/example/config.toml` for an example.
+
+---
+
+## Running LegoAgent (Experimental)
+
+LegoAgent uses an interactive clarification loop to refine requirements before generating and running an agent workflow graph.
+
+### Web UI Mode (Recommended)
+Launch the modern web interface to interact with the agent:
+```bash
+./scripts/start_lego_ui.sh
+```
+This will start the backend server and frontend application. Open `http://localhost:3000` in your browser.
+
+### Terminal Mode (CLI)
+Run the agent directly from the terminal without the UI. Note that `--work-dir` is required to specify where the generated script will run.
 
 ```bash
-pip install -e .
+# Using the wrapper script
+./sds_lego_agent --prompt "Improve application test coverage to >= 80%" --work-dir .
+
+# Or using uv directly
+uv run -m lego_agent --prompt "Your task description" --work-dir .
 ```
 
-#### Environment Setup
+---
 
-1. Create a `.env` file in the project root with your OpenAI API key (required for health check summaries):
+## Component Details
 
+### SDS Operator Runtimes
+SDS provides three runtime implementations of the Application Operator, selectable in `sds.toml`:
+
+- **CLI Agent Runtime (`cli_agent`)**: The default implementation. It communicates with external coding agents (like Gemini, Claude, or Codex) via their CLI interfaces.
+- **LangGraph Runtime (`langgraph`)**: Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes using LangChain.
+- **ADK Runtime (`adk`)**: Uses Google's Agent Development Kit with Gemini models for deterministic orchestration of agent tasks.
+
+### Operator Outputs & Trajectories
+The operator creates a `.sds/` directory in the target application with:
+- `deploy.sh` and `health_check.sh`: AI-generated scripts.
+- `logs/`: Detailed logs for every deployment and monitoring attempt.
+- `trajectories/`: Structured JSON recordings of all agent interactions, including sequential call IDs and correlation with external session logs (e.g., Gemini sessions).
+
+### LegoAgent Features & Orchestration
+LegoAgent is designed for complex task automation:
+- **Clarification Loop**: AI-powered questions to resolve ambiguities before script generation.
+- **Orchestration Patterns**: Built-in support for `fan_out` (parallel execution), `summarize` (aggregation), and `judge_loop` (iterative refinement).
+- **Validation**: Generated scripts are validated for syntax and safety before execution.
+
+---
+
+## Command Reference
+
+### `run`
+Deploy and monitor an application with autonomous error fixing.
 ```bash
-OPENAI_API_KEY=your_api_key_here
+./sds_operator run <DIR> [--config <FILE>] [--tui]
 ```
 
-2. Configure the agent and operator settings using `sds.toml` in the target repository (or use the default configuration):
-
-```toml
-[agent]
-provider = "codex"  # or "gemini"
-model = "gpt-4o-mini" # optional
-
-[operator]
-interval = 30 # Health check interval in seconds
-```
-
-### Commands
-
-#### Deploy and Monitor an App with AI-Assisted Self-Healing
-
- It uses an AI agent (Codex or Gemini) to deploy and monitor applications.
-
-**What it does:**
-- **Auto-Scripting**: Automatically generates deployment and health check scripts if they are missing. Scripts are created in `<app-dir>/.sds`.
-- **Self-Healing Deployment**: If a deployment fails, the AI agent analyzes the error logs, identifies the root cause, and automatically fixes the scripts before retrying (up to 5 attempts).
-- **AI-Powered Analysis**: Provides intelligent analysis of health check results to suggest improvements.
-
+### `init-exp`
+Initialize a new experiment from an existing application.
 ```bash
-./sds_operator /path/to/repository
+./sds_operator init-exp <APP_PATH> <EXP_NAME>
 ```
 
-
-### Command Reference
-
-#### Deploy and Monitor a Repository
-
-Deploy an application with autonomous error fixing and AI-powered health monitoring.
-
-**Arguments:**
-- `DIR`: Path to the repository directory (required, positional argument)
-
-**Options:**
-- `--config <FILE>`: Path to configuration file (default: `sds.toml` in target dir)
-
-**Example:**
+### `run-exp`
+Run multiple experiments in parallel.
 ```bash
-./sds_operator /path/to/repository
+./sds_operator run-exp <EXPERIMENT_NAME_OR_PATH> [--parallel <N>]
 ```
 
+### `viz-graph`
+Visualize the agent's dependency graph (for LangGraph runtime).
+```bash
+./sds_operator viz-graph [-o graph.png]
+```

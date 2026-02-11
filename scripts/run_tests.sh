@@ -1,15 +1,15 @@
 #!/bin/bash
-# Run tests using pytest via uv
+# Run tests using pytest via uv and npm for frontend
 
 set -e
 
 # Get the directory of the script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "Running tests..."
-cd "$PROJECT_ROOT"
+echo "Running all tests..."
 
-# Run pytest via uv
-# Using --extra test to ensure pytest is available
-uv run --extra test pytest tests
+# Run Python tests
+"$SCRIPT_DIR/test_python.sh" "$@"
+
+# Run frontend tests
+"$SCRIPT_DIR/test_js.sh"

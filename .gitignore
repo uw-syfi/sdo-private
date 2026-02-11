@@ -44,6 +44,8 @@ venv.bak/
 # pyenv
 .python-version
 
+exp
+
 # pytest
 .pytest_cache/
 .coverage
@@ -58,5 +60,15 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# UV
-uv.lock
+sds.toml
+
+.codex
+opencode.json
+
+.hypothesis
+agent_graph.png
+agentflow_runs/
+.sds
+exp_config/
+lego_agent_runs/
+!lego_agent/ui/lib/

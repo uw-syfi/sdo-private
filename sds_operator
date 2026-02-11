@@ -8,9 +8,4 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-if [ -z "$1" ]; then
-    echo "Usage: $0 <app-dir> [options]"
-    exit 1
-fi
-
-uv run -m app_operator run "$@"
+uv run -m app_operator "$@"
