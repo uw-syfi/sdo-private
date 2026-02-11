@@ -55,8 +55,15 @@ formatting:
     - echo "Checking Code Formatting..."
     - ./scripts/format_code.sh --check
 
-unit_tests:
+unit_tests_python:
   extends: .test_job_template
   script:
-    - echo "Running Tests..."
-    - ./scripts/run_tests.sh
+    - echo "Running Python Tests..."
+    - ./scripts/test_python.sh
+
+unit_tests_js:
+  stage: test
+  image: node:20
+  script:
+    - echo "Running Frontend Tests..."
+    - ./scripts/test_js.sh

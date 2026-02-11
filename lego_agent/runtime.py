@@ -452,7 +452,7 @@ class JudgeLoop(Runnable):
                 start = judge_resp.find("{")
                 end = judge_resp.rfind("}")
                 if start != -1 and end != -1:
-                    json_str = judge_resp[start: end + 1]
+                    json_str = judge_resp[start : end + 1]
                     feedback_data = json.loads(json_str)
                 else:
                     feedback_data = {
@@ -576,3 +576,23 @@ def run_yaml(config_path: str):
 
     print(f"\n{Colors.BOLD}{Colors.GREEN}Workflow Complete!{Colors.ENDC}")
     print(f"Result:\n{result}")
+
+
+# Wrapper functions for script usage
+def fan_out(agent: Runnable, items: List[str], max_workers: int = 4) -> List[Any]:
+    """Execute multiple items in parallel using the agent."""
+    return FanOut(agent, items, max_workers).run(None)
+
+
+def summarize(
+    agent: Runnable, items: List[str], instruction: str = "Summarize the inputs."
+) -> str:
+    """Summarize a list of items using the agent."""
+    return Summarize(agent, instruction).run(items)
+
+
+def judge_loop(
+    judge: Runnable, worker: Runnable, task: str, max_iterations: int = 10
+) -> Dict[str, str]:
+    """Execute a judge-worker loop."""
+    return JudgeLoop(judge, worker, task, max_iterations).run(None)
