@@ -68,7 +68,7 @@ def extract_json(text: str) -> str:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1:
-        candidate = text[start : end + 1]
+        candidate = text[start: end + 1]
         try:
             json.loads(candidate)
             return candidate
@@ -81,7 +81,7 @@ def extract_json(text: str) -> str:
     if match:
         return match.group(1)
     if start != -1 and end != -1:
-        return text[start : end + 1]
+        return text[start: end + 1]
 
     return text
 
