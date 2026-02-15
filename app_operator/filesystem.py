@@ -133,6 +133,10 @@ class InMemoryFilesystem(FileSystemInterface):
         self.directories: set = set()  # set of directory paths
         self.should_fail: Dict[str, Exception] = {}  # path -> exception to raise
 
+        # Initialize root directory to support relative paths
+        from pathlib import Path
+        self.directories.add(self._normalize_path(Path(".")))
+
     def simulate_permission_error(self, path: Path):
         """Configure the filesystem to raise PermissionError for a path.
 

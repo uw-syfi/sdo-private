@@ -746,7 +746,7 @@ class DeploymentAgent:
                 # Optionally truncate if too long
                 if len(summary_text) > 2000:
                     summary_text = summary_text[:1900] + "...\n[Response truncated]"
-            
+
             # Always save some summary
             log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
             self.filesystem.mkdir(log_file.parent, parents=True, exist_ok=True)
