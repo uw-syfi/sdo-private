@@ -27,6 +27,7 @@ class AgentConfig:
     provider: str = "codex"
     model: Optional[str] = None
     location: Optional[str] = None
+    thinking_budget: Optional[int] = None
 
     VALID_PROVIDERS = {
         "codex",
@@ -61,6 +62,15 @@ class AgentConfig:
             raise TypeError(
                 f"location must be str or None, got {type(self.location).__name__}"
             )
+        if self.thinking_budget is not None:
+            if not isinstance(self.thinking_budget, int):
+                raise TypeError(
+                    f"thinking_budget must be int or None, got {type(self.thinking_budget).__name__}"
+                )
+            if self.thinking_budget <= 0:
+                raise ValueError(
+                    f"thinking_budget must be positive, got {self.thinking_budget}"
+                )
 
 
 @dataclass

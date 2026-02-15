@@ -4,7 +4,9 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Union
+
+from app_operator.ui import OperatorUI
 
 
 class SubprocessRunner:
@@ -27,6 +29,9 @@ class SubprocessRunner:
         time_func: Optional[Callable[[], float]] = None,
         sleep_func: Optional[Callable[[float], None]] = None,
         popen_func: Optional[Callable] = None,
+        ui: Optional[OperatorUI] = None,
+        tool_name: Optional[str] = None,
+        tool_args: Optional[Union[Dict, str]] = None,
     ):
         """Initialize the subprocess runner.
 
@@ -39,6 +44,9 @@ class SubprocessRunner:
             time_func: Optional function to get current time (default: time.time).
             sleep_func: Optional function to sleep (default: time.sleep).
             popen_func: Optional function to create subprocess (default: self.popen_func).
+            ui: Optional UI for tool events.
+            tool_name: Optional tool name for UI events.
+            tool_args: Optional tool arguments for UI events.
         """
         self.command = command
         self.cwd = cwd
@@ -48,8 +56,11 @@ class SubprocessRunner:
         self.time_func = time_func if time_func is not None else time.time
         self.sleep_func = sleep_func if sleep_func is not None else time.sleep
         self.popen_func = popen_func if popen_func is not None else subprocess.Popen
+        self.ui = ui
+        self.tool_name = tool_name
+        self.tool_args = tool_args
 
-        self.process: Optional[self.popen_func] = None
+        self.process: Optional[subprocess.Popen] = None
         self.stdout_lines: List[str] = []
         self.stderr_lines: List[str] = []
         self._log_file = None
@@ -61,6 +72,11 @@ class SubprocessRunner:
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
+        if self.ui and self.tool_name:
+            self.ui.on_tool_call(self.tool_name, self.tool_args)
+
+        start_time_mono = self.time_func()
+
         # Open log file if provided
         if self.log_file_path:
             try:
@@ -98,25 +114,56 @@ class SubprocessRunner:
             result = self._wait_for_completion()
 
             # Wait for threads to finish reading
-            stdout_thread.join(timeout=1)
-            stderr_thread.join(timeout=1)
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+
+            # Update stdout/stderr with full content captured by threads
+            result["stdout"] = "".join(self.stdout_lines)
+            # Append captured stderr to any existing error message (e.g. timeout msg)
+            result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
+
+            if self.ui and self.tool_name:
+                duration = self.time_func() - start_time_mono
+                self.ui.on_tool_result(
+                    tool=self.tool_name,
+                    stdout=result.get("stdout", ""),
+                    stderr=result.get("stderr", ""),
+                    exit_code=result.get("exit_code"),
+                    duration=duration,
+                )
 
             return result
 
         except (OSError, subprocess.SubprocessError) as e:
-            return {
+            result = {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": f"Failed to run deployment script: {e}",
             }
+            if self.ui and self.tool_name:
+                self.ui.on_tool_result(
+                    tool=self.tool_name,
+                    stdout="",
+                    stderr=result["stderr"],
+                    exit_code=-1,
+                )
+            return result
         except Exception as e:
-            return {
+            result = {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": f"Unexpected error running deployment script: {e}",
             }
+            if self.ui and self.tool_name:
+                self.ui.on_tool_result(
+                    tool=self.tool_name,
+                    stdout="",
+                    stderr=result["stderr"],
+                    exit_code=-1,
+                )
+            return result
         finally:
             if self._log_file:
                 self._log_file.close()
@@ -149,12 +196,43 @@ class SubprocessRunner:
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+            Note: stdout/stderr returned here only contain system messages.
+            Captured output is in self.*_lines and merged in run().
         """
         start_time = self.time_func()
 
-        while self.process.poll() is None:
+        # Handle timeout=0 as a special case that fails immediately
+        if self.timeout == 0:
+            self._ensure_process_terminated()
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Deployment script timed out after 0 seconds\n",
+            }
+
+        while True:
             current_time = self.time_func()
             elapsed = current_time - start_time
+
+            # Check timeout
+            if elapsed >= self.timeout:
+                if self.process.poll() is None:
+                    self.process.terminate()
+                    try:
+                        self.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                    return {
+                        "success": False,
+                        "exit_code": -1,
+                        "stdout": "",
+                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n",
+                    }
+
+            # Check if process completed
+            if self.process.poll() is not None:
+                break
 
             # Check shutdown
             if self.check_shutdown and self.check_shutdown():
@@ -166,38 +244,19 @@ class SubprocessRunner:
                 return {
                     "success": False,
                     "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": "Deployment interrupted by shutdown request\n"
-                    + "".join(self.stderr_lines),
-                }
-
-            # Check timeout
-            if elapsed > self.timeout:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                return {
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
-                    + "".join(self.stderr_lines),
+                    "stdout": "",
+                    "stderr": "Deployment interrupted by shutdown request\n",
                 }
 
             # Yield to allow other processing
-            self.sleep_func(0.5)
+            self.sleep_func(0.1)
 
         # Process completed
-        stdout_data = "".join(self.stdout_lines)
-        stderr_data = "".join(self.stderr_lines)
-
         return {
             "success": self.process.returncode == 0,
             "exit_code": self.process.returncode,
-            "stdout": stdout_data,
-            "stderr": stderr_data,
+            "stdout": "",
+            "stderr": "",
         }
 
     def _ensure_process_terminated(self):
@@ -245,6 +304,11 @@ class SubprocessRunner:
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
+        if self.ui and self.tool_name:
+            self.ui.on_tool_call(self.tool_name, self.tool_args)
+
+        start_time_mono = self.time_func()
+
         # Open log file if provided
         if self.log_file_path:
             try:
@@ -282,25 +346,56 @@ class SubprocessRunner:
             result = self._wait_with_progress(summarizer)
 
             # Wait for threads to finish reading
-            stdout_thread.join(timeout=1)
-            stderr_thread.join(timeout=1)
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+
+            # Update stdout/stderr with full content captured by threads
+            result["stdout"] = "".join(self.stdout_lines)
+            # Append captured stderr to any existing error message
+            result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
+
+            if self.ui and self.tool_name:
+                duration = self.time_func() - start_time_mono
+                self.ui.on_tool_result(
+                    tool=self.tool_name,
+                    stdout=result.get("stdout", ""),
+                    stderr=result.get("stderr", ""),
+                    exit_code=result.get("exit_code"),
+                    duration=duration,
+                )
 
             return result
 
         except (OSError, subprocess.SubprocessError) as e:
-            return {
+            result = {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": f"Failed to run deployment script: {e}",
             }
+            if self.ui and self.tool_name:
+                self.ui.on_tool_result(
+                    tool=self.tool_name,
+                    stdout="",
+                    stderr=result["stderr"],
+                    exit_code=-1,
+                )
+            return result
         except Exception as e:
-            return {
+            result = {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": f"Unexpected error running deployment script: {e}",
             }
+            if self.ui and self.tool_name:
+                self.ui.on_tool_result(
+                    tool=self.tool_name,
+                    stdout="",
+                    stderr=result["stderr"],
+                    exit_code=-1,
+                )
+            return result
         finally:
             if self._log_file:
                 self._log_file.close()
@@ -314,14 +409,45 @@ class SubprocessRunner:
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+            Note: stdout/stderr returned here only contain system messages.
+            Captured output is in self.*_lines and merged in run().
         """
         start_time = self.time_func()
         # Initialize summarizer with the same start time to avoid extra time_func call
         summarizer.start(start_time=start_time)
 
-        while self.process.poll() is None:
+        # Handle timeout=0 as a special case that fails immediately
+        if self.timeout == 0:
+            self._ensure_process_terminated()
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Deployment script timed out after 0 seconds\n",
+            }
+
+        while True:
             current_time = self.time_func()
             elapsed = current_time - start_time
+
+            # Check timeout
+            if elapsed >= self.timeout:
+                if self.process.poll() is None:
+                    self.process.terminate()
+                    try:
+                        self.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                    return {
+                        "success": False,
+                        "exit_code": -1,
+                        "stdout": "",
+                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n",
+                    }
+
+            # Check if process completed
+            if self.process.poll() is not None:
+                break
 
             # Check shutdown
             if self.check_shutdown and self.check_shutdown():
@@ -333,24 +459,8 @@ class SubprocessRunner:
                 return {
                     "success": False,
                     "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": "Deployment interrupted by shutdown request\n"
-                    + "".join(self.stderr_lines),
-                }
-
-            # Check timeout
-            if elapsed > self.timeout:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                return {
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "".join(self.stdout_lines),
-                    "stderr": f"Deployment script timed out after {self.timeout} seconds\n"
-                    + "".join(self.stderr_lines),
+                    "stdout": "",
+                    "stderr": "Deployment interrupted by shutdown request\n",
                 }
 
             # Check for progress summary
@@ -359,15 +469,12 @@ class SubprocessRunner:
                 summarizer.summarize(recent_output)
 
             # Yield to allow other processing
-            self.sleep_func(0.5)
+            self.sleep_func(0.1)
 
         # Process completed
-        stdout_data = "".join(self.stdout_lines)
-        stderr_data = "".join(self.stderr_lines)
-
         return {
             "success": self.process.returncode == 0,
             "exit_code": self.process.returncode,
-            "stdout": stdout_data,
-            "stderr": stderr_data,
+            "stdout": "",
+            "stderr": "",
         }

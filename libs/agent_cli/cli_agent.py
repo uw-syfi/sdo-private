@@ -10,6 +10,7 @@ from typing import Optional, List
 from app_operator.logger import logger
 from .base import CodingAgent
 from .utils import _get_interactive_env
+from .events import AgentEventHandler
 from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
 
 
@@ -27,6 +28,7 @@ class CLIGenerationSession:
         timeout: int = 300,
         silent: bool = False,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        event_handler: Optional[AgentEventHandler] = None,
     ):
         self.binary_name = binary_name
         self.env = env
@@ -37,6 +39,7 @@ class CLIGenerationSession:
         self.timeout = timeout
         self.silent = silent
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.event_handler = event_handler
 
         # State initialization
         self.stdout_lines = []
@@ -52,6 +55,10 @@ class CLIGenerationSession:
         line_stripped = line.rstrip("\n")
         if not self.silent:
             self.logger.info(line_stripped)
+
+        if self.event_handler and line_stripped:
+            self.event_handler.on_thinking(line_stripped + "\n")
+
         self.stdout_lines.append(line)
 
     def _process_stderr(self, line: str) -> None:
@@ -151,6 +158,7 @@ class CLICodingAgent(CodingAgent):
         binary_name: str,
         model: Optional[str] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        event_handler: Optional[AgentEventHandler] = None,
     ):
         """Initialize the CLI coding agent.
 
@@ -158,6 +166,7 @@ class CLICodingAgent(CodingAgent):
             binary_name: The name of the executable to use.
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
+            event_handler: Optional event handler for UI updates.
 
         Raises:
             RuntimeError: If binary is not found in PATH or is not working.
@@ -166,6 +175,7 @@ class CLICodingAgent(CodingAgent):
         self.binary_name = binary_name
         self.model = model
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.event_handler = event_handler
 
         # Search for binary in the captured environment's PATH
         binary_path = shutil.which(binary_name, path=self.env.get("PATH"))
@@ -239,6 +249,7 @@ class CLICodingAgent(CodingAgent):
             timeout=timeout,
             silent=silent,
             recorder=recorder,
+            event_handler=self.event_handler,
         )
 
     def generate(

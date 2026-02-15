@@ -4,6 +4,7 @@ from typing import Optional, List
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
+from .events import AgentEventHandler
 from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
@@ -34,6 +35,9 @@ class OpencodeGenerationSession(CLIGenerationSession):
         # 1. Update State
         if isinstance(event, TextEvent):
             self.stdout_lines.append(event.text)
+            if self.event_handler:
+                self.event_handler.on_thinking(event.text)
+
         elif isinstance(event, ToolUseEvent):
             # Record tool call if it has a completion status
             if event.status in ("success", "error"):
@@ -50,6 +54,15 @@ class OpencodeGenerationSession(CLIGenerationSession):
                     stdout=stdout,
                     # duration is not easily available from event stream
                 )
+
+                if self.event_handler:
+                    # Emit both call and result since we only capture completion
+                    self.event_handler.on_tool_call(event.tool_name, args)
+                    self.event_handler.on_tool_result(
+                        tool=event.tool_name,
+                        stdout=stdout,
+                        # No duration available
+                    )
 
         # 2. Render Output
         if not self.silent:
@@ -104,16 +117,18 @@ class OpencodeCodingAgent(CLICodingAgent):
         self,
         model: Optional[str] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        event_handler: Optional[AgentEventHandler] = None,
     ):
         """Initialize the Opencode coding agent.
 
         Args:
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
+            event_handler: Optional event handler for UI updates.
         """
         if not model:
             model = "google-vertex/gemini-3-pro-preview"
-        super().__init__("opencode", model, recorder)
+        super().__init__("opencode", model, recorder, event_handler)
 
     @property
     def _log_prefix(self) -> str:
@@ -149,4 +164,5 @@ class OpencodeCodingAgent(CLICodingAgent):
             timeout=timeout,
             silent=silent,
             recorder=recorder,
+            event_handler=self.event_handler,
         )

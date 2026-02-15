@@ -1,0 +1,5 @@
+# Example configuration for exp-runner
+apps = [
+    "apps/deathstarbench/hotelReservation",
+    "apps/deathstarbench/socialNetwork"
+]

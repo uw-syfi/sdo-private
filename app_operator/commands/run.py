@@ -18,6 +18,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="FILE",
         help="Path to configuration file (default: sds.toml in target dir)",
     )
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        dest="tui",
+        default=False,
+        help="Enable Textual TUI (cli_agent runtime only)",
+    )
 
 
 def run_command(args: argparse.Namespace) -> int:
@@ -34,6 +41,12 @@ def run_command(args: argparse.Namespace) -> int:
     if interval < 1:
         logger.error("Error: interval must be at least 1 second")
         return 1
+
+    use_tui = args.tui
+    if use_tui and config.runtime.impl != "cli_agent":
+        logger.warning("TUI is only supported for cli_agent; falling back to CLI.")
+        use_tui = False
+
     try:
         if config.runtime.impl == "langgraph":
             operator = LangGraphOperator(
@@ -43,6 +56,7 @@ def run_command(args: argparse.Namespace) -> int:
                 max_deployment_attempts=config.operator.deployment_max_iters,
                 config=config,
             )
+            return operator.run()
         elif config.runtime.impl == "adk":
             operator = AdkOperator(
                 repo_path=args.directory,
@@ -51,18 +65,38 @@ def run_command(args: argparse.Namespace) -> int:
                 max_deployment_attempts=config.operator.deployment_max_iters,
                 config=config,
             )
+            return operator.run()
         else:
-            agent = create_agent_from_config(args.directory, config=config)
-            operator = AppOperator(
-                repo_path=args.directory,
-                health_check_interval=interval,
-                health_check_max_count=config.operator.monitoring_max_iters,
-                max_deployment_attempts=config.operator.deployment_max_iters,
-                agent=agent,
-                config=config,
-            )
+            # cli_agent
+            if use_tui:
+                from app_operator.ui.textual_tui import OperatorTUI
 
-        return operator.run()
+                def op_factory(ui):
+                    agent = create_agent_from_config(args.directory, config=config)
+                    return AppOperator(
+                        repo_path=args.directory,
+                        health_check_interval=interval,
+                        health_check_max_count=config.operator.monitoring_max_iters,
+                        max_deployment_attempts=config.operator.deployment_max_iters,
+                        agent=agent,
+                        config=config,
+                        ui=ui,
+                    )
+
+                app = OperatorTUI(op_factory)
+                app.run()
+                return app._exit_code
+            else:
+                agent = create_agent_from_config(args.directory, config=config)
+                operator = AppOperator(
+                    repo_path=args.directory,
+                    health_check_interval=interval,
+                    health_check_max_count=config.operator.monitoring_max_iters,
+                    max_deployment_attempts=config.operator.deployment_max_iters,
+                    agent=agent,
+                    config=config,
+                )
+                return operator.run()
 
     except ValueError as e:
         logger.error(f"Error: {e}")

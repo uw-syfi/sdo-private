@@ -8,17 +8,20 @@ SDS is an AI-native project designed to autonomously explore, validate, and evol
 
 ```
 sds/
-├── agentflow/            # Autonomous script generation module
-│   ├── __main__.py       # Entry point for `python -m agentflow`
+├── lego_agent/            # Autonomous script generation module
+│   ├── __main__.py       # Entry point for `python -m lego_agent`
 │   ├── cli.py            # CLI argument parsing and mode selection
 │   ├── engine.py         # Core clarification loop and orchestration engine
-│   ├── io.py             # I/O abstractions (ConsoleIO, TextualIO)
-│   ├── models.py         # Data models (AgentflowResponse, AgentflowResult)
+│   ├── io.py             # I/O abstractions (ConsoleIO)
+│   ├── models.py         # Data models (LegoAgentResponse, LegoAgentResult)
 │   ├── runtime.py        # LangGraph agent runtime and orchestration patterns
 │   ├── storage.py        # Script storage management
-│   ├── tui.py            # Textual-based interactive TUI implementation
+│   ├── server.py         # FastAPI WebSocket server for Web UI
+│   ├── ui/               # Next.js Web UI
+│   │   ├── app/          # App Router components
+│   │   └── ...
 │   └── prompts/          # Jinja2 prompt templates
-│       └── templates/agentflow/
+│       └── templates/lego_agent/
 │           ├── system.jinja2   # System prompt with orchestration docs
 │           ├── user.jinja2     # User request template
 │           └── repair.jinja2   # Error correction template
@@ -155,13 +158,13 @@ This implementation uses a stateful graph to manage the lifecycle:
 *   **Commands (`app_operator/commands/`):**
     *   CLI command implementations: `run`, `init_exp`, `viz_graph`.
 
-## 2. Agentflow Module (`agentflow/`)
+## 2. LegoAgent Module (`lego_agent/`)
 
-The **Agentflow** module is an autonomous script generation system that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. It features an interactive TUI, clarification loops, and supports advanced orchestration patterns.
+The **LegoAgent** module is an autonomous script generation system that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows. It features clarification loops and supports advanced orchestration patterns.
 
 ### Key Features
 
-*   **Interactive TUI Mode**: Textual-based rich terminal interface with real-time streaming output.
+*   **Web UI Mode**: Modern Next.js interface with real-time visualization of agent thinking and tool usage.
 *   **Clarification Loop**: Iteratively refines requirements through AI-powered questions before generating scripts.
 *   **Orchestration Patterns**: Built-in support for `fan_out`, `summarize`, and `judge_loop` patterns.
 *   **Automatic Repo Detection**: Finds project root by searching upward for `.git` or `sds.toml`.
@@ -172,25 +175,29 @@ The **Agentflow** module is an autonomous script generation system that uses AI 
 
 #### Core Components
 
-*   **AgentflowEngine (`engine.py`)**:
+*   **LegoAgentEngine (`engine.py`)**:
     *   Manages the clarification loop (up to `max_clarifications` rounds).
     *   Integrates with LangGraph for agent execution.
     *   Streams thinking chunks, tool calls, and results.
     *   Validates generated Python scripts before execution.
     *   Handles response parsing and error repair.
 
+*   **Web UI Server (`server.py`)**:
+    *   FastAPI application serving a WebSocket endpoint (`/ws`).
+    *   **WebIO**: Adapts the `UserIO` protocol to WebSocket events.
+    *   Streams "thinking", "tool_start", "tool_end" events to the frontend.
+    *   Handles "start" and "answer" events from the frontend.
+
+*   **Web Frontend (`ui/`)**:
+    *   Next.js application using Tailwind CSS and React.
+    *   **TerminalLog**: Renders the agent's stream in a terminal-like view.
+    *   **InputArea**: Dynamic form for prompts and clarification answers.
+    *   Connects to the backend via WebSocket.
+
 *   **I/O Abstraction (`io.py`)**:
     *   **UserIO Protocol**: Duck-typed interface for user interaction.
+    *   **WebIO**: WebSocket-based implementation for the Web UI.
     *   **ConsoleIO**: ANSI-colored console output for CLI mode.
-    *   **TextualIO**: Rich Textual widgets for TUI mode with async support.
-    *   Both implement: `read_prompt()`, `ask_questions()`, `render_thinking_chunk()`, `render_tool_start/end()`, etc.
-
-*   **AgentflowTUI (`tui.py`)**:
-    *   Textual App implementation with `RichLog` widget.
-    *   Interactive input field for prompts and answers.
-    *   Work directory display in header.
-    *   Async script execution with live stdout/stderr streaming.
-    *   Uses `flexoki` theme for consistent styling.
 
 *   **LangGraphAgent (`runtime.py`)**:
     *   Wraps LangGraph React agent for orchestration.
@@ -205,8 +212,8 @@ The **Agentflow** module is an autonomous script generation system that uses AI 
     4. **Combined patterns**: Complex workflows combining multiple patterns.
 
 *   **Storage & Models**:
-    *   **AgentflowStorage (`storage.py`)**: Manages script output with timestamped directories.
-    *   **AgentflowResponse/Result (`models.py`)**: Pydantic models for structured data.
+    *   **LegoAgentStorage (`storage.py`)**: Manages script output with timestamped directories.
+    *   **LegoAgentResponse/Result (`models.py`)**: Pydantic models for structured data.
 
 *   **Prompt System (`prompts/`)**:
     *   **system.jinja2**: Comprehensive system instructions (338 lines) with:
@@ -218,42 +225,56 @@ The **Agentflow** module is an autonomous script generation system that uses AI 
     *   **user.jinja2**: User request with clarification history and validation checklist.
     *   **repair.jinja2**: Error correction prompt for JSON parsing failures.
 
-### CLI Usage
+### Usage
 
-**Default TUI Mode:**
+**Web UI Mode (Recommended):**
 ```bash
-uv run -m agentflow
+./scripts/start_lego_ui.sh
+```
+This starts the backend on port 8000 and the frontend on port 3000. Open `http://localhost:3000` in your browser.
+
+**Default CLI Mode:**
+```bash
+uv run -m lego_agent
 ```
 
 **With Initial Prompt:**
 ```bash
-uv run -m agentflow --prompt "Scrape hacker news and summarize top 3 AI stories"
-```
-
-**CLI Mode (No TUI):**
-```bash
-uv run -m agentflow --no-tui --prompt "Your task"
+uv run -m lego_agent --prompt "Scrape hacker news and summarize top 3 AI stories"
 ```
 
 **Available Flags:**
-- `--prompt`: Initial user prompt (interactive if omitted in TUI mode).
+- `--prompt`: Initial user prompt (interactive if omitted).
 - `--loop-bound`: Maximum iterations for loops (default: 10).
 - `--max-clarifications`: Maximum clarification rounds (default: 5).
 - `--config`: Path to `sds.toml` (optional, auto-detects repo root).
 - `--model`: Override agent model from configuration.
-- `--output-dir`: Output directory (default: `agentflow_runs`).
+- `--output-dir`: Output directory (default: `lego_agent_runs`).
 - `--work-dir`: Execution directory (default: current directory).
-- `--no-run`: Generate script but don't execute it.
-- `--no-tui`: Use CLI mode instead of TUI.
+- `--no-run`: Generate script but do not execute it.
 
-### Data Flow
+### Data Flow (Web UI)
 
 ```
-User Input (TUI or CLI)
+Browser (Next.js) <── WebSocket ──> FastAPI (server.py)
+                                        ↓
+                                LegoAgentEngine
+                                        ↓
+                                    Clarification Loop
+                                        ↓
+                                    Script Generation
+                                        ↓
+                                    Execution
+```
+
+### Data Flow (CLI)
+
+```
+User Input (CLI)
     ↓
 Config loading (sds.toml)
     ↓
-AgentflowEngine.run_async()
+LegoAgentEngine.run_async()
     ├─→ Clarification Loop (rounds 0 to max_clarifications):
     │   ├─→ Render system/user prompts
     │   ├─→ Stream agent thinking (LangGraph events)
@@ -263,7 +284,7 @@ AgentflowEngine.run_async()
     ├─→ If status="clarify": ask_questions() → next round
     ├─→ If status="ready": validate_script() → write to storage
     │
-AgentflowStorage.write_script()
+LegoAgentStorage.write_script()
     ↓
 Script Execution (in work_dir)
     ├─→ Set PYTHONPATH to repo root
@@ -275,15 +296,15 @@ Script Execution (in work_dir)
 
 Generated scripts must satisfy:
 1. Define `MAX_ITERATIONS = {loop_bound}` constant.
-2. Import from `agentflow.runtime` or related modules.
+2. Import from `lego_agent.runtime` or related modules.
 3. Include `if __name__ == "__main__":` block.
 4. Be valid Python with proper syntax.
 
 ### Output Structure
 
-Scripts are saved in `agentflow_runs/<timestamp>/agentflow.py` with:
+Scripts are saved in `lego_agent_runs/<timestamp>/lego_agent.py` with:
 - Timestamped directory for each run.
-- Standalone execution (no external dependencies except `agentflow.runtime`).
+- Standalone execution (no external dependencies except `lego_agent.runtime`).
 - `MAX_ITERATIONS` constant for loop bounding.
 - Orchestration tools: `fan_out()`, `summarize()`, `judge_loop()`.
 
@@ -314,9 +335,9 @@ Scripts are saved in `agentflow_runs/<timestamp>/agentflow.py` with:
 ## Usage Guide for LLM agents
 
 *   **When debugging deployment:** Check `.sds/deploy.sh` and the generated logs in `.sds/logs/`.
-*   **When debugging agentflow scripts:** Check `agentflow_runs/<timestamp>/agentflow.py` and examine the clarification history.
+*   **When debugging lego_agent scripts:** Check `lego_agent_runs/<timestamp>/lego_agent.py` and examine the clarification history.
 *   **When adding a new app:** Simply run the operator on the repository. The `DeploymentAgent` will attempt to generate appropriate scripts automatically.
-*   **When adding agentflow features:** Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
+*   **When adding lego_agent features:** Test both Web UI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
 *   **When adding a new feature:** Think of what new behavior(s) are being introduced, and how you would test them. Test public behavior, not internal implementation details.
 *   **When fixing bugs:** Think of how to write test(s) to reproduce the issue first and then use them to verify your fix. The test should be part of your fix. If you cannot do so, you must defend your decision.
 
@@ -348,39 +369,216 @@ Always do the following after you're done with your code edits:
 
 *   **Unit tests** (`tests/unit/`): Fast, isolated tests for individual components
 *   **Integration tests** (`tests/integration/`): Test component interactions and real behavior
+*   **Frontend tests** (`lego_agent/ui/app/components/__tests__/`): Jest/React Testing Library tests for UI components.
 *   Test organization by component:
     *   `tests/unit/config/`: Configuration validation tests
     *   `tests/unit/agents/`: Agent-specific tests (deployment, monitoring)
-    *   `tests/unit/agentflow/`: Agentflow module tests (engine, runtime, CLI, prompts)
+    *   `tests/unit/lego_agent/`: LegoAgent module tests (engine, runtime, CLI, prompts)
     *   `tests/integration/`: End-to-end scenarios, signal handling, concurrency
 
 #### Running Tests
 
-*   Run all tests: `uv run pytest tests/`
+*   Run all tests (backend + frontend): `scripts/run_tests.sh`
+*   Run python tests: `uv run pytest tests/`
 *   Run specific category: `uv run pytest tests/unit/` or `uv run pytest tests/integration/`
+*   Run frontend tests: `cd lego_agent/ui && npm test`
 *   Run with coverage: `uv run pytest tests/ --cov=app_operator`
 *   Check if tests pass after you've modified the codebase's behavior.
 *   Don't run the sds_operator directly to test; it is a long-running process that will not terminate.
 
-#### Writing Tests - Best Practices
+#### Writing Tests - Core Principles
 
-**1. Test Behavior, Not Implementation**
+**1. Test Contracts, Not Implementation Details**
+
+Tests should verify **externally visible behavior** (the contract with callers), not internal mechanics.
+
 ```python
-# ✅ GOOD: Test observable outcomes
-def test_deployment_succeeds_after_retry(repo_with_scripts):
-    operator = AppOperator(str(repo), agent=agent, max_deployment_attempts=3)
-    exit_code = operator.run()
-    assert exit_code == 0
-    assert (repo / ".sds" / "logs" / "deploy_attempt_2.log").exists()
-
-# ❌ AVOID: Test internal method calls (brittle)
-def test_deployment():
-    mock_deployer._fix_with_agent.assert_called_once()  # Fragile!
+# ✅ GOOD: Test observable outcomes (return values, file creation, state changes)
+def test_deployment_succeeds_after_retry():
+    result = deployer.run(max_attempts=3)
+    assert result is True
+    assert log_file.exists()
+    assert "deployment successful" in log_file.read_text()
 ```
 
-**2. Use Test Fixtures**
+**2. Write Testable, Robust, Clean Frontend Code**
 
-Available fixtures in `tests/conftest.py`:
+For the `lego_agent` UI, we prioritize robustness and testability:
+
+*   **Component Isolation**: Build components (e.g., `TerminalLog`, `InputArea`) that rely on props rather than global state where possible.
+*   **Interaction Testing**: Use `@testing-library/react` to test user interactions (clicks, inputs) rather than internal component state.
+*   **Robustness**: Ensure components handle loading states, empty data, and error states gracefully (e.g., connection loss).
+*   **Clean Code**: Keep components small and focused. Extract logic into hooks (e.g., `useLegoAgent`) to separate concerns from the view layer.
+
+```typescript
+// ✅ GOOD: Testing user interaction and prop handling
+it('calls onSendPrompt when submitting prompt', () => {
+  render(<InputArea onSendPrompt={mockSend} status="connected" />);
+  fireEvent.click(screen.getByText('Run'));
+  expect(mockSend).toHaveBeenCalled();
+});
+```
+
+**3. Prefer Test Doubles Over Mocks for Maintainability**
+
+
+Use **simple test double classes** instead of mock frameworks for clearer, more maintainable tests. Implement features in a test-double-friendly way.
+
+```python
+# ✅ GOOD: Test doubles with real behavior
+class StubAgent:
+    def generate(self, prompt):
+        return "fixed script content"
+
+class TrackingAgent:
+    def __init__(self):
+        self.calls = []
+    def generate(self, prompt):
+        self.calls.append(prompt)
+        return "response"
+
+def test_with_doubles():
+    agent = TrackingAgent()
+    deployer.run(agent)
+    assert len(agent.calls) == 1  # Clear, readable verification
+
+# ❌ AVOID: Complex mocks with assertions
+def test_with_mocks():
+    mock_agent = Mock()
+    mock_agent.generate.return_value = "response"
+    deployer.run(mock_agent)
+    mock_agent.generate.assert_called_once_with(ANY, timeout=ANY)  # Fragile
+```
+
+**Why:** Test doubles are explicit, easier to understand, and don't break when argument order changes or new parameters are added. Mocks should be reserved for external dependencies (subprocess, file I/O).
+
+**4. Write Human-Readable, Self-Documenting Tests**
+
+Test names and structure should clearly communicate **what is being tested and why**.
+
+```python
+# ✅ GOOD: Clear name and focused test
+def test_deployment_timeout_returns_partial_output():
+    """When deployment times out, partial stdout/stderr should be captured."""
+    result = deployer.run(timeout=1)
+    assert result.exit_code == -1
+    assert "Starting deployment" in result.stdout
+    assert "timed out" in result.stderr
+
+# ❌ AVOID: Vague names and multiple unrelated assertions
+def test_deployment():
+    assert deployer.run() is not None
+    assert len(deployer.logs) > 0
+    assert deployer.config.timeout == 30
+    # What is this actually testing?
+```
+
+**Why:** Tests serve as living documentation. Clear test names and focused assertions make it obvious what failed and why when tests break.
+
+**5. Test Edge Cases and Boundary Conditions Thoroughly**
+
+Consider **boundary values, error conditions, special inputs, and resource constraints**.
+
+```python
+# ✅ GOOD: Comprehensive edge case coverage
+def test_interval_boundary_values():
+    assert OperatorConfig(interval=1).interval == 1  # Minimum
+    assert OperatorConfig(interval=86400).interval == 86400  # Maximum
+    with pytest.raises(ValueError):
+        OperatorConfig(interval=0)  # Below minimum
+    with pytest.raises(ValueError):
+        OperatorConfig(interval=86401)  # Above maximum
+
+def test_unicode_filenames():
+    fs.write_text(Path("файл_测试_🎉.txt"), "content")
+    assert fs.exists(Path("файл_测试_🎉.txt"))
+
+def test_filesystem_permission_denied():
+    fs.simulate_permission_error(path)
+    with pytest.raises(FileSystemError):
+        fs.write_text(path, "content")
+```
+
+**Why:** Edge cases are where bugs hide. Thorough edge case testing catches issues before production.
+
+**6. Keep Tests Fast Without Compromising Quality**
+
+Use **in-memory alternatives and test isolation** to maintain speed.
+
+```python
+# ✅ GOOD: In-memory filesystem for speed
+def test_file_operations():
+    fs = InMemoryFilesystem()  # No disk I/O
+    fs.write_text(path, "content")
+    assert fs.read_text(path) == "content"
+
+# ✅ GOOD: Test doubles for external dependencies
+def test_deployment():
+    agent = StubAgent()  # No API calls
+    deployer = DeploymentAgent(repo, agent)
+    result = deployer.run(max_attempts=1)
+
+# ❌ AVOID: Slow tests with real I/O or network
+def test_deployment():
+    deployer.run()  # Writes to disk, slow
+    time.sleep(5)  # Waiting for external service
+```
+
+**Why:** Fast tests enable frequent test runs during development. Slow tests discourage running the full test suite, leading to bugs slipping through.
+
+**7. Make Tests Robust to Code Changes**
+
+Tests should **survive refactoring** as long as behavior is preserved.
+
+```python
+# ✅ GOOD: Test public API only
+def test_deployment_success():
+    result = deployer.deploy(repo_path)
+    assert result.success is True
+    assert result.exit_code == 0
+
+# ❌ AVOID: Test internal structure
+def test_deployment():
+    assert isinstance(deployer._runner, ProcessRunner)  # Internal detail
+    assert deployer._max_retries == 3  # Private attribute
+    deployer._internal_helper()  # Private method
+```
+
+**Why:** Tests that depend on internal structure break when refactoring, creating maintenance burden and discouraging code improvements.
+
+**8. Test One Concept Per Test**
+
+Each test should verify **one specific behavior or property**.
+
+```python
+# ✅ GOOD: Focused, single-purpose tests
+def test_deployment_creates_log_file():
+    deployer.run()
+    assert log_file.exists()
+
+def test_deployment_captures_stdout():
+    result = deployer.run()
+    assert "deployment started" in result.stdout
+
+def test_deployment_handles_timeout():
+    result = deployer.run(timeout=1)
+    assert result.timed_out is True
+
+# ❌ AVOID: Testing multiple unrelated behaviors
+def test_deployment():
+    deployer.run()
+    assert log_file.exists()  # File creation
+    assert "started" in result.stdout  # Output capture
+    assert result.timed_out is False  # Timeout handling
+    assert agent.calls > 0  # Agent interaction
+    # If this fails, which behavior broke?
+```
+
+**Why:** When a focused test fails, it immediately tells you what broke. When a multi-purpose test fails, you need to debug to find which assertion failed and why.
+
+#### Project-Specific Testing Patterns
+
+**Available Test Fixtures** (`tests/conftest.py`):
 *   `test_filesystem`: In-memory filesystem for fast, isolated tests
 *   `stub_agent`: Minimal agent that returns simple responses
 *   `error_agent`: Agent that always raises errors
@@ -389,45 +587,45 @@ Available fixtures in `tests/conftest.py`:
 *   `configurable_agent`: Agent with configurable responses
 *   `repo_with_scripts`: Temp repository with pre-generated working scripts
 
-**3. Test Agent Doubles**
+**Test Agent Doubles** (`tests/fixtures/agents.py`):
 
-Use test doubles from `tests/fixtures/agents.py` instead of mocking:
+Prefer test doubles over mocks for agent interactions:
 ```python
 from tests.fixtures.agents import StubAgent, TrackingAgent, ErrorAgent
 
-def test_deployment_with_agent(tmp_path):
+def test_with_stub():
     agent = StubAgent()  # Simple, predictable behavior
-    deployer = DeploymentAgent(tmp_path, agent)
-    result = deployer.run(max_attempts=1)
+    result = deployer.run(agent)
     assert result is True
 
-def test_agent_interaction(tmp_path):
-    agent = TrackingAgent()  # Tracks calls for verification
-    deployer = DeploymentAgent(tmp_path, agent)
-    deployer.run(max_attempts=2)
+def test_interaction_tracking():
+    agent = TrackingAgent()  # Records all calls
+    deployer.run(agent)
     assert agent.generation_count == 1
+    assert "deploy.sh" in agent.calls[0]["prompt"]
 ```
 
-**4. Filesystem Abstraction**
+**Filesystem Abstraction**:
 
 For testing filesystem operations without disk I/O:
 ```python
 from app_operator.filesystem import InMemoryFilesystem
 
-def test_with_memory_filesystem():
+def test_filesystem():
     fs = InMemoryFilesystem()
-    fs.simulate_permission_error(path)  # Test error handling
-    # ... test code that uses filesystem
+    fs.write_text(path, "content")
+    assert fs.read_text(path) == "content"
+
+def test_permission_error():
+    fs = InMemoryFilesystem()
+    fs.simulate_permission_error(path)
+    with pytest.raises(FileSystemError):
+        fs.write_text(path, "content")
 ```
 
-**5. Configuration Validation**
+**Configuration Validation**:
 
 All configuration dataclasses validate in `__post_init__`:
-*   `AgentConfig`: Validates provider (must be in VALID_PROVIDERS), model type
-*   `OperatorConfig`: Validates interval (1-86400s), max_iters (positive integers)
-*   Invalid configs raise `TypeError` or `ValueError` with clear messages
-
-When adding new config fields:
 ```python
 @dataclass
 class MyConfig:
@@ -440,32 +638,47 @@ class MyConfig:
             raise ValueError(f"field must be positive, got {self.field}")
 ```
 
-**6. Exception Handling**
+**Environment Independence**:
 
-Use custom exceptions from `app_operator/exceptions.py`:
-*   `ConfigurationError`: Configuration issues
-*   `DeploymentError`: Deployment failures (includes exit_code, attempt)
-*   `FileSystemError`: Filesystem operation failures
-*   `ProcessError`: Process execution errors (includes timeout flag)
-*   `AgentError`: Agent-related failures
+Tests must not assume external binaries are installed:
+*   Mock `shutil.which` and `subprocess.run` to simulate binary presence/absence
+*   Use test doubles for agents instead of calling real CLIs
+*   See `tests/unit/test_agent_factory.py` for mocking examples
 
-Example:
-```python
-from app_operator.exceptions import DeploymentError
+#### Characteristics of High-Quality Tests
 
-if result.exit_code != 0:
-    raise DeploymentError(
-        "Deployment failed",
-        exit_code=result.exit_code,
-        attempt=current_attempt
-    )
-```
+Good tests exhibit these qualities:
 
-**7. Environment Independence**
+1. **Robust**: Tests survive refactoring and code changes as long as behavior is preserved
+   - Test contracts (public API), not implementation details
+   - Avoid coupling to internal structure, private methods, or execution order
+   - Use test doubles that don't break when signatures change
 
-Tests must not assume external binaries (e.g., `npm`, `docker`, agents) are installed in the environment.
-*   Mock `shutil.which` and `subprocess.run` to simulate binary presence/absence.
-*   See `tests/unit/test_agent_factory.py` for examples of mocking agent binaries.
+2. **Human-Readable**: Tests serve as executable documentation
+   - Clear, descriptive test names that explain what and why
+   - One concept per test for easy debugging
+   - Self-documenting assertions that show expected behavior
+
+3. **Fast**: Tests run quickly to encourage frequent execution
+   - Use in-memory alternatives (InMemoryFilesystem) instead of disk I/O
+   - Use test doubles instead of calling external services or CLIs
+   - Isolate tests to avoid setup/teardown overhead
+
+4. **Thorough**: Tests cover the full behavior space
+   - Happy path (expected behavior)
+   - Error conditions (permission denied, timeouts, invalid input)
+   - Boundary values (0, 1, min, max)
+   - Edge cases (Unicode, special characters, resource limits, concurrency)
+
+5. **Focused**: Each test verifies one specific property or behavior
+   - Single assertion or closely related assertions
+   - Clear failure messages that indicate what broke
+   - Avoid testing multiple unrelated concepts in one test
+
+6. **Maintainable**: Tests are easy to understand and update
+   - Prefer test doubles over complex mocks
+   - Use shared fixtures for common setup
+   - Avoid duplication across tests
 
 #### Test Coverage Guidelines
 

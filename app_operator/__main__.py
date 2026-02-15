@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from app_operator.commands import run, init_exp, viz_graph
+from app_operator.commands import run, init_exp, viz_graph, run_exp
 from app_operator.logger import logger
 
 # Load environment variables from .env file
@@ -83,6 +83,12 @@ Examples:
     )
     viz_graph.add_arguments(viz_graph_parser)
 
+    # 'run-exp' command
+    run_exp_parser = subparsers.add_parser(
+        "run-exp", help="Run experiments defined in a TOML config file"
+    )
+    run_exp.add_arguments(run_exp_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
@@ -93,6 +99,8 @@ Examples:
         return init_exp.run_command(args)
     elif args.command == "viz-graph":
         return viz_graph.run_command(args)
+    elif args.command == "run-exp":
+        return run_exp.run_command(args)
     else:
         parser.print_help()
         return 1
