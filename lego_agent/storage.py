@@ -1,4 +1,5 @@
 import time
+import threading
 from pathlib import Path
 
 
@@ -8,12 +9,17 @@ class LegoAgentStorage:
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
         self.current_run_dir = None
+        self._lock = threading.Lock()
 
     def _ensure_run_dir(self):
-        if self.current_run_dir is None:
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            self.current_run_dir = self.base_dir / timestamp
-            self.current_run_dir.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            current_timestamp = time.strftime("%Y%m%d-%H%M%S")
+
+            # Create new directory if we don't have one or timestamp changed
+            if (self.current_run_dir is None or
+                    self.current_run_dir.name != current_timestamp):
+                self.current_run_dir = self.base_dir / current_timestamp
+                self.current_run_dir.mkdir(parents=True, exist_ok=True)
         return self.current_run_dir
 
     def write_config(self, config_text: str) -> Path:
