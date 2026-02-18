@@ -36,7 +36,7 @@ def test_chmod(fs):
     fs.write_text(file_path, "content")
 
     fs.chmod(file_path, 0o777)
-    assert fs.permissions[str(file_path)] == 0o777
+    assert fs.permissions[fs._normalize_path(file_path)] == 0o777
 
 
 def test_chmod_non_existent(fs):
@@ -80,9 +80,9 @@ def test_empty_file_name(fs):
     """Test behavior with empty filename."""
     path = Path("")
     # Empty path is treated as current directory "."
-    # Write should succeed (creates file named "")
-    fs.write_text(path, "content")
-    assert fs.exists(path)
+    # Writing to a directory should raise IsADirectoryError
+    with pytest.raises(IsADirectoryError, match="Is a directory"):
+        fs.write_text(path, "content")
 
 
 def test_very_long_filename(fs):

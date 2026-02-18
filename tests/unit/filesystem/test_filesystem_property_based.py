@@ -244,7 +244,7 @@ class TestPropertyBasedFilesystem:
         fs.chmod(path, perms)
 
         # Permissions should be set
-        assert fs.permissions.get(str(path)) == perms
+        assert fs.permissions.get(fs._normalize_path(path)) == perms
 
     @given(filename=valid_filename())
     @settings(max_examples=50, deadline=1000)

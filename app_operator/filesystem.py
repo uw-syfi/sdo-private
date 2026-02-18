@@ -133,13 +133,18 @@ class InMemoryFilesystem(FileSystemInterface):
         self.directories: set = set()  # set of directory paths
         self.should_fail: Dict[str, Exception] = {}  # path -> exception to raise
 
+        # Initialize root directory to support relative paths
+        from pathlib import Path
+        self.directories.add(self._normalize_path(Path(".")))
+
     def simulate_permission_error(self, path: Path):
         """Configure the filesystem to raise PermissionError for a path.
 
         Args:
             path: The path that should fail with permission error.
         """
-        self.should_fail[str(path)] = PermissionError(f"Permission denied: '{path}'")
+        path_str = self._normalize_path(path)
+        self.should_fail[path_str] = PermissionError(f"Permission denied: '{path}'")
 
     def simulate_disk_full(self, path: Path):
         """Configure the filesystem to raise disk full error for a path.
@@ -147,7 +152,8 @@ class InMemoryFilesystem(FileSystemInterface):
         Args:
             path: The path that should fail with disk full error.
         """
-        self.should_fail[str(path)] = OSError(f"No space left on device: '{path}'")
+        path_str = self._normalize_path(path)
+        self.should_fail[path_str] = OSError(f"No space left on device: '{path}'")
 
     def simulate_readonly(self, path: Path):
         """Configure the filesystem to be read-only for a path.
@@ -155,21 +161,33 @@ class InMemoryFilesystem(FileSystemInterface):
         Args:
             path: The path that should fail with read-only error.
         """
-        self.should_fail[str(path)] = OSError(f"Read-only file system: '{path}'")
+        path_str = self._normalize_path(path)
+        self.should_fail[path_str] = OSError(f"Read-only file system: '{path}'")
 
     def clear_failures(self):
         """Clear all simulated failures."""
         self.should_fail.clear()
 
+    def _normalize_path(self, path: Path) -> str:
+        """Normalize a path to handle resolved paths consistently."""
+        try:
+            # Resolve the path to handle symlinks and relative paths
+            resolved = path.resolve()
+            return str(resolved)
+        except (OSError, RuntimeError):
+            # If resolve fails (e.g., path doesn't exist), use as-is
+            return str(path)
+
     def exists(self, path: Path) -> bool:
-        path_str = str(path)
+        path_str = self._normalize_path(path)
         return path_str in self.files or path_str in self.directories
 
     def is_dir(self, path: Path) -> bool:
-        return str(path) in self.directories
+        path_str = self._normalize_path(path)
+        return path_str in self.directories
 
     def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
-        path_str = str(path)
+        path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
             raise self.should_fail[path_str]
@@ -185,15 +203,19 @@ class InMemoryFilesystem(FileSystemInterface):
         # Check parent exists if parents=False
         if not parents:
             parent = path.parent
-            if str(parent) != "." and str(parent) not in self.directories:
+            parent_str = self._normalize_path(parent)
+            if parent_str != "." and parent_str not in self.directories:
                 raise FileNotFoundError(f"Parent directory does not exist: '{parent}'")
 
         # Create directory and parents if needed
         if parents:
             current = path
             to_create = []
-            while str(current) != "." and str(current) not in self.directories:
-                to_create.append(str(current))
+            while True:
+                current_str = self._normalize_path(current)
+                if current_str == "." or current_str in self.directories:
+                    break
+                to_create.append(current_str)
                 if current == current.parent:
                     break
                 current = current.parent
@@ -203,7 +225,7 @@ class InMemoryFilesystem(FileSystemInterface):
             self.directories.add(path_str)
 
     def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
-        path_str = str(path)
+        path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
             raise self.should_fail[path_str]
@@ -213,7 +235,8 @@ class InMemoryFilesystem(FileSystemInterface):
 
         # Ensure parent directory exists
         parent = path.parent
-        if str(parent) != "." and str(parent) not in self.directories:
+        parent_str = self._normalize_path(parent)
+        if parent_str != "." and parent_str not in self.directories:
             raise FileNotFoundError(f"Parent directory does not exist: '{parent}'")
 
         self.files[path_str] = content
@@ -221,7 +244,7 @@ class InMemoryFilesystem(FileSystemInterface):
             self.permissions[path_str] = 0o644
 
     def read_text(self, path: Path, encoding: str = "utf-8") -> str:
-        path_str = str(path)
+        path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
             raise self.should_fail[path_str]
@@ -235,7 +258,7 @@ class InMemoryFilesystem(FileSystemInterface):
         return self.files[path_str]
 
     def chmod(self, path: Path, mode: int):
-        path_str = str(path)
+        path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
             raise self.should_fail[path_str]
@@ -246,7 +269,7 @@ class InMemoryFilesystem(FileSystemInterface):
         self.permissions[path_str] = mode
 
     def remove(self, path: Path):
-        path_str = str(path)
+        path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
             raise self.should_fail[path_str]
