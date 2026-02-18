@@ -30,6 +30,10 @@ class AgentConfig:
     model: Optional[str] = None
     location: Optional[str] = None
     thinking_budget: Optional[int] = None
+    # Rate limiting and retry configuration
+    max_retries: int = 3
+    retry_base_delay: int = 5
+    rate_limit_backoff: int = 60
 
     VALID_PROVIDERS = {
         "codex",
@@ -74,6 +78,32 @@ class AgentConfig:
                 raise ValueError(
                     f"thinking_budget must be positive, got {self.thinking_budget}"
                 )
+
+        # Validate retry configuration
+        if not isinstance(self.max_retries, int):
+            raise TypeError(
+                f"max_retries must be int, got {type(self.max_retries).__name__}"
+            )
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be non-negative, got {self.max_retries}")
+
+        if not isinstance(self.retry_base_delay, int):
+            raise TypeError(
+                f"retry_base_delay must be int, got {type(self.retry_base_delay).__name__}"
+            )
+        if self.retry_base_delay <= 0:
+            raise ValueError(
+                f"retry_base_delay must be positive, got {self.retry_base_delay}"
+            )
+
+        if not isinstance(self.rate_limit_backoff, int):
+            raise TypeError(
+                f"rate_limit_backoff must be int, got {type(self.rate_limit_backoff).__name__}"
+            )
+        if self.rate_limit_backoff <= 0:
+            raise ValueError(
+                f"rate_limit_backoff must be positive, got {self.rate_limit_backoff}"
+            )
 
 
 @dataclass

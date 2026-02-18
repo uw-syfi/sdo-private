@@ -6,6 +6,13 @@
 # ...
 iterations = 3
 
+# Rate limiting and retry configuration
+# These settings help prevent API quota exhaustion during long experiment runs
+inter_run_delay = 30         # Delay between consecutive runs in seconds (default: 30)
+                             # Increase to 60+ if you encounter rate limits
+max_retries = 3              # Max retries per failed run (default: 3)
+rate_limit_backoff = 60      # Additional delay when rate limit detected (default: 60)
+
 # List of prompts to optimize
 # Available options:
 # - deployer_system, deployer_fix_error, deployer_summarize, deployer_generate_script

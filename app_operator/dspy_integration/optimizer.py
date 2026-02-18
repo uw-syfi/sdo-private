@@ -309,8 +309,12 @@ class PromptOptimizer:
         # with different instructions are not served stale responses.
         kwargs = {"model": model_str, "cache": False}
 
-        # Explicitly pass VERTEX_LOCATION if present in environment
+        # Explicitly pass VERTEX_PROJECT and VERTEX_LOCATION if present in environment
         # This fixes issues where litellm defaults to us-central1 despite env var
+        vertex_project = os.environ.get("VERTEX_PROJECT")
+        if vertex_project:
+            kwargs["vertex_project"] = vertex_project
+
         vertex_location = os.environ.get("VERTEX_LOCATION")
         if vertex_location:
             kwargs["vertex_location"] = vertex_location

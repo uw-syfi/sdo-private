@@ -1,0 +1,30 @@
+# Experiment opt3: Train-Ticket in Validation Set
+# Trains on all DeathStarBench apps, validates on train-ticket
+
+iterations = 3
+output_prefix = "opt3"  # Write to optimized/opt3/ instead of optimized/
+
+# Rate limiting - increased to avoid quota conflicts with opt2
+inter_run_delay = 50
+max_retries = 3
+rate_limit_backoff = 60
+
+# Focus on most impactful prompts
+prompts = [
+    "deployer_fix_error",
+    "deployer_summarize"
+]
+
+[training]
+# All DeathStarBench apps for training
+apps = [
+    "apps/deathstarbench/hotelReservation",
+    "apps/deathstarbench/mediaMicroservices",
+    "apps/deathstarbench/socialNetwork"
+]
+
+[validation]
+# Validate on train-ticket (tests generalization)
+apps = [
+    "apps/train-ticket"
+]

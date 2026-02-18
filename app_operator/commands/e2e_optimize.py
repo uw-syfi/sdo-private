@@ -13,6 +13,7 @@ import sys
 import shutil
 import subprocess
 import json
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -24,6 +25,7 @@ except ImportError:
 from app_operator.logger import logger
 from app_operator.dspy_integration.optimizer import PromptOptimizer
 from app_operator.config import load_config as load_app_config
+from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -61,6 +63,16 @@ def load_config(config_path: Path) -> Dict[str, Any]:
 
     if "apps" not in config["training"]:
         raise ValueError("Missing 'apps' in [training] section")
+
+    # Set defaults for optional fields
+    if "inter_run_delay" not in config:
+        config["inter_run_delay"] = 30  # Default 30 seconds between runs
+    if "max_retries" not in config:
+        config["max_retries"] = 3  # Default 3 retries
+    if "rate_limit_backoff" not in config:
+        config["rate_limit_backoff"] = 60  # Default 60 seconds for rate limits
+    if "output_prefix" not in config:
+        config["output_prefix"] = None  # Default: no prefix (write to optimized/)
 
     return config
 
@@ -284,15 +296,33 @@ def run_command(args: argparse.Namespace) -> int:
     prompts = config["prompts"]
     train_apps = [Path(p).resolve() for p in config["training"]["apps"]]
     val_apps = [Path(p).resolve() for p in config.get("validation", {}).get("apps", [])]
+    inter_run_delay = config["inter_run_delay"]
+    max_retries = config["max_retries"]
+    rate_limit_backoff = config["rate_limit_backoff"]
+    output_prefix = config["output_prefix"]
 
     logger.info(f"Starting E2E optimization for {iterations} iterations")
     logger.info(f"Prompts: {prompts}")
     logger.info(f"Training apps: {[a.name for a in train_apps]}")
+    if output_prefix:
+        logger.info(f"Output prefix: {output_prefix} (will write to optimized/{output_prefix}/)")
+    logger.info(
+        f"Rate limit handling: max_retries={max_retries}, "
+        f"backoff={rate_limit_backoff}s, inter_run_delay={inter_run_delay}s"
+    )
 
     # We need to access the prompts directory for the optimizer
     # Assuming standard layout
     base_dir = Path(__file__).parent.parent.parent
     prompts_dir = base_dir / "app_operator" / "prompts"
+
+    # Load app config to get provider for rate limit detection
+    try:
+        app_config = load_app_config(str(base_dir))
+        provider = app_config.agent.provider
+    except Exception as e:
+        logger.warning(f"Failed to load app config, assuming 'gemini' provider: {e}")
+        provider = "gemini"
 
     current_version = state_manager.get_current_version()
 
@@ -356,18 +386,17 @@ def run_command(args: argparse.Namespace) -> int:
                 )
 
             logger.info(f"Running operator on {exp_path.name}...")
-            # We run the operator as a subprocess
+            # We run the operator as a subprocess with rate limit handling
             cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
 
-            try:
-                subprocess.run(
-                    cmd, check=False, timeout=3600
-                )  # Don't fail the whole loop if one run fails
-            except subprocess.TimeoutExpired:
-                logger.error(
-                    f"Run timed out after 3600s for {app_name}")
-            except Exception as e:
-                logger.error(f"Run failed for {exp_path.name}: {e}")
+            result, success, error_msg = run_subprocess_with_rate_limit_handling(
+                cmd=cmd,
+                provider=provider,
+                max_retries=max_retries,
+                base_delay=5,
+                rate_limit_backoff=rate_limit_backoff,
+                operation_name=f"Training run: {exp_path.name}",
+            )
 
             traj_dir = exp_path / ".sds" / "trajectories"
             if traj_dir.exists():
@@ -375,6 +404,13 @@ def run_command(args: argparse.Namespace) -> int:
                 state_manager.mark_train_app_completed(app_name)
             else:
                 logger.warning(f"No trajectories found for {exp_path.name}")
+                if error_msg:
+                    logger.warning(f"Error: {error_msg}")
+
+            # Add delay before next run to avoid rate limits
+            if app_name != train_apps[-1].name:  # Don't delay after last app
+                logger.info(f"Waiting {inter_run_delay}s before next run...")
+                time.sleep(inter_run_delay)
 
         if not train_trajectories_dirs:
             logger.error("No training trajectories generated. Aborting.")
@@ -412,7 +448,11 @@ def run_command(args: argparse.Namespace) -> int:
 
             try:
                 next_version = f"v{i}"
-                output_dir = prompts_dir / "optimized" / next_version
+                # Use output_prefix if provided to avoid version collisions
+                if output_prefix:
+                    output_dir = prompts_dir / "optimized" / output_prefix / next_version
+                else:
+                    output_dir = prompts_dir / "optimized" / next_version
 
                 result = optimizer.optimize(
                     prompt_names=prompts,
@@ -453,17 +493,22 @@ def run_command(args: argparse.Namespace) -> int:
                 )
 
                 logger.info(f"Running validation on {exp_path.name}...")
-                try:
-                    subprocess.run(
-                        [sys.executable, "-m", "app_operator",
-                            "run", str(exp_path)],
-                        check=False,
-                        timeout=3600,
-                    )
-                except subprocess.TimeoutExpired:
-                    logger.error(
-                        f"Run timed out after 3600s for {app_name}")
+                cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
+
+                result, success, error_msg = run_subprocess_with_rate_limit_handling(
+                    cmd=cmd,
+                    provider=provider,
+                    max_retries=max_retries,
+                    base_delay=5,
+                    rate_limit_backoff=rate_limit_backoff,
+                    operation_name=f"Validation run: {exp_path.name}",
+                )
                 state_manager.mark_val_app_completed(app_name)
+
+                # Add delay before next validation run
+                if app_name != val_apps[-1].name:  # Don't delay after last app
+                    logger.info(f"Waiting {inter_run_delay}s before next run...")
+                    time.sleep(inter_run_delay)
 
         state_manager.advance_iteration()
 

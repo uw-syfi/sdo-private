@@ -1,0 +1,35 @@
+# Experiment opt1 continuation: run through iteration 6
+# Continues from the current state of opt1 (currently at iteration 4)
+
+iterations = 6
+output_prefix = "opt1"  # Continue using opt1 prefix
+
+# Rate limiting - adjusted timing to avoid conflicts
+inter_run_delay = 35
+max_retries = 3
+rate_limit_backoff = 60
+
+# Same prompts as original opt1
+prompts = [
+    "deployer_fix_error",
+    "deployer_generate_deploy_script",
+    "deployer_generate_health_check",
+    "deployer_system",
+    "deployer_summarize",
+    "deployer_generate_script",
+    "code_analyzer_system",
+    "code_analyzer_user"
+]
+
+[training]
+# Same apps as original opt1
+apps = [
+    "apps/deathstarbench/hotelReservation",
+    "apps/deathstarbench/mediaMicroservices"
+]
+
+[validation]
+# Same validation set as original opt1
+apps = [
+    "apps/deathstarbench/socialNetwork"
+]
