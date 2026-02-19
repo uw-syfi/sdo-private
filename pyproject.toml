@@ -49,3 +49,8 @@ norecursedirs = ["apps", ".venv", "venv", "build", "dist", ".hypothesis"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.uv.workspace]
+members = [
+    "mcp_server",
+]

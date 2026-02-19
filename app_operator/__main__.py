@@ -2,8 +2,12 @@ import argparse
 import shutil
 import subprocess
 import sys
+import os
+import subprocess
+import time
 
 from dotenv import load_dotenv
+from pathlib import Path
 
 from app_operator.commands import run, init_exp, viz_graph, run_exp
 from app_operator.logger import logger
@@ -12,6 +16,67 @@ from app_operator.logger import logger
 load_dotenv()
 
 REQUIRED_DEPENDENCIES = ["docker", "kubectl"]
+
+
+def trigger_ai_remediation(max_retries: int):
+    """
+    Runs the Gemini SRE agent in a loop until the system is healthy 
+    or we run out of retries.
+    """
+    # 1. Setup Paths
+    current_file = Path(__file__).resolve()
+    sds_root = current_file.parent.parent
+    playbook_path = sds_root / "agents" / "sre_startup_playbook.md"
+
+    if not playbook_path.exists():
+        logger.warning(f"⚠️  Playbook not found at {playbook_path}")
+        return False
+
+    playbook_content = playbook_path.read_text()
+    
+    print("\n" + "="*50)
+    print(f"🤖 [SDS Operator] STARTING AUTO-HEALING LOOP (Max Retries: {max_retries})")
+    print("="*50)
+
+    for attempt in range(1, max_retries + 1):
+        print(f"\n🔄 [Attempt {attempt}/{max_retries}] Summoning SRE Agent...")
+
+        try:
+            # 2. Run Gemini and CAPTURE the output
+            #    We use 'tee' behavior: print to screen AND capture to variable
+            process = subprocess.Popen(
+                ["gemini", playbook_content],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+
+            # Stream output to console in real-time while capturing it
+            full_output = ""
+            for line in process.stdout:
+                print(line, end="") # Print to user
+                full_output += line # Save for analysis
+            
+            process.wait() # Wait for agent to finish
+
+            # 3. Analyze the Result
+            if "SYSTEM HEALTHY" in full_output:
+                print(f"\n✅ [SDS Operator] Success! System healed on attempt {attempt}.")
+                return True # Exit the loop
+            
+            else:
+                print(f"\n⚠️ [SDS Operator] Agent finished, but system is NOT healthy yet.")
+                print("   Retrying in 5 seconds...")
+                time.sleep(5)
+
+        except Exception as e:
+            logger.error(f"❌ Execution error: {e}")
+            time.sleep(5)
+
+    print(f"\n❌ [SDS Operator] Failed to heal system after {max_retries} attempts.")
+    return False
 
 
 def check_dependencies():
@@ -94,7 +159,14 @@ Examples:
 
     args = parser.parse_args()
     if args.command == "run":
-        return run.run_command(args)
+        # return run.run_command(args)
+        exit_code = run.run_command(args)
+        
+        if exit_code == 0:
+            # Call the loop (it handles the retries internally)
+            trigger_ai_remediation(max_retries=5)
+            
+        return exit_code
     elif args.command == "init-exp":
         return init_exp.run_command(args)
     elif args.command == "viz-graph":

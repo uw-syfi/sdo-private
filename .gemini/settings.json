@@ -3,6 +3,11 @@
     "fileName": "AGENTS.md"
   },
   "mcpServers": {
+    "docker_controller": {
+      "command": "uv",
+      "args": ["run", 
+               "/Users/taran/Documents/1UW/3Year3/research/winter2026/sds/mcp_server/server.py"]
+    },
     "context7": {
       "httpUrl": "https://mcp.context7.com/mcp",
       "headers": {
