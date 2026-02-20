@@ -1,6 +1,6 @@
 """RLM execution environment and context types."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

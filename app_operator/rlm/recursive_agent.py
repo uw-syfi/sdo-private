@@ -7,7 +7,6 @@ answer.  This reduces token usage ~50-75% on large logs.
 
 import os
 import re
-from pathlib import Path
 from typing import List, Optional
 
 import litellm
