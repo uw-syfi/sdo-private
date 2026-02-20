@@ -79,7 +79,7 @@ Then edit `sds.toml` to configure your settings:
 
 ```toml
 [agent]
-provider = "codex"  # or "gemini", "claude", "opencode", "openai", "anthropic"
+provider = "codex"  # or "gemini", "claude", "opencode", "openai", "anthropic", "rlm"
 model = "gpt-4o-mini" # required for langgraph and adk runtimes
 # location = "us-central1" # optional: specify vertex AI location (default: us-central1)
 
@@ -140,7 +140,18 @@ evaluation_window = 100         # Number of recent runs to evaluate
 **CLI Agent runtime (default):**
 - Set `[runtime] impl = "cli_agent"` to use the CLI-based implementation.
 - Communicates with external coding agents via their CLI interfaces.
-- Supports all providers: `codex`, `gemini`, `claude`, `claude-code`, `opencode`.
+- Supports all providers: `codex`, `gemini`, `claude`, `claude-code`, `opencode`, `rlm`.
+
+**RLM (Recursive Language Model) provider:**
+- Set `provider = "rlm"` to use the RLM backend, which reduces token usage on large error logs.
+- Instead of passing full log files in every prompt, the LLM is given a Python REPL environment to programmatically query and filter context before forming a response. This typically saves 50–75% of tokens on long deployment logs.
+- Requires [litellm](https://github.com/BerriAI/litellm) and a Vertex AI / litellm-compatible model string.
+- Example configuration:
+  ```toml
+  [agent]
+  provider = "rlm"
+  model = "vertex_ai/gemini-2.0-flash"
+  ```
 
 ### Experiment Workflow
 For controlled experiments, use the `init-exp` and `run` commands:

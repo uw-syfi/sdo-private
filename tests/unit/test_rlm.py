@@ -1,7 +1,6 @@
 """Unit tests for RLM (Recursive Language Model) components."""
 
 import pytest
-from pathlib import Path
 from app_operator.rlm.environment import (
     RLMEnvironment,
     RLMContext,

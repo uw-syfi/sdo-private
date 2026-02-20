@@ -14,7 +14,6 @@ from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
 from app_operator.dspy_integration.metrics import (
     CompositeMetric,
-    GroundTruthSimilarityMetric,
 )
 from app_operator.dspy_integration.signatures import get_signature, SIGNATURES
 from app_operator.dspy_integration.field_mappings import (
@@ -105,18 +104,27 @@ class PromptOptimizer:
     4. Save optimized prompts
     """
 
-    def __init__(self, config: DSPyConfig, prompts_dir: Path, use_seeds: bool = False):
+    def __init__(
+        self,
+        config: DSPyConfig,
+        prompts_dir: Path,
+        use_seeds: bool = False,
+        vertex_location: Optional[str] = None,
+    ):
         """Initialize optimizer.
 
         Args:
             config: DSPy configuration
             prompts_dir: Directory containing prompt templates
             use_seeds: If True, use minimal GEPA-style seed prompts instead of baseline templates
+            vertex_location: Vertex AI location override (e.g. "global").
+                Falls back to the VERTEX_LOCATION environment variable when None.
         """
         self.config = config
         self.prompts_dir = Path(prompts_dir)
         self.optimized_dir = prompts_dir / "optimized"
         self.use_seeds = use_seeds
+        self.vertex_location = vertex_location
 
     def optimize(
         self,
@@ -184,10 +192,6 @@ class PromptOptimizer:
         )
         self._configure_dspy_lm()
 
-        # Use GroundTruthSimilarityMetric for the prediction-quality slot:
-        # instant, deterministic, no LM call, and immune to the
-        # self-evaluation bias that plagues LLM judges when the same model
-        # generates both the prediction and the score.
         metric_weights = self.config.optimization.metric_weights
 
         # Support both legacy (3 weights) and new (4 weights with health_check) format
@@ -197,7 +201,6 @@ class PromptOptimizer:
                 efficiency_weight=metric_weights["efficiency"],
                 token_weight=metric_weights["tokens"],
                 health_check_weight=metric_weights["health_check"],
-                prediction_metric=GroundTruthSimilarityMetric(),
                 include_health_check_quality=True,
             )
         else:
@@ -206,7 +209,6 @@ class PromptOptimizer:
                 success_weight=metric_weights["success"],
                 efficiency_weight=metric_weights["efficiency"],
                 token_weight=metric_weights["tokens"],
-                prediction_metric=GroundTruthSimilarityMetric(),
                 include_health_check_quality=False,
             )
 
@@ -315,7 +317,7 @@ class PromptOptimizer:
         if vertex_project:
             kwargs["vertex_project"] = vertex_project
 
-        vertex_location = os.environ.get("VERTEX_LOCATION")
+        vertex_location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
         if vertex_location:
             kwargs["vertex_location"] = vertex_location
 

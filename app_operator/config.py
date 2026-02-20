@@ -432,6 +432,10 @@ class Config:
             else DSPyAutoRollbackConfig()
         )
 
+        # Propagate agent location to DSPy runtime if not already set
+        if "vertex_location" not in dspy_data and agent_config.location:
+            dspy_data["vertex_location"] = agent_config.location
+
         # Create main DSPy config with nested objects
         return DSPyConfig(
             **dspy_data,

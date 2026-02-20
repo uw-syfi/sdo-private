@@ -68,7 +68,7 @@ def extract_prompt_kwargs_from_content(prompt_type: str, rendered_prompt: str,
         if 'error' in rendered_prompt.lower():
             # Extract section after deployment failure mention
             parts = rendered_prompt.split('\n')
-            error_lines = [l for l in parts if 'error' in l.lower() or 'failed' in l.lower()]
+            error_lines = [line for line in parts if 'error' in line.lower() or 'failed' in line.lower()]
             if error_lines:
                 kwargs['error_context'] = '\n'.join(error_lines[:10])  # First 10 error lines
 
@@ -238,13 +238,13 @@ if __name__ == '__main__':
     examples = loader.load_examples()
 
     print(f"\nLoaded {len(examples)} enriched examples from {enriched_dir}")
-    print(f"\nBy prompt type:")
+    print("\nBy prompt type:")
     for prompt_type, count in sorted(get_example_counts_by_prompt(examples).items()):
         print(f"  {prompt_type}: {count}")
 
     # Show sample
     if examples:
-        print(f"\nSample example (deployer_fix_error):")
+        print("\nSample example (deployer_fix_error):")
         fix_error_examples = [ex for ex in examples if ex.prompt_name == 'deployer_fix_error']
         if fix_error_examples:
             ex = fix_error_examples[0]

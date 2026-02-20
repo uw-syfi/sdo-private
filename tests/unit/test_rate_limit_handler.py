@@ -1,6 +1,5 @@
 """Tests for rate limit error detection and handling."""
 
-import pytest
 from app_operator.rate_limit_handler import (
     detect_rate_limit_error,
     exponential_backoff,
@@ -110,3 +109,38 @@ class TestRateLimitError:
         """Test that RateLimitError is an Exception."""
         error = RateLimitError(provider="test", message="test")
         assert isinstance(error, Exception)
+
+
+class TestSubprocessErrorLogging:
+    """run_subprocess_with_rate_limit_handling logs full stderr on non-zero exit."""
+
+    def test_full_stderr_logged_on_failure(self):
+        """stderr is logged in full — not truncated — when subprocess fails."""
+        import subprocess
+        from unittest.mock import patch
+        from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
+
+        long_stderr = "E: " + "x" * 2000  # exceeds any reasonable truncation limit
+
+        fake_result = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr=long_stderr
+        )
+
+        logged_messages = []
+
+        def capture_error(msg):
+            logged_messages.append(msg)
+
+        with (
+            patch("subprocess.run", return_value=fake_result),
+            patch("app_operator.rate_limit_handler.logger.error", side_effect=capture_error),
+        ):
+            run_subprocess_with_rate_limit_handling(
+                cmd=["fake"],
+                provider="gemini",
+                max_retries=0,
+                operation_name="test_op",
+            )
+
+        full_log = " ".join(logged_messages)
+        assert long_stderr in full_log, "Full stderr must appear in logs without truncation"

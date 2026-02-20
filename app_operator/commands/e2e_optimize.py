@@ -23,7 +23,7 @@ except ImportError:
     import tomli as tomllib
 
 from app_operator.logger import logger
-from app_operator.dspy_integration.optimizer import PromptOptimizer
+from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
 from app_operator.config import load_config as load_app_config
 from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 
@@ -193,7 +193,6 @@ class StateManager:
     def _load_state(self) -> Dict[str, Any]:
         default_state = {
             "current_iteration": 1,
-            "completed_train_apps": [],
             "optimization_done": False,
             "current_version": None,
             "completed_val_apps": [],
@@ -236,16 +235,6 @@ class StateManager:
     def save(self):
         self.state_file.write_text(json.dumps(self.state, indent=2))
 
-    def is_train_app_completed(self, iter_num: int, app_name: str) -> bool:
-        if self.state["current_iteration"] > iter_num:
-            return True
-        return app_name in self.state["completed_train_apps"]
-
-    def mark_train_app_completed(self, app_name: str):
-        if app_name not in self.state["completed_train_apps"]:
-            self.state["completed_train_apps"].append(app_name)
-            self.save()
-
     def is_optimization_done(self, iter_num: int) -> bool:
         if self.state["current_iteration"] > iter_num:
             return True
@@ -271,7 +260,6 @@ class StateManager:
 
     def advance_iteration(self):
         self.state["current_iteration"] += 1
-        self.state["completed_train_apps"] = []
         self.state["optimization_done"] = False
         # Keep current_version as the starting point for next iteration
         self.state["completed_val_apps"] = []
@@ -333,131 +321,52 @@ def run_command(args: argparse.Namespace) -> int:
 
         logger.info(f"\n=== Iteration {i}/{iterations} ===")
 
-        # 1. Generate Training Trajectories
-        logger.info("Generating training trajectories...")
-        train_trajectories_dirs = []
-
-        for app_path in train_apps:
-            app_name = app_path.name
-            exp_name = f"{app_name}_iter{i}_train"
-            exp_path = work_dir / exp_name
-
-            if state_manager.is_train_app_completed(i, app_name):
-                logger.info(f"Skipping {app_name} (already trained)")
-                # Even if skipped, we need the trajectory dir for optimization
-                traj_dir = exp_path / ".sds" / "trajectories"
-                if traj_dir.exists():
-                    train_trajectories_dirs.append(traj_dir)
-                else:
-                    logger.warning(
-                        f"Expected trajectories at {traj_dir} but not found!"
-                    )
-                continue
-
-            # Check if experiment already has trajectories from a partial run
-            traj_dir = exp_path / ".sds" / "trajectories"
-            if traj_dir.exists() and any(traj_dir.iterdir()):
-                logger.info(
-                    f"Reusing existing trajectories for {app_name}")
-                train_trajectories_dirs.append(traj_dir)
-                state_manager.mark_train_app_completed(app_name)
-                continue
-
-            exp_path = _init_experiment(app_path, work_dir, f"iter{i}_train")
-
-            # Configure sds.toml
-            if i == 1:
-                # First iteration: Use Seeds
-                _update_sds_toml(
-                    exp_path,
-                    use_seeds=True,
-                    use_optimized=False,
-                    optimized_version=None,
-                    project_root=base_dir,
-                )
-            else:
-                # Subsequent iterations: Use Optimized
-                _update_sds_toml(
-                    exp_path,
-                    use_seeds=False,
-                    use_optimized=True,
-                    optimized_version=current_version,
-                    project_root=base_dir,
-                )
-
-            logger.info(f"Running operator on {exp_path.name}...")
-            # We run the operator as a subprocess with rate limit handling
-            cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
-
-            result, success, error_msg = run_subprocess_with_rate_limit_handling(
-                cmd=cmd,
-                provider=provider,
-                max_retries=max_retries,
-                base_delay=5,
-                rate_limit_backoff=rate_limit_backoff,
-                operation_name=f"Training run: {exp_path.name}",
-            )
-
-            traj_dir = exp_path / ".sds" / "trajectories"
-            if traj_dir.exists():
-                train_trajectories_dirs.append(traj_dir)
-                state_manager.mark_train_app_completed(app_name)
-            else:
-                logger.warning(f"No trajectories found for {exp_path.name}")
-                if error_msg:
-                    logger.warning(f"Error: {error_msg}")
-
-            # Add delay before next run to avoid rate limits
-            if app_name != train_apps[-1].name:  # Don't delay after last app
-                logger.info(f"Waiting {inter_run_delay}s before next run...")
-                time.sleep(inter_run_delay)
-
-        if not train_trajectories_dirs:
-            logger.error("No training trajectories generated. Aborting.")
-            return 1
-
-        # 2. Optimize
-        logger.info("Optimizing prompts...")
+        # 1. + 2. Generate candidates, evaluate by running operator, keep best (EvalExecute)
+        logger.info("Running eval-execute optimization...")
 
         if state_manager.is_optimization_done(i):
             logger.info("Skipping optimization (already done)")
             current_version = state_manager.get_current_version()
         else:
-            # Load DSPy config from project root to respect sds.toml settings (e.g. COPRO)
+            # Load DSPy config from project root
             try:
-                # We need to find the project root. base_dir is app_operator/.., which is sds/
-                # So base_dir is the repo root.
                 app_config = load_app_config(str(base_dir))
                 dspy_config = app_config.dspy
                 logger.info(
-                    f"Loaded DSPy config: optimizer={dspy_config.optimization.optimizer}, teacher={dspy_config.optimization.teacher_model}"
+                    f"Loaded DSPy config: teacher={dspy_config.optimization.teacher_model}, "
+                    f"n_candidates={dspy_config.optimization.n_candidates}"
                 )
             except Exception as e:
                 logger.warning(f"Failed to load project config, using defaults: {e}")
-                # Fallback to defaults if loading fails, but we should import DSPyConfig
-                # for this fallback
                 from app_operator.dspy_integration.config import DSPyConfig
 
                 dspy_config = DSPyConfig()
 
-            optimizer = PromptOptimizer(
-                config=dspy_config,
-                prompts_dir=prompts_dir,
-                use_seeds=True,  # Always optimize starting from seeds + new demos
-            )
-
             try:
                 next_version = f"v{i}"
-                # Use output_prefix if provided to avoid version collisions
                 if output_prefix:
                     output_dir = prompts_dir / "optimized" / output_prefix / next_version
                 else:
                     output_dir = prompts_dir / "optimized" / next_version
 
-                result = optimizer.optimize(
+                eval_optimizer = EvalExecuteOptimizer(
+                    config=dspy_config,
+                    prompts_dir=prompts_dir,
+                    project_root=base_dir,
+                    n_candidates=dspy_config.optimization.n_candidates,
+                    vertex_location=app_config.agent.location,
+                )
+                result = eval_optimizer.optimize(
                     prompt_names=prompts,
-                    trajectories_dirs=train_trajectories_dirs,
+                    train_apps=train_apps,
+                    work_dir=work_dir,
                     output_dir=output_dir,
+                    iteration=i,
+                    current_version=current_version,
+                    provider=provider,
+                    max_retries=max_retries,
+                    rate_limit_backoff=rate_limit_backoff,
+                    inter_run_delay=inter_run_delay,
                 )
 
                 if result["success"]:

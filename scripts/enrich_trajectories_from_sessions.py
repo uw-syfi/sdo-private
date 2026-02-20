@@ -11,7 +11,6 @@ This enriched data can be used for better prompt optimization.
 """
 
 import json
-import glob
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -23,11 +22,11 @@ def parse_time(time_str: str) -> Optional[datetime]:
     try:
         # Trajectory format: "2026-02-12 03:08:23"
         return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-    except:
+    except ValueError:
         try:
             # Session format: "2026-02-12T03:08:23.000Z"
             return datetime.strptime(time_str[:19], "%Y-%m-%dT%H:%M:%S")
-        except:
+        except ValueError:
             return None
 
 

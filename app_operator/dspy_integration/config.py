@@ -23,6 +23,7 @@ class DSPyOptimizationConfig:
     optimizer: str = "BootstrapFewShot"
     teacher_model: str = "claude-sonnet-4-5"
     num_examples: int = 30
+    n_candidates: int = 4
     validation_split: float = 0.2
     n_candidates: int = 4
     metric_weights: Dict[str, float] = field(
@@ -177,6 +178,7 @@ class DSPyConfig:
     use_seeds: bool = False
     optimized_version: str = "latest"
     runtime_model: Optional[str] = None
+    vertex_location: Optional[str] = None
     fallback_to_baseline: bool = True
     enable_online_learning: bool = False
     feedback_sample_rate: float = 0.1

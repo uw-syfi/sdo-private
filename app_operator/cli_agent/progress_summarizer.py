@@ -120,7 +120,7 @@ class ProgressSummarizer:
             if summary:
                 logger.info(f"[{elapsed_time:.1f}s] ➜ {summary}")
             else:
-                logger.warning(f"ProgressSummarizer: Failed to extract summary from response")
+                logger.warning("ProgressSummarizer: Failed to extract summary from response")
 
             # Update last summary time
             self.last_summary_time = self.time_func()

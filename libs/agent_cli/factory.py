@@ -45,7 +45,10 @@ def create_agent_from_config(
         return AGENT_REGISTRY["rlm"](model=model, location=config.agent.location)
 
     if provider_lower in AGENT_REGISTRY:
-        return AGENT_REGISTRY[provider_lower](model=model)
+        kwargs = {"model": model}
+        if provider_lower == "rlm":
+            kwargs["location"] = config.agent.location
+        return AGENT_REGISTRY[provider_lower](**kwargs)
 
     # Default fallback
     return AGENT_REGISTRY["codex"](model=model)

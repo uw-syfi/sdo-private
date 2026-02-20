@@ -205,7 +205,7 @@ def run_subprocess_with_rate_limit_handling(
                 )
                 logger.error(error_msg)
                 if stderr:
-                    logger.error(f"Error output: {stderr[:1000]}")
+                    logger.error(f"Error output: {stderr}")
                 return result, False, error_msg
 
             if attempt > 0:

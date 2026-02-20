@@ -11,16 +11,15 @@ from pathlib import Path
 import tempfile
 import sys
 
+from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
+from app_operator.trajectory import TrajectoryRecorder, Phase
+
 # Setup debug logging to see all the debug messages
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s | %(levelname)-8s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-
-from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
-from app_operator.trajectory import TrajectoryRecorder, Phase
-from app_operator.prompts import get_loader
 
 
 def fake_agent_generate(prompt: str, silent: bool, timeout: int) -> str:
@@ -50,7 +49,7 @@ def test_progress_summarizer_standalone():
 
     # Start it
     summarizer.start()
-    print(f"✓ Summarizer started at t=0s")
+    print("✓ Summarizer started at t=0s")
 
     # Simulate a 10-second process
     for t in range(11):
@@ -61,7 +60,7 @@ def test_progress_summarizer_standalone():
         print(f"t={elapsed}s: should_summarize={should}")
 
         if should:
-            print(f"  → Calling summarizer.summarize()")
+            print("  → Calling summarizer.summarize()")
             summarizer.summarize(f"Fake output at {elapsed} seconds")
 
     print("\n✓ Test 1 complete\n")
@@ -106,12 +105,12 @@ echo "Deployment complete!"
             timeout=30,
         )
 
-        print(f"✓ Running 20-second deployment script...")
-        print(f"  Expected: Summaries at ~5s, ~10s, ~15s\n")
+        print("✓ Running 20-second deployment script...")
+        print("  Expected: Summaries at ~5s, ~10s, ~15s\n")
 
         result = runner.run_with_progress_monitoring(summarizer)
 
-        print(f"\n✓ Script completed:")
+        print("\n✓ Script completed:")
         print(f"  Exit code: {result['exit_code']}")
         print(f"  Success: {result['success']}")
 
@@ -144,7 +143,7 @@ def test_progress_summarizer_with_trajectory():
         # Create a fake agent that uses the recorder
         def agent_with_recorder(prompt: str, silent: bool, timeout: int) -> str:
             print(f"\n{'='*60}")
-            print(f"AGENT CALLED (with recorder):")
+            print("AGENT CALLED (with recorder):")
             print(f"Prompt length: {len(prompt)} chars")
             print(f"Silent: {silent}")
             print(f"{'='*60}\n")
@@ -182,8 +181,8 @@ echo "Done!"
             timeout=20,
         )
 
-        print(f"✓ Running 12-second deployment with trajectory recording...")
-        result = runner.run_with_progress_monitoring(summarizer)
+        print("✓ Running 12-second deployment with trajectory recording...")
+        runner.run_with_progress_monitoring(summarizer)
 
         # End the phase
         recorder.end_phase()
@@ -210,7 +209,7 @@ echo "Done!"
             for msg in user_messages:
                 content = msg.get('content', '')
                 if 'summarize' in content.lower() or 'output_msg' in content.lower():
-                    print(f"    ✓ FOUND deployer_summarize call!")
+                    print("    ✓ FOUND deployer_summarize call!")
                     print(f"      Content: {content[:100]}...")
 
     print("\n✓ Test 3 complete\n")

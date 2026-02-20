@@ -78,10 +78,17 @@ class PromptLoader:
             return
 
         try:
+            import os
             import dspy
 
             # Configure DSPy with the runtime model
-            lm = dspy.LM(model=self.dspy_config.runtime_model)
+            kwargs = {"model": self.dspy_config.runtime_model, "cache": False}
+            vertex_location = self.dspy_config.vertex_location or os.environ.get(
+                "VERTEX_LOCATION"
+            )
+            if vertex_location:
+                kwargs["vertex_location"] = vertex_location
+            lm = dspy.LM(**kwargs)
             dspy.settings.configure(lm=lm)
             self._dspy_configured = True
             logger.info(

@@ -7,13 +7,9 @@ This shows:
 """
 
 import json
-from pathlib import Path
-from typing import Dict, Any
 
 from app_operator.rlm.environment import RLMEnvironment, RLMContext
-from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
-from app_operator.rlm.metrics import RLMCompositeMetric, extract_rlm_statistics_from_trajectory
-from app_operator.trajectory import TrajectoryRecorder, NullTrajectoryRecorder
+from app_operator.rlm.metrics import RLMCompositeMetric
 
 
 def create_example_error_log() -> str:
@@ -311,14 +307,14 @@ def main():
     print("\nTraditional Approach:")
     print(f"  - Tokens sent to LLM: ~{trad_results['estimated_tokens']:,}")
     print(f"  - Fits in 8K context: {'Yes' if trad_results['fits_in_8k'] else 'No'}")
-    print(f"  - Analysis depth: Single-pass")
-    print(f"  - Cost: Full context cost")
+    print("  - Analysis depth: Single-pass")
+    print("  - Cost: Full context cost")
 
     print("\nRLM Approach:")
     print(f"  - Tokens sent to LLM: ~{rlm_results['tokens_sent']:,}")
     print(f"  - Tokens saved: ~{rlm_results['tokens_saved']:,} ({rlm_results['savings_ratio']:.1%} reduction)")
-    print(f"  - Fits in 8K context: Yes (filtered)")
-    print(f"  - Analysis depth: Multi-level (code + recursion)")
+    print("  - Fits in 8K context: Yes (filtered)")
+    print("  - Analysis depth: Multi-level (code + recursion)")
     print(f"  - Cost: {1 - rlm_results['savings_ratio']:.1%} of traditional")
 
     print("\nKey Insights for SDS:")

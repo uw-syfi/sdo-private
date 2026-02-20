@@ -2,6 +2,16 @@
 #
 # This file configures the end-to-end prompt optimization loop.
 # Usage: uv run -m app_operator e2e-optimize --config e2e_config.toml
+#
+# Optimization strategy: eval-execute loop
+#   For each prompt, the optimizer generates n_candidates instruction variants
+#   (configured in sds.toml under [dspy.optimization]), runs the SDS operator
+#   on each training app with each candidate, scores by real deployment outcomes,
+#   and keeps the best-scoring candidate.
+#
+# To configure n_candidates, add to your project's sds.toml:
+#   [dspy.optimization]
+#   n_candidates = 4  # Number of instruction variants to evaluate per prompt (default: 4)
 
 # Number of optimization iterations
 iterations = 3
