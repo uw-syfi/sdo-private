@@ -81,4 +81,7 @@ lego_agent_runs/
 # Experiment configs and run artifacts
 e2e_config*.toml
 *_run.log
-rlm*/
+rlm_runs/
+rlm_results/
+rlm_output/
+rlm[0-9]*/
