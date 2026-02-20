@@ -5,7 +5,7 @@ from app_operator.logger import logger
 from .base import CodingAgent, AGENT_REGISTRY
 
 # Import modules to ensure agents are registered
-from . import codex, gemini, opencode, claude  # noqa: F401
+from . import codex, gemini, opencode, claude, rlm_agent  # noqa: F401
 
 
 def create_agent_from_config(
@@ -40,6 +40,9 @@ def create_agent_from_config(
         logger.info(f"Using coding agent model: {model}")
 
     provider_lower = provider.lower()
+
+    if provider_lower == "rlm":
+        return AGENT_REGISTRY["rlm"](model=model, location=config.agent.location)
 
     if provider_lower in AGENT_REGISTRY:
         return AGENT_REGISTRY[provider_lower](model=model)

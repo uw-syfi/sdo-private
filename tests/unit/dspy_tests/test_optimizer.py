@@ -680,7 +680,8 @@ class TestPromptOptimizer:
         def fake_compile(*args, **kwargs):
             metric_fn = mock_dspy.BootstrapFewShot.call_args[1]["metric"]
             example = Mock(success=True, iterations=1,
-                           token_usage={"input": 10, "output": 5, "total": 15})
+                           token_usage={"input": 10, "output": 5, "total": 15},
+                           health_check_script=None)
             metric_fn(example, "prediction")  # one successful evaluation
             return compiled_module
 
@@ -733,14 +734,13 @@ class TestPromptOptimizer:
             )
             optimizer = PromptOptimizer(config, tmp_path)
 
-            # Mock the LM class
-            mock_lm_instance = Mock()
-            mock_dspy.LM.return_value = mock_lm_instance
-
+            mock_dspy.LM.return_value = Mock()
             optimizer._configure_dspy_lm()
 
-            # Verify LM was called with correct model string
-            mock_dspy.LM.assert_called_with(model=expected_model_str, cache=False)
+            # Verify model and cache kwargs — ignore vertex_location forwarded from env
+            call_kwargs = mock_dspy.LM.call_args[1]
+            assert call_kwargs.get("model") == expected_model_str
+            assert call_kwargs.get("cache") is False
 
     @patch("app_operator.dspy_integration.optimizer.dspy")
     def test_configure_dspy_lm_without_provider_prefix(self, mock_dspy, tmp_path):
@@ -764,11 +764,10 @@ class TestPromptOptimizer:
             )
             optimizer = PromptOptimizer(config, tmp_path)
 
-            # Mock the LM class
-            mock_lm_instance = Mock()
-            mock_dspy.LM.return_value = mock_lm_instance
-
+            mock_dspy.LM.return_value = Mock()
             optimizer._configure_dspy_lm()
 
-            # Verify LM was called with correct model string
-            mock_dspy.LM.assert_called_with(model=expected_model_str, cache=False)
+            # Verify model and cache kwargs — ignore vertex_location forwarded from env
+            call_kwargs = mock_dspy.LM.call_args[1]
+            assert call_kwargs.get("model") == expected_model_str
+            assert call_kwargs.get("cache") is False

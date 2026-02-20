@@ -383,8 +383,8 @@ def get_loader(dspy_config: Optional["DSPyConfig"] = None) -> PromptLoader:
     """
     global _loader
 
-    # Reset loader if config changed
-    if _loader is not None and dspy_config is not None:
+    # Reset loader if config changed (including when new config is None)
+    if _loader is not None:
         if _loader.dspy_config != dspy_config:
             _loader = None
 

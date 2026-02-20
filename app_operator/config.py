@@ -40,6 +40,7 @@ class AgentConfig:
         "anthropic",
         "vertex",
         "openai",
+        "rlm",
     }
 
     def __post_init__(self):
@@ -111,7 +112,7 @@ class OperatorConfig:
     deployment_max_iters: int = 5
     agent_fix_timeout: int = 1800
     deploy_timeout: int = 900
-    agent_timeout: int = 900
+    agent_timeout: int = 300
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
