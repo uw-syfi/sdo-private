@@ -77,3 +77,8 @@ agentflow_runs/
 exp_config/
 lego_agent_runs/
 !lego_agent/ui/lib/
+
+# Experiment configs and run artifacts
+e2e_config*.toml
+*_run.log
+rlm*/
