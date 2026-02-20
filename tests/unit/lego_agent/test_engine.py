@@ -49,12 +49,15 @@ class MockIO(UserIO):
     def render_info(self, message: str) -> None:
         self.info_messages.append(f"Info: {message}")
 
+    def render_graph(self, config: dict) -> None:
+        self.info_messages.append(f"[Graph Render] {config}")
+
 
 @pytest.fixture
 def mock_config():
     return Config(
         agent=AgentConfig(provider="gemini", model="gemini-1.5-pro"),
-        operator=OperatorConfig()
+        operator=OperatorConfig(),
     )
 
 
@@ -79,26 +82,35 @@ def engine(tmp_path, mock_config, mock_io):
 
 
 def test_engine_happy_path(engine, tmp_path):
-    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
-            patch("lego_agent.engine.build_llm"):
-
+    with (
+        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.engine.build_llm"),
+    ):
         mock_agent = MagicMock()
 
         async def mock_astream_events(*args, **kwargs):
             yield {
                 "event": "on_chat_model_stream",
-                "data": {"chunk": MagicMock(content=r'''
+                "data": {
+                    "chunk": MagicMock(
+                        content=r"""
 ```json
 {
     "status": "ready",
-    "python_script": "import sys\nfrom lego_agent.runtime import *\nif __name__ == '__main__':\n    MAX_ITERATIONS = 5\n    pass"
+    "yaml_config": "workflow:\n  name: test"
 }
 ```
-''')}
+"""
+                    )
+                },
             }
 
         async def mock_ainvoke(*args, **kwargs):
-            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
+            return {
+                "messages": [
+                    MagicMock(content='{"status": "error", "output": "fallback"}')
+                ]
+            }
 
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke
@@ -107,7 +119,9 @@ def test_engine_happy_path(engine, tmp_path):
         result = asyncio.run(engine.run_async("do something"))
 
         assert result.script_text is not None
-        assert (tmp_path / result.script_path.parent.name / "generated_script.py").exists()
+        assert (
+            tmp_path / result.script_path.parent.name / "generated_script.py"
+        ).exists()
         assert result.clarifications == []
 
 
@@ -117,20 +131,21 @@ def test_engine_clarification_loop(engine, mock_io):
     # Or better, the mock_astream_events can yield different things based on
     # the prompt or just sequential calls.
 
-    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
-            patch("lego_agent.engine.build_llm"):
-
+    with (
+        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.engine.build_llm"),
+    ):
         mock_agent = MagicMock()
 
         # We need an iterator for the responses
         responses = [
             r'{"status": "clarify", "questions": ["Q1"]}',
-            r'''
+            r"""
             {
                 "status": "ready",
-                "python_script": "import lego_agent.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"
+                "yaml_config": "workflow:\n  name: test"
             }
-            '''
+            """,
         ]
 
         call_count = 0
@@ -141,11 +156,15 @@ def test_engine_clarification_loop(engine, mock_io):
             call_count += 1
             yield {
                 "event": "on_chat_model_stream",
-                "data": {"chunk": MagicMock(content=response)}
+                "data": {"chunk": MagicMock(content=response)},
             }
 
         async def mock_ainvoke(*args, **kwargs):
-            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
+            return {
+                "messages": [
+                    MagicMock(content='{"status": "error", "output": "fallback"}')
+                ]
+            }
 
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke
@@ -163,9 +182,10 @@ def test_engine_clarification_loop(engine, mock_io):
 
 
 def test_engine_validation_failure_and_repair(engine):
-    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
-            patch("lego_agent.engine.build_llm"):
-
+    with (
+        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.engine.build_llm"),
+    ):
         mock_agent = MagicMock()
 
         # First call: Not JSON
@@ -179,14 +199,14 @@ def test_engine_validation_failure_and_repair(engine):
                 first_call_done = True
                 yield {
                     "event": "on_chat_model_stream",
-                    "data": {"chunk": MagicMock(content="Not JSON")}
+                    "data": {"chunk": MagicMock(content="Not JSON")},
                 }
             else:
                 # Should not be reached via astream_events in this test logic because
                 # repair uses ainvoke
                 yield {
                     "event": "on_chat_model_stream",
-                    "data": {"chunk": MagicMock(content="Should not be here")}
+                    "data": {"chunk": MagicMock(content="Should not be here")},
                 }
 
         async def mock_ainvoke_impl(*args, **kwargs):
@@ -194,7 +214,8 @@ def test_engine_validation_failure_and_repair(engine):
             return {
                 "messages": [
                     MagicMock(
-                        content=r'''{"status": "ready", "python_script": "import lego_agent.runtime\nMAX_ITERATIONS = 5\nif __name__ == '__main__': pass"}''')
+                        content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: test"}"""
+                    )
                 ]
             }
 
@@ -208,29 +229,64 @@ def test_engine_validation_failure_and_repair(engine):
         assert mock_agent.ainvoke.called
 
 
-def test_engine_script_validation_error(engine):
-    with patch("lego_agent.engine.create_react_agent") as mock_create_agent, \
-            patch("lego_agent.engine.build_llm"):
-
+def test_engine_yaml_validation_repair(engine):
+    with (
+        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.engine.build_llm"),
+    ):
         mock_agent = MagicMock()
 
+        # First call: Valid JSON, Invalid YAML (missing workflow)
+        # Second call (repair): Valid YAML
+
+        first_call_done = False
+
         async def mock_astream_events(*args, **kwargs):
-            yield {
-                "event": "on_chat_model_stream",
-                "data": {"chunk": MagicMock(content='''\
-                {
-                    "status": "ready",
-                    "python_script": "print('bad script')"
+            nonlocal first_call_done
+            if not first_call_done:
+                first_call_done = True
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {
+                        "chunk": MagicMock(
+                            content=r"""
+                    {
+                        "status": "ready",
+                        "yaml_config": "invalid: yaml"
+                    }
+                    """
+                        )
+                    },
                 }
-                ''')}
+            else:
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {"chunk": MagicMock(content="Should not be here")},
+                }
+
+        async def mock_ainvoke_impl(*args, **kwargs):
+            # This is the repair call
+            return {
+                "messages": [
+                    MagicMock(
+                        content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: repaired"}"""
+                    )
+                ]
             }
 
-        async def mock_ainvoke(*args, **kwargs):
-            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
-
         mock_agent.astream_events = mock_astream_events
-        mock_agent.ainvoke = mock_ainvoke
+        mock_agent.ainvoke = AsyncMock(side_effect=mock_ainvoke_impl)
         mock_create_agent.return_value = mock_agent
 
-        with pytest.raises(ValueError, match="Script validation failed"):
-            asyncio.run(engine.run_async("task"))
+        result = asyncio.run(engine.run_async("task"))
+
+        # Verify repair was attempted
+        assert mock_agent.ainvoke.called
+
+        # Verify the config file contains the repaired content
+        config_content = result.config_path.read_text()
+        assert "name: repaired" in config_content
+        # result.config_path points to file with yaml.
+        # But we can check result.script_text? No, script_text is the launcher.
+        # We can just assert success.
+        assert result.script_path is not None

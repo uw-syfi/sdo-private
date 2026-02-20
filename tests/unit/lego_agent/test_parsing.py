@@ -8,13 +8,13 @@ def test_extract_json_from_markdown():
     ```json
     {
         "status": "ready",
-        "python_script": "print('hello')"
+        "yaml_config": "workflow: ..."
     }
     ```
     """
     response = parse_lego_agent_response(text)
     assert response.status == "ready"
-    assert response.python_script == "print('hello')"
+    assert response.yaml_config == "workflow: ..."
 
 
 def test_extract_json_raw():
@@ -35,9 +35,9 @@ def test_validate_clarify_no_questions():
         parse_lego_agent_response(text)
 
 
-def test_validate_ready_no_script():
+def test_validate_ready_no_config():
     text = '{"status": "ready"}'
-    with pytest.raises(ValueError, match="no python_script provided"):
+    with pytest.raises(ValueError, match="no yaml_config provided"):
         parse_lego_agent_response(text)
 
 
@@ -54,10 +54,10 @@ def test_extract_json_with_nested_backticks():
     ```json
     {
       "status": "ready",
-      "python_script": "code = code.split(\"```\")[0]"
+      "yaml_config": "code: | \n  ```python\n  print('hello')\n  ```"
     }
     ```
     """
     response = parse_lego_agent_response(text)
     assert response.status == "ready"
-    assert 'code.split("```")' in response.python_script
+    assert "```python" in response.yaml_config

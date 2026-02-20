@@ -165,19 +165,24 @@ This looks for configuration in `exp_config/<exp-name>/config.toml`. See `exp_co
 
 ## Running LegoAgent (Experimental)
 
-LegoAgent uses an interactive clarification loop to refine requirements before generating orchestration scripts.
+LegoAgent uses an interactive clarification loop to refine requirements before generating and running an agent workflow graph.
 
-### Interactive TUI (Recommended)
-Launch the terminal UI to interact with the agent:
+### Web UI Mode (Recommended)
+Launch the modern web interface to interact with the agent:
 ```bash
-uv run -m lego_agent
+./scripts/start_lego_ui.sh
 ```
+This will start the backend server and frontend application. Open `http://localhost:3000` in your browser.
 
-### CLI Mode
-Provide a prompt directly from the terminal:
+### Terminal Mode (CLI)
+Run the agent directly from the terminal without the UI. Note that `--work-dir` is required to specify where the generated script will run.
+
 ```bash
-./sds_lego_agent --prompt "Improve application test coverage to >= 80%" --loop-bound 5
-./sds_lego_agent --prompt "Improve the frontend application till it follows all React best practices" --loop-bound 5
+# Using the wrapper script
+./sds_lego_agent --prompt "Improve application test coverage to >= 80%" --work-dir .
+
+# Or using uv directly
+uv run -m lego_agent --prompt "Your task description" --work-dir .
 ```
 
 ---

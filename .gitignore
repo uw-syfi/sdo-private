@@ -85,3 +85,6 @@ rlm_runs/
 rlm_results/
 rlm_output/
 rlm[0-9]*/
+
+# macOS
+.DS_Store

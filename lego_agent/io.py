@@ -4,6 +4,7 @@ import click
 
 class Colors:
     """ANSI color codes for console output."""
+
     HEADER = "\033[95m"
     BLUE = "\033[94m"
     CYAN = "\033[96m"
@@ -65,13 +66,19 @@ class UserIO(Protocol):
         """Render a general info message."""
         ...
 
+    def render_graph(self, config: dict) -> None:
+        """Render the dependency graph from the config."""
+        ...
+
 
 class ConsoleIO:
     """Console implementation of UserIO."""
 
     def read_prompt(self) -> str:
         try:
-            click.echo(f"\n{Colors.BOLD}{Colors.BLUE}Please enter your prompt:{Colors.ENDC}")
+            click.echo(
+                f"\n{Colors.BOLD}{Colors.BLUE}Please enter your prompt:{Colors.ENDC}"
+            )
             click.echo(f"{Colors.CYAN}> {Colors.ENDC}", nl=False)
             return input()
         except (KeyboardInterrupt, EOFError):
@@ -100,7 +107,9 @@ class ConsoleIO:
                     return n
                 click.echo(f"{Colors.RED}Please enter a positive integer.{Colors.ENDC}")
             except ValueError:
-                click.echo(f"{Colors.RED}Invalid number. Please try again.{Colors.ENDC}")
+                click.echo(
+                    f"{Colors.RED}Invalid number. Please try again.{Colors.ENDC}"
+                )
 
     def info(self, message: str) -> None:
         click.echo(message)
@@ -135,3 +144,9 @@ class ConsoleIO:
 
     def render_info(self, message: str) -> None:
         click.echo(message)
+
+    def render_graph(self, config: dict) -> None:
+        # For console, we just print a simple text representation or info message
+        click.echo(f"\n{Colors.BOLD}{Colors.BLUE}[Graph Generated]{Colors.ENDC}")
+        # We could print a tree here, but for now just acknowledge it
+        pass
