@@ -187,9 +187,12 @@ class AppOperator:
 
             self.ui.set_stage("Initializing")
 
-            # Step 1: Code Analysis
-            self.ui.set_stage("Code Analysis")
-            self.analyzer.run()
+            # Step 1: Code Analysis (conditional)
+            if self.config.operator.phase.code_analysis:
+                self.ui.set_stage("Code Analysis")
+                self.analyzer.run()
+            else:
+                logger.info("Code analysis disabled by configuration, skipping")
 
             # Step 2: Deploy with automatic error fixing (includes script
             # generation)

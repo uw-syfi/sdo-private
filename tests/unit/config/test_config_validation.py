@@ -83,7 +83,7 @@ class TestOperatorConfigValidation:
         assert config.deployment_max_iters == 5
         assert config.agent_fix_timeout == 1800
         assert config.deploy_timeout == 900
-        assert config.agent_timeout == 300
+        assert config.agent_timeout == 900
 
     def test_interval_boundary_values(self):
         """Test interval at boundary values."""

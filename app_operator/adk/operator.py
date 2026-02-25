@@ -79,8 +79,11 @@ class AdkOperator:
             self.filesystem.mkdir(self.sds_dir, parents=True, exist_ok=True)
             self.filesystem.mkdir(self.logs_dir, parents=True, exist_ok=True)
 
-            # 1. Code Analysis
-            await self._run_analysis()
+            # 1. Code Analysis (conditional)
+            if self.config.operator.phase.code_analysis:
+                await self._run_analysis()
+            else:
+                logger.info("Code analysis disabled by configuration, skipping")
 
             # 2. Script Generation
             await self._generate_scripts()

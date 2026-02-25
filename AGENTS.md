@@ -59,6 +59,10 @@ agent_fix_timeout = 1800
 deploy_timeout = 900
 agent_timeout = 300
 
+[operator.phase]  # Phase control (optional)
+code_analysis = false  # Disable code analysis phase (default: true)
+
+# DSPy Prompt Optimization (optional)
 [dspy]
 use_optimized = false
 optimized_version = "latest"
