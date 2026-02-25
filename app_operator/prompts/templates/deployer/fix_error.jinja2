@@ -84,6 +84,16 @@ If the deployment script uses Kubernetes, you can run kubectl commands to inspec
 
 Check for container/pod abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs.
 
+## CRITICAL: Context size limits
+
+You are operating inside a context window with a hard token limit. Large outputs will cause you to exceed that limit and crash mid-diagnosis. Follow these rules strictly:
+
+- **Always use `--tail`** when reading container logs: `docker compose logs --tail=100 <service>` — never omit `--tail`.
+- **Diagnose one service at a time.** Do not run `docker compose logs` without specifying a service name.
+- **Read log files with `tail`**, not `cat`: `tail -100 .sds/logs/deploy_attempt_N.log`.
+- **Do not read the full `docker-compose.yml`** if you only need one service definition. Use `grep -A 20 <service_name> docker-compose.yml` instead.
+- **Stop reading logs once you have identified the root cause.** Do not collect logs from every service.
+
 The deployment has failed. Please analyze the error and fix the application deployment.
 
 {{ error_context }}

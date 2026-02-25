@@ -1,4 +1,5 @@
 """Progress summarization for long-running deployment processes."""
+
 import re
 import time
 from typing import Optional, Callable
@@ -23,6 +24,7 @@ class ProgressSummarizer:
         initial_delay: float = 15.0,
         summary_interval: float = 30.0,
         time_func: Optional[Callable[[], float]] = None,
+        recorder=None,
     ):
         """Initialize the progress summarizer.
 
@@ -32,11 +34,13 @@ class ProgressSummarizer:
             initial_delay: Seconds to wait before first summary (default: 15).
             summary_interval: Seconds between summaries (default: 30).
             time_func: Optional function to get current time (default: time.time).
+            recorder: Optional trajectory recorder.
         """
         self.agent_generate_fn = agent_generate_fn
         self.initial_delay = initial_delay
         self.summary_interval = summary_interval
         self.time_func = time_func if time_func is not None else time.time
+        self.recorder = recorder
 
         self.start_time: Optional[float] = None
         self.last_summary_time: Optional[float] = None
@@ -76,10 +80,15 @@ class ProgressSummarizer:
         if not output_snippet.strip():
             return
 
+        if self.start_time is None:
+            return
+
         elapsed_time = self.time_func() - self.start_time
 
         prompt = get_loader().render(
-            "deployer/summarize.jinja2", output_snippet=output_snippet
+            "deployer/summarize.jinja2",
+            output_snippet=output_snippet,
+            _trajectory_recorder=self.recorder,
         )
 
         try:

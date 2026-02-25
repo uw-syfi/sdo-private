@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, fields
 
 from app_operator.logger import logger
 from app_operator.exceptions import ConfigurationError
+from app_operator.dspy_integration.config import DSPyConfig
+from app_operator.fault_injection.config import FaultInjectionConfig
 
 
 class UnrecognizedSectionError(ConfigurationError):
@@ -38,6 +40,7 @@ class AgentConfig:
         "anthropic",
         "vertex",
         "openai",
+        "rlm",
     }
 
     def __post_init__(self):
@@ -156,6 +159,8 @@ class Config:
     operator: OperatorConfig = field(default_factory=OperatorConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    dspy: DSPyConfig = field(default_factory=DSPyConfig)
+    fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
     def __post_init__(self):
         self._validate_runtime_requirements()
@@ -192,7 +197,14 @@ class Config:
     @classmethod
     def from_dict(cls, data: dict) -> "Config":
         # Validate top-level sections
-        recognized_sections = {"agent", "operator", "deployment", "runtime"}
+        recognized_sections = {
+            "agent",
+            "operator",
+            "deployment",
+            "runtime",
+            "dspy",
+            "fault_injection",
+        }
         unrecognized_sections = set(data.keys()) - recognized_sections
         if unrecognized_sections:
             raise UnrecognizedSectionError(
@@ -206,17 +218,159 @@ class Config:
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
+        dspy_data = data.get("dspy", {})
+        fault_injection_data = data.get("fault_injection", {})
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
+        cls._validate_dspy_fields(dspy_data)
+        cls._validate_fields(
+            fault_injection_data, "fault_injection", FaultInjectionConfig
+        )
+
+        # Create agent config first to access model info
+        agent_config = AgentConfig(**agent_data)
+
+        # Parse DSPy config and auto-populate runtime_model if not set
+        dspy_config = cls._parse_dspy_config(dspy_data, agent_config)
 
         return cls(
-            agent=AgentConfig(**agent_data),
+            agent=agent_config,
             operator=OperatorConfig(**operator_data),
             deployment=DeploymentConfig(**deployment_data),
             runtime=RuntimeConfig(**runtime_data),
+            dspy=dspy_config,
+            fault_injection=FaultInjectionConfig(**fault_injection_data),
+        )
+
+    @classmethod
+    def _validate_dspy_fields(cls, dspy_data: dict) -> None:
+        """Validate DSPy configuration fields."""
+        if not dspy_data:
+            return
+
+        from app_operator.dspy_integration.config import (
+            DSPyConfig,
+            DSPyOptimizationConfig,
+            DSPyAutoRollbackConfig,
+        )
+
+        # Top-level DSPy fields
+        recognized_top_level = {f.name for f in fields(DSPyConfig)}
+        unrecognized_top_level = set(dspy_data.keys()) - recognized_top_level
+        if unrecognized_top_level:
+            raise UnrecognizedFieldError(
+                f"Unrecognized field(s) in [dspy] section: "
+                f"{', '.join(sorted(unrecognized_top_level))}. "
+                f"Recognized fields are: {', '.join(sorted(recognized_top_level))}"
+            )
+
+        # Validate nested optimization section
+        if "optimization" in dspy_data:
+            opt_data = dspy_data["optimization"]
+            if isinstance(opt_data, dict):
+                recognized_opt = {f.name for f in fields(DSPyOptimizationConfig)}
+                unrecognized_opt = set(opt_data.keys()) - recognized_opt
+                if unrecognized_opt:
+                    raise UnrecognizedFieldError(
+                        f"Unrecognized field(s) in [dspy.optimization] section: "
+                        f"{', '.join(sorted(unrecognized_opt))}. "
+                        f"Recognized fields are: {', '.join(sorted(recognized_opt))}"
+                    )
+
+        # Validate nested auto_rollback section
+        if "auto_rollback" in dspy_data:
+            rollback_data = dspy_data["auto_rollback"]
+            if isinstance(rollback_data, dict):
+                recognized_rollback = {f.name for f in fields(DSPyAutoRollbackConfig)}
+                unrecognized_rollback = set(rollback_data.keys()) - recognized_rollback
+                if unrecognized_rollback:
+                    raise UnrecognizedFieldError(
+                        f"Unrecognized field(s) in [dspy.auto_rollback] section: "
+                        f"{', '.join(sorted(unrecognized_rollback))}. "
+                        f"Recognized fields are: {', '.join(sorted(recognized_rollback))}"
+                    )
+
+    @classmethod
+    def _parse_dspy_config(
+        cls, dspy_data: dict, agent_config: AgentConfig
+    ) -> DSPyConfig:
+        """Parse DSPy configuration with nested sections.
+
+        Args:
+            dspy_data: DSPy configuration data from TOML
+            agent_config: Agent configuration (used to auto-populate runtime_model)
+
+        Returns:
+            Parsed DSPy configuration
+        """
+        if not dspy_data:
+            return DSPyConfig()
+
+        from app_operator.dspy_integration.config import (
+            DSPyOptimizationConfig,
+            DSPyAutoRollbackConfig,
+        )
+
+        # Make a copy to avoid modifying the input
+        dspy_data = dict(dspy_data)
+
+        # Extract nested sections
+        optimization_data = dspy_data.pop("optimization", {})
+        auto_rollback_data = dspy_data.pop("auto_rollback", {})
+
+        # Auto-populate runtime_model if not explicitly set.
+        #
+        # The [agent] model is consumed by the CLI coding agent (e.g. the
+        # Gemini CLI) and may not be a valid litellm model string.  For
+        # example, "gemini-3-pro-preview" works via the CLI but does not
+        # exist as a Vertex AI publisher model.
+        #
+        # teacher_model, on the other hand, is already a fully-qualified
+        # litellm model string (e.g. "vertex_ai/gemini-2.5-pro") that has
+        # been validated during optimization.  Use it as the default when
+        # available; fall back to mapping [agent] provider/model only when
+        # no teacher_model is configured.
+        if "runtime_model" not in dspy_data:
+            teacher_model = optimization_data.get("teacher_model", "")
+            if "/" in teacher_model:
+                # teacher_model is already a qualified litellm string
+                dspy_data["runtime_model"] = teacher_model
+            elif agent_config.model:
+                # No teacher_model available; derive from agent config
+                provider = agent_config.provider
+                model = agent_config.model
+
+                provider_mapping = {
+                    "gemini": "gemini",
+                    "vertex": "vertex_ai",
+                    "claude": "anthropic",
+                    "anthropic": "anthropic",
+                    "codex": "openai",
+                    "openai": "openai",
+                }
+                dspy_provider = provider_mapping.get(provider, provider)
+                dspy_data["runtime_model"] = f"{dspy_provider}/{model}"
+
+        # Create nested config objects
+        optimization = (
+            DSPyOptimizationConfig(**optimization_data)
+            if optimization_data
+            else DSPyOptimizationConfig()
+        )
+        auto_rollback = (
+            DSPyAutoRollbackConfig(**auto_rollback_data)
+            if auto_rollback_data
+            else DSPyAutoRollbackConfig()
+        )
+
+        # Create main DSPy config with nested objects
+        return DSPyConfig(
+            **dspy_data,
+            optimization=optimization,
+            auto_rollback=auto_rollback,
         )
 
 

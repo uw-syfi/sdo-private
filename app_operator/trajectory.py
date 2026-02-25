@@ -93,6 +93,11 @@ class TrajectoryRecorderProtocol(Protocol):
     ) -> None: ...
     def set_phase_status(self, status: str) -> None: ...
     def set_agent_name(self, agent_name: str) -> None: ...
+    def set_prompt_version(self, version: str) -> None: ...
+    def record_fallback(self) -> None: ...
+    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
+    def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
+    def record_fault_injection(self, metadata: Dict[str, Any]) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
     def phase(
@@ -157,6 +162,12 @@ class TrajectoryRecorder:
 
         # Pending status for the current phase (set by set_phase_status)
         self._pending_phase_status: Optional[str] = None
+
+        # Prompt version tracking for DSPy integration
+        self._current_prompt_version: Optional[str] = None
+        self._current_prompt_kwargs: Optional[Dict[str, Any]] = None
+        self._current_rendered_prompt: Optional[str] = None
+        self._fallback_occurred: bool = False
 
         # Prevent double finalization
         self._finalized = False
@@ -322,6 +333,54 @@ class TrajectoryRecorder:
         """Set the status to be used when ending the current phase."""
         self._pending_phase_status = status
 
+    def set_prompt_version(self, version: str) -> None:
+        """Record which prompt version was used (jinja2 or dspy_vN).
+
+        Args:
+            version: Version identifier (e.g., 'jinja2', 'dspy_v1')
+        """
+        self._current_prompt_version = version
+
+    def record_fallback(self) -> None:
+        """Record that a fallback from DSPy to Jinja2 occurred."""
+        self._fallback_occurred = True
+
+    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None:
+        """Record the structured kwargs passed to a prompt render call.
+
+        Filters out internal keys (starting with '_') and converts Path values
+        to strings for JSON serialization.
+
+        Args:
+            kwargs: The keyword arguments passed to the prompt renderer.
+        """
+        filtered = {
+            k: str(v) if isinstance(v, Path) else v
+            for k, v in kwargs.items()
+            if not k.startswith("_")
+        }
+        self._current_prompt_kwargs = filtered
+
+    def record_rendered_prompt(self, rendered_prompt: str) -> None:
+        """Record the rendered prompt string returned by the prompt renderer.
+
+        This is the string sent to the coding agent as its instruction prompt.
+        Stored in the trajectory as ground-truth output for DSPy optimization.
+
+        Args:
+            rendered_prompt: The rendered prompt string.
+        """
+        self._current_rendered_prompt = rendered_prompt
+
+    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
+        """Record fault injection metadata in the trajectory.
+
+        Args:
+            metadata: Fault injection report from FaultReport.to_trajectory_metadata().
+        """
+        self.trajectory["metadata"]["fault_injection"] = metadata
+        self._write_to_file()
+
     def end_phase(self, status: Optional[str] = None) -> None:
         """End the current phase, commit conversation, and save to file."""
         with self._conversation_lock:
@@ -357,11 +416,28 @@ class TrajectoryRecorder:
         if self._current_phase and self._current_conversation:
             phase_key = self._current_phase.value
             if phase_key in self.trajectory:
-                # Create a conversation entry with call_id
+                # Create a conversation entry with call_id and prompt metadata
                 conversation_entry = {
                     "call_id": self._current_call_id,
                     "messages": self._current_conversation.copy(),
                 }
+
+                # Add prompt version if tracked
+                if self._current_prompt_version:
+                    conversation_entry["prompt_version"] = self._current_prompt_version
+
+                # Add fallback flag if occurred
+                if self._fallback_occurred:
+                    conversation_entry["fallback_occurred"] = True
+
+                # Add recorded prompt kwargs if available
+                if self._current_prompt_kwargs is not None:
+                    conversation_entry["prompt_kwargs"] = self._current_prompt_kwargs
+
+                # Add rendered prompt if recorded
+                if self._current_rendered_prompt is not None:
+                    conversation_entry["rendered_prompt"] = self._current_rendered_prompt
+
                 # Append the conversation entry
                 self.trajectory[phase_key].append(conversation_entry)
 
@@ -370,7 +446,18 @@ class TrajectoryRecorder:
                 for call_record in self.trajectory["calls"]:
                     if call_record["call_id"] == self._current_call_id:
                         call_record["end_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        # Also record prompt metadata in call record
+                        if self._current_prompt_version:
+                            call_record["prompt_version"] = self._current_prompt_version
+                        if self._fallback_occurred:
+                            call_record["fallback_occurred"] = True
                         break
+
+            # Reset prompt tracking for next conversation
+            self._current_prompt_version = None
+            self._current_prompt_kwargs = None
+            self._current_rendered_prompt = None
+            self._fallback_occurred = False
 
     def _write_to_file(self) -> None:
         """Write the current trajectory state to file."""
@@ -670,6 +757,21 @@ class NullTrajectoryRecorder:
         pass
 
     def set_agent_name(self, agent_name: str) -> None:
+        pass
+
+    def set_prompt_version(self, version: str) -> None:
+        pass
+
+    def record_fallback(self) -> None:
+        pass
+
+    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None:
+        pass
+
+    def record_rendered_prompt(self, rendered_prompt: str) -> None:
+        pass
+
+    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
         pass
 
     @contextmanager

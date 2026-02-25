@@ -2,7 +2,10 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
 
 from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
@@ -44,6 +47,7 @@ def generate_scripts(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -58,6 +62,7 @@ def generate_scripts(
         deployment_config: Optional deployment configuration. If None, uses default.
         operator_config: Optional operator configuration for timeouts. If None, uses default.
         recorder: Optional trajectory recorder.
+        dspy_config: Optional DSPy configuration for optimized prompts.
 
     Returns:
         Tuple of (success: bool, message: str).
@@ -117,6 +122,7 @@ def generate_scripts(
                 deployment_config,
                 operator_config,
                 recorder=r,
+                dspy_config=dspy_config,
             )
 
             if not deploy_success:
@@ -133,6 +139,7 @@ def generate_scripts(
                 deployment_config,
                 operator_config,
                 recorder=r,
+                dspy_config=dspy_config,
             )
 
             if not health_check_success:
@@ -169,6 +176,7 @@ def _generate_deploy_script(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh script using a coding agent."""
     if operator_config is None:
@@ -183,6 +191,8 @@ def _generate_deploy_script(
         repo_context=repo_context,
         target_dir=target_dir,
         platform=platform,
+        dspy_config=dspy_config,
+        recorder=recorder,
     )
 
     try:
@@ -226,6 +236,7 @@ def _generate_health_check_script(
     deployment_config: Optional[DeploymentConfig] = None,
     operator_config: Optional[OperatorConfig] = None,
     recorder: Optional[TrajectoryRecorderProtocol] = None,
+    dspy_config: Optional["DSPyConfig"] = None,
 ) -> tuple[bool, str]:
     """Generate health_check.sh script using a coding agent."""
     if operator_config is None:
@@ -240,6 +251,8 @@ def _generate_health_check_script(
         repo_context=repo_context,
         target_dir=target_dir,
         platform=platform,
+        dspy_config=dspy_config,
+        recorder=recorder,
     )
 
     try:
@@ -285,6 +298,7 @@ class DeploymentAgent:
         deployment_config: Optional[DeploymentConfig] = None,
         operator_config: Optional[OperatorConfig] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        dspy_config: Optional["DSPyConfig"] = None,
         ui: Optional[OperatorUI] = None,
     ):
         """Initialize the deployment agent.
@@ -296,6 +310,7 @@ class DeploymentAgent:
             deployment_config: Optional deployment configuration.
             operator_config: Optional operator configuration for timeouts.
             recorder: Optional trajectory recorder.
+            dspy_config: Optional DSPy configuration for optimized prompts.
             ui: Optional UI interface.
         """
         self.repo_path = repo_path
@@ -304,6 +319,7 @@ class DeploymentAgent:
         self.deployment_config = deployment_config or DeploymentConfig()
         self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
         self.sds_dir = self.repo_path / ".sds"
         self.deploy_script = self.sds_dir / "deploy.sh"
@@ -376,6 +392,7 @@ class DeploymentAgent:
                 self.deployment_config,
                 self.operator_config,
                 recorder=self.recorder,
+                dspy_config=self.dspy_config,
             )
 
             if success:
@@ -435,12 +452,13 @@ class DeploymentAgent:
                     return False
 
                 # Record the deployment tool call
+                deploy_ec = deploy_result.get("exit_code")
                 r.add_tool_call(
                     tool="bash",
                     args={"script": ".sds/deploy.sh start"},
                     stdout=deploy_result.get("stdout", ""),
                     stderr=deploy_result.get("stderr", ""),
-                    exit_code=int(deploy_result.get("exit_code", -1) or -1),
+                    exit_code=int(deploy_ec) if deploy_ec is not None else -1,
                     duration=deploy_duration,
                 )
 
@@ -470,12 +488,13 @@ class DeploymentAgent:
                     health_duration = time.time() - health_start
 
                     # Record health check tool call
+                    health_ec = health_result.get("exit_code")
                     r.add_tool_call(
                         tool="bash",
                         args={"script": ".sds/health_check.sh"},
                         stdout=health_result.get("stdout", ""),
                         stderr=health_result.get("stderr", ""),
-                        exit_code=int(health_result.get("exit_code", -1) or -1),
+                        exit_code=int(health_ec) if health_ec is not None else -1,
                         duration=health_duration,
                     )
 
@@ -502,6 +521,42 @@ class DeploymentAgent:
                             log_file_path,
                             health_check_log_path,
                         ):
+                            # Re-run health check before committing to a full
+                            # re-deploy.  If the agent only fixed health_check.sh
+                            # (e.g. wrong service names) the containers are already
+                            # healthy and a restart would be wasteful.
+                            recheck_log = (
+                                self.sds_dir
+                                / "logs"
+                                / f"health_recheck_attempt_{attempt}.log"
+                            )
+                            recheck = run_health_check(
+                                self.repo_path,
+                                self.health_check_script,
+                                log_file_path=recheck_log,
+                            )
+                            recheck_ec = recheck.get("exit_code")
+                            r.add_tool_call(
+                                tool="bash",
+                                args={
+                                    "script": ".sds/health_check.sh (post-fix recheck)"
+                                },
+                                stdout=recheck.get("stdout", ""),
+                                stderr=recheck.get("stderr", ""),
+                                exit_code=int(recheck_ec)
+                                if recheck_ec is not None
+                                else -1,
+                            )
+
+                            if recheck["success"]:
+                                logger.success(
+                                    "Health check passed after agent fix. Deployment successful!"
+                                )
+                                r.add_assistant_message(
+                                    "Health check passed after agent fix. Deployment successful!"
+                                )
+                                return True
+
                             r.set_phase_status("needs_retry")
                         else:
                             if attempt < absolute_max_attempts:
@@ -589,6 +644,7 @@ class DeploymentAgent:
             initial_delay=15.0,
             summary_interval=30.0,
             time_func=self._get_time,
+            recorder=self.recorder,
         )
 
         # Start the subprocess with progress monitoring
@@ -717,6 +773,8 @@ class DeploymentAgent:
             error_context,
             self.deploy_script,
             self.health_check_script,
+            dspy_config=self.dspy_config,
+            recorder=self.recorder,
         )
 
         try:

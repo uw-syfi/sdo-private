@@ -4,7 +4,10 @@ import shutil
 import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Any, List
+from typing import Optional, Callable, Any, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
 
 from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
@@ -84,7 +87,14 @@ class HealthCheckTask(MonitoringTask):
         context = self._prepare_health_context(health_result, monitor.check_count)
 
         # Create analysis prompt
-        prompt = self._create_analysis_prompt(context, monitor.repo_path)
+        prompt = self._create_analysis_prompt(
+            context,
+            monitor.repo_path,
+            health_result,
+            monitor.check_count,
+            monitor.dspy_config,
+            recorder=monitor.recorder,
+        )
 
         try:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -159,11 +169,46 @@ class HealthCheckTask(MonitoringTask):
 
         return "\n".join(context_parts)
 
-    def _create_analysis_prompt(self, context: str, repo_path: Path) -> str:
-        """Create a prompt for the coding agent to analyze health check results."""
-        return get_loader().render(
-            "monitor/analyze_health.jinja2", repo_path=repo_path, context=context
+    def _create_analysis_prompt(
+        self,
+        context: str,
+        repo_path: Path,
+        health_result: dict,
+        check_count: int,
+        dspy_config: Optional["DSPyConfig"] = None,
+        recorder=None,
+    ) -> str:
+        """Create a prompt for the coding agent to analyze health check results.
+
+        Args:
+            context: Formatted health check context (for Jinja2)
+            repo_path: Repository path
+            health_result: Raw health check result dict
+            check_count: Current monitoring iteration
+            dspy_config: Optional DSPy configuration
+            recorder: Optional trajectory recorder for kwargs capture
+
+        Returns:
+            Rendered prompt string
+        """
+        # Pass both Jinja2 fields (context, repo_path) and DSPy fields
+        # (health_check_output, exit_code, iteration) to support both renderers
+        prompt = get_loader(dspy_config).render(
+            "monitor/analyze_health.jinja2",
+            # Jinja2 fields (for backward compatibility)
+            repo_path=repo_path,
+            context=context,
+            # DSPy fields (for DSPy signature)
+            health_check_output=health_result.get("stdout", ""),
+            exit_code=health_result.get("exit_code", -1),
+            iteration=check_count,
+            _trajectory_recorder=recorder,
         )
+
+        # Ensure the prompt explicitly requests <exec_summary> format
+        prompt += "\n\nProvide your analysis with an executive summary wrapped in <exec_summary> tags. The summary must be 1-2 sentences maximum."
+
+        return prompt
 
 
 class AppMonitor:
@@ -175,6 +220,7 @@ class AppMonitor:
         agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
+        dspy_config: Optional["DSPyConfig"] = None,
         ui: Optional[OperatorUI] = None,
     ):
         """Initialize the monitor agent.
@@ -184,12 +230,14 @@ class AppMonitor:
             agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
+            dspy_config: Optional DSPy configuration for optimized prompts.
             ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
         self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0

@@ -8,11 +8,18 @@ from .run_exp import (
     run_command as run_run_exp_command,
 )
 
+from .e2e_optimize import (
+    add_arguments as add_e2e_optimize_arguments,
+    run_command as run_e2e_optimize_command,
+)
+
 __all__ = [
     "add_run_arguments",
     "run_command",
     "add_init_exp_arguments",
     "run_init_exp_command",
+    "add_e2e_optimize_arguments",
+    "run_e2e_optimize_command",
     "add_run_exp_arguments",
     "run_run_exp_command",
 ]

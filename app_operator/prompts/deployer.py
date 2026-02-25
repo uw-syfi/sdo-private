@@ -1,6 +1,10 @@
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
+
 from app_operator.prompts import get_loader
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
 
 
 def prepare_error_context(
@@ -54,6 +58,8 @@ def create_generate_script_prompt(
     repo_context: str,
     target_dir: str,
     platform: str,
+    dspy_config: Optional["DSPyConfig"] = None,
+    recorder=None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
 
@@ -63,17 +69,48 @@ def create_generate_script_prompt(
         repo_context: Context string describing the repository.
         target_dir: The directory where scripts will be generated.
         platform: The deployment platform (e.g., 'docker', 'kubernetes').
+        dspy_config: Optional DSPy configuration for optimized prompts.
+        recorder: Optional trajectory recorder for kwargs capture.
 
     Returns:
         str: The rendered prompt.
     """
-    return get_loader().render(
-        "deployer/generate_script.jinja2",
+    if script_name == "deploy.sh":
+        template_name = "deployer/generate_deploy_script.jinja2"
+    elif script_name == "health_check.sh":
+        template_name = "deployer/generate_health_check.jinja2"
+    else:
+        # Fallback for other scripts or backward compatibility
+        template_name = "deployer/generate_script.jinja2"
+
+    # Read code analysis and deployment issues if available
+    # This ensures kwargs match the DSPy signatures for optimization
+    code_analysis = ""
+    deployment_issues = ""
+    try:
+        sds_dir = Path(target_dir) / ".sds"
+        ca_path = sds_dir / "code_analysis.md"
+        di_path = sds_dir / "deployment_issues.md"
+
+        if ca_path.exists():
+            code_analysis = ca_path.read_text()
+        if di_path.exists():
+            deployment_issues = di_path.read_text()
+    except Exception:
+        # Ignore filesystem errors during prompt generation
+        pass
+
+    return get_loader(dspy_config).render(
+        template_name,
         system_prompt=system_prompt,
         script_name=script_name,
         repo_context=repo_context,
         target_dir=target_dir,
+        repo_path=target_dir,  # Map target_dir to repo_path for signature
+        code_analysis=code_analysis,
+        deployment_issues=deployment_issues,
         platform=platform,
+        _trajectory_recorder=recorder,
     )
 
 
@@ -84,6 +121,8 @@ def create_fix_prompt(
     error_context: str,
     deploy_script_path: Path,
     health_check_script_path: Path,
+    dspy_config: Optional["DSPyConfig"] = None,
+    recorder=None,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.
 
@@ -94,6 +133,8 @@ def create_fix_prompt(
         error_context: Formatted error context.
         deploy_script_path: Path to the deploy script.
         health_check_script_path: Path to the health check script.
+        dspy_config: Optional DSPy configuration for optimized prompts.
+        recorder: Optional trajectory recorder for kwargs capture.
 
     Returns:
         str: The rendered prompt.
@@ -115,7 +156,7 @@ def create_fix_prompt(
             "Please review the previous attempts to avoid repeating mistakes."
         )
 
-    return get_loader().render(
+    return get_loader(dspy_config).render(
         "deployer/fix_error.jinja2",
         repo_path=repo_path,
         attempt=attempt,
@@ -124,6 +165,7 @@ def create_fix_prompt(
         previous_summary_note=previous_summary_note,
         deploy_script=deploy_script_path,
         health_check_script=health_check_script_path,
+        _trajectory_recorder=recorder,
     )
 
 
