@@ -42,7 +42,7 @@ class TestFault:
         )
         assert fault.fault_id == "TEST-001"
         assert fault.name == "test_fault"
-        assert fault.applicable_services == []
+        assert fault.applicable_services == ()
         assert fault.platform == "compose"
 
     def test_frozen(self):
