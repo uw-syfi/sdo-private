@@ -105,6 +105,18 @@ class DeploymentConfig:
 
 
 @dataclass
+class OperatorPhaseConfig:
+    """Configuration for operator phase control."""
+    code_analysis: bool = True
+
+    def __post_init__(self):
+        if not isinstance(self.code_analysis, bool):
+            raise TypeError(
+                f"code_analysis must be bool, got {type(self.code_analysis).__name__}"
+            )
+
+
+@dataclass
 class OperatorConfig:
     interval: int = 30
     monitoring_max_iters: int = 5
@@ -112,6 +124,7 @@ class OperatorConfig:
     agent_fix_timeout: int = 1800
     deploy_timeout: int = 900
     agent_timeout: int = 900
+    phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
@@ -222,6 +235,7 @@ class Config:
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
+        cls._validate_operator_phase_fields(operator_data)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
         cls._validate_dspy_fields(dspy_data)
@@ -237,7 +251,7 @@ class Config:
 
         return cls(
             agent=agent_config,
-            operator=OperatorConfig(**operator_data),
+            operator=cls._parse_operator_config(operator_data),
             deployment=DeploymentConfig(**deployment_data),
             runtime=RuntimeConfig(**runtime_data),
             dspy=dspy_config,
@@ -291,6 +305,25 @@ class Config:
                         f"{', '.join(sorted(unrecognized_rollback))}. "
                         f"Recognized fields are: {', '.join(sorted(recognized_rollback))}"
                     )
+
+    @classmethod
+    def _validate_operator_phase_fields(cls, operator_data: dict) -> None:
+        """Validate operator.phase configuration fields."""
+        if not operator_data or "phase" not in operator_data:
+            return
+
+        phase_data = operator_data["phase"]
+        if not isinstance(phase_data, dict):
+            return
+
+        recognized_phase = {f.name for f in fields(OperatorPhaseConfig)}
+        unrecognized_phase = set(phase_data.keys()) - recognized_phase
+        if unrecognized_phase:
+            raise UnrecognizedFieldError(
+                f"Unrecognized field(s) in [operator.phase] section: "
+                f"{', '.join(sorted(unrecognized_phase))}. "
+                f"Recognized fields are: {', '.join(sorted(recognized_phase))}"
+            )
 
     @classmethod
     def _parse_dspy_config(
@@ -371,6 +404,23 @@ class Config:
             optimization=optimization,
             auto_rollback=auto_rollback,
         )
+
+    @classmethod
+    def _parse_operator_config(cls, operator_data: dict) -> OperatorConfig:
+        """Parse Operator configuration with nested phase section."""
+        if not operator_data:
+            return OperatorConfig()
+
+        operator_data = dict(operator_data)  # Copy to avoid mutation
+        phase_data = operator_data.pop("phase", {})
+
+        phase = (
+            OperatorPhaseConfig(**phase_data)
+            if phase_data
+            else OperatorPhaseConfig()
+        )
+
+        return OperatorConfig(**operator_data, phase=phase)
 
 
 def _deep_merge(base: dict, update: dict) -> dict:

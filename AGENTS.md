@@ -99,6 +99,9 @@ agent_fix_timeout = 1800 # Agent fix timeout in seconds (>0, default: 1800 / 30 
 deploy_timeout = 900 # Deployment timeout in seconds (>0, default: 900 / 15 minutes)
 agent_timeout = 300 # Agent generation timeout in seconds (>0, default: 300 / 5 minutes)
 
+[operator.phase]  # Phase control (optional)
+code_analysis = false  # Disable code analysis phase (default: true)
+
 # DSPy Prompt Optimization (optional)
 [dspy]
 use_optimized = false           # Use DSPy-optimized prompts (default: false)

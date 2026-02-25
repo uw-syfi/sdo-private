@@ -97,7 +97,7 @@ class LangGraphOperator:
                 "repo_path": str(self.repo_path),
                 "attempt": 1,
                 "max_attempts": self.max_deployment_attempts,
-                "analysis_done": False,
+                "analysis_done": not self.config.operator.phase.code_analysis,
                 "scripts_done": False,
                 "deploy_result": None,
                 "health_result": None,
