@@ -4,10 +4,13 @@ Loads training examples from trajectory files for prompt optimization.
 """
 
 import json
+import logging
 import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -111,14 +114,13 @@ class TrajectoryDataLoader:
             fault_severities = fault_meta.get("severities", [])
 
             # Extract examples from each phase
-            phases_to_process = ["deployment", "monitoring", "script_generation"]
+            phases_to_process = ["deployment", "monitoring", "script_generation", "exploration"]
             if phase_filter:
                 phases_to_process = [phase_filter]
 
             for phase in phases_to_process:
                 phase_data = trajectory.get(phase, [])
-                phase_attempt_count = len(phase_data)
-                for conversation in phase_data:
+                for idx, conversation in enumerate(phase_data):
                     call_id = conversation.get("call_id")
                     messages = conversation.get("messages", [])
 
@@ -138,7 +140,7 @@ class TrajectoryDataLoader:
 
                     # Calculate metrics
                     success = self._determine_success(messages, phase, overall_success)
-                    iterations = phase_attempt_count
+                    iterations = idx + 1
                     duration = self._calculate_duration(messages)
                     token_usage = self._extract_token_usage(messages)
                     prompt_kwargs = conversation.get("prompt_kwargs")
@@ -332,14 +334,16 @@ class TrajectoryDataLoader:
         repo_path = trajectory.get("metadata", {}).get("repo_path")
         if not repo_path:
             return None
-
-        health_check_path = Path(repo_path) / ".sds" / "health_check.sh"
+        repo = Path(repo_path).resolve()
+        if not repo.is_absolute():
+            return None
+        health_check_path = (repo / ".sds" / "health_check.sh").resolve()
+        if not health_check_path.is_relative_to(repo):
+            return None
         try:
             if health_check_path.exists():
                 return health_check_path.read_text()
-        except Exception:
-            # Ignore errors reading health check script (file may have been deleted,
-            # permissions, etc.)
-            pass
+        except Exception as e:
+            logger.debug(f"Could not read health check: {e}")
 
         return None

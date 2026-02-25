@@ -1,8 +1,9 @@
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 import hashlib
 import logging
+import threading
 
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
@@ -65,6 +66,7 @@ class PromptLoader:
         self.dspy_config = dspy_config
         self.optimized_dir = Path(__file__).resolve().parent / "optimized"
         self._dspy_configured = False  # Track if DSPy LM has been configured
+        self._module_exists_cache: Dict[str, bool] = {}
 
     def _configure_dspy_runtime(self):
         """Configure DSPy with runtime LM (called once on first use)."""
@@ -180,7 +182,7 @@ class PromptLoader:
             if repo_path:
                 try:
                     # Hash repo_path to get deterministic percentage
-                    hash_val = int(hashlib.md5(str(repo_path).encode()).hexdigest(), 16)
+                    hash_val = int(hashlib.sha256(str(repo_path).encode()).hexdigest(), 16)
                     percentage = (hash_val % 100) / 100.0
                     canary_pct = float(self.dspy_config.canary_percentage)
                     use_dspy = percentage < canary_pct
@@ -216,16 +218,22 @@ class PromptLoader:
         Returns:
             True if the module file exists in the target version directory
         """
+        if prompt_name in self._module_exists_cache:
+            return self._module_exists_cache[prompt_name]
+
         from app_operator.dspy_integration.loader import resolve_version
 
         resolved = resolve_version(
             self.optimized_dir, self.dspy_config.optimized_version
         )
         if resolved is None:
-            return False
+            result = False
+        else:
+            module_file = self.optimized_dir / resolved / f"{prompt_name}.dspy.json"
+            result = module_file.exists()
 
-        module_file = self.optimized_dir / resolved / f"{prompt_name}.dspy.json"
-        return module_file.exists()
+        self._module_exists_cache[prompt_name] = result
+        return result
 
     def _render_dspy(self, prompt_name: str, kwargs: dict) -> str:
         """Render using DSPy optimized module.
@@ -281,6 +289,10 @@ class PromptLoader:
         )
 
         return output
+
+    def render_template(self, template_name: str, kwargs: dict) -> str:
+        """Render a Jinja2 template by name with the given kwargs."""
+        return self._render_jinja2(template_name, kwargs)
 
     def _render_jinja2(self, template_name: str, kwargs: dict) -> str:
         """Render using Jinja2 template.
@@ -369,6 +381,7 @@ class PromptLoader:
 
 # Global instance for easy access
 _loader = None
+_loader_lock = threading.Lock()
 
 
 def get_loader(dspy_config: Optional["DSPyConfig"] = None) -> PromptLoader:
@@ -383,15 +396,16 @@ def get_loader(dspy_config: Optional["DSPyConfig"] = None) -> PromptLoader:
     """
     global _loader
 
-    # Reset loader if config changed (including when new config is None)
-    if _loader is not None:
-        if _loader.dspy_config != dspy_config:
-            _loader = None
+    with _loader_lock:
+        # Reset loader if config changed (including when new config is None)
+        if _loader is not None:
+            if _loader.dspy_config != dspy_config:
+                _loader = None
 
-    if _loader is None:
-        _loader = PromptLoader(dspy_config=dspy_config)
+        if _loader is None:
+            _loader = PromptLoader(dspy_config=dspy_config)
 
-    return _loader
+        return _loader
 
 
 def reset_loader() -> None:

@@ -3,7 +3,10 @@
 Calculates token costs based on model pricing.
 """
 
+import logging
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # Model pricing per 1M tokens (as of 2026-01)
@@ -41,18 +44,15 @@ def calculate_cost(
         output_tokens: Number of output tokens
 
     Returns:
-        Cost in USD
-
-    Raises:
-        ValueError: If model pricing not found
+        Cost in USD, or 0.0 if model pricing not found
     """
-    if model not in MODEL_PRICING:
-        raise ValueError(
-            f"No pricing data for model '{model}'. "
-            f"Supported models: {', '.join(sorted(MODEL_PRICING.keys()))}"
-        )
+    # Normalize: strip provider prefix
+    normalized = model.split("/")[-1] if "/" in model else model
+    if normalized not in MODEL_PRICING:
+        logger.warning("No pricing data for model '%s', returning zero cost", model)
+        return 0.0
 
-    pricing = MODEL_PRICING[model]
+    pricing = MODEL_PRICING[normalized]
     input_cost = (input_tokens / 1_000_000) * pricing["input"]
     output_cost = (output_tokens / 1_000_000) * pricing["output"]
 
@@ -69,4 +69,5 @@ def get_model_pricing(model: str) -> Optional[Dict[str, float]]:
         Dictionary with 'input' and 'output' prices per 1M tokens,
         or None if model not found
     """
-    return MODEL_PRICING.get(model)
+    pricing = MODEL_PRICING.get(model)
+    return dict(pricing) if pricing else None

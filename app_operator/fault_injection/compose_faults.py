@@ -135,7 +135,7 @@ COMPOSE_FAULTS: List[Fault] = [
         category=FaultCategory.CORRELATED,
         severity=FaultSeverity.HIGH,
         description="Change the database connection string for one consumer.",
-        applicable_services=["backend"],
+        applicable_services=("backend",),
     ),
     Fault(
         fault_id="CORR-003",
@@ -205,7 +205,7 @@ class ComposeFaultInjector(FaultInjector):
             "META-001": self._inject_resource_limit_cpu,
             "META-002": self._inject_resource_limit_memory,
             "META-003": self._inject_restart_loop_trigger,
-            "META-004": self._inject_slow_healthcheck,
+            "META-004": self._inject_failing_healthcheck,
             "META-005": self._inject_tmpfs_too_small,
             "CORR-001": self._inject_remove_dependency,
             "CORR-002": self._inject_break_shared_database,
@@ -540,7 +540,7 @@ class ComposeFaultInjector(FaultInjector):
             },
         )
 
-    def _inject_slow_healthcheck(
+    def _inject_failing_healthcheck(
         self, fault: Fault, data: Dict[str, Any], service: str
     ) -> FaultResult:
         svc = data["services"][service]
@@ -610,14 +610,14 @@ class ComposeFaultInjector(FaultInjector):
                                    error_message="No database env vars found")
             key = self._rng.choice(db_keys)
             old_val = env[key]
-            env[key] = "broken-host-sds-fault:99999"
+            env[key] = "broken-host-sds-fault:65535"
             return FaultResult(
                 fault=fault, target_service=service,
                 modified_fields={
                     "environment": {
                         key: {
                             "old": str(old_val),
-                            "new": "broken-host-sds-fault:99999"}}},
+                            "new": "broken-host-sds-fault:65535"}}},
             )
 
         db_indices = [
@@ -630,7 +630,7 @@ class ComposeFaultInjector(FaultInjector):
         idx = self._rng.choice(db_indices)
         old_val = env[idx]
         var_name = str(old_val).split("=")[0]
-        env[idx] = f"{var_name}=broken-host-sds-fault:99999"
+        env[idx] = f"{var_name}=broken-host-sds-fault:65535"
         return FaultResult(
             fault=fault, target_service=service,
             modified_fields={"environment": {var_name: {"old": str(old_val), "new": env[idx]}}},
@@ -702,10 +702,21 @@ class ComposeFaultInjector(FaultInjector):
         vol_name = self._rng.choice(list(volumes.keys()))
         removed_config = volumes.pop(vol_name)
 
+        # Also remove service-level references to the volume
+        affected_services = []
+        for svc_name, svc_cfg in data.get("services", {}).items():
+            svc_volumes = svc_cfg.get("volumes", [])
+            if isinstance(svc_volumes, list):
+                new_volumes = [v for v in svc_volumes if not str(v).startswith(f"{vol_name}:")]
+                if len(new_volumes) != len(svc_volumes):
+                    svc_cfg["volumes"] = new_volumes
+                    affected_services.append(svc_name)
+
         return FaultResult(
             fault=fault, target_service=service,
             modified_fields={
                 "volumes": {"removed": vol_name, "config": str(removed_config)},
+                "affected_services": affected_services,
             },
         )
 

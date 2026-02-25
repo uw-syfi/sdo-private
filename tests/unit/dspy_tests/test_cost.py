@@ -68,10 +68,21 @@ class TestCalculateCost:
         cost = calculate_cost("claude-sonnet-4-5", 5_000, 2_000)
         assert pytest.approx(cost, 0.0001) == 0.045
 
-    def test_unknown_model_raises_error(self):
-        """Test that unknown model raises ValueError."""
-        with pytest.raises(ValueError, match="No pricing data for model"):
-            calculate_cost("unknown-model", 1_000, 1_000)
+    def test_unknown_model_returns_zero(self):
+        """Test that unknown model returns 0.0 with a warning."""
+        cost = calculate_cost("unknown-model", 1_000, 1_000)
+        assert cost == 0.0
+
+    def test_prefixed_model_normalizes(self):
+        """Test that provider-prefixed model names are normalized."""
+        # "anthropic/claude-sonnet-4-5" should resolve to "claude-sonnet-4-5"
+        cost = calculate_cost("anthropic/claude-sonnet-4-5", 1_000_000, 1_000_000)
+        assert cost == 18.00
+
+    def test_prefixed_gemini_model(self):
+        """Test that gemini-prefixed model names are normalized."""
+        cost = calculate_cost("gemini/gemini-2.0-flash", 1_000_000, 1_000_000)
+        assert cost == 0.50  # 0.10 + 0.40
 
     def test_all_models_have_pricing(self):
         """Test that all models in MODEL_PRICING can be calculated."""

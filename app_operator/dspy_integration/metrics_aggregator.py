@@ -237,6 +237,13 @@ class MetricsAggregator:
         baseline_metrics = baseline_agg.aggregate_metrics(phase_filter, model)
         optimized_metrics = optimized_agg.aggregate_metrics(phase_filter, model)
 
+        if "error" in baseline_metrics or "error" in optimized_metrics:
+            return {
+                "baseline": baseline_metrics,
+                "optimized": optimized_metrics,
+                "improvements": {"error": "Insufficient data for comparison"},
+            }
+
         # Calculate improvements
         comparison = {
             "baseline": baseline_metrics,
@@ -283,9 +290,9 @@ class MetricsAggregator:
         improvements = {}
 
         # Success rate improvement
-        if "success_rate" in baseline and "success_rate" in optimized:
-            baseline_sr = baseline["success_rate"]
-            optimized_sr = optimized["success_rate"]
+        baseline_sr = baseline.get("success_rate")
+        optimized_sr = optimized.get("success_rate")
+        if baseline_sr is not None and optimized_sr is not None:
             if baseline_sr > 0:
                 improvements["success_rate_improvement"] = round(
                     ((optimized_sr - baseline_sr) / baseline_sr) * 100, 2
@@ -294,31 +301,30 @@ class MetricsAggregator:
                 improvements["success_rate_improvement"] = None
 
         # Iteration efficiency (lower is better, so invert)
-        if "iterations" in baseline and "iterations" in optimized:
-            baseline_iter = baseline["iterations"]["avg"]
-            optimized_iter = optimized["iterations"]["avg"]
-            if baseline_iter > 0:
-                improvements["iteration_reduction_pct"] = round(
-                    ((baseline_iter - optimized_iter) / baseline_iter) * 100, 2
-                )
+        baseline_iter = baseline.get("iterations", {}).get("avg", 0)
+        optimized_iter = optimized.get("iterations", {}).get("avg", 0)
+        if baseline_iter > 0:
+            improvements["iteration_reduction_pct"] = round(
+                ((baseline_iter - optimized_iter) / baseline_iter) * 100, 2
+            )
 
         # Token usage (lower is better)
+        baseline_tokens_info = baseline.get("tokens", {})
+        optimized_tokens_info = optimized.get("tokens", {})
         if (
-            "tokens" in baseline
-            and "tokens" in optimized
-            and baseline["tokens"].get("available")
-            and optimized["tokens"].get("available")
+            baseline_tokens_info.get("available")
+            and optimized_tokens_info.get("available")
         ):
-            baseline_tokens = baseline["tokens"].get("total", 0)
-            optimized_tokens = optimized["tokens"].get("total", 0)
+            baseline_tokens = baseline_tokens_info.get("total", 0)
+            optimized_tokens = optimized_tokens_info.get("total", 0)
             if baseline_tokens > 0:
                 improvements["token_reduction_pct"] = round(
                     ((baseline_tokens - optimized_tokens) / baseline_tokens) * 100, 2
                 )
 
             # Cost savings (requires --model flag)
-            baseline_cost = baseline["tokens"].get("cost_usd", {})
-            optimized_cost = optimized["tokens"].get("cost_usd", {})
+            baseline_cost = baseline_tokens_info.get("cost_usd", {})
+            optimized_cost = optimized_tokens_info.get("cost_usd", {})
 
             if "total" in baseline_cost and "total" in optimized_cost:
                 baseline_total = baseline_cost["total"]
@@ -332,9 +338,9 @@ class MetricsAggregator:
                     )
 
         # Fallback rate (lower is better)
-        if "fallback_rate" in baseline and "fallback_rate" in optimized:
-            baseline_fr = baseline["fallback_rate"]
-            optimized_fr = optimized["fallback_rate"]
+        baseline_fr = baseline.get("fallback_rate")
+        optimized_fr = optimized.get("fallback_rate")
+        if baseline_fr is not None and optimized_fr is not None:
             if baseline_fr > 0:
                 improvements["fallback_rate_reduction_pct"] = round(
                     ((baseline_fr - optimized_fr) / baseline_fr) * 100, 2
