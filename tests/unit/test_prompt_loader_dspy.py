@@ -74,7 +74,8 @@ class TestShouldUseDSPy:
         """With use_optimized=True and no canary, should return True."""
         config = DSPyConfig(use_optimized=True, canary_deployment=False)
         loader = PromptLoader(dspy_config=config)
-        result = loader._should_use_dspy('deployer_fix_error', {})
+        with patch.object(loader, '_optimized_module_exists', return_value=True):
+            result = loader._should_use_dspy('deployer_fix_error', {})
         assert result is True
 
     def test_canary_deployment_deterministic_routing(self):
@@ -86,18 +87,19 @@ class TestShouldUseDSPy:
         )
         loader = PromptLoader(dspy_config=config)
 
-        # Same repo_path should always give same result
-        kwargs1 = {'repo_path': '/repo/test1'}
-        result1a = loader._should_use_dspy('deployer_fix_error', kwargs1)
-        result1b = loader._should_use_dspy('deployer_fix_error', kwargs1)
-        assert result1a == result1b
+        with patch.object(loader, '_optimized_module_exists', return_value=True):
+            # Same repo_path should always give same result
+            kwargs1 = {'repo_path': '/repo/test1'}
+            result1a = loader._should_use_dspy('deployer_fix_error', kwargs1)
+            result1b = loader._should_use_dspy('deployer_fix_error', kwargs1)
+            assert result1a == result1b
 
-        # Different repo_paths should give different results (with high probability)
-        results = []
-        for i in range(100):
-            kwargs = {'repo_path': f'/repo/test{i}'}
-            result = loader._should_use_dspy('deployer_fix_error', kwargs)
-            results.append(result)
+            # Different repo_paths should give different results (with high probability)
+            results = []
+            for i in range(100):
+                kwargs = {'repo_path': f'/repo/test{i}'}
+                result = loader._should_use_dspy('deployer_fix_error', kwargs)
+                results.append(result)
 
         # Should have roughly 50% True (within tolerance)
         true_count = sum(results)
