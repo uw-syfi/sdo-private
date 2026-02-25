@@ -35,7 +35,7 @@ venv.bak/
 # PyCharm
 .idea/
 opt*/
-e2e_optimization/
+e2e_optimization*/
 
 # VS Code
 .vscode/
@@ -73,7 +73,7 @@ agentflow_runs/
 .sds
 
 # DSPy optimization artifacts
-# app_operator/prompts/optimized/
+app_operator/prompts/optimized/
 exp_config/
 lego_agent_runs/
 !lego_agent/ui/lib/
@@ -81,10 +81,13 @@ lego_agent_runs/
 # Experiment configs and run artifacts
 e2e_config*.toml
 *_run.log
+optimization.log
+experiment.toml
 rlm_runs/
 rlm_results/
 rlm_output/
 rlm[0-9]*/
+*_results*.png
 
 # macOS
 .DS_Store

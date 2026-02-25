@@ -1,8 +1,15 @@
 #!/bin/bash
-# Collect rich training data for GEPA optimization
+# Collect rich training data for prompt optimization
 # Uses controlled cleanup with docker compose down only
 
 set -e
+
+# Resolve SDS root (scripts/prompt_opt/ -> ../..)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SDS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# DeathStarBench root — override via env var if needed
+DEATHSTARBENCH_ROOT="${DEATHSTARBENCH_ROOT:-$(cd "$SDS_ROOT/../DeathStarBench" && pwd)}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -33,7 +40,7 @@ print_error() {
 show_usage() {
     echo "Usage: $0 [OPTIONS] [APP_NAMES...]"
     echo ""
-    echo "Collect training data for GEPA optimization by running the SDS operator"
+    echo "Collect training data for prompt optimization by running the SDS operator"
     echo "on DeathStarBench applications multiple times."
     echo ""
     echo "APP_NAMES (optional):"
@@ -52,6 +59,9 @@ show_usage() {
     echo "  --fault-categories    Fault categories (space-separated, e.g., misconfiguration correlated)"
     echo "  --fault-severities    Fault severities (space-separated, e.g., low medium high)"
     echo ""
+    echo "Environment variables:"
+    echo "  DEATHSTARBENCH_ROOT   Path to DeathStarBench repo (default: \$SDS_ROOT/../DeathStarBench)"
+    echo ""
     echo "Examples:"
     echo "  $0                                          # Run all apps (3 runs each)"
     echo "  $0 hotel                                    # Run only hotelReservation"
@@ -65,9 +75,9 @@ show_usage() {
 
 # Map short names to full paths
 declare -A APP_PATHS=(
-  ["hotel"]="/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation"
-  ["social"]="/mnt/nvme1/khoav/Research/DeathStarBench/socialNetwork"
-  ["media"]="/mnt/nvme1/khoav/Research/DeathStarBench/mediaMicroservices"
+  ["hotel"]="$DEATHSTARBENCH_ROOT/hotelReservation"
+  ["social"]="$DEATHSTARBENCH_ROOT/socialNetwork"
+  ["media"]="$DEATHSTARBENCH_ROOT/mediaMicroservices"
 )
 
 # Parse command-line arguments
@@ -144,21 +154,20 @@ done
 # If no apps specified, use all apps
 if [ ${#apps[@]} -eq 0 ]; then
   apps=(
-    "/mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation"
-    "/mnt/nvme1/khoav/Research/DeathStarBench/socialNetwork"
-    "/mnt/nvme1/khoav/Research/DeathStarBench/mediaMicroservices"
+    "$DEATHSTARBENCH_ROOT/hotelReservation"
+    "$DEATHSTARBENCH_ROOT/socialNetwork"
+    "$DEATHSTARBENCH_ROOT/mediaMicroservices"
   )
 fi
-
-# SDS operator path
-SDS_ROOT="/mnt/nvme1/khoav/Research/sds"
 
 # Summary counters
 total_runs=0
 total_trajectories_before=0
 total_trajectories_after=0
 
-print_header "Training Data Collection for GEPA"
+print_header "Training Data Collection for Prompt Optimization"
+echo "SDS root: $SDS_ROOT"
+echo "DeathStarBench root: $DEATHSTARBENCH_ROOT"
 echo "Apps to process: ${#apps[@]}"
 echo "Runs per app: $RUNS_PER_APP"
 echo "Total runs: $((${#apps[@]} * RUNS_PER_APP))"
@@ -355,14 +364,14 @@ echo "1. Analyze the collected data:"
 echo "   cd $SDS_ROOT"
 echo "   uv run -m app_operator analyze-prompts --phase deployment"
 echo ""
-echo "2. Run GEPA optimization:"
+echo "2. Run prompt optimization:"
 echo "   uv run -m app_operator optimize-prompts \\"
 echo "       --prompts deployer_fix_error \\"
 echo "       --use-seeds \\"
 echo "       --optimizer COPRO \\"
-echo "       --trajectories-dir /mnt/nvme1/khoav/Research/DeathStarBench/hotelReservation/.sds/trajectories \\"
-echo "       --trajectories-dir /mnt/nvme1/khoav/Research/DeathStarBench/socialNetwork/.sds/trajectories \\"
-echo "       --trajectories-dir /mnt/nvme1/khoav/Research/DeathStarBench/mediaMicroservices/.sds/trajectories"
+echo "       --trajectories-dir \$DEATHSTARBENCH_ROOT/hotelReservation/.sds/trajectories \\"
+echo "       --trajectories-dir \$DEATHSTARBENCH_ROOT/socialNetwork/.sds/trajectories \\"
+echo "       --trajectories-dir \$DEATHSTARBENCH_ROOT/mediaMicroservices/.sds/trajectories"
 echo ""
 
 print_success "Training data collection complete!"
