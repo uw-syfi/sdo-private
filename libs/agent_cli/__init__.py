@@ -4,6 +4,8 @@ from .codex import CodexCodingAgent
 from .gemini import GeminiCodingAgent
 from .opencode import OpencodeCodingAgent
 from .claude import ClaudeCodeCodingAgent
+from .rlm_agent import RLMCodingAgent
+from .filtered_agent import FilteredCodingAgent
 
 __all__ = [
     "CodingAgent",
@@ -12,4 +14,6 @@ __all__ = [
     "GeminiCodingAgent",
     "OpencodeCodingAgent",
     "ClaudeCodeCodingAgent",
+    "RLMCodingAgent",
+    "FilteredCodingAgent",
 ]

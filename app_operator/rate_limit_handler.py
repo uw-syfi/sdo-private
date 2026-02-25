@@ -27,7 +27,7 @@ class RateLimitError(Exception):
 def detect_rate_limit_error(
     stderr: str, returncode: int, provider: str
 ) -> Optional[RateLimitError]:
-    """Detect if an error is due to rate limiting.
+    """Detect if an error is due to rate limiting or a transient network failure.
 
     Args:
         stderr: Standard error output from the command
@@ -35,9 +35,25 @@ def detect_rate_limit_error(
         provider: Provider name (gemini, openai, anthropic, etc.)
 
     Returns:
-        RateLimitError if rate limit detected, None otherwise
+        RateLimitError if rate limit or transient network error detected, None otherwise
     """
     stderr_lower = stderr.lower()
+
+    # Transient network / DNS errors (provider-agnostic)
+    _network_markers = [
+        "nameresolutionerror",
+        "name or service not known",
+        "transporterror",
+        "apiconnectionerror",
+        "connectionerror",
+        "max retries exceeded",
+    ]
+    if any(m in stderr_lower for m in _network_markers):
+        return RateLimitError(
+            provider=provider,
+            message="Transient network error (DNS/connection failure)",
+            retry_after=15,
+        )
 
     # Gemini / Google Vertex AI
     if provider in ["gemini", "vertex"]:

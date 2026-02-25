@@ -130,6 +130,39 @@ class DeployerSummarizeSignature(dspy.Signature):
     )
 
 
+class RLMDeployerFixErrorSignature(dspy.Signature):
+    """Generate an RLM-based instruction prompt for fixing deployment errors.
+
+    Unlike the standard DeployerFixErrorSignature which passes full context
+    to a coding agent, this signature produces a prompt that leverages the
+    RLM paradigm: context is stored as queryable REPL variables and the agent
+    uses execute_code/recursive_call actions to filter and analyze.
+    """
+
+    repo_path = dspy.InputField(desc="Path to the repository being deployed")
+    available_variables = dspy.InputField(
+        desc="Summary of context variables available in the RLM REPL environment "
+        "(e.g. error_log, deployment_script, dockerfile)"
+    )
+    error_log_size = dspy.InputField(
+        desc="Size of the error log in characters (used to decide filtering strategy)"
+    )
+    attempt = dspy.InputField(desc="Current deployment attempt number")
+    max_attempts = dspy.InputField(desc="Maximum number of deployment attempts allowed")
+    has_original_script = dspy.InputField(
+        desc="Whether an original deploy.sh backup is available for backtracking"
+    )
+
+    rendered_prompt = dspy.OutputField(
+        desc="The task prompt for the RLM agent. Must instruct the agent to: "
+        "(1) use execute_code to filter error_log and identify root cause, "
+        "(2) validate file references with validate_file_refs, "
+        "(3) compare against original_script if available, "
+        "(4) write the fixed deploy.sh via execute_code, "
+        "(5) provide a final_answer summarizing the fix."
+    )
+
+
 class CodeAnalyzerSystemSignature(dspy.Signature):
     """System prompt for code analyzer agent.
 
@@ -224,6 +257,7 @@ SIGNATURES = {
     "deployer_generate_health_check": DeployerGenerateHealthCheckSignature,
     "deployer_generate_script": DeployerGenerateScriptSignature,
     "deployer_fix_error": DeployerFixErrorSignature,
+    "rlm_deployer_fix_error": RLMDeployerFixErrorSignature,
     "deployer_summarize": DeployerSummarizeSignature,
     "code_analyzer_system": CodeAnalyzerSystemSignature,
     "code_analyzer_user": CodeAnalyzerUserSignature,

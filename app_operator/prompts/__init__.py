@@ -11,6 +11,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # GEPA-style seed prompts: minimal starting points for optimization
+# Prompts that produce Jinja2 instructions for agent.generate() to execute.
+# They must never be routed through DSPy because:
+#   - The DSPy module generates the final script content (output: deployment_script)
+#     rather than an instruction, so it returns a bash script as "full_prompt"
+#   - agent.generate() receives that bash script, _FILE_GEN_RE fails to match,
+#     and the RLM loop runs on a bash script as its task → infinite explore loop
+# These prompts rely on Jinja2 → _FILE_GEN_RE match → _generate_files() to work.
+_AGENT_INSTRUCTION_PROMPTS: frozenset[str] = frozenset({
+    "deployer_generate_deploy_script",
+    "deployer_generate_health_check",
+    "deployer_generate_script",
+})
+
 SEED_TEMPLATE_MAP = {
     "deployer_system": "seeds/deployer_system.jinja2",
     "deployer_fix_error": "seeds/deployer_fix_error.jinja2",
@@ -174,6 +187,13 @@ class PromptLoader:
             return False
 
         if not self.dspy_config.use_optimized:
+            return False
+
+        # Script-generation prompts must always use Jinja2. Their DSPy modules
+        # generate the final script content as output (not an instruction), so
+        # returning that content as full_prompt causes the RLM loop to receive
+        # a bash script as its task and spiral into an explore loop.
+        if prompt_name in _AGENT_INSTRUCTION_PROMPTS:
             return False
 
         # Check whether an optimized module actually exists for this prompt

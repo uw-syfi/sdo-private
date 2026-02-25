@@ -83,8 +83,17 @@ def _update_sds_toml(
     use_optimized: bool,
     optimized_version: Optional[str],
     project_root: Optional[Path] = None,
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
 ):
-    """Update sds.toml in the app directory."""
+    """Update sds.toml in the app directory.
+
+    When *provider_override* or *model_override* is given, the corresponding
+    value inside the ``[agent]`` section is replaced so the experiment uses
+    the specified setting regardless of what the root ``sds.toml`` says.
+    """
+    import re
+
     sds_toml = app_dir / "sds.toml"
     config_toml = app_dir / "config.toml"
 
@@ -142,6 +151,26 @@ def _update_sds_toml(
             if not skip:
                 new_lines.append(line)
         content = "\n".join(new_lines)
+
+    # Override provider if requested
+    if provider_override:
+        content = re.sub(
+            r'^(\s*provider\s*=\s*).*$',
+            f'\\1"{provider_override}"',
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    # Override model if requested
+    if model_override:
+        content = re.sub(
+            r'^(\s*model\s*=\s*).*$',
+            f'\\1"{model_override}"',
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
 
     final_content = content + "\n" + new_section_content
     sds_toml.write_text(final_content)
@@ -275,7 +304,7 @@ def run_command(args: argparse.Namespace) -> int:
         logger.error(f"Failed to load config: {e}")
         return 1
 
-    work_dir = Path(args.work_dir).resolve()
+    work_dir = Path(config.get("work_dir", args.work_dir)).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
 
     state_manager = StateManager(work_dir)
@@ -288,12 +317,18 @@ def run_command(args: argparse.Namespace) -> int:
     max_retries = config["max_retries"]
     rate_limit_backoff = config["rate_limit_backoff"]
     output_prefix = config["output_prefix"]
+    provider_override = config.get("provider")  # Optional per-experiment provider
+    model_override = config.get("model")  # Optional per-experiment model
 
     logger.info(f"Starting E2E optimization for {iterations} iterations")
     logger.info(f"Prompts: {prompts}")
     logger.info(f"Training apps: {[a.name for a in train_apps]}")
     if output_prefix:
         logger.info(f"Output prefix: {output_prefix} (will write to optimized/{output_prefix}/)")
+    if provider_override:
+        logger.info(f"Provider override: {provider_override}")
+    if model_override:
+        logger.info(f"Model override: {model_override}")
     logger.info(
         f"Rate limit handling: max_retries={max_retries}, "
         f"backoff={rate_limit_backoff}s, inter_run_delay={inter_run_delay}s"
@@ -307,10 +342,10 @@ def run_command(args: argparse.Namespace) -> int:
     # Load app config to get provider for rate limit detection
     try:
         app_config = load_app_config(str(base_dir))
-        provider = app_config.agent.provider
+        provider = provider_override or app_config.agent.provider
     except Exception as e:
         logger.warning(f"Failed to load app config, assuming 'gemini' provider: {e}")
-        provider = "gemini"
+        provider = provider_override or "gemini"
 
     current_version = state_manager.get_current_version()
 
@@ -367,6 +402,9 @@ def run_command(args: argparse.Namespace) -> int:
                     max_retries=max_retries,
                     rate_limit_backoff=rate_limit_backoff,
                     inter_run_delay=inter_run_delay,
+                    provider_override=provider_override,
+                    model_override=model_override,
+                    output_prefix=output_prefix,
                 )
 
                 if result["success"]:
@@ -399,6 +437,8 @@ def run_command(args: argparse.Namespace) -> int:
                     use_optimized=True,
                     optimized_version=current_version,
                     project_root=base_dir,
+                    provider_override=provider_override,
+                    model_override=model_override,
                 )
 
                 logger.info(f"Running validation on {exp_path.name}...")

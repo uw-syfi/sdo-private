@@ -45,6 +45,7 @@ class AgentConfig:
         "vertex",
         "openai",
         "rlm",
+        "filtered",
     }
 
     def __post_init__(self):
