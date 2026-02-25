@@ -42,9 +42,9 @@ class TestCLIOperatorPhaseControl:
             repo_path=temp_repo,
             config=config,
             filesystem=filesystem,
+            agent=agent,
             ui=NullOperatorUI()
         )
-        operator.agent = agent
 
         # Mock the analyzer to track if it runs
         operator.analyzer.run = Mock()
@@ -80,9 +80,9 @@ class TestCLIOperatorPhaseControl:
             repo_path=temp_repo,
             config=config,
             filesystem=filesystem,
+            agent=agent,
             ui=NullOperatorUI()
         )
-        operator.agent = agent
 
         # Mock the analyzer to track if it runs
         operator.analyzer.run = Mock()
@@ -117,9 +117,9 @@ class TestCLIOperatorPhaseControl:
             repo_path=temp_repo,
             config=config,
             filesystem=filesystem,
+            agent=agent,
             ui=NullOperatorUI()
         )
-        operator.agent = agent
 
         # Mock deployer to succeed
         operator.deployer.run = Mock(return_value=True)
@@ -152,9 +152,9 @@ class TestCLIOperatorPhaseControl:
             repo_path=temp_repo,
             config=config,
             filesystem=filesystem,
+            agent=agent,
             ui=NullOperatorUI()
         )
-        operator.agent = agent
 
         # Mock deployer and monitor
         operator.deployer.run = Mock(return_value=True)
@@ -196,9 +196,9 @@ class TestCLIOperatorPhaseControl:
             repo_path=temp_repo,
             config=config,
             filesystem=filesystem,
+            agent=agent,
             ui=mock_ui
         )
-        operator.agent = agent
 
         # Mock deployer and monitor
         operator.deployer.run = Mock(return_value=True)
@@ -233,9 +233,9 @@ class TestCLIOperatorPhaseControl:
             repo_path=temp_repo,
             config=config,
             filesystem=filesystem,
+            agent=agent,
             ui=NullOperatorUI()
         )
-        operator.agent = agent
 
         # Mock the analyzer
         operator.analyzer.run = Mock()

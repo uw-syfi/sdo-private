@@ -94,7 +94,7 @@ class TestDSPyOptimizationConfig:
 
     def test_invalid_metric_weights_keys(self):
         """Test invalid metric_weights keys raises ValueError."""
-        with pytest.raises(ValueError, match="metric_weights must contain"):
+        with pytest.raises(ValueError, match="metric_weights must contain either"):
             DSPyOptimizationConfig(metric_weights={"success": 0.6, "efficiency": 0.4})
 
         with pytest.raises(ValueError, match="metric_weights must contain"):

@@ -10,6 +10,7 @@ from app_operator.config import Config
 from app_operator.filesystem import InMemoryFilesystem
 
 
+@pytest.mark.skip(reason="Requires Google GenAI API credentials")
 class TestADKPhaseControl:
     """Test phase control in ADK runtime."""
 

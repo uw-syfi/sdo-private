@@ -30,7 +30,7 @@ def input_queue():
     return asyncio.Queue()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_webio_send_event(mock_websocket, input_queue):
     io = WebIO(mock_websocket, input_queue)
     await io._send_event("test_type", {"key": "value"})
@@ -39,7 +39,7 @@ async def test_webio_send_event(mock_websocket, input_queue):
     assert mock_websocket.sent_messages[0] == {"type": "test_type", "key": "value"}
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_webio_flush_thinking(mock_websocket, input_queue):
     io = WebIO(mock_websocket, input_queue)
     io._thinking_buffer = "thinking..."
@@ -54,7 +54,7 @@ async def test_webio_flush_thinking(mock_websocket, input_queue):
     assert io._thinking_buffer == ""
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_webio_ask_questions(mock_websocket, input_queue):
     io = WebIO(mock_websocket, input_queue)
 
@@ -67,7 +67,7 @@ async def test_webio_ask_questions(mock_websocket, input_queue):
     assert {"type": "question", "questions": ["Q1"]} in mock_websocket.sent_messages
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_webio_prompt_int(mock_websocket, input_queue):
     io = WebIO(mock_websocket, input_queue)
 
@@ -93,7 +93,7 @@ def test_websocket_connection():
         pass
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_server_logic(tmp_path):
     # We can mock the dependencies of websocket_endpoint
     with (
