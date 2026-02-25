@@ -5,8 +5,12 @@ LLM can query/filter them with execute_code actions before returning a final
 answer.  This reduces token usage ~50-75% on large logs.
 """
 
+import json
 import os
 import re
+import subprocess
+import sys
+import tempfile
 from typing import List, Optional
 
 import litellm
@@ -82,9 +86,11 @@ class RecursiveDeploymentAgent:
             "repo_path": repo_path,
         }
 
-        prompt = self._build_initial_prompt(task, context)
+        initial_prompt = self._build_initial_prompt(task, context)
+        conversation_history: List[dict] = []
 
         for _ in range(self.max_recursion_depth):
+            prompt = self._rebuild_prompt(initial_prompt, conversation_history)
             response = self._call_llm(prompt)
             action, content = self._parse_response(response)
 
@@ -93,14 +99,19 @@ class RecursiveDeploymentAgent:
 
             if action == "execute_code":
                 exec_result = self._execute_code(content, namespace)
-                prompt = f"{prompt}\n\nAssistant:\n{response}\n\nCode result:\n{exec_result}\n\nUser: Continue."
+                conversation_history.append({
+                    "response": response,
+                    "result": exec_result,
+                })
+                # Keep only the last 3 iterations
+                conversation_history = conversation_history[-3:]
                 continue
 
             # Unknown action — return as-is
             return response
 
-        # Max iterations reached — return last prompt as fallback
-        return prompt
+        # Max iterations reached
+        return "ERROR: Max recursion depth reached without resolution"
 
     def fix_deployment_error(
         self,
@@ -179,21 +190,89 @@ class RecursiveDeploymentAgent:
 
         return "unknown", response
 
+    def _rebuild_prompt(
+        self, initial_prompt: str, history: List[dict]
+    ) -> str:
+        """Rebuild the full prompt from initial context and recent history."""
+        parts = [initial_prompt]
+        for entry in history:
+            parts.append(f"\nAssistant:\n{entry['response']}")
+            parts.append(f"\nCode result:\n{entry['result']}")
+            parts.append("\nUser: Continue.")
+        return "\n".join(parts)
+
     def _execute_code(self, code: str, namespace: dict) -> str:
-        """Execute *code* in *namespace* and return the `result` variable.
+        """Execute *code* in a subprocess and return the `result` variable.
+
+        The namespace is serialised to a temporary JSON file so the
+        subprocess can deserialise it.  A small epilogue is appended to
+        the generated script that prints the ``result`` variable as JSON
+        on stdout.
 
         Args:
             code: Python code to execute.
-            namespace: Variable namespace (modified in-place).
+            namespace: Variable namespace (string values).
 
         Returns:
-            String representation of `result`, or an error message.
+            String representation of ``result``, or an error message.
         """
+        ns_file = None
+        code_file = None
         try:
-            exec(code, namespace)  # noqa: S102
-            return str(namespace.get("result", ""))
+            # Write namespace to a temp JSON file
+            ns_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            )
+            json.dump(namespace, ns_file)
+            ns_file.close()
+
+            # Build the script: load namespace, run user code, emit result
+            preamble = (
+                "import json as _json\n"
+                f"with open({ns_file.name!r}) as _f:\n"
+                "    _ns = _json.load(_f)\n"
+                "for _k, _v in _ns.items():\n"
+                "    globals()[_k] = _v\n"
+            )
+            epilogue = (
+                "\nimport json as _json2\n"
+                "print(_json2.dumps({'result': str(result)}))\n"
+            )
+            full_code = preamble + code + epilogue
+
+            code_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False
+            )
+            code_file.write(full_code)
+            code_file.close()
+
+            proc = subprocess.run(
+                [sys.executable, code_file.name],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if proc.returncode != 0:
+                return f"Error: {proc.stderr.strip()}"
+
+            output = json.loads(proc.stdout.strip())
+            return output.get("result", "")
+        except subprocess.TimeoutExpired:
+            return "Error: Code execution timed out after 30s"
         except Exception as exc:
             return f"Error: {exc}"
+        finally:
+            if ns_file is not None:
+                try:
+                    os.unlink(ns_file.name)
+                except OSError:
+                    pass
+            if code_file is not None:
+                try:
+                    os.unlink(code_file.name)
+                except OSError:
+                    pass
 
     def _build_initial_prompt(self, task: str, context: RLMContext) -> str:
         """Build the first user prompt from task and context summary."""
