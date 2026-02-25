@@ -36,7 +36,6 @@ venv.bak/
 .idea/
 opt*/
 e2e_optimization*/
-*_run.log
 
 # VS Code
 .vscode/
@@ -76,7 +75,6 @@ agentflow_runs/
 # DSPy optimization artifacts
 app_operator/prompts/optimized/
 exp_config/
-rlm*/
 lego_agent_runs/
 !lego_agent/ui/lib/
 
