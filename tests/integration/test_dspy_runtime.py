@@ -287,7 +287,7 @@ def test_canary_deployment_routing(temp_repo, tmp_path, dspy_config_canary):
 
     # Calculate expected routing
     repo_path_str = str(temp_repo)
-    hash_val = int(hashlib.md5(repo_path_str.encode()).hexdigest(), 16)
+    hash_val = int(hashlib.sha256(repo_path_str.encode()).hexdigest(), 16)
     expected_percentage = (hash_val % 100) / 100.0
     expected_use_dspy = expected_percentage < dspy_config_canary.canary_percentage
 

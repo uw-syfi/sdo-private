@@ -8,6 +8,7 @@ This command orchestrates a full optimization cycle:
 """
 
 import argparse
+import re
 import sys
 import shutil
 import subprocess
@@ -113,17 +114,18 @@ def _update_sds_toml(
     new_section_content = dspy_section + "\n".join(dspy_settings) + "\n"
 
     if "[dspy]" in content:
-        # Remove existing [dspy] section and append new one
-        # This is a bit brittle, but sufficient for the task
+        # Remove existing [dspy] section (and subsections) and append new one
         lines = content.splitlines()
         new_lines = []
         skip = False
         for line in lines:
-            if line.strip() == "[dspy]":
+            if re.match(r'^\[dspy(\..*)?\]$', line.strip()):
                 skip = True
                 continue
             if skip and line.strip().startswith("["):
-                skip = False
+                # Only stop skipping if this is NOT a dspy subsection
+                if not re.match(r'^\[dspy(\..*)?\]$', line.strip()):
+                    skip = False
 
             if not skip:
                 new_lines.append(line)
@@ -177,19 +179,47 @@ class StateManager:
         self.state = self._load_state()
 
     def _load_state(self) -> Dict[str, Any]:
-        if self.state_file.exists():
-            try:
-                return json.loads(self.state_file.read_text())
-            except json.JSONDecodeError:
-                logger.warning("Corrupted state file, starting fresh.")
-
-        return {
+        default_state = {
             "current_iteration": 1,
             "completed_train_apps": [],
             "optimization_done": False,
             "current_version": None,
             "completed_val_apps": [],
         }
+        if self.state_file.exists():
+            try:
+                data = json.loads(self.state_file.read_text())
+            except json.JSONDecodeError:
+                logger.warning("Corrupted state file, starting fresh.")
+                return default_state
+
+            # Validate required keys and types
+            schema = {
+                "current_iteration": int,
+                "completed_train_apps": list,
+                "optimization_done": bool,
+                "current_version": (str, type(None)),
+                "completed_val_apps": list,
+            }
+            try:
+                for key, expected_type in schema.items():
+                    if key not in data:
+                        raise ValueError(
+                            f"Missing required key: {key}")
+                    if not isinstance(data[key], expected_type):
+                        raise TypeError(
+                            f"Key '{key}' has wrong type: "
+                            f"expected {expected_type}, "
+                            f"got {type(data[key])}"
+                        )
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"Invalid state file schema ({e}), starting fresh.")
+                return default_state
+
+            return data
+
+        return default_state
 
     def save(self):
         self.state_file.write_text(json.dumps(self.state, indent=2))
@@ -294,6 +324,15 @@ def run_command(args: argparse.Namespace) -> int:
                     )
                 continue
 
+            # Check if experiment already has trajectories from a partial run
+            traj_dir = exp_path / ".sds" / "trajectories"
+            if traj_dir.exists() and any(traj_dir.iterdir()):
+                logger.info(
+                    f"Reusing existing trajectories for {app_name}")
+                train_trajectories_dirs.append(traj_dir)
+                state_manager.mark_train_app_completed(app_name)
+                continue
+
             exp_path = _init_experiment(app_path, work_dir, f"iter{i}_train")
 
             # Configure sds.toml
@@ -322,8 +361,11 @@ def run_command(args: argparse.Namespace) -> int:
 
             try:
                 subprocess.run(
-                    cmd, check=False
+                    cmd, check=False, timeout=3600
                 )  # Don't fail the whole loop if one run fails
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    f"Run timed out after 3600s for {app_name}")
             except Exception as e:
                 logger.error(f"Run failed for {exp_path.name}: {e}")
 
@@ -411,10 +453,16 @@ def run_command(args: argparse.Namespace) -> int:
                 )
 
                 logger.info(f"Running validation on {exp_path.name}...")
-                subprocess.run(
-                    [sys.executable, "-m", "app_operator", "run", str(exp_path)],
-                    check=False,
-                )
+                try:
+                    subprocess.run(
+                        [sys.executable, "-m", "app_operator",
+                            "run", str(exp_path)],
+                        check=False,
+                        timeout=3600,
+                    )
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        f"Run timed out after 3600s for {app_name}")
                 state_manager.mark_val_app_completed(app_name)
 
         state_manager.advance_iteration()

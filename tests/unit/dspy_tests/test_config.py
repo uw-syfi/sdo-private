@@ -19,9 +19,10 @@ class TestDSPyOptimizationConfig:
         assert config.num_examples == 30
         assert config.validation_split == 0.2
         assert config.metric_weights == {
-            "success": 0.6,
+            "success": 0.5,
             "efficiency": 0.25,
             "tokens": 0.15,
+            "health_check": 0.1,
         }
 
     def test_valid_optimizer(self):
@@ -93,10 +94,10 @@ class TestDSPyOptimizationConfig:
 
     def test_invalid_metric_weights_keys(self):
         """Test invalid metric_weights keys raises ValueError."""
-        with pytest.raises(ValueError, match="metric_weights must contain exactly"):
+        with pytest.raises(ValueError, match="metric_weights must contain"):
             DSPyOptimizationConfig(metric_weights={"success": 0.6, "efficiency": 0.4})
 
-        with pytest.raises(ValueError, match="metric_weights must contain exactly"):
+        with pytest.raises(ValueError, match="metric_weights must contain"):
             DSPyOptimizationConfig(
                 metric_weights={
                     "success": 0.5,

@@ -5,8 +5,10 @@ backup, and revert operations.
 """
 
 import json
+import os
 import random
 import shutil
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -109,9 +111,16 @@ class FaultInjectionOrchestrator:
 
             attempts += 1
 
-        # Write modified compose file
-        with open(compose_file, "w") as f:
-            yaml.dump(compose_data, f, default_flow_style=False, sort_keys=False)
+        # Write modified compose file only if at least one injection succeeded
+        if any(r.success for r in results):
+            fd, tmp_path = tempfile.mkstemp(dir=str(compose_file.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    yaml.dump(compose_data, f, default_flow_style=False, sort_keys=False)
+                os.replace(tmp_path, str(compose_file))
+            except Exception:
+                os.unlink(tmp_path)
+                raise
 
         # Write metadata for trajectory pickup
         self._write_metadata(repo_path, results)
@@ -137,7 +146,11 @@ class FaultInjectionOrchestrator:
         restored = False
         for backup_file in backup_dir.iterdir():
             if backup_file.is_file():
+                if os.sep in backup_file.name or '/' in backup_file.name:
+                    continue
                 dest = repo_path / backup_file.name
+                if not dest.resolve().is_relative_to(repo_path.resolve()):
+                    continue
                 shutil.copy2(backup_file, dest)
                 restored = True
 

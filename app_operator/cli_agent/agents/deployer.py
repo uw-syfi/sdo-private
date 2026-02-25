@@ -37,6 +37,7 @@ from app_operator.trajectory import (
 AGENT_FIX_TIMEOUT_SECS = 1800
 DEFAULT_DEPLOY_TIMEOUT_SECS = 900
 DEFAULT_AGENT_TIMEOUT_SECS = 300
+FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 
 
 def generate_scripts(
@@ -404,6 +405,13 @@ class DeploymentAgent:
 
         # Determine start attempt based on existing logs
         start_attempt = self._get_next_attempt_number()
+
+        # If starting fresh, ensure clean slate for summary
+        if start_attempt == 1:
+            summary_file = self.sds_dir / "fix_summary.md"
+            if self.filesystem.exists(summary_file):
+                self.filesystem.remove(summary_file)
+
         end_of_range = start_attempt + max_attempts
         absolute_max_attempts = end_of_range - 1
 
@@ -651,6 +659,76 @@ class DeploymentAgent:
 
         return result
 
+    def _update_consolidated_summary(
+        self, current_attempt: int, current_summary: str
+    ) -> None:
+        """Consolidate fix summaries into a markdown file using the agent."""
+        if current_attempt % FIX_SUMMARY_CONSOLIDATION_INTERVAL != 0:
+            return
+
+        summary_file = self.sds_dir / "fix_summary.md"
+
+        # Read existing content if file exists
+        existing_content = ""
+        if self.filesystem.exists(summary_file):
+            existing_content = self.filesystem.read_text(summary_file)
+
+        # Determine range of attempts to consolidate
+        start_index = current_attempt - FIX_SUMMARY_CONSOLIDATION_INTERVAL + 1
+
+        # Collect new attempts text
+        new_attempts_list = []
+        for i in range(start_index, current_attempt + 1):
+            if i == current_attempt:
+                content = current_summary
+            else:
+                # Read from log file
+                log_path = self.sds_dir / "logs" / f"fix_summary_{i}.log"
+                if self.filesystem.exists(log_path):
+                    content = self.filesystem.read_text(log_path)
+                else:
+                    content = "No summary available."
+
+            new_attempts_list.append(f"## Attempt {i}\n{content}\n")
+
+        new_attempts_text = "\n".join(new_attempts_list)
+
+        # Import locally to avoid circular imports if any
+        from app_operator.prompts.deployer import create_consolidation_prompt
+
+        prompt = create_consolidation_prompt(existing_content, new_attempts_text)
+
+        logger.info("Consolidating fix summaries with agent...")
+        try:
+            # Use a shorter timeout for summarization
+            consolidated_summary_raw = self.agent.generate(
+                prompt,
+                cwd=str(self.repo_path),
+                timeout=self.operator_config.agent_timeout,
+                silent=True
+            )
+
+            # Extract from <summary> tags
+            match = re.search(r"<summary>(.*?)</summary>",
+                              consolidated_summary_raw, re.DOTALL)
+            if match:
+                consolidated_summary = match.group(1).strip()
+            else:
+                # Fallback to raw output if no tags found
+                consolidated_summary = consolidated_summary_raw.strip()
+
+            self.filesystem.write_text(summary_file, consolidated_summary)
+            logger.info(f"Updated consolidated summary at {summary_file}")
+
+        except Exception as e:
+            logger.warning(f"Failed to consolidate summary: {e}")
+            # Fallback: append if agent fails
+            if existing_content:
+                fallback_content = existing_content + "\n\n" + new_attempts_text
+            else:
+                fallback_content = new_attempts_text
+            self.filesystem.write_text(summary_file, fallback_content)
+
     def _fix_with_agent(
         self,
         deploy_result: Dict[str, Any],
@@ -719,10 +797,22 @@ class DeploymentAgent:
             match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
             if match:
                 summary_text = match.group(1).strip()
-                log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
-                self.filesystem.mkdir(log_file.parent, parents=True, exist_ok=True)
-                self.filesystem.write_text(log_file, summary_text)
-                logger.info(f"Saved fix summary to {log_file}")
+            else:
+                # Fallback: use the full response or a truncated version as summary
+                logger.warning(f"Agent did not provide summary in expected format for attempt {attempt}")
+                summary_text = f"Agent attempted to fix deployment issues (no structured summary provided).\n\nFull response:\n{response}"
+                # Optionally truncate if too long
+                if len(summary_text) > 2000:
+                    summary_text = summary_text[:1900] + "...\n[Response truncated]"
+
+            # Always save some summary
+            log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
+            self.filesystem.mkdir(log_file.parent, parents=True, exist_ok=True)
+            self.filesystem.write_text(log_file, summary_text)
+            logger.info(f"Saved fix summary to {log_file}")
+
+            # Always update consolidated summary
+            self._update_consolidated_summary(attempt, summary_text)
 
             logger.info("Agent response received")
 

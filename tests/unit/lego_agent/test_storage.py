@@ -74,6 +74,8 @@ def test_write_script_multiple_scripts_different_timestamps(tmp_path):
     for ts in timestamps:
         with patch("time.strftime") as mock_strftime:
             mock_strftime.return_value = ts
+            # Reset current_run_dir to force new directory creation
+            storage.current_run_dir = None
             path = storage.write_script(f"# Script {ts}")
             paths.append(path)
 
@@ -205,6 +207,7 @@ def test_write_script_very_long_content(tmp_path):
 def test_write_script_concurrent_writes_different_timestamps(tmp_path):
     """Test concurrent writes with different timestamps create separate files."""
     import threading
+
     storage = LegoAgentStorage(tmp_path)
     results = []
 

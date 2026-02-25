@@ -40,6 +40,7 @@ class AgentConfig:
         "anthropic",
         "vertex",
         "openai",
+        "rlm",
     }
 
     def __post_init__(self):
@@ -380,8 +381,11 @@ class Config:
                     "vertex": "vertex_ai",
                     "claude": "anthropic",
                     "anthropic": "anthropic",
+                    "claude-code": "anthropic",
                     "codex": "openai",
                     "openai": "openai",
+                    "opencode": "openai",
+                    "rlm": "gemini",  # RLM defaults to Gemini
                 }
                 dspy_provider = provider_mapping.get(provider, provider)
                 dspy_data["runtime_model"] = f"{dspy_provider}/{model}"

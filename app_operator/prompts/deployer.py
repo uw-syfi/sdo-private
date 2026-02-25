@@ -27,7 +27,8 @@ def prepare_error_context(
     context_parts = []
 
     if log_file_path:
-        context_parts.append(f"Full deployment logs available at: {log_file_path}")
+        context_parts.append(
+            f"Full deployment logs available at: {log_file_path}")
 
     if health_check_log_path:
         context_parts.append(
@@ -140,15 +141,19 @@ def create_fix_prompt(
     """
     previous_summary_note = ""
     if attempt > 1:
-        prev_log_path = repo_path / ".sds" / "logs" / f"fix_summary_{attempt - 1}.log"
+        consolidated_summary_path = repo_path / ".sds" / "fix_summary.md"
+        # Since we can't check file existence here (no filesystem access), we provide both paths
+        # The agent can check which one exists.
+
+        prev_log_path = repo_path / ".sds" / \
+            "logs" / f"fix_summary_{attempt - 1}.log"
+
         previous_summary_note = (
             f"\n\nNote: This is attempt #{attempt}. "
-            f"You can read the summary of the previous fix attempt at:\n{prev_log_path}\n"
-            "The log files follow the pattern .sds/logs/fix_summary_{attempt}.log. "
-            "Please review the previous attempt to avoid repeating mistakes, and "
-            "to check if the previous fix was successful."
-            "Note that the application may still be failing, but the it's now "
-            "failing for a different reason."
+            f"You can review the history of previous fixes at: {consolidated_summary_path}\n"
+            f"Or the specific summary of the last attempt at: {prev_log_path}\n"
+            "You can dive into prior attempts for more detail; logs follow the pattern: fix_summary_{attempt}.log"
+            "Please review the previous attempts to avoid repeating mistakes."
         )
 
     return get_loader(dspy_config).render(
@@ -161,4 +166,24 @@ def create_fix_prompt(
         deploy_script=deploy_script_path,
         health_check_script=health_check_script_path,
         _trajectory_recorder=recorder,
+    )
+
+
+def create_consolidation_prompt(
+    existing_summary: str,
+    new_attempts_text: str,
+) -> str:
+    """Create a prompt for consolidating fix summaries.
+
+    Args:
+        existing_summary: The content of the existing fix_summary.md.
+        new_attempts_text: Text describing the new attempts to integrate.
+
+    Returns:
+        str: The rendered prompt.
+    """
+    return get_loader().render(
+        "deployer/consolidate_summary.jinja2",
+        existing_summary=existing_summary,
+        new_attempts_text=new_attempts_text,
     )

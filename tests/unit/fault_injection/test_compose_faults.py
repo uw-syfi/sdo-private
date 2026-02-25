@@ -260,7 +260,7 @@ class TestCorrelatedFaults:
         result = injector.inject(fault, hotel_compose, "geo")
         assert result.success
         env = hotel_compose["services"]["geo"]["environment"]
-        assert env["DB_HOST"] == "broken-host-sds-fault:99999"
+        assert env["DB_HOST"] == "broken-host-sds-fault:65535"
 
     def test_cascading_port_change(self, hotel_compose, injector):
         fault = _get_fault("CORR-003")

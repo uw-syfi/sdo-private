@@ -462,7 +462,7 @@ class TestTrajectoryDataLoader:
         assert loader._extract_token_usage(messages) is None
 
     def test_iterations_reflects_phase_attempt_count(self, tmp_path):
-        """iterations should be the total number of conversations in the phase, not assistant message count."""
+        """iterations should reflect the 1-based index of each conversation in the phase."""
         traj_dir = tmp_path / "trajectories"
         traj_dir.mkdir()
 
@@ -512,5 +512,5 @@ class TestTrajectoryDataLoader:
         examples = loader.load_examples(phase_filter="deployment")
 
         assert len(examples) == 3
-        # All examples share the same iterations value: total deployment attempts in this run
-        assert all(ex.iterations == 3 for ex in examples)
+        # Each example gets a 1-based iteration index within the phase
+        assert [ex.iterations for ex in examples] == [1, 2, 3]

@@ -125,11 +125,8 @@ def load_optimized_module(
         version: Version to load (e.g., 'v1', 'latest')
 
     Returns:
-        Loaded DSPy module or None if loading fails
-
-    Raises:
-        FileNotFoundError: If module file not found
-        ValueError: If module file corrupted or invalid
+        Loaded DSPy module, or None on failure (missing files,
+        corrupted data, invalid signatures).
     """
     # Check cache first
     cache_key = f"{prompt_name}:{version}"
@@ -187,6 +184,10 @@ def load_optimized_module(
         # Store in cache
         _module_cache.set(cache_key, module)
         logger.debug(f"Cached module as {cache_key}")
+
+        # Also cache under the original version key if it differs
+        if version != resolved_version:
+            _module_cache.set(f"{prompt_name}:{version}", module)
 
         return module
 

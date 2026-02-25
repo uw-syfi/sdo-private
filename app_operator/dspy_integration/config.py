@@ -24,6 +24,7 @@ class DSPyOptimizationConfig:
     teacher_model: str = "claude-sonnet-4-5"
     num_examples: int = 30
     validation_split: float = 0.2
+    n_candidates: int = 4
     metric_weights: Dict[str, float] = field(
         default_factory=lambda: {
             "success": 0.5,
@@ -60,6 +61,14 @@ class DSPyOptimizationConfig:
             )
         if self.num_examples <= 0:
             raise ValueError(f"num_examples must be positive, got {self.num_examples}")
+
+        # Validate n_candidates
+        if not isinstance(self.n_candidates, int):
+            raise TypeError(
+                f"n_candidates must be int, got {type(self.n_candidates).__name__}"
+            )
+        if self.n_candidates < 1:
+            raise ValueError(f"n_candidates must be >= 1, got {self.n_candidates}")
 
         # Validate validation_split
         if not isinstance(self.validation_split, (int, float)):
