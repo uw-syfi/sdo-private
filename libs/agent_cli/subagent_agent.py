@@ -330,7 +330,8 @@ class SubagentCodingAgent(CodingAgent):
             deployment = data.get("deployment", [])
             last_convos = deployment[-5:] if len(deployment) > 5 else deployment
             return json.dumps(last_convos, indent=2)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to read trajectory from {traj_path}: {e}")
             return ""
 
     @staticmethod
@@ -338,8 +339,8 @@ class SubagentCodingAgent(CodingAgent):
         try:
             if path.exists():
                 return path.read_text()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to read {path}: {e}")
         return ""
 
     def _gather_repo_context(self, repo_path: Path, sds_dir: Path) -> str:

@@ -77,6 +77,42 @@ def load_config(config_path: Path) -> Dict[str, Any]:
     return config
 
 
+def _replace_in_agent_section(
+    content: str,
+    provider_override: Optional[str],
+    model_override: Optional[str],
+) -> str:
+    """Replace provider/model keys only within the [agent] TOML section."""
+    lines = content.splitlines()
+    new_lines = []
+    in_agent = False
+    provider_replaced = False
+    model_replaced = False
+
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'^\[agent\]$', stripped):
+            in_agent = True
+        elif stripped.startswith("[") and in_agent:
+            in_agent = False
+
+        if in_agent and provider_override and not provider_replaced:
+            m = re.match(r'^(\s*provider\s*=\s*).*$', line)
+            if m:
+                line = f'{m.group(1)}"{provider_override}"'
+                provider_replaced = True
+
+        if in_agent and model_override and not model_replaced:
+            m = re.match(r'^(\s*model\s*=\s*).*$', line)
+            if m:
+                line = f'{m.group(1)}"{model_override}"'
+                model_replaced = True
+
+        new_lines.append(line)
+
+    return "\n".join(new_lines)
+
+
 def _update_sds_toml(
     app_dir: Path,
     use_seeds: bool,
@@ -152,24 +188,11 @@ def _update_sds_toml(
                 new_lines.append(line)
         content = "\n".join(new_lines)
 
-    # Override provider if requested
-    if provider_override:
-        content = re.sub(
-            r'^(\s*provider\s*=\s*).*$',
-            f'\\1"{provider_override}"',
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-
-    # Override model if requested
-    if model_override:
-        content = re.sub(
-            r'^(\s*model\s*=\s*).*$',
-            f'\\1"{model_override}"',
-            content,
-            count=1,
-            flags=re.MULTILINE,
+    # Override provider/model only within the [agent] section.
+    # We locate the [agent] block and do targeted substitution within it.
+    if provider_override or model_override:
+        content = _replace_in_agent_section(
+            content, provider_override, model_override
         )
 
     final_content = content + "\n" + new_section_content
@@ -200,14 +223,28 @@ def _init_experiment(source_app: Path, work_dir: Path, name_suffix: str) -> Path
     if sds_dir.exists():
         shutil.rmtree(sds_dir)
 
-    # Init git
-    subprocess.run(
+    # Init git (use -b only on git >= 2.28; fall back to symbolic-ref)
+    init_result = subprocess.run(
         ["git", "init", "-b", "main"],
         cwd=target_path,
-        check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    if init_result.returncode != 0:
+        subprocess.run(
+            ["git", "init"],
+            cwd=target_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+            cwd=target_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     return target_path
 
@@ -224,6 +261,7 @@ class StateManager:
             "current_iteration": 1,
             "optimization_done": False,
             "current_version": None,
+            "completed_train_apps": [],
             "completed_val_apps": [],
         }
         if self.state_file.exists():

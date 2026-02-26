@@ -722,8 +722,11 @@ class DeploymentAgent:
 
         except Exception as e:
             logger.warning(f"Failed to consolidate summary: {e}")
-            # Fallback: append if agent fails
+            # Fallback: append, but cap to prevent unbounded growth
+            _max_fallback = 20_000  # characters
             if existing_content:
+                if len(existing_content) > _max_fallback:
+                    existing_content = existing_content[-_max_fallback:]
                 fallback_content = existing_content + "\n\n" + new_attempts_text
             else:
                 fallback_content = new_attempts_text

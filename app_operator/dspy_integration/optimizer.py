@@ -424,7 +424,13 @@ class PromptOptimizer:
 
             loader = PromptLoader(templates_dir=self.prompts_dir / "templates")
             return loader.render_template(template_name, prompt_kwargs)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Failed to re-render prompt '%s' from kwargs (template=%s): %s",
+                prompt_name,
+                template_name,
+                e,
+            )
             return ""
 
     def _optimize_single_prompt(
@@ -703,9 +709,9 @@ class PromptOptimizer:
             latest_link.unlink()
         try:
             latest_link.symlink_to(output_dir.name)
-        except OSError:
+        except OSError as e:
             # Windows doesn't support symlinks without admin
-            pass
+            logger.warning("Could not create 'latest' symlink at %s: %s", latest_link, e)
 
         logger.info("Saved metadata to %s", metadata_file)
 
