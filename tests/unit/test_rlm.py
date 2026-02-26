@@ -180,7 +180,7 @@ result = len(lines)
         assert stats["code_executions"] == 2
         assert stats["recursive_calls"] == 1
         assert stats["max_depth_reached"] == 1
-        assert stats["total_tokens_saved"] > 0
+        assert stats["baseline_context_tokens"] > 0
 
     def test_record_callback(self):
         """Test that record callback is called."""
@@ -447,16 +447,12 @@ class TestRLMMetrics:
         metric = RLMContextUtilizationMetric(target_savings_ratio=0.5)
 
         class MockExample:
-            rlm_statistics = {"total_tokens_saved": 10000}
-            error_log = "x" * 40000  # 10K tokens
-            deployment_script = "y" * 10000  # 2.5K tokens
-            previous_attempts = []
-
-            # Total: ~12.5K tokens, saved 10K = 80% savings
+            # baseline=10000, saved=8000 → 80% savings, exceeds 50% target
+            rlm_statistics = {"total_tokens_saved": 8000, "baseline_context_tokens": 10000}
 
         score = metric(MockExample(), None)
 
-        # Exceeded target (50%), should score high
+        # Exceeded target (50%), should score 1.0
         assert score >= 1.0
 
     def test_rlm_context_utilization_metric_poor(self):
@@ -464,17 +460,25 @@ class TestRLMMetrics:
         metric = RLMContextUtilizationMetric(target_savings_ratio=0.5)
 
         class MockExample:
-            rlm_statistics = {"total_tokens_saved": 1000}
-            error_log = "x" * 40000  # 10K tokens
-            deployment_script = ""
-            previous_attempts = []
-
-            # Total: 10K tokens, saved 1K = 10% savings (below 50% target)
+            # baseline=10000, saved=1000 → 10% savings (below 50% target)
+            rlm_statistics = {"total_tokens_saved": 1000, "baseline_context_tokens": 10000}
 
         score = metric(MockExample(), None)
 
         # Below target, should score low
         assert score < 0.5
+
+    def test_rlm_context_utilization_metric_negative_savings(self):
+        """RLM cost more than single-call baseline — score should be 0.0."""
+        metric = RLMContextUtilizationMetric(target_savings_ratio=0.5)
+
+        class MockExample:
+            # baseline=5000, actual=8000 → saved=-3000 (RLM cost more)
+            rlm_statistics = {"total_tokens_saved": -3000, "baseline_context_tokens": 5000}
+
+        score = metric(MockExample(), None)
+
+        assert score == 0.0
 
     def test_rlm_composite_metric(self):
         """Test composite RLM metric."""
@@ -495,9 +499,9 @@ class TestRLMMetrics:
                 "code_executions": 3,
                 "recursive_calls": 2,
                 "total_tokens_saved": 8000,
+                "baseline_context_tokens": 10000,
                 "max_depth_reached": 1,
             }
-            error_log = "x" * 40000  # 10K tokens
 
         class MockPrediction:
             rendered_prompt = "test prompt"
@@ -880,6 +884,119 @@ class TestExtractRLMStatisticsFromTrajectory:
     def test_extract_from_empty_trajectory(self):
         stats = extract_rlm_statistics_from_trajectory({})
         assert stats["total_calls"] == 0
+
+
+class TestIsolatedRecursiveCall:
+    """Tests for _call_llm_isolated and recursive call isolation."""
+
+    def test_isolated_call_uses_fresh_messages(self):
+        """_call_llm_isolated builds a fresh messages list, not self._messages."""
+        import unittest.mock as mock
+
+        captured_kwargs = []
+
+        def capture(**kwargs):
+            captured_kwargs.append(kwargs)
+            return mock.MagicMock(
+                choices=[mock.MagicMock(message=mock.MagicMock(content="sub-response"))],
+                usage=None,
+            )
+
+        agent = RecursiveDeploymentAgent()
+        # Simulate existing conversation history
+        agent._messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "first prompt"},
+            {"role": "assistant", "content": "first response"},
+        ]
+        agent._token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        with mock.patch("litellm.completion", side_effect=capture):
+            agent._call_llm_isolated(
+                "Analyse the error", {"error_log": "port 8080 in use"}
+            )
+
+        # The isolated call should NOT use self._messages
+        assert len(captured_kwargs) == 1
+        messages = captured_kwargs[0]["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert "Analyse the error" in messages[1]["content"]
+        assert "port 8080" in messages[1]["content"]
+
+        # self._messages should not have been modified
+        assert len(agent._messages) == 3
+
+    def test_isolated_call_without_context(self):
+        """_call_llm_isolated works when filtered_context is None."""
+        import unittest.mock as mock
+
+        captured_kwargs = []
+
+        def capture(**kwargs):
+            captured_kwargs.append(kwargs)
+            return mock.MagicMock(
+                choices=[mock.MagicMock(message=mock.MagicMock(content="response"))],
+                usage=None,
+            )
+
+        agent = RecursiveDeploymentAgent()
+        agent._messages = [{"role": "system", "content": "sys"}]
+        agent._token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        with mock.patch("litellm.completion", side_effect=capture):
+            agent._call_llm_isolated("Just a question", None)
+
+        messages = captured_kwargs[0]["messages"]
+        assert len(messages) == 2
+        # Without context, user prompt is just the sub_prompt
+        assert messages[1]["content"] == "Just a question"
+
+    def test_recursive_call_in_run_task_does_not_grow_history(self):
+        """recursive_call inside run_task uses isolated calls, not _call_llm."""
+        import unittest.mock as mock
+
+        main_call_count = 0
+        main_messages_lengths = []
+
+        def fake_completion(**kwargs):
+            nonlocal main_call_count
+            messages = kwargs["messages"]
+            main_messages_lengths.append(len(messages))
+            main_call_count += 1
+
+            if main_call_count == 1:
+                # First call: request a recursive call
+                content = (
+                    "ACTION: recursive_call\n"
+                    "SUBTASK: Analyse the error\n"
+                    'CONTEXT: {"error_log": "test error"}'
+                )
+            elif main_call_count == 2:
+                # This is the isolated subagent call (2 messages: system + user)
+                content = "Sub-analysis result"
+            elif main_call_count == 3:
+                # Back to main loop — receives recursive result
+                content = "ACTION: final_answer\nANSWER: done"
+            else:
+                content = "ACTION: final_answer\nANSWER: done"
+
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            agent.run_task("test task", context, "/tmp")
+
+        # The isolated subagent call (call #2) should have only 2 messages
+        # (system + user), not the growing main conversation.
+        assert main_messages_lengths[1] == 2
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ from .gemini import GeminiCodingAgent
 from .opencode import OpencodeCodingAgent
 from .claude import ClaudeCodeCodingAgent
 from .rlm_agent import RLMCodingAgent
-from .filtered_agent import FilteredCodingAgent
+from .subagent_agent import SubagentCodingAgent
+from .hybrid_agent import HybridCodingAgent
 
 __all__ = [
     "CodingAgent",
@@ -15,5 +16,6 @@ __all__ = [
     "OpencodeCodingAgent",
     "ClaudeCodeCodingAgent",
     "RLMCodingAgent",
-    "FilteredCodingAgent",
+    "SubagentCodingAgent",
+    "HybridCodingAgent",
 ]

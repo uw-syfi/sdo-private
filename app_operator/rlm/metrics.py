@@ -125,7 +125,8 @@ class RLMContextUtilizationMetric:
             trace: Optional execution trace
 
         Returns:
-            Score between 0.0 and 1.0 (higher = better context filtering)
+            Score between 0.0 and 1.0 (higher = better context filtering).
+            Returns 0.0 when RLM consumed more tokens than the single-call baseline.
         """
         if not hasattr(example, "rlm_statistics"):
             return 0.5
@@ -135,34 +136,14 @@ class RLMContextUtilizationMetric:
             return 0.5
 
         tokens_saved = stats.get("total_tokens_saved", 0)
+        baseline_context_tokens = stats.get("baseline_context_tokens", 0)
 
-        # Estimate total context size from example
-        # This would be the size if we fed everything to LLM directly
-        total_context_tokens = 0
-        if hasattr(example, "error_log"):
-            total_context_tokens += len(example.error_log) // 4
-
-        if hasattr(example, "deployment_script"):
-            total_context_tokens += len(example.deployment_script) // 4
-
-        if hasattr(example, "previous_attempts"):
-            total_context_tokens += len(str(example.previous_attempts)) // 4
-
-        if total_context_tokens == 0:
+        if baseline_context_tokens == 0:
             return 0.5
 
-        # Calculate savings ratio
-        savings_ratio = tokens_saved / total_context_tokens
-
-        # Score based on how close to target
-        if savings_ratio >= self.target_savings_ratio:
-            # Met or exceeded target - full score
-            score = 1.0
-        else:
-            # Partial credit
-            score = savings_ratio / self.target_savings_ratio
-
-        return min(1.0, score)
+        savings_ratio = tokens_saved / baseline_context_tokens
+        score = savings_ratio / self.target_savings_ratio
+        return max(0.0, min(1.0, score))
 
 
 class RLMCompositeMetric:
