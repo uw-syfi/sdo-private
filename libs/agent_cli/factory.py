@@ -4,9 +4,6 @@ from app_operator.config import load_config, Config
 from app_operator.logger import logger
 from .base import CodingAgent, AGENT_REGISTRY
 
-# Import modules to ensure agents are registered
-from . import codex, gemini, opencode, claude, rlm_agent, subagent_agent, hybrid_agent  # noqa: F401
-
 
 def create_agent_from_config(
     target_dir: str,
