@@ -1,0 +1,369 @@
+"""Subagent-based coding agent for the SDS operator.
+
+Instead of a single RLM REPL loop, this agent fans out independent subagent
+calls that each analyse a different slice of context (trajectory, error logs,
+deploy script, repository).  Their summaries are fed to a root LLM call that
+produces the final fix.
+
+Register with ``provider = "subagent"`` in ``sds.toml``.
+"""
+
+import json
+import re
+from pathlib import Path
+from typing import Optional
+
+from app_operator.logger import logger
+from app_operator.trajectory import TrajectoryRecorderProtocol
+
+from .base import CodingAgent, register_provider
+from .events import AgentEventHandler
+from .rlm_agent import _FILE_GEN_RE, _DIRECT_TEXT_RE, _litellm_call_with_retry
+from .subagent import call_subagent
+
+
+@register_provider("subagent")
+class SubagentCodingAgent(CodingAgent):
+    """Coding agent that fans out independent subagents for fix tasks.
+
+    For file-generation and direct-text tasks the behaviour matches
+    ``RLMCodingAgent`` (single litellm call).  For fix tasks the agent:
+
+    1. Fans out 4 independent subagent calls (trajectory analyst, error log
+       analyst, script analyst, repo analyst) — each receives a focused
+       slice of context and returns a short summary.
+    2. Feeds all 4 summaries plus the original task prompt to a root LLM
+       call that produces the actual fix.
+    """
+
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        event_handler: Optional[AgentEventHandler] = None,
+        location: Optional[str] = None,
+    ):
+        self.model = model or "vertex_ai/gemini-2.0-flash"
+        self.recorder = recorder
+        self.event_handler = event_handler
+        self.location = location
+        self._total_token_usage: dict = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+
+    def generate(
+        self,
+        prompt: str,
+        cwd: Optional[str] = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ) -> str:
+        repo_path = Path(cwd) if cwd else Path.cwd()
+        call_tokens: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        if _DIRECT_TEXT_RE.search(prompt):
+            result = self._generate_direct(prompt, call_tokens)
+        elif _FILE_GEN_RE.search(prompt):
+            result = self._generate_files(prompt, repo_path, call_tokens)
+        else:
+            result = self._generate_fix(prompt, repo_path, call_tokens)
+
+        for k in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            self._total_token_usage[k] += call_tokens[k]
+
+        if self.recorder and hasattr(self.recorder, "record_token_usage"):
+            self.recorder.record_token_usage(self._total_token_usage.copy())
+
+        return result
+
+    # -- Direct / file-gen paths (same as RLMCodingAgent) ---------------------
+
+    def _generate_direct(self, prompt: str, token_acc: Optional[dict] = None) -> str:
+        import os
+
+        kwargs = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "cache": {"no-cache": True},
+        }
+        loc = self.location or os.environ.get("VERTEX_LOCATION")
+        if loc:
+            kwargs["vertex_location"] = loc
+
+        try:
+            return _litellm_call_with_retry(kwargs, label="direct text generation", token_acc=token_acc)
+        except Exception as e:
+            logger.error(f"[Subagent] Direct text LLM call failed: {e}")
+            return f"LLM call failed: {e}"
+
+    def _generate_files(self, prompt: str, repo_path: Path, token_acc: Optional[dict] = None) -> str:
+        import os
+
+        expected_files = re.findall(r"\.sds/[\w._-]+", prompt)
+
+        system_msg = (
+            "You are a deployment assistant. The user will ask you to generate "
+            "one or more files. For EACH file, output a section in this exact format:\n\n"
+            "FILE: .sds/<filename>\n"
+            "```\n"
+            "<file content here>\n"
+            "```\n\n"
+            "Output ONLY these sections. Do not add explanations outside the sections."
+        )
+
+        kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt},
+            ],
+            "cache": {"no-cache": True},
+        }
+        loc = self.location or os.environ.get("VERTEX_LOCATION")
+        if loc:
+            kwargs["vertex_location"] = loc
+
+        try:
+            raw = _litellm_call_with_retry(kwargs, label="file generation", token_acc=token_acc)
+        except Exception as e:
+            logger.error(f"[Subagent] Direct LLM call failed: {e}")
+            return f"LLM call failed: {e}"
+
+        written = []
+        file_sections = re.findall(
+            r"FILE:\s*(\.sds/[\w._-]+)\s*\n```[^\n]*\n(.*?)```",
+            raw,
+            re.DOTALL,
+        )
+        for rel_path, content in file_sections:
+            out_path = repo_path / rel_path
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(content)
+            logger.info(f"[Subagent] Wrote {out_path}")
+            written.append(rel_path)
+
+        if not written and len(expected_files) == 1:
+            out_path = repo_path / expected_files[0]
+            content = re.sub(r"^```[^\n]*\n|```$", "", raw.strip(), flags=re.MULTILINE)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(content)
+            logger.info(f"[Subagent] Wrote {out_path} (fallback)")
+            written.append(expected_files[0])
+
+        return raw
+
+    # -- Fix path: fan-out subagents + root synthesis -------------------------
+
+    def _generate_fix(
+        self,
+        prompt: str,
+        repo_path: Path,
+        token_acc: Optional[dict] = None,
+    ) -> str:
+        """Fan out 4 subagent analyses, then synthesise the fix with a root call."""
+        sds = repo_path / ".sds"
+
+        trajectory_text = self._read_trajectory(sds)
+        error_log = (
+            self._read(sds / "logs" / "deploy.log")
+            + "\n"
+            + self._read(sds / "logs" / "health_check.log")
+        )
+        deploy_script = self._read(sds / "deploy.sh")
+        original_script = self._read(sds / "deploy.sh.bak")
+        repo_context = self._gather_repo_context(repo_path, sds)
+
+        logger.info("[Subagent] Starting fan-out analysis (4 subagents)")
+
+        # --- Step 1: Fan out independent subagent calls ----------------------
+        summaries: dict[str, str] = {}
+
+        summaries["trajectory"] = call_subagent(
+            model=self.model,
+            system_prompt=(
+                "You are a trajectory analyst. Summarise what deployment "
+                "fixes have been tried so far, which error patterns recur, "
+                "and what approaches have NOT been attempted yet. Be concise "
+                "(max 300 words)."
+            ),
+            user_prompt=trajectory_text or "(no trajectory data available)",
+            location=self.location,
+            token_acc=token_acc,
+        )
+        logger.info("[Subagent] Trajectory analyst complete")
+
+        summaries["error_log"] = call_subagent(
+            model=self.model,
+            system_prompt=(
+                "You are an error log analyst. Identify the key errors, "
+                "their root cause, and the most likely fix. Be concise "
+                "(max 300 words)."
+            ),
+            user_prompt=error_log or "(no error log available)",
+            location=self.location,
+            token_acc=token_acc,
+        )
+        logger.info("[Subagent] Error log analyst complete")
+
+        script_input = f"Current script:\n{deploy_script}"
+        if original_script:
+            script_input += f"\n\nOriginal script (before fixes):\n{original_script}"
+        summaries["script"] = call_subagent(
+            model=self.model,
+            system_prompt=(
+                "You are a script analyst. Examine the deployment script and "
+                "identify what is likely wrong. If an original pre-fix version "
+                "is provided, note any regressions introduced by previous fixes. "
+                "Be concise (max 300 words)."
+            ),
+            user_prompt=script_input or "(no deploy script available)",
+            location=self.location,
+            token_acc=token_acc,
+        )
+        logger.info("[Subagent] Script analyst complete")
+
+        summaries["repo"] = call_subagent(
+            model=self.model,
+            system_prompt=(
+                "You are a repository analyst. Based on the Dockerfile, "
+                "docker-compose file, README, and code analysis report, "
+                "summarise the deployment constraints and requirements. "
+                "Be concise (max 300 words)."
+            ),
+            user_prompt=repo_context or "(no repository context available)",
+            location=self.location,
+            token_acc=token_acc,
+        )
+        logger.info("[Subagent] Repo analyst complete")
+
+        if self.recorder:
+            for name, summary in summaries.items():
+                self.recorder.add_assistant_message(
+                    f"[Subagent {name} analyst]\n{summary[:500]}"
+                )
+
+        # --- Step 2: Root LLM synthesis --------------------------------------
+        logger.info("[Subagent] Starting root synthesis call")
+        result = self._root_synthesis(prompt, summaries, deploy_script, token_acc)
+
+        # Write deploy.sh if the root call produced one
+        self._write_deploy_sh_if_present(result, repo_path)
+
+        return result
+
+    def _root_synthesis(
+        self,
+        task_prompt: str,
+        summaries: dict[str, str],
+        deploy_script: str,
+        token_acc: Optional[dict] = None,
+    ) -> str:
+        """Single root LLM call that receives all subagent summaries."""
+        import os
+
+        system_msg = (
+            "You are a deployment fix agent. You have received analysis from "
+            "4 independent analysts. Use their summaries to produce the "
+            "correct fix.\n\n"
+            "IMPORTANT: Write the complete corrected deploy.sh file in your "
+            "response, wrapped in:\n"
+            "FILE: .sds/deploy.sh\n"
+            "```\n<content>\n```\n\n"
+            "Do not reference non-existent files. Remove any lines that "
+            "reference paths that do not exist."
+        )
+
+        user_parts = [
+            f"TASK:\n{task_prompt}",
+            f"\nCURRENT deploy.sh:\n{deploy_script}" if deploy_script else "",
+            f"\n--- Trajectory Analysis ---\n{summaries.get('trajectory', 'N/A')}",
+            f"\n--- Error Log Analysis ---\n{summaries.get('error_log', 'N/A')}",
+            f"\n--- Script Analysis ---\n{summaries.get('script', 'N/A')}",
+            f"\n--- Repository Analysis ---\n{summaries.get('repo', 'N/A')}",
+        ]
+        user_prompt = "\n".join(p for p in user_parts if p)
+
+        kwargs: dict = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_prompt},
+            ],
+            "cache": {"no-cache": True},
+        }
+        loc = self.location or os.environ.get("VERTEX_LOCATION")
+        if loc:
+            kwargs["vertex_location"] = loc
+
+        try:
+            return _litellm_call_with_retry(kwargs, label="root synthesis", token_acc=token_acc)
+        except Exception as e:
+            logger.error(f"[Subagent] Root synthesis failed: {e}")
+            return f"Root synthesis failed: {e}"
+
+    def _write_deploy_sh_if_present(self, response: str, repo_path: Path) -> None:
+        """Extract and write deploy.sh from the root synthesis response."""
+        file_sections = re.findall(
+            r"FILE:\s*(\.sds/deploy\.sh)\s*\n```[^\n]*\n(.*?)```",
+            response,
+            re.DOTALL,
+        )
+        if file_sections:
+            _, content = file_sections[0]
+            out_path = repo_path / ".sds" / "deploy.sh"
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(content)
+            logger.info(f"[Subagent] Wrote {out_path}")
+
+    # -- Helpers --------------------------------------------------------------
+
+    def _read_trajectory(self, sds_dir: Path) -> str:
+        """Read and summarise recent trajectory data."""
+        traj_path = sds_dir / "trajectory.json"
+        if not traj_path.exists():
+            return ""
+        try:
+            data = json.loads(traj_path.read_text())
+            # Extract last N deployment conversations
+            deployment = data.get("deployment", [])
+            last_convos = deployment[-5:] if len(deployment) > 5 else deployment
+            return json.dumps(last_convos, indent=2)
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _read(path: Path) -> str:
+        try:
+            if path.exists():
+                return path.read_text()
+        except Exception:
+            pass
+        return ""
+
+    def _gather_repo_context(self, repo_path: Path, sds_dir: Path) -> str:
+        """Gather repository-level context files into a single string."""
+        parts = []
+
+        dockerfile = self._read(repo_path / "Dockerfile")
+        if dockerfile:
+            parts.append(f"--- Dockerfile ---\n{dockerfile}")
+
+        for name in ("docker-compose.yml", "docker-compose.yaml"):
+            compose = self._read(repo_path / name)
+            if compose:
+                parts.append(f"--- {name} ---\n{compose}")
+                break
+
+        for name in ("README.md", "README.rst", "README"):
+            readme = self._read(repo_path / name)
+            if readme:
+                parts.append(f"--- README ---\n{readme}")
+                break
+
+        analysis = self._read(sds_dir / "code_analysis.md")
+        if analysis:
+            parts.append(f"--- Code Analysis ---\n{analysis}")
+
+        return "\n\n".join(parts)
