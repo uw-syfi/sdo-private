@@ -115,6 +115,10 @@ uv run -m lego_agent --no-tui --prompt "task"  # CLI mode
 - **Adding a new feature**: Think about tests first. Test public behavior, not internal details.
 - **Fixing bugs**: Write a reproducing test first, then fix. Test must be part of the fix.
 
+## Remote repo access
+
+Use `glab` command (if available) to access the remote repo on GitLab, including issues and merge requests.
+
 ## Notes from Developers
 
 - Use `uv` and `uv run ...` for Python.
