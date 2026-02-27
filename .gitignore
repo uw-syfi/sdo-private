@@ -91,3 +91,5 @@ rlm[0-9]*/
 
 # macOS
 .DS_Store
+
+.mcp.json
