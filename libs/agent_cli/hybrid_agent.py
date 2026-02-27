@@ -111,62 +111,78 @@ class HybridCodingAgent(CodingAgent):
 
         logger.info("[Hybrid] Pre-running 4 subagent analyses")
 
-        trajectory_summary = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are a trajectory analyst. Summarise what deployment "
-                "fixes have been tried so far, which error patterns recur, "
-                "and what approaches have NOT been attempted yet. Be concise "
-                "(max 300 words)."
-            ),
-            user_prompt=trajectory_text or "(no trajectory data available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            trajectory_summary = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are a trajectory analyst. Summarise what deployment "
+                    "fixes have been tried so far, which error patterns recur, "
+                    "and what approaches have NOT been attempted yet. Be concise "
+                    "(max 300 words)."
+                ),
+                user_prompt=trajectory_text or "(no trajectory data available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Hybrid] Trajectory analyst failed, skipping: {e}")
+            trajectory_summary = "(trajectory analysis unavailable)"
         logger.info("[Hybrid] Trajectory analyst complete")
 
-        error_summary = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are an error log analyst. Identify the key errors, "
-                "their root cause, and the most likely fix. Be concise "
-                "(max 300 words)."
-            ),
-            user_prompt=error_log or "(no error log available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            error_summary = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are an error log analyst. Identify the key errors, "
+                    "their root cause, and the most likely fix. Be concise "
+                    "(max 300 words)."
+                ),
+                user_prompt=error_log or "(no error log available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Hybrid] Error log analyst failed, skipping: {e}")
+            error_summary = "(error log analysis unavailable)"
         logger.info("[Hybrid] Error log analyst complete")
 
         script_input = f"Current script:\n{deploy_script}"
         if original_script:
             script_input += f"\n\nOriginal script (before fixes):\n{original_script}"
-        script_summary = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are a script analyst. Examine the deployment script and "
-                "identify what is likely wrong. If an original pre-fix version "
-                "is provided, note any regressions introduced by previous fixes. "
-                "Be concise (max 300 words)."
-            ),
-            user_prompt=script_input or "(no deploy script available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            script_summary = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are a script analyst. Examine the deployment script and "
+                    "identify what is likely wrong. If an original pre-fix version "
+                    "is provided, note any regressions introduced by previous fixes. "
+                    "Be concise (max 300 words)."
+                ),
+                user_prompt=script_input or "(no deploy script available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Hybrid] Script analyst failed, skipping: {e}")
+            script_summary = "(script analysis unavailable)"
         logger.info("[Hybrid] Script analyst complete")
 
-        repo_summary = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are a repository analyst. Based on the Dockerfile, "
-                "docker-compose file, README, and code analysis report, "
-                "summarise the deployment constraints and requirements. "
-                "Be concise (max 300 words)."
-            ),
-            user_prompt=repo_context or "(no repository context available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            repo_summary = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are a repository analyst. Based on the Dockerfile, "
+                    "docker-compose file, README, and code analysis report, "
+                    "summarise the deployment constraints and requirements. "
+                    "Be concise (max 300 words)."
+                ),
+                user_prompt=repo_context or "(no repository context available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Hybrid] Repo analyst failed, skipping: {e}")
+            repo_summary = "(repository analysis unavailable)"
         logger.info("[Hybrid] Repo analyst complete")
 
         if self.recorder:

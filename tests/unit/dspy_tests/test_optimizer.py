@@ -255,10 +255,19 @@ class TestPromptOptimizer:
         """Test saving optimized prompts creates correct structure."""
         optimizer = PromptOptimizer(dspy_config, tmp_path)
 
+        # Provide a mock module with at least one demo so _save_dspy_module succeeds
+        mock_predictor = Mock()
+        mock_predictor.demos = [{"input": "fix this", "output": "fixed"}]
+        mock_predictor.signature = Mock()
+        del mock_predictor.signature.instructions  # simulate BootstrapFewShot (no rewrite)
+        mock_module = Mock()
+        mock_module.predictor = mock_predictor
+
         results = {
             "deployer_fix_error": {
                 "success": True,
                 "validation_score": 0.85,
+                "optimized_module": mock_module,
             },
             "deployer_summarize": {
                 "success": False,

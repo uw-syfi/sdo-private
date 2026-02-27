@@ -111,6 +111,11 @@ class TokenEfficiencyMetric:
             input_weight: Weight for input tokens (0.0-1.0)
             output_weight: Weight for output tokens (0.0-1.0)
         """
+        if abs(input_weight + output_weight - 1.0) > 1e-9:
+            raise ValueError(
+                f"input_weight ({input_weight}) + output_weight ({output_weight}) "
+                f"must sum to 1.0, got {input_weight + output_weight}"
+            )
         self.baseline_tokens = baseline_tokens
         self.input_weight = input_weight
         self.output_weight = output_weight

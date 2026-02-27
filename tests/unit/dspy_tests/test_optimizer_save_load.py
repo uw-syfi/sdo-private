@@ -54,8 +54,9 @@ class TestOptimizerSaveModule:
         assert len(data["demos"]) == 1
         assert data["demos"][0]["repo_path"] == "/repo1"
 
-    def test_save_dspy_module_no_demos(self, tmp_path):
-        """Should handle modules without demos."""
+    def test_save_dspy_module_no_demos_raises(self, tmp_path):
+        """Should raise RuntimeError when module has no demos and no optimized instruction."""
+        import pytest
         config = DSPyConfig()
         optimizer = PromptOptimizer(config, tmp_path)
 
@@ -65,13 +66,8 @@ class TestOptimizerSaveModule:
 
         output_file = tmp_path / "deployer_fix_error.dspy.json"
 
-        optimizer._save_dspy_module(mock_module, output_file, "deployer_fix_error")
-
-        with open(output_file) as f:
-            data = json.load(f)
-
-        assert "demos" in data
-        assert data["demos"] == []
+        with pytest.raises(RuntimeError, match="produced no demos"):
+            optimizer._save_dspy_module(mock_module, output_file, "deployer_fix_error")
 
     def test_save_dspy_module_includes_metadata(self, tmp_path):
         """Saved module should include metadata."""
@@ -80,7 +76,7 @@ class TestOptimizerSaveModule:
 
         mock_module = Mock()
         mock_module.predictor = Mock(spec=['demos'])
-        mock_module.predictor.demos = []
+        mock_module.predictor.demos = [{"input": "err", "output": "fix"}]
 
         output_file = tmp_path / "deployer_fix_error.dspy.json"
 
@@ -105,7 +101,9 @@ class TestOptimizerSaveOptimizedPrompts:
             "deployer_fix_error": {
                 "success": True,
                 "validation_score": 0.85,
-                "optimized_module": Mock(predictor=Mock(spec=['demos'], demos=[])),
+                "optimized_module": Mock(
+                    predictor=Mock(spec=['demos'], demos=[{"input": "err", "output": "fix"}])
+                ),
             }
         }
 
@@ -122,7 +120,7 @@ class TestOptimizerSaveOptimizedPrompts:
 
         mock_module = Mock()
         mock_module.predictor = Mock(spec=['demos'])
-        mock_module.predictor.demos = []
+        mock_module.predictor.demos = [{"input": "err", "output": "fix"}]
 
         results = {
             "deployer_fix_error": {
@@ -146,7 +144,7 @@ class TestOptimizerSaveOptimizedPrompts:
 
         mock_module = Mock()
         mock_module.predictor = Mock(spec=['demos'])
-        mock_module.predictor.demos = []
+        mock_module.predictor.demos = [{"input": "err", "output": "fix"}]
 
         results = {
             "deployer_fix_error": {

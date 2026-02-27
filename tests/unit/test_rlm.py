@@ -999,5 +999,213 @@ class TestIsolatedRecursiveCall:
         assert main_messages_lengths[1] == 2
 
 
+class TestExecuteCodeTruncation:
+    """Tests for execute_code result truncation."""
+
+    def test_execute_code_result_truncation(self):
+        """Results longer than max_result_chars are truncated with a notice."""
+        context = RLMContext()
+        env = RLMEnvironment(context, max_result_chars=100)
+
+        # Produce a result > 100 chars
+        code = "result = 'x' * 500"
+        output = env.execute_code(code, "Long result")
+
+        assert len(output) < 600  # much shorter than 500 chars of 'x' + overhead
+        assert "chars truncated" in output
+        assert output[:100] == "x" * 100
+
+    def test_execute_code_short_result_not_truncated(self):
+        """Results within max_result_chars pass through unchanged."""
+        context = RLMContext()
+        env = RLMEnvironment(context, max_result_chars=1000)
+
+        code = "result = 'hello'"
+        output = env.execute_code(code, "Short result")
+
+        assert output == "hello"
+        assert "truncated" not in output
+
+
+class TestNamespaceReservedNamesRestored:
+    """Tests for namespace integrity after exec."""
+
+    def test_reserved_names_restored_after_clobber(self):
+        """Code that overwrites re=None doesn't persist to the next exec call."""
+        context = RLMContext(error_log="Error: test")
+        env = RLMEnvironment(context)
+
+        # First exec: clobber 're'
+        env.execute_code("re = None\nresult = 'clobbered re'", "Clobber re")
+
+        # Second exec: 're' should be restored and usable
+        code = "result = re.findall(r'Error: (.*)', error_log)"
+        output = env.execute_code(code, "Use re after clobber")
+        assert "test" in output
+
+    def test_user_variables_persist_across_execs(self):
+        """Non-reserved variables written by code persist to the next exec."""
+        context = RLMContext()
+        env = RLMEnvironment(context)
+
+        env.execute_code("my_var = 42\nresult = 'set'", "Set my_var")
+        output = env.execute_code("result = my_var", "Read my_var")
+        assert "42" in output
+
+
+class TestParseRobustness:
+    """Tests for the regex-based response parser."""
+
+    def test_parse_missing_action_line_returns_noop(self):
+        """Missing ACTION: line returns a no-op execute_code, not FINAL_ANSWER."""
+        agent = RecursiveDeploymentAgent()
+        response = "This response has no action line at all."
+        parsed = agent._parse_rlm_response(response)
+
+        assert parsed["action"] == ActionType.EXECUTE_CODE
+        assert parsed["code"] == ""
+        assert parsed["description"] == "no-op"
+
+    def test_parse_bounded_code_block(self):
+        """CODE: extraction stops at the next section keyword."""
+        agent = RecursiveDeploymentAgent()
+        response = (
+            "ACTION: execute_code\n"
+            "DESCRIPTION: test\n"
+            "CODE:\n"
+            "result = 'value'\n"
+            "ACTION: final_answer\n"
+            "ANSWER: this should not be in code"
+        )
+        parsed = agent._parse_rlm_response(response)
+
+        assert parsed["action"] == ActionType.EXECUTE_CODE
+        assert "this should not be in code" not in parsed["code"]
+        assert "result = 'value'" in parsed["code"]
+
+
+class TestConsecutiveErrorTracking:
+    """Tests for max_consecutive_errors stopping the loop."""
+
+    def test_max_consecutive_errors_stops_loop(self):
+        """After max_consecutive_errors failures, run_task returns early."""
+        import unittest.mock as mock
+
+        error_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal error_count
+            error_count += 1
+            content = "ACTION: execute_code\nDESCRIPTION: bad\nCODE:\nresult = 1/0"
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent(max_consecutive_errors=3)
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            result = agent.run_task("test", context, "/tmp")
+
+        # Should have stopped after 3 errors, not run all 10 iterations
+        assert error_count == 3
+        assert "Code execution error" in result
+
+    def test_error_counter_resets_on_success(self):
+        """Successful exec resets the consecutive error counter."""
+        import unittest.mock as mock
+
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                content = "ACTION: execute_code\nDESCRIPTION: fail\nCODE:\nresult = 1/0"
+            elif call_count == 2:
+                content = "ACTION: execute_code\nDESCRIPTION: ok\nCODE:\nresult = 'ok'"
+            else:
+                content = "ACTION: final_answer\nANSWER: done"
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent(max_consecutive_errors=2)
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            result = agent.run_task("test", context, "/tmp")
+
+        # Should NOT have stopped early — success after 1 error resets counter
+        assert result == "done"
+
+
+class TestConfigurableLoopParams:
+    """Tests for configurable max_iterations and consecutive_explore_limit."""
+
+    def test_max_iterations_configurable(self):
+        """Constructor param overrides default max iterations."""
+        import unittest.mock as mock
+
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            content = "ACTION: execute_code\nDESCRIPTION: loop\nCODE:\nresult = 'ok'"
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent(max_iterations=3)
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            agent.run_task("test", context, "/tmp")
+
+        assert call_count == 3  # exactly max_iterations calls, then loop ends
+
+    def test_default_max_iterations(self):
+        """Default max_iterations is 10."""
+        agent = RecursiveDeploymentAgent()
+        assert agent.max_iterations == 10
+
+    def test_default_consecutive_explore_limit(self):
+        """Default consecutive_explore_limit is 5."""
+        agent = RecursiveDeploymentAgent()
+        assert agent.consecutive_explore_limit == 5
+
+
+class TestEstimateTokensTiktoken:
+    """Tests for tiktoken integration in _estimate_tokens."""
+
+    def test_estimate_tokens_uses_tiktoken_when_available(self):
+        """When tiktoken is importable, returns exact token count."""
+        pytest.importorskip("tiktoken")
+        import tiktoken as tk
+
+        text = "Hello, world! This is a test."
+        enc = tk.get_encoding("cl100k_base")
+        expected = len(enc.encode(text))
+        from app_operator.rlm.environment import _estimate_tokens
+        assert _estimate_tokens(text) == expected
+
+    def test_estimate_tokens_fallback_without_tiktoken(self):
+        """Without tiktoken, falls back to heuristic (no exception)."""
+        import unittest.mock as mock
+        from app_operator.rlm.environment import _estimate_tokens
+
+        with mock.patch.dict("sys.modules", {"tiktoken": None}):
+            # builtins.__import__ will raise ImportError for tiktoken
+            result = _estimate_tokens("hello world " * 50)
+        assert result > 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

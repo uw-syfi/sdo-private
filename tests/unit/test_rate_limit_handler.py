@@ -66,31 +66,35 @@ class TestExponentialBackoff:
     """Test exponential backoff calculation."""
 
     def test_first_attempt(self):
-        """Test delay for first retry."""
+        """Test delay for first retry is in jitter range around base_delay."""
         delay = exponential_backoff(0, base_delay=5)
-        assert delay == 5
+        # base=5, ±25% jitter → [3, 7] (clamped to ≥1)
+        assert 3 <= delay <= 7
 
     def test_second_attempt(self):
-        """Test delay for second retry."""
+        """Test delay for second retry is in jitter range around 2*base_delay."""
         delay = exponential_backoff(1, base_delay=5)
-        assert delay == 10
+        # base*2=10, ±25% jitter → [7, 13]
+        assert 7 <= delay <= 13
 
     def test_third_attempt(self):
-        """Test delay for third retry."""
+        """Test delay for third retry is in jitter range around 4*base_delay."""
         delay = exponential_backoff(2, base_delay=5)
-        assert delay == 20
+        # base*4=20, ±25% jitter → [15, 25]
+        assert 15 <= delay <= 25
 
     def test_max_delay_cap(self):
-        """Test that delay is capped at max_delay."""
+        """Test that delay is capped at max_delay before jitter."""
         delay = exponential_backoff(10, base_delay=5, max_delay=100)
-        assert delay == 100
+        # max=100, ±25% jitter → [75, 100] (capped before jitter applied to base)
+        assert 75 <= delay <= 100
 
     def test_custom_base_delay(self):
-        """Test with custom base delay."""
+        """Test with custom base delay stays within jitter range."""
         delay = exponential_backoff(0, base_delay=10)
-        assert delay == 10
+        assert 7 <= delay <= 13
         delay = exponential_backoff(1, base_delay=10)
-        assert delay == 20
+        assert 15 <= delay <= 25
 
 
 class TestRateLimitError:

@@ -77,7 +77,10 @@ PROMPT_TO_TEMPLATE: Dict[str, str] = {
 }
 
 
-def _ensure_serializable(obj):
+_ENSURE_SERIALIZABLE_MAX_DEPTH = 50
+
+
+def _ensure_serializable(obj, _depth: int = 0):
     """Ensure object is JSON-serializable, raising TypeError if not.
 
     DSPy demo objects may contain non-primitive types (e.g. Example
@@ -85,12 +88,14 @@ def _ensure_serializable(obj):
     rather than relying on json.dump's implicit default=str, making
     the conversion intentional and documented.
     """
+    if _depth > _ENSURE_SERIALIZABLE_MAX_DEPTH:
+        return str(obj)
     if isinstance(obj, (str, int, float, bool, type(None))):
         return obj
     if isinstance(obj, dict):
-        return {str(k): _ensure_serializable(v) for k, v in obj.items()}
+        return {str(k): _ensure_serializable(v, _depth + 1) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [_ensure_serializable(v) for v in obj]
+        return [_ensure_serializable(v, _depth + 1) for v in obj]
     return str(obj)  # Convert unknown types to string with explicit intent
 
 
@@ -780,7 +785,10 @@ class PromptOptimizer:
                 not module_state["demos"]
                 and "optimized_instruction" not in module_state
             ):
-                logger.warning("No optimization artifacts to save")
+                raise RuntimeError(
+                    f"Optimization for '{prompt_name}' produced no demos and no "
+                    "optimized instruction — the optimizer may have failed silently."
+                )
 
             # Explicitly convert non-primitive types before serialization
             module_state = _ensure_serializable(module_state)

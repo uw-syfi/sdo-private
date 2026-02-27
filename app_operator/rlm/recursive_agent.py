@@ -1,292 +1,627 @@
-"""Recursive Deployment Agent using the RLM (Recursive Language Model) paradigm.
+"""RLM-enabled deployment agent for SDS.
 
-The agent exposes deployment artifacts as Python variables in a REPL so the
-LLM can query/filter them with execute_code actions before returning a final
-answer.  This reduces token usage ~50-75% on large logs.
+Implements a deployment agent that uses RLM to handle long error logs
+and iteration history efficiently.
 """
 
 import json
 import os
 import re
-import subprocess
-import sys
-import tempfile
-from typing import List, Optional
+import time
+from pathlib import Path
+from typing import Dict, Any, List, Optional
 
 import litellm
 
 from app_operator.logger import logger
-from app_operator.rlm.environment import RLMContext
-
-_SYSTEM_PROMPT = """\
-You are an RLM deployment assistant. Use execute_code actions to inspect
-deployment artifacts, then provide a final answer.
-
-For each response, use exactly ONE of these formats:
-
-  ACTION: execute_code
-  DESCRIPTION: <brief description>
-  CODE:
-  <python code; set result = <your output>>
-
-  or:
-
-  ACTION: final_answer
-  ANSWER: <your fix or analysis>
-
-Available variables in CODE: error_log, deployment_script,
-health_check_output, dockerfile, docker_compose, readme, analysis_report,
-repo_path. Always assign to `result` to capture output.
-"""
+from app_operator.rate_limit_handler import detect_rate_limit_error
+from app_operator.rlm.environment import (
+    RLMEnvironment,
+    RLMContext,
+    RLMCall,
+    ActionType,
+    _validate_file_refs,
+)
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 class RecursiveDeploymentAgent:
-    """LLM agent that uses a REPL loop to inspect deployment artifacts."""
+    """Deployment agent using RLM for long-context handling.
+
+    Instead of feeding entire error logs into prompts, this agent:
+    1. Stores context in RLM environment as variables
+    2. Lets LLM programmatically query/filter context
+    3. Makes focused recursive calls on specific issues
+    4. Tracks all RLM actions in trajectory for optimization
+    """
 
     def __init__(
         self,
-        trajectory=None,
+        trajectory: Optional[TrajectoryRecorderProtocol] = None,
         max_recursion_depth: int = 5,
-        llm_provider: str = "vertex_ai/gemini-2.0-flash",
+        llm_provider: str = "gemini",
         vertex_location: Optional[str] = None,
+        max_iterations: int = 10,
+        consecutive_explore_limit: int = 5,
+        max_consecutive_errors: Optional[int] = None,
+        compaction: bool = False,
+        compaction_threshold: float = 0.85,
+        model_context_tokens: int = 32_768,
     ):
+        """Initialize RLM deployment agent.
+
+        Args:
+            trajectory: Trajectory recorder for tracking RLM calls
+            max_recursion_depth: Maximum allowed recursion depth
+            llm_provider: LLM provider to use (e.g. vertex_ai/gemini-2.0-flash)
+            vertex_location: Vertex AI location override (e.g. "global", "us-central1").
+                Passed as ``vertex_location`` to litellm. Falls back to the
+                ``VERTEX_LOCATION`` environment variable when None.
+            max_iterations: Maximum RLM loop iterations before giving up.
+            consecutive_explore_limit: Number of consecutive non-final-answer steps
+                before nudging the LLM to wrap up.
+            max_consecutive_errors: Stop the loop after this many consecutive code
+                execution errors. None disables the limit.
+            compaction: Enable automatic conversation history compaction when the
+                context approaches the model's token limit.
+            compaction_threshold: Fraction of model_context_tokens at which to
+                compact (default 0.85 = 85%).
+            model_context_tokens: Model's context window size used for compaction
+                threshold calculation.
+        """
         self.trajectory = trajectory
         self.max_recursion_depth = max_recursion_depth
         self.llm_provider = llm_provider
         self.vertex_location = vertex_location
-        self._system_prompt = _SYSTEM_PROMPT
-
-    def run_task(
-        self,
-        task: str,
-        context: RLMContext,
-        repo_path: str,
-    ) -> str:
-        """Run a task using the RLM loop.
-
-        Does NOT call trajectory.start_phase or trajectory.end_phase — that is
-        the caller's responsibility.
-
-        Args:
-            task: Natural-language task description.
-            context: Deployment artifacts available to the LLM.
-            repo_path: Path to the repository (available as a variable).
-
-        Returns:
-            Final answer string from the LLM.
-        """
-        namespace = {
-            "error_log": context.error_log,
-            "deployment_script": context.deployment_script,
-            "health_check_output": context.health_check_output,
-            "dockerfile": context.dockerfile,
-            "docker_compose": context.docker_compose,
-            "readme": context.readme,
-            "analysis_report": context.analysis_report,
-            "repo_path": repo_path,
+        self.max_iterations = max_iterations
+        self.consecutive_explore_limit = consecutive_explore_limit
+        self.max_consecutive_errors = max_consecutive_errors
+        self.compaction = compaction
+        self.compaction_threshold = compaction_threshold
+        self.model_context_tokens = model_context_tokens
+        self.rlm_env: Optional[RLMEnvironment] = None
+        self._system_prompt: str = ""
+        self._messages: List[Dict[str, str]] = []
+        self._token_usage: Dict[str, int] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
         }
 
-        initial_prompt = self._build_initial_prompt(task, context)
-        conversation_history: List[dict] = []
+    def _record_rlm_call(self, call: RLMCall) -> None:
+        """Callback to record RLM calls in trajectory."""
+        if self.trajectory:
+            self.trajectory.add_assistant_message(
+                f"[RLM {call.action_type.value} at depth {call.depth}]\n"
+                f"Input: {call.input_prompt[:200]}\n"
+                f"Output: {call.output[:200]}\n"
+                f"Tokens saved: ~{call.tokens_saved}"
+            )
 
-        for _ in range(self.max_recursion_depth):
-            prompt = self._rebuild_prompt(initial_prompt, conversation_history)
-            response = self._call_llm(prompt)
-            action, content = self._parse_response(response)
+    def _create_rlm_context(
+        self,
+        error_log: str,
+        deployment_script: str,
+        previous_attempts: List[Dict[str, Any]],
+        repo_path: Path,
+    ) -> RLMContext:
+        """Create RLM context from deployment state."""
+        # Try to read relevant files
+        dockerfile = ""
+        docker_compose = ""
+        readme = ""
+        analysis_report = ""
 
-            if action == "final_answer":
-                return content
+        try:
+            sds_dir = repo_path / ".sds"
+            if (sds_dir / "code_analysis.md").exists():
+                analysis_report = (sds_dir / "code_analysis.md").read_text()
+
+            if (repo_path / "Dockerfile").exists():
+                dockerfile = (repo_path / "Dockerfile").read_text()
+
+            compose_files = ["docker-compose.yml", "docker-compose.yaml"]
+            for cf in compose_files:
+                if (repo_path / cf).exists():
+                    docker_compose = (repo_path / cf).read_text()
+                    break
+
+            readme_files = ["README.md", "README.txt", "README"]
+            for rf in readme_files:
+                if (repo_path / rf).exists():
+                    readme = (repo_path / rf).read_text()
+                    break
+        except Exception as e:
+            logger.warning(f"Failed to read some context files: {e}")
+
+        # Get trajectory data
+        trajectory_data = self.trajectory.trajectory if self.trajectory else {}
+
+        return RLMContext(
+            error_log=error_log,
+            deployment_script=deployment_script,
+            previous_attempts=previous_attempts,
+            trajectory_data=trajectory_data,
+            dockerfile=dockerfile,
+            docker_compose=docker_compose,
+            readme=readme,
+            analysis_report=analysis_report,
+            attempt_number=len(previous_attempts) + 1,
+        )
+
+    def _parse_rlm_response(self, response: str) -> Dict[str, Any]:
+        """Parse LLM response to extract action type and content.
+
+        Expected format:
+        ACTION: execute_code
+        DESCRIPTION: Extract error messages
+        CODE:
+        result = re.findall(r'Error: (.*)', error_log)
+
+        OR:
+
+        ACTION: recursive_call
+        SUBTASK: Analyze Docker network configuration
+        CONTEXT: {"dockerfile": dockerfile, "error_log": error_snippet}
+
+        OR:
+
+        ACTION: final_answer
+        ANSWER: <deployment fix>
+        """
+        try:
+            # Extract action with regex — avoids IndexError when ACTION: is missing
+            action_match = re.search(
+                r'^ACTION:\s*(\S+)', response, re.MULTILINE | re.IGNORECASE
+            )
+            if not action_match:
+                logger.warning("[RLM] No ACTION: line found, continuing loop as no-op")
+                return {
+                    "action": ActionType.EXECUTE_CODE,
+                    "code": "",
+                    "description": "no-op",
+                }
+
+            action = action_match.group(1).strip().lower()
 
             if action == "execute_code":
-                exec_result = self._execute_code(content, namespace)
-                conversation_history.append({
-                    "response": response,
-                    "result": exec_result,
-                })
-                # Keep only the last 3 iterations
-                conversation_history = conversation_history[-3:]
-                continue
+                # Extract code block — bounded by the next section keyword or EOF
+                code_match = re.search(
+                    r'^CODE:\s*\n(.*?)(?=\n(?:ACTION:|DESCRIPTION:|ANSWER:)\s|\Z)',
+                    response,
+                    re.MULTILINE | re.DOTALL,
+                )
+                code = code_match.group(1).strip() if code_match else ""
 
-            # Unknown action — return as-is
-            return response
+                desc_match = re.search(r'^DESCRIPTION:\s*(.+)$', response, re.MULTILINE)
+                description = desc_match.group(1).strip() if desc_match else ""
 
-        # Max iterations reached
-        return "ERROR: Max recursion depth reached without resolution"
+                return {
+                    "action": ActionType.EXECUTE_CODE,
+                    "code": code,
+                    "description": description,
+                }
+
+            elif action == "recursive_call":
+                subtask_match = re.search(r'^SUBTASK:\s*(.+)$', response, re.MULTILINE)
+                subtask = subtask_match.group(1).strip() if subtask_match else ""
+
+                context_start = response.find("CONTEXT:")
+                filtered_context = None
+                if context_start != -1:
+                    context_str = response[context_start + 8:].strip()
+                    try:
+                        parsed_ctx = json.loads(context_str)
+                        if isinstance(parsed_ctx, dict) and parsed_ctx:
+                            filtered_context = parsed_ctx
+                        else:
+                            logger.warning(
+                                "CONTEXT parsed but empty or not a dict, using full context"
+                            )
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "Failed to parse CONTEXT as JSON, using full context"
+                        )
+
+                return {
+                    "action": ActionType.RECURSIVE_CALL,
+                    "subtask": subtask,
+                    "context": filtered_context,
+                }
+
+            elif action == "final_answer":
+                answer_match = re.search(
+                    r'^ANSWER:\s*(.*)', response, re.MULTILINE | re.DOTALL
+                )
+                if answer_match:
+                    answer = answer_match.group(1).strip()
+                else:
+                    lines = response.strip().split("\n")
+                    answer = "\n".join(lines[1:])
+
+                return {"action": ActionType.FINAL_ANSWER, "answer": answer}
+
+            else:
+                raise ValueError(f"Unknown action: {action}")
+
+        except Exception as e:
+            logger.error(f"Failed to parse RLM response: {e}")
+            logger.debug(f"Response was: {response}")
+
+            # Fallback: treat entire response as final answer
+            return {"action": ActionType.FINAL_ANSWER, "answer": response}
+
+    def _call_llm_isolated(self, sub_prompt: str, filtered_context: dict | None = None) -> str:
+        """Make an isolated LLM call for recursive sub-tasks.
+
+        Unlike ``_call_llm``, this builds a completely fresh ``messages``
+        list (system + user) so the sub-call does not see (or pollute) the
+        main conversation history.  Token usage is still accumulated into
+        ``self._token_usage``.
+
+        Args:
+            sub_prompt: The focused question / task for the sub-call.
+            filtered_context: Optional dict of context variables to include.
+                Keys are variable names, values are their content.
+
+        Returns:
+            The assistant's response text.
+        """
+        # Local import to break circular dependency:
+        # libs.agent_cli.subagent -> libs.agent_cli.rlm_agent -> app_operator.rlm.recursive_agent
+        from libs.agent_cli.subagent import call_subagent  # noqa: PLC0415
+
+        context_section = ""
+        if filtered_context:
+            parts = []
+            for key, value in filtered_context.items():
+                parts.append(f"--- {key} ---\n{value}")
+            context_section = "\n\n".join(parts)
+
+        system_prompt = (
+            "You are a focused analysis subagent. Answer the question below "
+            "using ONLY the provided context. Be concise and specific."
+        )
+        user_prompt = sub_prompt
+        if context_section:
+            user_prompt = f"Context:\n{context_section}\n\nTask:\n{sub_prompt}"
+
+        return call_subagent(
+            model=self.llm_provider,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            location=self.vertex_location,
+            token_acc=self._token_usage,
+        )
+
+    def _call_llm(self, prompt: str) -> str:
+        """Call the LLM via litellm, accumulating conversation history.
+
+        Appends ``prompt`` as a user message to ``self._messages``, calls
+        litellm with the full conversation, then appends the assistant
+        response.  This gives the LLM memory of prior turns (code results,
+        recursive call outputs, etc.) across the RLM loop.
+
+        ``self._messages`` must be initialised (at least with the system
+        message) before calling this method — ``run_task()`` does this
+        automatically.
+
+        Vertex AI auth is handled automatically by litellm via
+        ``GOOGLE_APPLICATION_CREDENTIALS`` or ``VERTEX_PROJECT`` /
+        ``VERTEX_LOCATION`` environment variables.
+
+        ``vertex_location`` is forwarded to litellm when set, either from the
+        constructor argument or from the ``VERTEX_LOCATION`` environment variable.
+        """
+        logger.info(f"[RLM] LLM call to {self.llm_provider}, prompt length: {len(prompt)} chars")
+
+        self._messages.append({"role": "user", "content": prompt})
+
+        kwargs: Dict[str, Any] = {
+            "model": self.llm_provider,
+            "messages": self._messages,
+            "cache": {"no-cache": True},
+        }
+        location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
+        if location:
+            kwargs["vertex_location"] = location
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                response = litellm.completion(**kwargs)
+                usage = getattr(response, "usage", None)
+                if usage:
+                    self._token_usage["prompt_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
+                    self._token_usage["completion_tokens"] += getattr(usage, "completion_tokens", 0) or 0
+                    self._token_usage["total_tokens"] += getattr(usage, "total_tokens", 0) or 0
+                content = response.choices[0].message.content or ""
+                self._messages.append({"role": "assistant", "content": content})
+                return content
+            except Exception as e:
+                rate_err = detect_rate_limit_error(str(e), -1, self.llm_provider)
+                if rate_err and attempt < max_attempts - 1:
+                    delay = (rate_err.retry_after or 15) * (2 ** attempt)
+                    logger.warning(
+                        f"[RLM] Transient network error (attempt {attempt + 1}/{max_attempts}), "
+                        f"retrying in {delay}s: {e}"
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error(f"[RLM] LLM call failed: {e}")
+                    content = f"ACTION: final_answer\nANSWER: LLM call failed: {e}"
+                    self._messages.append({"role": "assistant", "content": content})
+                    return content
+        content = f"ACTION: final_answer\nANSWER: LLM call failed after {max_attempts} attempts"
+        self._messages.append({"role": "assistant", "content": content})
+        return content
+
+    def _should_compact(self) -> bool:
+        """Return True if the conversation history should be compacted."""
+        if not self.compaction:
+            return False
+        try:
+            count = litellm.token_counter(model=self.llm_provider, messages=self._messages)
+        except Exception:
+            count = sum(len(m.get("content", "")) for m in self._messages) // 4
+        return count >= self.model_context_tokens * self.compaction_threshold
+
+    def _compact_history(self) -> None:
+        """Summarize conversation history and reset to system + summary.
+
+        Prevents the O(n²) token re-send problem over many iterations.
+        """
+        summary_messages = self._messages + [{
+            "role": "user",
+            "content": (
+                "Summarize your progress so far. Include: "
+                "(1) which exploration steps you completed and what they revealed, "
+                "(2) any concrete findings (error patterns, missing files, etc.), "
+                "(3) what your next action should be. "
+                "Be concise (1-3 paragraphs) but preserve all key findings."
+            ),
+        }]
+        kwargs: Dict[str, Any] = {
+            "model": self.llm_provider,
+            "messages": summary_messages,
+            "cache": {"no-cache": True},
+        }
+        location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
+        if location:
+            kwargs["vertex_location"] = location
+        try:
+            response = litellm.completion(**kwargs)
+            summary = response.choices[0].message.content or ""
+        except Exception as e:
+            logger.warning(f"[RLM] Compaction failed: {e}, keeping full history")
+            return
+
+        system_msg = self._messages[0]  # preserve system prompt
+        self._messages = [
+            system_msg,
+            {"role": "assistant", "content": summary},
+            {
+                "role": "user",
+                "content": (
+                    "Your conversation has been compacted. Continue from the summary above. "
+                    "Do not repeat completed work. Your next action:"
+                ),
+            },
+        ]
+        logger.info("[RLM] Conversation history compacted")
+
+    def run_task(self, task: str, context: RLMContext, repo_path: str) -> str:
+        """Run any task using the RLM loop.
+
+        This is the generic entry-point used by ``RLMCodingAgent.generate()``.
+        ``fix_deployment_error()`` delegates here after building an
+        ``RLMContext`` from its structured parameters.
+
+        Args:
+            task: Free-form task description / rendered prompt from the operator.
+            context: Pre-built ``RLMContext`` with available file contents.
+            repo_path: Repository path (string) for trajectory metadata.
+
+        Returns:
+            Final answer produced by the LLM after the RLM loop.
+        """
+        logger.info("[RLM] Starting run_task")
+
+        self.rlm_env = RLMEnvironment(
+            context=context,
+            max_recursion_depth=self.max_recursion_depth,
+            record_callback=self._record_rlm_call,
+            cwd=repo_path,
+        )
+        self._system_prompt = self.rlm_env.get_system_prompt()
+        self._messages: List[Dict[str, str]] = [
+            {"role": "system", "content": self._system_prompt},
+        ]
+
+        if self.trajectory:
+            self.trajectory.add_user_message(self._system_prompt)
+
+        current_prompt = (
+            f"Task:\n{task}\n\n"
+            "MANDATORY FIRST STEPS (do these before any other actions):\n"
+            "1. Run validate_file_refs(deployment_script, cwd) to find paths that do "
+            "not exist on disk. Remove every line that references a MISSING path.\n"
+            "2. If original_script is non-empty, compare it to deployment_script. "
+            "Lines present in deployment_script but not in original_script that "
+            "reference MISSING paths are regressions from a previous fix — revert "
+            "those lines to restore the working baseline.\n"
+            "Only after completing steps 1 and 2, analyse the error and apply a fix.\n\n"
+            "Use the context variables as needed via EXECUTE_CODE, then provide FINAL_ANSWER."
+        )
+
+        consecutive_explore_count = 0
+        consecutive_errors = 0
+        action = None
+        response = ""
+        for iteration in range(self.max_iterations):
+            logger.info(f"[RLM] Iteration {iteration + 1}/{self.max_iterations}")
+
+            # After several consecutive explore steps, nudge (not override) the prompt.
+            if consecutive_explore_count >= self.consecutive_explore_limit:
+                current_prompt = (
+                    f"You have explored for {consecutive_explore_count} consecutive steps "
+                    "without providing a final answer. Please wrap up now.\n"
+                    "Write all required output files using execute_code (open() calls), "
+                    "then provide ACTION: final_answer.\n\n"
+                    f"Previous context: {current_prompt}"
+                )
+
+            response = self._call_llm(current_prompt)
+
+            if self._should_compact():
+                self._compact_history()
+
+            if self.trajectory:
+                self.trajectory.add_assistant_message(response, duration=0.0)
+
+            parsed = self._parse_rlm_response(response)
+            action = parsed["action"]
+
+            if action == ActionType.FINAL_ANSWER:
+                consecutive_explore_count = 0
+            else:
+                consecutive_explore_count += 1
+
+            if action == ActionType.EXECUTE_CODE:
+                try:
+                    result = self.rlm_env.execute_code(
+                        parsed["code"], parsed.get("description", "")
+                    )
+                    consecutive_errors = 0
+                except RuntimeError as e:
+                    result = f"Code execution error: {e}"
+                    consecutive_errors += 1
+                    if (
+                        self.max_consecutive_errors is not None
+                        and consecutive_errors >= self.max_consecutive_errors
+                    ):
+                        logger.warning(
+                            f"[RLM] {consecutive_errors} consecutive errors, stopping loop"
+                        )
+                        return result
+                current_prompt = f"Result:\n{result}\n\nContinue or provide FINAL_ANSWER."
+
+            elif action == ActionType.RECURSIVE_CALL:
+                filtered_ctx = parsed.get("context", {})
+                result = self.rlm_env.recursive_call(
+                    sub_prompt=parsed.get("subtask", ""),
+                    filtered_context=filtered_ctx,
+                    llm_function=lambda p: self._call_llm_isolated(p, filtered_ctx),
+                )
+                current_prompt = (
+                    f"Recursive result:\n{result}\n\nContinue or provide FINAL_ANSWER."
+                )
+
+            elif action == ActionType.FINAL_ANSWER:
+                # Auto-validate deploy.sh if it exists before accepting the answer
+                answer = parsed.get("answer", response)
+                answer = self._auto_validate_deploy_sh(repo_path, answer)
+
+                if self.trajectory:
+                    self.trajectory.add_assistant_message(
+                        f"RLM Statistics: {json.dumps(self.get_rlm_statistics())}", duration=0.0
+                    )
+                return answer
+
+        logger.warning(f"[RLM] Max iterations ({self.max_iterations}) reached without FINAL_ANSWER")
+        return response
 
     def fix_deployment_error(
         self,
         error_log: str,
         deployment_script: str,
-        previous_attempts: List[str],
-        repo_path,
+        previous_attempts: List[Dict[str, Any]],
+        repo_path: Path,
     ) -> str:
-        """Fix a deployment error using the RLM loop.
+        """Fix deployment error using RLM.
+
+        Builds an ``RLMContext`` from the structured deployment parameters and
+        delegates to ``run_task()``.
 
         Args:
-            error_log: Deployment error log content.
-            deployment_script: Current deploy.sh content.
-            previous_attempts: List of previous fix attempts (for context).
-            repo_path: Path to the repository.
+            error_log: Error output from failed deployment
+            deployment_script: Current deployment script
+            previous_attempts: History of previous fix attempts
+            repo_path: Path to repository
 
         Returns:
-            Fix instructions from the LLM.
+            Fixed deployment script or analysis
         """
-        context = RLMContext(
+        logger.info("Starting RLM-based deployment error fixing")
+
+        context = self._create_rlm_context(
             error_log=error_log,
             deployment_script=deployment_script,
+            previous_attempts=previous_attempts,
+            repo_path=repo_path,
         )
-        attempts_str = (
-            "\n\nPrevious fix attempts:\n" + "\n---\n".join(previous_attempts)
-            if previous_attempts
-            else ""
+
+        task = (
+            f"Analyze the deployment error and provide a fix.\n\n"
+            f"The error log contains {len(error_log)} characters.\n"
+            f"Previous attempts: {len(previous_attempts)}\n\n"
+            "Use RLM features to:\n"
+            "1. Extract and categorize errors from error_log\n"
+            "2. Identify patterns across previous_attempts\n"
+            "3. Generate a targeted fix\n\n"
+            "Remember: Use EXECUTE_CODE to query context before making decisions."
         )
-        task = f"Fix the following deployment error:\n{error_log}{attempts_str}"
+
         return self.run_task(task=task, context=context, repo_path=str(repo_path))
 
-    def _call_llm(self, prompt: str) -> str:
-        """Call the LLM and return the response text.
+    def _auto_validate_deploy_sh(self, repo_path: str, answer: str) -> str:
+        """Validate deploy.sh after the RLM loop and log warnings for missing refs.
+
+        This ensures that even if the LLM skipped calling validate_file_refs(),
+        any broken file references are caught and reported.
 
         Args:
-            prompt: User message to send.
+            repo_path: Repository path string.
+            answer: The final answer from the RLM loop.
 
         Returns:
-            LLM response text, or a fallback FINAL_ANSWER on error.
+            The answer, potentially with a validation warning appended.
         """
-        kwargs = {
-            "model": self.llm_provider,
-            "messages": [
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "cache": {"no-cache": True},
-        }
-
-        location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
-        if location:
-            kwargs["vertex_location"] = location
+        deploy_sh = Path(repo_path) / ".sds" / "deploy.sh"
+        if not deploy_sh.exists():
+            return answer
 
         try:
-            response = litellm.completion(**kwargs)
-            return response.choices[0].message.content or ""
-        except Exception as exc:
-            logger.error(f"[RLM] LLM call failed: {exc}")
-            return f"ACTION: final_answer\nANSWER: LLM call failed: {exc}"
+            script_content = deploy_sh.read_text()
+            validation = _validate_file_refs(script_content, repo_path)
+            if "MISSING" in validation:
+                warning = (
+                    f"\n[AUTO-VALIDATION WARNING] deploy.sh references missing paths:\n"
+                    f"{validation}"
+                )
+                logger.warning(f"[RLM]{warning}")
+                if self.trajectory:
+                    self.trajectory.add_assistant_message(
+                        f"[RLM Auto-Validation]{warning}", duration=0.0
+                    )
+                return answer + warning
+        except Exception as e:
+            logger.warning(f"[RLM] Auto-validation of deploy.sh failed: {e}")
 
-    def _parse_response(self, response: str):
-        """Parse an LLM response into (action, content).
+        return answer
 
-        Returns:
-            Tuple of (action_str, content_str).
+    def get_rlm_statistics(self) -> Dict[str, Any]:
+        """Get RLM usage statistics from last run.
+
+        total_tokens_saved is the difference between the estimated single-call
+        baseline prompt cost and the actual prompt tokens consumed across all
+        LLM turns (from litellm).  A negative value means RLM spent more tokens
+        than a single call would have, which is expected for short tasks.
         """
-        if "ACTION: final_answer" in response:
-            match = re.search(r"ANSWER:\s*(.+)", response, re.DOTALL)
-            content = match.group(1).strip() if match else response
-            return "final_answer", content
-
-        if "ACTION: execute_code" in response:
-            match = re.search(r"CODE:\n(.+)", response, re.DOTALL)
-            code = match.group(1).strip() if match else ""
-            return "execute_code", code
-
-        return "unknown", response
-
-    def _rebuild_prompt(
-        self, initial_prompt: str, history: List[dict]
-    ) -> str:
-        """Rebuild the full prompt from initial context and recent history."""
-        parts = [initial_prompt]
-        for entry in history:
-            parts.append(f"\nAssistant:\n{entry['response']}")
-            parts.append(f"\nCode result:\n{entry['result']}")
-            parts.append("\nUser: Continue.")
-        return "\n".join(parts)
-
-    def _execute_code(self, code: str, namespace: dict) -> str:
-        """Execute *code* in a subprocess and return the `result` variable.
-
-        The namespace is serialised to a temporary JSON file so the
-        subprocess can deserialise it.  A small epilogue is appended to
-        the generated script that prints the ``result`` variable as JSON
-        on stdout.
-
-        Args:
-            code: Python code to execute.
-            namespace: Variable namespace (string values).
-
-        Returns:
-            String representation of ``result``, or an error message.
-        """
-        ns_file = None
-        code_file = None
-        try:
-            # Write namespace to a temp JSON file
-            ns_file = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            )
-            json.dump(namespace, ns_file)
-            ns_file.close()
-
-            # Build the script: load namespace, run user code, emit result
-            preamble = (
-                "import json as _json\n"
-                f"with open({ns_file.name!r}) as _f:\n"
-                "    _ns = _json.load(_f)\n"
-                "for _k, _v in _ns.items():\n"
-                "    globals()[_k] = _v\n"
-            )
-            epilogue = (
-                "\nimport json as _json2\n"
-                "print(_json2.dumps({'result': str(result)}))\n"
-            )
-            full_code = preamble + code + epilogue
-
-            code_file = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False
-            )
-            code_file.write(full_code)
-            code_file.close()
-
-            proc = subprocess.run(
-                [sys.executable, code_file.name],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-
-            if proc.returncode != 0:
-                return f"Error: {proc.stderr.strip()}"
-
-            output = json.loads(proc.stdout.strip())
-            return output.get("result", "")
-        except subprocess.TimeoutExpired:
-            return "Error: Code execution timed out after 30s"
-        except Exception as exc:
-            return f"Error: {exc}"
-        finally:
-            if ns_file is not None:
-                try:
-                    os.unlink(ns_file.name)
-                except OSError:
-                    pass
-            if code_file is not None:
-                try:
-                    os.unlink(code_file.name)
-                except OSError:
-                    pass
-
-    def _build_initial_prompt(self, task: str, context: RLMContext) -> str:
-        """Build the first user prompt from task and context summary."""
-        parts = [f"Task: {task}"]
-        if context.error_log:
-            parts.append(f"\nError log:\n{context.error_log}")
-        if context.deployment_script:
-            parts.append(f"\nDeployment script:\n{context.deployment_script}")
-        if context.docker_compose:
-            parts.append(f"\nDocker Compose:\n{context.docker_compose}")
-        if context.dockerfile:
-            parts.append(f"\nDockerfile:\n{context.dockerfile}")
-        if context.readme:
-            parts.append(f"\nREADME:\n{context.readme}")
-        if context.analysis_report:
-            parts.append(f"\nCode Analysis:\n{context.analysis_report}")
-        return "\n".join(parts)
+        stats = self.rlm_env.get_statistics() if self.rlm_env else {}
+        actual_prompt_tokens = self._token_usage.get("prompt_tokens", 0)
+        baseline_context_tokens = stats.get("baseline_context_tokens", 0)
+        stats["actual_prompt_tokens"] = actual_prompt_tokens
+        stats["total_tokens_saved"] = baseline_context_tokens - actual_prompt_tokens
+        stats["token_usage"] = self._token_usage.copy()
+        return stats

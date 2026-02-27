@@ -13,6 +13,7 @@ import sys
 import shutil
 import subprocess
 import json
+import os
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -300,7 +301,9 @@ class StateManager:
         return default_state
 
     def save(self):
-        self.state_file.write_text(json.dumps(self.state, indent=2))
+        tmp = self.state_file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self.state, indent=2))
+        os.replace(tmp, self.state_file)
 
     def is_optimization_done(self, iter_num: int) -> bool:
         if self.state["current_iteration"] > iter_num:

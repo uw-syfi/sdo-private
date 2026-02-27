@@ -5,6 +5,7 @@ from various LLM API providers (Gemini, OpenAI, Anthropic, etc.) and
 implementing retry logic with exponential backoff.
 """
 
+import random
 import time
 import subprocess
 from typing import Optional, Callable, TypeVar, Any
@@ -111,7 +112,9 @@ def exponential_backoff(
         Delay in seconds
     """
     delay = min(base_delay * (2**attempt), max_delay)
-    return delay
+    # Add jitter (±25%) to avoid thundering herd on concurrent retries
+    jitter = delay * 0.25 * (2 * random.random() - 1)
+    return max(1, min(int(delay + jitter), max_delay))
 
 
 def run_with_rate_limit_handling(
@@ -157,8 +160,6 @@ def run_with_rate_limit_handling(
             error_msg = f"{operation_name} failed with error: {str(e)}"
             logger.error(error_msg)
             return None, False, error_msg
-
-    return None, False, f"{operation_name} failed after all retries"
 
 
 def run_subprocess_with_rate_limit_handling(
@@ -234,5 +235,3 @@ def run_subprocess_with_rate_limit_handling(
             error_msg = f"{operation_name} raised exception: {str(e)}"
             logger.error(error_msg)
             return None, False, error_msg
-
-    return None, False, f"{operation_name} failed after all retries"

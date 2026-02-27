@@ -1,7 +1,7 @@
 """Subagent-based coding agent for the SDS operator.
 
-Instead of a single RLM REPL loop, this agent fans out independent subagent
-calls that each analyse a different slice of context (trajectory, error logs,
+Instead of a single RLM REPL loop, this agent calls four sequential subagents
+that each analyse a different slice of context (trajectory, error logs,
 deploy script, repository).  Their summaries are fed to a root LLM call that
 produces the final fix.
 
@@ -175,67 +175,83 @@ class SubagentCodingAgent(CodingAgent):
         original_script = self._read(sds / "deploy.sh.bak")
         repo_context = self._gather_repo_context(repo_path, sds)
 
-        logger.info("[Subagent] Starting fan-out analysis (4 subagents)")
+        logger.info("[Subagent] Starting sequential subagent analysis (4 subagents)")
 
-        # --- Step 1: Fan out independent subagent calls ----------------------
+        # --- Step 1: Sequential subagent calls (each analyses one context slice) ---
         summaries: dict[str, str] = {}
 
-        summaries["trajectory"] = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are a trajectory analyst. Summarise what deployment "
-                "fixes have been tried so far, which error patterns recur, "
-                "and what approaches have NOT been attempted yet. Be concise "
-                "(max 300 words)."
-            ),
-            user_prompt=trajectory_text or "(no trajectory data available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            summaries["trajectory"] = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are a trajectory analyst. Summarise what deployment "
+                    "fixes have been tried so far, which error patterns recur, "
+                    "and what approaches have NOT been attempted yet. Be concise "
+                    "(max 300 words)."
+                ),
+                user_prompt=trajectory_text or "(no trajectory data available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Subagent] Trajectory analyst failed, skipping: {e}")
+            summaries["trajectory"] = "(trajectory analysis unavailable)"
         logger.info("[Subagent] Trajectory analyst complete")
 
-        summaries["error_log"] = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are an error log analyst. Identify the key errors, "
-                "their root cause, and the most likely fix. Be concise "
-                "(max 300 words)."
-            ),
-            user_prompt=error_log or "(no error log available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            summaries["error_log"] = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are an error log analyst. Identify the key errors, "
+                    "their root cause, and the most likely fix. Be concise "
+                    "(max 300 words)."
+                ),
+                user_prompt=error_log or "(no error log available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Subagent] Error log analyst failed, skipping: {e}")
+            summaries["error_log"] = "(error log analysis unavailable)"
         logger.info("[Subagent] Error log analyst complete")
 
         script_input = f"Current script:\n{deploy_script}"
         if original_script:
             script_input += f"\n\nOriginal script (before fixes):\n{original_script}"
-        summaries["script"] = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are a script analyst. Examine the deployment script and "
-                "identify what is likely wrong. If an original pre-fix version "
-                "is provided, note any regressions introduced by previous fixes. "
-                "Be concise (max 300 words)."
-            ),
-            user_prompt=script_input or "(no deploy script available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            summaries["script"] = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are a script analyst. Examine the deployment script and "
+                    "identify what is likely wrong. If an original pre-fix version "
+                    "is provided, note any regressions introduced by previous fixes. "
+                    "Be concise (max 300 words)."
+                ),
+                user_prompt=script_input or "(no deploy script available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Subagent] Script analyst failed, skipping: {e}")
+            summaries["script"] = "(script analysis unavailable)"
         logger.info("[Subagent] Script analyst complete")
 
-        summaries["repo"] = call_subagent(
-            model=self.model,
-            system_prompt=(
-                "You are a repository analyst. Based on the Dockerfile, "
-                "docker-compose file, README, and code analysis report, "
-                "summarise the deployment constraints and requirements. "
-                "Be concise (max 300 words)."
-            ),
-            user_prompt=repo_context or "(no repository context available)",
-            location=self.location,
-            token_acc=token_acc,
-        )
+        try:
+            summaries["repo"] = call_subagent(
+                model=self.model,
+                system_prompt=(
+                    "You are a repository analyst. Based on the Dockerfile, "
+                    "docker-compose file, README, and code analysis report, "
+                    "summarise the deployment constraints and requirements. "
+                    "Be concise (max 300 words)."
+                ),
+                user_prompt=repo_context or "(no repository context available)",
+                location=self.location,
+                token_acc=token_acc,
+            )
+        except Exception as e:
+            logger.warning(f"[Subagent] Repo analyst failed, skipping: {e}")
+            summaries["repo"] = "(repository analysis unavailable)"
         logger.info("[Subagent] Repo analyst complete")
 
         if self.recorder:
