@@ -46,3 +46,17 @@ class FaultInjectionMetadata(TypedDict):
     fault_ids: list[str]
     categories: list[str]
     severities: list[str]
+
+
+class _ConversationEntryRequired(TypedDict):
+    call_id: int
+    messages: list
+
+
+class ConversationEntry(_ConversationEntryRequired, total=False):
+    """A conversation entry in a trajectory phase list."""
+
+    prompt_version: str
+    fallback_occurred: bool
+    prompt_kwargs: dict
+    rendered_prompt: str

@@ -27,7 +27,7 @@ from enum import Enum
 from app_operator.logger import logger
 from app_operator.trajectory_collectors import collect_gemini_sessions
 from app_operator.prompts.trajectory_prompts import get_system_prompt
-from app_operator.types import FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
+from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
 
 
 class Phase(str, Enum):
@@ -156,7 +156,7 @@ class TrajectoryRecorder:
 
         # Current conversation being recorded (not yet committed)
         self._current_phase: Optional[Phase] = None
-        self._current_conversation: List[Dict[str, Any]] = []
+        self._current_conversation: List[dict] = []
         self._current_call_id: Optional[int] = None
         self._conversation_lock = threading.Lock()
 
@@ -430,8 +430,8 @@ class TrajectoryRecorder:
             phase_key = self._current_phase.value
             if phase_key in self.trajectory:
                 # Create a conversation entry with call_id and prompt metadata
-                conversation_entry = {
-                    "call_id": self._current_call_id,
+                conversation_entry: ConversationEntry = {
+                    "call_id": self._current_call_id or 0,
                     "messages": self._current_conversation.copy(),
                 }
 
