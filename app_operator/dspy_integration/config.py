@@ -7,6 +7,15 @@ auto-rollback parameters, and metric weights.
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+from app_operator.validation import (
+    validate_field,
+    validate_type,
+    validate_range,
+)
+
+# Label used for (int, float) type checks to match the existing "numeric" wording.
+_NUMERIC_LABEL = "numeric"
+
 
 @dataclass
 class DSPyOptimizationConfig:
@@ -19,6 +28,13 @@ class DSPyOptimizationConfig:
         validation_split: Fraction of data reserved for validation (0.0-1.0)
         metric_weights: Weights for different metrics (must sum to 1.0)
     """
+
+    VALID_OPTIMIZERS = [
+        "BootstrapFewShot",
+        "BootstrapFewShotWithRandomSearch",
+        "MIPROv2",
+        "COPRO",
+    ]
 
     optimizer: str = "BootstrapFewShot"
     teacher_model: str = "claude-sonnet-4-5"
@@ -36,55 +52,35 @@ class DSPyOptimizationConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization."""
-        # Validate optimizer
-        valid_optimizers = [
-            "BootstrapFewShot",
-            "BootstrapFewShotWithRandomSearch",
-            "MIPROv2",
-            "COPRO",
-        ]
-        if self.optimizer not in valid_optimizers:
+        if self.optimizer not in self.VALID_OPTIMIZERS:
             raise ValueError(
-                f"optimizer must be one of {valid_optimizers}, got '{self.optimizer}'"
+                f"optimizer must be one of {self.VALID_OPTIMIZERS}, got '{self.optimizer}'"
             )
 
-        # Validate teacher_model
+        # teacher_model: non-empty string
         if not isinstance(self.teacher_model, str) or not self.teacher_model.strip():
             raise ValueError(
                 f"teacher_model must be a non-empty string, got '{self.teacher_model}'"
             )
 
-        # Validate num_examples
-        if not isinstance(self.num_examples, int):
-            raise TypeError(
-                f"num_examples must be int, got {type(self.num_examples).__name__}"
-            )
-        if self.num_examples <= 0:
-            raise ValueError(f"num_examples must be positive, got {self.num_examples}")
+        validate_field(self.num_examples, "num_examples", int, positive=True)
+        validate_field(self.n_candidates, "n_candidates", int, min_val=1)
 
-        # Validate n_candidates
-        if not isinstance(self.n_candidates, int):
-            raise TypeError(
-                f"n_candidates must be int, got {type(self.n_candidates).__name__}"
-            )
-        if self.n_candidates < 1:
-            raise ValueError(f"n_candidates must be >= 1, got {self.n_candidates}")
-
-        # Validate validation_split
-        if not isinstance(self.validation_split, (int, float)):
-            raise TypeError(
-                f"validation_split must be numeric, got {type(self.validation_split).__name__}"
-            )
-        if not 0.0 <= self.validation_split < 1.0:
-            raise ValueError(
-                f"validation_split must be in range [0.0, 1.0), got {self.validation_split}"
-            )
+        # validation_split: numeric in [0.0, 1.0)
+        validate_type(
+            self.validation_split, "validation_split", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.validation_split,
+            "validation_split",
+            min_val=0.0,
+            max_val=1.0,
+            max_exclusive=True,
+        )
 
         # Validate metric_weights
-        if not isinstance(self.metric_weights, dict):
-            raise TypeError(
-                f"metric_weights must be dict, got {type(self.metric_weights).__name__}"
-            )
+        validate_type(self.metric_weights, "metric_weights", dict)
 
         # Support both old format (3 weights) and new format (4 weights with health_check)
         required_metrics_new = {"success", "efficiency", "tokens", "health_check"}
@@ -131,29 +127,20 @@ class DSPyAutoRollbackConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization."""
-        if not isinstance(self.enabled, bool):
-            raise TypeError(f"enabled must be bool, got {type(self.enabled).__name__}")
+        validate_field(self.enabled, "enabled", bool)
 
-        if not isinstance(self.success_rate_threshold, (int, float)):
-            raise TypeError(
-                f"success_rate_threshold must be numeric, "
-                f"got {type(self.success_rate_threshold).__name__}"
-            )
-        if not 0.0 <= self.success_rate_threshold <= 1.0:
-            raise ValueError(
-                f"success_rate_threshold must be in range [0.0, 1.0], "
-                f"got {self.success_rate_threshold}"
-            )
+        validate_type(
+            self.success_rate_threshold, "success_rate_threshold", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.success_rate_threshold,
+            "success_rate_threshold",
+            min_val=0.0,
+            max_val=1.0,
+        )
 
-        if not isinstance(self.evaluation_window, int):
-            raise TypeError(
-                f"evaluation_window must be int, "
-                f"got {type(self.evaluation_window).__name__}"
-            )
-        if self.evaluation_window <= 0:
-            raise ValueError(
-                f"evaluation_window must be positive, got {self.evaluation_window}"
-            )
+        validate_field(self.evaluation_window, "evaluation_window", int, positive=True)
 
 
 @dataclass
@@ -190,15 +177,8 @@ class DSPyConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization."""
-        if not isinstance(self.use_optimized, bool):
-            raise TypeError(
-                f"use_optimized must be bool, got {type(self.use_optimized).__name__}"
-            )
-
-        if not isinstance(self.use_seeds, bool):
-            raise TypeError(
-                f"use_seeds must be bool, got {type(self.use_seeds).__name__}"
-            )
+        validate_field(self.use_optimized, "use_optimized", bool)
+        validate_field(self.use_seeds, "use_seeds", bool)
 
         if (
             not isinstance(self.optimized_version, str)
@@ -209,57 +189,35 @@ class DSPyConfig:
                 f"got '{self.optimized_version}'"
             )
 
-        if not isinstance(self.fallback_to_baseline, bool):
-            raise TypeError(
-                f"fallback_to_baseline must be bool, "
-                f"got {type(self.fallback_to_baseline).__name__}"
-            )
+        validate_field(self.fallback_to_baseline, "fallback_to_baseline", bool)
+        validate_field(self.enable_online_learning, "enable_online_learning", bool)
 
-        if not isinstance(self.enable_online_learning, bool):
-            raise TypeError(
-                f"enable_online_learning must be bool, "
-                f"got {type(self.enable_online_learning).__name__}"
-            )
+        validate_type(
+            self.feedback_sample_rate, "feedback_sample_rate", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.feedback_sample_rate,
+            "feedback_sample_rate",
+            min_val=0.0,
+            max_val=1.0,
+        )
 
-        if not isinstance(self.feedback_sample_rate, (int, float)):
-            raise TypeError(
-                f"feedback_sample_rate must be numeric, "
-                f"got {type(self.feedback_sample_rate).__name__}"
-            )
-        if not 0.0 <= self.feedback_sample_rate <= 1.0:
-            raise ValueError(
-                f"feedback_sample_rate must be in range [0.0, 1.0], "
-                f"got {self.feedback_sample_rate}"
-            )
+        validate_field(self.canary_deployment, "canary_deployment", bool)
 
-        if not isinstance(self.canary_deployment, bool):
-            raise TypeError(
-                f"canary_deployment must be bool, "
-                f"got {type(self.canary_deployment).__name__}"
-            )
+        validate_type(
+            self.canary_percentage, "canary_percentage", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.canary_percentage,
+            "canary_percentage",
+            min_val=0.0,
+            max_val=1.0,
+        )
 
-        if not isinstance(self.canary_percentage, (int, float)):
-            raise TypeError(
-                f"canary_percentage must be numeric, "
-                f"got {type(self.canary_percentage).__name__}"
-            )
-        if not 0.0 <= self.canary_percentage <= 1.0:
-            raise ValueError(
-                f"canary_percentage must be in range [0.0, 1.0], "
-                f"got {self.canary_percentage}"
-            )
-
-        if not isinstance(self.optimization, DSPyOptimizationConfig):
-            raise TypeError(
-                f"optimization must be DSPyOptimizationConfig, "
-                f"got {type(self.optimization).__name__}"
-            )
-
-        if not isinstance(self.auto_rollback, DSPyAutoRollbackConfig):
-            raise TypeError(
-                f"auto_rollback must be DSPyAutoRollbackConfig, "
-                f"got {type(self.auto_rollback).__name__}"
-            )
+        validate_field(self.optimization, "optimization", DSPyOptimizationConfig)
+        validate_field(self.auto_rollback, "auto_rollback", DSPyAutoRollbackConfig)
 
         # Canary deployment requires use_optimized
         if self.canary_deployment and not self.use_optimized:

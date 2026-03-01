@@ -112,7 +112,7 @@ class TestFaultInjectionConfig:
             FaultInjectionConfig(platform=123)
 
     def test_invalid_platform_value(self):
-        with pytest.raises(ValueError, match="Invalid platform 'invalid'"):
+        with pytest.raises(ValueError, match="Invalid platform"):
             FaultInjectionConfig(platform="invalid")
 
     def test_valid_platforms(self):

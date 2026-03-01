@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from app_operator.fault_injection.models import FaultCategory, FaultSeverity
+from app_operator.validation import validate_field, validate_type
 
 
 @dataclass
@@ -24,6 +25,8 @@ class FaultInjectionConfig:
         platform: Target platform for fault selection ("compose" or "k8s").
     """
 
+    VALID_PLATFORMS = {"compose", "k8s"}
+
     enabled: bool = False
     num_faults: int = 2
     categories: List[str] = field(default_factory=list)
@@ -35,24 +38,15 @@ class FaultInjectionConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization."""
-        if not isinstance(self.enabled, bool):
-            raise TypeError(
-                f"enabled must be bool, got {type(self.enabled).__name__}"
-            )
+        validate_field(self.enabled, "enabled", bool)
 
-        if not isinstance(self.num_faults, int):
-            raise TypeError(
-                f"num_faults must be int, got {type(self.num_faults).__name__}"
-            )
+        validate_type(self.num_faults, "num_faults", int)
         if self.num_faults < 1 or self.num_faults > 5:
             raise ValueError(
                 f"num_faults must be between 1 and 5, got {self.num_faults}"
             )
 
-        if not isinstance(self.categories, list):
-            raise TypeError(
-                f"categories must be list, got {type(self.categories).__name__}"
-            )
+        validate_type(self.categories, "categories", list)
         valid_categories = {c.value for c in FaultCategory}
         for cat in self.categories:
             if cat not in valid_categories:
@@ -61,10 +55,7 @@ class FaultInjectionConfig:
                     f"Valid categories: {sorted(valid_categories)}"
                 )
 
-        if not isinstance(self.severities, list):
-            raise TypeError(
-                f"severities must be list, got {type(self.severities).__name__}"
-            )
+        validate_type(self.severities, "severities", list)
         valid_severities = {s.value for s in FaultSeverity}
         for sev in self.severities:
             if sev not in valid_severities:
@@ -73,28 +64,9 @@ class FaultInjectionConfig:
                     f"Valid severities: {sorted(valid_severities)}"
                 )
 
-        if not isinstance(self.exclude_faults, list):
-            raise TypeError(
-                f"exclude_faults must be list, got {type(self.exclude_faults).__name__}"
-            )
-
-        if self.seed is not None and not isinstance(self.seed, int):
-            raise TypeError(
-                f"seed must be int or None, got {type(self.seed).__name__}"
-            )
-
-        if not isinstance(self.backup_compose, bool):
-            raise TypeError(
-                f"backup_compose must be bool, got {type(self.backup_compose).__name__}"
-            )
-
-        valid_platforms = {"compose", "k8s"}
-        if not isinstance(self.platform, str):
-            raise TypeError(
-                f"platform must be str, got {type(self.platform).__name__}"
-            )
-        if self.platform not in valid_platforms:
-            raise ValueError(
-                f"Invalid platform '{self.platform}'. "
-                f"Valid platforms: {sorted(valid_platforms)}"
-            )
+        validate_field(self.exclude_faults, "exclude_faults", list)
+        validate_field(self.seed, "seed", int, nullable=True)
+        validate_field(self.backup_compose, "backup_compose", bool)
+        validate_field(
+            self.platform, "platform", str, valid_values=self.VALID_PLATFORMS
+        )
