@@ -172,6 +172,34 @@ To orchestrate multiple experiments in parallel using a configuration file:
 ```
 This looks for configuration in `exp_config/<exp-name>/config.toml`. See `exp_config/example/config.toml` for an example.
 
+#### Per-experiment config overrides
+Experiment configs can include any standard `sds.toml` sections alongside `apps`. These sections are written as `sds.toml` into each experiment directory before the run, overriding the app's own config.
+
+Example — run an A/B test with and without `fix_summary_consolidation`:
+```
+exp_config/
+├── with-ltm/config.toml
+└── without-ltm/config.toml
+```
+
+```toml
+# exp_config/with-ltm/config.toml
+apps = [
+    "apps/deathstarbench/hotelReservation",
+    "apps/deathstarbench/socialNetwork"
+]
+
+[operator.phase]
+fix_summary_consolidation = true
+```
+
+```bash
+./sds_operator run-exp with-ltm --parallel 2
+./sds_operator run-exp without-ltm --parallel 2
+```
+
+Any section valid in `sds.toml` (`[agent]`, `[operator]`, `[runtime]`, etc.) can be used.
+
 ---
 
 ## Running LegoAgent (Experimental)
@@ -426,9 +454,9 @@ Run multiple experiments in parallel.
 ./sds_operator run-exp <EXPERIMENT_NAME_OR_PATH> [--parallel <N>]
 ```
 
-```bash
-./sds_operator run-exp <EXPERIMENT_NAME_OR_PATH> [--parallel <N>]
-```
+The experiment config (`exp_config/<name>/config.toml`) lists apps and can include any `sds.toml` sections (e.g., `[agent]`, `[operator]`, `[operator.phase]`) that will be applied to all apps in the experiment. See [Per-experiment config overrides](#per-experiment-config-overrides) for details.
+
+After all apps complete, `run-exp` writes a `results.json` to the log directory with per-app deployment iterations and status, and prints a summary table to the console.
 
 ### `viz-graph`
 Visualize the agent's dependency graph (for LangGraph runtime).
