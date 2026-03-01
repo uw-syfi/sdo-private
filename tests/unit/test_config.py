@@ -52,7 +52,7 @@ interval = 45
 
     config = load_config(str(tmp_path))
     assert config.agent.provider == "claude"
-    assert config.agent.model is None
+    assert config.agent.model == "gemini-2.5-flash"  # inherited from root sds.toml
     assert config.operator.interval == 45
     assert config.operator.monitoring_max_iters == 5  # default
     assert config.operator.deployment_max_iters == 20  # default
@@ -229,7 +229,7 @@ def test_config_empty_sections(tmp_path):
 """)
 
     config = load_config(str(tmp_path))
-    assert config.agent.provider == "codex"  # default
+    assert config.agent.provider == "gemini"  # inherited from root sds.toml
     assert config.operator.interval == 30  # default
 
 
@@ -253,7 +253,7 @@ interval = 90
 """)
 
     config = load_config(str(tmp_path))
-    assert config.agent.provider == "codex"  # default
+    assert config.agent.provider == "gemini"  # inherited from root sds.toml
     assert config.operator.interval == 90
 
 

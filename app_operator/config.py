@@ -446,32 +446,24 @@ def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
         # Determine project root (where this package is installed/located)
         project_root = Path(__file__).resolve().parent.parent
 
-        # Define hierarchy: Base (Repo/Root) -> Override (App .sds)
-        # We load base first, then merge override on top.
-
-        # Potential base config files (pick first that exists)
-        base_candidates = [
-            target_path / "sds.toml",
-            target_path / "config.toml",
-            project_root / "sds.toml",
-        ]
-
-        # Potential app config files (pick first that exists)
-        app_candidates = [
-            target_path / ".sds" / "config.toml",
-            target_path / ".sds" / "sds.toml",
-        ]
+        # Define hierarchy: Repo root -> Target dir -> App .sds override
+        # Each layer merges on top of the previous.
 
         files_to_load = []
 
-        # Find base config
-        for f in base_candidates:
+        # 1. Always load repo root sds.toml as the base (if it exists and differs from target)
+        root_sds = project_root / "sds.toml"
+        if root_sds.exists() and root_sds.resolve() != (target_path / "sds.toml").resolve():
+            files_to_load.append((root_sds, False))
+
+        # 2. Load target dir config on top (overrides root)
+        for f in [target_path / "sds.toml", target_path / "config.toml"]:
             if f.exists():
                 files_to_load.append((f, False))
                 break
 
-        # Find app config
-        for f in app_candidates:
+        # 3. Load app .sds config on top (overrides target)
+        for f in [target_path / ".sds" / "config.toml", target_path / ".sds" / "sds.toml"]:
             if f.exists():
                 files_to_load.append((f, True))
                 break
