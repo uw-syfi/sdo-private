@@ -25,6 +25,71 @@ from rich.console import Console
 from app_operator.logger import logger
 
 
+def _write_toml_simple(data: dict) -> str:
+    """Serialize a dict to TOML format.
+
+    Handles: bool, int, str, list[str], and nested dicts (as [section] tables).
+    """
+    lines = []
+    top_level = {}
+    tables = {}
+
+    for key, value in data.items():
+        if isinstance(value, dict):
+            tables[key] = value
+        else:
+            top_level[key] = value
+
+    for key, value in top_level.items():
+        lines.append(f"{key} = {_toml_value(value)}")
+
+    for section, fields in tables.items():
+        sub_tables = {}
+        plain_fields = {}
+        for k, v in fields.items():
+            if isinstance(v, dict):
+                sub_tables[k] = v
+            else:
+                plain_fields[k] = v
+
+        if plain_fields:
+            lines.append(f"\n[{section}]")
+            for k, v in plain_fields.items():
+                lines.append(f"{k} = {_toml_value(v)}")
+
+        for sub_name, sub_fields in sub_tables.items():
+            lines.append(f"\n[{section}.{sub_name}]")
+            for k, v in sub_fields.items():
+                lines.append(f"{k} = {_toml_value(v)}")
+
+    return "\n".join(lines) + "\n"
+
+
+def _toml_value(value) -> str:
+    """Format a Python value as a TOML value string."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, list):
+        items = ", ".join(_toml_value(item) for item in value)
+        return f"[{items}]"
+    raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
+
+
+def _write_experiment_sds_config(exp_dir: Path, experiment_config: dict) -> None:
+    """Write non-apps sections from experiment config as sds.toml in the experiment dir."""
+    sds_sections = {k: v for k, v in experiment_config.items() if k != "apps"}
+    if not sds_sections:
+        return
+    sds_toml_path = exp_dir / "sds.toml"
+    sds_toml_path.write_text(_write_toml_simple(sds_sections))
+    logger.info(f"Wrote experiment sds config to {sds_toml_path}")
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "experiment",
@@ -68,6 +133,7 @@ def run_experiment_task(
     progress: Progress,
     task_id,
     log_dir: Path,
+    experiment_config: dict | None = None,
 ) -> bool:
     # Explicitly start the task timer
     progress.start_task(task_id)
@@ -109,6 +175,10 @@ def run_experiment_task(
         if init_proc.returncode != 0:
             progress.update(task_id, description=f"[red]{app_name}[/]: Init Failed")
             return False
+
+        # Write experiment sds config overrides into the experiment directory
+        if experiment_config:
+            _write_experiment_sds_config(exp_dir, experiment_config)
 
         progress.update(task_id, description=f"[cyan]{app_name}[/]: Starting Run", completed=10)
 
@@ -280,7 +350,7 @@ def run_command(args: argparse.Namespace) -> int:
                     total=100,
                     start=False)
                 futures[executor.submit(run_experiment_task, app, exp_name,
-                                        progress, task_id, log_dir)] = app
+                                        progress, task_id, log_dir, config)] = app
 
             for future in as_completed(futures):
                 app = futures[future]
