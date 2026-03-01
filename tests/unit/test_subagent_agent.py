@@ -12,7 +12,8 @@ from libs.agent_cli.subagent_agent import SubagentCodingAgent
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_litellm_response(content: str, prompt_tokens=10, completion_tokens=5):
+def _make_litellm_response(
+        content: str, prompt_tokens=10, completion_tokens=5):
     """Create a minimal mock litellm response."""
     resp = mock.MagicMock()
     resp.choices = [mock.MagicMock()]
@@ -83,11 +84,124 @@ class TestCallSubagent:
         assert captured_kwargs[0].get("vertex_location") == "us-east1"
 
     def test_returns_error_string_on_failure(self):
-        with mock.patch("litellm.completion", side_effect=RuntimeError("boom")):
-            result = call_subagent(model="m", system_prompt="s", user_prompt="u")
+        with mock.patch("litellm.completion", side_effect=ConnectionError("boom")):
+            result = call_subagent(
+                model="m", system_prompt="s", user_prompt="u")
 
         assert "Subagent call failed" in result
         assert "boom" in result
+
+    def test_keyboard_interrupt_propagates(self):
+        """KeyboardInterrupt must not be swallowed."""
+        with mock.patch("litellm.completion", side_effect=KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
+                call_subagent(model="m", system_prompt="s", user_prompt="u")
+
+    @pytest.mark.parametrize("exc_class", [
+        TimeoutError, ConnectionError, OSError,
+    ])
+    def test_specific_errors_return_error_string(self, exc_class):
+        """Specific exception types are caught and return error strings."""
+        with mock.patch("litellm.completion", side_effect=exc_class("test error")):
+            result = call_subagent(
+                model="m", system_prompt="s", user_prompt="u")
+
+        assert "Subagent call failed" in result
+        assert exc_class.__name__ in result
+        assert "test error" in result
+
+    def test_unexpected_exception_propagates(self):
+        """Exceptions not in the handled set must propagate."""
+        with mock.patch("litellm.completion", side_effect=ValueError("unexpected")):
+            with pytest.raises(ValueError, match="unexpected"):
+                call_subagent(model="m", system_prompt="s", user_prompt="u")
+
+
+# ---------------------------------------------------------------------------
+# SubagentCodingAgent exception handling tests
+# ---------------------------------------------------------------------------
+
+class TestSubagentExceptionHandling:
+    """Tests for narrowed exception handling in SubagentCodingAgent."""
+
+    def test_generate_direct_keyboard_interrupt_propagates(self, tmp_path):
+        """KeyboardInterrupt in _generate_direct must propagate."""
+        agent = SubagentCodingAgent(model="test-model")
+        prompt = "Provide fix_summary for the deployment."
+
+        with mock.patch("litellm.completion", side_effect=KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
+                agent.generate(prompt, cwd=str(tmp_path))
+
+    def test_generate_files_keyboard_interrupt_propagates(self, tmp_path):
+        """KeyboardInterrupt in _generate_files must propagate."""
+        agent = SubagentCodingAgent(model="test-model")
+        prompt = "Generate .sds/deploy.sh for the project."
+
+        with mock.patch("litellm.completion", side_effect=KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
+                agent.generate(prompt, cwd=str(tmp_path))
+
+    def test_generate_direct_handles_timeout(self, tmp_path):
+        """TimeoutError in _generate_direct returns error string."""
+        agent = SubagentCodingAgent(model="test-model")
+        prompt = "Provide fix_summary for the deployment."
+
+        with mock.patch("litellm.completion", side_effect=TimeoutError("timed out")):
+            result = agent.generate(prompt, cwd=str(tmp_path))
+
+        assert "LLM call failed" in result
+        assert "TimeoutError" in result
+
+    def test_generate_files_handles_connection_error(self, tmp_path):
+        """ConnectionError in _generate_files returns error string."""
+        agent = SubagentCodingAgent(model="test-model")
+        prompt = "Generate .sds/deploy.sh for the project."
+
+        with mock.patch("litellm.completion", side_effect=ConnectionError("refused")):
+            result = agent.generate(prompt, cwd=str(tmp_path))
+
+        assert "LLM call failed" in result
+        assert "ConnectionError" in result
+
+    def test_generate_direct_unexpected_error_propagates(self, tmp_path):
+        """ValueError (not in handled set) must propagate from _generate_direct."""
+        agent = SubagentCodingAgent(model="test-model")
+        prompt = "Provide fix_summary for the deployment."
+
+        with mock.patch("litellm.completion", side_effect=ValueError("bad")):
+            with pytest.raises(ValueError, match="bad"):
+                agent.generate(prompt, cwd=str(tmp_path))
+
+    def test_root_synthesis_keyboard_interrupt_propagates(self, tmp_path):
+        """KeyboardInterrupt in root synthesis must propagate."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        agent = SubagentCodingAgent(model="test-model")
+
+        call_count = 0
+
+        def mock_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 4:
+                return _make_litellm_response("analysis")
+            raise KeyboardInterrupt
+
+        with mock.patch("litellm.completion", side_effect=mock_completion):
+            with pytest.raises(KeyboardInterrupt):
+                agent.generate("Fix the deployment error", cwd=str(tmp_path))
+
+    def test_error_string_includes_error_category(self, tmp_path):
+        """Error messages should include the exception type name."""
+        agent = SubagentCodingAgent(model="test-model")
+        prompt = "Provide fix_summary for the deployment."
+
+        with mock.patch("litellm.completion", side_effect=OSError("disk full")):
+            result = agent.generate(prompt, cwd=str(tmp_path))
+
+        assert "OSError" in result
+        assert "disk full" in result
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +279,9 @@ class TestSubagentFixPath:
             )
 
         with mock.patch("litellm.completion", side_effect=mock_completion):
-            result = agent.generate("Fix the deployment error", cwd=str(tmp_path))
+            result = agent.generate(
+                "Fix the deployment error",
+                cwd=str(tmp_path))
 
         assert call_count == 5
         assert "deploy.sh" in result
@@ -182,7 +298,8 @@ class TestSubagentFixPath:
             nonlocal call_count
             call_count += 1
             if call_count <= 4:
-                return _make_litellm_response(f"Summary from analyst {call_count}")
+                return _make_litellm_response(
+                    f"Summary from analyst {call_count}")
             # Root call — capture the messages
             captured_messages.extend(kwargs["messages"])
             return _make_litellm_response("Fixed deploy.sh")
@@ -230,7 +347,10 @@ class TestSubagentFixPath:
         with mock.patch("litellm.completion", side_effect=mock_completion):
             agent.generate("Fix the deployment error", cwd=str(tmp_path))
 
-        assert (tmp_path / ".sds" / "deploy.sh").read_text() == "#!/bin/bash\nnew content\n"
+        assert (
+            tmp_path /
+            ".sds" /
+            "deploy.sh").read_text() == "#!/bin/bash\nnew content\n"
 
     def test_fix_path_with_no_artifacts(self, tmp_path):
         """Fix path should not crash when .sds directory is empty."""
@@ -239,7 +359,9 @@ class TestSubagentFixPath:
         agent = SubagentCodingAgent(model="test-model")
 
         with mock.patch("litellm.completion", return_value=_make_litellm_response("no fix needed")):
-            result = agent.generate("Fix the deployment error", cwd=str(tmp_path))
+            result = agent.generate(
+                "Fix the deployment error",
+                cwd=str(tmp_path))
 
         assert "no fix needed" in result
 
@@ -275,7 +397,10 @@ class TestSubagentRegistration:
         from app_operator.config import Config, AgentConfig
         from libs.agent_cli.factory import create_agent_from_config
 
-        config = Config(agent=AgentConfig(provider="subagent", location="us-west1"))
+        config = Config(
+            agent=AgentConfig(
+                provider="subagent",
+                location="us-west1"))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, SubagentCodingAgent)
         assert agent.location == "us-west1"
