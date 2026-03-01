@@ -108,6 +108,54 @@ class AgentConfig:
             )
 
 
+# Canonical mapping from SDS provider name to the litellm model prefix.
+# Used wherever a litellm-compatible "prefix/model" string is needed.
+PROVIDER_TO_LITELLM_PREFIX: dict[str, str] = {
+    "gemini": "gemini",
+    "vertex": "vertex_ai",
+    "claude": "anthropic",
+    "anthropic": "anthropic",
+    "claude-code": "anthropic",
+    "codex": "openai",
+    "openai": "openai",
+    "opencode": "openai",
+    "rlm": "gemini",
+}
+
+
+def qualify_model_for_litellm(
+    model: str,
+    provider: str | None = None,
+) -> str:
+    """Return a fully-qualified ``provider/model`` string for litellm.
+
+    Resolution order:
+    1. If *model* already contains a ``/``, return it unchanged.
+    2. If an SDS *provider* name is given, look it up in
+       ``PROVIDER_TO_LITELLM_PREFIX``.
+    3. Infer the prefix from well-known substrings in *model*.
+    4. Fall back to *model* as-is.
+    """
+    if "/" in model:
+        return model
+
+    if provider is not None:
+        prefix = PROVIDER_TO_LITELLM_PREFIX.get(provider)
+        if prefix is not None:
+            return f"{prefix}/{model}"
+
+    # Heuristic: infer provider from the model name itself.
+    lower = model.lower()
+    if "claude" in lower:
+        return f"anthropic/{model}"
+    if "gpt" in lower or "o1" in lower:
+        return f"openai/{model}"
+    if "gemini" in lower:
+        return f"gemini/{model}"
+
+    return model
+
+
 @dataclass
 class DeploymentConfig:
     platform: str = "docker"
@@ -408,19 +456,9 @@ class Config:
                 provider = agent_config.provider
                 model = agent_config.model
 
-                provider_mapping = {
-                    "gemini": "gemini",
-                    "vertex": "vertex_ai",
-                    "claude": "anthropic",
-                    "anthropic": "anthropic",
-                    "claude-code": "anthropic",
-                    "codex": "openai",
-                    "openai": "openai",
-                    "opencode": "openai",
-                    "rlm": "gemini",  # RLM defaults to Gemini
-                }
-                dspy_provider = provider_mapping.get(provider, provider)
-                dspy_data["runtime_model"] = f"{dspy_provider}/{model}"
+                dspy_data["runtime_model"] = qualify_model_for_litellm(
+                    model, provider=provider
+                )
 
         # Create nested config objects
         optimization = (

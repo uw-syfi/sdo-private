@@ -294,23 +294,12 @@ class PromptOptimizer:
 
     def _configure_dspy_lm(self):
         """Configure DSPy language model."""
+        from app_operator.config import qualify_model_for_litellm
+
         teacher_model = self.config.optimization.teacher_model
 
-        # Map model names to provider/model format for DSPy 3.x
-        # DSPy uses LiteLLM format: "provider/model"
-
-        # If already in provider/model format, use as-is
-        if "/" in teacher_model:
-            model_str = teacher_model
-        elif "claude" in teacher_model.lower():
-            model_str = f"anthropic/{teacher_model}"
-        elif "gpt" in teacher_model.lower() or "o1" in teacher_model.lower():
-            model_str = f"openai/{teacher_model}"
-        elif "gemini" in teacher_model.lower():
-            model_str = f"gemini/{teacher_model}"
-        else:
-            # Try as-is for unknown models
-            model_str = teacher_model
+        # Build a fully-qualified litellm model string.
+        model_str = qualify_model_for_litellm(teacher_model)
 
         # Disable LiteLLM's request-level cache so that COPRO candidates
         # with different instructions are not served stale responses.
