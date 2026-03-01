@@ -24,8 +24,18 @@ from rich.progress import (
 )
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from app_operator.logger import logger
+
+
+class _ActiveSpinnerColumn(SpinnerColumn):
+    """Spinner that only animates once the task has been started."""
+
+    def render(self, task):
+        if task.start_time is None:
+            return Text(" ")
+        return super().render(task)
 
 
 @dataclass
@@ -508,7 +518,7 @@ def run_command(args: argparse.Namespace) -> int:
         log_dir.mkdir(parents=True, exist_ok=True)
 
     with Progress(
-        SpinnerColumn(),
+        _ActiveSpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
@@ -531,7 +541,7 @@ def run_command(args: argparse.Namespace) -> int:
                             label = f"[white]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Pending"
                         else:
                             label = f"[white]{prefix}{app_name}[/]: Pending"
-                        task_id = progress.add_task(label, total=100, completed=0)
+                        task_id = progress.add_task(label, total=100, completed=0, start=False)
                         repeat_task_ids.append((i, task_id))
                     future = executor.submit(
                         run_app_repeats, app, exp_name,
