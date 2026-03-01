@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -25,6 +26,15 @@ from rich.console import Console
 from rich.table import Table
 
 from app_operator.logger import logger
+
+
+@dataclass
+class AppResult:
+    app: str
+    success: bool
+    status: str
+    deployment_iterations: int | None
+    repeat: int | None = None
 
 
 def _write_toml_simple(data: dict) -> str:
@@ -126,33 +136,33 @@ def _extract_results(exp_dir: Path) -> dict:
         return {"status": "unknown", "deployment_iterations": None}
 
 
-def _write_results(log_dir: Path, exp_name: str, results: list[dict]) -> None:
+def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> None:
     """Write per-app results as JSON to the log directory."""
-    has_repeats = any("repeat" in r for r in results)
+    has_repeats = any(r.repeat is not None for r in results)
 
     entries = []
     for r in results:
-        entry = {
-            "app": r["app"],
-            "status": r["status"],
-            "deployment_iterations": r["deployment_iterations"],
+        entry: dict = {
+            "app": r.app,
+            "status": r.status,
+            "deployment_iterations": r.deployment_iterations,
         }
         if has_repeats:
-            entry["repeat"] = r["repeat"]
+            entry["repeat"] = r.repeat
         entries.append(entry)
 
     output: dict = {"experiment": exp_name, "results": entries}
 
     if has_repeats:
-        apps_seen: dict[str, list[dict]] = {}
+        apps_seen: dict[str, list[AppResult]] = {}
         for r in results:
-            apps_seen.setdefault(r["app"], []).append(r)
+            apps_seen.setdefault(r.app, []).append(r)
 
         aggregated = []
         for app_name, app_results in apps_seen.items():
             total = len(app_results)
-            successes = sum(1 for r in app_results if r.get("success"))
-            iters = [r["deployment_iterations"] for r in app_results if r["deployment_iterations"] is not None]
+            successes = sum(1 for r in app_results if r.success)
+            iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
             agg: dict = {
                 "app": app_name,
                 "success_rate": f"{successes}/{total}",
@@ -169,9 +179,9 @@ def _write_results(log_dir: Path, exp_name: str, results: list[dict]) -> None:
         json.dump(output, f, indent=2)
 
 
-def _print_summary(console: Console, results: list[dict]) -> None:
+def _print_summary(console: Console, results: list[AppResult]) -> None:
     """Print a Rich table summarizing experiment results."""
-    has_repeats = any("repeat" in r for r in results)
+    has_repeats = any(r.repeat is not None for r in results)
 
     if has_repeats:
         table = Table()
@@ -179,14 +189,14 @@ def _print_summary(console: Console, results: list[dict]) -> None:
         table.add_column("Success Rate")
         table.add_column("Deploy Iterations (min–max / mean / median)")
 
-        apps_seen: dict[str, list[dict]] = {}
+        apps_seen: dict[str, list[AppResult]] = {}
         for r in results:
-            apps_seen.setdefault(r["app"], []).append(r)
+            apps_seen.setdefault(r.app, []).append(r)
 
         for app_name, app_results in apps_seen.items():
             total = len(app_results)
-            successes = sum(1 for r in app_results if r.get("success"))
-            iters = sorted(r["deployment_iterations"] for r in app_results if r["deployment_iterations"] is not None)
+            successes = sum(1 for r in app_results if r.success)
+            iters = sorted(r.deployment_iterations for r in app_results if r.deployment_iterations is not None)
             success_str = f"{successes}/{total}"
             if iters:
                 mean = sum(iters) / len(iters)
@@ -203,8 +213,8 @@ def _print_summary(console: Console, results: list[dict]) -> None:
         table.add_column("Deploy Iterations")
 
         for r in results:
-            iterations = str(r["deployment_iterations"]) if r["deployment_iterations"] is not None else "N/A"
-            table.add_row(r["app"], r["status"], iterations)
+            iterations = str(r.deployment_iterations) if r.deployment_iterations is not None else "N/A"
+            table.add_row(r.app, r.status, iterations)
 
     console.print(table)
 
@@ -242,7 +252,7 @@ def run_experiment_task(
     experiment_config: dict | None = None,
     repeat_idx: int = 0,
     total_repeats: int = 1,
-) -> dict:
+) -> AppResult:
     # Explicitly start the task timer
     progress.start_task(task_id)
 
@@ -288,10 +298,13 @@ def run_experiment_task(
 
         if init_proc.returncode != 0:
             progress.update(task_id, description=f"[red]{app_name}[/]: Init Failed")
-            result = {"app": app_name, "success": False, "status": "unknown", "deployment_iterations": None}
-            if total_repeats > 1:
-                result["repeat"] = repeat_idx + 1
-            return result
+            return AppResult(
+                app=app_name,
+                success=False,
+                status="unknown",
+                deployment_iterations=None,
+                repeat=repeat_idx + 1 if total_repeats > 1 else None,
+            )
 
         # Write experiment sds config overrides into the experiment directory
         if experiment_config:
@@ -384,14 +397,14 @@ def run_experiment_task(
                 shutil.copy(session_file, log_dir)
 
         extracted = _extract_results(exp_dir)
+        repeat = repeat_idx + 1 if total_repeats > 1 else None
 
-        repeat_field = {"repeat": repeat_idx + 1} if total_repeats > 1 else {}
         if proc.returncode == 0:
             progress.update(task_id, description=f"[green]{app_name}[/]: Done", completed=100)
-            return {"app": app_name, "success": True, **extracted, **repeat_field}
+            return AppResult(app=app_name, success=True, repeat=repeat, **extracted)
         else:
             progress.update(task_id, description=f"[red]{app_name}[/]: Failed", completed=100)
-            return {"app": app_name, "success": False, **extracted, **repeat_field}
+            return AppResult(app=app_name, success=False, repeat=repeat, **extracted)
 
 
 def run_app_repeats(
@@ -402,7 +415,7 @@ def run_app_repeats(
     log_dir: Path,
     experiment_config: dict | None = None,
     total_repeats: int = 1,
-) -> list[dict]:
+) -> list[AppResult]:
     results = []
     for repeat_idx, task_id in repeat_task_ids:
         result = run_experiment_task(
@@ -527,7 +540,7 @@ def run_command(args: argparse.Namespace) -> int:
                     futures[future] = (app, exp_name, log_dir, config)
 
             # Collect results grouped by exp_name
-            results_by_exp: dict[str, list[dict]] = {exp_name: [] for exp_name, _, _, _ in resolved}
+            results_by_exp: dict[str, list[AppResult]] = {exp_name: [] for exp_name, _, _, _ in resolved}
             for future in as_completed(futures):
                 app, exp_name, log_dir, config = futures[future]
                 try:
@@ -537,15 +550,13 @@ def run_command(args: argparse.Namespace) -> int:
                     logger.error(f"Error running {app}: {e}")
                     repeats = config.get("repeats", 1)
                     for i in range(repeats):
-                        result = {
-                            "app": Path(app).name,
-                            "success": False,
-                            "status": "unknown",
-                            "deployment_iterations": None,
-                        }
-                        if repeats > 1:
-                            result["repeat"] = i + 1
-                        results_by_exp[exp_name].append(result)
+                        results_by_exp[exp_name].append(AppResult(
+                            app=Path(app).name,
+                            success=False,
+                            status="unknown",
+                            deployment_iterations=None,
+                            repeat=i + 1 if repeats > 1 else None,
+                        ))
 
     for exp_name, config_path, config, log_dir in resolved:
         results = results_by_exp[exp_name]

@@ -11,6 +11,7 @@ except ImportError:
 import pytest
 
 from app_operator.commands.run_exp import (
+    AppResult,
     _extract_results,
     _resolve_experiment,
     _write_experiment_sds_config,
@@ -318,12 +319,7 @@ class TestRunCommandMultiExperiment:
 
         args = argparse.Namespace(experiments=["exp-a"], parallel=1)
 
-        fake_result = {
-            "app": "hotel",
-            "success": True,
-            "status": "completed",
-            "deployment_iterations": 2,
-        }
+        fake_result = AppResult(app="hotel", success=True, status="completed", deployment_iterations=2)
 
         with patch("app_operator.commands.run_exp.run_experiment_task", return_value=fake_result):
             rc = run_command(args)
@@ -347,12 +343,7 @@ class TestRunCommandMultiExperiment:
 
         def fake_task(app_path_str, exp_name, progress, task_id, log_dir, *a, **kw):
             progress.start_task(task_id)
-            return {
-                "app": Path(app_path_str).name,
-                "success": True,
-                "status": "completed",
-                "deployment_iterations": 1,
-            }
+            return AppResult(app=Path(app_path_str).name, success=True, status="completed", deployment_iterations=1)
 
         with patch("app_operator.commands.run_exp.run_experiment_task", side_effect=fake_task):
             rc = run_command(args)
