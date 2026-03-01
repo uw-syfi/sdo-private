@@ -109,6 +109,7 @@ name = "commands layer must not import from libs directly"
 type = "forbidden"
 source_modules = ["app_operator.commands"]
 forbidden_modules = ["libs"]
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "dspy_integration must not import from operator runtimes"

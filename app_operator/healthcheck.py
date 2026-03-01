@@ -2,7 +2,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from app_operator.ui import OperatorUI
+from app_operator.ui_protocol import OperatorUI
 from app_operator.logger import logger
 from app_operator.types import CommandResult
 
