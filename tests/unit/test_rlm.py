@@ -346,7 +346,7 @@ class TestRLMAgentBackup:
     """Tests for the deploy.sh backup logic in RLMCodingAgent._build_context."""
 
     def test_backup_created_on_first_build(self, tmp_path):
-        from libs.agent_cli.rlm_agent import RLMCodingAgent
+        from app_operator.cli_agent.rlm_agent import RLMCodingAgent
 
         sds = tmp_path / ".sds"
         sds.mkdir()
@@ -359,7 +359,7 @@ class TestRLMAgentBackup:
         assert ctx.original_script == "#!/bin/bash\ndocker compose up -d\n"
 
     def test_backup_not_overwritten_on_subsequent_builds(self, tmp_path):
-        from libs.agent_cli.rlm_agent import RLMCodingAgent
+        from app_operator.cli_agent.rlm_agent import RLMCodingAgent
 
         sds = tmp_path / ".sds"
         sds.mkdir()
@@ -377,7 +377,7 @@ class TestRLMAgentBackup:
         assert ctx.deployment_script == "modified content\n"
 
     def test_no_backup_when_deploy_sh_missing(self, tmp_path):
-        from libs.agent_cli.rlm_agent import RLMCodingAgent
+        from app_operator.cli_agent.rlm_agent import RLMCodingAgent
 
         sds = tmp_path / ".sds"
         sds.mkdir()  # no deploy.sh

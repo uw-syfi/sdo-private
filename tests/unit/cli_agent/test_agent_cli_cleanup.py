@@ -557,7 +557,7 @@ def test_multiple_generates_dont_leak_resources(agent_type, mock_which):
 
 def test_factory_creates_all_agent_types(mock_which):
     """Test factory can create all agent types."""
-    from libs.agent_cli.factory import create_agent_from_config
+    from app_operator.cli_agent.factory import create_agent_from_config
     from app_operator.config import Config, AgentConfig, OperatorConfig
 
     agents_to_test = [

@@ -6,11 +6,11 @@ import sys
 import threading
 from abc import abstractmethod
 
-from app_operator.logger import logger
+from loguru import logger
 from .base import CodingAgent
 from .utils import _get_interactive_env
 from .events import AgentEventHandler
-from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
 
 
 class CLIGenerationSession:

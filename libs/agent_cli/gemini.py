@@ -8,11 +8,8 @@ import logging
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
 from .events import AgentEventHandler
-from app_operator.trajectory import (
-    get_current_call_id,
-    get_run_id,
-    TrajectoryRecorderProtocol,
-)
+import libs.agent_cli.trajectory as _trajectory_module
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 _logger = logging.getLogger(__name__)
 
@@ -25,8 +22,8 @@ class GeminiGenerationSession(CLIGenerationSession):
         self.tool_start_times = {}
         self.tool_args = {}
         # Capture call_id and run_id for correlation
-        self.call_id = get_current_call_id()
-        self.run_id = get_run_id()
+        self.call_id = _trajectory_module.get_current_call_id()
+        self.run_id = _trajectory_module.get_run_id()
 
     def _write_call_metadata(self):
         """Write metadata file to help correlate Gemini session with trajectory call."""

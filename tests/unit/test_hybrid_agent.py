@@ -5,7 +5,7 @@ import unittest.mock as mock
 import pytest
 
 from app_operator.rlm.environment import RLMContext, RLMEnvironment
-from libs.agent_cli.hybrid_agent import HybridCodingAgent
+from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -262,14 +262,14 @@ class TestHybridRegistration:
 
     def test_factory_creates_hybrid(self):
         from app_operator.config import Config, AgentConfig
-        from libs.agent_cli.factory import create_agent_from_config
+        from app_operator.cli_agent.factory import create_agent_from_config
         config = Config(agent=AgentConfig(provider="hybrid"))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, HybridCodingAgent)
 
     def test_factory_forwards_location(self):
         from app_operator.config import Config, AgentConfig
-        from libs.agent_cli.factory import create_agent_from_config
+        from app_operator.cli_agent.factory import create_agent_from_config
         config = Config(agent=AgentConfig(provider="hybrid", location="us-west1"))
         agent = create_agent_from_config("/tmp", config=config)
         assert agent.location == "us-west1"

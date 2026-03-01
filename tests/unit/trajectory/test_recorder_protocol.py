@@ -107,7 +107,7 @@ class TestRecorderGuardConsistency:
     def test_hybrid_record_token_usage_guarded(self):
         """HybridCodingAgent guards record_token_usage with hasattr."""
         import inspect
-        from libs.agent_cli.hybrid_agent import HybridCodingAgent
+        from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 
         source = inspect.getsource(HybridCodingAgent.generate)
         assert 'hasattr(self.recorder, "record_token_usage")' in source
@@ -115,7 +115,7 @@ class TestRecorderGuardConsistency:
     def test_hybrid_add_assistant_message_guarded(self):
         """HybridCodingAgent guards add_assistant_message with hasattr."""
         import inspect
-        from libs.agent_cli.hybrid_agent import HybridCodingAgent
+        from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 
         source = inspect.getsource(HybridCodingAgent._generate_fix)
         assert 'hasattr(self.recorder, "add_assistant_message")' in source
@@ -151,7 +151,7 @@ class TestRecorderGuardConsistency:
     def test_partial_recorder_does_not_crash_hybrid(self, tmp_path):
         """A recorder missing record_token_usage should not crash HybridCodingAgent."""
         import unittest.mock as mock
-        from libs.agent_cli.hybrid_agent import HybridCodingAgent
+        from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 
         class MinimalRecorder:
             """Recorder that lacks record_token_usage and add_assistant_message."""

@@ -13,12 +13,12 @@ import re
 import subprocess
 from pathlib import Path
 
-from app_operator.logger import logger
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from loguru import logger
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 from .base import CodingAgent, register_provider
 from .events import AgentEventHandler
-from .rlm_agent import _FILE_GEN_RE, _DIRECT_TEXT_RE, _litellm_call_with_retry
+from libs.agent_cli.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _litellm_call_with_retry
 from .subagent import call_subagent
 from .utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 

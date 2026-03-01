@@ -6,6 +6,11 @@ recording all agent interactions, prompts, responses, and tool calls
 into a structured trajectory.json file.
 """
 from __future__ import annotations
+from libs.agent_cli.trajectory import (
+    NullTrajectoryRecorder,  # noqa: F401
+    TrajectoryRecorderProtocol,  # noqa: F401
+    register_context_providers as _register_context_providers,
+)
 
 import json
 import shutil
@@ -16,9 +21,6 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import (
     Any,
-    Protocol,
-    runtime_checkable,
-    ContextManager,
 )
 from enum import Enum
 
@@ -65,44 +67,6 @@ class TrajectoryMessage:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary, excluding None values."""
         return {k: v for k, v in asdict(self).items() if v is not None}
-
-
-@runtime_checkable
-class TrajectoryRecorderProtocol(Protocol):
-    """Protocol for trajectory recorders."""
-
-    def start_phase(
-        self, phase: Phase, context: dict[str, Any] | None = None
-    ) -> None: ...
-    def end_phase(self, status: str | None = None) -> None: ...
-    def add_user_message(self, content: str) -> None: ...
-
-    def add_assistant_message(
-        self, content: str, duration: float | None = None
-    ) -> None: ...
-
-    def add_tool_call(
-        self,
-        tool: str,
-        args: dict[str, Any],
-        stdout: str = "",
-        stderr: str = "",
-        exit_code: int | None = None,
-        duration: float | None = None,
-    ) -> None: ...
-    def set_phase_status(self, status: str) -> None: ...
-    def set_agent_name(self, agent_name: str) -> None: ...
-    def set_prompt_version(self, version: str) -> None: ...
-    def record_fallback(self) -> None: ...
-    def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None: ...
-    def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
-    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None: ...
-    def record_token_usage(self, usage: TokenUsage) -> None: ...
-    def finalize(self, status: str = "completed") -> Path: ...
-
-    def phase(
-        self, phase: Phase, context: dict[str, Any] | None = None
-    ) -> ContextManager: ...
 
 
 class TrajectoryRecorder:
@@ -573,72 +537,6 @@ class TrajectoryRecorder:
             self.end_phase(status)
 
 
-class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
-    """No-op recorder that formally implements TrajectoryRecorderProtocol.
-
-    Used as a default when no real recorder is needed (e.g. in tests).
-    Every method is a no-op, so callers never need to check for None.
-    """
-
-    def start_phase(
-        self, phase: Phase, context: dict[str, Any] | None = None
-    ) -> None:
-        pass
-
-    def end_phase(self, status: str | None = None) -> None:
-        pass
-
-    def add_user_message(self, content: str) -> None:
-        pass
-
-    def add_assistant_message(
-        self, content: str, duration: float | None = None
-    ) -> None:
-        pass
-
-    def add_tool_call(
-        self,
-        tool: str,
-        args: dict[str, Any],
-        stdout: str = "",
-        stderr: str = "",
-        exit_code: int | None = None,
-        duration: float | None = None,
-    ) -> None:
-        pass
-
-    def set_phase_status(self, status: str) -> None:
-        pass
-
-    def set_agent_name(self, agent_name: str) -> None:
-        pass
-
-    def set_prompt_version(self, version: str) -> None:
-        pass
-
-    def record_fallback(self) -> None:
-        pass
-
-    def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None:
-        pass
-
-    def record_rendered_prompt(self, rendered_prompt: str) -> None:
-        pass
-
-    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None:
-        pass
-
-    def record_token_usage(self, usage: TokenUsage) -> None:
-        pass
-
-    @contextmanager
-    def phase(self, phase: Phase, context: dict[str, Any] | None = None):
-        yield self
-
-    def finalize(self, status: str = "completed") -> Path:
-        return Path("/dev/null")
-
-
 # Global recorder instance
 _recorder: TrajectoryRecorder | None = None
 
@@ -727,3 +625,8 @@ def record_user_message(content: str) -> None:
     recorder = get_trajectory()
     if recorder:
         recorder.add_user_message(content)
+
+
+# Wire libs.agent_cli.trajectory context providers to the real thread-local
+# implementations so GeminiGenerationSession gets live call/run IDs.
+_register_context_providers(get_current_call_id, get_run_id)
