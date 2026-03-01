@@ -501,6 +501,8 @@ def run_yaml(config_path: str) -> None:
     print(f"Result:\n{result}")
 
 # Wrapper functions for script usage
+
+
 def fan_out(agent: Runnable, items: list[str], max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS) -> list[Any]:
     """Execute multiple items in parallel using the agent."""
     return FanOut(agent, items, max_workers).run(None)

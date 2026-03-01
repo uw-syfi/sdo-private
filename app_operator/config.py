@@ -211,20 +211,6 @@ class Config:
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
-    def __post_init__(self):
-        self._validate_runtime_requirements()
-
-    def _validate_runtime_requirements(self) -> None:
-        """Validate requirements for specific runtimes."""
-        if self.runtime.impl == "langgraph":
-            if not self.agent.provider:
-                raise ValueError("agent.provider must be set for langgraph runtime")
-            if not self.agent.model:
-                raise ValueError("agent.model must be set for langgraph runtime")
-        elif self.runtime.impl == "adk":
-            if not self.agent.model:
-                raise ValueError("agent.model must be set for adk runtime")
-
     @staticmethod
     def _validate_fields(
         section_data: dict, section_name: str, config_class: type

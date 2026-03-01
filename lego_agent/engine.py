@@ -20,13 +20,7 @@ from lego_agent.streaming import parse_chunk_content, extract_tool_result
 # If `lego_agent` is intended to be a reusable library, these dependencies should be inverted or abstracted.
 from app_operator.langgraph.llm import build_llm
 from app_operator.config import Config
-from app_operator.adk.tools import (
-    ToolContext,
-    _build_read_file,
-    _build_list_files,
-    _build_find_files,
-    _build_search_content,
-)
+from app_operator.adk.tools import build_readonly_tools
 from app_operator.filesystem import RealFilesystem
 from app_operator.exceptions import AgentError
 from app_operator.logger import logger
@@ -272,16 +266,10 @@ class LegoAgentEngine:
 
         # Setup tools
         filesystem = RealFilesystem()
-        context = ToolContext(repo_root=self.work_dir, filesystem=filesystem)
-
-        # Build specific tools used by LegoAgent (read-only mostly)
+        readonly_tools = build_readonly_tools(self.work_dir, filesystem)
         tools = [
-            self._wrap_tool(_build_read_file(context), "read_file"),
-            self._wrap_tool(_build_list_files(context), "list_files"),
-            self._wrap_tool(_build_find_files(context), "find_files"),
-            self._wrap_tool(_build_search_content(context), "search_content"),
-            self._wrap_tool(self._submit_response, "submit_response"),
-        ]
+            self._wrap_tool(t, t.__name__) for t in readonly_tools
+        ] + [self._wrap_tool(self._submit_response, "submit_response")]
 
         # Build LLM
         llm = build_llm(self.config)

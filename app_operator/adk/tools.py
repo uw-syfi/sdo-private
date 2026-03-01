@@ -396,3 +396,21 @@ def build_tools(
         _build_write_file(context),
         _build_run_command(context),
     ]
+
+
+def build_readonly_tools(
+    repo_path: Path, filesystem: FileSystemInterface | None = None
+) -> list[Callable[..., Any]]:
+    """Build read-only tools for external consumers (e.g. lego_agent).
+
+    Returns tools for reading the repository without any write or execute access.
+    """
+    if filesystem is None:
+        filesystem = RealFilesystem()
+    context = ToolContext(repo_root=repo_path.resolve(), filesystem=filesystem)
+    return [
+        _build_read_file(context),
+        _build_list_files(context),
+        _build_find_files(context),
+        _build_search_content(context),
+    ]
