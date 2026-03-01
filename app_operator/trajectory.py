@@ -737,8 +737,12 @@ class TrajectoryRecorder:
             self.end_phase(status)
 
 
-class NullTrajectoryRecorder:
-    """No-op recorder for tests."""
+class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
+    """No-op recorder that formally implements TrajectoryRecorderProtocol.
+
+    Used as a default when no real recorder is needed (e.g. in tests).
+    Every method is a no-op, so callers never need to check for None.
+    """
 
     def start_phase(
         self, phase: Phase, context: Optional[Dict[str, Any]] = None

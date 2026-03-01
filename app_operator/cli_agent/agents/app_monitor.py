@@ -201,7 +201,7 @@ class HealthCheckTask(MonitoringTask):
             health_check_output=health_result.get("stdout", ""),
             exit_code=health_result.get("exit_code", -1),
             iteration=check_count,
-            _trajectory_recorder=recorder,
+            recorder=recorder,
         )
 
         # Ensure the prompt explicitly requests <exec_summary> format

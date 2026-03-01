@@ -7,6 +7,7 @@ import threading
 
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
+    from app_operator.trajectory import TrajectoryRecorderProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -112,13 +113,19 @@ class PromptLoader:
             logger.error(f"Failed to configure DSPy runtime: {e}")
             # Don't raise - will fallback to Jinja2
 
-    def render(self, template_name: str, **kwargs: Any) -> str:
+    def render(
+        self,
+        template_name: str,
+        recorder: Optional["TrajectoryRecorderProtocol"] = None,
+        **kwargs: Any,
+    ) -> str:
         """Render a template with the given context.
 
         Automatically routes to DSPy or Jinja2 based on configuration.
 
         Args:
             template_name: Name of the template file (relative to prompts dir).
+            recorder: Optional trajectory recorder for tracking prompt metadata.
             **kwargs: Variables to pass to the template.
 
         Returns:
@@ -128,14 +135,14 @@ class PromptLoader:
         prompt_name = self._template_to_prompt_name(template_name)
 
         # Record structured kwargs in trajectory before routing
-        self._record_prompt_kwargs(kwargs)
+        self._notify_recorder(recorder, "record_prompt_kwargs", kwargs)
 
         # Check if we should use DSPy
         if self._should_use_dspy(prompt_name, kwargs):
             try:
-                result = self._render_dspy(prompt_name, kwargs)
+                result = self._render_dspy(prompt_name, kwargs, recorder=recorder)
                 logger.info(f"Successfully rendered {prompt_name} using DSPy")
-                self._record_rendered_prompt(kwargs, result)
+                self._notify_recorder(recorder, "record_rendered_prompt", result)
                 return result
             except Exception as e:
                 logger.warning(
@@ -143,11 +150,11 @@ class PromptLoader:
                     f"Falling back to Jinja2."
                 )
                 # Record fallback in trajectory if available
-                self._record_fallback(kwargs)
+                self._notify_recorder(recorder, "record_fallback")
 
         # Fall back to Jinja2 (or default path)
-        result = self._render_jinja2(template_name, kwargs)
-        self._record_rendered_prompt(kwargs, result)
+        result = self._render_jinja2(template_name, kwargs, recorder=recorder)
+        self._notify_recorder(recorder, "record_rendered_prompt", result)
         return result
 
     def _template_to_prompt_name(self, template_name: str) -> str:
@@ -262,12 +269,18 @@ class PromptLoader:
         self._module_exists_cache[prompt_name] = result
         return result
 
-    def _render_dspy(self, prompt_name: str, kwargs: dict) -> str:
+    def _render_dspy(
+        self,
+        prompt_name: str,
+        kwargs: dict,
+        recorder: Optional["TrajectoryRecorderProtocol"] = None,
+    ) -> str:
         """Render using DSPy optimized module.
 
         Args:
             prompt_name: Name of the prompt
             kwargs: Template context
+            recorder: Optional trajectory recorder
 
         Returns:
             Rendered prompt string
@@ -311,8 +324,9 @@ class PromptLoader:
         output = getattr(result, output_field)
 
         # Record prompt version in trajectory if available
-        self._record_prompt_version(
-            kwargs, f"dspy_{self.dspy_config.optimized_version}"
+        self._notify_recorder(
+            recorder, "set_prompt_version",
+            f"dspy_{self.dspy_config.optimized_version}",
         )
 
         return output
@@ -321,12 +335,18 @@ class PromptLoader:
         """Render a Jinja2 template by name with the given kwargs."""
         return self._render_jinja2(template_name, kwargs)
 
-    def _render_jinja2(self, template_name: str, kwargs: dict) -> str:
+    def _render_jinja2(
+        self,
+        template_name: str,
+        kwargs: dict,
+        recorder: Optional["TrajectoryRecorderProtocol"] = None,
+    ) -> str:
         """Render using Jinja2 template.
 
         Args:
             template_name: Template file name
             kwargs: Template context
+            recorder: Optional trajectory recorder
 
         Returns:
             Rendered prompt string
@@ -348,7 +368,7 @@ class PromptLoader:
             result = template.render(**kwargs)
 
             # Record prompt version in trajectory
-            self._record_prompt_version(kwargs, "jinja2")
+            self._notify_recorder(recorder, "set_prompt_version", "jinja2")
 
             return result
         except Exception as e:
@@ -357,53 +377,28 @@ class PromptLoader:
                 f"Failed to render template '{template_name}': {e}"
             ) from e
 
-    def _record_prompt_version(self, kwargs: dict, version: str) -> None:
-        """Record which prompt version was used in trajectory.
+    @staticmethod
+    def _notify_recorder(
+        recorder: Optional["TrajectoryRecorderProtocol"],
+        method_name: str,
+        *args: Any,
+    ) -> None:
+        """Dispatch a single recording call to the trajectory recorder.
+
+        Replaces the four near-identical _record_* helpers with one
+        consolidated method. Safely no-ops when recorder is None or
+        does not implement the requested method.
 
         Args:
-            kwargs: Template context (may contain trajectory_recorder)
-            version: Version identifier (e.g., 'jinja2', 'dspy_v1')
+            recorder: Optional trajectory recorder instance.
+            method_name: Name of the recorder method to call.
+            *args: Positional arguments forwarded to the recorder method.
         """
-        # Check if trajectory recorder is passed in kwargs
-        recorder = kwargs.get("_trajectory_recorder")
-        if recorder and hasattr(recorder, "set_prompt_version"):
-            recorder.set_prompt_version(version)
-
-    def _record_fallback(self, kwargs: dict) -> None:
-        """Record that a fallback to Jinja2 occurred.
-
-        Args:
-            kwargs: Template context (may contain trajectory_recorder)
-        """
-        recorder = kwargs.get("_trajectory_recorder")
-        if recorder and hasattr(recorder, "record_fallback"):
-            recorder.record_fallback()
-
-    def _record_prompt_kwargs(self, kwargs: dict) -> None:
-        """Record the structured kwargs in the trajectory.
-
-        The recorder itself filters internal keys and converts types.
-
-        Args:
-            kwargs: Template context (may contain trajectory_recorder)
-        """
-        recorder = kwargs.get("_trajectory_recorder")
-        if recorder and hasattr(recorder, "record_prompt_kwargs"):
-            recorder.record_prompt_kwargs(kwargs)
-
-    def _record_rendered_prompt(self, kwargs: dict, rendered_prompt: str) -> None:
-        """Record the rendered prompt string in the trajectory.
-
-        This captures the ground-truth output that DSPy optimization should
-        learn to produce — the instruction prompt sent to the coding agent.
-
-        Args:
-            kwargs: Template context (may contain trajectory_recorder)
-            rendered_prompt: The rendered prompt string
-        """
-        recorder = kwargs.get("_trajectory_recorder")
-        if recorder and hasattr(recorder, "record_rendered_prompt"):
-            recorder.record_rendered_prompt(rendered_prompt)
+        if recorder is None:
+            return
+        method = getattr(recorder, method_name, None)
+        if method is not None:
+            method(*args)
 
 
 # Global instance for easy access
