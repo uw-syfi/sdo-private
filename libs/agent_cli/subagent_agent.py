@@ -20,6 +20,35 @@ from .base import CodingAgent, register_provider
 from .events import AgentEventHandler
 from .rlm_agent import _FILE_GEN_RE, _DIRECT_TEXT_RE, _litellm_call_with_retry
 from .subagent import call_subagent
+from .utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
+
+# Shared analyst system prompts used by both SubagentCodingAgent and HybridCodingAgent.
+TRAJECTORY_ANALYST_PROMPT = (
+    "You are a trajectory analyst. Summarise what deployment "
+    "fixes have been tried so far, which error patterns recur, "
+    "and what approaches have NOT been attempted yet. Be concise "
+    "(max 300 words)."
+)
+
+ERROR_LOG_ANALYST_PROMPT = (
+    "You are an error log analyst. Identify the key errors, "
+    "their root cause, and the most likely fix. Be concise "
+    "(max 300 words)."
+)
+
+SCRIPT_ANALYST_PROMPT = (
+    "You are a script analyst. Examine the deployment script and "
+    "identify what is likely wrong. If an original pre-fix version "
+    "is provided, note any regressions introduced by previous fixes. "
+    "Be concise (max 300 words)."
+)
+
+REPO_ANALYST_PROMPT = (
+    "You are a repository analyst. Based on the Dockerfile, "
+    "docker-compose file, README, and code analysis report, "
+    "summarise the deployment constraints and requirements. "
+    "Be concise (max 300 words)."
+)
 
 
 @register_provider("subagent")
@@ -101,22 +130,10 @@ class SubagentCodingAgent(CodingAgent):
     def _generate_files(self, prompt: str, repo_path: Path, token_acc: Optional[dict] = None) -> str:
         import os
 
-        expected_files = re.findall(r"\.sds/[\w._-]+", prompt)
-
-        system_msg = (
-            "You are a deployment assistant. The user will ask you to generate "
-            "one or more files. For EACH file, output a section in this exact format:\n\n"
-            "FILE: .sds/<filename>\n"
-            "```\n"
-            "<file content here>\n"
-            "```\n\n"
-            "Output ONLY these sections. Do not add explanations outside the sections."
-        )
-
         kwargs = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": system_msg},
+                {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "cache": {"no-cache": True},
@@ -131,27 +148,7 @@ class SubagentCodingAgent(CodingAgent):
             logger.error(f"[Subagent] Direct LLM call failed: {e}")
             return f"LLM call failed: {e}"
 
-        written = []
-        file_sections = re.findall(
-            r"FILE:\s*(\.sds/[\w._-]+)\s*\n```[^\n]*\n(.*?)```",
-            raw,
-            re.DOTALL,
-        )
-        for rel_path, content in file_sections:
-            out_path = repo_path / rel_path
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(content)
-            logger.info(f"[Subagent] Wrote {out_path}")
-            written.append(rel_path)
-
-        if not written and len(expected_files) == 1:
-            out_path = repo_path / expected_files[0]
-            content = re.sub(r"^```[^\n]*\n|```$", "", raw.strip(), flags=re.MULTILINE)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(content)
-            logger.info(f"[Subagent] Wrote {out_path} (fallback)")
-            written.append(expected_files[0])
-
+        generate_and_write_files(raw, prompt, repo_path, "[Subagent]")
         return raw
 
     # -- Fix path: fan-out subagents + root synthesis -------------------------
@@ -183,12 +180,7 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["trajectory"] = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are a trajectory analyst. Summarise what deployment "
-                    "fixes have been tried so far, which error patterns recur, "
-                    "and what approaches have NOT been attempted yet. Be concise "
-                    "(max 300 words)."
-                ),
+                system_prompt=TRAJECTORY_ANALYST_PROMPT,
                 user_prompt=trajectory_text or "(no trajectory data available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -201,11 +193,7 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["error_log"] = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are an error log analyst. Identify the key errors, "
-                    "their root cause, and the most likely fix. Be concise "
-                    "(max 300 words)."
-                ),
+                system_prompt=ERROR_LOG_ANALYST_PROMPT,
                 user_prompt=error_log or "(no error log available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -221,12 +209,7 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["script"] = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are a script analyst. Examine the deployment script and "
-                    "identify what is likely wrong. If an original pre-fix version "
-                    "is provided, note any regressions introduced by previous fixes. "
-                    "Be concise (max 300 words)."
-                ),
+                system_prompt=SCRIPT_ANALYST_PROMPT,
                 user_prompt=script_input or "(no deploy script available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -239,12 +222,7 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["repo"] = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are a repository analyst. Based on the Dockerfile, "
-                    "docker-compose file, README, and code analysis report, "
-                    "summarise the deployment constraints and requirements. "
-                    "Be concise (max 300 words)."
-                ),
+                system_prompt=REPO_ANALYST_PROMPT,
                 user_prompt=repo_context or "(no repository context available)",
                 location=self.location,
                 token_acc=token_acc,

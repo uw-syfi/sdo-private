@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
+from .utils import truncate_params
+
 
 class OpencodeEvent(ABC):
     """Base class for Opencode stream events."""
@@ -57,25 +59,18 @@ class ToolUseEvent(OpencodeEvent):
 
     def render(self, log_prefix: str) -> str:
         # Render tool use and result
-        truncated_input = self._truncate(str(self.input_data))
+        truncated_input = truncate_params(str(self.input_data))
 
         output_str = ""
         if self.output_data:
-            truncated_output = self._truncate(str(self.output_data), max_lines=5)
+            # Truncate output to first 5 lines
+            out_lines = str(self.output_data).splitlines()
+            truncated_output = "\n".join(out_lines[:5] + (["..."] if len(out_lines) > 5 else []))
             output_str = (
                 f"\n{log_prefix} \033[32m[Tool Result] {truncated_output}\033[0m"
             )
 
         return f"{log_prefix} \033[34m[Tool Use] {self.tool_name} {truncated_input}\033[0m{output_str}"
-
-    def _truncate(self, s: str, max_lines: int = 1) -> str:
-        lines = s.splitlines()
-        if len(lines) > max_lines:
-            s = "\n".join(lines[:max_lines] + ["..."])
-
-        if len(s) > 200 and max_lines == 1:
-            return s[:200] + "..."
-        return s
 
 
 class StepStartEvent(OpencodeEvent):

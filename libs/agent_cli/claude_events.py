@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, List
 
+from .utils import truncate_params, truncate_content
+
 
 class ClaudeEvent(ABC):
     """Base class for Claude Code stream events."""
@@ -92,15 +94,8 @@ class ToolUseEvent(ClaudeEvent):
         self.parameters = parameters
 
     def render(self, log_prefix: str) -> str:
-        truncated_params = self._truncate_params(self.parameters)
-        return f"{log_prefix} \033[34m[Tool Use] {self.tool_name} {truncated_params}\033[0m"
-
-    def _truncate_params(self, params: Any) -> str:
-        s = str(params)
-        max_len = 200
-        if len(s) > max_len:
-            return s[:max_len] + "..."
-        return s
+        truncated = truncate_params(self.parameters)
+        return f"{log_prefix} \033[34m[Tool Use] {self.tool_name} {truncated}\033[0m"
 
 
 class ToolResultEvent(ClaudeEvent):
@@ -120,17 +115,8 @@ class ToolResultEvent(ClaudeEvent):
         if not self.output:
             return f"{log_prefix} \033[32m{self.tool_name_resolved} ran successfully\033[0m"
         else:
-            truncated = self._truncate(self.output)
+            truncated = truncate_content(self.output)
             return f"{log_prefix} \033[32m[Tool Result] {truncated}\033[0m"
-
-    def _truncate(self, content: str) -> str:
-        lines = content.splitlines()
-        max_lines = 10
-        if len(lines) > max_lines * 2:
-            return "\n".join(
-                lines[:max_lines] + ["... (truncated) ..."] + lines[-max_lines:]
-            )
-        return content
 
 
 class ResultEvent(ClaudeEvent):
