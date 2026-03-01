@@ -2,7 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import List, Any, Dict, Optional
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
@@ -18,7 +18,6 @@ DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding
 MAX_DIR_SUGGESTIONS = 20  # maximum number of directory suggestions to return
 
 app = FastAPI()
-
 
 class WebIO:
     """UserIO implementation for WebSocket-based Web UI."""
@@ -41,7 +40,7 @@ class WebIO:
         if self._pending_tasks:
             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
 
-    async def _send_event(self, type: str, data: Dict[str, Any]) -> None:
+    async def _send_event(self, type: str, data: dict[str, Any]) -> None:
         if self.websocket.client_state == WebSocketState.CONNECTED:
             await self.websocket.send_json({"type": type, **data})
 
@@ -54,7 +53,7 @@ class WebIO:
         # Not used in this flow, prompt is passed directly to engine
         return ""
 
-    async def ask_questions(self, questions: List[str]) -> List[str]:
+    async def ask_questions(self, questions: list[str]) -> list[str]:
         await self._flush_thinking()
         await self._send_event("question", {"questions": questions})
 
@@ -138,13 +137,12 @@ class WebIO:
         await self._flush_thinking()
         await self._send_event("log", {"message": message, "level": level})
 
-    def render_graph(self, config: Dict[str, Any]) -> None:
+    def render_graph(self, config: dict[str, Any]) -> None:
         self._track_task(self._send_graph_async(config))
 
-    async def _send_graph_async(self, config: Dict[str, Any]) -> None:
+    async def _send_graph_async(self, config: dict[str, Any]) -> None:
         await self._flush_thinking()
         await self._send_event("graph", {"config": config})
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -178,7 +176,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     work_dir = repo_root  # Default to repo root for execution context
 
     try:
-        current_task: Optional[asyncio.Task] = None
+        current_task: asyncio.Task | None = None
 
         while True:
             data = await websocket.receive_json()
@@ -217,9 +215,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     except asyncio.CancelledError:
                         pass
 
-                # Drain input queue to remove stale answers
-                while not input_queue.empty():
-                    input_queue.get_nowait()
+                # Drain the queue atomically by catching Empty exceptions
+                while True:
+                    try:
+                        input_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
 
                 # Resolve work dir
                 exec_work_dir = (
@@ -324,7 +325,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     finally:
         await io.cleanup()
 
-
 async def run_engine_and_script(
     io: WebIO,
     config: Config,
@@ -416,7 +416,6 @@ async def run_engine_and_script(
     except Exception as e:
         logger.error(f"Execution failed: {e}", exc_info=True)
         await io._send_event("log", {"message": f"Error: {e}", "level": "error"})
-
 
 if __name__ == "__main__":
     import uvicorn
