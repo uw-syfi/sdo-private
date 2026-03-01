@@ -9,10 +9,11 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.langgraph.llm import build_llm
 from app_operator.langgraph.graph import build_graph
+from app_operator.operator_base import OperatorBase
 from app_operator.trajectory import TrajectoryRecorder
 
 
-class LangGraphOperator:
+class LangGraphOperator(OperatorBase):
     """LangGraph-based operator for deployment and monitoring."""
 
     def __init__(
@@ -40,6 +41,11 @@ class LangGraphOperator:
         else:
             self.config = config
 
+        if not self.config.agent.provider:
+            raise ValueError("agent.provider must be set for langgraph runtime")
+        if not self.config.agent.model:
+            raise ValueError("agent.model must be set for langgraph runtime")
+
         self.sds_dir = self.repo_path / ".sds"
         self._persist_deployment_config()
 
@@ -65,25 +71,12 @@ class LangGraphOperator:
             recorder=self.recorder,
         )
 
-    def _persist_deployment_config(self) -> None:
-        if not self.filesystem.exists(self.sds_dir):
-            self.filesystem.mkdir(self.sds_dir)
-
-        sds_config_path = self.sds_dir / "config.toml"
-        if not self.filesystem.exists(sds_config_path):
-            logger.info(f"Creating deployment config at {sds_config_path}")
-            config_content = (
-                "[deployment]\n"
-                f'platform = "{self.config.deployment.platform}"\n'
-                f'target = "{self.config.deployment.target}"\n'
-            )
-            self.filesystem.write_text(sds_config_path, config_content)
-
     def run(self) -> int:
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, self._handle_shutdown_signal)
             signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
+        _status = "failed"
         try:
             logger.info("Starting LangGraph App Operator Mode")
             logger.info(f"Repository: {self.repo_path}")
@@ -118,11 +111,12 @@ class LangGraphOperator:
 
             health_result = final_state.get("health_result") if final_state else None
             self._deployed = bool(health_result and health_result.get("success"))
+            _status = "completed" if self._deployed else "failed"
             return 0
 
         except KeyboardInterrupt:
             logger.info("Shutting down due to interrupt...")
-            self.recorder.finalize("interrupted")
+            _status = "interrupted"
             return 1
 
         except Exception as e:
@@ -130,10 +124,9 @@ class LangGraphOperator:
             import traceback
 
             traceback.print_exc()
-            self.recorder.finalize("failed")
             return 1
         finally:
-            self.recorder.finalize("completed" if self._deployed else "failed")
+            self.recorder.finalize(_status)
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         if not self._shutdown_requested:
