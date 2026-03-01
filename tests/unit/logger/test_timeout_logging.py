@@ -2,7 +2,7 @@ import pytest
 import subprocess
 from unittest.mock import MagicMock
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
-from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.healthcheck import run_health_check
 from tests.fixtures.agents import StubAgent
 
 

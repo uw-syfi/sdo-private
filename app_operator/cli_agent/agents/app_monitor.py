@@ -15,7 +15,7 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.config import OperatorConfig
-from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.healthcheck import run_health_check
 from app_operator.trajectory import (
     Phase,
     TrajectoryRecorderProtocol,

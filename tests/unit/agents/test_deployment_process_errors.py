@@ -144,7 +144,7 @@ class TestHealthCheckProcessErrors:
 
     def test_health_check_timeout(self, tmp_path):
         """Health check that times out should be handled properly."""
-        from app_operator.cli_agent.healthcheck import run_health_check
+        from app_operator.healthcheck import run_health_check
 
         repo = tmp_path / "repo"
         repo.mkdir()

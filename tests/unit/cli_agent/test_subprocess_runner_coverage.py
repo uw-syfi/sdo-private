@@ -1,7 +1,7 @@
 import pytest
 import subprocess
 from unittest.mock import MagicMock, patch
-from app_operator.cli_agent.subprocess_runner import SubprocessRunner
+from app_operator.subprocess_runner import SubprocessRunner
 
 
 class MockProcess:
