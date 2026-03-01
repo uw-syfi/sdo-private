@@ -222,6 +222,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     Path(user_work_dir).resolve() if user_work_dir else work_dir
                 )
 
+                # Validate work_dir is within repo root to prevent path traversal
+                try:
+                    exec_work_dir.relative_to(repo_root)
+                except ValueError:
+                    await io._send_event(
+                        "log",
+                        {
+                            "message": f"Invalid work_dir: path must be within the repository root ({repo_root})",
+                            "level": "error",
+                        },
+                    )
+                    continue
+
                 # Run engine in background task so we can keep receiving messages (like answers)
                 current_task = asyncio.create_task(
                     run_engine_and_script(

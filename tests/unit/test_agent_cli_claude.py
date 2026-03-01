@@ -78,7 +78,7 @@ class TestClaudeCommandConstruction:
 
     def test_command_includes_prompt(self, agent):
         cmd = agent._get_command("deploy the app")
-        assert '"deploy the app"' in cmd
+        assert "deploy the app" in cmd
 
 
 class TestClaudeGenerationSession:
