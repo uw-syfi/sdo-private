@@ -7,10 +7,9 @@ chunk-content parsing and tool-result extraction logic.
 
 import ast
 import json
-import logging
 from typing import Any, Tuple
 
-logger = logging.getLogger(__name__)
+from app_operator.logger import logger
 
 
 def parse_chunk_content(content: Any) -> str:
