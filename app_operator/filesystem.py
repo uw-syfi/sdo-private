@@ -5,6 +5,8 @@ dependency injection and testing without actual file I/O.
 """
 
 import fnmatch
+import posixpath
+import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List
@@ -164,8 +166,6 @@ class RealFilesystem(FileSystemInterface):
         path.unlink()
 
     def remove_tree(self, path: Path):
-        import shutil
-
         shutil.rmtree(path)
 
     def glob(self, path: Path, pattern: str) -> List[Path]:
@@ -236,7 +236,6 @@ class InMemoryFilesystem(FileSystemInterface):
         applies pure PurePosixPath normalization to collapse '..' and '.'
         components without touching the real filesystem.
         """
-        import posixpath
         p = path if path.is_absolute() else Path.cwd() / path
         return posixpath.normpath(str(p))
 

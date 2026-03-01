@@ -20,8 +20,9 @@ from app_operator.prompts.deployment_context import (
     create_system_prompt,
 )
 from app_operator.prompts.deployer import (
-    create_generate_script_prompt,
+    create_consolidation_prompt,
     create_fix_prompt,
+    create_generate_script_prompt,
     prepare_error_context,
 )
 from app_operator.cli_agent.subprocess_runner import SubprocessRunner
@@ -713,9 +714,6 @@ class DeploymentAgent:
             new_attempts_list.append(f"## Attempt {i}\n{content}\n")
 
         new_attempts_text = "\n".join(new_attempts_list)
-
-        # Import locally to avoid circular imports if any
-        from app_operator.prompts.deployer import create_consolidation_prompt
 
         prompt = create_consolidation_prompt(
             existing_content, new_attempts_text)

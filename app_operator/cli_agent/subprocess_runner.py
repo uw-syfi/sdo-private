@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Union
 
+from app_operator.logger import logger
 from app_operator.ui import OperatorUI
 from app_operator.types import CommandResult
 
@@ -257,7 +258,6 @@ class SubprocessRunner:
 
         if summarizer is not None:
             summarizer.start(start_time=start_time)
-            from app_operator.logger import logger
             logger.debug(
                 f"SubprocessRunner: Started monitoring with summarizer "
                 f"(initial_delay={
@@ -284,7 +284,6 @@ class SubprocessRunner:
             # Log monitoring progress every 10 seconds (100 iterations at 0.1s
             # sleep)
             if summarizer is not None and loop_iterations % 100 == 0:
-                from app_operator.logger import logger
                 logger.debug(
                     f"SubprocessRunner: Monitoring loop iter={loop_iterations}, "
                     f"elapsed={
