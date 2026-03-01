@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# lego_agent Web UI
 
-## Getting Started
+This is the web frontend for `lego_agent`, the SDS agent workflow generator. It provides a chat-based interface for describing a task, iterating through clarification questions, and watching the generated workflow run.
 
-First, run the development server:
+## Starting the UI
+
+The recommended way is the wrapper script from the repo root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+./scripts/start_lego_ui.sh
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+This starts both the backend server (`lego_agent/server.py`) and this Next.js frontend, then opens `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Manual start (development)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+If you need to run the frontend independently:
 
-## Learn More
+```bash
+cd lego_agent/ui
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+The frontend expects the backend at `http://localhost:8000`. Start the backend separately:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+uv run -m lego_agent.server
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## What it does
 
-## Deploy on Vercel
+1. Sends your task description to the backend
+2. Displays the clarification loop (AI-generated questions to refine requirements)
+3. Shows the generated agent workflow script
+4. Streams execution output in real time
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See `docs/lego-agent.md` for full documentation on the lego_agent system.
