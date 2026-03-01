@@ -19,7 +19,7 @@ app = FastAPI()
 class WebIO:
     """UserIO implementation for WebSocket-based Web UI."""
 
-    def __init__(self, websocket: WebSocket, input_queue: asyncio.Queue):
+    def __init__(self, websocket: WebSocket, input_queue: asyncio.Queue) -> None:
         self.websocket = websocket
         self.input_queue = input_queue
         self._thinking_buffer = ""
@@ -37,7 +37,7 @@ class WebIO:
         if self._pending_tasks:
             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
 
-    async def _send_event(self, type: str, data: Dict[str, Any]):
+    async def _send_event(self, type: str, data: Dict[str, Any]) -> None:
         if self.websocket.client_state == WebSocketState.CONNECTED:
             await self.websocket.send_json({"type": type, **data})
 
@@ -84,14 +84,14 @@ class WebIO:
         # We will schedule the task on the current loop.
         self._track_task(self._send_info_async(message))
 
-    async def _send_info_async(self, message: str):
+    async def _send_info_async(self, message: str) -> None:
         await self._flush_thinking()
         await self._send_event("log", {"message": message, "level": "info"})
 
     def print_stream(self, text: str) -> None:
         self._track_task(self._send_stream_async(text))
 
-    async def _send_stream_async(self, text: str):
+    async def _send_stream_async(self, text: str) -> None:
         await self._flush_thinking()
         await self._send_event("log", {"message": text, "level": "info"})
 
@@ -102,20 +102,20 @@ class WebIO:
         # The engine calls this synchronously.
         self._track_task(self._send_thinking_async(text))
 
-    async def _send_thinking_async(self, text: str):
+    async def _send_thinking_async(self, text: str) -> None:
         await self._send_event("thinking", {"text": text})
 
     def render_tool_start(self, name: str, inputs: str) -> None:
         self._track_task(self._send_tool_start_async(name, inputs))
 
-    async def _send_tool_start_async(self, name: str, inputs: str):
+    async def _send_tool_start_async(self, name: str, inputs: str) -> None:
         await self._flush_thinking()
         await self._send_event("tool_start", {"name": name, "input": inputs})
 
     def render_tool_end(self, name: str, output: str, status: str) -> None:
         self._track_task(self._send_tool_end_async(name, output, status))
 
-    async def _send_tool_end_async(self, name: str, output: str, status: str):
+    async def _send_tool_end_async(self, name: str, output: str, status: str) -> None:
         await self._flush_thinking()
         await self._send_event(
             "tool_end", {"name": name, "output": output, "status": status}
@@ -130,20 +130,20 @@ class WebIO:
     def render_info(self, message: str) -> None:
         self._track_task(self._send_log_async(message, "info"))
 
-    async def _send_log_async(self, message: str, level: str):
+    async def _send_log_async(self, message: str, level: str) -> None:
         await self._flush_thinking()
         await self._send_event("log", {"message": message, "level": level})
 
     def render_graph(self, config: Dict[str, Any]) -> None:
         self._track_task(self._send_graph_async(config))
 
-    async def _send_graph_async(self, config: Dict[str, Any]):
+    async def _send_graph_async(self, config: Dict[str, Any]) -> None:
         await self._flush_thinking()
         await self._send_event("graph", {"config": config})
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     input_queue = asyncio.Queue()
     io = WebIO(websocket, input_queue)
@@ -373,7 +373,7 @@ async def run_engine_and_script(
             env=env,
         )
 
-        async def read_stream(stream, name):
+        async def read_stream(stream, name) -> None:
             while True:
                 line = await stream.readline()
                 if not line:
