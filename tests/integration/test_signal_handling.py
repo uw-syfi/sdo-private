@@ -5,8 +5,8 @@ correctly, performing cleanup and exiting gracefully.
 """
 
 import signal
-import time
 import threading
+from unittest.mock import patch
 from app_operator.cli_agent.operator import AppOperator
 from tests.fixtures.agents import StubAgent
 
@@ -48,21 +48,26 @@ class TestSignalHandling:
             agent=agent,
         )
 
-        # Run operator in a thread and send SIGINT after 0.5 second
-        def run_operator():
-            return operator.run()
+        # Use an event to synchronize: wait until the operator has started
+        operator_started = threading.Event()
+        original_set_stage = operator.ui.set_stage
+
+        def signaling_set_stage(stage):
+            original_set_stage(stage)
+            operator_started.set()
 
         result = None
 
         def run_with_result():
             nonlocal result
-            result = run_operator()
+            with patch.object(operator.ui, "set_stage", side_effect=signaling_set_stage):
+                result = operator.run()
 
         thread = threading.Thread(target=run_with_result)
         thread.start()
 
-        # Wait a bit then send SIGINT
-        time.sleep(0.5)
+        # Wait for the operator to start, then request shutdown
+        operator_started.wait(timeout=10)
         operator._shutdown_requested = True
 
         thread.join(timeout=10)
@@ -95,21 +100,27 @@ class TestSignalHandling:
             agent=stub_agent,
         )
 
-        # Run in thread and request shutdown during monitoring
-        def run_operator():
-            return operator.run()
+        # Use an event to synchronize: wait until deployment stage begins
+        deployment_started = threading.Event()
+        original_set_stage = operator.ui.set_stage
+
+        def signaling_set_stage(stage):
+            original_set_stage(stage)
+            if stage == "Deployment":
+                deployment_started.set()
 
         result = None
 
         def run_with_result():
             nonlocal result
-            result = run_operator()
+            with patch.object(operator.ui, "set_stage", side_effect=signaling_set_stage):
+                result = operator.run()
 
         thread = threading.Thread(target=run_with_result)
         thread.start()
 
-        # Let deployment complete, then request shutdown
-        time.sleep(0.5)
+        # Wait for the operator to reach deployment, then request shutdown
+        deployment_started.wait(timeout=10)
         operator._shutdown_requested = True
 
         thread.join(timeout=10)
