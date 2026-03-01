@@ -29,6 +29,8 @@ from app_operator.trajectory_collectors import collect_gemini_sessions
 from app_operator.prompts.trajectory_prompts import get_system_prompt
 from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
 
+DEFAULT_MAX_OUTPUT_LENGTH = 10000  # characters captured per tool output
+
 
 class Phase(str, Enum):
     """Phases of SDS operation."""
@@ -111,7 +113,7 @@ class TrajectoryRecorder:
     Writes JSON to .sds/trajectories/
     """
 
-    def __init__(self, repo_path: Path, max_output_length: int = 10000):
+    def __init__(self, repo_path: Path, max_output_length: int = DEFAULT_MAX_OUTPUT_LENGTH):
         """Initialize the trajectory recorder.
 
         Args:

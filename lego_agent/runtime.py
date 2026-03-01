@@ -27,6 +27,8 @@ from lego_agent.streaming import parse_chunk_content, extract_tool_result
 
 # Default timeout (seconds) for agent generation calls
 DEFAULT_AGENT_TIMEOUT = 300
+DEFAULT_FAN_OUT_MAX_WORKERS = 4  # maximum parallel workers for FanOut
+DEFAULT_JUDGE_LOOP_MAX_ITERATIONS = 10  # default maximum iterations for JudgeLoop
 
 
 @runtime_checkable
@@ -256,7 +258,7 @@ class FanOut(Runnable):
         self,
         agent: Runnable,
         items: List[str],
-        max_workers: int = 4,
+        max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
     ):
         self.agent = agent
@@ -431,7 +433,7 @@ def _create_fan_out_from_config(config: Dict[str, Any]) -> Runnable:
     return FanOut(
         agent=_build_runnable(agent_config),
         items=items,
-        max_workers=config.get("max_workers", 4),
+        max_workers=config.get("max_workers", DEFAULT_FAN_OUT_MAX_WORKERS),
         timeout=config.get("timeout", DEFAULT_AGENT_TIMEOUT),
     )
 
@@ -452,7 +454,7 @@ def _create_judge_loop_from_config(config: Dict[str, Any]) -> Runnable:
     if not worker_config:
         raise ValueError("JudgeLoop must have 'worker'")
     task = config.get("task", "")
-    max_iters = config.get("max_iterations", 10)
+    max_iters = config.get("max_iterations", DEFAULT_JUDGE_LOOP_MAX_ITERATIONS)
     return JudgeLoop(
         judge=_build_runnable(judge_config),
         worker=_build_runnable(worker_config),
@@ -503,7 +505,7 @@ def run_yaml(config_path: str) -> None:
 
 
 # Wrapper functions for script usage
-def fan_out(agent: Runnable, items: List[str], max_workers: int = 4) -> List[Any]:
+def fan_out(agent: Runnable, items: List[str], max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS) -> List[Any]:
     """Execute multiple items in parallel using the agent."""
     return FanOut(agent, items, max_workers).run(None)
 
@@ -516,7 +518,8 @@ def summarize(
 
 
 def judge_loop(
-    judge: Runnable, worker: Runnable, task: str, max_iterations: int = 10
+    judge: Runnable, worker: Runnable, task: str,
+    max_iterations: int = DEFAULT_JUDGE_LOOP_MAX_ITERATIONS
 ) -> Dict[str, str]:
     """Execute a judge-worker loop."""
     return JudgeLoop(judge, worker, task, max_iterations).run(None)

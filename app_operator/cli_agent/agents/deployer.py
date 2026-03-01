@@ -37,6 +37,8 @@ from app_operator.trajectory import (
 
 FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 FIX_SUMMARY_FILENAME = "fix_summary.md"
+FIX_SUMMARY_MAX_LENGTH = 2000  # characters before truncating agent response summary
+FIX_SUMMARY_TRUNCATE_AT = 1900  # characters to keep when truncating summary
 
 
 def get_fix_summary_path(sds_dir: Path) -> Path:
@@ -834,8 +836,8 @@ class DeploymentAgent:
                     f"Agent did not provide summary in expected format for attempt {attempt}")
                 summary_text = f"Agent attempted to fix deployment issues (no structured summary provided).\n\nFull response:\n{response}"
                 # Optionally truncate if too long
-                if len(summary_text) > 2000:
-                    summary_text = summary_text[:1900] + \
+                if len(summary_text) > FIX_SUMMARY_MAX_LENGTH:
+                    summary_text = summary_text[:FIX_SUMMARY_TRUNCATE_AT] + \
                         "...\n[Response truncated]"
 
             # Always save some summary
