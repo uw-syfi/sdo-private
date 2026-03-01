@@ -7,6 +7,31 @@ from app_operator.ui import OperatorUI
 from app_operator.logger import logger
 
 
+def _write_to_log(log_file, header: str, stdout: str = "",
+                  stderr: str = "") -> None:
+    """Write a structured entry to a health check log file.
+
+    Args:
+        log_file: Open file handle to write to.
+        header: Header text for the log entry.
+        stdout: Standard output to include (omitted if empty).
+        stderr: Standard error to include (omitted if empty).
+    """
+    try:
+        log_file.write(header)
+        if stdout:
+            log_file.write("=== STDOUT ===\n")
+            log_file.write(stdout)
+            log_file.write("\n")
+        if stderr:
+            log_file.write("=== STDERR ===\n")
+            log_file.write(stderr)
+            log_file.write("\n")
+        log_file.flush()
+    except Exception:
+        pass
+
+
 def run_health_check(
     repo_path: Path,
     health_check_script: Path,
@@ -38,7 +63,8 @@ def run_health_check(
             log_file = open(log_file_path, "w")
             logger.info(f"  Logging health check output to: {log_file_path}")
         except Exception as e:
-            logger.warning(f"Could not open health check log file {log_file_path}: {e}")
+            logger.warning(
+                f"Could not open health check log file {log_file_path}: {e}")
 
     start_time = time.time()
     try:
@@ -52,7 +78,9 @@ def run_health_check(
         duration = time.time() - start_time
 
         status = "PASSED" if result.returncode == 0 else "FAILED"
-        logger.info(f"Health check finished: {status} (Exit Code: {result.returncode})")
+        logger.info(
+            f"Health check finished: {status} (Exit Code: {
+                result.returncode})")
 
         if ui:
             ui.on_tool_result(
@@ -65,21 +93,12 @@ def run_health_check(
 
         # Write outputs to log file if provided
         if log_file:
-            try:
-                log_file.write("=== Health Check Output ===\n")
-                log_file.write(f"Exit Code: {result.returncode}\n")
-                log_file.write(f"Status: {status}\n\n")
-                if result.stdout:
-                    log_file.write("=== STDOUT ===\n")
-                    log_file.write(result.stdout)
-                    log_file.write("\n")
-                if result.stderr:
-                    log_file.write("=== STDERR ===\n")
-                    log_file.write(result.stderr)
-                    log_file.write("\n")
-                log_file.flush()
-            except Exception as e:
-                logger.warning(f"Could not write to health check log file: {e}")
+            header = (
+                "=== Health Check Output ===\n"
+                f"Exit Code: {result.returncode}\n"
+                f"Status: {status}\n\n"
+            )
+            _write_to_log(log_file, header, result.stdout, result.stderr)
 
         return {
             "success": result.returncode == 0,
@@ -123,20 +142,16 @@ def run_health_check(
             )
 
         if log_file:
-            try:
-                log_file.write("=== Health Check Timeout ===\n")
-                log_file.write(f"{error_msg}\n")
-                if stdout_output:
-                    log_file.write("=== STDOUT (Partial) ===\n")
-                    log_file.write(stdout_output)
-                    log_file.write("\n")
-                if stderr_output != error_msg and stderr_output:
-                    log_file.write("=== STDERR (Partial) ===\n")
-                    log_file.write(stderr_output)
-                    log_file.write("\n")
-                log_file.flush()
-            except Exception:
-                pass
+            header = f"=== Health Check Timeout ===\n{error_msg}\n"
+            # For timeout, only include stderr if it differs from the error
+            # message
+            timeout_stderr = stderr_output if stderr_output != error_msg else ""
+            _write_to_log(
+                log_file, header,
+                stdout=stdout_output,
+                stderr=timeout_stderr,
+            )
+
         return {
             "success": False,
             "exit_code": -1,
@@ -157,13 +172,11 @@ def run_health_check(
             )
 
         if log_file:
-            try:
-                log_file.write("=== Health Check Error ===\n")
-                log_file.write(f"{error_msg}\n")
-                log_file.flush()
-            except Exception:
-                pass
-        return {"success": False, "exit_code": -1, "stdout": "", "stderr": error_msg}
+            header = f"=== Health Check Error ===\n{error_msg}\n"
+            _write_to_log(log_file, header)
+
+        return {"success": False, "exit_code": -
+                1, "stdout": "", "stderr": error_msg}
     finally:
         if log_file:
             try:
