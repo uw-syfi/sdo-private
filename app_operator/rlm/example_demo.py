@@ -38,15 +38,15 @@ def create_example_error_log() -> str:
 
 """
 
-    # Add some different error types for realism
-    if i % 5 == 0:
-        error_log += f"""
+        # Add some different error types for realism
+        if i % 5 == 0:
+            error_log += f"""
 [2026-02-13 10:{i:02d}:50] Warning: MongoDB connection timeout
 [2026-02-13 10:{i:02d}:51] Error: dial tcp 172.17.0.{i}:27017: i/o timeout
 """
 
-    if i % 7 == 0:
-        error_log += f"""
+        if i % 7 == 0:
+            error_log += f"""
 [2026-02-13 10:{i:02d}:52] Error: Redis connection refused
 [2026-02-13 10:{i:02d}:53] Error: dial tcp 127.0.0.1:6379: connect: connection refused
 """
@@ -190,10 +190,14 @@ result = f"Port conflict detected. Ports used: {set(ports)}"
     print("\n--- RLM Statistics ---")
     print(json.dumps(stats, indent=2))
 
+    baseline_tokens = stats['baseline_context_tokens']
+    estimated_tokens = len(error_log) // 4
+    tokens_saved = baseline_tokens
+
     print("\nBenefits:")
     print(
-        f"  1. Tokens saved: ~{stats['total_tokens_saved']:,} "
-        f"({stats['total_tokens_saved'] / (len(error_log) // 4) * 100:.1f}% reduction)"
+        f"  1. Tokens saved: ~{tokens_saved:,} "
+        f"({tokens_saved / estimated_tokens * 100:.1f}% reduction)"
     )
     print(
         f"  2. Focused analysis: {stats['code_executions']} code queries + {stats['recursive_calls']} recursive calls")
@@ -204,9 +208,9 @@ result = f"Port conflict detected. Ports used: {set(ports)}"
         "approach": "rlm",
         "log_size": len(error_log),
         "total_calls": stats["total_calls"],
-        "tokens_saved": stats["total_tokens_saved"],
-        "tokens_sent": (len(error_log) // 4) - stats["total_tokens_saved"],
-        "savings_ratio": stats["total_tokens_saved"] / (len(error_log) // 4),
+        "tokens_saved": tokens_saved,
+        "tokens_sent": estimated_tokens - tokens_saved,
+        "savings_ratio": tokens_saved / estimated_tokens,
     }
 
 
