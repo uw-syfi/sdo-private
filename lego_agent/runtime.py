@@ -25,9 +25,6 @@ from app_operator.logger import logger
 from lego_agent.io import Colors
 from lego_agent.streaming import parse_chunk_content, extract_tool_result
 
-# Global constant for compatibility with generated scripts
-MAX_ITERATIONS = 10
-
 # Default timeout (seconds) for agent generation calls
 DEFAULT_AGENT_TIMEOUT = 300
 

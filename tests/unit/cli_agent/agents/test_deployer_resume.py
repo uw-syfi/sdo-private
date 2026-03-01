@@ -1,11 +1,11 @@
 import pytest
 
-from app_operator.cli_agent.agents.deployer import (
-    DeploymentAgent,
-    DEFAULT_DEPLOY_TIMEOUT_SECS,
-)
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures import bind_method
 from tests.fixtures.agents import StubAgent
+
+# Default deploy timeout used by OperatorConfig; kept here for test readability.
+DEFAULT_DEPLOY_TIMEOUT_SECS = 900
 
 
 @pytest.fixture
