@@ -80,7 +80,7 @@ def test_analyze_health_calls_agent(monitor, stub_agent):
     call = stub_agent.calls[0]
     assert "all good" in call["prompt"]
     assert call["cwd"] == str(monitor.repo_path)
-    assert call["timeout"] == 120
+    assert call["timeout"] == 900
 
 
 def test_analyze_parses_exec_summary(monitor, stub_agent, capture_logs, tmp_path):
