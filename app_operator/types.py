@@ -33,3 +33,16 @@ class TrajectoryCallRecord(_TrajectoryCallRecordRequired, total=False):
 
     prompt_version: str
     fallback_occurred: bool
+
+
+class FaultInjectionMetadata(TypedDict):
+    """Metadata about fault injection for embedding in trajectory JSON."""
+
+    enabled: bool
+    num_faults_requested: int
+    num_faults_injected: int
+    faults: list
+    failed_injections: list
+    fault_ids: list[str]
+    categories: list[str]
+    severities: list[str]

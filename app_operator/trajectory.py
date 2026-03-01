@@ -27,7 +27,7 @@ from enum import Enum
 from app_operator.logger import logger
 from app_operator.trajectory_collectors import collect_gemini_sessions
 from app_operator.prompts.trajectory_prompts import get_system_prompt
-from app_operator.types import TokenUsage, TrajectoryCallRecord
+from app_operator.types import FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
 
 
 class Phase(str, Enum):
@@ -96,7 +96,7 @@ class TrajectoryRecorderProtocol(Protocol):
     def record_fallback(self) -> None: ...
     def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
     def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
-    def record_fault_injection(self, metadata: Dict[str, Any]) -> None: ...
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None: ...
     def record_token_usage(self, usage: TokenUsage) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
@@ -372,7 +372,7 @@ class TrajectoryRecorder:
         """
         self._current_rendered_prompt = rendered_prompt
 
-    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None:
         """Record fault injection metadata in the trajectory.
 
         Args:
@@ -625,7 +625,7 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
     def record_rendered_prompt(self, rendered_prompt: str) -> None:
         pass
 
-    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None:
         pass
 
     def record_token_usage(self, usage: TokenUsage) -> None:
