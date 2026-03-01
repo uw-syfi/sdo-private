@@ -171,8 +171,11 @@ class LegoAgentEngine:
                                         yaml_config=inputs.get("yaml_config"),
                                     ).validate()
                                     break
-                                except Exception:
-                                    pass
+                                except (ValueError, TypeError, KeyError) as e:
+                                    logger.debug(
+                                        "Early response validation failed, "
+                                        "continuing agent execution: %s", e
+                                    )
 
                         if self._thinking_started:
                             self.io.info("")  # Newline

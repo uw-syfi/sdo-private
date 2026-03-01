@@ -7,7 +7,10 @@ chunk-content parsing and tool-result extraction logic.
 
 import ast
 import json
+import logging
 from typing import Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def parse_chunk_content(content: Any) -> str:
@@ -68,7 +71,8 @@ def extract_tool_result(
             result_text = str(content.get("output", ""))
         else:
             result_text = str(content)
-    except Exception:
+    except (TypeError, AttributeError) as e:
+        logger.debug("Failed to parse tool result: %s", e)
         result_text = str(content)
 
     if len(result_text) > max_length:

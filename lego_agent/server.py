@@ -246,8 +246,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     suggestions = sorted(suggestions)[:20]
                     await io._send_event("dir_options", {"options": suggestions})
 
-                except Exception:
-                    # Silently fail for list dirs (e.g. permission error)
+                except OSError as e:
+                    logger.debug("Directory listing failed for %r: %s", path_str, e)
                     await io._send_event("dir_options", {"options": []})
 
             elif event_type == "validate_path":
@@ -257,8 +257,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     if path_str:
                         p = Path(path_str)
                         valid = p.exists() and p.is_dir()
-                except Exception:
-                    pass
+                except (OSError, ValueError) as e:
+                    logger.debug("Path validation failed for %r: %s", path_str, e)
 
                 await io._send_event(
                     "path_validation", {"path": path_str, "valid": valid}
