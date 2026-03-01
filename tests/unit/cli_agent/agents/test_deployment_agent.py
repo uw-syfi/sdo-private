@@ -3,16 +3,16 @@ from unittest.mock import MagicMock
 import pytest
 
 import app_operator.cli_agent.agents.deployer as deployer_module
-from app_operator.cli_agent.agents.deployer import (
-    DeploymentAgent,
-    DEFAULT_DEPLOY_TIMEOUT_SECS,
-)
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.prompts.deployer import (
     prepare_error_context,
     create_fix_prompt,
 )
 from tests.fixtures import bind_method
 from tests.fixtures.agents import TrackingAgent
+
+# Default deploy timeout used by OperatorConfig; kept here for test readability.
+DEFAULT_DEPLOY_TIMEOUT_SECS = 900
 
 
 @pytest.fixture

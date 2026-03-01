@@ -38,9 +38,6 @@ def create_agent_from_config(
 
     provider_lower = provider.lower()
 
-    if provider_lower == "rlm":
-        return AGENT_REGISTRY["rlm"](model=model, location=config.agent.location)
-
     if provider_lower in AGENT_REGISTRY:
         kwargs = {"model": model}
         if provider_lower in ("rlm", "subagent", "hybrid"):

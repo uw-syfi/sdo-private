@@ -35,19 +35,6 @@ class LegoAgentResult:
     clarifications: List[Tuple[str, str]]
 
 
-def get_lego_agent_response_schema() -> dict:
-    """Return the JSON schema for LegoAgentResponse."""
-    return {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["clarify", "ready"]},
-            "questions": {"type": "array", "items": {"type": "string"}},
-            "yaml_config": {"type": "string"},
-        },
-        "required": ["status"],
-    }
-
-
 def extract_json(text: str) -> str:
     """Extract JSON from text, handling markdown fences."""
     # SDS-REVIEW: Architecture - Utility function in models module.
