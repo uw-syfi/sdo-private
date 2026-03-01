@@ -234,11 +234,26 @@ class RLMCodingAgent(CodingAgent):
         """Build an ``RLMContext`` by reading available artifacts from *repo_path*.
 
         Files that do not exist are silently skipped (empty string).
+
+        On the first call where ``.sds/deploy.sh`` exists, a backup is created
+        at ``.sds/deploy.sh.bak`` so the original script is preserved across
+        fix iterations.  Subsequent calls read from the backup.
         """
         sds = repo_path / ".sds"
+        deploy_sh = sds / "deploy.sh"
+        deploy_bak = sds / "deploy.sh.bak"
+
+        # Create backup of deploy.sh on first build (before any fixes).
+        if deploy_sh.exists() and not deploy_bak.exists():
+            import shutil
+            shutil.copy2(deploy_sh, deploy_bak)
+
+        # original_script comes from the backup (immutable first version).
+        original_script = self._read(deploy_bak)
+
         return RLMContext(
             error_log=self._read(sds / "logs" / "deploy.log"),
-            deployment_script=self._read(sds / "deploy.sh"),
+            deployment_script=self._read(deploy_sh),
             health_check_output=self._read(sds / "logs" / "health_check.log"),
             dockerfile=self._read(repo_path / "Dockerfile"),
             docker_compose=(
@@ -250,6 +265,7 @@ class RLMCodingAgent(CodingAgent):
                 or self._read(repo_path / "README.rst")
             ),
             analysis_report=self._read(sds / "code_analysis.md"),
+            original_script=original_script,
         )
 
     @staticmethod
