@@ -55,13 +55,9 @@ class AppOperator:
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.ui = ui or NullOperatorUI()
 
-        # Convert to Path and resolve only for real filesystem
-        # (InMemoryFilesystem doesn't need symlink resolution)
-        if isinstance(self.filesystem, RealFilesystem):
-            self.repo_path = Path(repo_path).resolve()
-        else:
-            # For InMemoryFilesystem, just use absolute path
-            self.repo_path = Path(repo_path).absolute()
+        # Use absolute() which works for both real and in-memory filesystems
+        # without making OS syscalls like resolve() does
+        self.repo_path = Path(repo_path).absolute()
 
         # Validate repository path
         if not self.filesystem.exists(self.repo_path):

@@ -116,7 +116,7 @@ def generate_scripts(
             system_prompt = create_system_prompt(deployment_config.platform)
 
             # Analyze the repository structure
-            repo_context = analyze_repository(target_path)
+            repo_context = analyze_repository(target_path, filesystem=filesystem)
 
             # Generate deploy.sh using coding agent
             deploy_success, deploy_msg = _generate_script(
@@ -214,6 +214,7 @@ def _generate_script(
         platform=platform,
         dspy_config=dspy_config,
         recorder=recorder,
+        filesystem=filesystem,
     )
 
     try:
@@ -300,8 +301,8 @@ class DeploymentAgent:
         if not self.filesystem.exists(logs_dir):
             return 1
 
-        # Find all deploy logs
-        log_files = list(logs_dir.glob("deploy_attempt_*.log"))
+        # Find all deploy logs using filesystem abstraction
+        log_files = self.filesystem.glob(logs_dir, "deploy_attempt_*.log")
         if not log_files:
             return 1
 

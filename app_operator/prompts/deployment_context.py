@@ -1,5 +1,7 @@
 from pathlib import Path
+from typing import Optional
 
+from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.prompts import get_loader
 
 
@@ -14,45 +16,59 @@ def create_system_prompt(platform: str) -> str:
     )
 
 
-def analyze_repository(repo_path: Path) -> str:
-    """Analyze repository structure and return context string."""
+def analyze_repository(
+    repo_path: Path,
+    filesystem: Optional[FileSystemInterface] = None,
+) -> str:
+    """Analyze repository structure and return context string.
+
+    Args:
+        repo_path: Path to the repository to analyze.
+        filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+
+    Returns:
+        str: Context string describing the repository structure.
+    """
+    if filesystem is None:
+        filesystem = RealFilesystem()
+
     context_parts = []
 
     # Check for common deployment files
-    if (repo_path / ".sds" / "code_analysis.md").exists():
+    if filesystem.exists(repo_path / ".sds" / "code_analysis.md"):
         context_parts.append("- Found code analysis: .sds/code_analysis.md")
-    if (repo_path / ".sds" / "deployment_issues.md").exists():
+    if filesystem.exists(repo_path / ".sds" / "deployment_issues.md"):
         context_parts.append(
             "- Found deployment issues report: .sds/deployment_issues.md"
         )
 
-    if (repo_path / "docker-compose.yml").exists():
+    if filesystem.exists(repo_path / "docker-compose.yml"):
         context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
-    if (repo_path / "docker-compose.yaml").exists():
+    if filesystem.exists(repo_path / "docker-compose.yaml"):
         context_parts.append("- Found docker-compose.yaml (Docker Compose deployment)")
-    if (repo_path / "Dockerfile").exists():
+    if filesystem.exists(repo_path / "Dockerfile"):
         context_parts.append("- Found Dockerfile (Docker-based application)")
-    if (repo_path / "k8s").exists() or (repo_path / "kubernetes").exists():
+    if filesystem.exists(repo_path / "k8s") or filesystem.exists(repo_path / "kubernetes"):
         context_parts.append("- Found Kubernetes manifests directory")
-    if (repo_path / "Makefile").exists():
+    if filesystem.exists(repo_path / "Makefile"):
         context_parts.append("- Found Makefile (may contain build/deploy targets)")
 
     # Check for common application files
-    if (repo_path / "package.json").exists():
+    if filesystem.exists(repo_path / "package.json"):
         context_parts.append("- Found package.json (Node.js application)")
-    if (repo_path / "requirements.txt").exists() or (
+    if filesystem.exists(repo_path / "requirements.txt") or filesystem.exists(
         repo_path / "pyproject.toml"
-    ).exists():
+    ):
         context_parts.append("- Found Python dependencies (Python application)")
-    if (repo_path / "go.mod").exists():
+    if filesystem.exists(repo_path / "go.mod"):
         context_parts.append("- Found go.mod (Go application)")
-    if (repo_path / "Cargo.toml").exists():
+    if filesystem.exists(repo_path / "Cargo.toml"):
         context_parts.append("- Found Cargo.toml (Rust application)")
-    if (repo_path / "pom.xml").exists():
+    if filesystem.exists(repo_path / "pom.xml"):
         context_parts.append("- Found pom.xml (Java/Maven application)")
 
     # Check for README
-    readme_files = list(repo_path.glob("README*"))
+    readme_files = filesystem.glob(repo_path, "README*")
     if readme_files:
         context_parts.append(
             f"- Found README file(s): {', '.join(f.name for f in readme_files)}"
