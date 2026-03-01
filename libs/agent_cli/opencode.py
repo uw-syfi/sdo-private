@@ -13,6 +13,7 @@ OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 class OpencodeGenerationSession(CLIGenerationSession):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
     def _process_stdout(self, line: str) -> None:
         """Process a line from stdout."""
         if not line:
