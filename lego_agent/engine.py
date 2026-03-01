@@ -145,10 +145,10 @@ class LegoAgentEngine:
                                 ).validate()
                                 break
                             except (ValueError, TypeError, KeyError) as e:
-                                    logger.debug(
-                                        "Early response validation failed, "
-                                        "continuing agent execution: %s", e
-                                    )
+                                logger.debug(
+                                    "Early response validation failed, "
+                                    "continuing agent execution: %s", e
+                                )
 
                     if self._thinking_started:
                         self.io.info("")  # Newline

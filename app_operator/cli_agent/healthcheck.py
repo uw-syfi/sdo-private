@@ -1,10 +1,11 @@
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Optional
 
 from app_operator.ui import OperatorUI
 from app_operator.logger import logger
+from app_operator.types import CommandResult
 
 
 def _write_to_log(log_file, header: str, stdout: str = "",
@@ -38,7 +39,7 @@ def run_health_check(
     timeout: int = 120,
     log_file_path: Optional[Path] = None,
     ui: Optional[OperatorUI] = None,
-) -> Dict[str, Any]:
+) -> CommandResult:
     """Run the health check script.
 
     Args:
@@ -49,7 +50,7 @@ def run_health_check(
         ui: Optional UI for tool events.
 
     Returns:
-        dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+        CommandResult with keys 'success', 'exit_code', 'stdout', 'stderr'.
     """
     logger.info(f"Running health check: {health_check_script}")
 

@@ -4,9 +4,10 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable, Union
+from typing import Dict, List, Optional, Callable, Union
 
 from app_operator.ui import OperatorUI
+from app_operator.types import CommandResult
 
 
 class SubprocessRunner:
@@ -66,15 +67,15 @@ class SubprocessRunner:
         self._log_file = None
         self._log_lock = threading.Lock()
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> CommandResult:
         """Run the subprocess and return results.
 
         Returns:
-            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+            CommandResult with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
         return self._run_impl(self._wait_for_completion)
 
-    def run_with_progress_monitoring(self, summarizer) -> Dict[str, Any]:
+    def run_with_progress_monitoring(self, summarizer) -> CommandResult:
         """Run subprocess with integrated progress monitoring.
 
         This method starts the subprocess and monitors it, providing periodic
@@ -84,7 +85,7 @@ class SubprocessRunner:
             summarizer: ProgressSummarizer instance for generating summaries.
 
         Returns:
-            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+            CommandResult with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
         def progress_callback():
             if summarizer.should_summarize():
@@ -98,7 +99,7 @@ class SubprocessRunner:
         return self._run_impl(wait_fn)
 
     def _run_impl(
-            self, wait_fn: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
+            self, wait_fn: Callable[[], CommandResult]) -> CommandResult:
         """Shared implementation for run() and run_with_progress_monitoring().
 
         Args:
@@ -174,7 +175,7 @@ class SubprocessRunner:
             return result
 
         except (OSError, subprocess.SubprocessError) as e:
-            result = {
+            result: CommandResult = {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
@@ -189,7 +190,7 @@ class SubprocessRunner:
                 )
             return result
         except Exception as e:
-            result = {
+            result: CommandResult = {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
@@ -234,7 +235,7 @@ class SubprocessRunner:
         self,
         progress_callback: Optional[Callable[[], None]] = None,
         summarizer=None,
-    ) -> Dict[str, Any]:
+    ) -> CommandResult:
         """Wait for process completion with timeout and shutdown checks.
 
         Args:
@@ -248,6 +249,7 @@ class SubprocessRunner:
             Note: stdout/stderr returned here only contain system messages.
             Captured output is in self.*_lines and merged in _run_impl().
         """
+        assert self.process is not None, "_wait_for_completion called before process was started"
         start_time = self.time_func()
 
         if summarizer is not None:

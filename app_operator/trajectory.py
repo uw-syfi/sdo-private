@@ -27,6 +27,7 @@ from enum import Enum
 from app_operator.logger import logger
 from app_operator.trajectory_collectors import collect_gemini_sessions
 from app_operator.prompts.trajectory_prompts import get_system_prompt
+from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
 
 
 class Phase(str, Enum):
@@ -95,8 +96,8 @@ class TrajectoryRecorderProtocol(Protocol):
     def record_fallback(self) -> None: ...
     def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
     def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
-    def record_fault_injection(self, metadata: Dict[str, Any]) -> None: ...
-    def record_token_usage(self, usage: Dict[str, int]) -> None: ...
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None: ...
+    def record_token_usage(self, usage: TokenUsage) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
     def phase(
@@ -155,7 +156,7 @@ class TrajectoryRecorder:
 
         # Current conversation being recorded (not yet committed)
         self._current_phase: Optional[Phase] = None
-        self._current_conversation: List[Dict[str, Any]] = []
+        self._current_conversation: List[dict] = []
         self._current_call_id: Optional[int] = None
         self._conversation_lock = threading.Lock()
 
@@ -228,7 +229,7 @@ class TrajectoryRecorder:
 
             # Record this call in the calls list
             call_start_time = time.strftime("%Y-%m-%d %H:%M:%S")
-            call_record = {
+            call_record: TrajectoryCallRecord = {
                 "call_id": self._current_call_id,
                 "phase": phase.value,
                 "start_time": call_start_time,
@@ -371,7 +372,7 @@ class TrajectoryRecorder:
         """
         self._current_rendered_prompt = rendered_prompt
 
-    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None:
         """Record fault injection metadata in the trajectory.
 
         Args:
@@ -380,7 +381,7 @@ class TrajectoryRecorder:
         self.trajectory["metadata"]["fault_injection"] = metadata
         self._write_to_file()
 
-    def record_token_usage(self, usage: Dict[str, int]) -> None:
+    def record_token_usage(self, usage: TokenUsage) -> None:
         """Record cumulative LLM token usage for this run.
 
         Called after each agent generate() call with the running total so the
@@ -429,8 +430,8 @@ class TrajectoryRecorder:
             phase_key = self._current_phase.value
             if phase_key in self.trajectory:
                 # Create a conversation entry with call_id and prompt metadata
-                conversation_entry = {
-                    "call_id": self._current_call_id,
+                conversation_entry: ConversationEntry = {
+                    "call_id": self._current_call_id or 0,
                     "messages": self._current_conversation.copy(),
                 }
 
@@ -624,10 +625,10 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
     def record_rendered_prompt(self, rendered_prompt: str) -> None:
         pass
 
-    def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None:
         pass
 
-    def record_token_usage(self, usage: Dict[str, int]) -> None:
+    def record_token_usage(self, usage: TokenUsage) -> None:
         pass
 
     @contextmanager
@@ -654,7 +655,7 @@ def get_trajectory() -> Optional["TrajectoryRecorder"]:
     return _recorder
 
 
-def record_assistant_message(content: str, duration: float = None) -> None:
+def record_assistant_message(content: str, duration: Optional[float] = None) -> None:
     """Record an assistant response."""
     recorder = get_trajectory()
     if recorder:
@@ -666,8 +667,8 @@ def record_tool_call(
     args: Dict[str, Any],
     stdout: str = "",
     stderr: str = "",
-    exit_code: int = None,
-    duration: float = None,
+    exit_code: Optional[int] = None,
+    duration: Optional[float] = None,
 ) -> None:
     """Record a tool call with its output."""
     recorder = get_trajectory()
@@ -675,7 +676,7 @@ def record_tool_call(
         recorder.add_tool_call(tool, args, stdout, stderr, exit_code, duration)
 
 
-def record_phase_end(status: str = None) -> None:
+def record_phase_end(status: Optional[str] = None) -> None:
     """End the current phase."""
     recorder = get_trajectory()
     if recorder:
@@ -714,7 +715,7 @@ def get_run_id() -> Optional[str]:
     return None
 
 
-def record_phase_start(phase: Phase, context: Dict[str, Any] = None) -> None:
+def record_phase_start(phase: Phase, context: Optional[Dict[str, Any]] = None) -> None:
     """Start a new phase."""
     recorder = get_trajectory()
     if recorder:

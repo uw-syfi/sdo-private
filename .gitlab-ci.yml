@@ -49,6 +49,12 @@ static_analysis:
     - echo "Running Static Error Checks..."
     - ./scripts/check_errors.sh
 
+type_check:
+  extends: .test_job_template
+  script:
+    - echo "Running Type Checks..."
+    - ./scripts/type_check.sh
+
 formatting:
   extends: .test_job_template
   script:
