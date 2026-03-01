@@ -1,10 +1,19 @@
 from unittest.mock import MagicMock
-from lego_agent.runtime import fan_out, summarize, judge_loop
+from lego_agent.runtime import (
+    fan_out,
+    summarize,
+    judge_loop,
+    _build_runnable,
+    RUNNABLE_TYPES,
+    FanOut,
+    DEFAULT_AGENT_TIMEOUT,
+)
+import pytest
 
 
 def test_fan_out():
     agent = MagicMock()
-    # Mock run as it is called by fan_out (fallback from _generate_async)
+    # Mock run as it is called by fan_out (via asyncio.to_thread for non-AsyncRunnable)
     agent.run.side_effect = ["resp1", "resp2"]
 
     results = fan_out(agent, ["p1", "p2"])
@@ -51,8 +60,10 @@ def test_judge_loop_worker_immediate_success():
 
     judge = MagicMock()
     judge.run.side_effect = [
-        '{"status": "continue", "feedback": "Please start"}',  # First check (pre-work)
-        '{"status": "done", "feedback": "Good job"}',  # Second check (post-work)
+        # First check (pre-work)
+        '{"status": "continue", "feedback": "Please start"}',
+        # Second check (post-work)
+        '{"status": "done", "feedback": "Good job"}',
     ]
 
     result = judge_loop(judge, worker, "task", max_iterations=3)
@@ -84,3 +95,58 @@ def test_judge_loop_refinement():
     # Worker call 1: Fix it
     refine_call = worker.run.call_args_list[1]
     assert "Fix it" in refine_call.args[0]
+
+
+# --- Registry pattern tests (issue 5) ---
+
+
+def test_runnable_types_registry_contains_all_types():
+    """RUNNABLE_TYPES should list all supported kinds."""
+    expected = {"agent", "chain", "fan_out", "summarize", "judge_loop"}
+    assert set(RUNNABLE_TYPES.keys()) == expected
+
+
+def test_build_runnable_unknown_type():
+    """Unknown type should raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown Runnable type: bogus"):
+        _build_runnable({"type": "bogus"})
+
+
+def test_build_runnable_chain_requires_steps():
+    with pytest.raises(ValueError, match="Chain must have 'steps'"):
+        _build_runnable({"type": "chain", "steps": []})
+
+
+def test_build_runnable_fan_out_requires_agent():
+    with pytest.raises(ValueError, match="FanOut must have 'agent'"):
+        _build_runnable({"type": "fan_out"})
+
+
+def test_build_runnable_summarize_requires_agent():
+    with pytest.raises(ValueError, match="Summarize must have 'agent'"):
+        _build_runnable({"type": "summarize"})
+
+
+def test_build_runnable_judge_loop_requires_judge():
+    with pytest.raises(ValueError, match="JudgeLoop must have 'judge'"):
+        _build_runnable({"type": "judge_loop"})
+
+
+def test_build_runnable_judge_loop_requires_worker():
+    with pytest.raises(ValueError, match="JudgeLoop must have 'worker'"):
+        _build_runnable({"type": "judge_loop", "judge": {"type": "agent"}})
+
+
+# --- FanOut timeout configurability (issue 3) ---
+
+
+def test_fan_out_default_timeout():
+    agent = MagicMock()
+    fo = FanOut(agent, ["p1"])
+    assert fo.timeout == DEFAULT_AGENT_TIMEOUT
+
+
+def test_fan_out_custom_timeout():
+    agent = MagicMock()
+    fo = FanOut(agent, ["p1"], timeout=600)
+    assert fo.timeout == 600
