@@ -6,6 +6,9 @@ from app_operator.cli_agent.operator import AppOperator
 from libs.agent_cli.base import CodingAgent
 
 # --- Fake Agent ---
+# Note: FakeCodingAgent is intentionally NOT replaced by the shared StubAgent
+# because it performs real filesystem I/O (writing scripts to disk) to exercise
+# the full operator integration flow end-to-end.
 
 
 class FakeCodingAgent(CodingAgent):

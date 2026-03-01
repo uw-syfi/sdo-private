@@ -13,13 +13,15 @@ from tests.fixtures.agents import (
 
 @pytest.fixture
 def capture_logs():
-    """Fixture to capture loguru logs."""
+    """Fixture to capture loguru logs.
+
+    Only removes the handler added by this fixture on teardown,
+    avoiding destruction of other handlers (e.g. default stderr).
+    """
     logs = []
-    logger.remove()
-    logger.add(lambda msg: logs.append(msg))
+    handler_id = logger.add(lambda msg: logs.append(msg))
     yield logs
-    # Restore default behavior (optional, but good practice if tests run sequentially)
-    logger.remove()
+    logger.remove(handler_id)
 
 
 @pytest.fixture

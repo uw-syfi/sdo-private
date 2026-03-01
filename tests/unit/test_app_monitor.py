@@ -1,16 +1,7 @@
 import pytest
 from app_operator.cli_agent.agents.app_monitor import AppMonitor, HealthCheckTask
 import app_operator.cli_agent.agents.app_monitor as app_monitor_module
-
-
-class StubAgent:
-    def __init__(self, response: str = "ok"):
-        self.response = response
-        self.calls = []
-
-    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 120) -> str:
-        self.calls.append((prompt, cwd, timeout))
-        return self.response
+from tests.fixtures.agents import StubAgent
 
 
 @pytest.fixture
@@ -20,7 +11,7 @@ def repo_path(tmp_path):
 
 @pytest.fixture
 def stub_agent():
-    return StubAgent()
+    return StubAgent(response="ok")
 
 
 @pytest.fixture
@@ -53,7 +44,7 @@ def test_run_executes_health_check_task(monitor, stub_agent, monkeypatch):
 
     assert calls["count"] == 1
     assert len(stub_agent.calls) == 1
-    assert "ok" in stub_agent.calls[0][0]  # prompt contains context
+    assert "ok" in stub_agent.calls[0]["prompt"]  # prompt contains context
 
 
 def test_run_respects_max_checks(monitor, monkeypatch):
@@ -86,10 +77,10 @@ def test_analyze_health_calls_agent(monitor, stub_agent):
     task.analyze(monitor, health_result)
 
     assert len(stub_agent.calls) == 1
-    prompt, cwd, timeout = stub_agent.calls[0]
-    assert "all good" in prompt
-    assert cwd == str(monitor.repo_path)
-    assert timeout == 120
+    call = stub_agent.calls[0]
+    assert "all good" in call["prompt"]
+    assert call["cwd"] == str(monitor.repo_path)
+    assert call["timeout"] == 120
 
 
 def test_analyze_parses_exec_summary(monitor, stub_agent, capture_logs, tmp_path):
