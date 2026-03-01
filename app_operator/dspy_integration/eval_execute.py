@@ -196,7 +196,10 @@ class EvalExecuteOptimizer:
         best_idx = max(range(len(scores)), key=lambda i: scores[i])
         best_score = scores[best_idx]
         best_candidate = candidates[best_idx]
-        best_version = f"eval_{iteration}_c{best_idx + 1}"
+        if output_prefix:
+            best_version = f"{output_prefix}/eval_{iteration}_c{best_idx + 1}"
+        else:
+            best_version = f"eval_{iteration}_c{best_idx + 1}"
 
         logger.info(
             f"[EvalExecute] Best candidate: {best_idx + 1} with score {best_score:.2f}"
