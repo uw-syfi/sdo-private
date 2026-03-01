@@ -21,6 +21,11 @@ load_dotenv()
 
 REQUIRED_DEPENDENCIES = ["docker", "kubectl"]
 
+INSTALL_HINTS = {
+    "docker": "Install Docker: https://docs.docker.com/engine/install/",
+    "kubectl": "Install kubectl: https://kubernetes.io/docs/tasks/tools/",
+}
+
 
 def check_dependencies():
     """Check if required system dependencies are installed."""
@@ -30,8 +35,9 @@ def check_dependencies():
             missing.append(tool)
 
     if missing:
-        logger.error(f"Missing required system dependencies: {', '.join(missing)}")
-        logger.info("Please install them to continue.")
+        for tool in missing:
+            hint = INSTALL_HINTS.get(tool, f"Please install '{tool}' to continue.")
+            logger.error(f"Missing required dependency '{tool}': {hint}")
         sys.exit(1)
 
     # Check if docker daemon is running
@@ -43,7 +49,7 @@ def check_dependencies():
         )
     except subprocess.CalledProcessError:
         logger.error("Docker daemon is not running or not accessible.")
-        logger.info("Please start Docker to continue.")
+        logger.info("Start Docker and try again: https://docs.docker.com/engine/install/")
         sys.exit(1)
 
 
