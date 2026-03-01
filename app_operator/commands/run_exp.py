@@ -45,6 +45,8 @@ class AppResult:
     status: str
     deployment_iterations: int | None
     repeat: int | None = None
+    elapsed_seconds: float | None = None
+    phase_durations: dict | None = None
 
 
 def _write_toml_simple(data: dict) -> str:
@@ -162,6 +164,8 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
                 status=entry["status"],
                 deployment_iterations=entry.get("deployment_iterations"),
                 repeat=entry.get("repeat"),
+                elapsed_seconds=entry.get("elapsed_seconds"),
+                phase_durations=entry.get("phase_durations"),
             ))
         return results
     except (json.JSONDecodeError, KeyError, OSError):
@@ -179,6 +183,8 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
             "success": r.success,
             "status": r.status,
             "deployment_iterations": r.deployment_iterations,
+            "elapsed_seconds": r.elapsed_seconds,
+            "phase_durations": r.phase_durations,
         }
         if has_repeats:
             entry["repeat"] = r.repeat
@@ -196,6 +202,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
             total = len(app_results)
             successes = sum(1 for r in app_results if r.success)
             iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
+            elapsed = [r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None]
             agg: dict = {
                 "app": app_name,
                 "success_rate": f"{successes}/{total}",
@@ -204,12 +211,47 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
                 agg["deploy_iterations_min"] = min(iters)
                 agg["deploy_iterations_max"] = max(iters)
                 agg["deploy_iterations_mean"] = round(sum(iters) / len(iters), 2)
+            if elapsed:
+                agg["elapsed_seconds_min"] = min(elapsed)
+                agg["elapsed_seconds_max"] = max(elapsed)
+                agg["elapsed_seconds_mean"] = round(sum(elapsed) / len(elapsed), 1)
             aggregated.append(agg)
         output["aggregated"] = aggregated
 
     results_path = log_dir / "results.json"
     with open(results_path, "w") as f:
         json.dump(output, f, indent=2)
+
+
+def _fmt_seconds(seconds: float) -> str:
+    """Format a duration in seconds as a human-readable string."""
+    seconds = round(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    m, s = divmod(seconds, 60)
+    return f"{m}m{s:02d}s"
+
+
+_PHASE_LABELS = {
+    "code_analysis": "analysis",
+    "script_generation": "scripting",
+    "deployment": "deploy",
+    "monitoring": "monitor",
+    "finishing": "finishing",
+}
+
+
+def _fmt_phase_durations(phases: dict) -> str:
+    """Format phase durations as a compact string, e.g. 'analysis:2m deploy:5m mon:3m'."""
+    parts = []
+    for key, label in _PHASE_LABELS.items():
+        if key in phases:
+            parts.append(f"{label}:{_fmt_seconds(phases[key])}")
+    # Include any phases not in the known list
+    for key, val in phases.items():
+        if key not in _PHASE_LABELS:
+            parts.append(f"{key}:{_fmt_seconds(val)}")
+    return " ".join(parts) if parts else "N/A"
 
 
 def _print_summary(console: Console, results: list[AppResult]) -> None:
@@ -221,6 +263,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
         table.add_column("App")
         table.add_column("Success Rate")
         table.add_column("Deploy Iterations (min–max / mean / median)")
+        table.add_column("Elapsed (min–max / mean)")
 
         apps_seen: dict[str, list[AppResult]] = {}
         for r in results:
@@ -230,6 +273,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
             total = len(app_results)
             successes = sum(1 for r in app_results if r.success)
             iters = sorted(r.deployment_iterations for r in app_results if r.deployment_iterations is not None)
+            elapsed = sorted(r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None)
             success_str = f"{successes}/{total}"
             if iters:
                 mean = sum(iters) / len(iters)
@@ -238,16 +282,24 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
                 iter_str = f"{iters[0]}–{iters[-1]} / {mean:.1f} / {median:.1f}"
             else:
                 iter_str = "N/A"
-            table.add_row(app_name, success_str, iter_str)
+            if elapsed:
+                elapsed_str = f"{_fmt_seconds(elapsed[0])}–{_fmt_seconds(elapsed[-1])} / {_fmt_seconds(sum(elapsed) / len(elapsed))}"
+            else:
+                elapsed_str = "N/A"
+            table.add_row(app_name, success_str, iter_str, elapsed_str)
     else:
         table = Table()
         table.add_column("App")
         table.add_column("Status")
         table.add_column("Deploy Iterations")
+        table.add_column("Elapsed")
+        table.add_column("Phase Durations")
 
         for r in results:
             iterations = str(r.deployment_iterations) if r.deployment_iterations is not None else "N/A"
-            table.add_row(r.app, r.status, iterations)
+            elapsed = _fmt_seconds(r.elapsed_seconds) if r.elapsed_seconds is not None else "N/A"
+            phases = _fmt_phase_durations(r.phase_durations) if r.phase_durations else "N/A"
+            table.add_row(r.app, r.status, iterations, elapsed, phases)
 
     console.print(table)
 
@@ -356,22 +408,39 @@ def run_experiment_task(
         # 2. Run Experiment
         run_cmd = [sys.executable, "-m", "app_operator", "run", str(exp_dir)]
 
+        # Phase timing state
+        run_start = time.monotonic()
+        phase_state: dict = {"current": None, "start": None, "durations": {}}
+
+        def _transition_phase(name: str) -> None:
+            now = time.monotonic()
+            prev = phase_state["current"]
+            if prev is not None:
+                phase_state["durations"][prev] = (
+                    phase_state["durations"].get(prev, 0.0) + (now - phase_state["start"])
+                )
+            phase_state["current"] = name
+            phase_state["start"] = now
+
         # Start a thread to monitor the log file for status updates
         stop_tail = threading.Event()
 
         def check_status(line):
             lower_line = line.lower()
             if "code analysis" in lower_line and "step 1" in lower_line:
+                _transition_phase("code_analysis")
                 progress.update(
                     task_id,
                     description=f"[yellow]{app_name}[/]: Code Analysis",
                     completed=20)
             elif "generating deployment scripts" in lower_line:
+                _transition_phase("script_generation")
                 progress.update(
                     task_id,
                     description=f"[yellow]{app_name}[/]: Script Generation",
                     completed=30)
             elif "deployment attempt" in lower_line:
+                _transition_phase("deployment")
                 # Extract attempt number if possible "Deployment Attempt #1"
                 try:
                     parts = line.split("#")
@@ -386,6 +455,7 @@ def run_experiment_task(
                         description=f"[yellow]{app_name}[/]: Deployment",
                         completed=40)
             elif "monitoring cycle" in lower_line:
+                _transition_phase("monitoring")
                 try:
                     parts = line.split("#")
                     cycle = parts[-1].split()[0]
@@ -399,6 +469,7 @@ def run_experiment_task(
                         description=f"[yellow]{app_name}[/]: Monitoring",
                         completed=70)
             elif "shutting down" in lower_line:
+                _transition_phase("finishing")
                 progress.update(
                     task_id,
                     description=f"[green]{app_name}[/]: Finishing",
@@ -418,6 +489,11 @@ def run_experiment_task(
         finally:
             stop_tail.set()
             tail_thread.join()
+
+        # Finalize last phase and compute totals
+        _transition_phase("_done")
+        elapsed_seconds = round(time.monotonic() - run_start, 1)
+        phase_durations = {k: round(v, 1) for k, v in phase_state["durations"].items()} or None
 
         # Save trajectory and session logs
         f_log.write("\n=== Collecting Artifacts ===\n")
@@ -442,13 +518,21 @@ def run_experiment_task(
             time.sleep(1)
             progress.update(task_id, visible=False)
             progress.advance(overall_task_id)
-            return AppResult(app=app_name, success=True, repeat=repeat, **extracted)
+            return AppResult(
+                app=app_name, success=True, repeat=repeat,
+                elapsed_seconds=elapsed_seconds, phase_durations=phase_durations,
+                **extracted,
+            )
         else:
             progress.update(task_id, description=f"[red]{app_name}[/]: Failed", completed=100)
             time.sleep(1)
             progress.update(task_id, visible=False)
             progress.advance(overall_task_id)
-            return AppResult(app=app_name, success=False, repeat=repeat, **extracted)
+            return AppResult(
+                app=app_name, success=False, repeat=repeat,
+                elapsed_seconds=elapsed_seconds, phase_durations=phase_durations,
+                **extracted,
+            )
 
 
 def run_app_repeats(
