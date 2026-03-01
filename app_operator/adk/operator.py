@@ -21,8 +21,8 @@ from app_operator.prompts.deployment_context import (
 from app_operator.prompts.deployer import (
     create_generate_script_prompt,
 )
-from app_operator.cli_agent.subprocess_runner import SubprocessRunner
-from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.subprocess_runner import SubprocessRunner
+from app_operator.healthcheck import run_health_check
 
 from app_operator.adk.models import build_adk_model
 from app_operator.adk.tools import build_tools

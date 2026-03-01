@@ -27,9 +27,9 @@ from app_operator.prompts.deployer import (
     create_generate_script_prompt,
     prepare_error_context,
 )
-from app_operator.cli_agent.subprocess_runner import SubprocessRunner
+from app_operator.subprocess_runner import SubprocessRunner
 from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
-from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.healthcheck import run_health_check
 from app_operator.trajectory import (
     Phase,
     TrajectoryRecorderProtocol,
