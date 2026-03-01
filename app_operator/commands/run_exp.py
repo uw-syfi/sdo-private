@@ -355,8 +355,11 @@ def run_experiment_task(
 
     exp_dir = Path.cwd() / "exp" / app_name / run_exp_name
 
+    repeat_suffix = f" ({repeat_idx + 1}/{total_repeats})" if total_repeats > 1 else ""
+    display_name = f"{exp_name}/{app_name}{repeat_suffix}"
+
     # Update status to initializing
-    progress.update(task_id, description=f"[cyan]{app_name}[/]: Initializing", completed=0)
+    progress.update(task_id, description=f"[cyan]{display_name}[/]: Initializing", completed=0)
 
     # 1. Init Experiment
     # Remove existing exp dir if it exists to ensure fresh init
@@ -384,7 +387,7 @@ def run_experiment_task(
         )
 
         if init_proc.returncode != 0:
-            progress.update(task_id, description=f"[red]{app_name}[/]: Init Failed", completed=100)
+            progress.update(task_id, description=f"[red]{display_name}[/]: Init Failed", completed=100)
             time.sleep(1)
             progress.update(task_id, visible=False)
             progress.advance(overall_task_id)
@@ -400,7 +403,7 @@ def run_experiment_task(
         if experiment_config:
             _write_experiment_sds_config(exp_dir, experiment_config)
 
-        progress.update(task_id, description=f"[cyan]{app_name}[/]: Starting Run", completed=10)
+        progress.update(task_id, description=f"[cyan]{display_name}[/]: Starting Run", completed=10)
 
         f_log.write("\n=== Running Experiment ===\n")
         f_log.flush()
@@ -431,13 +434,13 @@ def run_experiment_task(
                 _transition_phase("code_analysis")
                 progress.update(
                     task_id,
-                    description=f"[yellow]{app_name}[/]: Code Analysis",
+                    description=f"[yellow]{display_name}[/]: Code Analysis",
                     completed=20)
             elif "generating deployment scripts" in lower_line:
                 _transition_phase("script_generation")
                 progress.update(
                     task_id,
-                    description=f"[yellow]{app_name}[/]: Script Generation",
+                    description=f"[yellow]{display_name}[/]: Script Generation",
                     completed=30)
             elif "deployment attempt" in lower_line:
                 _transition_phase("deployment")
@@ -447,12 +450,12 @@ def run_experiment_task(
                     attempt = parts[-1].split()[0]
                     progress.update(
                         task_id,
-                        description=f"[yellow]{app_name}[/]: Deploy-loop (Attempt {attempt})",
+                        description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})",
                         completed=40)
                 except BaseException:
                     progress.update(
                         task_id,
-                        description=f"[yellow]{app_name}[/]: Deployment",
+                        description=f"[yellow]{display_name}[/]: Deployment",
                         completed=40)
             elif "monitoring cycle" in lower_line:
                 _transition_phase("monitoring")
@@ -461,18 +464,18 @@ def run_experiment_task(
                     cycle = parts[-1].split()[0]
                     progress.update(
                         task_id,
-                        description=f"[yellow]{app_name}[/]: Health-monitor (Attempt {cycle})",
+                        description=f"[yellow]{display_name}[/]: Health-monitor (Attempt {cycle})",
                         completed=70)
                 except BaseException:
                     progress.update(
                         task_id,
-                        description=f"[yellow]{app_name}[/]: Monitoring",
+                        description=f"[yellow]{display_name}[/]: Monitoring",
                         completed=70)
             elif "shutting down" in lower_line:
                 _transition_phase("finishing")
                 progress.update(
                     task_id,
-                    description=f"[green]{app_name}[/]: Finishing",
+                    description=f"[green]{display_name}[/]: Finishing",
                     completed=90)
 
         tail_thread = threading.Thread(target=tail_file, args=(log_file, stop_tail, check_status))
@@ -514,7 +517,7 @@ def run_experiment_task(
         repeat = repeat_idx + 1 if total_repeats > 1 else None
 
         if proc.returncode == 0:
-            progress.update(task_id, description=f"[green]{app_name}[/]: Done", completed=100)
+            progress.update(task_id, description=f"[green]{display_name}[/]: Done", completed=100)
             time.sleep(1)
             progress.update(task_id, visible=False)
             progress.advance(overall_task_id)
@@ -524,7 +527,7 @@ def run_experiment_task(
                 **extracted,
             )
         else:
-            progress.update(task_id, description=f"[red]{app_name}[/]: Failed", completed=100)
+            progress.update(task_id, description=f"[red]{display_name}[/]: Failed", completed=100)
             time.sleep(1)
             progress.update(task_id, visible=False)
             progress.advance(overall_task_id)
@@ -682,16 +685,13 @@ def run_command(args: argparse.Namespace) -> int:
                 completed_keys = completed_keys_by_exp[exp_name]
                 for app in apps:
                     app_name = Path(app).name
-                    prefix = f"{exp_name}/" if multi else ""
                     repeat_task_ids = []
                     for i in range(repeats):
                         repeat = i + 1 if repeats > 1 else None
                         if (app_name, repeat) in completed_keys:
                             continue
-                        if repeats > 1:
-                            label = f"[white]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Pending"
-                        else:
-                            label = f"[white]{prefix}{app_name}[/]: Pending"
+                        repeat_suffix = f" ({i + 1}/{repeats})" if repeats > 1 else ""
+                        label = f"[white]{exp_name}/{app_name}{repeat_suffix}[/]: Pending"
                         task_id = progress.add_task(label, total=100, completed=0, start=False, visible=False)
                         repeat_task_ids.append((i, task_id))
                     if not repeat_task_ids:
