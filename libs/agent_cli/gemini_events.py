@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .utils import truncate_params, truncate_content
 
@@ -8,12 +10,12 @@ class GeminiEvent(ABC):
     """Base class for Gemini stream events."""
 
     @abstractmethod
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         """Render the event as a string for terminal output."""
         pass
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> Optional["GeminiEvent"]:
+    def from_dict(data: dict[str, Any]) -> "GeminiEvent" | None:
         """Factory method to create events from JSON data."""
         msg_type = data.get("type")
 
@@ -39,14 +41,14 @@ class MessageEvent(GeminiEvent):
         self.role = role
         self.content = content
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # Message rendering is handled specially due to streaming
         # This is just a placeholder or could handle non-streaming blocks
         return self.content
 
 
 class ToolUseEvent(GeminiEvent):
-    def __init__(self, tool_name: str, tool_id: Optional[str], parameters: Any):
+    def __init__(self, tool_name: str, tool_id: str | None, parameters: Any):
         self.tool_name = tool_name
         self.tool_id = tool_id
         self.parameters = parameters
@@ -57,7 +59,7 @@ class ToolUseEvent(GeminiEvent):
 
 
 class ToolResultEvent(GeminiEvent):
-    def __init__(self, output: str, tool_id: Optional[str]):
+    def __init__(self, output: str, tool_id: str | None):
         self.output = output
         self.tool_id = tool_id
         self.tool_name_resolved: str = "Tool"  # To be set externally

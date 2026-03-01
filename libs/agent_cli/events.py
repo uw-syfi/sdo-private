@@ -1,4 +1,4 @@
-from typing import Protocol, Optional, Dict, Union
+from typing import Protocol
 
 
 class AgentEventHandler(Protocol):
@@ -8,7 +8,7 @@ class AgentEventHandler(Protocol):
         """Handle agent thinking output."""
         ...
 
-    def on_tool_call(self, tool: str, args: Optional[Union[Dict, str]] = None) -> None:
+    def on_tool_call(self, tool: str, args: dict | str | None = None) -> None:
         """Handle tool execution start."""
         ...
 
@@ -17,8 +17,8 @@ class AgentEventHandler(Protocol):
         tool: str,
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None:
         """Handle tool execution result."""
         ...

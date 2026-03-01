@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from typing import List, Tuple, Any, Callable, Optional
+from typing import Any, Callable
 
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool, StructuredTool
@@ -64,7 +64,7 @@ class LegoAgentEngine:
         return t
 
     def _submit_response(
-        self, status: str, questions: List[str] = None, yaml_config: str = None
+        self, status: str, questions: list[str] = None, yaml_config: str = None
     ) -> str:
         """
         Submit the final response to the user.
@@ -95,8 +95,8 @@ class LegoAgentEngine:
         return str(last_msg_content)
 
     async def _run_clarification_round(
-        self, agent: Any, messages: List[Any]
-    ) -> Tuple[str, Optional[dict]]:
+        self, agent: Any, messages: list[Any]
+    ) -> tuple[str, dict | None]:
         """Stream one clarification round and return (final_content, final_response_data).
 
         Handles streaming events from the agent, rendering thinking chunks and
@@ -184,7 +184,7 @@ class LegoAgentEngine:
     def _parse_response(
         self,
         final_content: str,
-        final_response_data: Optional[dict],
+        final_response_data: dict | None,
     ) -> LegoAgentResponse:
         """Parse and validate the agent response from a clarification round.
 
@@ -224,7 +224,7 @@ class LegoAgentEngine:
     def _handle_ready_response(
         self,
         response: LegoAgentResponse,
-        qa_pairs: List[Tuple[str, str]],
+        qa_pairs: list[tuple[str, str]],
     ) -> LegoAgentResult:
         """Process a 'ready' response: validate config, write files, return result."""
         yaml_text = response.yaml_config
@@ -268,7 +268,7 @@ class LegoAgentEngine:
 
     async def run_async(self, user_prompt: str) -> LegoAgentResult:
         """Run the clarification loop and generate the script."""
-        qa_pairs: List[Tuple[str, str]] = []
+        qa_pairs: list[tuple[str, str]] = []
 
         # Setup tools
         filesystem = RealFilesystem()

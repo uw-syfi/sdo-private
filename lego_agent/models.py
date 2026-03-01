@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+from typing import Literal
 
 
 @dataclass
@@ -10,8 +10,8 @@ class LegoAgentResponse:
     """Structured response from the agent."""
 
     status: Literal["clarify", "ready"]
-    questions: List[str] = field(default_factory=list)
-    yaml_config: Optional[str] = None
+    questions: list[str] = field(default_factory=list)
+    yaml_config: str | None = None
 
     def validate(self) -> None:
         """Validate the response consistency."""
@@ -32,7 +32,7 @@ class LegoAgentResult:
     script_path: Path
     config_path: Path
     script_text: str
-    clarifications: List[Tuple[str, str]]
+    clarifications: list[tuple[str, str]]
 
 
 def extract_json(text: str) -> str:

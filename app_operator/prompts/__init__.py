@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from pathlib import Path
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 import hashlib
 import logging
 import threading
@@ -47,7 +49,7 @@ class PromptLoader:
     def __init__(
         self,
         templates_dir: str | Path = None,
-        dspy_config: Optional["DSPyConfig"] = None,
+        dspy_config: "DSPyConfig" | None = None,
     ):
         """Initialize the loader.
 
@@ -80,7 +82,7 @@ class PromptLoader:
         self.dspy_config = dspy_config
         self.optimized_dir = Path(__file__).resolve().parent / "optimized"
         self._dspy_configured = False  # Track if DSPy LM has been configured
-        self._module_exists_cache: Dict[str, bool] = {}
+        self._module_exists_cache: dict[str, bool] = {}
 
     def _configure_dspy_runtime(self):
         """Configure DSPy with runtime LM (called once on first use)."""
@@ -116,7 +118,7 @@ class PromptLoader:
     def render(
         self,
         template_name: str,
-        recorder: Optional["TrajectoryRecorderProtocol"] = None,
+        recorder: "TrajectoryRecorderProtocol" | None = None,
         **kwargs: Any,
     ) -> str:
         """Render a template with the given context.
@@ -273,7 +275,7 @@ class PromptLoader:
         self,
         prompt_name: str,
         kwargs: dict,
-        recorder: Optional["TrajectoryRecorderProtocol"] = None,
+        recorder: "TrajectoryRecorderProtocol" | None = None,
     ) -> str:
         """Render using DSPy optimized module.
 
@@ -339,7 +341,7 @@ class PromptLoader:
         self,
         template_name: str,
         kwargs: dict,
-        recorder: Optional["TrajectoryRecorderProtocol"] = None,
+        recorder: "TrajectoryRecorderProtocol" | None = None,
     ) -> str:
         """Render using Jinja2 template.
 
@@ -379,7 +381,7 @@ class PromptLoader:
 
     @staticmethod
     def _notify_recorder(
-        recorder: Optional["TrajectoryRecorderProtocol"],
+        recorder: "TrajectoryRecorderProtocol" | None,
         method_name: str,
         *args: Any,
     ) -> None:
@@ -406,7 +408,7 @@ _loader = None
 _loader_lock = threading.Lock()
 
 
-def get_loader(dspy_config: Optional["DSPyConfig"] = None) -> PromptLoader:
+def get_loader(dspy_config: "DSPyConfig" | None = None) -> PromptLoader:
     """Get or create the global PromptLoader instance.
 
     Args:

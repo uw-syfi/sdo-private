@@ -1,6 +1,6 @@
 import functools
 from pathlib import Path
-from typing import Callable, Any, Optional
+from typing import Callable, Any
 
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import create_react_agent
@@ -28,9 +28,9 @@ def build_graph(
     repo_path: Path,
     config: Config,
     health_check_interval: int,
-    filesystem: Optional[FileSystemInterface] = None,
-    check_shutdown: Optional[Callable[[], bool]] = None,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    filesystem: FileSystemInterface | None = None,
+    check_shutdown: Callable[[], bool] | None = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ):
     if filesystem is None:
         filesystem = RealFilesystem()

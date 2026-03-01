@@ -6,7 +6,7 @@ working with Docker Compose data structures.
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app_operator.fault_injection.models import Fault, FaultResult
 
@@ -22,8 +22,8 @@ class FaultInjector(ABC):
     def inject(
         self,
         fault: Fault,
-        compose_data: Dict[str, Any],
-        target_service: Optional[str] = None,
+        compose_data: dict[str, Any],
+        target_service: str | None = None,
     ) -> FaultResult:
         """Inject a fault into the compose data.
 
@@ -38,8 +38,8 @@ class FaultInjector(ABC):
 
     @abstractmethod
     def get_applicable_services(
-        self, fault: Fault, compose_data: Dict[str, Any]
-    ) -> List[str]:
+        self, fault: Fault, compose_data: dict[str, Any]
+    ) -> list[str]:
         """Get services this fault can be applied to.
 
         Args:
@@ -55,14 +55,14 @@ class ComposeManipulator:
     """Utility for inspecting and modifying Docker Compose data structures."""
 
     @staticmethod
-    def get_services(compose_data: Dict[str, Any]) -> Dict[str, Any]:
+    def get_services(compose_data: dict[str, Any]) -> dict[str, Any]:
         """Get the services dictionary from compose data."""
         return compose_data.get("services", {})
 
     @staticmethod
     def get_service_ports(
-        compose_data: Dict[str, Any], service: str
-    ) -> List[str]:
+        compose_data: dict[str, Any], service: str
+    ) -> list[str]:
         """Get port mappings for a service.
 
         Returns:
@@ -74,8 +74,8 @@ class ComposeManipulator:
 
     @staticmethod
     def get_service_environment(
-        compose_data: Dict[str, Any], service: str
-    ) -> List[str]:
+        compose_data: dict[str, Any], service: str
+    ) -> list[str]:
         """Get environment variables for a service.
 
         Normalizes both dict and list formats to list format.
@@ -93,7 +93,7 @@ class ComposeManipulator:
 
     @staticmethod
     def classify_service(
-        service_name: str, service_config: Dict[str, Any]
+        service_name: str, service_config: dict[str, Any]
     ) -> str:
         """Classify a service by its role based on image/name heuristics.
 
@@ -128,7 +128,7 @@ class ComposeManipulator:
         return "backend"
 
     @staticmethod
-    def parse_port_mapping(port_str: str) -> Optional[Dict[str, int]]:
+    def parse_port_mapping(port_str: str) -> dict[str, int] | None:
         """Parse a port mapping string into host/container ports.
 
         Args:

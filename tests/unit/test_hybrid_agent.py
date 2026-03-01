@@ -7,10 +7,10 @@ import pytest
 from app_operator.rlm.environment import RLMContext, RLMEnvironment
 from libs.agent_cli.hybrid_agent import HybridCodingAgent
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_litellm_response(content: str, prompt_tokens=10, completion_tokens=5):
     resp = mock.MagicMock()
@@ -36,10 +36,10 @@ def _setup_repo(tmp_path):
     (tmp_path / "docker-compose.yml").write_text("services:\n  web:\n    build: .\n")
     return sds
 
-
 # ---------------------------------------------------------------------------
 # RLMContext summary fields
 # ---------------------------------------------------------------------------
+
 
 class TestRLMContextSummaryFields:
     """Tests for the new pre-computed summary fields on RLMContext."""
@@ -104,10 +104,10 @@ class TestRLMContextSummaryFields:
         )
         assert "True" in result
 
-
 # ---------------------------------------------------------------------------
 # HybridCodingAgent routing
 # ---------------------------------------------------------------------------
+
 
 class TestHybridRouting:
     def test_file_gen_prompt(self, tmp_path):
@@ -128,10 +128,10 @@ class TestHybridRouting:
             result = agent.generate(prompt, cwd=str(tmp_path))
         assert result == "summary text"
 
-
 # ---------------------------------------------------------------------------
 # HybridCodingAgent fix path
 # ---------------------------------------------------------------------------
+
 
 class TestHybridFixPath:
     """Tests that the fix path pre-runs 4 subagents then enters the RLM loop."""
@@ -244,10 +244,10 @@ class TestHybridFixPath:
         # At least 4 subagent calls × 25 tokens + 1 RLM call × 40 tokens
         assert agent._total_token_usage["total_tokens"] >= 4 * 25 + 40
 
-
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
+
 
 class TestHybridRegistration:
     def test_hybrid_in_agent_registry(self):

@@ -1,7 +1,6 @@
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
 
 from app_operator.ui import OperatorUI
 from app_operator.logger import logger
@@ -41,8 +40,8 @@ def run_health_check(
     repo_path: Path,
     health_check_script: Path,
     timeout: int = DEFAULT_HEALTH_CHECK_TIMEOUT,
-    log_file_path: Optional[Path] = None,
-    ui: Optional[OperatorUI] = None,
+    log_file_path: Path | None = None,
+    ui: OperatorUI | None = None,
 ) -> CommandResult:
     """Run the health check script.
 

@@ -1,4 +1,3 @@
-from typing import Optional
 
 from app_operator.config import load_config, Config
 from app_operator.logger import logger
@@ -7,9 +6,9 @@ from .base import CodingAgent, AGENT_REGISTRY
 
 def create_agent_from_config(
     target_dir: str,
-    model_override: Optional[str] = None,
-    config_path: Optional[str] = None,
-    config: Optional[Config] = None,
+    model_override: str | None = None,
+    config_path: str | None = None,
+    config: Config | None = None,
 ) -> CodingAgent:
     """Create a coding agent based on configuration file.
 

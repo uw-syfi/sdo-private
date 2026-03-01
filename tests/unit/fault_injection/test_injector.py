@@ -12,7 +12,6 @@ from app_operator.fault_injection.injector import (
     FaultInjectionOrchestrator,
 )
 
-
 SAMPLE_COMPOSE = {
     "version": "3",
     "services": {

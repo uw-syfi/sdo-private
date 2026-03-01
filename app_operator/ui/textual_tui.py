@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Dict, Union
+from typing import Callable
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Static, RichLog
 from textual.containers import Container
@@ -24,7 +24,7 @@ class TextualOperatorUI(OperatorUI):
         self.app = app
 
     def set_stage(
-        self, stage: str, detail: Optional[str] = None, status: Optional[str] = None
+        self, stage: str, detail: str | None = None, status: str | None = None
     ) -> None:
         self.app.call_from_thread(self.app.update_stage, stage, detail)
 
@@ -34,7 +34,7 @@ class TextualOperatorUI(OperatorUI):
     def on_thinking(self, text: str) -> None:
         self.app.call_from_thread(self.app.add_thinking, text)
 
-    def on_tool_call(self, tool: str, args: Optional[Union[Dict, str]] = None) -> None:
+    def on_tool_call(self, tool: str, args: dict | str | None = None) -> None:
         self.app.call_from_thread(self.app.add_tool_call, tool, args)
 
     def on_tool_result(
@@ -42,15 +42,15 @@ class TextualOperatorUI(OperatorUI):
         tool: str,
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None:
         self.app.call_from_thread(
             self.app.add_tool_result, tool, stdout, stderr, exit_code, duration
         )
 
     def close(
-        self, status: Optional[str] = None, exit_code: Optional[int] = None
+        self, status: str | None = None, exit_code: int | None = None
     ) -> None:
         # We don't exit the app immediately on close, we just log it.
         msg = f"Operator finished with status: {status} (Exit Code: {exit_code})"
@@ -130,7 +130,7 @@ class OperatorTUI(App):
             "info",
         )
 
-    def update_stage(self, stage: str, detail: Optional[str] = None) -> None:
+    def update_stage(self, stage: str, detail: str | None = None) -> None:
         text = f"Stage: {stage}"
         if detail:
             text += f" — {detail}"
@@ -154,7 +154,7 @@ class OperatorTUI(App):
     def add_thinking(self, text: str) -> None:
         self.log_widget.write(Text(text, style="dim italic"))
 
-    def add_tool_call(self, tool: str, args: Optional[Union[Dict, str]] = None) -> None:
+    def add_tool_call(self, tool: str, args: dict | str | None = None) -> None:
         args_str = str(args) if args else ""
         content = f"[bold]{tool}[/bold]\n{args_str}"
         panel = Panel(content, title="Tool Call", border_style="blue", expand=False)
@@ -165,8 +165,8 @@ class OperatorTUI(App):
         tool: str,
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None:
         title_parts = ["Tool Result"]
         if exit_code is not None:

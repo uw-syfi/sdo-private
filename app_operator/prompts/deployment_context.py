@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.prompts import get_loader
@@ -18,7 +17,7 @@ def create_system_prompt(platform: str) -> str:
 
 def analyze_repository(
     repo_path: Path,
-    filesystem: Optional[FileSystemInterface] = None,
+    filesystem: FileSystemInterface | None = None,
 ) -> str:
     """Analyze repository structure and return context string.
 

@@ -7,7 +7,6 @@ including success rates, iteration efficiency, and token costs.
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 from tabulate import tabulate
 
 from app_operator.dspy_integration.metrics_aggregator import MetricsAggregator
@@ -87,8 +86,8 @@ def run_command(args) -> int:
 
 def _compare_mode(
     compare: str,
-    phase: Optional[str],
-    model: Optional[str],
+    phase: str | None,
+    model: str | None,
     format_type: str,
 ) -> int:
     """Compare two trajectory directories."""

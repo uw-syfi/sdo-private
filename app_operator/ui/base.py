@@ -1,9 +1,9 @@
-from typing import Protocol, Optional, Dict, Union
+from typing import Protocol
 
 
 class OperatorUI(Protocol):
     def set_stage(
-        self, stage: str, detail: Optional[str] = None, status: Optional[str] = None
+        self, stage: str, detail: str | None = None, status: str | None = None
     ) -> None:
         """Update the current operating stage."""
         ...
@@ -16,7 +16,7 @@ class OperatorUI(Protocol):
         """Handle agent thinking output."""
         ...
 
-    def on_tool_call(self, tool: str, args: Optional[Union[Dict, str]] = None) -> None:
+    def on_tool_call(self, tool: str, args: dict | str | None = None) -> None:
         """Handle tool execution start."""
         ...
 
@@ -25,14 +25,14 @@ class OperatorUI(Protocol):
         tool: str,
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None:
         """Handle tool execution result."""
         ...
 
     def close(
-        self, status: Optional[str] = None, exit_code: Optional[int] = None
+        self, status: str | None = None, exit_code: int | None = None
     ) -> None:
         """Close the UI."""
         ...
@@ -42,7 +42,7 @@ class NullOperatorUI:
     """No-op implementation of OperatorUI."""
 
     def set_stage(
-        self, stage: str, detail: Optional[str] = None, status: Optional[str] = None
+        self, stage: str, detail: str | None = None, status: str | None = None
     ) -> None:
         pass
 
@@ -52,7 +52,7 @@ class NullOperatorUI:
     def on_thinking(self, text: str) -> None:
         pass
 
-    def on_tool_call(self, tool: str, args: Optional[Union[Dict, str]] = None) -> None:
+    def on_tool_call(self, tool: str, args: dict | str | None = None) -> None:
         pass
 
     def on_tool_result(
@@ -60,12 +60,12 @@ class NullOperatorUI:
         tool: str,
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None:
         pass
 
     def close(
-        self, status: Optional[str] = None, exit_code: Optional[int] = None
+        self, status: str | None = None, exit_code: int | None = None
     ) -> None:
         pass

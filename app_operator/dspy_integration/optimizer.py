@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 import dspy
 
 from app_operator.dspy_integration.config import DSPyConfig
@@ -43,7 +43,7 @@ class _MetricCallTracker:
         return result
 
 
-PROMPT_PHASE_MAP: Dict[str, str] = {
+PROMPT_PHASE_MAP: dict[str, str] = {
     "deployer_system": "deployment",
     "deployer_fix_error": "deployment",
     "deployer_summarize": "deployment",
@@ -61,7 +61,7 @@ PROMPT_PHASE_MAP: Dict[str, str] = {
 # Reverse map: prompt name → Jinja2 template path.
 # Used to re-render ground-truth prompts from stored prompt_kwargs when
 # rendered_prompt was not recorded in the trajectory.
-PROMPT_TO_TEMPLATE: Dict[str, str] = {
+PROMPT_TO_TEMPLATE: dict[str, str] = {
     "deployer_system": "deployer/system.jinja2",
     "deployer_fix_error": "deployer/fix_error.jinja2",
     "deployer_summarize": "deployer/summarize.jinja2",
@@ -75,7 +75,6 @@ PROMPT_TO_TEMPLATE: Dict[str, str] = {
     "agentflow_user": "agentflow/user.jinja2",
     "agentflow_repair": "agentflow/repair.jinja2",
 }
-
 
 _ENSURE_SERIALIZABLE_MAX_DEPTH = 50
 
@@ -114,7 +113,7 @@ class PromptOptimizer:
         config: DSPyConfig,
         prompts_dir: Path,
         use_seeds: bool = False,
-        vertex_location: Optional[str] = None,
+        vertex_location: str | None = None,
     ):
         """Initialize optimizer.
 
@@ -133,15 +132,15 @@ class PromptOptimizer:
 
     def optimize(
         self,
-        prompt_names: List[str],
-        trajectories_dirs: List[Path],
-        output_dir: Optional[Path] = None,
+        prompt_names: list[str],
+        trajectories_dirs: list[Path],
+        output_dir: Path | None = None,
         dry_run: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run prompt optimization.
 
         Args:
-            prompt_names: List of prompt names to optimize
+            prompt_names: list of prompt names to optimize
             trajectories_dirs: Directories containing trajectory files;
                 examples from all directories are merged before optimization.
             output_dir: Optional output directory for optimized prompts
@@ -320,9 +319,9 @@ class PromptOptimizer:
 
     def _convert_to_dspy_examples(
         self,
-        trajectory_examples: List,
+        trajectory_examples: list,
         prompt_name: str,
-    ) -> List[dspy.Example]:
+    ) -> list[dspy.Example]:
         """Convert TrajectoryExample objects to dspy.Example objects.
 
         Uses signature-driven generic conversion. Input fields are populated
@@ -332,11 +331,11 @@ class PromptOptimizer:
         available. Examples without prompt_kwargs are skipped.
 
         Args:
-            trajectory_examples: List of TrajectoryExample objects
+            trajectory_examples: list of TrajectoryExample objects
             prompt_name: Name of the prompt being optimized
 
         Returns:
-            List of dspy.Example objects suitable for DSPy optimization
+            list of dspy.Example objects suitable for DSPy optimization
         """
         signature = get_signature(prompt_name)
         input_field_names = list(signature.input_fields.keys())
@@ -392,7 +391,7 @@ class PromptOptimizer:
         return dspy_examples
 
     def _rerender_from_kwargs(
-        self, prompt_name: str, prompt_kwargs: Dict[str, Any]
+        self, prompt_name: str, prompt_kwargs: dict[str, Any]
     ) -> str:
         """Re-render a Jinja2 template from stored prompt_kwargs.
 
@@ -430,10 +429,10 @@ class PromptOptimizer:
     def _optimize_single_prompt(
         self,
         prompt_name: str,
-        train_examples: List,
-        val_examples: List,
+        train_examples: list,
+        val_examples: list,
         metric: CompositeMetric,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Optimize a single prompt.
 
         Args:
@@ -586,10 +585,10 @@ class PromptOptimizer:
     def _evaluate(
         self,
         module: dspy.Module,
-        examples: List,
+        examples: list,
         metric: CompositeMetric,
         prompt_name: str,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Evaluate module on validation examples by invoking it.
 
         Each example is converted individually so that examples which lack
@@ -642,7 +641,7 @@ class PromptOptimizer:
 
     def _save_optimized_prompts(
         self,
-        results: Dict[str, Dict[str, Any]],
+        results: dict[str, dict[str, Any]],
         output_dir: Path,
     ):
         """Save optimized prompts to disk.

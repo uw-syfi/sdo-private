@@ -6,7 +6,6 @@ Handles loading optimized DSPy modules from disk with caching and version resolu
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional
 
 import dspy
 
@@ -20,9 +19,9 @@ class DSPyModuleCache:
 
     def __init__(self):
         """Initialize empty cache."""
-        self._cache: Dict[str, dspy.Module] = {}
+        self._cache: dict[str, dspy.Module] = {}
 
-    def get(self, key: str) -> Optional[dspy.Module]:
+    def get(self, key: str) -> dspy.Module | None:
         """Get a cached module.
 
         Args:
@@ -65,7 +64,7 @@ def reset_cache() -> None:
     _module_cache.clear()
 
 
-def resolve_version(optimized_dir: Path, version: str) -> Optional[str]:
+def resolve_version(optimized_dir: Path, version: str) -> str | None:
     """Resolve version string to actual version directory.
 
     Handles special cases like 'latest' which points to the most recent version.
@@ -116,7 +115,7 @@ def load_optimized_module(
     prompt_name: str,
     optimized_dir: Path,
     version: str = "latest"
-) -> Optional[dspy.Module]:
+) -> dspy.Module | None:
     """Load an optimized DSPy module from disk.
 
     Args:

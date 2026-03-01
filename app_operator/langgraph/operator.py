@@ -2,7 +2,6 @@ import signal
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 from app_operator.config import load_config, Config
 from app_operator.exceptions import AgentError
@@ -20,10 +19,10 @@ class LangGraphOperator:
         self,
         repo_path: str,
         health_check_interval: int = 30,
-        health_check_max_count: Optional[int] = 5,
+        health_check_max_count: int | None = 5,
         max_deployment_attempts: int = 5,
-        filesystem: Optional[FileSystemInterface] = None,
-        config: Optional[Config] = None,
+        filesystem: FileSystemInterface | None = None,
+        config: Config | None = None,
     ):
         self.repo_path = Path(repo_path).resolve()
         self.health_check_interval = health_check_interval

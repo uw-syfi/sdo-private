@@ -7,7 +7,7 @@ trajectory-only loader.
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any
 from dataclasses import dataclass, field
 
 from app_operator.trajectory import Phase
@@ -29,13 +29,13 @@ class EnrichedTrajectoryExample:
     phase: Phase
     prompt_name: str  # e.g., 'deployer_fix_error'
     rendered_prompt: str  # The full prompt sent to the agent
-    prompt_kwargs: Optional[Dict[str, Any]] = None  # Original template kwargs
+    prompt_kwargs: dict[str, Any] | None = None  # Original template kwargs
 
     # Enriched data from Gemini sessions
-    full_conversation: List[Dict[str, Any]] = field(default_factory=list)
+    full_conversation: list[dict[str, Any]] = field(default_factory=list)
     token_usage: TokenUsage = field(default_factory=lambda: TokenUsage(
         prompt_tokens=0, completion_tokens=0, total_tokens=0))
-    session_metadata: Dict[str, Any] = field(default_factory=dict)
+    session_metadata: dict[str, Any] = field(default_factory=dict)
 
     # Success metrics (from trajectory)
     success: bool = False
@@ -44,7 +44,7 @@ class EnrichedTrajectoryExample:
 
 
 def extract_prompt_kwargs_from_content(prompt_type: str, rendered_prompt: str,
-                                       conversation: List[Dict]) -> Dict[str, Any]:
+                                       conversation: list[dict]) -> dict[str, Any]:
     """Extract prompt kwargs by reverse-engineering from rendered prompt.
 
     This attempts to extract the original template variables from the
@@ -115,8 +115,8 @@ class EnrichedTrajectoryDataLoader:
     def load_examples(
         self,
         success_only: bool = False,
-        phase: Optional[Phase] = None
-    ) -> List[EnrichedTrajectoryExample]:
+        phase: Phase | None = None
+    ) -> list[EnrichedTrajectoryExample]:
         """Load training examples from all enriched trajectories.
 
         Args:
@@ -124,7 +124,7 @@ class EnrichedTrajectoryDataLoader:
             phase: Optional phase filter (e.g., Phase.DEPLOYMENT)
 
         Returns:
-            List of enriched training examples
+            list of enriched training examples
         """
         examples = []
 
@@ -143,8 +143,8 @@ class EnrichedTrajectoryDataLoader:
         self,
         traj_file: Path,
         success_only: bool,
-        phase_filter: Optional[Phase]
-    ) -> List[EnrichedTrajectoryExample]:
+        phase_filter: Phase | None
+    ) -> list[EnrichedTrajectoryExample]:
         """Load examples from a single enriched trajectory file."""
 
         with open(traj_file) as f:
@@ -219,7 +219,7 @@ class EnrichedTrajectoryDataLoader:
         return examples
 
 
-def get_example_counts_by_prompt(examples: List[EnrichedTrajectoryExample]) -> Dict[str, int]:
+def get_example_counts_by_prompt(examples: list[EnrichedTrajectoryExample]) -> dict[str, int]:
     """Count examples by prompt type."""
     from collections import Counter
     return dict(Counter(ex.prompt_name for ex in examples))

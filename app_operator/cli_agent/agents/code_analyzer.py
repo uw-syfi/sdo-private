@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import time
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
@@ -27,10 +29,10 @@ class CodeAnalyzerAgent:
         self,
         repo_path: Path,
         coding_agent: CodingAgent,
-        filesystem: Optional[FileSystemInterface] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        dspy_config: Optional["DSPyConfig"] = None,
-        ui: Optional[OperatorUI] = None,
+        filesystem: FileSystemInterface | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        dspy_config: "DSPyConfig" | None = None,
+        ui: OperatorUI | None = None,
     ):
         """Initialize the code analyzer agent.
 

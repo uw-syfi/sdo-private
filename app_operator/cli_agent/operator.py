@@ -2,7 +2,6 @@ import json
 import signal
 import threading
 from pathlib import Path
-from typing import Optional
 
 from libs.agent_cli.base import CodingAgent
 from libs.agent_cli.factory import create_agent_from_config
@@ -30,12 +29,12 @@ class AppOperator:
         self,
         repo_path: str,
         health_check_interval: int = 30,
-        health_check_max_count: Optional[int] = 5,
+        health_check_max_count: int | None = 5,
         max_deployment_attempts: int = 5,
-        agent: Optional[CodingAgent] = None,
-        filesystem: Optional[FileSystemInterface] = None,
-        config: Optional[Config] = None,
-        ui: Optional[OperatorUI] = None,
+        agent: CodingAgent | None = None,
+        filesystem: FileSystemInterface | None = None,
+        config: Config | None = None,
+        ui: OperatorUI | None = None,
     ):
         """Initialize the application operator.
 

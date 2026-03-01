@@ -19,6 +19,7 @@ MAX_DIR_SUGGESTIONS = 20  # maximum number of directory suggestions to return
 
 app = FastAPI()
 
+
 class WebIO:
     """UserIO implementation for WebSocket-based Web UI."""
 
@@ -143,6 +144,7 @@ class WebIO:
     async def _send_graph_async(self, config: dict[str, Any]) -> None:
         await self._flush_thinking()
         await self._send_event("graph", {"config": config})
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -324,6 +326,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.error(f"WebSocket error: {e}", exc_info=True)
     finally:
         await io.cleanup()
+
 
 async def run_engine_and_script(
     io: WebIO,

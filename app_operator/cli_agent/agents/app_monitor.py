@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import time
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Any, List, Protocol, TYPE_CHECKING
+from typing import Callable, Any, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
@@ -28,7 +30,7 @@ class MonitorLike(Protocol):
     agent: CodingAgent
     filesystem: FileSystemInterface
     recorder: TrajectoryRecorderProtocol
-    dspy_config: Optional["DSPyConfig"]
+    dspy_config: "DSPyConfig" | None
     ui: OperatorUI
     check_count: int
     health_check_script: Path
@@ -189,7 +191,7 @@ class HealthCheckTask(MonitoringTask):
         repo_path: Path,
         health_result: dict,
         check_count: int,
-        dspy_config: Optional["DSPyConfig"] = None,
+        dspy_config: "DSPyConfig" | None = None,
         recorder=None,
     ) -> str:
         """Create a prompt for the coding agent to analyze health check results.
@@ -229,11 +231,11 @@ class AppMonitor:
         self,
         repo_path: Path,
         agent: CodingAgent,
-        filesystem: Optional[FileSystemInterface] = None,
-        operator_config: Optional[OperatorConfig] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        dspy_config: Optional["DSPyConfig"] = None,
-        ui: Optional[OperatorUI] = None,
+        filesystem: FileSystemInterface | None = None,
+        operator_config: OperatorConfig | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        dspy_config: "DSPyConfig" | None = None,
+        ui: OperatorUI | None = None,
     ):
         """Initialize the monitor agent.
 
@@ -253,7 +255,7 @@ class AppMonitor:
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
-        self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
+        self.monitoring_tasks: list[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
         self.log_dir = self.repo_path / ".sds" / "logs" / "monitor"
@@ -261,8 +263,8 @@ class AppMonitor:
     def run(
         self,
         interval: int = 30,
-        max_checks: Optional[int] = None,
-        check_shutdown: Optional[Callable[[], bool]] = None,
+        max_checks: int | None = None,
+        check_shutdown: Callable[[], bool] | None = None,
     ):
         """Monitor application health and provide agent analysis every interval.
 

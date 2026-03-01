@@ -6,7 +6,7 @@ These metrics evaluate how well RLM-based prompts utilize the RLM paradigm:
 - Token savings (comparing RLM vs direct context passing)
 """
 
-from typing import Any, Dict
+from typing import Any
 import json
 
 from app_operator.logger import logger
@@ -256,7 +256,7 @@ class RLMCompositeMetric:
         return composite
 
 
-def extract_rlm_statistics_from_trajectory(trajectory_dict: Dict[str, Any]) -> Dict[str, Any]:
+def extract_rlm_statistics_from_trajectory(trajectory_dict: dict[str, Any]) -> dict[str, Any]:
     """Extract RLM statistics from a trajectory dictionary.
 
     Args:

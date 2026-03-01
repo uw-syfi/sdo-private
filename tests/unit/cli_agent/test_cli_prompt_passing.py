@@ -76,7 +76,6 @@ def agent_info(request):
     """Parameterized fixture for all agent types with prompt passing info."""
     return request.param
 
-
 # ============================================================================
 # PROMPT PASSING IN COMMAND LINE TESTS
 # ============================================================================
@@ -126,7 +125,6 @@ def test_agent_passes_prompt_via_stdin(agent_info, mock_which, command_tracker):
         f"{agent_name} should pass prompt '{test_prompt}' to stdin, "
         f"but got: {stdin_writes}"
     )
-
 
 # ============================================================================
 # COMMAND CONSTRUCTION TESTS
@@ -222,7 +220,6 @@ def test_opencode_command_structure(mock_which, command_tracker):
     cmd_str = " ".join(cmd)
     assert test_prompt in cmd_str
 
-
 # ============================================================================
 # MODEL PARAMETER TESTS
 # ============================================================================
@@ -256,7 +253,6 @@ def test_agent_includes_model_in_command_when_specified(
     assert cmd[model_idx + 1] == test_model, (
         f"{agent_name} should use model '{test_model}', but got: {cmd[model_idx + 1]}"
     )
-
 
 # ============================================================================
 # EDGE CASE TESTS

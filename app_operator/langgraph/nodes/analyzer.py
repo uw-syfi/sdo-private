@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from app_operator.filesystem import FileSystemInterface
 from app_operator.logger import logger
@@ -20,7 +20,7 @@ def analyze_code(
     loader: PromptLoader,
     agent: Any,
     context_limit: int,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> OperatorState:
     recorder = recorder or NullTrajectoryRecorder()
     if state["analysis_done"]:

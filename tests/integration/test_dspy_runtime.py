@@ -10,14 +10,13 @@ Tests the end-to-end DSPy integration including:
 import json
 import pytest
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 from unittest.mock import Mock, patch
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import Config, DSPyConfig
 from app_operator.dspy_integration.loader import reset_cache
 from libs.agent_cli.base import CodingAgent
-
 
 # --- Fake Agent for DSPy Testing ---
 
@@ -27,12 +26,12 @@ class DSPyFakeCodingAgent(CodingAgent):
 
     def __init__(self, repo_path: Path):
         self.repo_path = repo_path
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
     ) -> str:
@@ -102,7 +101,6 @@ fi
 The system appears to be running smoothly.
 """
 
-
 # --- Fixtures ---
 
 
@@ -148,7 +146,6 @@ def reset_dspy_cache():
     reset_cache()
     yield
     reset_cache()
-
 
 # --- Tests ---
 

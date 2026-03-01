@@ -4,10 +4,8 @@ Calculates token costs based on model pricing.
 """
 
 import logging
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
-
 
 # Model pricing per 1M tokens (as of 2026-01)
 MODEL_PRICING = {
@@ -59,7 +57,7 @@ def calculate_cost(
     return input_cost + output_cost
 
 
-def get_model_pricing(model: str) -> Optional[Dict[str, float]]:
+def get_model_pricing(model: str) -> dict[str, float] | None:
     """Get pricing information for a model.
 
     Args:

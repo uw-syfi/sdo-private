@@ -16,7 +16,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 try:
     import tomllib
@@ -48,7 +48,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def load_config(config_path: Path) -> Dict[str, Any]:
+def load_config(config_path: Path) -> dict[str, Any]:
     """Load and validate configuration."""
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -80,8 +80,8 @@ def load_config(config_path: Path) -> Dict[str, Any]:
 
 def _replace_in_agent_section(
     content: str,
-    provider_override: Optional[str],
-    model_override: Optional[str],
+    provider_override: str | None,
+    model_override: str | None,
 ) -> str:
     """Replace provider/model keys only within the [agent] TOML section."""
     lines = content.splitlines()
@@ -118,10 +118,10 @@ def _update_sds_toml(
     app_dir: Path,
     use_seeds: bool,
     use_optimized: bool,
-    optimized_version: Optional[str],
-    project_root: Optional[Path] = None,
-    provider_override: Optional[str] = None,
-    model_override: Optional[str] = None,
+    optimized_version: str | None,
+    project_root: Path | None = None,
+    provider_override: str | None = None,
+    model_override: str | None = None,
 ):
     """Update sds.toml in the app directory.
 
@@ -257,7 +257,7 @@ class StateManager:
         self.state_file = work_dir / "state.json"
         self.state = self._load_state()
 
-    def _load_state(self) -> Dict[str, Any]:
+    def _load_state(self) -> dict[str, Any]:
         default_state = {
             "current_iteration": 1,
             "optimization_done": False,
@@ -315,7 +315,7 @@ class StateManager:
         self.state["current_version"] = version
         self.save()
 
-    def get_current_version(self) -> Optional[str]:
+    def get_current_version(self) -> str | None:
         return self.state["current_version"]
 
     def is_val_app_completed(self, iter_num: int, app_name: str) -> bool:

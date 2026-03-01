@@ -1,6 +1,5 @@
 from .base import register_provider
 import json
-from typing import Optional, List
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
@@ -93,9 +92,9 @@ class OpencodeCodingAgent(CLICodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         """Initialize the Opencode coding agent.
 
@@ -113,7 +112,7 @@ class OpencodeCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Opencode]"
 
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         cmd = [self.binary_path, "run", f'"{prompt}"']
 
         if self.model:
@@ -126,11 +125,11 @@ class OpencodeCodingAgent(CLICodingAgent):
 
     def _create_session(
         self,
-        cmd: List[str],
-        cwd: Optional[str] = None,
+        cmd: list[str],
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> OpencodeGenerationSession:
         return OpencodeGenerationSession(
             binary_name=self.binary_name,

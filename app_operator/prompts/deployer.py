@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from app_operator.types import CommandResult
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
@@ -13,9 +15,9 @@ if TYPE_CHECKING:
 
 def prepare_error_context(
     deploy_result: CommandResult,
-    health_result: Optional[CommandResult],
-    log_file_path: Optional[Path] = None,
-    health_check_log_path: Optional[Path] = None,
+    health_result: CommandResult | None,
+    log_file_path: Path | None = None,
+    health_check_log_path: Path | None = None,
 ) -> str:
     """Prepare error context for the coding agent.
 
@@ -62,9 +64,9 @@ def create_generate_script_prompt(
     repo_context: str,
     target_dir: str,
     platform: str,
-    dspy_config: Optional["DSPyConfig"] = None,
+    dspy_config: DSPyConfig | None = None,
     recorder=None,
-    filesystem: Optional[FileSystemInterface] = None,
+    filesystem: FileSystemInterface | None = None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
 
@@ -130,7 +132,7 @@ def create_fix_prompt(
     error_context: str,
     deploy_script_path: Path,
     health_check_script_path: Path,
-    dspy_config: Optional["DSPyConfig"] = None,
+    dspy_config: DSPyConfig | None = None,
     recorder=None,
     fix_summary_consolidation: bool = True,
 ) -> str:

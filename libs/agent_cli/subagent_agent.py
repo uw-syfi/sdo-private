@@ -12,7 +12,6 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from app_operator.logger import logger
 from app_operator.trajectory import TrajectoryRecorderProtocol
@@ -69,10 +68,10 @@ class SubagentCodingAgent(CodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
-        location: Optional[str] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
+        location: str | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder = recorder
@@ -87,7 +86,7 @@ class SubagentCodingAgent(CodingAgent):
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
     ) -> str:
@@ -115,7 +114,7 @@ class SubagentCodingAgent(CodingAgent):
     # -- Direct / file-gen paths (same as RLMCodingAgent) ---------------------
 
     def _generate_direct(self, prompt: str,
-                         token_acc: Optional[dict] = None) -> str:
+                         token_acc: dict | None = None) -> str:
         import os
 
         kwargs = {
@@ -139,7 +138,7 @@ class SubagentCodingAgent(CodingAgent):
             return f"LLM call failed: {type(e).__name__}: {e}"
 
     def _generate_files(self, prompt: str, repo_path: Path,
-                        token_acc: Optional[dict] = None) -> str:
+                        token_acc: dict | None = None) -> str:
         import os
 
         kwargs = {
@@ -174,7 +173,7 @@ class SubagentCodingAgent(CodingAgent):
         self,
         prompt: str,
         repo_path: Path,
-        token_acc: Optional[dict] = None,
+        token_acc: dict | None = None,
     ) -> str:
         """Fan out 4 subagent analyses, then synthesise the fix with a root call."""
         sds = repo_path / ".sds"
@@ -287,7 +286,7 @@ class SubagentCodingAgent(CodingAgent):
         task_prompt: str,
         summaries: dict[str, str],
         deploy_script: str,
-        token_acc: Optional[dict] = None,
+        token_acc: dict | None = None,
     ) -> str:
         """Single root LLM call that receives all subagent summaries."""
         import os

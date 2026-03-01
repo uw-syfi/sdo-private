@@ -32,7 +32,6 @@ def mock_config():
         runtime=RuntimeConfig(impl="cli_agent"),
     )
 
-
 # ============================================================================
 # add_arguments Tests
 # ============================================================================
@@ -80,7 +79,6 @@ def test_add_arguments_config_is_optional():
     # Should work without --config
     args = parser.parse_args(["/path"])
     assert args.config is None
-
 
 # ============================================================================
 # run_command Tests - Error Cases
@@ -133,7 +131,6 @@ def test_run_command_returns_1_on_generic_exception(mock_args, mock_config):
             exit_code = run_command(mock_args)
 
     assert exit_code == 1
-
 
 # ============================================================================
 # run_command Tests - cli_agent Runtime
@@ -199,7 +196,6 @@ def test_run_command_passes_custom_config_path(mock_config):
     # Verify custom config path was passed
     mock_load.assert_called_once_with("/test/repo", "/custom/sds.toml")
 
-
 # ============================================================================
 # run_command Tests - langgraph Runtime
 # ============================================================================
@@ -242,7 +238,6 @@ def test_run_command_runs_langgraph_operator(mock_args):
     mock_operator.run.assert_called_once()
     assert exit_code == 0
 
-
 # ============================================================================
 # run_command Tests - adk Runtime
 # ============================================================================
@@ -281,7 +276,6 @@ def test_run_command_runs_adk_operator(mock_args):
     # Verify operator.run() was called
     mock_operator.run.assert_called_once()
     assert exit_code == 0
-
 
 # ============================================================================
 # run_command Tests - TUI Mode
@@ -397,7 +391,6 @@ def test_run_command_tui_operator_factory(mock_config):
     call_kwargs = mock_app_op_class.call_args[1]
     assert call_kwargs["ui"] == mock_ui
     assert call_kwargs["agent"] == mock_agent
-
 
 # ============================================================================
 # run_command Tests - Configuration Values

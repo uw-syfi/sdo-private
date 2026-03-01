@@ -1,6 +1,6 @@
 import uuid
 from pathlib import Path
-from typing import Callable, Any, Optional
+from typing import Callable, Any
 
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
@@ -16,7 +16,7 @@ class AdkAgentRunner:
         self,
         app_name: str,
         repo_path: Path,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ):
         self.app_name = app_name
         self.recorder = recorder
@@ -27,7 +27,7 @@ class AdkAgentRunner:
         self,
         agent: LlmAgent,
         user_prompt: str,
-        on_event: Optional[Callable[[Any], None]] = None,
+        on_event: Callable[[Any], None] | None = None,
     ) -> str:
         """Run the agent asynchronously once with the given prompt and return the assistant response."""
 

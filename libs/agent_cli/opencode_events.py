@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .utils import truncate_params
 
@@ -8,12 +10,12 @@ class OpencodeEvent(ABC):
     """Base class for Opencode stream events."""
 
     @abstractmethod
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         """Render the event as a string for terminal output."""
         pass
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> Optional["OpencodeEvent"]:
+    def from_dict(data: dict[str, Any]) -> "OpencodeEvent" | None:
         """Factory method to create events from JSON data."""
         msg_type = data.get("type")
         part = data.get("part", {})
@@ -43,7 +45,7 @@ class TextEvent(OpencodeEvent):
     def __init__(self, text: str):
         self.text = text
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # We will handle text printing in the agent loop to handle potential streaming
         # or just print it as is.
         # For now, let's return it.
@@ -74,19 +76,19 @@ class ToolUseEvent(OpencodeEvent):
 
 
 class StepStartEvent(OpencodeEvent):
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         return None
 
 
 class StepFinishEvent(OpencodeEvent):
     def __init__(
-        self, reason: Optional[str], cost: Optional[float], tokens: Optional[Dict]
+        self, reason: str | None, cost: float | None, tokens: dict | None
     ):
         self.reason = reason
         self.cost = cost
         self.tokens = tokens
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # Optional: Print cost info?
         # For now, maybe just ignore or print verbose.
         # Let's keep it clean.

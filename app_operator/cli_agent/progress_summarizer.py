@@ -2,7 +2,7 @@
 
 import re
 import time
-from typing import Optional, Callable
+from typing import Callable
 
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
@@ -23,7 +23,7 @@ class ProgressSummarizer:
         agent_generate_fn: Callable[[str, bool, int], str],
         initial_delay: float = 15.0,
         summary_interval: float = 30.0,
-        time_func: Optional[Callable[[], float]] = None,
+        time_func: Callable[[], float] | None = None,
         recorder=None,
     ):
         """Initialize the progress summarizer.
@@ -42,10 +42,10 @@ class ProgressSummarizer:
         self.time_func = time_func if time_func is not None else time.time
         self.recorder = recorder
 
-        self.start_time: Optional[float] = None
-        self.last_summary_time: Optional[float] = None
+        self.start_time: float | None = None
+        self.last_summary_time: float | None = None
 
-    def start(self, start_time: Optional[float] = None):
+    def start(self, start_time: float | None = None):
         """Start the summarization timer.
 
         Args:
@@ -130,14 +130,14 @@ class ProgressSummarizer:
             logger.warning(f"ProgressSummarizer: Failed to generate summary: {e}", exc_info=True)
             pass
 
-    def _extract_summary(self, response: str) -> Optional[str]:
+    def _extract_summary(self, response: str) -> str | None:
         """Extract the summary from the agent's response using XML markers.
 
         Args:
             response: The agent's response text.
 
         Returns:
-            Optional[str]: Extracted summary text, or None if not found.
+            str | None: Extracted summary text, or None if not found.
         """
         match = re.search(r"<output_msg>(.*?)</output_msg>", response, re.DOTALL)
         if match:

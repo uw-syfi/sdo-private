@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, List
+from typing import Any
 
 from .utils import truncate_params, truncate_content
 
@@ -8,12 +10,12 @@ class ClaudeEvent(ABC):
     """Base class for Claude Code stream events."""
 
     @abstractmethod
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         """Render the event as a string for terminal output."""
         pass
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> Optional["ClaudeEvent"]:
+    def from_dict(data: dict[str, Any]) -> "ClaudeEvent" | None:
         """Factory method to create events from JSON data."""
         event_type = data.get("type")
 
@@ -55,10 +57,10 @@ class ClaudeEvent(ABC):
 class MultiEvent(ClaudeEvent):
     """Container for multiple events from a single message."""
 
-    def __init__(self, events: List[ClaudeEvent]):
+    def __init__(self, events: list[ClaudeEvent]):
         self.events = events
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # MultiEvent doesn't render itself; events are handled individually
         return None
 
@@ -66,10 +68,10 @@ class MultiEvent(ClaudeEvent):
 class SystemEvent(ClaudeEvent):
     """System initialization event."""
 
-    def __init__(self, data: Dict[str, Any]):
+    def __init__(self, data: dict[str, Any]):
         self.data = data
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # System events are silent
         return None
 
@@ -80,7 +82,7 @@ class TextEvent(ClaudeEvent):
     def __init__(self, text: str):
         self.text = text
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # Text rendering is handled specially due to streaming
         return self.text
 
@@ -88,7 +90,7 @@ class TextEvent(ClaudeEvent):
 class ToolUseEvent(ClaudeEvent):
     """Tool call event from assistant."""
 
-    def __init__(self, tool_name: str, tool_id: Optional[str], parameters: Any):
+    def __init__(self, tool_name: str, tool_id: str | None, parameters: Any):
         self.tool_name = tool_name
         self.tool_id = tool_id
         self.parameters = parameters
@@ -101,7 +103,7 @@ class ToolUseEvent(ClaudeEvent):
 class ToolResultEvent(ClaudeEvent):
     """Tool execution result event."""
 
-    def __init__(self, output: Any, tool_id: Optional[str]):
+    def __init__(self, output: Any, tool_id: str | None):
         # Convert output to string if it's not already
         if isinstance(output, list):
             # Handle list content (e.g., from tool_result blocks with multiple items)
@@ -125,6 +127,6 @@ class ResultEvent(ClaudeEvent):
     def __init__(self, result: str):
         self.result = result
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # Result events are silent (result is captured separately)
         return None

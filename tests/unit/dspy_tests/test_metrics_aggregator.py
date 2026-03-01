@@ -10,10 +10,10 @@ from pathlib import Path
 
 from app_operator.dspy_integration.metrics_aggregator import MetricsAggregator
 
-
 # ---------------------------------------------------------------------------
 # Helpers for writing minimal trajectory files
 # ---------------------------------------------------------------------------
+
 
 def _write_trajectory(path: Path, conversations: list, phase: str = "deployment",
                       status: str = "completed") -> None:
@@ -52,10 +52,10 @@ def _conv(*, exit_code=0, duration=10.0, fallback=False, content_len=400):
         ],
     }
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def baseline_dir(tmp_path):
@@ -76,10 +76,10 @@ def optimized_dir(tmp_path):
     _write_trajectory(d / "trajectory_4.json", [_conv(exit_code=0, duration=6.0, fallback=True)])
     return d
 
-
 # ---------------------------------------------------------------------------
 # Fallback-rate comparison
 # ---------------------------------------------------------------------------
+
 
 class TestFallbackRateComparison:
     """Fallback rate and its reduction percentage appear in improvements."""
@@ -143,10 +143,10 @@ class TestFallbackRateComparison:
         impr = agg.compare_versions(baseline_dir, o)["improvements"]
         assert impr["fallback_rate_reduction_pct"] == 0.0
 
-
 # ---------------------------------------------------------------------------
 # Per-phase comparison
 # ---------------------------------------------------------------------------
+
 
 class TestPerPhaseComparison:
     """compare_versions populates by_phase with per-phase improvements."""

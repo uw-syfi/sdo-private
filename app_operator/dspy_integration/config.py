@@ -5,7 +5,6 @@ auto-rollback parameters, and metric weights.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
 
 from app_operator.validation import (
     validate_field,
@@ -41,7 +40,7 @@ class DSPyOptimizationConfig:
     num_examples: int = 30
     validation_split: float = 0.2
     n_candidates: int = 4
-    metric_weights: Dict[str, float] = field(
+    metric_weights: dict[str, float] = field(
         default_factory=lambda: {
             "success": 0.5,
             "efficiency": 0.25,
@@ -163,8 +162,8 @@ class DSPyConfig:
     use_optimized: bool = False
     use_seeds: bool = False
     optimized_version: str = "latest"
-    runtime_model: Optional[str] = None
-    vertex_location: Optional[str] = None
+    runtime_model: str | None = None
+    vertex_location: str | None = None
     fallback_to_baseline: bool = True
     enable_online_learning: bool = False
     feedback_sample_rate: float = 0.1

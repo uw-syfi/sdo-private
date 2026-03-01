@@ -5,12 +5,11 @@ where field names differ between template context and signature definitions.
 """
 
 from pathlib import Path
-from typing import Any, Dict
-
+from typing import Any
 
 # Explicit field mappings for prompts where Jinja2 kwargs don't match DSPy fields
 # Format: {prompt_name: {jinja2_kwarg: dspy_field_name}}
-EXPLICIT_MAPPINGS: Dict[str, Dict[str, str]] = {
+EXPLICIT_MAPPINGS: dict[str, dict[str, str]] = {
     "deployer_fix_error": {
         "previous_summary_note": "previous_summary",
     },
@@ -34,7 +33,7 @@ def convert_type(value: Any) -> Any:
     return value
 
 
-def map_kwargs_to_fields(prompt_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+def map_kwargs_to_fields(prompt_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Map Jinja2 template kwargs to DSPy signature fields.
 
     Applies explicit mappings first, then auto-maps remaining fields.
@@ -113,7 +112,7 @@ def get_output_field_name(prompt_name: str) -> str:
     return OUTPUT_FIELDS[prompt_name]
 
 
-def get_all_output_fields(prompt_name: str) -> Dict[str, str]:
+def get_all_output_fields(prompt_name: str) -> dict[str, str]:
     """Get all output fields for prompts with multiple outputs.
 
     Some prompts (like code_analyzer_user) have multiple output fields.

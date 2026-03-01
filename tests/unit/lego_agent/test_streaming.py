@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 from lego_agent.streaming import parse_chunk_content, extract_tool_result
 
-
 # --- parse_chunk_content ---
 
 
@@ -38,7 +37,6 @@ class TestParseChunkContent:
 
     def test_non_string_non_list(self):
         assert parse_chunk_content(42) == "42"
-
 
 # --- extract_tool_result ---
 
