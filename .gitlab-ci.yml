@@ -73,3 +73,9 @@ unit_tests_js:
   script:
     - echo "Running Frontend Tests..."
     - ./scripts/test_js.sh
+
+architecture_check:
+  extends: .test_job_template
+  script:
+    - echo "Checking architecture rules..."
+    - ./scripts/check_arch.sh

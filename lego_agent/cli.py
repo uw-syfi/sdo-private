@@ -8,8 +8,8 @@ from pathlib import Path
 from lego_agent.engine import LegoAgentEngine
 from lego_agent.io import ConsoleIO
 from lego_agent.utils import find_repo_root
-from app_operator.config import load_config
-from app_operator.logger import logger
+from loguru import logger
+from lego_agent.config import load_config
 from lego_agent.prompts import get_loader
 
 DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding
