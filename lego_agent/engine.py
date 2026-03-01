@@ -205,6 +205,7 @@ class LegoAgentEngine:
                 )
                 response.validate()
             except Exception as e:
+                logger.warning("Response validation failed, falling back to text parsing: %s", e)
                 self.io.render_error(
                     f"Response validation failed: {e}")
 

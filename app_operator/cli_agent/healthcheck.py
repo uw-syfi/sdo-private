@@ -29,8 +29,10 @@ def _write_to_log(log_file, header: str, stdout: str = "",
             log_file.write(stderr)
             log_file.write("\n")
         log_file.flush()
-    except Exception:
-        pass
+    except Exception as e:
+        # Best-effort logging: swallow write errors so they don't mask the
+        # health check result that is about to be returned to the caller.
+        logger.debug("Failed to write health check log entry: %s", e)
 
 
 def run_health_check(
@@ -182,5 +184,7 @@ def run_health_check(
         if log_file:
             try:
                 log_file.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # Best-effort cleanup: swallow close errors so the caller
+                # receives the health check result unaffected.
+                logger.debug("Failed to close health check log file: %s", e)
