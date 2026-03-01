@@ -177,7 +177,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
         while True:
             data = await websocket.receive_json()
+
+            if not isinstance(data, dict):
+                await io._send_event(
+                    "error",
+                    {"message": "Invalid message: expected a JSON object"},
+                )
+                continue
+
             event_type = data.get("type")
+            if not isinstance(event_type, str):
+                await io._send_event(
+                    "error",
+                    {"message": "Invalid message: 'type' field must be a string"},
+                )
+                continue
 
             if event_type == "start":
                 user_prompt = data.get("prompt")
@@ -203,6 +217,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 exec_work_dir = (
                     Path(user_work_dir).resolve() if user_work_dir else work_dir
                 )
+
+                # Validate work_dir is within repo root to prevent path traversal
+                try:
+                    exec_work_dir.relative_to(repo_root)
+                except ValueError:
+                    await io._send_event(
+                        "log",
+                        {
+                            "message": f"Invalid work_dir: path must be within the repository root ({repo_root})",
+                            "level": "error",
+                        },
+                    )
+                    continue
 
                 # Run engine in background task so we can keep receiving messages (like answers)
                 current_task = asyncio.create_task(
