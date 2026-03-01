@@ -98,6 +98,7 @@ class TrajectoryRecorderProtocol(Protocol):
     def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
     def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
     def record_fault_injection(self, metadata: Dict[str, Any]) -> None: ...
+    def record_token_usage(self, usage: Dict[str, int]) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
     def phase(
@@ -379,6 +380,19 @@ class TrajectoryRecorder:
             metadata: Fault injection report from FaultReport.to_trajectory_metadata().
         """
         self.trajectory["metadata"]["fault_injection"] = metadata
+        self._write_to_file()
+
+    def record_token_usage(self, usage: Dict[str, int]) -> None:
+        """Record cumulative LLM token usage for this run.
+
+        Called after each agent generate() call with the running total so the
+        trajectory always reflects the latest count. The final value after all
+        generate() calls is the total tokens consumed by the run.
+
+        Args:
+            usage: Dict with prompt_tokens, completion_tokens, total_tokens.
+        """
+        self.trajectory["metadata"]["token_usage"] = usage
         self._write_to_file()
 
     def end_phase(self, status: Optional[str] = None) -> None:
@@ -772,6 +786,9 @@ class NullTrajectoryRecorder:
         pass
 
     def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
+        pass
+
+    def record_token_usage(self, usage: Dict[str, int]) -> None:
         pass
 
     @contextmanager

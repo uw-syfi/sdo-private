@@ -37,7 +37,7 @@ def test_load_config_defaults(tmp_path):
     assert config.agent.model is None
     assert config.operator.interval == 30
     assert config.operator.monitoring_max_iters == 5
-    assert config.operator.deployment_max_iters == 5
+    assert config.operator.deployment_max_iters == 20
 
 
 def test_load_config_partial_config(tmp_path):
@@ -55,7 +55,7 @@ interval = 45
     assert config.agent.model is None
     assert config.operator.interval == 45
     assert config.operator.monitoring_max_iters == 5  # default
-    assert config.operator.deployment_max_iters == 5  # default
+    assert config.operator.deployment_max_iters == 20  # default
 
 
 def test_config_unrecognized_section(tmp_path):

@@ -13,6 +13,8 @@ import sys
 import shutil
 import subprocess
 import json
+import os
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -22,8 +24,9 @@ except ImportError:
     import tomli as tomllib
 
 from app_operator.logger import logger
-from app_operator.dspy_integration.optimizer import PromptOptimizer
+from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
 from app_operator.config import load_config as load_app_config
+from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -62,7 +65,53 @@ def load_config(config_path: Path) -> Dict[str, Any]:
     if "apps" not in config["training"]:
         raise ValueError("Missing 'apps' in [training] section")
 
+    # Set defaults for optional fields
+    if "inter_run_delay" not in config:
+        config["inter_run_delay"] = 30  # Default 30 seconds between runs
+    if "max_retries" not in config:
+        config["max_retries"] = 3  # Default 3 retries
+    if "rate_limit_backoff" not in config:
+        config["rate_limit_backoff"] = 60  # Default 60 seconds for rate limits
+    if "output_prefix" not in config:
+        config["output_prefix"] = None  # Default: no prefix (write to optimized/)
+
     return config
+
+
+def _replace_in_agent_section(
+    content: str,
+    provider_override: Optional[str],
+    model_override: Optional[str],
+) -> str:
+    """Replace provider/model keys only within the [agent] TOML section."""
+    lines = content.splitlines()
+    new_lines = []
+    in_agent = False
+    provider_replaced = False
+    model_replaced = False
+
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'^\[agent\]$', stripped):
+            in_agent = True
+        elif stripped.startswith("[") and in_agent:
+            in_agent = False
+
+        if in_agent and provider_override and not provider_replaced:
+            m = re.match(r'^(\s*provider\s*=\s*).*$', line)
+            if m:
+                line = f'{m.group(1)}"{provider_override}"'
+                provider_replaced = True
+
+        if in_agent and model_override and not model_replaced:
+            m = re.match(r'^(\s*model\s*=\s*).*$', line)
+            if m:
+                line = f'{m.group(1)}"{model_override}"'
+                model_replaced = True
+
+        new_lines.append(line)
+
+    return "\n".join(new_lines)
 
 
 def _update_sds_toml(
@@ -71,8 +120,17 @@ def _update_sds_toml(
     use_optimized: bool,
     optimized_version: Optional[str],
     project_root: Optional[Path] = None,
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
 ):
-    """Update sds.toml in the app directory."""
+    """Update sds.toml in the app directory.
+
+    When *provider_override* or *model_override* is given, the corresponding
+    value inside the ``[agent]`` section is replaced so the experiment uses
+    the specified setting regardless of what the root ``sds.toml`` says.
+    """
+    import re
+
     sds_toml = app_dir / "sds.toml"
     config_toml = app_dir / "config.toml"
 
@@ -131,6 +189,13 @@ def _update_sds_toml(
                 new_lines.append(line)
         content = "\n".join(new_lines)
 
+    # Override provider/model only within the [agent] section.
+    # We locate the [agent] block and do targeted substitution within it.
+    if provider_override or model_override:
+        content = _replace_in_agent_section(
+            content, provider_override, model_override
+        )
+
     final_content = content + "\n" + new_section_content
     sds_toml.write_text(final_content)
 
@@ -159,14 +224,28 @@ def _init_experiment(source_app: Path, work_dir: Path, name_suffix: str) -> Path
     if sds_dir.exists():
         shutil.rmtree(sds_dir)
 
-    # Init git
-    subprocess.run(
+    # Init git (use -b only on git >= 2.28; fall back to symbolic-ref)
+    init_result = subprocess.run(
         ["git", "init", "-b", "main"],
         cwd=target_path,
-        check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    if init_result.returncode != 0:
+        subprocess.run(
+            ["git", "init"],
+            cwd=target_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+            cwd=target_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     return target_path
 
@@ -181,9 +260,9 @@ class StateManager:
     def _load_state(self) -> Dict[str, Any]:
         default_state = {
             "current_iteration": 1,
-            "completed_train_apps": [],
             "optimization_done": False,
             "current_version": None,
+            "completed_train_apps": [],
             "completed_val_apps": [],
         }
         if self.state_file.exists():
@@ -222,17 +301,9 @@ class StateManager:
         return default_state
 
     def save(self):
-        self.state_file.write_text(json.dumps(self.state, indent=2))
-
-    def is_train_app_completed(self, iter_num: int, app_name: str) -> bool:
-        if self.state["current_iteration"] > iter_num:
-            return True
-        return app_name in self.state["completed_train_apps"]
-
-    def mark_train_app_completed(self, app_name: str):
-        if app_name not in self.state["completed_train_apps"]:
-            self.state["completed_train_apps"].append(app_name)
-            self.save()
+        tmp = self.state_file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self.state, indent=2))
+        os.replace(tmp, self.state_file)
 
     def is_optimization_done(self, iter_num: int) -> bool:
         if self.state["current_iteration"] > iter_num:
@@ -259,7 +330,6 @@ class StateManager:
 
     def advance_iteration(self):
         self.state["current_iteration"] += 1
-        self.state["completed_train_apps"] = []
         self.state["optimization_done"] = False
         # Keep current_version as the starting point for next iteration
         self.state["completed_val_apps"] = []
@@ -275,7 +345,7 @@ def run_command(args: argparse.Namespace) -> int:
         logger.error(f"Failed to load config: {e}")
         return 1
 
-    work_dir = Path(args.work_dir).resolve()
+    work_dir = Path(config.get("work_dir", args.work_dir)).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
 
     state_manager = StateManager(work_dir)
@@ -284,15 +354,39 @@ def run_command(args: argparse.Namespace) -> int:
     prompts = config["prompts"]
     train_apps = [Path(p).resolve() for p in config["training"]["apps"]]
     val_apps = [Path(p).resolve() for p in config.get("validation", {}).get("apps", [])]
+    inter_run_delay = config["inter_run_delay"]
+    max_retries = config["max_retries"]
+    rate_limit_backoff = config["rate_limit_backoff"]
+    output_prefix = config["output_prefix"]
+    provider_override = config.get("provider")  # Optional per-experiment provider
+    model_override = config.get("model")  # Optional per-experiment model
 
     logger.info(f"Starting E2E optimization for {iterations} iterations")
     logger.info(f"Prompts: {prompts}")
     logger.info(f"Training apps: {[a.name for a in train_apps]}")
+    if output_prefix:
+        logger.info(f"Output prefix: {output_prefix} (will write to optimized/{output_prefix}/)")
+    if provider_override:
+        logger.info(f"Provider override: {provider_override}")
+    if model_override:
+        logger.info(f"Model override: {model_override}")
+    logger.info(
+        f"Rate limit handling: max_retries={max_retries}, "
+        f"backoff={rate_limit_backoff}s, inter_run_delay={inter_run_delay}s"
+    )
 
     # We need to access the prompts directory for the optimizer
     # Assuming standard layout
     base_dir = Path(__file__).parent.parent.parent
     prompts_dir = base_dir / "app_operator" / "prompts"
+
+    # Load app config to get provider for rate limit detection
+    try:
+        app_config = load_app_config(str(base_dir))
+        provider = provider_override or app_config.agent.provider
+    except Exception as e:
+        logger.warning(f"Failed to load app config, assuming 'gemini' provider: {e}")
+        provider = provider_override or "gemini"
 
     current_version = state_manager.get_current_version()
 
@@ -303,121 +397,55 @@ def run_command(args: argparse.Namespace) -> int:
 
         logger.info(f"\n=== Iteration {i}/{iterations} ===")
 
-        # 1. Generate Training Trajectories
-        logger.info("Generating training trajectories...")
-        train_trajectories_dirs = []
-
-        for app_path in train_apps:
-            app_name = app_path.name
-            exp_name = f"{app_name}_iter{i}_train"
-            exp_path = work_dir / exp_name
-
-            if state_manager.is_train_app_completed(i, app_name):
-                logger.info(f"Skipping {app_name} (already trained)")
-                # Even if skipped, we need the trajectory dir for optimization
-                traj_dir = exp_path / ".sds" / "trajectories"
-                if traj_dir.exists():
-                    train_trajectories_dirs.append(traj_dir)
-                else:
-                    logger.warning(
-                        f"Expected trajectories at {traj_dir} but not found!"
-                    )
-                continue
-
-            # Check if experiment already has trajectories from a partial run
-            traj_dir = exp_path / ".sds" / "trajectories"
-            if traj_dir.exists() and any(traj_dir.iterdir()):
-                logger.info(
-                    f"Reusing existing trajectories for {app_name}")
-                train_trajectories_dirs.append(traj_dir)
-                state_manager.mark_train_app_completed(app_name)
-                continue
-
-            exp_path = _init_experiment(app_path, work_dir, f"iter{i}_train")
-
-            # Configure sds.toml
-            if i == 1:
-                # First iteration: Use Seeds
-                _update_sds_toml(
-                    exp_path,
-                    use_seeds=True,
-                    use_optimized=False,
-                    optimized_version=None,
-                    project_root=base_dir,
-                )
-            else:
-                # Subsequent iterations: Use Optimized
-                _update_sds_toml(
-                    exp_path,
-                    use_seeds=False,
-                    use_optimized=True,
-                    optimized_version=current_version,
-                    project_root=base_dir,
-                )
-
-            logger.info(f"Running operator on {exp_path.name}...")
-            # We run the operator as a subprocess
-            cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
-
-            try:
-                subprocess.run(
-                    cmd, check=False, timeout=3600
-                )  # Don't fail the whole loop if one run fails
-            except subprocess.TimeoutExpired:
-                logger.error(
-                    f"Run timed out after 3600s for {app_name}")
-            except Exception as e:
-                logger.error(f"Run failed for {exp_path.name}: {e}")
-
-            traj_dir = exp_path / ".sds" / "trajectories"
-            if traj_dir.exists():
-                train_trajectories_dirs.append(traj_dir)
-                state_manager.mark_train_app_completed(app_name)
-            else:
-                logger.warning(f"No trajectories found for {exp_path.name}")
-
-        if not train_trajectories_dirs:
-            logger.error("No training trajectories generated. Aborting.")
-            return 1
-
-        # 2. Optimize
-        logger.info("Optimizing prompts...")
+        # 1. + 2. Generate candidates, evaluate by running operator, keep best (EvalExecute)
+        logger.info("Running eval-execute optimization...")
 
         if state_manager.is_optimization_done(i):
             logger.info("Skipping optimization (already done)")
             current_version = state_manager.get_current_version()
         else:
-            # Load DSPy config from project root to respect sds.toml settings (e.g. COPRO)
+            # Load DSPy config from project root
             try:
-                # We need to find the project root. base_dir is app_operator/.., which is sds/
-                # So base_dir is the repo root.
                 app_config = load_app_config(str(base_dir))
                 dspy_config = app_config.dspy
                 logger.info(
-                    f"Loaded DSPy config: optimizer={dspy_config.optimization.optimizer}, teacher={dspy_config.optimization.teacher_model}"
+                    f"Loaded DSPy config: teacher={dspy_config.optimization.teacher_model}, "
+                    f"n_candidates={dspy_config.optimization.n_candidates}"
                 )
             except Exception as e:
                 logger.warning(f"Failed to load project config, using defaults: {e}")
-                # Fallback to defaults if loading fails, but we should import DSPyConfig
-                # for this fallback
                 from app_operator.dspy_integration.config import DSPyConfig
 
                 dspy_config = DSPyConfig()
 
-            optimizer = PromptOptimizer(
-                config=dspy_config,
-                prompts_dir=prompts_dir,
-                use_seeds=True,  # Always optimize starting from seeds + new demos
-            )
-
             try:
                 next_version = f"v{i}"
-                output_dir = prompts_dir / "optimized" / next_version
+                if output_prefix:
+                    output_dir = prompts_dir / "optimized" / output_prefix / next_version
+                else:
+                    output_dir = prompts_dir / "optimized" / next_version
 
-                result = optimizer.optimize(
+                eval_optimizer = EvalExecuteOptimizer(
+                    config=dspy_config,
+                    prompts_dir=prompts_dir,
+                    project_root=base_dir,
+                    n_candidates=dspy_config.optimization.n_candidates,
+                    vertex_location=app_config.agent.location,
+                )
+                result = eval_optimizer.optimize(
                     prompt_names=prompts,
-                    trajectories_dirs=train_trajectories_dirs,
+                    train_apps=train_apps,
+                    work_dir=work_dir,
                     output_dir=output_dir,
+                    iteration=i,
+                    current_version=current_version,
+                    provider=provider,
+                    max_retries=max_retries,
+                    rate_limit_backoff=rate_limit_backoff,
+                    inter_run_delay=inter_run_delay,
+                    provider_override=provider_override,
+                    model_override=model_override,
+                    output_prefix=output_prefix,
                 )
 
                 if result["success"]:
@@ -450,20 +478,27 @@ def run_command(args: argparse.Namespace) -> int:
                     use_optimized=True,
                     optimized_version=current_version,
                     project_root=base_dir,
+                    provider_override=provider_override,
+                    model_override=model_override,
                 )
 
                 logger.info(f"Running validation on {exp_path.name}...")
-                try:
-                    subprocess.run(
-                        [sys.executable, "-m", "app_operator",
-                            "run", str(exp_path)],
-                        check=False,
-                        timeout=3600,
-                    )
-                except subprocess.TimeoutExpired:
-                    logger.error(
-                        f"Run timed out after 3600s for {app_name}")
+                cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
+
+                result, success, error_msg = run_subprocess_with_rate_limit_handling(
+                    cmd=cmd,
+                    provider=provider,
+                    max_retries=max_retries,
+                    base_delay=5,
+                    rate_limit_backoff=rate_limit_backoff,
+                    operation_name=f"Validation run: {exp_path.name}",
+                )
                 state_manager.mark_val_app_completed(app_name)
+
+                # Add delay before next validation run
+                if app_name != val_apps[-1].name:  # Don't delay after last app
+                    logger.info(f"Waiting {inter_run_delay}s before next run...")
+                    time.sleep(inter_run_delay)
 
         state_manager.advance_iteration()
 

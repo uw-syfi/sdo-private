@@ -116,6 +116,30 @@ class TestShouldUseDSPy:
         result = loader._should_use_dspy('deployer_fix_error', {})
         assert result is False
 
+    def test_script_generation_prompts_never_use_dspy(self):
+        """Script-generation prompts must always use Jinja2 regardless of config.
+
+        These prompts produce agent instructions (with .sds/deploy.sh in the text)
+        that _FILE_GEN_RE must match. If DSPy is used, the module returns the full
+        bash script as output, _FILE_GEN_RE fails to match, and the RLM loop runs
+        on a bash script as its task — causing the infinite explore loop seen in
+        the e2e-rlm1 experiment.
+        """
+        config = DSPyConfig(use_optimized=True, canary_deployment=False)
+        loader = PromptLoader(dspy_config=config)
+
+        for prompt_name in [
+            "deployer_generate_deploy_script",
+            "deployer_generate_health_check",
+            "deployer_generate_script",
+        ]:
+            result = loader._should_use_dspy(prompt_name, {})
+            assert result is False, (
+                f"'{prompt_name}' must never use DSPy: it would return a bash script "
+                "as the rendered prompt, bypassing _FILE_GEN_RE and triggering the "
+                "RLM explore loop instead of _generate_files()"
+            )
+
 
 class TestRenderWithDSPy:
     """Tests for rendering with DSPy integration."""

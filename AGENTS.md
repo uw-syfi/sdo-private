@@ -57,7 +57,7 @@ monitoring_max_iters = 5
 deployment_max_iters = 20
 agent_fix_timeout = 1800
 deploy_timeout = 900
-agent_timeout = 300
+agent_timeout = 900
 
 [operator.phase]  # Phase control (optional)
 code_analysis = false  # Disable code analysis phase (default: true)

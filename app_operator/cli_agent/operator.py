@@ -105,10 +105,9 @@ class AppOperator:
 
         # Pick up fault injection metadata if present
         fault_meta_path = self.sds_dir / "fault_injection.json"
-        if fault_meta_path.exists():
+        if self.filesystem.exists(fault_meta_path):
             try:
-                with open(fault_meta_path) as f:
-                    fault_meta = json.load(f)
+                fault_meta = json.loads(self.filesystem.read_text(fault_meta_path))
                 self.recorder.record_fault_injection(fault_meta)
                 logger.info(
                     f"Loaded fault injection metadata: "
@@ -178,6 +177,7 @@ class AppOperator:
             signal.signal(signal.SIGINT, self._handle_shutdown_signal)
             signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
+        run_succeeded = False
         try:
             logger.info("Starting App Operator Mode")
             logger.info(f"Repository: {self.repo_path}")
@@ -214,6 +214,7 @@ class AppOperator:
                 check_shutdown=lambda: self._shutdown_requested,
             )
 
+            run_succeeded = True
             return 0
 
         except KeyboardInterrupt:
@@ -229,11 +230,11 @@ class AppOperator:
             return 1
         finally:
             self.ui.close(
-                status="completed" if self._deployed else "failed",
-                exit_code=0 if self._deployed else 1,
+                status="completed" if run_succeeded else "failed",
+                exit_code=0 if run_succeeded else 1,
             )
             self._cleanup()
-            self.recorder.finalize("completed" if self._deployed else "failed")
+            self.recorder.finalize("completed" if run_succeeded else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).

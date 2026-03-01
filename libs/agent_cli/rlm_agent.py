@@ -32,6 +32,61 @@ _FILE_GEN_PATTERNS = [
 ]
 _FILE_GEN_RE = re.compile("|".join(_FILE_GEN_PATTERNS))
 
+# Patterns that indicate a pure text-generation task (no file writes needed).
+# These tasks use a direct single LLM call with the prompt as-is.
+_DIRECT_TEXT_PATTERNS = [
+    r"fix_summary",
+]
+_DIRECT_TEXT_RE = re.compile("|".join(_DIRECT_TEXT_PATTERNS))
+
+_NETWORK_ERROR_MARKERS = (
+    "nameresolutionerror",
+    "name or service not known",
+    "transporterror",
+    "apiconnectionerror",
+    "connectionerror",
+    "max retries exceeded",
+)
+
+
+def _litellm_call_with_retry(
+    kwargs: dict,
+    label: str,
+    max_attempts: int = 3,
+    token_acc: Optional[dict] = None,
+) -> str:
+    """Call litellm.completion with retry on transient network errors.
+
+    Returns the response content string, or raises the last exception if all
+    attempts fail.  When *token_acc* is provided, prompt/completion/total token
+    counts from each successful call are accumulated into it.
+    """
+    import time
+
+    for attempt in range(max_attempts):
+        try:
+            response = litellm.completion(**kwargs)
+            if token_acc is not None:
+                usage = getattr(response, "usage", None)
+                if usage:
+                    token_acc["prompt_tokens"] = token_acc.get(
+                        "prompt_tokens", 0) + (getattr(usage, "prompt_tokens", 0) or 0)
+                    token_acc["completion_tokens"] = token_acc.get(
+                        "completion_tokens", 0) + (getattr(usage, "completion_tokens", 0) or 0)
+                    token_acc["total_tokens"] = token_acc.get(
+                        "total_tokens", 0) + (getattr(usage, "total_tokens", 0) or 0)
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            if any(m in str(e).lower() for m in _NETWORK_ERROR_MARKERS) and attempt < max_attempts - 1:
+                delay = 15 * (2 ** attempt)
+                logger.warning(
+                    f"[RLM] {label}: transient network error (attempt {attempt + 1}/{max_attempts}), "
+                    f"retrying in {delay}s: {e}"
+                )
+                time.sleep(delay)
+            else:
+                raise
+
 
 @register_provider("rlm")
 class RLMCodingAgent(CodingAgent):
@@ -179,11 +234,26 @@ class RLMCodingAgent(CodingAgent):
         """Build an ``RLMContext`` by reading available artifacts from *repo_path*.
 
         Files that do not exist are silently skipped (empty string).
+
+        On the first call where ``.sds/deploy.sh`` exists, a backup is created
+        at ``.sds/deploy.sh.bak`` so the original script is preserved across
+        fix iterations.  Subsequent calls read from the backup.
         """
         sds = repo_path / ".sds"
+        deploy_sh = sds / "deploy.sh"
+        deploy_bak = sds / "deploy.sh.bak"
+
+        # Create backup of deploy.sh on first build (before any fixes).
+        if deploy_sh.exists() and not deploy_bak.exists():
+            import shutil
+            shutil.copy2(deploy_sh, deploy_bak)
+
+        # original_script comes from the backup (immutable first version).
+        original_script = self._read(deploy_bak)
+
         return RLMContext(
             error_log=self._read(sds / "logs" / "deploy.log"),
-            deployment_script=self._read(sds / "deploy.sh"),
+            deployment_script=self._read(deploy_sh),
             health_check_output=self._read(sds / "logs" / "health_check.log"),
             dockerfile=self._read(repo_path / "Dockerfile"),
             docker_compose=(
@@ -195,6 +265,7 @@ class RLMCodingAgent(CodingAgent):
                 or self._read(repo_path / "README.rst")
             ),
             analysis_report=self._read(sds / "code_analysis.md"),
+            original_script=original_script,
         )
 
     @staticmethod

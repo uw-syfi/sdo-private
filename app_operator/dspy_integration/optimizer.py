@@ -14,7 +14,6 @@ from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
 from app_operator.dspy_integration.metrics import (
     CompositeMetric,
-    GroundTruthSimilarityMetric,
 )
 from app_operator.dspy_integration.signatures import get_signature, SIGNATURES
 from app_operator.dspy_integration.field_mappings import (
@@ -78,7 +77,10 @@ PROMPT_TO_TEMPLATE: Dict[str, str] = {
 }
 
 
-def _ensure_serializable(obj):
+_ENSURE_SERIALIZABLE_MAX_DEPTH = 50
+
+
+def _ensure_serializable(obj, _depth: int = 0):
     """Ensure object is JSON-serializable, raising TypeError if not.
 
     DSPy demo objects may contain non-primitive types (e.g. Example
@@ -86,12 +88,14 @@ def _ensure_serializable(obj):
     rather than relying on json.dump's implicit default=str, making
     the conversion intentional and documented.
     """
+    if _depth > _ENSURE_SERIALIZABLE_MAX_DEPTH:
+        return str(obj)
     if isinstance(obj, (str, int, float, bool, type(None))):
         return obj
     if isinstance(obj, dict):
-        return {str(k): _ensure_serializable(v) for k, v in obj.items()}
+        return {str(k): _ensure_serializable(v, _depth + 1) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [_ensure_serializable(v) for v in obj]
+        return [_ensure_serializable(v, _depth + 1) for v in obj]
     return str(obj)  # Convert unknown types to string with explicit intent
 
 
@@ -105,18 +109,27 @@ class PromptOptimizer:
     4. Save optimized prompts
     """
 
-    def __init__(self, config: DSPyConfig, prompts_dir: Path, use_seeds: bool = False):
+    def __init__(
+        self,
+        config: DSPyConfig,
+        prompts_dir: Path,
+        use_seeds: bool = False,
+        vertex_location: Optional[str] = None,
+    ):
         """Initialize optimizer.
 
         Args:
             config: DSPy configuration
             prompts_dir: Directory containing prompt templates
             use_seeds: If True, use minimal GEPA-style seed prompts instead of baseline templates
+            vertex_location: Vertex AI location override (e.g. "global").
+                Falls back to the VERTEX_LOCATION environment variable when None.
         """
         self.config = config
         self.prompts_dir = Path(prompts_dir)
         self.optimized_dir = prompts_dir / "optimized"
         self.use_seeds = use_seeds
+        self.vertex_location = vertex_location
 
     def optimize(
         self,
@@ -184,10 +197,6 @@ class PromptOptimizer:
         )
         self._configure_dspy_lm()
 
-        # Use GroundTruthSimilarityMetric for the prediction-quality slot:
-        # instant, deterministic, no LM call, and immune to the
-        # self-evaluation bias that plagues LLM judges when the same model
-        # generates both the prediction and the score.
         metric_weights = self.config.optimization.metric_weights
 
         # Support both legacy (3 weights) and new (4 weights with health_check) format
@@ -197,7 +206,6 @@ class PromptOptimizer:
                 efficiency_weight=metric_weights["efficiency"],
                 token_weight=metric_weights["tokens"],
                 health_check_weight=metric_weights["health_check"],
-                prediction_metric=GroundTruthSimilarityMetric(),
                 include_health_check_quality=True,
             )
         else:
@@ -206,7 +214,6 @@ class PromptOptimizer:
                 success_weight=metric_weights["success"],
                 efficiency_weight=metric_weights["efficiency"],
                 token_weight=metric_weights["tokens"],
-                prediction_metric=GroundTruthSimilarityMetric(),
                 include_health_check_quality=False,
             )
 
@@ -309,9 +316,13 @@ class PromptOptimizer:
         # with different instructions are not served stale responses.
         kwargs = {"model": model_str, "cache": False}
 
-        # Explicitly pass VERTEX_LOCATION if present in environment
+        # Explicitly pass VERTEX_PROJECT and VERTEX_LOCATION if present in environment
         # This fixes issues where litellm defaults to us-central1 despite env var
-        vertex_location = os.environ.get("VERTEX_LOCATION")
+        vertex_project = os.environ.get("VERTEX_PROJECT")
+        if vertex_project:
+            kwargs["vertex_project"] = vertex_project
+
+        vertex_location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
         if vertex_location:
             kwargs["vertex_location"] = vertex_location
 
@@ -418,7 +429,13 @@ class PromptOptimizer:
 
             loader = PromptLoader(templates_dir=self.prompts_dir / "templates")
             return loader.render_template(template_name, prompt_kwargs)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Failed to re-render prompt '%s' from kwargs (template=%s): %s",
+                prompt_name,
+                template_name,
+                e,
+            )
             return ""
 
     def _optimize_single_prompt(
@@ -697,9 +714,9 @@ class PromptOptimizer:
             latest_link.unlink()
         try:
             latest_link.symlink_to(output_dir.name)
-        except OSError:
+        except OSError as e:
             # Windows doesn't support symlinks without admin
-            pass
+            logger.warning("Could not create 'latest' symlink at %s: %s", latest_link, e)
 
         logger.info("Saved metadata to %s", metadata_file)
 
@@ -768,7 +785,10 @@ class PromptOptimizer:
                 not module_state["demos"]
                 and "optimized_instruction" not in module_state
             ):
-                logger.warning("No optimization artifacts to save")
+                raise RuntimeError(
+                    f"Optimization for '{prompt_name}' produced no demos and no "
+                    "optimized instruction — the optimizer may have failed silently."
+                )
 
             # Explicitly convert non-primitive types before serialization
             module_state = _ensure_serializable(module_state)

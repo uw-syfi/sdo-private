@@ -177,6 +177,7 @@ class DSPyConfig:
     use_seeds: bool = False
     optimized_version: str = "latest"
     runtime_model: Optional[str] = None
+    vertex_location: Optional[str] = None
     fallback_to_baseline: bool = True
     enable_online_learning: bool = False
     feedback_sample_rate: float = 0.1

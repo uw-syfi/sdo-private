@@ -279,7 +279,7 @@ def test_canary_deployment_routing(temp_repo, tmp_path, dspy_config_canary):
     optimized_dir = tmp_path / "optimized"
     v1_dir = optimized_dir / "v1"
     v1_dir.mkdir(parents=True)
-    (v1_dir / "deployer_generate_script.dspy.json").write_text("{}")
+    (v1_dir / "deployer_fix_error.dspy.json").write_text("{}")
 
     # Test deterministic routing
     loader = PromptLoader(dspy_config=dspy_config_canary)
@@ -295,9 +295,9 @@ def test_canary_deployment_routing(temp_repo, tmp_path, dspy_config_canary):
     kwargs = {"repo_path": temp_repo}
 
     # Call _should_use_dspy multiple times - should be consistent
-    result1 = loader._should_use_dspy("deployer_generate_script", kwargs)
-    result2 = loader._should_use_dspy("deployer_generate_script", kwargs)
-    result3 = loader._should_use_dspy("deployer_generate_script", kwargs)
+    result1 = loader._should_use_dspy("deployer_fix_error", kwargs)
+    result2 = loader._should_use_dspy("deployer_fix_error", kwargs)
+    result3 = loader._should_use_dspy("deployer_fix_error", kwargs)
 
     assert result1 == result2 == result3 == expected_use_dspy
 
@@ -317,7 +317,7 @@ def test_canary_deployment_distribution(tmp_path, dspy_config_canary):
     optimized_dir = tmp_path / "optimized"
     v1_dir = optimized_dir / "v1"
     v1_dir.mkdir(parents=True)
-    (v1_dir / "deployer_generate_script.dspy.json").write_text("{}")
+    (v1_dir / "deployer_fix_error.dspy.json").write_text("{}")
 
     loader = PromptLoader(dspy_config=dspy_config_canary)
     loader.optimized_dir = optimized_dir
@@ -330,7 +330,7 @@ def test_canary_deployment_distribution(tmp_path, dspy_config_canary):
         repo = tmp_path / f"repo_{i}"
         kwargs = {"repo_path": repo}
 
-        if loader._should_use_dspy("deployer_generate_script", kwargs):
+        if loader._should_use_dspy("deployer_fix_error", kwargs):
             dspy_count += 1
 
     # With 50% canary, expect around 50 repos to use DSPy

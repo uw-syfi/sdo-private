@@ -16,10 +16,13 @@ class TestSignatures:
         """Test that all expected signatures are registered."""
         expected_prompts = {
             "deployer_system",
+            "deployer_generate_deploy_script",
+            "deployer_generate_health_check",
             "deployer_generate_script",
             "deployer_generate_deploy_script",
             "deployer_generate_health_check",
             "deployer_fix_error",
+            "rlm_deployer_fix_error",
             "deployer_summarize",
             "code_analyzer_system",
             "code_analyzer_user",
@@ -82,4 +85,4 @@ class TestSignatures:
 
     def test_signature_count(self):
         """Test expected number of signatures."""
-        assert len(SIGNATURES) == 12
+        assert len(SIGNATURES) == 13

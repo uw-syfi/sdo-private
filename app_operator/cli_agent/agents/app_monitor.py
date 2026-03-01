@@ -1,6 +1,5 @@
 import time
 import re
-import shutil
 import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -263,8 +262,8 @@ class AppMonitor:
         )
 
         # Clear log directory on startup
-        if self.log_dir.exists():
-            shutil.rmtree(self.log_dir)
+        if self.filesystem.exists(self.log_dir):
+            self.filesystem.remove_tree(self.log_dir)
         self.filesystem.mkdir(self.log_dir, parents=True, exist_ok=True)
 
         self.check_count = 0

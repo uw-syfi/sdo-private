@@ -63,13 +63,23 @@ class ProgressSummarizer:
             bool: True if a summary should be generated.
         """
         if self.start_time is None or self.last_summary_time is None:
+            logger.debug("ProgressSummarizer: should_summarize=False (not started)")
             return False
 
         current_time = self.time_func()
         elapsed = current_time - self.start_time
         time_since_last = current_time - self.last_summary_time
 
-        return elapsed > self.initial_delay and time_since_last >= self.summary_interval
+        should = elapsed > self.initial_delay and time_since_last >= self.summary_interval
+
+        if should:
+            logger.debug(
+                f"ProgressSummarizer: should_summarize=True "
+                f"(elapsed={elapsed:.1f}s > {self.initial_delay}s, "
+                f"time_since_last={time_since_last:.1f}s >= {self.summary_interval}s)"
+            )
+
+        return should
 
     def summarize(self, output_snippet: str):
         """Generate and log a progress summary.
@@ -78,31 +88,46 @@ class ProgressSummarizer:
             output_snippet: Recent output to summarize.
         """
         if not output_snippet.strip():
+            logger.debug("ProgressSummarizer: summarize skipped (empty output)")
             return
 
         if self.start_time is None:
+            logger.debug("ProgressSummarizer: summarize skipped (not started)")
             return
 
         elapsed_time = self.time_func() - self.start_time
 
-        prompt = get_loader().render(
-            "deployer/summarize.jinja2",
-            output_snippet=output_snippet,
-            _trajectory_recorder=self.recorder,
+        logger.debug(
+            f"ProgressSummarizer: Generating summary at {elapsed_time:.1f}s "
+            f"(output length: {len(output_snippet)} chars)"
         )
 
         try:
+            prompt = get_loader().render(
+                "deployer/summarize.jinja2",
+                output_snippet=output_snippet,
+                _trajectory_recorder=self.recorder,
+            )
+
+            logger.debug(f"ProgressSummarizer: Calling agent with prompt ({len(prompt)} chars)")
+
             # Use silent=True to avoid printing the agent's internal thought process
             response = self.agent_generate_fn(prompt, True, 30)
+
+            logger.debug(f"ProgressSummarizer: Got response ({len(response)} chars)")
+
             summary = self._extract_summary(response)
             if summary:
                 logger.info(f"[{elapsed_time:.1f}s] ➜ {summary}")
+            else:
+                logger.warning("ProgressSummarizer: Failed to extract summary from response")
 
             # Update last summary time
             self.last_summary_time = self.time_func()
 
-        except Exception:
-            # If summarization fails, just ignore it to not interrupt the flow
+        except Exception as e:
+            # If summarization fails, log but don't interrupt the flow
+            logger.warning(f"ProgressSummarizer: Failed to generate summary: {e}", exc_info=True)
             pass
 
     def _extract_summary(self, response: str) -> Optional[str]:

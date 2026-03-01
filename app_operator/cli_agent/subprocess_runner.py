@@ -416,6 +416,12 @@ class SubprocessRunner:
         # Initialize summarizer with the same start time to avoid extra time_func call
         summarizer.start(start_time=start_time)
 
+        from app_operator.logger import logger
+        logger.debug(
+            f"SubprocessRunner: Started monitoring with summarizer "
+            f"(initial_delay={summarizer.initial_delay}s, interval={summarizer.summary_interval}s)"
+        )
+
         # Handle timeout=0 as a special case that fails immediately
         if self.timeout == 0:
             self._ensure_process_terminated()
@@ -426,9 +432,18 @@ class SubprocessRunner:
                 "stderr": "Deployment script timed out after 0 seconds\n",
             }
 
+        loop_iterations = 0
         while True:
             current_time = self.time_func()
             elapsed = current_time - start_time
+            loop_iterations += 1
+
+            # Log monitoring progress every 10 seconds (100 iterations at 0.1s sleep)
+            if loop_iterations % 100 == 0:
+                logger.debug(
+                    f"SubprocessRunner: Monitoring loop iter={loop_iterations}, "
+                    f"elapsed={elapsed:.1f}s, process_running={self.process.poll() is None}"
+                )
 
             # Check timeout
             if elapsed >= self.timeout:

@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import Mock, patch
 import signal
 from app_operator.cli_agent.operator import AppOperator
+from app_operator.ui import OperatorUI
 
 
 @pytest.fixture
@@ -146,3 +147,23 @@ def test_run_handles_exception_gracefully(app_operator):
     exit_code = op.run()
 
     assert exit_code == 1
+
+
+def test_run_monitor_failure_marks_failed_status(repo_path, mock_agent):
+    mock_ui = Mock(spec=OperatorUI)
+
+    with (
+        patch("app_operator.cli_agent.operator.DeploymentAgent") as mock_deployer_cls,
+        patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
+        patch("app_operator.cli_agent.operator.CodeAnalyzerAgent"),
+    ):
+        mock_deployer_cls.return_value.run.return_value = True
+        mock_monitor_cls.return_value.run.side_effect = RuntimeError("monitor failed")
+
+        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui)
+        with patch.object(op.recorder, "finalize") as mock_finalize:
+            exit_code = op.run()
+
+    assert exit_code == 1
+    mock_ui.close.assert_called_once_with(status="failed", exit_code=1)
+    mock_finalize.assert_called_once_with("failed")

@@ -90,6 +90,15 @@ class FileSystemInterface(ABC):
         """
         pass
 
+    @abstractmethod
+    def remove_tree(self, path: Path):
+        """Remove a directory tree recursively.
+
+        Args:
+            path: The directory path to remove.
+        """
+        pass
+
 
 class RealFilesystem(FileSystemInterface):
     """Production implementation using pathlib and os operations."""
@@ -114,6 +123,11 @@ class RealFilesystem(FileSystemInterface):
 
     def remove(self, path: Path):
         path.unlink()
+
+    def remove_tree(self, path: Path):
+        import shutil
+
+        shutil.rmtree(path)
 
 
 class InMemoryFilesystem(FileSystemInterface):
@@ -283,3 +297,24 @@ class InMemoryFilesystem(FileSystemInterface):
         del self.files[path_str]
         if path_str in self.permissions:
             del self.permissions[path_str]
+
+    def remove_tree(self, path: Path):
+        path_str = self._normalize_path(path)
+
+        if path_str in self.should_fail:
+            raise self.should_fail[path_str]
+
+        if path_str not in self.directories:
+            raise FileNotFoundError(f"No such directory: '{path}'")
+
+        prefix = path_str + "/"
+
+        files_to_remove = [p for p in self.files if p == path_str or p.startswith(prefix)]
+        for file_path in files_to_remove:
+            del self.files[file_path]
+            if file_path in self.permissions:
+                del self.permissions[file_path]
+
+        dirs_to_remove = [d for d in self.directories if d == path_str or d.startswith(prefix)]
+        for dir_path in dirs_to_remove:
+            self.directories.remove(dir_path)

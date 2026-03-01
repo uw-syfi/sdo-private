@@ -3,6 +3,7 @@
 This command runs offline prompt optimization using trajectory data.
 """
 
+import copy
 import sys
 from pathlib import Path
 
@@ -120,7 +121,7 @@ def run_command(args) -> int:
         else:
             config = load_config(str(Path.cwd()))
 
-        dspy_config = config.dspy
+        dspy_config = copy.deepcopy(config.dspy)
     except Exception as e:
         print(f"Error loading config: {e}", file=sys.stderr)
         return 1
