@@ -3,7 +3,6 @@ try:
 except ImportError:
     import tomli as tomllib
 from pathlib import Path
-from typing import Optional
 from dataclasses import dataclass, field, fields
 
 from app_operator.logger import logger
@@ -32,9 +31,9 @@ class UnrecognizedFieldError(ConfigurationError):
 @dataclass
 class AgentConfig:
     provider: str = "codex"
-    model: Optional[str] = None
-    location: Optional[str] = None
-    thinking_budget: Optional[int] = None
+    model: str | None = None
+    location: str | None = None
+    thinking_budget: int | None = None
     # Rate limiting and retry configuration
     max_retries: int = 3
     retry_base_delay: int = 5
@@ -426,7 +425,7 @@ def _deep_merge(base: dict, update: dict) -> dict:
     return base
 
 
-def load_config(target_dir: str, config_path: Optional[str] = None) -> Config:
+def load_config(target_dir: str, config_path: str | None = None) -> Config:
     """Load configuration from sds.toml or config.toml.
 
     Args:

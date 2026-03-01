@@ -4,7 +4,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, Union
+from typing import Callable
 
 from app_operator.logger import logger
 from app_operator.ui import OperatorUI
@@ -23,17 +23,17 @@ class SubprocessRunner:
 
     def __init__(
         self,
-        command: List[str],
+        command: list[str],
         cwd: str,
         timeout: int,
-        log_file_path: Optional[Path] = None,
-        check_shutdown: Optional[Callable[[], bool]] = None,
-        time_func: Optional[Callable[[], float]] = None,
-        sleep_func: Optional[Callable[[float], None]] = None,
-        popen_func: Optional[Callable] = None,
-        ui: Optional[OperatorUI] = None,
-        tool_name: Optional[str] = None,
-        tool_args: Optional[Union[Dict, str]] = None,
+        log_file_path: Path | None = None,
+        check_shutdown: Callable[[], bool] | None = None,
+        time_func: Callable[[], float] | None = None,
+        sleep_func: Callable[[float], None] | None = None,
+        popen_func: Callable | None = None,
+        ui: OperatorUI | None = None,
+        tool_name: str | None = None,
+        tool_args: dict | str | None = None,
     ):
         """Initialize the subprocess runner.
 
@@ -62,9 +62,9 @@ class SubprocessRunner:
         self.tool_name = tool_name
         self.tool_args = tool_args
 
-        self.process: Optional[subprocess.Popen] = None
-        self.stdout_lines: List[str] = []
-        self.stderr_lines: List[str] = []
+        self.process: subprocess.Popen | None = None
+        self.stdout_lines: list[str] = []
+        self.stderr_lines: list[str] = []
         self._log_file = None
         self._log_lock = threading.Lock()
 
@@ -210,12 +210,12 @@ class SubprocessRunner:
                 self._log_file.close()
             self._ensure_process_terminated()
 
-    def _read_pipe(self, pipe, buffer: List[str]):
+    def _read_pipe(self, pipe, buffer: list[str]):
         """Read pipe line by line and capture to buffer.
 
         Args:
             pipe: The pipe to read from (stdout or stderr).
-            buffer: List to append lines to.
+            buffer: list to append lines to.
         """
         try:
             for line in iter(pipe.readline, ""):
@@ -234,7 +234,7 @@ class SubprocessRunner:
 
     def _wait_for_completion(
         self,
-        progress_callback: Optional[Callable[[], None]] = None,
+        progress_callback: Callable[[], None] | None = None,
         summarizer=None,
     ) -> CommandResult:
         """Wait for process completion with timeout and shutdown checks.

@@ -7,10 +7,10 @@ import pytest
 from libs.agent_cli.subagent import call_subagent
 from libs.agent_cli.subagent_agent import SubagentCodingAgent
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_litellm_response(
         content: str, prompt_tokens=10, completion_tokens=5):
@@ -25,10 +25,10 @@ def _make_litellm_response(
     resp.usage = usage
     return resp
 
-
 # ---------------------------------------------------------------------------
 # call_subagent tests
 # ---------------------------------------------------------------------------
+
 
 class TestCallSubagent:
     """Tests for the shared call_subagent() primitive."""
@@ -116,10 +116,10 @@ class TestCallSubagent:
             with pytest.raises(ValueError, match="unexpected"):
                 call_subagent(model="m", system_prompt="s", user_prompt="u")
 
-
 # ---------------------------------------------------------------------------
 # SubagentCodingAgent exception handling tests
 # ---------------------------------------------------------------------------
+
 
 class TestSubagentExceptionHandling:
     """Tests for narrowed exception handling in SubagentCodingAgent."""
@@ -203,10 +203,10 @@ class TestSubagentExceptionHandling:
         assert "OSError" in result
         assert "disk full" in result
 
-
 # ---------------------------------------------------------------------------
 # SubagentCodingAgent routing tests
 # ---------------------------------------------------------------------------
+
 
 class TestSubagentRoutingFileGen:
     """File-generation prompts route to _generate_files."""
@@ -239,10 +239,10 @@ class TestSubagentRoutingDirectText:
 
         assert result == "summary text"
 
-
 # ---------------------------------------------------------------------------
 # SubagentCodingAgent fix path tests
 # ---------------------------------------------------------------------------
+
 
 class TestSubagentFixPath:
     """Tests for the fan-out + root synthesis fix path."""
@@ -365,10 +365,10 @@ class TestSubagentFixPath:
 
         assert "no fix needed" in result
 
-
 # ---------------------------------------------------------------------------
 # Registration tests
 # ---------------------------------------------------------------------------
+
 
 class TestSubagentRegistration:
     """Tests for provider registration."""

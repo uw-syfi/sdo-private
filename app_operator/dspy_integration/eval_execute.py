@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import litellm
 
@@ -41,7 +41,7 @@ class EvalExecuteOptimizer:
         prompts_dir: Path,
         project_root: Path,
         n_candidates: int = 4,
-        vertex_location: Optional[str] = None,
+        vertex_location: str | None = None,
     ):
         self.config = config
         self.prompts_dir = Path(prompts_dir)
@@ -52,20 +52,20 @@ class EvalExecuteOptimizer:
 
     def optimize(
         self,
-        prompt_names: List[str],
-        train_apps: List[Path],
+        prompt_names: list[str],
+        train_apps: list[Path],
         work_dir: Path,
         output_dir: Path,
         iteration: int,
-        current_version: Optional[str],
+        current_version: str | None,
         provider: str,
         max_retries: int = 3,
         rate_limit_backoff: int = 60,
         inter_run_delay: int = 30,
-        provider_override: Optional[str] = None,
-        model_override: Optional[str] = None,
-        output_prefix: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        provider_override: str | None = None,
+        model_override: str | None = None,
+        output_prefix: str | None = None,
+    ) -> dict[str, Any]:
         """Run the eval-execute optimization loop.
 
         Args:
@@ -98,7 +98,7 @@ class EvalExecuteOptimizer:
             }
 
         # 1. Load current instructions for all prompts
-        current_instructions: Dict[str, str] = {}
+        current_instructions: dict[str, str] = {}
         for pname in prompt_names:
             current_instructions[pname] = self._load_current_instruction(pname, current_version)
             logger.info(
@@ -114,7 +114,7 @@ class EvalExecuteOptimizer:
         logger.info(f"[EvalExecute] Generated {len(candidates)} candidates")
 
         # 3. Evaluate each candidate by running the operator on all training apps
-        scores: List[float] = []
+        scores: list[float] = []
         for c_idx, candidate in enumerate(candidates):
             logger.info(
                 f"[EvalExecute] Evaluating candidate {c_idx + 1}/{len(candidates)}..."
@@ -129,7 +129,7 @@ class EvalExecuteOptimizer:
 
             successful_runs = 0
             total_runs = 0
-            rlm_scores: List[float] = []
+            rlm_scores: list[float] = []
             for app_path in train_apps:
                 app_name = app_path.name
                 exp_dir = work_dir / f"iter{iteration}_c{c_idx + 1}_{app_name}"
@@ -259,7 +259,7 @@ class EvalExecuteOptimizer:
     # ------------------------------------------------------------------
 
     def _load_current_instruction(
-        self, prompt_name: str, current_version: Optional[str]
+        self, prompt_name: str, current_version: str | None
     ) -> str:
         """Return the instruction string currently used for *prompt_name*."""
         if current_version:
@@ -304,11 +304,11 @@ class EvalExecuteOptimizer:
 
     def _generate_candidates(
         self,
-        prompt_names: List[str],
-        current_instructions: Dict[str, str],
-    ) -> List[Dict[str, str]]:
+        prompt_names: list[str],
+        current_instructions: dict[str, str],
+    ) -> list[dict[str, str]]:
         """Generate self.n_candidates candidate dicts (prompt_name -> instruction)."""
-        per_prompt: Dict[str, List[str]] = {}
+        per_prompt: dict[str, list[str]] = {}
         for pname in prompt_names:
             per_prompt[pname] = self._generate_instruction_variants(
                 pname, current_instructions[pname], self.n_candidates
@@ -316,7 +316,7 @@ class EvalExecuteOptimizer:
 
         candidates = []
         for c_idx in range(self.n_candidates):
-            candidate: Dict[str, str] = {}
+            candidate: dict[str, str] = {}
             for pname in prompt_names:
                 variants = per_prompt[pname]
                 candidate[pname] = (
@@ -327,7 +327,7 @@ class EvalExecuteOptimizer:
 
     def _generate_instruction_variants(
         self, prompt_name: str, current_instruction: str, n: int
-    ) -> List[str]:
+    ) -> list[str]:
         """Use the teacher LLM to produce *n* instruction variants."""
         model = self.config.optimization.teacher_model
         if "/" not in model:
@@ -351,7 +351,7 @@ class EvalExecuteOptimizer:
             "fixing deployment errors."
         )
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_msg},
@@ -381,7 +381,7 @@ class EvalExecuteOptimizer:
         # Fallback: repeat the current instruction
         return [current_instruction] * n
 
-    def _write_candidate(self, candidate: Dict[str, str], version: str) -> None:
+    def _write_candidate(self, candidate: dict[str, str], version: str) -> None:
         """Write .dspy.json files for all prompts in *candidate* to *version* dir."""
         version_dir = self.optimized_dir / version
         version_dir.mkdir(parents=True, exist_ok=True)
@@ -449,7 +449,7 @@ class EvalExecuteOptimizer:
                 f"[EvalExecute] Could not clean up containers for '{project_name}': {e}"
             )
 
-    def _score_rlm_trajectory(self, exp_dir: Path) -> Optional[float]:
+    def _score_rlm_trajectory(self, exp_dir: Path) -> float | None:
         """Extract RLM efficiency score from a run's trajectory, if available.
 
         Returns a score between 0.0 and 1.0, or None if no RLM data was found.
@@ -501,8 +501,8 @@ class EvalExecuteOptimizer:
         self,
         app_dir: Path,
         optimized_version: str,
-        provider_override: Optional[str] = None,
-        model_override: Optional[str] = None,
+        provider_override: str | None = None,
+        model_override: str | None = None,
     ) -> None:
         """Write (or update) sds.toml in *app_dir* to use *optimized_version*.
 
@@ -525,7 +525,7 @@ class EvalExecuteOptimizer:
         # Strip existing [dspy] section
         if "[dspy]" in content:
             lines = content.splitlines()
-            new_lines: List[str] = []
+            new_lines: list[str] = []
             skip = False
             for line in lines:
                 if line.strip() == "[dspy]":

@@ -5,6 +5,7 @@ This module provides real-time trajectory capture during SDS execution,
 recording all agent interactions, prompts, responses, and tool calls
 into a structured trajectory.json file.
 """
+from __future__ import annotations
 
 import json
 import shutil
@@ -14,10 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import (
-    List,
-    Dict,
     Any,
-    Optional,
     Protocol,
     runtime_checkable,
     ContextManager,
@@ -55,16 +53,16 @@ class TrajectoryMessage:
     """A single message in the trajectory."""
 
     role: str
-    content: Optional[str] = None
-    tool: Optional[str] = None
-    args: Optional[Dict[str, Any]] = None
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
-    exit_code: Optional[int] = None
-    timestamp: Optional[str] = None
-    duration_seconds: Optional[float] = None
+    content: str | None = None
+    tool: str | None = None
+    args: dict[str, Any] | None = None
+    stdout: str | None = None
+    stderr: str | None = None
+    exit_code: int | None = None
+    timestamp: str | None = None
+    duration_seconds: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary, excluding None values."""
         return {k: v for k, v in asdict(self).items() if v is not None}
 
@@ -74,36 +72,36 @@ class TrajectoryRecorderProtocol(Protocol):
     """Protocol for trajectory recorders."""
 
     def start_phase(
-        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+        self, phase: Phase, context: dict[str, Any] | None = None
     ) -> None: ...
-    def end_phase(self, status: Optional[str] = None) -> None: ...
+    def end_phase(self, status: str | None = None) -> None: ...
     def add_user_message(self, content: str) -> None: ...
 
     def add_assistant_message(
-        self, content: str, duration: Optional[float] = None
+        self, content: str, duration: float | None = None
     ) -> None: ...
 
     def add_tool_call(
         self,
         tool: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None: ...
     def set_phase_status(self, status: str) -> None: ...
     def set_agent_name(self, agent_name: str) -> None: ...
     def set_prompt_version(self, version: str) -> None: ...
     def record_fallback(self) -> None: ...
-    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
+    def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None: ...
     def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
     def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None: ...
     def record_token_usage(self, usage: TokenUsage) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
     def phase(
-        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+        self, phase: Phase, context: dict[str, Any] | None = None
     ) -> ContextManager: ...
 
 
@@ -139,7 +137,7 @@ class TrajectoryRecorder:
         self._call_id_lock = threading.Lock()
 
         # Initialize trajectory structure
-        self.trajectory: Dict[str, Any] = {
+        self.trajectory: dict[str, Any] = {
             "metadata": {
                 "repo_path": str(self.repo_path),
                 "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -157,18 +155,18 @@ class TrajectoryRecorder:
         }
 
         # Current conversation being recorded (not yet committed)
-        self._current_phase: Optional[Phase] = None
-        self._current_conversation: List[dict] = []
-        self._current_call_id: Optional[int] = None
+        self._current_phase: Phase | None = None
+        self._current_conversation: list[dict] = []
+        self._current_call_id: int | None = None
         self._conversation_lock = threading.Lock()
 
         # Pending status for the current phase (set by set_phase_status)
-        self._pending_phase_status: Optional[str] = None
+        self._pending_phase_status: str | None = None
 
         # Prompt version tracking for DSPy integration
-        self._current_prompt_version: Optional[str] = None
-        self._current_prompt_kwargs: Optional[Dict[str, Any]] = None
-        self._current_rendered_prompt: Optional[str] = None
+        self._current_prompt_version: str | None = None
+        self._current_prompt_kwargs: dict[str, Any] | None = None
+        self._current_rendered_prompt: str | None = None
         self._fallback_occurred: bool = False
 
         # Prevent double finalization
@@ -186,7 +184,7 @@ class TrajectoryRecorder:
         self.trajectory["metadata"]["agent_name"] = agent_name
         self._write_to_file()
 
-    def get_current_call_id(self) -> Optional[int]:
+    def get_current_call_id(self) -> int | None:
         """Get the current call ID for the active phase.
 
         Returns:
@@ -209,7 +207,7 @@ class TrajectoryRecorder:
             return self._call_counter
 
     def start_phase(
-        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+        self, phase: Phase, context: dict[str, Any] | None = None
     ) -> None:
         """Start a new phase/conversation.
 
@@ -266,7 +264,7 @@ class TrajectoryRecorder:
                 logger.warning("Attempted to record user message outside of a phase")
 
     def add_assistant_message(
-        self, content: str, duration: Optional[float] = None
+        self, content: str, duration: float | None = None
     ) -> None:
         """Add an assistant response to the current conversation."""
         with self._conversation_lock:
@@ -287,11 +285,11 @@ class TrajectoryRecorder:
     def add_tool_call(
         self,
         tool: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None:
         """Add a tool call with its output to the current conversation."""
         with self._conversation_lock:
@@ -347,7 +345,7 @@ class TrajectoryRecorder:
         """Record that a fallback from DSPy to Jinja2 occurred."""
         self._fallback_occurred = True
 
-    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None:
+    def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None:
         """Record the structured kwargs passed to a prompt render call.
 
         Filters out internal keys (starting with '_') and converts Path values
@@ -396,7 +394,7 @@ class TrajectoryRecorder:
         self.trajectory["metadata"]["token_usage"] = usage
         self._write_to_file()
 
-    def end_phase(self, status: Optional[str] = None) -> None:
+    def end_phase(self, status: str | None = None) -> None:
         """End the current phase, commit conversation, and save to file."""
         with self._conversation_lock:
             if self._current_phase is None:
@@ -562,7 +560,7 @@ class TrajectoryRecorder:
         return self.trajectory_file
 
     @contextmanager
-    def phase(self, phase: Phase, context: Optional[Dict[str, Any]] = None):
+    def phase(self, phase: Phase, context: dict[str, Any] | None = None):
         """Context manager for a trajectory phase."""
         self.start_phase(phase, context)
         try:
@@ -583,29 +581,29 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
     """
 
     def start_phase(
-        self, phase: Phase, context: Optional[Dict[str, Any]] = None
+        self, phase: Phase, context: dict[str, Any] | None = None
     ) -> None:
         pass
 
-    def end_phase(self, status: Optional[str] = None) -> None:
+    def end_phase(self, status: str | None = None) -> None:
         pass
 
     def add_user_message(self, content: str) -> None:
         pass
 
     def add_assistant_message(
-        self, content: str, duration: Optional[float] = None
+        self, content: str, duration: float | None = None
     ) -> None:
         pass
 
     def add_tool_call(
         self,
         tool: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         stdout: str = "",
         stderr: str = "",
-        exit_code: Optional[int] = None,
-        duration: Optional[float] = None,
+        exit_code: int | None = None,
+        duration: float | None = None,
     ) -> None:
         pass
 
@@ -621,7 +619,7 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
     def record_fallback(self) -> None:
         pass
 
-    def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None:
+    def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None:
         pass
 
     def record_rendered_prompt(self, rendered_prompt: str) -> None:
@@ -634,7 +632,7 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
         pass
 
     @contextmanager
-    def phase(self, phase: Phase, context: Optional[Dict[str, Any]] = None):
+    def phase(self, phase: Phase, context: dict[str, Any] | None = None):
         yield self
 
     def finalize(self, status: str = "completed") -> Path:
@@ -642,22 +640,22 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
 
 
 # Global recorder instance
-_recorder: Optional["TrajectoryRecorder"] = None
+_recorder: TrajectoryRecorder | None = None
 
 
-def init_trajectory(repo_path: Path) -> "TrajectoryRecorder":
+def init_trajectory(repo_path: Path) -> TrajectoryRecorder:
     """Initialize the global trajectory recorder."""
     global _recorder
     _recorder = TrajectoryRecorder(repo_path)
     return _recorder
 
 
-def get_trajectory() -> Optional["TrajectoryRecorder"]:
+def get_trajectory() -> TrajectoryRecorder | None:
     """Get the global trajectory recorder instance."""
     return _recorder
 
 
-def record_assistant_message(content: str, duration: Optional[float] = None) -> None:
+def record_assistant_message(content: str, duration: float | None = None) -> None:
     """Record an assistant response."""
     recorder = get_trajectory()
     if recorder:
@@ -666,11 +664,11 @@ def record_assistant_message(content: str, duration: Optional[float] = None) -> 
 
 def record_tool_call(
     tool: str,
-    args: Dict[str, Any],
+    args: dict[str, Any],
     stdout: str = "",
     stderr: str = "",
-    exit_code: Optional[int] = None,
-    duration: Optional[float] = None,
+    exit_code: int | None = None,
+    duration: float | None = None,
 ) -> None:
     """Record a tool call with its output."""
     recorder = get_trajectory()
@@ -678,14 +676,14 @@ def record_tool_call(
         recorder.add_tool_call(tool, args, stdout, stderr, exit_code, duration)
 
 
-def record_phase_end(status: Optional[str] = None) -> None:
+def record_phase_end(status: str | None = None) -> None:
     """End the current phase."""
     recorder = get_trajectory()
     if recorder:
         recorder.end_phase(status)
 
 
-def finalize_trajectory(status: str = "completed") -> Optional[Path]:
+def finalize_trajectory(status: str = "completed") -> Path | None:
     """Finalize and save the trajectory."""
     recorder = get_trajectory()
     if recorder:
@@ -693,7 +691,7 @@ def finalize_trajectory(status: str = "completed") -> Optional[Path]:
     return None
 
 
-def get_current_call_id() -> Optional[int]:
+def get_current_call_id() -> int | None:
     """Get the current call ID for the active phase.
 
     Returns:
@@ -705,7 +703,7 @@ def get_current_call_id() -> Optional[int]:
     return None
 
 
-def get_run_id() -> Optional[str]:
+def get_run_id() -> str | None:
     """Get the unique run ID for the current trajectory.
 
     Returns:
@@ -717,7 +715,7 @@ def get_run_id() -> Optional[str]:
     return None
 
 
-def record_phase_start(phase: Phase, context: Optional[Dict[str, Any]] = None) -> None:
+def record_phase_start(phase: Phase, context: dict[str, Any] | None = None) -> None:
     """Start a new phase."""
     recorder = get_trajectory()
     if recorder:

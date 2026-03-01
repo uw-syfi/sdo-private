@@ -4,7 +4,6 @@ Follows the same validation patterns as app_operator/dspy_integration/config.py.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 from app_operator.fault_injection.models import FaultCategory, FaultSeverity
 from app_operator.validation import validate_field, validate_type
@@ -29,10 +28,10 @@ class FaultInjectionConfig:
 
     enabled: bool = False
     num_faults: int = 2
-    categories: List[str] = field(default_factory=list)
-    severities: List[str] = field(default_factory=list)
-    exclude_faults: List[str] = field(default_factory=list)
-    seed: Optional[int] = None
+    categories: list[str] = field(default_factory=list)
+    severities: list[str] = field(default_factory=list)
+    exclude_faults: list[str] = field(default_factory=list)
+    seed: int | None = None
     backup_compose: bool = True
     platform: str = "compose"
 

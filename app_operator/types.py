@@ -1,6 +1,6 @@
 """Shared type definitions for the app_operator package."""
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 
 class CommandResult(TypedDict):
@@ -24,7 +24,7 @@ class _TrajectoryCallRecordRequired(TypedDict):
     call_id: int
     phase: str
     start_time: str
-    end_time: Optional[str]
+    end_time: str | None
     context: dict
 
 

@@ -5,7 +5,7 @@ scenarios without requiring actual agent execution.
 """
 
 import time
-from typing import List, Dict, Any, Optional
+from typing import Any
 from libs.agent_cli.base import CodingAgent
 
 
@@ -27,8 +27,8 @@ class StubAgent(CodingAgent):
         self.response = response
         self.model = model
         self.recorder = None
-        self.calls: List[Dict[str, Any]] = []
-        self.generate_calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
+        self.generate_calls: list[dict[str, Any]] = []
 
     def generate(self, prompt: str, cwd=None, timeout=300, silent=False, **kwargs) -> str:
         """Return a stub response and record the call.
@@ -126,7 +126,7 @@ class TrackingAgent(CodingAgent):
         Args:
             response: The response to return for all calls.
         """
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
         self.fix_request_count = 0
         self.generation_count = 0
         self.response = response
@@ -165,9 +165,9 @@ class ConfigurableAgent(CodingAgent):
 
     def __init__(self):
         """Initialize the configurable agent."""
-        self.responses: Dict[str, str] = {}
+        self.responses: dict[str, str] = {}
         self.default_response = "default response"
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
     def set_response(self, keyword: str, response: str):
         """Configure a response for prompts containing a keyword.
@@ -217,7 +217,7 @@ class ScriptGeneratingAgent(CodingAgent):
     def __init__(
         self,
         generate_valid_scripts: bool = True,
-        responses: Optional[List[str]] = None,
+        responses: list[str] | None = None,
     ):
         """Initialize the script generating agent.
 
@@ -227,14 +227,14 @@ class ScriptGeneratingAgent(CodingAgent):
             responses: Custom script contents (if None, uses defaults).
         """
         self.generate_valid_scripts = generate_valid_scripts
-        self.calls: List[tuple[str, Optional[str], int]] = []
+        self.calls: list[tuple[str, str | None, int]] = []
         self.responses = responses or [
             "#!/bin/bash\necho deploy",
             "#!/bin/bash\necho health",
         ]
         self.call_count = 0
 
-    def generate(self, prompt: str, cwd: Optional[str] = None, timeout: int = 300, **kwargs) -> str:
+    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300, **kwargs) -> str:
         """Generate scripts based on the prompt.
 
         Args:

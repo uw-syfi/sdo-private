@@ -5,7 +5,6 @@ import subprocess
 import sys
 import threading
 from abc import abstractmethod
-from typing import Optional, List
 
 from app_operator.logger import logger
 from .base import CodingAgent
@@ -22,13 +21,13 @@ class CLIGenerationSession:
         binary_name: str,
         env: dict,
         log_prefix: str,
-        cmd: List[str],
+        cmd: list[str],
         logger,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         self.binary_name = binary_name
         self.env = env
@@ -180,9 +179,9 @@ class CLICodingAgent(CodingAgent):
     def __init__(
         self,
         binary_name: str,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         """Initialize the CLI coding agent.
 
@@ -242,7 +241,7 @@ class CLICodingAgent(CodingAgent):
             raise RuntimeError(f"Failed to check {self.binary_name} CLI tool: {e}")
 
     @abstractmethod
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         """Construct the command line arguments."""
         pass
 
@@ -253,11 +252,11 @@ class CLICodingAgent(CodingAgent):
 
     def _create_session(
         self,
-        cmd: List[str],
-        cwd: Optional[str] = None,
+        cmd: list[str],
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> CLIGenerationSession:
         """Create a session for a single generation request.
 
@@ -279,7 +278,7 @@ class CLICodingAgent(CodingAgent):
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
     ) -> str:

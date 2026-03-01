@@ -5,16 +5,16 @@ value check -> ValueError pattern used across all config dataclasses.
 """
 
 from dataclasses import fields
-from typing import Any, Collection, Optional, Tuple, Type, Union
+from typing import Any, Collection, Type
 
 
 def validate_type(
     value: Any,
     name: str,
-    expected_type: Union[Type, Tuple[Type, ...]],
+    expected_type: Type | tuple[Type, ...],
     *,
     nullable: bool = False,
-    type_label: Optional[str] = None,
+    type_label: str | None = None,
 ) -> None:
     """Validate that *value* is an instance of *expected_type*.
 
@@ -65,8 +65,8 @@ def validate_range(
     value: Any,
     name: str,
     *,
-    min_val: Optional[float] = None,
-    max_val: Optional[float] = None,
+    min_val: float | None = None,
+    max_val: float | None = None,
     min_exclusive: bool = False,
     max_exclusive: bool = False,
 ) -> None:
@@ -132,16 +132,16 @@ def validate_non_empty_str(value: Any, name: str) -> None:
 def validate_field(
     value: Any,
     name: str,
-    expected_type: Union[Type, Tuple[Type, ...]],
+    expected_type: Type | tuple[Type, ...],
     *,
     nullable: bool = False,
     positive: bool = False,
     non_negative: bool = False,
-    min_val: Optional[float] = None,
-    max_val: Optional[float] = None,
+    min_val: float | None = None,
+    max_val: float | None = None,
     min_exclusive: bool = False,
     max_exclusive: bool = False,
-    valid_values: Optional[Collection] = None,
+    valid_values: Collection | None = None,
     non_empty_str: bool = False,
 ) -> None:
     """All-in-one field validator combining type + value checks.

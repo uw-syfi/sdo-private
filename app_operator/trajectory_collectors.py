@@ -5,7 +5,6 @@ Trajectory collectors for SDS.
 import shutil
 import time
 from pathlib import Path
-from typing import List
 
 from app_operator.logger import logger
 
@@ -18,7 +17,7 @@ def collect_gemini_sessions(
     trajectories_dir: Path,
     run_timestamp: str,
     start_time_str: str,
-) -> List[str]:
+) -> list[str]:
     """Collect and copy recent Gemini CLI session files to the trajectory directory.
 
     Args:

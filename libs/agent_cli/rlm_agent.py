@@ -10,7 +10,6 @@ Register with ``provider = "rlm"`` in ``sds.toml``.
 
 import re
 from pathlib import Path
-from typing import Optional
 
 import litellm
 
@@ -54,7 +53,7 @@ def _litellm_call_with_retry(
     kwargs: dict,
     label: str,
     max_attempts: int = 3,
-    token_acc: Optional[dict] = None,
+    token_acc: dict | None = None,
 ) -> str:
     """Call litellm.completion with retry on transient network errors.
 
@@ -104,10 +103,10 @@ class RLMCodingAgent(CodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
-        location: Optional[str] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
+        location: str | None = None,
     ):
         """Initialise the RLM coding agent.
 
@@ -130,7 +129,7 @@ class RLMCodingAgent(CodingAgent):
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
     ) -> str:

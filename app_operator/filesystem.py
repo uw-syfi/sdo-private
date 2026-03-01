@@ -9,7 +9,6 @@ import posixpath
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, List
 
 
 class FileSystemInterface(ABC):
@@ -103,7 +102,7 @@ class FileSystemInterface(ABC):
         pass
 
     @abstractmethod
-    def glob(self, path: Path, pattern: str) -> List[Path]:
+    def glob(self, path: Path, pattern: str) -> list[Path]:
         """Glob for files matching a pattern under a directory.
 
         Args:
@@ -111,12 +110,12 @@ class FileSystemInterface(ABC):
             pattern: The glob pattern to match.
 
         Returns:
-            List[Path]: List of matching paths.
+            list[Path]: List of matching paths.
         """
         pass
 
     @abstractmethod
-    def rglob(self, path: Path, pattern: str) -> List[Path]:
+    def rglob(self, path: Path, pattern: str) -> list[Path]:
         """Recursively glob for files matching a pattern under a directory.
 
         Args:
@@ -124,7 +123,7 @@ class FileSystemInterface(ABC):
             pattern: The glob pattern to match.
 
         Returns:
-            List[Path]: List of matching paths.
+            list[Path]: List of matching paths.
         """
         pass
 
@@ -168,10 +167,10 @@ class RealFilesystem(FileSystemInterface):
     def remove_tree(self, path: Path):
         shutil.rmtree(path)
 
-    def glob(self, path: Path, pattern: str) -> List[Path]:
+    def glob(self, path: Path, pattern: str) -> list[Path]:
         return list(path.glob(pattern))
 
-    def rglob(self, path: Path, pattern: str) -> List[Path]:
+    def rglob(self, path: Path, pattern: str) -> list[Path]:
         return list(path.rglob(pattern))
 
     def is_file(self, path: Path) -> bool:
@@ -190,10 +189,10 @@ class InMemoryFilesystem(FileSystemInterface):
 
     def __init__(self):
         """Initialize the test filesystem."""
-        self.files: Dict[str, str] = {}  # path -> content
-        self.permissions: Dict[str, int] = {}  # path -> mode
+        self.files: dict[str, str] = {}  # path -> content
+        self.permissions: dict[str, int] = {}  # path -> mode
         self.directories: set = set()  # set of directory paths
-        self.should_fail: Dict[str, Exception] = {}  # path -> exception to raise
+        self.should_fail: dict[str, Exception] = {}  # path -> exception to raise
 
         # Initialize root directory to support relative paths
         self.directories.add(self._normalize_path(Path(".")))
@@ -366,10 +365,10 @@ class InMemoryFilesystem(FileSystemInterface):
         for dir_path in dirs_to_remove:
             self.directories.remove(dir_path)
 
-    def glob(self, path: Path, pattern: str) -> List[Path]:
+    def glob(self, path: Path, pattern: str) -> list[Path]:
         dir_str = self._normalize_path(path)
         prefix = dir_str + "/"
-        results: List[Path] = []
+        results: list[Path] = []
         # Check all files and directories that are direct children matching
         for stored in list(self.files) + list(self.directories):
             if not stored.startswith(prefix):
@@ -379,10 +378,10 @@ class InMemoryFilesystem(FileSystemInterface):
                 results.append(Path(stored))
         return results
 
-    def rglob(self, path: Path, pattern: str) -> List[Path]:
+    def rglob(self, path: Path, pattern: str) -> list[Path]:
         dir_str = self._normalize_path(path)
         prefix = dir_str + "/"
-        results: List[Path] = []
+        results: list[Path] = []
         for stored in list(self.files) + list(self.directories):
             if not stored.startswith(prefix):
                 continue

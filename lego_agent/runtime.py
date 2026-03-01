@@ -2,9 +2,6 @@ import asyncio
 import json
 import yaml
 from typing import (
-    Optional,
-    Dict,
-    List,
     Any,
     Callable,
     Protocol,
@@ -54,7 +51,7 @@ class LangGraphAgent:
         self,
         model_name: str,
         llm: Any,
-        tools: List[Callable],
+        tools: list[Callable],
         instruction: str = "",
         agent_name: str = "LegoAgentWorker",
     ):
@@ -69,7 +66,7 @@ class LangGraphAgent:
             model=self.llm, tools=self.tools, prompt=self.instruction
         )
 
-    def _wrap_tools(self, tools: List[Callable]) -> List[StructuredTool]:
+    def _wrap_tools(self, tools: list[Callable]) -> list[StructuredTool]:
         """Wrap ADK tools into LangChain StructuredTools."""
         wrapped_tools = []
         for t in tools:
@@ -84,7 +81,7 @@ class LangGraphAgent:
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
         silent: bool = False,
     ) -> str:
@@ -106,7 +103,7 @@ class LangGraphAgent:
         messages = [HumanMessage(content=prompt)]
         config: RunnableConfig = {"recursion_limit": 50}
 
-        accumulated_text: List[str] = []
+        accumulated_text: list[str] = []
 
         async def run_stream() -> None:
             thinking_started = False
@@ -188,12 +185,12 @@ class LangGraphAgent:
 
 
 def create_agent(
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    config_path: Optional[str] = None,
-    repo_path: Optional[str] = None,
-    instruction: Optional[str] = None,
-    tools: Optional[List[str]] = None,
+    provider: str | None = None,
+    model: str | None = None,
+    config_path: str | None = None,
+    repo_path: str | None = None,
+    instruction: str | None = None,
+    tools: list[str] | None = None,
 ) -> LangGraphAgent:
     """Create a coding agent instance using LangGraph."""
     target_dir = repo_path or "."
@@ -238,7 +235,7 @@ def create_agent(
 class Chain(Runnable):
     """Executes a sequence of steps, passing output from one to the next."""
 
-    def __init__(self, steps: List[Runnable]):
+    def __init__(self, steps: list[Runnable]):
         self.steps = steps
 
     def run(self, input_data: Any) -> Any:
@@ -257,7 +254,7 @@ class FanOut(Runnable):
     def __init__(
         self,
         agent: Runnable,
-        items: List[str],
+        items: list[str],
         max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
     ):
@@ -266,7 +263,7 @@ class FanOut(Runnable):
         self.max_workers = max_workers
         self.timeout = timeout
 
-    def run(self, input_data: Any) -> List[Any]:
+    def run(self, input_data: Any) -> list[Any]:
         prompts_to_run = []
         if input_data:
             for item in self.items:
@@ -277,7 +274,7 @@ class FanOut(Runnable):
         else:
             prompts_to_run = self.items
 
-        async def _run_parallel() -> List[Any]:
+        async def _run_parallel() -> list[Any]:
             semaphore = asyncio.Semaphore(self.max_workers)
 
             async def _run_one(p: str) -> Any:
@@ -325,7 +322,7 @@ class JudgeLoop(Runnable):
         self.task = task
         self.max_iterations = max_iterations
 
-    def run(self, input_data: Any) -> Dict[str, str]:
+    def run(self, input_data: Any) -> dict[str, str]:
         current_output = None
 
         for i in range(self.max_iterations):
@@ -403,12 +400,12 @@ class JudgeLoop(Runnable):
             "iterations": str(self.max_iterations),
         }
 
-
 # ---------------------------------------------------------------------------
 # Registry-based runnable builder
 # ---------------------------------------------------------------------------
 
-def _create_agent_from_config(config: Dict[str, Any]) -> Runnable:
+
+def _create_agent_from_config(config: dict[str, Any]) -> Runnable:
     return create_agent(
         instruction=config.get("instruction"),
         tools=config.get("tools"),
@@ -417,7 +414,7 @@ def _create_agent_from_config(config: Dict[str, Any]) -> Runnable:
     )
 
 
-def _create_chain_from_config(config: Dict[str, Any]) -> Runnable:
+def _create_chain_from_config(config: dict[str, Any]) -> Runnable:
     steps_config = config.get("steps", [])
     if not steps_config:
         raise ValueError("Chain must have 'steps'")
@@ -425,7 +422,7 @@ def _create_chain_from_config(config: Dict[str, Any]) -> Runnable:
     return Chain(steps)
 
 
-def _create_fan_out_from_config(config: Dict[str, Any]) -> Runnable:
+def _create_fan_out_from_config(config: dict[str, Any]) -> Runnable:
     agent_config = config.get("agent")
     if not agent_config:
         raise ValueError("FanOut must have 'agent'")
@@ -438,7 +435,7 @@ def _create_fan_out_from_config(config: Dict[str, Any]) -> Runnable:
     )
 
 
-def _create_summarize_from_config(config: Dict[str, Any]) -> Runnable:
+def _create_summarize_from_config(config: dict[str, Any]) -> Runnable:
     agent_config = config.get("agent")
     if not agent_config:
         raise ValueError("Summarize must have 'agent'")
@@ -446,7 +443,7 @@ def _create_summarize_from_config(config: Dict[str, Any]) -> Runnable:
     return Summarize(agent=_build_runnable(agent_config), instruction=instruction)
 
 
-def _create_judge_loop_from_config(config: Dict[str, Any]) -> Runnable:
+def _create_judge_loop_from_config(config: dict[str, Any]) -> Runnable:
     judge_config = config.get("judge")
     if not judge_config:
         raise ValueError("JudgeLoop must have 'judge'")
@@ -463,7 +460,7 @@ def _create_judge_loop_from_config(config: Dict[str, Any]) -> Runnable:
     )
 
 
-RUNNABLE_TYPES: Dict[str, Callable[[Dict[str, Any]], Runnable]] = {
+RUNNABLE_TYPES: dict[str, Callable[[dict[str, Any]], Runnable]] = {
     "agent": _create_agent_from_config,
     "chain": _create_chain_from_config,
     "fan_out": _create_fan_out_from_config,
@@ -472,7 +469,7 @@ RUNNABLE_TYPES: Dict[str, Callable[[Dict[str, Any]], Runnable]] = {
 }
 
 
-def _build_runnable(config: Dict[str, Any]) -> Runnable:
+def _build_runnable(config: dict[str, Any]) -> Runnable:
     """Recursively build a Runnable from dictionary config."""
     kind = config.get("type")
     factory = RUNNABLE_TYPES.get(kind)
@@ -503,15 +500,14 @@ def run_yaml(config_path: str) -> None:
     print(f"\n{Colors.BOLD}{Colors.GREEN}Workflow Complete!{Colors.ENDC}")
     print(f"Result:\n{result}")
 
-
 # Wrapper functions for script usage
-def fan_out(agent: Runnable, items: List[str], max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS) -> List[Any]:
+def fan_out(agent: Runnable, items: list[str], max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS) -> list[Any]:
     """Execute multiple items in parallel using the agent."""
     return FanOut(agent, items, max_workers).run(None)
 
 
 def summarize(
-    agent: Runnable, items: List[str], instruction: str = "Summarize the inputs."
+    agent: Runnable, items: list[str], instruction: str = "Summarize the inputs."
 ) -> str:
     """Summarize a list of items using the agent."""
     return Summarize(agent, instruction).run(items)
@@ -520,6 +516,6 @@ def summarize(
 def judge_loop(
     judge: Runnable, worker: Runnable, task: str,
     max_iterations: int = DEFAULT_JUDGE_LOOP_MAX_ITERATIONS
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Execute a judge-worker loop."""
     return JudgeLoop(judge, worker, task, max_iterations).run(None)

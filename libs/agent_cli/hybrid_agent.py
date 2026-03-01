@@ -14,7 +14,6 @@ Register with ``provider = "hybrid"`` in ``sds.toml``.
 """
 
 from pathlib import Path
-from typing import Optional
 
 from app_operator.logger import logger
 from app_operator.rlm.environment import RLMContext
@@ -52,10 +51,10 @@ class HybridCodingAgent(CodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
-        location: Optional[str] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
+        location: str | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder = recorder
@@ -70,7 +69,7 @@ class HybridCodingAgent(CodingAgent):
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
     ) -> str:
@@ -99,7 +98,7 @@ class HybridCodingAgent(CodingAgent):
         self,
         prompt: str,
         repo_path: Path,
-        token_acc: Optional[dict] = None,
+        token_acc: dict | None = None,
     ) -> str:
         """Pre-run 4 subagent analyses, then hand off to the RLM loop."""
         helper = SubagentCodingAgent(model=self.model, location=self.location)

@@ -9,7 +9,7 @@ import random
 import re
 import time
 import subprocess
-from typing import Optional, Callable, TypeVar, Any
+from typing import Callable, TypeVar, Any
 from dataclasses import dataclass
 
 from app_operator.logger import logger
@@ -23,12 +23,12 @@ class RateLimitError(Exception):
 
     provider: str
     message: str
-    retry_after: Optional[int] = None  # Seconds to wait before retrying
+    retry_after: int | None = None  # Seconds to wait before retrying
 
 
 def detect_rate_limit_error(
     stderr: str, returncode: int, provider: str
-) -> Optional[RateLimitError]:
+) -> RateLimitError | None:
     """Detect if an error is due to rate limiting or a transient network failure.
 
     Args:
@@ -124,7 +124,7 @@ def run_with_rate_limit_handling(
     base_delay: int = 5,
     rate_limit_backoff: int = 60,
     operation_name: str = "operation",
-) -> tuple[Optional[T], bool, Optional[str]]:
+) -> tuple[T | None, bool, str | None]:
     """Run a function with rate limit error handling.
 
     Args:
@@ -171,7 +171,7 @@ def run_subprocess_with_rate_limit_handling(
     rate_limit_backoff: int = 60,
     operation_name: str = "subprocess",
     **subprocess_kwargs: Any,
-) -> tuple[Optional[subprocess.CompletedProcess], bool, Optional[str]]:
+) -> tuple[subprocess.CompletedProcess | None, bool, str | None]:
     """Run a subprocess command with rate limit error handling.
 
     Args:

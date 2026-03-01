@@ -10,7 +10,6 @@ import random
 import shutil
 import tempfile
 from pathlib import Path
-from typing import List, Optional
 
 from app_operator.fault_injection.compose_faults import COMPOSE_FAULTS, ComposeFaultInjector
 from app_operator.fault_injection.config import FaultInjectionConfig
@@ -34,11 +33,11 @@ class FaultInjectionOrchestrator:
     injects them, and writes the modified file back.
     """
 
-    def __init__(self, config: Optional[FaultInjectionConfig] = None):
+    def __init__(self, config: FaultInjectionConfig | None = None):
         self.config = config or FaultInjectionConfig()
         self.registry = FaultRegistry(COMPOSE_FAULTS)
 
-    def inject(self, repo_path: Path, seed: Optional[int] = None) -> List[FaultResult]:
+    def inject(self, repo_path: Path, seed: int | None = None) -> list[FaultResult]:
         """Inject faults into the Docker Compose file.
 
         Args:
@@ -76,8 +75,8 @@ class FaultInjectionOrchestrator:
         rng = random.Random(effective_seed)
         injector = ComposeFaultInjector(rng=rng)
 
-        results: List[FaultResult] = []
-        attempted_fault_ids: List[str] = []
+        results: list[FaultResult] = []
+        attempted_fault_ids: list[str] = []
         max_attempts = self.config.num_faults * 5  # Allow up to 5x attempts
 
         attempts = 0
@@ -166,7 +165,7 @@ class FaultInjectionOrchestrator:
         return restored
 
     @staticmethod
-    def _find_compose_file(repo_path: Path) -> Optional[Path]:
+    def _find_compose_file(repo_path: Path) -> Path | None:
         """Find docker-compose file in the repository."""
         for name in ("docker-compose.yml", "docker-compose.yaml"):
             candidate = repo_path / name
@@ -182,7 +181,7 @@ class FaultInjectionOrchestrator:
         shutil.copy2(compose_file, backup_dir / compose_file.name)
 
     @staticmethod
-    def _write_metadata(repo_path: Path, results: List[FaultResult]) -> None:
+    def _write_metadata(repo_path: Path, results: list[FaultResult]) -> None:
         """Write fault injection metadata for trajectory pickup."""
         sds_dir = repo_path / ".sds"
         sds_dir.mkdir(parents=True, exist_ok=True)

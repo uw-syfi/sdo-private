@@ -1,7 +1,7 @@
 import re
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Callable, Optional
+from typing import Any, Callable
 
 from app_operator.command_validation import DangerousCommandError, validate_command
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
@@ -44,8 +44,8 @@ class ToolContext:
         return candidate
 
 
-def _build_list_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
-    def list_files(path: str) -> Dict[str, Any]:
+def _build_list_files(context: ToolContext) -> Callable[[str], dict[str, Any]]:
+    def list_files(path: str) -> dict[str, Any]:
         """List files in the specified directory.
 
         Args:
@@ -96,8 +96,8 @@ def _build_list_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
     return list_files
 
 
-def _build_find_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
-    def find_files(pattern: str) -> Dict[str, Any]:
+def _build_find_files(context: ToolContext) -> Callable[[str], dict[str, Any]]:
+    def find_files(pattern: str) -> dict[str, Any]:
         """Find files matching the pattern.
 
         Args:
@@ -146,8 +146,8 @@ def _build_find_files(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
     return find_files
 
 
-def _build_read_file(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
-    def read_file(path: str) -> Dict[str, Any]:
+def _build_read_file(context: ToolContext) -> Callable[[str], dict[str, Any]]:
+    def read_file(path: str) -> dict[str, Any]:
         """Read the content of a file.
 
         Args:
@@ -178,8 +178,8 @@ def _build_read_file(context: ToolContext) -> Callable[[str], Dict[str, Any]]:
     return read_file
 
 
-def _build_search_content(context: ToolContext) -> Callable[[str, str], Dict[str, Any]]:
-    def search_content(pattern: str, path: str) -> Dict[str, Any]:
+def _build_search_content(context: ToolContext) -> Callable[[str, str], dict[str, Any]]:
+    def search_content(pattern: str, path: str) -> dict[str, Any]:
         """Search for a regex pattern in files.
 
         Args:
@@ -196,7 +196,7 @@ def _build_search_content(context: ToolContext) -> Callable[[str, str], Dict[str
         try:
             target = context.resolve_path(path)
             regex = re.compile(pattern)
-            matches: List[str] = []
+            matches: list[str] = []
 
             if context.filesystem.exists(target) and not context.filesystem.is_dir(
                 target
@@ -252,8 +252,8 @@ def _build_search_content(context: ToolContext) -> Callable[[str, str], Dict[str
     return search_content
 
 
-def _build_write_file(context: ToolContext) -> Callable[[str, str], Dict[str, Any]]:
-    def write_file(path: str, content: str) -> Dict[str, Any]:
+def _build_write_file(context: ToolContext) -> Callable[[str, str], dict[str, Any]]:
+    def write_file(path: str, content: str) -> dict[str, Any]:
         """Write content to a file.
 
         Args:
@@ -302,8 +302,8 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], Dict[str, An
     return write_file
 
 
-def _build_run_command(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
-    def run_command(command: str, timeout: int) -> Dict[str, Any]:
+def _build_run_command(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
+    def run_command(command: str, timeout: int) -> dict[str, Any]:
         """Execute a bash command.
 
         Args:
@@ -382,8 +382,8 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], Dict[str, A
 
 
 def build_tools(
-    repo_path: Path, filesystem: Optional[FileSystemInterface] = None
-) -> List[Callable[..., Any]]:
+    repo_path: Path, filesystem: FileSystemInterface | None = None
+) -> list[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 

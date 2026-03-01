@@ -7,7 +7,7 @@ chunk-content parsing and tool-result extraction logic.
 
 import ast
 import json
-from typing import Any, Tuple
+from typing import Any
 
 from app_operator.logger import logger
 
@@ -41,7 +41,7 @@ def parse_chunk_content(content: Any) -> str:
 def extract_tool_result(
     output: Any,
     max_length: int = DEFAULT_TOOL_RESULT_MAX_LENGTH,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Parse a tool-end event output into ``(status, result_text)``.
 
     *status* is one of ``"success"``, ``"error"``, or ``"unknown"``.

@@ -1,8 +1,7 @@
-from typing import Dict
 
 # Map model prefixes or full names to context window sizes
 # Using conservative estimates or standard limits
-MODEL_LIMITS: Dict[str, int] = {
+MODEL_LIMITS: dict[str, int] = {
     # OpenAI
     "gpt-4o": 128000,
     "gpt-4-turbo": 128000,

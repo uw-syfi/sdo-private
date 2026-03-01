@@ -7,7 +7,7 @@ that the LLM can programmatically query, filter, and recursively process.
 import re
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Callable
 from enum import Enum
 
 from app_operator.logger import logger
@@ -76,8 +76,8 @@ class RLMContext:
     health_check_output: str = ""
 
     # Historical context
-    previous_attempts: List[Dict[str, Any]] = field(default_factory=list)
-    trajectory_data: Dict[str, Any] = field(default_factory=dict)
+    previous_attempts: list[dict[str, Any]] = field(default_factory=list)
+    trajectory_data: dict[str, Any] = field(default_factory=dict)
 
     # Code analysis context
     dockerfile: str = ""
@@ -101,7 +101,7 @@ class RLMContext:
     attempt_number: int = 0
     total_tokens_used: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "error_log": self.error_log,
@@ -157,7 +157,7 @@ class RLMContext:
 - error_log: str ({len(self.error_log)} chars)
 - deployment_script: str ({len(self.deployment_script)} chars)
 - health_check_output: str ({len(self.health_check_output)} chars)
-- previous_attempts: List[Dict] ({len(self.previous_attempts)} attempts)
+- previous_attempts: list[Dict] ({len(self.previous_attempts)} attempts)
 - trajectory_data: Dict (run_id: {self.trajectory_data.get('metadata', {}).get('run_id', 'N/A')})
 - dockerfile: str ({len(self.dockerfile)} chars)
 - docker_compose: str ({len(self.docker_compose)} chars)
@@ -189,7 +189,7 @@ class RLMCall:
     tokens_saved: int = 0  # Est. tokens saved vs feeding full context
     timestamp: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for trajectory recording."""
         return {
             "action_type": self.action_type.value,
@@ -260,7 +260,7 @@ class RLMEnvironment:
         self,
         context: RLMContext,
         max_recursion_depth: int = 5,
-        record_callback: Optional[Callable[[RLMCall], None]] = None,
+        record_callback: Callable[[RLMCall], None] | None = None,
         cwd: str = "",
         max_result_chars: int = 20_000,
     ):
@@ -283,7 +283,7 @@ class RLMEnvironment:
         self.max_result_chars = max_result_chars
 
         # Track all RLM calls for analysis
-        self.call_history: List[RLMCall] = []
+        self.call_history: list[RLMCall] = []
 
         # Safe namespace for code execution
         self._namespace = self._create_safe_namespace()
@@ -294,7 +294,7 @@ class RLMEnvironment:
             "len", "str", "list", "dict", "print",
         })
 
-    def _create_safe_namespace(self) -> Dict[str, Any]:
+    def _create_safe_namespace(self) -> dict[str, Any]:
         """Create a restricted namespace for code execution.
 
         Provides access to context variables, common utilities, and
@@ -482,8 +482,8 @@ class RLMEnvironment:
     def recursive_call(
         self,
         sub_prompt: str,
-        filtered_context: Optional[Dict[str, Any]] = None,
-        llm_function: Optional[Callable[[str], str]] = None,
+        filtered_context: dict[str, Any] | None = None,
+        llm_function: Callable[[str], str] | None = None,
     ) -> str:
         """Make a recursive LLM sub-call with filtered context.
 
@@ -552,7 +552,7 @@ class RLMEnvironment:
             # Always decrement depth
             self.current_depth -= 1
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get statistics about RLM usage.
 
         Returns baseline_context_tokens — the estimated prompt-token cost of

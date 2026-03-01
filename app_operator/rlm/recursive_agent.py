@@ -9,7 +9,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 import litellm
 
@@ -37,13 +37,13 @@ class RecursiveDeploymentAgent:
 
     def __init__(
         self,
-        trajectory: Optional[TrajectoryRecorderProtocol] = None,
+        trajectory: TrajectoryRecorderProtocol | None = None,
         max_recursion_depth: int = 5,
         llm_provider: str = "gemini",
-        vertex_location: Optional[str] = None,
+        vertex_location: str | None = None,
         max_iterations: int = 10,
         consecutive_explore_limit: int = 5,
-        max_consecutive_errors: Optional[int] = None,
+        max_consecutive_errors: int | None = None,
         compaction: bool = False,
         compaction_threshold: float = 0.85,
         model_context_tokens: int = 32_768,
@@ -79,10 +79,10 @@ class RecursiveDeploymentAgent:
         self.compaction = compaction
         self.compaction_threshold = compaction_threshold
         self.model_context_tokens = model_context_tokens
-        self.rlm_env: Optional[RLMEnvironment] = None
+        self.rlm_env: RLMEnvironment | None = None
         self._system_prompt: str = ""
-        self._messages: List[Dict[str, str]] = []
-        self._token_usage: Dict[str, int] = {
+        self._messages: list[dict[str, str]] = []
+        self._token_usage: dict[str, int] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
@@ -102,7 +102,7 @@ class RecursiveDeploymentAgent:
         self,
         error_log: str,
         deployment_script: str,
-        previous_attempts: List[Dict[str, Any]],
+        previous_attempts: list[dict[str, Any]],
         repo_path: Path,
     ) -> RLMContext:
         """Create RLM context from deployment state."""
@@ -149,7 +149,7 @@ class RecursiveDeploymentAgent:
             attempt_number=len(previous_attempts) + 1,
         )
 
-    def _parse_rlm_response(self, response: str) -> Dict[str, Any]:
+    def _parse_rlm_response(self, response: str) -> dict[str, Any]:
         """Parse LLM response to extract action type and content.
 
         Expected format:
@@ -317,7 +317,7 @@ class RecursiveDeploymentAgent:
 
         self._messages.append({"role": "user", "content": prompt})
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self.llm_provider,
             "messages": self._messages,
             "cache": {"no-cache": True},
@@ -381,7 +381,7 @@ class RecursiveDeploymentAgent:
                 "Be concise (1-3 paragraphs) but preserve all key findings."
             ),
         }]
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self.llm_provider,
             "messages": summary_messages,
             "cache": {"no-cache": True},
@@ -434,7 +434,7 @@ class RecursiveDeploymentAgent:
             cwd=repo_path,
         )
         self._system_prompt = self.rlm_env.get_system_prompt()
-        self._messages: List[Dict[str, str]] = [
+        self._messages: list[dict[str, str]] = [
             {"role": "system", "content": self._system_prompt},
         ]
 
@@ -535,7 +535,7 @@ class RecursiveDeploymentAgent:
         self,
         error_log: str,
         deployment_script: str,
-        previous_attempts: List[Dict[str, Any]],
+        previous_attempts: list[dict[str, Any]],
         repo_path: Path,
     ) -> str:
         """Fix deployment error using RLM.
@@ -610,7 +610,7 @@ class RecursiveDeploymentAgent:
 
         return answer
 
-    def get_rlm_statistics(self) -> Dict[str, Any]:
+    def get_rlm_statistics(self) -> dict[str, Any]:
         """Get RLM usage statistics from last run.
 
         total_tokens_saved is the difference between the estimated single-call

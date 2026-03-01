@@ -6,7 +6,7 @@ Loads training examples from trajectory files for prompt optimization.
 import json
 import logging
 import re
-from typing import List, Dict, Any, Optional
+from typing import Any
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -25,17 +25,17 @@ class TrajectoryExample:
     response: str
     success: bool
     iterations: int
-    tool_calls: List[Dict[str, Any]]
+    tool_calls: list[dict[str, Any]]
     duration_seconds: float
-    token_usage: Optional[Dict[str, int]] = None
-    prompt_kwargs: Optional[Dict[str, Any]] = None
-    rendered_prompt: Optional[str] = None
+    token_usage: dict[str, int] | None = None
+    prompt_kwargs: dict[str, Any] | None = None
+    rendered_prompt: str | None = None
     fallback_occurred: bool = False
-    health_check_script: Optional[str] = None  # Content of health_check.sh for quality validation
+    health_check_script: str | None = None  # Content of health_check.sh for quality validation
     fault_injected: bool = False
-    fault_ids: List[str] = field(default_factory=list)
-    fault_categories: List[str] = field(default_factory=list)
-    fault_severities: List[str] = field(default_factory=list)
+    fault_ids: list[str] = field(default_factory=list)
+    fault_categories: list[str] = field(default_factory=list)
+    fault_severities: list[str] = field(default_factory=list)
 
 
 class TrajectoryDataLoader:
@@ -53,7 +53,7 @@ class TrajectoryDataLoader:
         """
         self.trajectories_dir = Path(trajectories_dir)
 
-    def load_trajectories(self, pattern: str = "trajectory_*.json") -> List[Dict[str, Any]]:
+    def load_trajectories(self, pattern: str = "trajectory_*.json") -> list[dict[str, Any]]:
         """Load all trajectory JSON files from the directory.
 
         Args:
@@ -80,9 +80,9 @@ class TrajectoryDataLoader:
 
     def load_examples(
         self,
-        phase_filter: Optional[str] = None,
+        phase_filter: str | None = None,
         success_only: bool = False,
-    ) -> List[TrajectoryExample]:
+    ) -> list[TrajectoryExample]:
         """Load training examples from trajectories.
 
         Args:
@@ -176,7 +176,7 @@ class TrajectoryDataLoader:
 
         return examples
 
-    def _extract_prompt(self, messages: List[Dict[str, Any]]) -> str:
+    def _extract_prompt(self, messages: list[dict[str, Any]]) -> str:
         """Extract the prompt from messages.
 
         Prefers the first user message. Falls back to the system message
@@ -190,7 +190,7 @@ class TrajectoryDataLoader:
                 system_content = msg.get("content", "")
         return system_content
 
-    def _extract_response(self, messages: List[Dict[str, Any]]) -> str:
+    def _extract_response(self, messages: list[dict[str, Any]]) -> str:
         """Extract assistant response (concatenate all assistant messages)."""
         responses = []
         for msg in messages:
@@ -198,7 +198,7 @@ class TrajectoryDataLoader:
                 responses.append(msg["content"])
         return "\n".join(responses)
 
-    def _extract_tool_calls(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_tool_calls(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Extract all tool calls from messages."""
         tool_calls = []
         for msg in messages:
@@ -214,7 +214,7 @@ class TrajectoryDataLoader:
 
     def _determine_success(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         phase: str,
         overall_success: bool
     ) -> bool:
@@ -260,7 +260,7 @@ class TrajectoryDataLoader:
         # Default to overall trajectory success
         return overall_success
 
-    def _extract_exec_summary(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+    def _extract_exec_summary(self, messages: list[dict[str, Any]]) -> str | None:
         """Extract the <exec_summary> block from assistant messages, if present."""
         for msg in messages:
             if msg.get("role") == "assistant":
@@ -273,7 +273,7 @@ class TrajectoryDataLoader:
                     return match.group(1).strip()
         return None
 
-    def _calculate_duration(self, messages: List[Dict[str, Any]]) -> float:
+    def _calculate_duration(self, messages: list[dict[str, Any]]) -> float:
         """Calculate total duration from message timestamps and durations."""
         total_duration = 0.0
         for msg in messages:
@@ -288,7 +288,7 @@ class TrajectoryDataLoader:
     # approximation for most LLM tokenizers).
     _CHARS_PER_TOKEN = 4.0
 
-    def _extract_token_usage(self, messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _extract_token_usage(self, messages: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Estimate token usage from message content lengths.
 
         Input tokens are approximated from system, user, and tool_call
@@ -322,7 +322,7 @@ class TrajectoryDataLoader:
             "estimated": True,
         }
 
-    def _extract_health_check_script(self, trajectory: Dict[str, Any]) -> Optional[str]:
+    def _extract_health_check_script(self, trajectory: dict[str, Any]) -> str | None:
         """Extract health_check.sh content from the repository filesystem.
 
         Args:

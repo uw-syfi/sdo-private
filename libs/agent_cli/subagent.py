@@ -7,7 +7,6 @@ SubagentCodingAgent (fan-out analysis calls).
 
 import os
 import subprocess
-from typing import Optional
 
 from app_operator.logger import logger
 
@@ -18,8 +17,8 @@ def call_subagent(
     model: str,
     system_prompt: str,
     user_prompt: str,
-    location: Optional[str] = None,
-    token_acc: Optional[dict] = None,
+    location: str | None = None,
+    token_acc: dict | None = None,
 ) -> str:
     """Make a completely fresh, isolated litellm call.
 

@@ -2,7 +2,7 @@ import time
 import asyncio
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
@@ -36,10 +36,10 @@ class AdkOperator:
         self,
         repo_path: str,
         health_check_interval: int = 30,
-        health_check_max_count: Optional[int] = 5,
+        health_check_max_count: int | None = 5,
         max_deployment_attempts: int = 5,
-        filesystem: Optional[FileSystemInterface] = None,
-        config: Optional[Config] = None,
+        filesystem: FileSystemInterface | None = None,
+        config: Config | None = None,
         agent: Any = None,  # For interface compatibility (ignored)
     ) -> None:
         self.repo_path = Path(repo_path).resolve()
@@ -375,8 +375,8 @@ class AdkOperator:
     def _run_deploy_command(
         self,
         command: str = "start",
-        log_file_path: Optional[Path] = None,
-    ) -> Dict[str, Any]:
+        log_file_path: Path | None = None,
+    ) -> dict[str, Any]:
         """Run deployment script command."""
         runner = SubprocessRunner(
             command=[str(self.deploy_script), command],

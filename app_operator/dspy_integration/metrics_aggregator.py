@@ -4,7 +4,7 @@ Analyzes trajectory data to compute performance metrics.
 """
 
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 from collections import defaultdict
 import statistics
 
@@ -30,9 +30,9 @@ class MetricsAggregator:
 
     def aggregate_metrics(
         self,
-        phase_filter: Optional[str] = None,
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        phase_filter: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Aggregate metrics from trajectories.
 
         Args:
@@ -70,9 +70,9 @@ class MetricsAggregator:
 
     def _compute_phase_metrics(
         self,
-        examples: List[TrajectoryExample],
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        examples: list[TrajectoryExample],
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Compute metrics for a set of examples.
 
         Args:
@@ -91,7 +91,7 @@ class MetricsAggregator:
 
         # Group by run for iteration stats — each run contributes one value
         # (all examples in the same run share the same iterations count)
-        runs: Dict[str, list] = defaultdict(list)
+        runs: dict[str, list] = defaultdict(list)
         for ex in examples:
             runs[ex.run_id].append(ex)
 
@@ -155,9 +155,9 @@ class MetricsAggregator:
 
     def _compute_token_metrics(
         self,
-        examples: List[TrajectoryExample],
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        examples: list[TrajectoryExample],
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Compute token usage and cost metrics.
 
         Args:
@@ -216,9 +216,9 @@ class MetricsAggregator:
         self,
         baseline_dir: Path,
         optimized_dir: Path,
-        phase_filter: Optional[str] = None,
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        phase_filter: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Compare metrics between baseline and optimized versions.
 
         Args:
@@ -275,9 +275,9 @@ class MetricsAggregator:
 
     def _calculate_improvements(
         self,
-        baseline: Dict[str, Any],
-        optimized: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        baseline: dict[str, Any],
+        optimized: dict[str, Any],
+    ) -> dict[str, Any]:
         """Calculate percentage improvements between baseline and optimized.
 
         Args:

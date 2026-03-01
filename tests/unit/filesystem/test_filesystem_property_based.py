@@ -43,7 +43,6 @@ pytestmark = pytest.mark.skipif(
     reason="hypothesis not installed - install with: uv add --dev hypothesis"
 )
 
-
 # Custom strategies for filesystem testing
 if HYPOTHESIS_AVAILABLE:
     @st.composite

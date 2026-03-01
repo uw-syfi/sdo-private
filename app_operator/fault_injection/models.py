@@ -5,7 +5,7 @@ Defines fault categories, severities, fault descriptors, and injection results.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 
 class FaultCategory(str, Enum):
@@ -47,7 +47,7 @@ class Fault:
     category: FaultCategory
     severity: FaultSeverity
     description: str
-    applicable_services: Tuple[str, ...] = ()
+    applicable_services: tuple[str, ...] = ()
     platform: str = "compose"
 
 
@@ -65,11 +65,11 @@ class FaultResult:
 
     fault: Fault
     target_service: str
-    modified_fields: Dict[str, Any] = field(default_factory=dict)
+    modified_fields: dict[str, Any] = field(default_factory=dict)
     success: bool = True
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
         return {
             "fault_id": self.fault.fault_id,

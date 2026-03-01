@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from app_operator.filesystem import FileSystemInterface
 from app_operator.prompts import PromptLoader
@@ -23,8 +23,8 @@ def health_check(
     state: OperatorState,
     repo_path: Path,
     filesystem: FileSystemInterface,
-    check_shutdown: Optional[Callable[[], bool]],
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    check_shutdown: Callable[[], bool] | None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> OperatorState:
     recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():
@@ -64,8 +64,8 @@ def monitor_health(
     repo_path: Path,
     filesystem: FileSystemInterface,
     health_check_interval: int,
-    check_shutdown: Optional[Callable[[], bool]],
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    check_shutdown: Callable[[], bool] | None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> OperatorState:
     recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():
@@ -107,7 +107,7 @@ def monitor_analyze(
     loader: PromptLoader,
     agent: Any,
     context_limit: int,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> OperatorState:
     recorder = recorder or NullTrajectoryRecorder()
     # We are still in MONITORING phase initiated by monitor_health

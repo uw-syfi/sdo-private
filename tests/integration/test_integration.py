@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from app_operator.cli_agent.operator import AppOperator
 from libs.agent_cli.base import CodingAgent
@@ -19,7 +19,7 @@ class FakeCodingAgent(CodingAgent):
 
     def __init__(self, repo_path: Path):
         self.repo_path = repo_path
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
         # Behavior flags
         self.should_generate_broken_deploy = False
@@ -28,7 +28,7 @@ class FakeCodingAgent(CodingAgent):
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
     ) -> str:
@@ -124,7 +124,6 @@ I have analyzed the logs and fixed the deployment script."""
         return """<exec_summary>System is healthy.</exec_summary>
 The system appears to be running smoothly.
 """
-
 
 # --- Tests ---
 

@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Callable, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 from app_operator.types import CommandResult
 
 if TYPE_CHECKING:
@@ -34,7 +36,6 @@ from app_operator.trajectory import (
     NullTrajectoryRecorder,
 )
 
-
 FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 FIX_SUMMARY_FILENAME = "fix_summary.md"
 FIX_SUMMARY_MAX_LENGTH = 2000  # characters before truncating agent response summary
@@ -48,12 +49,12 @@ def get_fix_summary_path(sds_dir: Path) -> Path:
 
 def generate_scripts(
     target_dir: str,
-    agent: Optional[CodingAgent] = None,
-    filesystem: Optional[FileSystemInterface] = None,
-    deployment_config: Optional[DeploymentConfig] = None,
-    operator_config: Optional[OperatorConfig] = None,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
-    dspy_config: Optional["DSPyConfig"] = None,
+    agent: CodingAgent | None = None,
+    filesystem: FileSystemInterface | None = None,
+    deployment_config: DeploymentConfig | None = None,
+    operator_config: OperatorConfig | None = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
+    dspy_config: DSPyConfig | None = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -179,10 +180,10 @@ def _generate_script(
     target_dir: str,
     filesystem: FileSystemInterface,
     script_name: str,
-    deployment_config: Optional[DeploymentConfig] = None,
-    operator_config: Optional[OperatorConfig] = None,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
-    dspy_config: Optional["DSPyConfig"] = None,
+    deployment_config: DeploymentConfig | None = None,
+    operator_config: OperatorConfig | None = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
+    dspy_config: DSPyConfig | None = None,
 ) -> tuple[bool, str]:
     """Generate a script (deploy.sh or health_check.sh) using a coding agent.
 
@@ -258,12 +259,12 @@ class DeploymentAgent:
         self,
         repo_path: Path,
         coding_agent: CodingAgent,
-        filesystem: Optional[FileSystemInterface] = None,
-        deployment_config: Optional[DeploymentConfig] = None,
-        operator_config: Optional[OperatorConfig] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        dspy_config: Optional["DSPyConfig"] = None,
-        ui: Optional[OperatorUI] = None,
+        filesystem: FileSystemInterface | None = None,
+        deployment_config: DeploymentConfig | None = None,
+        operator_config: OperatorConfig | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        dspy_config: DSPyConfig | None = None,
+        ui: OperatorUI | None = None,
     ):
         """Initialize the deployment agent.
 
@@ -325,7 +326,7 @@ class DeploymentAgent:
         return max_attempt + 1
 
     def run(
-        self, max_attempts: int = 5, check_shutdown: Optional[Callable[[], bool]] = None
+        self, max_attempts: int = 5, check_shutdown: Callable[[], bool] | None = None
     ) -> bool:
         """Attempt deployment with automatic error fixing using a coding agent.
         Ensures scripts exist before deployment.
@@ -408,8 +409,8 @@ class DeploymentAgent:
         attempt: int,
         max_attempts: int,
         absolute_max_attempts: int,
-        check_shutdown: Optional[Callable[[], bool]],
-    ) -> Optional[bool]:
+        check_shutdown: Callable[[], bool] | None,
+    ) -> bool | None:
         """Execute a single deployment attempt.
 
         Args:
@@ -503,7 +504,7 @@ class DeploymentAgent:
         absolute_max_attempts: int,
         log_file_path: Path,
         r: TrajectoryRecorderProtocol,
-    ) -> Optional[bool]:
+    ) -> bool | None:
         """Run health check and, on failure, attempt agent fix with recheck.
 
         Args:
@@ -620,9 +621,9 @@ class DeploymentAgent:
     def run_deploy_command(
         self,
         command: str = "start",
-        timeout: Optional[int] = None,
-        log_file_path: Optional[Path] = None,
-        check_shutdown: Optional[Callable[[], bool]] = None,
+        timeout: int | None = None,
+        log_file_path: Path | None = None,
+        check_shutdown: Callable[[], bool] | None = None,
     ) -> CommandResult:
         """Run the deployment script with a specific command.
 
@@ -757,11 +758,11 @@ class DeploymentAgent:
     def _fix_with_agent(
         self,
         deploy_result: CommandResult,
-        health_result: Optional[CommandResult],
+        health_result: CommandResult | None,
         attempt: int,
         max_attempts: int,
-        log_file_path: Optional[Path] = None,
-        health_check_log_path: Optional[Path] = None,
+        log_file_path: Path | None = None,
+        health_check_log_path: Path | None = None,
     ) -> bool:
         """Use a coding agent to analyze errors and fix the scripts.
 

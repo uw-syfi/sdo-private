@@ -1,5 +1,4 @@
 from .base import register_provider
-from typing import Optional, List
 import json
 import time
 from pathlib import Path
@@ -14,7 +13,6 @@ from app_operator.trajectory import (
     get_run_id,
     TrajectoryRecorderProtocol,
 )
-
 
 _logger = logging.getLogger(__name__)
 
@@ -159,9 +157,9 @@ class GeminiCodingAgent(CLICodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         """Initialize the Gemini coding agent.
 
@@ -182,7 +180,7 @@ class GeminiCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Gemini]"
 
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         cmd = [self.binary_path]
 
         # Enable yolo mode
@@ -198,11 +196,11 @@ class GeminiCodingAgent(CLICodingAgent):
 
     def _create_session(
         self,
-        cmd: List[str],
-        cwd: Optional[str] = None,
+        cmd: list[str],
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> GeminiGenerationSession:
         return GeminiGenerationSession(
             binary_name=self.binary_name,

@@ -5,7 +5,6 @@ efficient lookup and random selection.
 """
 
 import random
-from typing import Dict, List, Optional
 
 from app_operator.fault_injection.config import FaultInjectionConfig
 from app_operator.fault_injection.models import Fault
@@ -18,24 +17,24 @@ class FaultRegistry:
     platform, and exclusion lists, then sample N faults.
     """
 
-    def __init__(self, faults: List[Fault]):
-        self._faults: List[Fault] = list(faults)
-        self._by_id: Dict[str, Fault] = {f.fault_id: f for f in faults}
+    def __init__(self, faults: list[Fault]):
+        self._faults: list[Fault] = list(faults)
+        self._by_id: dict[str, Fault] = {f.fault_id: f for f in faults}
 
     @property
-    def all_faults(self) -> List[Fault]:
+    def all_faults(self) -> list[Fault]:
         return list(self._faults)
 
-    def get(self, fault_id: str) -> Optional[Fault]:
+    def get(self, fault_id: str) -> Fault | None:
         return self._by_id.get(fault_id)
 
     def filter(
         self,
-        categories: Optional[List[str]] = None,
-        severities: Optional[List[str]] = None,
-        platform: Optional[str] = None,
-        exclude: Optional[List[str]] = None,
-    ) -> List[Fault]:
+        categories: list[str] | None = None,
+        severities: list[str] | None = None,
+        platform: str | None = None,
+        exclude: list[str] | None = None,
+    ) -> list[Fault]:
         """Filter faults by criteria.
 
         Args:
@@ -69,9 +68,9 @@ class FaultRegistry:
     def select(
         self,
         n: int,
-        config: Optional[FaultInjectionConfig] = None,
-        rng: Optional[random.Random] = None,
-    ) -> List[Fault]:
+        config: FaultInjectionConfig | None = None,
+        rng: random.Random | None = None,
+    ) -> list[Fault]:
         """Select N faults based on config filters.
 
         Args:

@@ -3,12 +3,12 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from app_operator.logger import logger
 
 
-def _get_interactive_env() -> Dict[str, str]:
+def _get_interactive_env() -> dict[str, str]:
     """Capture environment variables from an interactive shell."""
     try:
         # Run env in an interactive shell to get the full user environment
@@ -33,8 +33,8 @@ def _get_interactive_env() -> Dict[str, str]:
     except Exception:
         return os.environ.copy()
 
-
 # -- File generation system prompt (shared by RLMCodingAgent & SubagentCodingAgent) --
+
 
 FILE_GEN_SYSTEM_PROMPT = (
     "You are a deployment assistant. The user will ask you to generate "
@@ -52,7 +52,7 @@ def generate_and_write_files(
     prompt: str,
     repo_path: Path,
     log_label: str,
-) -> List[str]:
+) -> list[str]:
     """Parse ``FILE: .sds/<name>`` sections from *raw* LLM output and write them.
 
     Returns a list of relative paths that were written.  If no ``FILE:`` sections
@@ -68,7 +68,7 @@ def generate_and_write_files(
     """
     expected_files = re.findall(r"\.sds/[\w._-]+", prompt)
 
-    written: List[str] = []
+    written: list[str] = []
     file_sections = re.findall(
         r"FILE:\s*(\.sds/[\w._-]+)\s*\n```[^\n]*\n(.*?)```",
         raw,
