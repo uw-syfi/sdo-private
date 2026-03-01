@@ -106,7 +106,7 @@ class ProgressSummarizer:
             prompt = get_loader().render(
                 "deployer/summarize.jinja2",
                 output_snippet=output_snippet,
-                _trajectory_recorder=self.recorder,
+                recorder=self.recorder,
             )
 
             logger.debug(f"ProgressSummarizer: Calling agent with prompt ({len(prompt)} chars)")

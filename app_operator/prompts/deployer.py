@@ -112,7 +112,7 @@ def create_generate_script_prompt(
         code_analysis=code_analysis,
         deployment_issues=deployment_issues,
         platform=platform,
-        _trajectory_recorder=recorder,
+        recorder=recorder,
     )
 
 
@@ -174,7 +174,7 @@ def create_fix_prompt(
         previous_summary_note=previous_summary_note,
         deploy_script=deploy_script_path,
         health_check_script=health_check_script_path,
-        _trajectory_recorder=recorder,
+        recorder=recorder,
     )
 
 

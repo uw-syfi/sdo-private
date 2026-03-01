@@ -242,7 +242,7 @@ class TestTrajectoryIntegration:
         mock_recorder = Mock()
         loader = PromptLoader(templates_dir=templates_dir)
 
-        loader.render('test.jinja2', name='World', _trajectory_recorder=mock_recorder)
+        loader.render('test.jinja2', name='World', recorder=mock_recorder)
 
         mock_recorder.set_prompt_version.assert_called_once_with('jinja2')
 
@@ -256,7 +256,7 @@ class TestTrajectoryIntegration:
         mock_recorder = Mock()
         loader = PromptLoader(templates_dir=templates_dir)
 
-        loader.render('test.jinja2', name='World', _trajectory_recorder=mock_recorder)
+        loader.render('test.jinja2', name='World', recorder=mock_recorder)
 
         mock_recorder.record_rendered_prompt.assert_called_once_with("Hello World!")
 
@@ -288,7 +288,7 @@ class TestTrajectoryIntegration:
         loader.render(
             'deployer/system.jinja2',
             repo_path='/repo',
-            _trajectory_recorder=mock_recorder
+            recorder=mock_recorder
         )
 
         # DSPy was attempted (module file existed) but load returned None →

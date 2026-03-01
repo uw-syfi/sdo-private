@@ -100,13 +100,13 @@ class CodeAnalyzerAgent:
                     "code_analyzer/system.jinja2",
                     repo_path=self.repo_path,
                     agent_name=self.agent.__class__.__name__,  # Added for signature
-                    _trajectory_recorder=self.recorder,
+                    recorder=self.recorder,
                 )
                 user_prompt = get_loader(self.dspy_config).render(
                     "code_analyzer/user.jinja2",
                     repo_path=self.repo_path,
                     file_tree=file_tree,  # Added for signature
-                    _trajectory_recorder=self.recorder,
+                    recorder=self.recorder,
                 )
 
                 logger.info(
