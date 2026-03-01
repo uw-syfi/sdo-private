@@ -1,5 +1,3 @@
-import json
-import ast
 import yaml
 from pathlib import Path
 from typing import List, Tuple, Any, Callable
@@ -16,6 +14,7 @@ from lego_agent.models import (
 )
 from lego_agent.storage import LegoAgentStorage
 from lego_agent.prompts import PromptLoader
+from lego_agent.streaming import parse_chunk_content, extract_tool_result
 
 # SDS-REVIEW: Architecture - Tight coupling with `app_operator`.
 # If `lego_agent` is intended to be a reusable library, these dependencies should be inverted or abstracted.
@@ -77,21 +76,10 @@ class LegoAgentEngine:
         """
         return "Response submitted."
 
-    def _parse_chunk_content(self, content: Any) -> str:
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            text = ""
-            for part in content:
-                if isinstance(part, dict):
-                    if part.get("type") == "text":
-                        text += part.get("text", "")
-                    elif part.get("type") == "thinking":
-                        text += part.get("thinking", "")
-                elif isinstance(part, str):
-                    text += part
-            return text
-        return str(content)
+    @staticmethod
+    def _parse_chunk_content(content: Any) -> str:
+        """Delegate to shared utility."""
+        return parse_chunk_content(content)
 
     async def run_async(self, user_prompt: str) -> LegoAgentResult:
         """Run the clarification loop and generate the script."""
@@ -178,7 +166,8 @@ class LegoAgentEngine:
                                 try:
                                     LegoAgentResponse(
                                         status=inputs.get("status"),
-                                        questions=inputs.get("questions", []) or [],
+                                        questions=inputs.get(
+                                            "questions", []) or [],
                                         yaml_config=inputs.get("yaml_config"),
                                     ).validate()
                                     break
@@ -193,40 +182,7 @@ class LegoAgentEngine:
                     elif kind == "on_tool_end":
                         name = event["name"]
                         output = event["data"].get("output")
-
-                        status = "unknown"  # Default
-                        result_text = ""
-
-                        # Handle ToolMessage or simple output
-                        content = getattr(output, "content", output)
-
-                        try:
-                            if isinstance(content, str):
-                                # Try parsing as JSON first
-                                try:
-                                    content_dict = json.loads(content)
-                                except json.JSONDecodeError:
-                                    try:
-                                        content_dict = ast.literal_eval(content)
-                                    except (ValueError, SyntaxError):
-                                        content_dict = None
-
-                                if isinstance(content_dict, dict):
-                                    status = content_dict.get("status", "unknown")
-                                    result_text = str(content_dict.get("output", ""))
-                                else:
-                                    result_text = content
-                            elif isinstance(content, dict):
-                                status = content.get("status", "unknown")
-                                result_text = str(content.get("output", ""))
-                            else:
-                                result_text = str(content)
-                        except Exception:
-                            result_text = str(content)
-
-                        if len(result_text) > 500:
-                            result_text = result_text[:500] + "\n... (truncated)"
-
+                        status, result_text = extract_tool_result(output)
                         self.io.render_tool_end(name, result_text, status)
 
                 final_content = "".join(accumulated_text)
@@ -238,7 +194,8 @@ class LegoAgentEngine:
                     # Fallback if streaming failed to capture or model didn't stream
                     # Run invoke to get it (it will be cached or fast-ish if deterministic?) No.
                     # Just run invoke if empty.
-                    logger.warning("Streaming yielded no content, running invoke...")
+                    logger.warning(
+                        "Streaming yielded no content, running invoke...")
                     result = await agent.ainvoke({"messages": messages})
                     last_msg_content = result["messages"][-1].content
                     if isinstance(last_msg_content, list):
@@ -261,12 +218,14 @@ class LegoAgentEngine:
                     try:
                         response = LegoAgentResponse(
                             status=final_response_data.get("status"),
-                            questions=final_response_data.get("questions", []) or [],
+                            questions=final_response_data.get(
+                                "questions", []) or [],
                             yaml_config=final_response_data.get("yaml_config"),
                         )
                         response.validate()
                     except Exception as e:
-                        self.io.render_error(f"Response validation failed: {e}")
+                        self.io.render_error(
+                            f"Response validation failed: {e}")
 
                 if not response:
                     response = parse_lego_agent_response(final_content)
@@ -274,7 +233,8 @@ class LegoAgentEngine:
                 # Validate YAML immediately to trigger repair loop if needed
                 if response.status == "ready":
                     if not response.yaml_config:
-                        raise ValueError("Status is ready but no yaml_config provided.")
+                        raise ValueError(
+                            "Status is ready but no yaml_config provided.")
                     self._validate_config(response.yaml_config)
             except ValueError as e:
                 # SDS-REVIEW: Logic - Repair logic should be encapsulated in `_repair_response()`.
@@ -307,7 +267,8 @@ class LegoAgentEngine:
                 # Verify repair
                 if response.status == "ready":
                     if not response.yaml_config:
-                        raise ValueError("Status is ready but no yaml_config provided.")
+                        raise ValueError(
+                            "Status is ready but no yaml_config provided.")
                     self._validate_config(response.yaml_config)
 
             if response.status == "clarify":
@@ -320,7 +281,8 @@ class LegoAgentEngine:
             elif response.status == "ready":
                 yaml_text = response.yaml_config
                 if not yaml_text:
-                    raise AgentError("Status is ready but no yaml_config provided.")
+                    raise AgentError(
+                        "Status is ready but no yaml_config provided.")
 
                 # Validate config
                 self._validate_config(yaml_text)
