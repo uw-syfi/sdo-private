@@ -71,7 +71,8 @@ class WebIO:
                 return int(ans)
             except ValueError:
                 await self._send_event(
-                    "log", {"message": "Invalid integer, try again", "level": "error"}
+                    "log", {"message": "Invalid integer, try again",
+                            "level": "error"}
                 )
 
     def info(self, message: str) -> None:
@@ -177,7 +178,24 @@ async def websocket_endpoint(websocket: WebSocket):
 
         while True:
             data = await websocket.receive_json()
+
+            if not isinstance(data, dict):
+                await io._send_event(
+                    "error",
+                    {"message": "Invalid message: expected a JSON object"},
+                )
+                continue
+
             event_type = data.get("type")
+            if not isinstance(event_type, str):
+                await io._send_event(
+                    "error",
+                    {
+                        "message":
+                        "Invalid message: 'type' field must be a string"
+                    },
+                )
+                continue
 
             if event_type == "start":
                 user_prompt = data.get("prompt")
@@ -225,7 +243,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     except asyncio.CancelledError:
                         pass
                     await io._send_event(
-                        "log", {"message": "Agent stopped by user", "level": "error"}
+                        "log", {"message": "Agent stopped by user",
+                                "level": "error"}
                     )
                     await io._send_event("execution_result", {"exit_code": -1})
 
@@ -352,7 +371,8 @@ async def run_engine_and_script(
                 )
 
         await asyncio.gather(
-            read_stream(process.stdout, "stdout"), read_stream(process.stderr, "stderr")
+            read_stream(process.stdout, "stdout"), read_stream(
+                process.stderr, "stderr")
         )
 
         return_code = await process.wait()

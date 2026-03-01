@@ -2,9 +2,9 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketState
+from starlette.websockets import WebSocketState, WebSocketDisconnect
 
-from lego_agent.server import WebIO, app
+from lego_agent.server import WebIO, app, websocket_endpoint
 
 
 class MockWebSocket:
@@ -36,7 +36,8 @@ async def test_webio_send_event(mock_websocket, input_queue):
     await io._send_event("test_type", {"key": "value"})
 
     assert len(mock_websocket.sent_messages) == 1
-    assert mock_websocket.sent_messages[0] == {"type": "test_type", "key": "value"}
+    assert mock_websocket.sent_messages[0] == {
+        "type": "test_type", "key": "value"}
 
 
 @pytest.mark.anyio
@@ -64,7 +65,8 @@ async def test_webio_ask_questions(mock_websocket, input_queue):
     answers = await io.ask_questions(["Q1"])
 
     assert answers == ["Ans1"]
-    assert {"type": "question", "questions": ["Q1"]} in mock_websocket.sent_messages
+    assert {"type": "question", "questions": [
+        "Q1"]} in mock_websocket.sent_messages
 
 
 @pytest.mark.anyio
@@ -96,7 +98,8 @@ async def test_server_logic(tmp_path):
         patch("lego_agent.server.LegoAgentEngine") as mock_engine_cls,
     ):
         mock_engine = AsyncMock()
-        mock_engine.run_async.return_value = MagicMock(script_path="/tmp/script.py")
+        mock_engine.run_async.return_value = MagicMock(
+            script_path="/tmp/script.py")
         mock_engine_cls.return_value = mock_engine
 
         from lego_agent.server import run_engine_and_script
@@ -128,7 +131,8 @@ async def test_server_logic(tmp_path):
                 {"message": "Script generated at: /tmp/script.py", "level": "success"},
             )
             io._send_event.assert_any_call(
-                "log", {"message": "Executing generated script...", "level": "info"}
+                "log", {"message": "Executing generated script...",
+                        "level": "info"}
             )
             io._send_event.assert_any_call("execution_result", {"exit_code": 0})
 
@@ -198,3 +202,102 @@ async def test_cleanup_on_empty(mock_websocket, input_queue):
     io = WebIO(mock_websocket, input_queue)
     await io.cleanup()
     assert len(io._pending_tasks) == 0
+
+
+@pytest.mark.anyio
+async def test_non_dict_message_returns_error(tmp_path):
+    """A WebSocket message that is not a JSON object gets an error response."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    mock_config = MagicMock()
+    mock_config.agent.model = "test-model"
+    mock_config.agent.thinking_budget = 100
+
+    ws = MockWebSocket()
+    ws.receive_json = AsyncMock(
+        side_effect=[
+            "not a dict",
+            WebSocketDisconnect(),
+        ]
+    )
+
+    with (
+        patch("lego_agent.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.server.load_config", return_value=mock_config),
+        patch("lego_agent.server.get_loader"),
+    ):
+        await websocket_endpoint(ws)
+
+    error_msgs = [
+        m for m in ws.sent_messages
+        if m.get("type") == "error"
+    ]
+    assert len(error_msgs) == 1
+    assert "expected a JSON object" in error_msgs[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_missing_type_field_returns_error(tmp_path):
+    """A WebSocket message without a 'type' field gets an error response."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    mock_config = MagicMock()
+    mock_config.agent.model = "test-model"
+    mock_config.agent.thinking_budget = 100
+
+    ws = MockWebSocket()
+    ws.receive_json = AsyncMock(
+        side_effect=[
+            {"no_type_key": "value"},
+            WebSocketDisconnect(),
+        ]
+    )
+
+    with (
+        patch("lego_agent.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.server.load_config", return_value=mock_config),
+        patch("lego_agent.server.get_loader"),
+    ):
+        await websocket_endpoint(ws)
+
+    error_msgs = [
+        m for m in ws.sent_messages
+        if m.get("type") == "error"
+    ]
+    assert len(error_msgs) == 1
+    assert "'type' field must be a string" in error_msgs[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_non_string_type_field_returns_error(tmp_path):
+    """A WebSocket message with a non-string 'type' field gets an error response."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    mock_config = MagicMock()
+    mock_config.agent.model = "test-model"
+    mock_config.agent.thinking_budget = 100
+
+    ws = MockWebSocket()
+    ws.receive_json = AsyncMock(
+        side_effect=[
+            {"type": 123},
+            WebSocketDisconnect(),
+        ]
+    )
+
+    with (
+        patch("lego_agent.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.server.load_config", return_value=mock_config),
+        patch("lego_agent.server.get_loader"),
+    ):
+        await websocket_endpoint(ws)
+
+    error_msgs = [
+        m for m in ws.sent_messages
+        if m.get("type") == "error"
+    ]
+    assert len(error_msgs) == 1
+    assert "'type' field must be a string" in error_msgs[0]["message"]
