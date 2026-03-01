@@ -31,7 +31,8 @@ You MUST generate scripts for Docker deployment.
 - **Docker Compose** (Recommended if compose file exists):
   - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
   - If found: Generate scripts that use `docker compose` commands
-  - Commands: docker compose up, docker compose down, docker compose ps, docker compose logs
+  - **ALWAYS pass `--project-name <name>`** (derived from the app directory name) to every `docker compose` command so container names are scoped to this deployment and do not conflict with other runs
+  - Commands: docker compose --project-name <name> up, docker compose --project-name <name> down, etc.
 - **Plain Docker**:
   - Look for: Dockerfile(s) without docker-compose files
   - If found: Generate scripts that use direct `docker run` commands
