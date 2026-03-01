@@ -9,7 +9,7 @@ import ast
 import json
 from typing import Any
 
-from app_operator.logger import logger
+from loguru import logger
 
 DEFAULT_TOOL_RESULT_MAX_LENGTH = 500  # characters before truncating tool result output
 

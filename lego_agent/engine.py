@@ -16,14 +16,12 @@ from lego_agent.storage import LegoAgentStorage
 from lego_agent.prompts import PromptLoader
 from lego_agent.streaming import parse_chunk_content, extract_tool_result
 
-# SDS-REVIEW: Architecture - Tight coupling with `app_operator`.
-# If `lego_agent` is intended to be a reusable library, these dependencies should be inverted or abstracted.
-from app_operator.langgraph.llm import build_llm
-from app_operator.config import Config
-from app_operator.adk.tools import build_readonly_tools
-from app_operator.filesystem import RealFilesystem
-from app_operator.exceptions import AgentError
-from app_operator.logger import logger
+from loguru import logger
+from lego_agent.config import Config
+from lego_agent.exceptions import AgentError
+from lego_agent.llm import build_llm
+from libs.sds_core.filesystem import RealFilesystem
+from libs.sds_core.tools import build_readonly_tools
 
 
 class LegoAgentEngine:

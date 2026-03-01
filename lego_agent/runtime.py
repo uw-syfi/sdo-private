@@ -14,11 +14,11 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
-from app_operator.langgraph.llm import build_llm
-from app_operator.adk.tools import build_tools
-from app_operator.config import load_config
-from app_operator.filesystem import RealFilesystem
-from app_operator.logger import logger
+from loguru import logger
+from lego_agent.config import load_config
+from lego_agent.llm import build_llm
+from libs.sds_core.filesystem import RealFilesystem
+from libs.sds_core.tools import build_tools
 from lego_agent.io import Colors
 from lego_agent.streaming import parse_chunk_content, extract_tool_result
 

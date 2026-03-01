@@ -10,8 +10,8 @@ from starlette.websockets import WebSocketState
 from lego_agent.engine import LegoAgentEngine
 from lego_agent.prompts import get_loader, PromptLoader
 from lego_agent.utils import find_repo_root
-from app_operator.config import load_config, Config
-from app_operator.logger import logger
+from loguru import logger
+from lego_agent.config import load_config, Config
 
 DEFAULT_LOOP_BOUND = 10  # default execution loop bound for generated scripts
 DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding
