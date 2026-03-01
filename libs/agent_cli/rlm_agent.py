@@ -21,6 +21,7 @@ from app_operator.trajectory import TrajectoryRecorderProtocol
 
 from .base import CodingAgent, register_provider
 from .events import AgentEventHandler
+from .utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 # Patterns that indicate a file-generation task (write specific output files).
 # These tasks use a direct single LLM call instead of the RLM loop.
@@ -171,23 +172,10 @@ class RLMCodingAgent(CodingAgent):
         """
         import os
 
-        # Extract all expected .sds/<file> paths from the prompt.
-        expected_files = re.findall(r"\.sds/[\w._-]+", prompt)
-
-        system_msg = (
-            "You are a deployment assistant. The user will ask you to generate "
-            "one or more files. For EACH file, output a section in this exact format:\n\n"
-            "FILE: .sds/<filename>\n"
-            "```\n"
-            "<file content here>\n"
-            "```\n\n"
-            "Output ONLY these sections. Do not add explanations outside the sections."
-        )
-
         kwargs = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": system_msg},
+                {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "cache": {"no-cache": True},
@@ -203,31 +191,7 @@ class RLMCodingAgent(CodingAgent):
             logger.error(f"[RLM] Direct LLM call failed: {e}")
             return f"LLM call failed: {e}"
 
-        # Parse FILE: sections and write each file.
-        written = []
-        file_sections = re.findall(
-            r"FILE:\s*(\.sds/[\w._-]+)\s*\n```[^\n]*\n(.*?)```",
-            raw,
-            re.DOTALL,
-        )
-        for rel_path, content in file_sections:
-            out_path = repo_path / rel_path
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(content)
-            logger.info(f"[RLM] Wrote {out_path}")
-            written.append(rel_path)
-
-        # Fallback: if no FILE: sections but there's a single expected file,
-        # write the entire response as that file's content.
-        if not written and len(expected_files) == 1:
-            out_path = repo_path / expected_files[0]
-            # Strip markdown code fences if present.
-            content = re.sub(r"^```[^\n]*\n|```$", "", raw.strip(), flags=re.MULTILINE)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(content)
-            logger.info(f"[RLM] Wrote {out_path} (fallback)")
-            written.append(expected_files[0])
-
+        generate_and_write_files(raw, prompt, repo_path, "[RLM]")
         return raw
 
     def _build_context(self, repo_path: Path) -> RLMContext:

@@ -25,7 +25,13 @@ from .base import CodingAgent, register_provider
 from .events import AgentEventHandler
 from .rlm_agent import _FILE_GEN_RE, _DIRECT_TEXT_RE
 from .subagent import call_subagent
-from .subagent_agent import SubagentCodingAgent
+from .subagent_agent import (
+    SubagentCodingAgent,
+    TRAJECTORY_ANALYST_PROMPT,
+    ERROR_LOG_ANALYST_PROMPT,
+    SCRIPT_ANALYST_PROMPT,
+    REPO_ANALYST_PROMPT,
+)
 
 
 @register_provider("hybrid")
@@ -114,12 +120,7 @@ class HybridCodingAgent(CodingAgent):
         try:
             trajectory_summary = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are a trajectory analyst. Summarise what deployment "
-                    "fixes have been tried so far, which error patterns recur, "
-                    "and what approaches have NOT been attempted yet. Be concise "
-                    "(max 300 words)."
-                ),
+                system_prompt=TRAJECTORY_ANALYST_PROMPT,
                 user_prompt=trajectory_text or "(no trajectory data available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -132,11 +133,7 @@ class HybridCodingAgent(CodingAgent):
         try:
             error_summary = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are an error log analyst. Identify the key errors, "
-                    "their root cause, and the most likely fix. Be concise "
-                    "(max 300 words)."
-                ),
+                system_prompt=ERROR_LOG_ANALYST_PROMPT,
                 user_prompt=error_log or "(no error log available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -152,12 +149,7 @@ class HybridCodingAgent(CodingAgent):
         try:
             script_summary = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are a script analyst. Examine the deployment script and "
-                    "identify what is likely wrong. If an original pre-fix version "
-                    "is provided, note any regressions introduced by previous fixes. "
-                    "Be concise (max 300 words)."
-                ),
+                system_prompt=SCRIPT_ANALYST_PROMPT,
                 user_prompt=script_input or "(no deploy script available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -170,12 +162,7 @@ class HybridCodingAgent(CodingAgent):
         try:
             repo_summary = call_subagent(
                 model=self.model,
-                system_prompt=(
-                    "You are a repository analyst. Based on the Dockerfile, "
-                    "docker-compose file, README, and code analysis report, "
-                    "summarise the deployment constraints and requirements. "
-                    "Be concise (max 300 words)."
-                ),
+                system_prompt=REPO_ANALYST_PROMPT,
                 user_prompt=repo_context or "(no repository context available)",
                 location=self.location,
                 token_acc=token_acc,

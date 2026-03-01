@@ -23,7 +23,6 @@ class ClaudeGenerationSession(CLIGenerationSession):
         self.tool_map = {}
         self.tool_start_times = {}
         self.tool_args = {}
-        self._at_line_start = True
         self.final_result = None
 
     def _process_stdout(self, line: str) -> None:
@@ -116,29 +115,6 @@ class ClaudeGenerationSession(CLIGenerationSession):
         output = event.render(self.log_prefix)
         if output:
             self._log_raw(output + "\n")
-
-    def _print_stream_content(self, content: str):
-        """Print streaming content with prefix handling."""
-        if not content:
-            return
-
-        lines = content.split("\n")
-
-        for i, line in enumerate(lines):
-            is_last = i == len(lines) - 1
-
-            if is_last:
-                if line:
-                    if self._at_line_start:
-                        self._log_raw(f"{self.log_prefix} ")
-                        self._at_line_start = False
-                    self._log_raw(line)
-            else:
-                if self._at_line_start:
-                    self._log_raw(f"{self.log_prefix} ")
-                self._log_raw(line)
-                self._log_raw("\n")
-                self._at_line_start = True
 
     def run(self, prompt: str) -> str:
         """Execute the command and return the result."""

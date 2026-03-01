@@ -44,6 +44,7 @@ class CLIGenerationSession:
         # State initialization
         self.stdout_lines = []
         self.stderr_lines = []
+        self._at_line_start = True
 
     def _log_raw(self, message: str) -> None:
         """Log a raw message directly to output if not silent."""
@@ -60,6 +61,29 @@ class CLIGenerationSession:
             self.event_handler.on_thinking(line_stripped + "\n")
 
         self.stdout_lines.append(line)
+
+    def _print_stream_content(self, content: str):
+        """Print streaming content with prefix handling."""
+        if not content:
+            return
+
+        lines = content.split("\n")
+
+        for i, line in enumerate(lines):
+            is_last = i == len(lines) - 1
+
+            if is_last:
+                if line:
+                    if self._at_line_start:
+                        self._log_raw(f"{self.log_prefix} ")
+                        self._at_line_start = False
+                    self._log_raw(line)
+            else:
+                if self._at_line_start:
+                    self._log_raw(f"{self.log_prefix} ")
+                self._log_raw(line)
+                self._log_raw("\n")
+                self._at_line_start = True
 
     def _process_stderr(self, line: str) -> None:
         """Process a line from stderr."""
