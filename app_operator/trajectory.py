@@ -499,12 +499,14 @@ class TrajectoryRecorder:
             # Create relative symlink
             rel_path = self.trajectory_file.relative_to(self.sds_dir)
             self._latest_link.symlink_to(rel_path)
-        except Exception:
+        except OSError:
             # If symlink fails (e.g., on Windows), just copy the file
             try:
                 shutil.copy2(self.trajectory_file, self._latest_link)
-            except Exception:
-                pass
+            except OSError as e:
+                logger.warning(
+                    f"Failed to update latest trajectory link: {e}"
+                )
 
     def save(self) -> Path:
         """Save the trajectory to file (alias for _write_to_file).
