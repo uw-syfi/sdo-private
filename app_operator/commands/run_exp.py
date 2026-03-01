@@ -94,8 +94,9 @@ def _write_experiment_sds_config(exp_dir: Path, experiment_config: dict) -> None
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "experiment",
-        help="Experiment name (e.g., 'example') or full path to TOML config file",
+        "experiments",
+        nargs='+',
+        help="One or more experiment names or full paths to TOML config files",
     )
     parser.add_argument(
         "--parallel",
@@ -393,70 +394,86 @@ def run_experiment_task(
             return {"app": app_name, "success": False, **extracted, **repeat_field}
 
 
-def run_command(args: argparse.Namespace) -> int:
-    # Try to resolve argument as experiment name first
-    exp_config_dir = Path("exp_config") / args.experiment
+def _resolve_experiment(experiment_str: str) -> tuple[str, Path, dict, Path] | None:
+    """Resolve an experiment string to (exp_name, config_path, config, log_dir).
+
+    Returns None and logs an error if resolution fails.
+    """
+    exp_config_dir = Path("exp_config") / experiment_str
     config_path = exp_config_dir / "config.toml"
 
     if not config_path.exists():
-        # Fallback: check if argument is a direct path to a file
-        potential_path = Path(args.experiment).resolve()
+        potential_path = Path(experiment_str).resolve()
         if potential_path.exists() and potential_path.is_file():
             config_path = potential_path
         else:
             logger.error(f"Config file not found. Tried:\n  - {config_path}\n  - {potential_path}")
-            return 1
+            return None
 
-    # Derive exp_name from path structure
     try:
         abs_config_path = config_path.resolve()
         parts = abs_config_path.parts
 
-        # Look for exp_config in path to determine experiment name
         if "exp_config" in parts:
             idx = parts.index("exp_config")
             if idx + 1 < len(parts):
-                # Use directory name inside exp_config as experiment name
                 exp_name = parts[idx + 1]
             else:
-                # Should not happen given logic above but safe fallback
-                exp_name = args.experiment
+                exp_name = experiment_str
         else:
-            # Fallback for paths outside exp_config structure
             exp_name = config_path.parent.name
 
     except Exception as e:
         logger.error(f"Error parsing experiment name from path: {e}")
-        return 1
+        return None
 
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    apps = config.get("apps", [])
-    if not apps:
-        logger.warning("No apps found in config")
-        return 0
-
-    repeats = config.get("repeats", 1)
-    if not isinstance(repeats, int) or repeats < 1:
-        logger.error(f"'repeats' must be a positive integer, got: {repeats!r}")
-        return 1
-
-    # Ensure log directory matches the experiment location
-    # If using exp_config structure: exp_config/<exp_name>/logs
-    # If custom path: <config_dir>/logs
     log_dir = config_path.parent / "logs"
 
-    if log_dir.exists():
-        shutil.rmtree(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    return exp_name, config_path, config, log_dir
 
+
+def run_command(args: argparse.Namespace) -> int:
     console = Console()
-    console.print(f"[bold]Running Experiment: {exp_name}[/bold]")
-    console.print(f"Log Directory: {log_dir}")
-    console.print(f"Apps: {len(apps)}")
-    console.print(f"Repeats: {repeats}")
+    multi = len(args.experiments) > 1
+
+    # Resolve all experiments up front
+    resolved = []
+    for experiment_str in args.experiments:
+        result = _resolve_experiment(experiment_str)
+        if result is None:
+            return 1
+        resolved.append(result)
+
+    # Validate all experiments before starting any work
+    for exp_name, config_path, config, log_dir in resolved:
+        apps = config.get("apps", [])
+        if not apps:
+            logger.warning(f"No apps found in config for experiment '{exp_name}'")
+            return 0
+
+        repeats = config.get("repeats", 1)
+        if not isinstance(repeats, int) or repeats < 1:
+            logger.error(f"'repeats' must be a positive integer, got: {repeats!r} (experiment '{exp_name}')")
+            return 1
+
+    # Print summary header
+    for exp_name, config_path, config, log_dir in resolved:
+        apps = config.get("apps", [])
+        repeats = config.get("repeats", 1)
+        console.print(f"[bold]Running Experiment: {exp_name}[/bold]")
+        console.print(f"Log Directory: {log_dir}")
+        console.print(f"Apps: {len(apps)}")
+        console.print(f"Repeats: {repeats}")
     console.print(f"Parallelism: {args.parallel}")
+
+    # Prepare log directories
+    for exp_name, config_path, config, log_dir in resolved:
+        if log_dir.exists():
+            shutil.rmtree(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
 
     with Progress(
         SpinnerColumn(),
@@ -467,37 +484,52 @@ def run_command(args: argparse.Namespace) -> int:
         console=console
     ) as progress:
 
+        # futures maps future -> (app, repeat_idx, exp_name, log_dir, config)
         futures = {}
         with ThreadPoolExecutor(max_workers=args.parallel) as executor:
-            for app in apps:
-                for i in range(repeats):
-                    if repeats > 1:
-                        label = f"[white]{Path(app).name} (run {i + 1}/{repeats})[/]: Pending"
-                    else:
-                        label = f"[white]{Path(app).name}[/]: Pending"
-                    task_id = progress.add_task(label, total=100, start=False)
-                    futures[executor.submit(
-                        run_experiment_task, app, exp_name,
-                        progress, task_id, log_dir, config,
-                        i, repeats,
-                    )] = (app, i)
+            for exp_name, config_path, config, log_dir in resolved:
+                apps = config.get("apps", [])
+                repeats = config.get("repeats", 1)
+                for app in apps:
+                    for i in range(repeats):
+                        app_name = Path(app).name
+                        if multi:
+                            prefix = f"{exp_name}/"
+                        else:
+                            prefix = ""
+                        if repeats > 1:
+                            label = f"[white]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Pending"
+                        else:
+                            label = f"[white]{prefix}{app_name}[/]: Pending"
+                        task_id = progress.add_task(label, total=100, start=False)
+                        future = executor.submit(
+                            run_experiment_task, app, exp_name,
+                            progress, task_id, log_dir, config,
+                            i, repeats,
+                        )
+                        futures[future] = (app, i, exp_name, log_dir, config)
 
-            results = []
+            # Collect results grouped by exp_name
+            results_by_exp: dict[str, list[dict]] = {exp_name: [] for exp_name, _, _, _ in resolved}
             for future in as_completed(futures):
-                app, _ = futures[future]
+                app, _, exp_name, log_dir, config = futures[future]
                 try:
                     result = future.result()
-                    results.append(result)
+                    results_by_exp[exp_name].append(result)
                 except Exception as e:
                     logger.error(f"Error running {app}: {e}")
-                    results.append({
+                    results_by_exp[exp_name].append({
                         "app": Path(app).name,
                         "success": False,
                         "status": "unknown",
                         "deployment_iterations": None,
                     })
 
-    _write_results(log_dir, exp_name, results)
-    _print_summary(console, results)
+    for exp_name, config_path, config, log_dir in resolved:
+        results = results_by_exp[exp_name]
+        _write_results(log_dir, exp_name, results)
+        if multi:
+            console.print(f"\n[bold]Experiment: {exp_name}[/bold]")
+        _print_summary(console, results)
 
     return 0
