@@ -6,6 +6,7 @@ implementing retry logic with exponential backoff.
 """
 
 import random
+import re
 import time
 import subprocess
 from typing import Optional, Callable, TypeVar, Any
@@ -58,7 +59,7 @@ def detect_rate_limit_error(
 
     # Gemini / Google Vertex AI
     if provider in ["gemini", "vertex"]:
-        if "429" in stderr or "resource exhausted" in stderr_lower:
+        if re.search(r'\b429\b', stderr) or "resource exhausted" in stderr_lower:
             return RateLimitError(
                 provider=provider,
                 message="Gemini API rate limit exceeded",
@@ -73,7 +74,7 @@ def detect_rate_limit_error(
 
     # OpenAI
     if provider in ["openai", "codex"]:
-        if "429" in stderr or "rate_limit" in stderr_lower:
+        if re.search(r'\b429\b', stderr) or "rate_limit" in stderr_lower:
             return RateLimitError(
                 provider=provider,
                 message="OpenAI API rate limit exceeded",
@@ -82,7 +83,7 @@ def detect_rate_limit_error(
 
     # Anthropic / Claude
     if provider in ["anthropic", "claude", "claude-code"]:
-        if "429" in stderr or "rate_limit" in stderr_lower:
+        if re.search(r'\b429\b', stderr) or "rate_limit" in stderr_lower:
             return RateLimitError(
                 provider=provider,
                 message="Anthropic API rate limit exceeded",
