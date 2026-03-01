@@ -276,6 +276,8 @@ def extract_rlm_statistics_from_trajectory(trajectory_dict: Dict[str, Any]) -> D
     # Look for RLM-specific messages in deployment phase
     deployment_convos = trajectory_dict.get("deployment", [])
 
+    found_json_stats = False
+
     for convo in deployment_convos:
         messages = convo.get("messages", [])
 
@@ -290,15 +292,17 @@ def extract_rlm_statistics_from_trajectory(trajectory_dict: Dict[str, Any]) -> D
                     json_str = content[json_start:]
                     extracted_stats = json.loads(json_str)
                     stats.update(extracted_stats)
+                    found_json_stats = True
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Failed to parse RLM statistics: {e}")
 
-            # Count RLM action messages
-            if "[RLM execute_code" in content:
-                stats["code_executions"] += 1
-                stats["total_calls"] += 1
-            elif "[RLM recursive_call" in content:
-                stats["recursive_calls"] += 1
-                stats["total_calls"] += 1
+            # Count RLM action messages only if no JSON stats were found
+            elif not found_json_stats:
+                if "[RLM execute_code" in content:
+                    stats["code_executions"] += 1
+                    stats["total_calls"] += 1
+                elif "[RLM recursive_call" in content:
+                    stats["recursive_calls"] += 1
+                    stats["total_calls"] += 1
 
     return stats
