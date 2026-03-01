@@ -249,7 +249,10 @@ class SubprocessRunner:
             Note: stdout/stderr returned here only contain system messages.
             Captured output is in self.*_lines and merged in _run_impl().
         """
-        assert self.process is not None, "_wait_for_completion called before process was started"
+        if self.process is None:
+            raise RuntimeError(
+                "process is not initialized; call start() before using this method"
+            )
         start_time = self.time_func()
 
         if summarizer is not None:
