@@ -2,7 +2,8 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any, TYPE_CHECKING
+from typing import Optional, Callable, TYPE_CHECKING
+from app_operator.types import CommandResult
 
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
@@ -492,7 +493,7 @@ class DeploymentAgent:
 
     def _run_health_check_with_retry(
         self,
-        deploy_result: Dict[str, Any],
+        deploy_result: CommandResult,
         attempt: int,
         absolute_max_attempts: int,
         log_file_path: Path,
@@ -617,7 +618,7 @@ class DeploymentAgent:
         timeout: Optional[int] = None,
         log_file_path: Optional[Path] = None,
         check_shutdown: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, Any]:
+    ) -> CommandResult:
         """Run the deployment script with a specific command.
 
         Args:
@@ -753,8 +754,8 @@ class DeploymentAgent:
 
     def _fix_with_agent(
         self,
-        deploy_result: Dict[str, Any],
-        health_result: Optional[Dict[str, Any]],
+        deploy_result: CommandResult,
+        health_result: Optional[CommandResult],
         attempt: int,
         max_attempts: int,
         log_file_path: Optional[Path] = None,

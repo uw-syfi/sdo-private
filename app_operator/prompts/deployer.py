@@ -1,6 +1,7 @@
 from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
+from app_operator.types import CommandResult
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.prompts import get_loader
 
@@ -11,8 +12,8 @@ if TYPE_CHECKING:
 
 
 def prepare_error_context(
-    deploy_result: Dict[str, Any],
-    health_result: Optional[Dict[str, Any]],
+    deploy_result: CommandResult,
+    health_result: Optional[CommandResult],
     log_file_path: Optional[Path] = None,
     health_check_log_path: Optional[Path] = None,
 ) -> str:

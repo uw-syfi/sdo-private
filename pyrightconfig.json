@@ -1,8 +1,10 @@
 {
   "include": [
+    "app_operator/types.py",
     "app_operator/cli_agent/healthcheck.py",
     "app_operator/cli_agent/subprocess_runner.py",
     "app_operator/cli_agent/agents/deployer.py",
+    "app_operator/prompts/deployer.py",
     "app_operator/trajectory.py",
     "app_operator/fault_injection/reporter.py",
     "app_operator/fault_injection/models.py",
