@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
 from app_operator.trajectory import Phase
+from app_operator.types import TokenUsage
 
 
 @dataclass
@@ -32,7 +33,8 @@ class EnrichedTrajectoryExample:
 
     # Enriched data from Gemini sessions
     full_conversation: List[Dict[str, Any]] = field(default_factory=list)
-    token_usage: Dict[str, int] = field(default_factory=dict)
+    token_usage: TokenUsage = field(default_factory=lambda: TokenUsage(
+        prompt_tokens=0, completion_tokens=0, total_tokens=0))
     session_metadata: Dict[str, Any] = field(default_factory=dict)
 
     # Success metrics (from trajectory)

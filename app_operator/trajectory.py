@@ -27,6 +27,7 @@ from enum import Enum
 from app_operator.logger import logger
 from app_operator.trajectory_collectors import collect_gemini_sessions
 from app_operator.prompts.trajectory_prompts import get_system_prompt
+from app_operator.types import TokenUsage
 
 
 class Phase(str, Enum):
@@ -96,7 +97,7 @@ class TrajectoryRecorderProtocol(Protocol):
     def record_prompt_kwargs(self, kwargs: Dict[str, Any]) -> None: ...
     def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
     def record_fault_injection(self, metadata: Dict[str, Any]) -> None: ...
-    def record_token_usage(self, usage: Dict[str, int]) -> None: ...
+    def record_token_usage(self, usage: TokenUsage) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
     def phase(
@@ -380,7 +381,7 @@ class TrajectoryRecorder:
         self.trajectory["metadata"]["fault_injection"] = metadata
         self._write_to_file()
 
-    def record_token_usage(self, usage: Dict[str, int]) -> None:
+    def record_token_usage(self, usage: TokenUsage) -> None:
         """Record cumulative LLM token usage for this run.
 
         Called after each agent generate() call with the running total so the
@@ -627,7 +628,7 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
     def record_fault_injection(self, metadata: Dict[str, Any]) -> None:
         pass
 
-    def record_token_usage(self, usage: Dict[str, int]) -> None:
+    def record_token_usage(self, usage: TokenUsage) -> None:
         pass
 
     @contextmanager
