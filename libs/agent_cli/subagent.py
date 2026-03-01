@@ -6,6 +6,7 @@ SubagentCodingAgent (fan-out analysis calls).
 """
 
 import os
+import subprocess
 from typing import Optional
 
 from app_operator.logger import logger
@@ -53,6 +54,8 @@ def call_subagent(
         return _litellm_call_with_retry(
             kwargs, label="subagent call", token_acc=token_acc,
         )
-    except Exception as e:
-        logger.error(f"[Subagent] LLM call failed: {e}")
-        return f"Subagent call failed: {e}"
+    except KeyboardInterrupt:
+        raise
+    except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
+        logger.error(f"[Subagent] LLM call failed: {type(e).__name__}: {e}")
+        return f"Subagent call failed: {type(e).__name__}: {e}"
