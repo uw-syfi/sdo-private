@@ -103,3 +103,67 @@ modules = [
     "tests.unit",
     "tests.integration",
 ]
+
+[[tool.importlinter.contracts]]
+name = "commands layer must not import from libs directly"
+type = "forbidden"
+source_modules = ["app_operator.commands"]
+forbidden_modules = ["libs"]
+
+[[tool.importlinter.contracts]]
+name = "dspy_integration must not import from operator runtimes"
+type = "forbidden"
+source_modules = ["app_operator.dspy_integration"]
+forbidden_modules = [
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+]
+
+[[tool.importlinter.contracts]]
+name = "fault_injection must not import from operator runtimes"
+type = "forbidden"
+source_modules = ["app_operator.fault_injection"]
+forbidden_modules = [
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+]
+
+[[tool.importlinter.contracts]]
+name = "lego_agent core must not import from presentation layer"
+type = "forbidden"
+source_modules = [
+    "lego_agent.engine",
+    "lego_agent.runtime",
+]
+forbidden_modules = [
+    "lego_agent.server",
+    "lego_agent.ui",
+]
+
+[[tool.importlinter.contracts]]
+name = "app_operator shared infrastructure must not import from runtimes"
+type = "forbidden"
+source_modules = [
+    "app_operator.trajectory",
+    "app_operator.operator_base",
+    "app_operator.prompts",
+]
+forbidden_modules = [
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+]
+
+[[tool.importlinter.contracts]]
+name = "app_operator ui must not be imported by core operator logic"
+type = "forbidden"
+source_modules = [
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+    "app_operator.trajectory",
+    "app_operator.operator_base",
+]
+forbidden_modules = ["app_operator.ui"]
