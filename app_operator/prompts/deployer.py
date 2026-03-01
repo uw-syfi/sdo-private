@@ -3,6 +3,8 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 
 from app_operator.prompts import get_loader
 
+FIX_SUMMARY_FILENAME = "fix_summary.md"
+
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
 
@@ -123,6 +125,7 @@ def create_fix_prompt(
     health_check_script_path: Path,
     dspy_config: Optional["DSPyConfig"] = None,
     recorder=None,
+    fix_summary_consolidation: bool = True,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.
 
@@ -135,26 +138,32 @@ def create_fix_prompt(
         health_check_script_path: Path to the health check script.
         dspy_config: Optional DSPy configuration for optimized prompts.
         recorder: Optional trajectory recorder for kwargs capture.
+        fix_summary_consolidation: Whether consolidated fix summary is enabled.
 
     Returns:
         str: The rendered prompt.
     """
     previous_summary_note = ""
     if attempt > 1:
-        consolidated_summary_path = repo_path / ".sds" / "fix_summary.md"
-        # Since we can't check file existence here (no filesystem access), we provide both paths
-        # The agent can check which one exists.
-
+        consolidated_summary_path = repo_path / ".sds" / FIX_SUMMARY_FILENAME
         prev_log_path = repo_path / ".sds" / \
             "logs" / f"fix_summary_{attempt - 1}.log"
 
-        previous_summary_note = (
-            f"\n\nNote: This is attempt #{attempt}. "
-            f"You can review the history of previous fixes at: {consolidated_summary_path}\n"
-            f"Or the specific summary of the last attempt at: {prev_log_path}\n"
-            "You can dive into prior attempts for more detail; logs follow the pattern: fix_summary_{attempt}.log"
-            "Please review the previous attempts to avoid repeating mistakes."
-        )
+        if fix_summary_consolidation:
+            previous_summary_note = (
+                f"\n\nNote: This is attempt #{attempt}. "
+                f"You can review the history of previous fixes at: {consolidated_summary_path}\n"
+                f"Or the specific summary of the last attempt at: {prev_log_path}\n"
+                "You can dive into prior attempts for more detail; logs follow the pattern: fix_summary_{attempt}.log"
+                "Please review the previous attempts to avoid repeating mistakes."
+            )
+        else:
+            previous_summary_note = (
+                f"\n\nNote: This is attempt #{attempt}. "
+                f"You can review the summary of the last attempt at: {prev_log_path}\n"
+                "You can dive into prior attempts for more detail; logs follow the pattern: fix_summary_{attempt}.log"
+                "Please review the previous attempts to avoid repeating mistakes."
+            )
 
     return get_loader(dspy_config).render(
         "deployer/fix_error.jinja2",

@@ -61,6 +61,7 @@ agent_timeout = 300
 
 [operator.phase]  # Phase control (optional)
 code_analysis = false  # Disable code analysis phase (default: true)
+fix_summary_consolidation = false  # default: true
 
 # DSPy Prompt Optimization (optional)
 [dspy]
