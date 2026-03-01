@@ -23,6 +23,19 @@ class WebIO:
         self.websocket = websocket
         self.input_queue = input_queue
         self._thinking_buffer = ""
+        self._pending_tasks: set[asyncio.Task] = set()
+
+    def _track_task(self, coro) -> asyncio.Task:
+        """Create a tracked asyncio task that is removed from the set when done."""
+        task = asyncio.create_task(coro)
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+        return task
+
+    async def cleanup(self) -> None:
+        """Await all pending tasks, suppressing exceptions."""
+        if self._pending_tasks:
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
 
     async def _send_event(self, type: str, data: Dict[str, Any]):
         if self.websocket.client_state == WebSocketState.CONNECTED:
@@ -68,14 +81,14 @@ class WebIO:
         # However, for simplicity in this architecture, we can use a helper or make it async compliant if possible.
         # The UserIO protocol defines info as synchronous `def info(self, message: str) -> None:`.
         # We will schedule the task on the current loop.
-        asyncio.create_task(self._send_info_async(message))
+        self._track_task(self._send_info_async(message))
 
     async def _send_info_async(self, message: str):
         await self._flush_thinking()
         await self._send_event("log", {"message": message, "level": "info"})
 
     def print_stream(self, text: str) -> None:
-        asyncio.create_task(self._send_stream_async(text))
+        self._track_task(self._send_stream_async(text))
 
     async def _send_stream_async(self, text: str):
         await self._flush_thinking()
@@ -86,20 +99,20 @@ class WebIO:
         # Sending immediately is fine for websockets.
         # But we need to handle the sync vs async nature.
         # The engine calls this synchronously.
-        asyncio.create_task(self._send_thinking_async(text))
+        self._track_task(self._send_thinking_async(text))
 
     async def _send_thinking_async(self, text: str):
         await self._send_event("thinking", {"text": text})
 
     def render_tool_start(self, name: str, inputs: str) -> None:
-        asyncio.create_task(self._send_tool_start_async(name, inputs))
+        self._track_task(self._send_tool_start_async(name, inputs))
 
     async def _send_tool_start_async(self, name: str, inputs: str):
         await self._flush_thinking()
         await self._send_event("tool_start", {"name": name, "input": inputs})
 
     def render_tool_end(self, name: str, output: str, status: str) -> None:
-        asyncio.create_task(self._send_tool_end_async(name, output, status))
+        self._track_task(self._send_tool_end_async(name, output, status))
 
     async def _send_tool_end_async(self, name: str, output: str, status: str):
         await self._flush_thinking()
@@ -108,20 +121,20 @@ class WebIO:
         )
 
     def render_error(self, message: str) -> None:
-        asyncio.create_task(self._send_log_async(message, "error"))
+        self._track_task(self._send_log_async(message, "error"))
 
     def render_success(self, message: str) -> None:
-        asyncio.create_task(self._send_log_async(message, "success"))
+        self._track_task(self._send_log_async(message, "success"))
 
     def render_info(self, message: str) -> None:
-        asyncio.create_task(self._send_log_async(message, "info"))
+        self._track_task(self._send_log_async(message, "info"))
 
     async def _send_log_async(self, message: str, level: str):
         await self._flush_thinking()
         await self._send_event("log", {"message": message, "level": level})
 
     def render_graph(self, config: Dict[str, Any]) -> None:
-        asyncio.create_task(self._send_graph_async(config))
+        self._track_task(self._send_graph_async(config))
 
     async def _send_graph_async(self, config: Dict[str, Any]):
         await self._flush_thinking()
@@ -272,6 +285,8 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("Client disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}", exc_info=True)
+    finally:
+        await io.cleanup()
 
 
 async def run_engine_and_script(
