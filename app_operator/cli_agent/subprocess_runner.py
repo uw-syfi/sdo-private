@@ -72,6 +72,41 @@ class SubprocessRunner:
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
+        return self._run_impl(self._wait_for_completion)
+
+    def run_with_progress_monitoring(self, summarizer) -> Dict[str, Any]:
+        """Run subprocess with integrated progress monitoring.
+
+        This method starts the subprocess and monitors it, providing periodic
+        progress summaries via the given summarizer.
+
+        Args:
+            summarizer: ProgressSummarizer instance for generating summaries.
+
+        Returns:
+            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+        """
+        def progress_callback():
+            if summarizer.should_summarize():
+                recent_output = self.get_recent_output(num_lines=20)
+                summarizer.summarize(recent_output)
+
+        def wait_fn():
+            return self._wait_for_completion(progress_callback=progress_callback,
+                                             summarizer=summarizer)
+
+        return self._run_impl(wait_fn)
+
+    def _run_impl(
+            self, wait_fn: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
+        """Shared implementation for run() and run_with_progress_monitoring().
+
+        Args:
+            wait_fn: Callable that waits for process completion and returns a result dict.
+
+        Returns:
+            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
+        """
         if self.ui and self.tool_name:
             self.ui.on_tool_call(self.tool_name, self.tool_args)
 
@@ -98,10 +133,12 @@ class SubprocessRunner:
 
             # Start threads to read stdout and stderr
             stdout_thread = threading.Thread(
-                target=self._read_pipe, args=(self.process.stdout, self.stdout_lines)
+                target=self._read_pipe, args=(
+                    self.process.stdout, self.stdout_lines)
             )
             stderr_thread = threading.Thread(
-                target=self._read_pipe, args=(self.process.stderr, self.stderr_lines)
+                target=self._read_pipe, args=(
+                    self.process.stderr, self.stderr_lines)
             )
 
             stdout_thread.daemon = True
@@ -111,7 +148,7 @@ class SubprocessRunner:
             stderr_thread.start()
 
             # Wait for process to complete or timeout/shutdown
-            result = self._wait_for_completion()
+            result = wait_fn()
 
             # Wait for threads to finish reading
             stdout_thread.join(timeout=5)
@@ -119,8 +156,10 @@ class SubprocessRunner:
 
             # Update stdout/stderr with full content captured by threads
             result["stdout"] = "".join(self.stdout_lines)
-            # Append captured stderr to any existing error message (e.g. timeout msg)
-            result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
+            # Append captured stderr to any existing error message (e.g.
+            # timeout msg)
+            result["stderr"] = result.get(
+                "stderr", "") + "".join(self.stderr_lines)
 
             if self.ui and self.tool_name:
                 duration = self.time_func() - start_time_mono
@@ -191,15 +230,35 @@ class SubprocessRunner:
         finally:
             pipe.close()
 
-    def _wait_for_completion(self) -> Dict[str, Any]:
+    def _wait_for_completion(
+        self,
+        progress_callback: Optional[Callable[[], None]] = None,
+        summarizer=None,
+    ) -> Dict[str, Any]:
         """Wait for process completion with timeout and shutdown checks.
+
+        Args:
+            progress_callback: Optional callable invoked each polling iteration
+                for progress monitoring (e.g. summarizer checks).
+            summarizer: Optional ProgressSummarizer. When provided, its start()
+                method is called and debug logging is enabled.
 
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
             Note: stdout/stderr returned here only contain system messages.
-            Captured output is in self.*_lines and merged in run().
+            Captured output is in self.*_lines and merged in _run_impl().
         """
         start_time = self.time_func()
+
+        if summarizer is not None:
+            summarizer.start(start_time=start_time)
+            from app_operator.logger import logger
+            logger.debug(
+                f"SubprocessRunner: Started monitoring with summarizer "
+                f"(initial_delay={
+                    summarizer.initial_delay}s, interval={
+                    summarizer.summary_interval}s)"
+            )
 
         # Handle timeout=0 as a special case that fails immediately
         if self.timeout == 0:
@@ -211,9 +270,22 @@ class SubprocessRunner:
                 "stderr": "Deployment script timed out after 0 seconds\n",
             }
 
+        loop_iterations = 0
         while True:
             current_time = self.time_func()
             elapsed = current_time - start_time
+            loop_iterations += 1
+
+            # Log monitoring progress every 10 seconds (100 iterations at 0.1s
+            # sleep)
+            if summarizer is not None and loop_iterations % 100 == 0:
+                from app_operator.logger import logger
+                logger.debug(
+                    f"SubprocessRunner: Monitoring loop iter={loop_iterations}, "
+                    f"elapsed={
+                        elapsed:.1f}s, process_running={
+                        self.process.poll() is None}"
+                )
 
             # Check timeout
             if elapsed >= self.timeout:
@@ -247,6 +319,10 @@ class SubprocessRunner:
                     "stdout": "",
                     "stderr": "Deployment interrupted by shutdown request\n",
                 }
+
+            # Check for progress summary if callback provided
+            if progress_callback is not None:
+                progress_callback()
 
             # Yield to allow other processing
             self.sleep_func(0.1)
@@ -291,205 +367,3 @@ class SubprocessRunner:
             bool: True if process is running, False otherwise.
         """
         return self.process is not None and self.process.poll() is None
-
-    def run_with_progress_monitoring(self, summarizer) -> Dict[str, Any]:
-        """Run subprocess with integrated progress monitoring.
-
-        This method starts the subprocess and monitors it, providing periodic
-        progress summaries via the given summarizer.
-
-        Args:
-            summarizer: ProgressSummarizer instance for generating summaries.
-
-        Returns:
-            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
-        """
-        if self.ui and self.tool_name:
-            self.ui.on_tool_call(self.tool_name, self.tool_args)
-
-        start_time_mono = self.time_func()
-
-        # Open log file if provided
-        if self.log_file_path:
-            try:
-                self._log_file = open(self.log_file_path, "w")
-            except (OSError, IOError):
-                # Log file open failed - continue without logging
-                pass
-
-        try:
-            # Start subprocess
-            self.process = self.popen_func(
-                self.command,
-                cwd=self.cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # Line buffered
-            )
-
-            # Start threads to read stdout and stderr
-            stdout_thread = threading.Thread(
-                target=self._read_pipe, args=(self.process.stdout, self.stdout_lines)
-            )
-            stderr_thread = threading.Thread(
-                target=self._read_pipe, args=(self.process.stderr, self.stderr_lines)
-            )
-
-            stdout_thread.daemon = True
-            stderr_thread.daemon = True
-
-            stdout_thread.start()
-            stderr_thread.start()
-
-            # Wait for process with progress monitoring (starts summarizer timer internally)
-            result = self._wait_with_progress(summarizer)
-
-            # Wait for threads to finish reading
-            stdout_thread.join(timeout=5)
-            stderr_thread.join(timeout=5)
-
-            # Update stdout/stderr with full content captured by threads
-            result["stdout"] = "".join(self.stdout_lines)
-            # Append captured stderr to any existing error message
-            result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
-
-            if self.ui and self.tool_name:
-                duration = self.time_func() - start_time_mono
-                self.ui.on_tool_result(
-                    tool=self.tool_name,
-                    stdout=result.get("stdout", ""),
-                    stderr=result.get("stderr", ""),
-                    exit_code=result.get("exit_code"),
-                    duration=duration,
-                )
-
-            return result
-
-        except (OSError, subprocess.SubprocessError) as e:
-            result = {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": f"Failed to run deployment script: {e}",
-            }
-            if self.ui and self.tool_name:
-                self.ui.on_tool_result(
-                    tool=self.tool_name,
-                    stdout="",
-                    stderr=result["stderr"],
-                    exit_code=-1,
-                )
-            return result
-        except Exception as e:
-            result = {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": f"Unexpected error running deployment script: {e}",
-            }
-            if self.ui and self.tool_name:
-                self.ui.on_tool_result(
-                    tool=self.tool_name,
-                    stdout="",
-                    stderr=result["stderr"],
-                    exit_code=-1,
-                )
-            return result
-        finally:
-            if self._log_file:
-                self._log_file.close()
-            self._ensure_process_terminated()
-
-    def _wait_with_progress(self, summarizer) -> Dict[str, Any]:
-        """Wait for process completion with progress monitoring.
-
-        Args:
-            summarizer: ProgressSummarizer instance for generating summaries.
-
-        Returns:
-            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
-            Note: stdout/stderr returned here only contain system messages.
-            Captured output is in self.*_lines and merged in run().
-        """
-        start_time = self.time_func()
-        # Initialize summarizer with the same start time to avoid extra time_func call
-        summarizer.start(start_time=start_time)
-
-        from app_operator.logger import logger
-        logger.debug(
-            f"SubprocessRunner: Started monitoring with summarizer "
-            f"(initial_delay={summarizer.initial_delay}s, interval={summarizer.summary_interval}s)"
-        )
-
-        # Handle timeout=0 as a special case that fails immediately
-        if self.timeout == 0:
-            self._ensure_process_terminated()
-            return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": "Deployment script timed out after 0 seconds\n",
-            }
-
-        loop_iterations = 0
-        while True:
-            current_time = self.time_func()
-            elapsed = current_time - start_time
-            loop_iterations += 1
-
-            # Log monitoring progress every 10 seconds (100 iterations at 0.1s sleep)
-            if loop_iterations % 100 == 0:
-                logger.debug(
-                    f"SubprocessRunner: Monitoring loop iter={loop_iterations}, "
-                    f"elapsed={elapsed:.1f}s, process_running={self.process.poll() is None}"
-                )
-
-            # Check timeout
-            if elapsed >= self.timeout:
-                if self.process.poll() is None:
-                    self.process.terminate()
-                    try:
-                        self.process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        self.process.kill()
-                    return {
-                        "success": False,
-                        "exit_code": -1,
-                        "stdout": "",
-                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n",
-                    }
-
-            # Check if process completed
-            if self.process.poll() is not None:
-                break
-
-            # Check shutdown
-            if self.check_shutdown and self.check_shutdown():
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                return {
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "",
-                    "stderr": "Deployment interrupted by shutdown request\n",
-                }
-
-            # Check for progress summary
-            if summarizer.should_summarize():
-                recent_output = self.get_recent_output(num_lines=20)
-                summarizer.summarize(recent_output)
-
-            # Yield to allow other processing
-            self.sleep_func(0.1)
-
-        # Process completed
-        return {
-            "success": self.process.returncode == 0,
-            "exit_code": self.process.returncode,
-            "stdout": "",
-            "stderr": "",
-        }
