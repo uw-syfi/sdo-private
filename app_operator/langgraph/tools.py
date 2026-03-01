@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Callable
 
 from langchain_core.tools import tool
 
+from app_operator.command_validation import DangerousCommandError, validate_command
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 
 
@@ -171,6 +172,7 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
     def bash(command: str, timeout: int = 120) -> Dict[str, Any]:
         """Execute a bash command."""
         try:
+            validate_command(command)
             result = subprocess.run(
                 command,
                 cwd=str(context.repo_root),
@@ -185,6 +187,14 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
                 "exit_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
+            }
+        except DangerousCommandError as e:
+            error_msg = str(e)
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": error_msg,
             }
         except subprocess.TimeoutExpired:
             error_msg = f"Command timed out after {timeout} seconds"

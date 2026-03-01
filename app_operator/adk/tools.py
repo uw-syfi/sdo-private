@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Callable, Optional
 
+from app_operator.command_validation import DangerousCommandError, validate_command
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 
 
@@ -317,6 +318,7 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], Dict[str, A
             - 'context': Metadata including 'command', 'exit_code', 'stdout', and 'stderr'.
         """
         try:
+            validate_command(command)
             # subprocess uses real system
             result = subprocess.run(
                 command,
@@ -337,6 +339,18 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], Dict[str, A
                     "exit_code": result.returncode,
                     "stdout": result.stdout,
                     "stderr": result.stderr,
+                },
+            }
+        except DangerousCommandError as e:
+            error_msg = str(e)
+            return {
+                "status": "error",
+                "error": error_msg,
+                "output": "",
+                "context": {
+                    "command": command,
+                    "exit_code": -1,
+                    "stderr": error_msg,
                 },
             }
         except subprocess.TimeoutExpired:
