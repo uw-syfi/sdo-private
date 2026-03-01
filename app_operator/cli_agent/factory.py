@@ -1,7 +1,6 @@
-
 from app_operator.config import load_config, Config
 from app_operator.logger import logger
-from .base import CodingAgent, AGENT_REGISTRY
+from libs.agent_cli.base import CodingAgent, AGENT_REGISTRY
 
 
 def create_agent_from_config(

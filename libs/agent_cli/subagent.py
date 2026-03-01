@@ -8,9 +8,9 @@ SubagentCodingAgent (fan-out analysis calls).
 import os
 import subprocess
 
-from app_operator.logger import logger
+from loguru import logger
 
-from .rlm_agent import _litellm_call_with_retry
+from libs.agent_cli.rlm_utils import _litellm_call_with_retry
 
 
 def call_subagent(

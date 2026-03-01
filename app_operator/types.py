@@ -2,6 +2,16 @@
 
 from typing import TypedDict
 
+from libs.agent_cli.trajectory import FaultInjectionMetadata, TokenUsage
+
+__all__ = [
+    "CommandResult",
+    "TokenUsage",
+    "FaultInjectionMetadata",
+    "TrajectoryCallRecord",
+    "ConversationEntry",
+]
+
 
 class CommandResult(TypedDict):
     """Result of running a shell command (deploy script or health check)."""
@@ -10,14 +20,6 @@ class CommandResult(TypedDict):
     exit_code: int
     stdout: str
     stderr: str
-
-
-class TokenUsage(TypedDict):
-    """Token usage statistics from an LLM call."""
-
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
 
 
 class _TrajectoryCallRecordRequired(TypedDict):
@@ -33,19 +35,6 @@ class TrajectoryCallRecord(_TrajectoryCallRecordRequired, total=False):
 
     prompt_version: str
     fallback_occurred: bool
-
-
-class FaultInjectionMetadata(TypedDict):
-    """Metadata about fault injection for embedding in trajectory JSON."""
-
-    enabled: bool
-    num_faults_requested: int
-    num_faults_injected: int
-    faults: list
-    failed_injections: list
-    fault_ids: list[str]
-    categories: list[str]
-    severities: list[str]
 
 
 class _ConversationEntryRequired(TypedDict):

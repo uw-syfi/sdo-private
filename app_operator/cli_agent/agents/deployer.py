@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from app_operator.ui import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
-from libs.agent_cli.factory import create_agent_from_config
+from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem

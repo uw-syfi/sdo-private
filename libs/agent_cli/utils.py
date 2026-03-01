@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from app_operator.logger import logger
+from loguru import logger
 
 
 def _get_interactive_env() -> dict[str, str]:

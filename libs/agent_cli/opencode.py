@@ -4,7 +4,7 @@ import json
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
 from .events import AgentEventHandler
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 

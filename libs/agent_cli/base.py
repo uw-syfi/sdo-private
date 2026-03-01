@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 AGENT_REGISTRY = {}
 

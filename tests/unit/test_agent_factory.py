@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from libs.agent_cli.factory import create_agent_from_config
+from app_operator.cli_agent.factory import create_agent_from_config
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.cli_agent import CLICodingAgent
 from app_operator.config import Config, AgentConfig

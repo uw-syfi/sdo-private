@@ -12,7 +12,7 @@ from .claude_events import (
     ResultEvent,
 )
 from .events import AgentEventHandler
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 
 class ClaudeGenerationSession(CLIGenerationSession):

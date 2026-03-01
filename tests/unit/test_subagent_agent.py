@@ -387,7 +387,7 @@ class TestSubagentRegistration:
 
     def test_factory_creates_subagent(self):
         from app_operator.config import Config, AgentConfig
-        from libs.agent_cli.factory import create_agent_from_config
+        from app_operator.cli_agent.factory import create_agent_from_config
 
         config = Config(agent=AgentConfig(provider="subagent"))
         agent = create_agent_from_config("/tmp", config=config)
@@ -395,7 +395,7 @@ class TestSubagentRegistration:
 
     def test_factory_forwards_location(self):
         from app_operator.config import Config, AgentConfig
-        from libs.agent_cli.factory import create_agent_from_config
+        from app_operator.cli_agent.factory import create_agent_from_config
 
         config = Config(
             agent=AgentConfig(

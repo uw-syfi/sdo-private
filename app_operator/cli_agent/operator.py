@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 
 from libs.agent_cli.base import CodingAgent
-from libs.agent_cli.factory import create_agent_from_config
+from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
