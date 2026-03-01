@@ -10,6 +10,11 @@ from app_operator.logger import logger
 from app_operator.exceptions import ConfigurationError
 from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.fault_injection.config import FaultInjectionConfig
+from app_operator.validation import (
+    validate_field,
+    validate_dataclass_fields,
+    validate_type,
+)
 
 
 class UnrecognizedSectionError(ConfigurationError):
@@ -51,8 +56,7 @@ class AgentConfig:
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
-        if not isinstance(self.provider, str):
-            raise TypeError(f"provider must be str, got {type(self.provider).__name__}")
+        validate_field(self.provider, "provider", str)
 
         # Case-insensitive check
         if self.provider.lower() not in self.VALID_PROVIDERS:
@@ -63,49 +67,18 @@ class AgentConfig:
         # Normalize provider name
         self.provider = self.provider.lower()
 
-        if self.model is not None and not isinstance(self.model, str):
-            raise TypeError(
-                f"model must be str or None, got {type(self.model).__name__}"
-            )
-        if self.location is not None and not isinstance(self.location, str):
-            raise TypeError(
-                f"location must be str or None, got {type(self.location).__name__}"
-            )
+        validate_field(self.model, "model", str, nullable=True)
+        validate_field(self.location, "location", str, nullable=True)
+
         if self.thinking_budget is not None:
-            if not isinstance(self.thinking_budget, int):
-                raise TypeError(
-                    f"thinking_budget must be int or None, got {type(self.thinking_budget).__name__}"
-                )
-            if self.thinking_budget <= 0:
-                raise ValueError(
-                    f"thinking_budget must be positive, got {self.thinking_budget}"
-                )
+            validate_field(self.thinking_budget, "thinking_budget", int, positive=True)
 
         # Validate retry configuration
-        if not isinstance(self.max_retries, int):
-            raise TypeError(
-                f"max_retries must be int, got {type(self.max_retries).__name__}"
-            )
-        if self.max_retries < 0:
-            raise ValueError(f"max_retries must be non-negative, got {self.max_retries}")
-
-        if not isinstance(self.retry_base_delay, int):
-            raise TypeError(
-                f"retry_base_delay must be int, got {type(self.retry_base_delay).__name__}"
-            )
-        if self.retry_base_delay <= 0:
-            raise ValueError(
-                f"retry_base_delay must be positive, got {self.retry_base_delay}"
-            )
-
-        if not isinstance(self.rate_limit_backoff, int):
-            raise TypeError(
-                f"rate_limit_backoff must be int, got {type(self.rate_limit_backoff).__name__}"
-            )
-        if self.rate_limit_backoff <= 0:
-            raise ValueError(
-                f"rate_limit_backoff must be positive, got {self.rate_limit_backoff}"
-            )
+        validate_field(self.max_retries, "max_retries", int, non_negative=True)
+        validate_field(self.retry_base_delay, "retry_base_delay", int, positive=True)
+        validate_field(
+            self.rate_limit_backoff, "rate_limit_backoff", int, positive=True
+        )
 
 
 # Canonical mapping from SDS provider name to the litellm model prefix.
@@ -166,16 +139,11 @@ class DeploymentConfig:
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
-        if not isinstance(self.platform, str):
-            raise TypeError(f"platform must be str, got {type(self.platform).__name__}")
-        if self.platform not in self.VALID_PLATFORMS:
-            raise ValueError(
-                f"Invalid platform: '{self.platform}'. "
-                f"Valid platforms: {', '.join(sorted(self.VALID_PLATFORMS))}"
-            )
+        validate_field(
+            self.platform, "platform", str, valid_values=self.VALID_PLATFORMS
+        )
 
-        if not isinstance(self.target, str):
-            raise TypeError(f"target must be str, got {type(self.target).__name__}")
+        validate_type(self.target, "target", str)
         if self.target == "remote":
             raise ValueError("Remote deployment is not currently supported")
         if self.target not in self.VALID_TARGETS:
@@ -192,14 +160,10 @@ class OperatorPhaseConfig:
     fix_summary_consolidation: bool = True
 
     def __post_init__(self):
-        if not isinstance(self.code_analysis, bool):
-            raise TypeError(
-                f"code_analysis must be bool, got {type(self.code_analysis).__name__}"
-            )
-        if not isinstance(self.fix_summary_consolidation, bool):
-            raise TypeError(
-                f"fix_summary_consolidation must be bool, got {type(self.fix_summary_consolidation).__name__}"
-            )
+        validate_field(self.code_analysis, "code_analysis", bool)
+        validate_field(
+            self.fix_summary_consolidation, "fix_summary_consolidation", bool
+        )
 
 
 @dataclass
@@ -214,10 +178,7 @@ class OperatorConfig:
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
-        if not isinstance(self.interval, int):
-            raise TypeError(f"interval must be int, got {type(self.interval).__name__}")
-        if self.interval <= 0:
-            raise ValueError(f"interval must be positive, got {self.interval}")
+        validate_field(self.interval, "interval", int, positive=True)
         if self.interval > 86400:
             raise ValueError(f"interval too large: {self.interval}s (max: 86400s/24h)")
 
@@ -229,10 +190,7 @@ class OperatorConfig:
             "agent_timeout",
         ]:
             value = getattr(self, field_name)
-            if not isinstance(value, int):
-                raise TypeError(f"{field_name} must be int, got {type(value).__name__}")
-            if value <= 0:
-                raise ValueError(f"{field_name} must be positive, got {value}")
+            validate_field(value, field_name, int, positive=True)
 
 
 @dataclass
@@ -242,13 +200,7 @@ class RuntimeConfig:
     VALID_IMPLS = {"cli_agent", "langgraph", "adk"}
 
     def __post_init__(self):
-        if not isinstance(self.impl, str):
-            raise TypeError(f"impl must be str, got {type(self.impl).__name__}")
-        if self.impl not in self.VALID_IMPLS:
-            raise ValueError(
-                f"Invalid impl: '{self.impl}'. "
-                f"Valid impls: {', '.join(sorted(self.VALID_IMPLS))}"
-            )
+        validate_field(self.impl, "impl", str, valid_values=self.VALID_IMPLS)
 
 
 @dataclass
@@ -279,30 +231,12 @@ class Config:
         section_data: dict, section_name: str, config_class: type
     ) -> None:
         """Validate that all fields in a section are recognized."""
-        if not section_data:
-            return
-
-        recognized_fields = {f.name for f in fields(config_class)}
-        unrecognized_fields = set(section_data.keys()) - recognized_fields
-
-        if unrecognized_fields:
-            raise UnrecognizedFieldError(
-                f"Unrecognized field(s) in [{section_name}] section: "
-                f"{', '.join(sorted(unrecognized_fields))}. "
-                f"Recognized fields are: {', '.join(sorted(recognized_fields))}"
-            )
+        validate_dataclass_fields(section_data, section_name, config_class)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Config":
-        # Validate top-level sections
-        recognized_sections = {
-            "agent",
-            "operator",
-            "deployment",
-            "runtime",
-            "dspy",
-            "fault_injection",
-        }
+        # Derive recognized sections from Config's own dataclass fields
+        recognized_sections = {f.name for f in fields(cls)}
         unrecognized_sections = set(data.keys()) - recognized_sections
         if unrecognized_sections:
             raise UnrecognizedSectionError(
@@ -357,40 +291,23 @@ class Config:
         )
 
         # Top-level DSPy fields
-        recognized_top_level = {f.name for f in fields(DSPyConfig)}
-        unrecognized_top_level = set(dspy_data.keys()) - recognized_top_level
-        if unrecognized_top_level:
-            raise UnrecognizedFieldError(
-                f"Unrecognized field(s) in [dspy] section: "
-                f"{', '.join(sorted(unrecognized_top_level))}. "
-                f"Recognized fields are: {', '.join(sorted(recognized_top_level))}"
-            )
+        validate_dataclass_fields(dspy_data, "dspy", DSPyConfig)
 
         # Validate nested optimization section
         if "optimization" in dspy_data:
             opt_data = dspy_data["optimization"]
             if isinstance(opt_data, dict):
-                recognized_opt = {f.name for f in fields(DSPyOptimizationConfig)}
-                unrecognized_opt = set(opt_data.keys()) - recognized_opt
-                if unrecognized_opt:
-                    raise UnrecognizedFieldError(
-                        f"Unrecognized field(s) in [dspy.optimization] section: "
-                        f"{', '.join(sorted(unrecognized_opt))}. "
-                        f"Recognized fields are: {', '.join(sorted(recognized_opt))}"
-                    )
+                validate_dataclass_fields(
+                    opt_data, "dspy.optimization", DSPyOptimizationConfig
+                )
 
         # Validate nested auto_rollback section
         if "auto_rollback" in dspy_data:
             rollback_data = dspy_data["auto_rollback"]
             if isinstance(rollback_data, dict):
-                recognized_rollback = {f.name for f in fields(DSPyAutoRollbackConfig)}
-                unrecognized_rollback = set(rollback_data.keys()) - recognized_rollback
-                if unrecognized_rollback:
-                    raise UnrecognizedFieldError(
-                        f"Unrecognized field(s) in [dspy.auto_rollback] section: "
-                        f"{', '.join(sorted(unrecognized_rollback))}. "
-                        f"Recognized fields are: {', '.join(sorted(recognized_rollback))}"
-                    )
+                validate_dataclass_fields(
+                    rollback_data, "dspy.auto_rollback", DSPyAutoRollbackConfig
+                )
 
     @classmethod
     def _validate_operator_phase_fields(cls, operator_data: dict) -> None:
@@ -402,14 +319,7 @@ class Config:
         if not isinstance(phase_data, dict):
             return
 
-        recognized_phase = {f.name for f in fields(OperatorPhaseConfig)}
-        unrecognized_phase = set(phase_data.keys()) - recognized_phase
-        if unrecognized_phase:
-            raise UnrecognizedFieldError(
-                f"Unrecognized field(s) in [operator.phase] section: "
-                f"{', '.join(sorted(unrecognized_phase))}. "
-                f"Recognized fields are: {', '.join(sorted(recognized_phase))}"
-            )
+        validate_dataclass_fields(phase_data, "operator.phase", OperatorPhaseConfig)
 
     @classmethod
     def _parse_dspy_config(
