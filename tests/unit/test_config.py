@@ -1,4 +1,5 @@
 import pytest
+import app_operator.config as _config_module
 from app_operator.config import (
     load_config,
     Config,
@@ -6,6 +7,23 @@ from app_operator.config import (
     UnrecognizedFieldError,
 )
 from app_operator.exceptions import ConfigurationError
+
+
+@pytest.fixture
+def fake_repo_root(tmp_path, monkeypatch):
+    """Set up a fake repo root with a known sds.toml so tests don't depend on the real one."""
+    root_dir = tmp_path / "fake_root"
+    root_dir.mkdir()
+    root_sds = root_dir / "sds.toml"
+    root_sds.write_text("""[agent]
+provider = "gemini"
+model = "gemini-2.5-flash"
+""")
+    fake_config_py = root_dir / "app_operator" / "config.py"
+    fake_config_py.parent.mkdir()
+    fake_config_py.touch()
+    monkeypatch.setattr(_config_module, "__file__", str(fake_config_py))
+    return root_dir
 
 
 def test_load_config_valid_config(tmp_path):
@@ -40,9 +58,11 @@ def test_load_config_defaults(tmp_path):
     assert config.operator.deployment_max_iters == 20
 
 
-def test_load_config_partial_config(tmp_path):
+def test_load_config_partial_config(tmp_path, fake_repo_root):
     """Test loading config with only some fields specified."""
-    config_file = tmp_path / "sds.toml"
+    target_dir = tmp_path / "experiment"
+    target_dir.mkdir()
+    config_file = target_dir / "sds.toml"
     config_file.write_text("""[agent]
 provider = "claude"
 
@@ -50,7 +70,7 @@ provider = "claude"
 interval = 45
 """)
 
-    config = load_config(str(tmp_path))
+    config = load_config(str(target_dir))
     assert config.agent.provider == "claude"
     assert config.agent.model == "gemini-2.5-flash"  # inherited from root sds.toml
     assert config.operator.interval == 45
@@ -220,15 +240,17 @@ def test_config_from_dict_unrecognized_field_operator():
     assert "[operator]" in str(exc_info.value)
 
 
-def test_config_empty_sections(tmp_path):
+def test_config_empty_sections(tmp_path, fake_repo_root):
     """Test that empty sections are handled correctly."""
-    config_file = tmp_path / "sds.toml"
+    target_dir = tmp_path / "experiment"
+    target_dir.mkdir()
+    config_file = target_dir / "sds.toml"
     config_file.write_text("""[agent]
 
 [operator]
 """)
 
-    config = load_config(str(tmp_path))
+    config = load_config(str(target_dir))
     assert config.agent.provider == "gemini"  # inherited from root sds.toml
     assert config.operator.interval == 30  # default
 
@@ -245,14 +267,16 @@ provider = "claude"
     assert config.operator.interval == 30  # default
 
 
-def test_config_only_operator_section(tmp_path):
+def test_config_only_operator_section(tmp_path, fake_repo_root):
     """Test config with only operator section."""
-    config_file = tmp_path / "sds.toml"
+    target_dir = tmp_path / "experiment"
+    target_dir.mkdir()
+    config_file = target_dir / "sds.toml"
     config_file.write_text("""[operator]
 interval = 90
 """)
 
-    config = load_config(str(tmp_path))
+    config = load_config(str(target_dir))
     assert config.agent.provider == "gemini"  # inherited from root sds.toml
     assert config.operator.interval == 90
 
