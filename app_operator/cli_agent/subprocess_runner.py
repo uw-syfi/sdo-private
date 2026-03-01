@@ -248,6 +248,7 @@ class SubprocessRunner:
             Note: stdout/stderr returned here only contain system messages.
             Captured output is in self.*_lines and merged in _run_impl().
         """
+        assert self.process is not None, "_wait_for_completion called before process was started"
         start_time = self.time_func()
 
         if summarizer is not None:

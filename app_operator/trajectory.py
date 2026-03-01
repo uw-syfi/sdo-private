@@ -654,7 +654,7 @@ def get_trajectory() -> Optional["TrajectoryRecorder"]:
     return _recorder
 
 
-def record_assistant_message(content: str, duration: float = None) -> None:
+def record_assistant_message(content: str, duration: Optional[float] = None) -> None:
     """Record an assistant response."""
     recorder = get_trajectory()
     if recorder:
@@ -666,8 +666,8 @@ def record_tool_call(
     args: Dict[str, Any],
     stdout: str = "",
     stderr: str = "",
-    exit_code: int = None,
-    duration: float = None,
+    exit_code: Optional[int] = None,
+    duration: Optional[float] = None,
 ) -> None:
     """Record a tool call with its output."""
     recorder = get_trajectory()
@@ -675,7 +675,7 @@ def record_tool_call(
         recorder.add_tool_call(tool, args, stdout, stderr, exit_code, duration)
 
 
-def record_phase_end(status: str = None) -> None:
+def record_phase_end(status: Optional[str] = None) -> None:
     """End the current phase."""
     recorder = get_trajectory()
     if recorder:
@@ -714,7 +714,7 @@ def get_run_id() -> Optional[str]:
     return None
 
 
-def record_phase_start(phase: Phase, context: Dict[str, Any] = None) -> None:
+def record_phase_start(phase: Phase, context: Optional[Dict[str, Any]] = None) -> None:
     """Start a new phase."""
     recorder = get_trajectory()
     if recorder:
