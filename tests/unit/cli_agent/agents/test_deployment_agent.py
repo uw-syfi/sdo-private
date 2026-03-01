@@ -1,4 +1,3 @@
-from types import MethodType
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +11,7 @@ from app_operator.prompts.deployer import (
     prepare_error_context,
     create_fix_prompt,
 )
+from tests.fixtures import bind_method
 from tests.fixtures.agents import TrackingAgent
 
 
@@ -73,7 +73,7 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
 
     monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
 
     assert agent.run(max_attempts=1) is True
     assert generated["args"] == (str(repo), stub_agent)
@@ -103,10 +103,6 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
     monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
 
     assert agent.run() is False
-
-
-def _bind_method(obj, name, func):
-    setattr(obj, name, MethodType(func, obj))
 
 
 def test_run_succeeds_without_fix(agent, monkeypatch):
@@ -141,9 +137,9 @@ def test_run_succeeds_without_fix(agent, monkeypatch):
     def unexpected_fix(self, *args, **kwargs):
         raise AssertionError("fix should not be invoked on success")
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "_fix_with_agent", unexpected_fix)
+    bind_method(agent, "_fix_with_agent", unexpected_fix)
 
     assert agent.run(max_attempts=1) is True
 
@@ -191,9 +187,9 @@ def test_run_retries_after_failure(agent, monkeypatch):
         fix_calls.append((attempt, max_attempts, deploy_result["exit_code"]))
         return True
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=3) is True
     assert fix_calls == [(1, 3, 1)]
@@ -225,8 +221,8 @@ def test_run_respects_max_attempts(agent):
         fix_calls["count"] += 1
         return False
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=1) is False
     assert fix_calls["count"] == 1
@@ -506,9 +502,9 @@ def test_run_health_recheck_after_fix_succeeds(agent, monkeypatch):
     ):
         return True
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=3) is True
     # Only one deploy; health called twice (initial + recheck)
@@ -550,9 +546,9 @@ def test_run_health_recheck_after_fix_still_fails_retries(agent, monkeypatch):
     ):
         return True
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=3) is True
     # Two deploys (attempt 1 + retry attempt 2)
@@ -635,7 +631,7 @@ def test_exit_code_zero_recorded_correctly(repo_path, stub_agent, monkeypatch):
     recorder = RecordingRecorder()
     agent = DeploymentAgent(repo_path, stub_agent, recorder=recorder)
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
 
     assert agent.run(max_attempts=1) is True
@@ -673,8 +669,8 @@ def test_run_retries_if_fix_fails(agent):
         fix_calls["count"] += 1
         return False  # Agent failed to fix
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     # Run with max_attempts=3.
     # It should retry 3 times.

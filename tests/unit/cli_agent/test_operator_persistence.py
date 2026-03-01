@@ -4,22 +4,7 @@ from unittest.mock import MagicMock, patch
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import Config, DeploymentConfig
 from app_operator.filesystem import InMemoryFilesystem
-from libs.agent_cli.base import CodingAgent
-
-
-class StubAgent(CodingAgent):
-    def __init__(self, model=None):
-        self.model = model
-        self.recorder = None
-
-    def generate(self, *args, **kwargs):
-        return ""
-
-    def run(self, *args, **kwargs):
-        return {}
-
-    def start_event_stream(self, *args, **kwargs):
-        pass
+from tests.fixtures.agents import StubAgent
 
 
 @pytest.fixture

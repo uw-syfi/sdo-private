@@ -1,21 +1,7 @@
 import pytest
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.healthcheck import run_health_check
-
-
-class StubAgent:
-    """Lightweight coding agent stub used by tests."""
-
-    def __init__(self, response: str = "ok", raise_error: bool = False):
-        self.response = response
-        self.raise_error = raise_error
-        self.calls: list[tuple[str, str, int]] = []
-
-    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300) -> str:
-        self.calls.append((prompt, cwd, timeout))
-        if self.raise_error:
-            raise RuntimeError("agent error")
-        return self.response
+from tests.fixtures.agents import StubAgent
 
 
 @pytest.fixture
@@ -29,7 +15,7 @@ def repo_path(tmp_path):
 
 @pytest.fixture
 def stub_agent():
-    return StubAgent()
+    return StubAgent(response="ok")
 
 
 @pytest.fixture

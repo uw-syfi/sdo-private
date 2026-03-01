@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from libs.agent_cli.base import CodingAgent
 from libs.agent_cli.claude import ClaudeCodeCodingAgent
 from libs.agent_cli.codex import CodexCodingAgent
 from libs.agent_cli.gemini import GeminiCodingAgent
@@ -52,21 +51,6 @@ class MockProcess:
 
     def _set_returncode(self, code):
         self.returncode = code
-
-
-# Stub agent that doesn't invoke actual LLM
-class StubAgent(CodingAgent):
-    """Stub agent for testing that uses mock subprocess."""
-
-    def __init__(self, name: str = "stub"):
-        self.name = name
-        self.generate_calls = []
-
-    def generate(self, prompt: str, cwd=None, timeout=300, silent=False) -> str:
-        self.generate_calls.append(
-            {"prompt": prompt, "cwd": cwd, "timeout": timeout, "silent": silent}
-        )
-        return "stub response"
 
 
 @pytest.fixture
