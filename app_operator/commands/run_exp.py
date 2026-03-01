@@ -518,7 +518,7 @@ def run_command(args: argparse.Namespace) -> int:
                             label = f"[white]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Pending"
                         else:
                             label = f"[white]{prefix}{app_name}[/]: Pending"
-                        task_id = progress.add_task(label, total=100, start=False)
+                        task_id = progress.add_task(label, total=100, completed=0)
                         repeat_task_ids.append((i, task_id))
                     future = executor.submit(
                         run_app_repeats, app, exp_name,
