@@ -49,7 +49,8 @@ def extract_json(text: str) -> str:
             json.loads(candidate)
             return candidate
         except json.JSONDecodeError:
-            pass  # Try fallback if regex extraction isn't valid JSON
+            # Regex match is not valid JSON; fall through to brace-slice fallback
+            pass
 
     # Fallback: look for the first { and last }
     start = text.find("{")
@@ -60,6 +61,7 @@ def extract_json(text: str) -> str:
             json.loads(candidate)
             return candidate
         except json.JSONDecodeError:
+            # Brace-slice is also not valid JSON; return best-effort text below
             pass
 
     # If we get here, neither method produced valid JSON.

@@ -164,6 +164,7 @@ def generate_scripts(
             return False, f"Failed to generate scripts: {e}"
         except Exception as e:
             # Catch any unexpected errors and log them
+            logger.error("Unexpected error during script generation: %s", e)
             r.set_phase_status("failed")
             return False, f"Unexpected error during script generation: {e}"
 
@@ -242,6 +243,7 @@ def _generate_script(
         recorder.add_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
     except Exception as e:
+        logger.warning("Unexpected error in _generate_script: %s", e)
         recorder.add_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
 
