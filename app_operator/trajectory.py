@@ -27,7 +27,7 @@ from enum import Enum
 from app_operator.logger import logger
 from app_operator.trajectory_collectors import collect_gemini_sessions
 from app_operator.prompts.trajectory_prompts import get_system_prompt
-from app_operator.types import TokenUsage
+from app_operator.types import TokenUsage, TrajectoryCallRecord
 
 
 class Phase(str, Enum):
@@ -229,7 +229,7 @@ class TrajectoryRecorder:
 
             # Record this call in the calls list
             call_start_time = time.strftime("%Y-%m-%d %H:%M:%S")
-            call_record = {
+            call_record: TrajectoryCallRecord = {
                 "call_id": self._current_call_id,
                 "phase": phase.value,
                 "start_time": call_start_time,
