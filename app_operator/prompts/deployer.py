@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
+from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.prompts import get_loader
 
 FIX_SUMMARY_FILENAME = "fix_summary.md"
@@ -62,6 +63,7 @@ def create_generate_script_prompt(
     platform: str,
     dspy_config: Optional["DSPyConfig"] = None,
     recorder=None,
+    filesystem: Optional[FileSystemInterface] = None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
 
@@ -73,10 +75,14 @@ def create_generate_script_prompt(
         platform: The deployment platform (e.g., 'docker', 'kubernetes').
         dspy_config: Optional DSPy configuration for optimized prompts.
         recorder: Optional trajectory recorder for kwargs capture.
+        filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
 
     Returns:
         str: The rendered prompt.
     """
+    if filesystem is None:
+        filesystem = RealFilesystem()
+
     if script_name == "deploy.sh":
         template_name = "deployer/generate_deploy_script.jinja2"
     elif script_name == "health_check.sh":
@@ -94,10 +100,10 @@ def create_generate_script_prompt(
         ca_path = sds_dir / "code_analysis.md"
         di_path = sds_dir / "deployment_issues.md"
 
-        if ca_path.exists():
-            code_analysis = ca_path.read_text()
-        if di_path.exists():
-            deployment_issues = di_path.read_text()
+        if filesystem.exists(ca_path):
+            code_analysis = filesystem.read_text(ca_path)
+        if filesystem.exists(di_path):
+            deployment_issues = filesystem.read_text(di_path)
     except Exception:
         # Ignore filesystem errors during prompt generation
         pass

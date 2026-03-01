@@ -4,9 +4,10 @@ This module provides an abstraction over filesystem operations to enable
 dependency injection and testing without actual file I/O.
 """
 
+import fnmatch
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 
 class FileSystemInterface(ABC):
@@ -99,6 +100,44 @@ class FileSystemInterface(ABC):
         """
         pass
 
+    @abstractmethod
+    def glob(self, path: Path, pattern: str) -> List[Path]:
+        """Glob for files matching a pattern under a directory.
+
+        Args:
+            path: The directory to search in.
+            pattern: The glob pattern to match.
+
+        Returns:
+            List[Path]: List of matching paths.
+        """
+        pass
+
+    @abstractmethod
+    def rglob(self, path: Path, pattern: str) -> List[Path]:
+        """Recursively glob for files matching a pattern under a directory.
+
+        Args:
+            path: The directory to search in.
+            pattern: The glob pattern to match.
+
+        Returns:
+            List[Path]: List of matching paths.
+        """
+        pass
+
+    @abstractmethod
+    def is_file(self, path: Path) -> bool:
+        """Check if a path is a file.
+
+        Args:
+            path: The path to check.
+
+        Returns:
+            bool: True if the path is a file, False otherwise.
+        """
+        pass
+
 
 class RealFilesystem(FileSystemInterface):
     """Production implementation using pathlib and os operations."""
@@ -128,6 +167,15 @@ class RealFilesystem(FileSystemInterface):
         import shutil
 
         shutil.rmtree(path)
+
+    def glob(self, path: Path, pattern: str) -> List[Path]:
+        return list(path.glob(pattern))
+
+    def rglob(self, path: Path, pattern: str) -> List[Path]:
+        return list(path.rglob(pattern))
+
+    def is_file(self, path: Path) -> bool:
+        return path.is_file()
 
 
 class InMemoryFilesystem(FileSystemInterface):
@@ -183,14 +231,15 @@ class InMemoryFilesystem(FileSystemInterface):
         self.should_fail.clear()
 
     def _normalize_path(self, path: Path) -> str:
-        """Normalize a path to handle resolved paths consistently."""
-        try:
-            # Resolve the path to handle symlinks and relative paths
-            resolved = path.resolve()
-            return str(resolved)
-        except (OSError, RuntimeError):
-            # If resolve fails (e.g., path doesn't exist), use as-is
-            return str(path)
+        """Normalize a path without making OS calls.
+
+        Uses Path.absolute() for relative paths to anchor them, then
+        applies pure PurePosixPath normalization to collapse '..' and '.'
+        components without touching the real filesystem.
+        """
+        import posixpath
+        p = path if path.is_absolute() else Path.cwd() / path
+        return posixpath.normpath(str(p))
 
     def exists(self, path: Path) -> bool:
         path_str = self._normalize_path(path)
@@ -318,3 +367,41 @@ class InMemoryFilesystem(FileSystemInterface):
         dirs_to_remove = [d for d in self.directories if d == path_str or d.startswith(prefix)]
         for dir_path in dirs_to_remove:
             self.directories.remove(dir_path)
+
+    def glob(self, path: Path, pattern: str) -> List[Path]:
+        dir_str = self._normalize_path(path)
+        prefix = dir_str + "/"
+        results: List[Path] = []
+        # Check all files and directories that are direct children matching
+        for stored in list(self.files) + list(self.directories):
+            if not stored.startswith(prefix):
+                continue
+            relative = stored[len(prefix):]
+            if fnmatch.fnmatch(relative, pattern):
+                results.append(Path(stored))
+        return results
+
+    def rglob(self, path: Path, pattern: str) -> List[Path]:
+        dir_str = self._normalize_path(path)
+        prefix = dir_str + "/"
+        results: List[Path] = []
+        for stored in list(self.files) + list(self.directories):
+            if not stored.startswith(prefix):
+                continue
+            relative = stored[len(prefix):]
+            # rglob matches pattern against any suffix of the relative path
+            # e.g. rglob("*") matches all files/dirs recursively
+            parts = relative.split("/")
+            # Match the pattern against the full relative path using **/ prefix
+            if fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(
+                relative, "**/" + pattern
+            ):
+                results.append(Path(stored))
+            # Also check if just the filename matches (like pathlib rglob)
+            elif fnmatch.fnmatch(parts[-1], pattern):
+                results.append(Path(stored))
+        return results
+
+    def is_file(self, path: Path) -> bool:
+        path_str = self._normalize_path(path)
+        return path_str in self.files

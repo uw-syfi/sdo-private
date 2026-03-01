@@ -57,8 +57,8 @@ class CodeAnalyzerAgent:
         try:
             # Get list of files, excluding hidden ones and common ignore patterns
             files = []
-            for path in self.repo_path.rglob("*"):
-                if path.is_file() and not any(
+            for path in self.filesystem.rglob(self.repo_path, "*"):
+                if self.filesystem.is_file(path) and not any(
                     p.startswith(".") for p in path.relative_to(self.repo_path).parts
                 ):
                     files.append(str(path.relative_to(self.repo_path)))
