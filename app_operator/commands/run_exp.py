@@ -535,12 +535,17 @@ def run_command(args: argparse.Namespace) -> int:
                     results_by_exp[exp_name].extend(repeat_results)
                 except Exception as e:
                     logger.error(f"Error running {app}: {e}")
-                    results_by_exp[exp_name].append({
-                        "app": Path(app).name,
-                        "success": False,
-                        "status": "unknown",
-                        "deployment_iterations": None,
-                    })
+                    repeats = config.get("repeats", 1)
+                    for i in range(repeats):
+                        result = {
+                            "app": Path(app).name,
+                            "success": False,
+                            "status": "unknown",
+                            "deployment_iterations": None,
+                        }
+                        if repeats > 1:
+                            result["repeat"] = i + 1
+                        results_by_exp[exp_name].append(result)
 
     for exp_name, config_path, config, log_dir in resolved:
         results = results_by_exp[exp_name]
