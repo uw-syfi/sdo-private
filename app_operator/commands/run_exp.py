@@ -146,6 +146,28 @@ def _extract_results(exp_dir: Path) -> dict:
         return {"status": "unknown", "deployment_iterations": None}
 
 
+def _load_existing_results(log_dir: Path) -> list[AppResult]:
+    """Load completed results from a previous run's results.json, if present."""
+    results_path = log_dir / "results.json"
+    if not results_path.exists():
+        return []
+    try:
+        with open(results_path) as f:
+            data = json.load(f)
+        results = []
+        for entry in data.get("results", []):
+            results.append(AppResult(
+                app=entry["app"],
+                success=entry.get("success", entry.get("status") == "success"),
+                status=entry["status"],
+                deployment_iterations=entry.get("deployment_iterations"),
+                repeat=entry.get("repeat"),
+            ))
+        return results
+    except (json.JSONDecodeError, KeyError, OSError):
+        return []
+
+
 def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> None:
     """Write per-app results as JSON to the log directory."""
     has_repeats = any(r.repeat is not None for r in results)
@@ -154,6 +176,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
     for r in results:
         entry: dict = {
             "app": r.app,
+            "success": r.success,
             "status": r.status,
             "deployment_iterations": r.deployment_iterations,
         }
@@ -307,7 +330,9 @@ def run_experiment_task(
         )
 
         if init_proc.returncode != 0:
-            progress.update(task_id, description=f"[red]{app_name}[/]: Init Failed")
+            progress.update(task_id, description=f"[red]{app_name}[/]: Init Failed", completed=100)
+            time.sleep(1)
+            progress.update(task_id, visible=False)
             return AppResult(
                 app=app_name,
                 success=False,
@@ -411,9 +436,13 @@ def run_experiment_task(
 
         if proc.returncode == 0:
             progress.update(task_id, description=f"[green]{app_name}[/]: Done", completed=100)
+            time.sleep(1)
+            progress.update(task_id, visible=False)
             return AppResult(app=app_name, success=True, repeat=repeat, **extracted)
         else:
             progress.update(task_id, description=f"[red]{app_name}[/]: Failed", completed=100)
+            time.sleep(1)
+            progress.update(task_id, visible=False)
             return AppResult(app=app_name, success=False, repeat=repeat, **extracted)
 
 
@@ -511,11 +540,18 @@ def run_command(args: argparse.Namespace) -> int:
         console.print(f"Repeats: {repeats}")
     console.print(f"Parallelism: {args.parallel}")
 
-    # Prepare log directories
+    # Prepare log directories and load any existing results (for resume support)
+    results_by_exp: dict[str, list[AppResult]] = {}
+    completed_keys_by_exp: dict[str, set[tuple[str, int | None]]] = {}
     for exp_name, config_path, config, log_dir in resolved:
-        if log_dir.exists():
-            shutil.rmtree(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
+        existing = _load_existing_results(log_dir)
+        results_by_exp[exp_name] = list(existing)
+        completed_keys_by_exp[exp_name] = {(r.app, r.repeat) for r in existing}
+        if existing:
+            console.print(f"  Resuming: {len(existing)} run(s) already complete, skipping.")
+
+    exp_locks = {exp_name: threading.Lock() for exp_name, _, _, _ in resolved}
 
     with Progress(
         _ActiveSpinnerColumn(),
@@ -532,41 +568,59 @@ def run_command(args: argparse.Namespace) -> int:
             for exp_name, config_path, config, log_dir in resolved:
                 apps = config.get("apps", [])
                 repeats = config.get("repeats", 1)
+                completed_keys = completed_keys_by_exp[exp_name]
                 for app in apps:
                     app_name = Path(app).name
                     prefix = f"{exp_name}/" if multi else ""
                     repeat_task_ids = []
                     for i in range(repeats):
+                        repeat = i + 1 if repeats > 1 else None
+                        if (app_name, repeat) in completed_keys:
+                            if repeats > 1:
+                                label = f"[dim]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Already done"
+                            else:
+                                label = f"[dim]{prefix}{app_name}[/]: Already done"
+                            progress.add_task(label, total=100, completed=100, start=False)
+                            continue
                         if repeats > 1:
                             label = f"[white]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Pending"
                         else:
                             label = f"[white]{prefix}{app_name}[/]: Pending"
                         task_id = progress.add_task(label, total=100, completed=0, start=False)
                         repeat_task_ids.append((i, task_id))
+                    if not repeat_task_ids:
+                        continue
                     future = executor.submit(
                         run_app_repeats, app, exp_name,
                         progress, repeat_task_ids, log_dir, config, repeats,
                     )
                     futures[future] = (app, exp_name, log_dir, config)
 
-            # Collect results grouped by exp_name
-            results_by_exp: dict[str, list[AppResult]] = {exp_name: [] for exp_name, _, _, _ in resolved}
+            # Collect results and write incrementally so ctrl-c preserves progress
             for future in as_completed(futures):
                 app, exp_name, log_dir, config = futures[future]
+                lock = exp_locks[exp_name]
                 try:
                     repeat_results = future.result()
-                    results_by_exp[exp_name].extend(repeat_results)
+                    with lock:
+                        results_by_exp[exp_name].extend(repeat_results)
+                        _write_results(log_dir, exp_name, results_by_exp[exp_name])
                 except Exception as e:
                     logger.error(f"Error running {app}: {e}")
                     repeats = config.get("repeats", 1)
-                    for i in range(repeats):
-                        results_by_exp[exp_name].append(AppResult(
-                            app=Path(app).name,
-                            success=False,
-                            status="unknown",
-                            deployment_iterations=None,
-                            repeat=i + 1 if repeats > 1 else None,
-                        ))
+                    completed_keys = completed_keys_by_exp[exp_name]
+                    with lock:
+                        for i in range(repeats):
+                            repeat = i + 1 if repeats > 1 else None
+                            if (Path(app).name, repeat) not in completed_keys:
+                                results_by_exp[exp_name].append(AppResult(
+                                    app=Path(app).name,
+                                    success=False,
+                                    status="unknown",
+                                    deployment_iterations=None,
+                                    repeat=repeat,
+                                ))
+                        _write_results(log_dir, exp_name, results_by_exp[exp_name])
 
     for exp_name, config_path, config, log_dir in resolved:
         results = results_by_exp[exp_name]
