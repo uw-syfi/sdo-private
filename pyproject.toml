@@ -34,6 +34,7 @@ test = [
     "hypothesis>=6.0.0",
     "pytest-xdist>=3.5.0",
     "pytest-cov>=4.1.0",
+    "import-linter>=2.1",
 ]
 
 [project.scripts]
@@ -57,4 +58,24 @@ pythonpath = ["."]
 [dependency-groups]
 dev = [
     "pyright>=1.1.408",
+]
+
+[tool.importlinter]
+root_packages = ["app_operator", "lego_agent", "libs"]
+
+[[tool.importlinter.contracts]]
+name = "app_operator and lego_agent are independent siblings"
+type = "independence"
+modules = [
+    "app_operator",
+    "lego_agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "libs must not import from app_operator or lego_agent"
+type = "forbidden"
+source_modules = ["libs"]
+forbidden_modules = [
+    "app_operator",
+    "lego_agent",
 ]
