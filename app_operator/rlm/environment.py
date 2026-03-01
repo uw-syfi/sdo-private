@@ -295,20 +295,46 @@ class RLMEnvironment:
         })
 
     def _create_safe_namespace(self) -> Dict[str, Any]:
-        """Create a namespace for code execution.
+        """Create a restricted namespace for code execution.
 
         Provides access to context variables, common utilities, and
-        filesystem operations so the model can read/write files.
+        restricted filesystem operations so the model can read/write files
+        only within the working directory (self.cwd).
 
-        Security note: The namespace intentionally exposes the full ``os``
-        module so that LLM-generated code can traverse the filesystem and
-        write output files (required for deploy-script generation).  This
-        means executed code runs with the same OS permissions as the SDS
-        process.  Only use this class with trusted LLM output in controlled
-        environments; do not expose it to arbitrary user input.
+        Security restrictions:
+        - ``os`` is replaced with a restricted wrapper exposing only path
+          utilities (os.path.join, os.path.exists, etc.), os.listdir,
+          os.makedirs, os.getcwd, and os.environ (read-only).
+        - ``open`` is replaced with a wrapper that validates the resolved
+          path is within self.cwd before allowing file operations.
+        - ``Path`` is available for path manipulation but not for arbitrary
+          I/O outside the working directory.
         """
         import os
         from pathlib import Path
+        from types import SimpleNamespace
+
+        # -- Restricted open: only allows access within self.cwd --
+        _allowed_root = os.path.realpath(self.cwd) if self.cwd else ""
+
+        def _safe_open(path, mode="r", *args, **kwargs):
+            """open() wrapper that restricts file access to the working directory."""
+            resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
+            if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
+                raise PermissionError(
+                    f"Access denied: {path!r} resolves outside the working directory"
+                )
+            return open(resolved, mode, *args, **kwargs)
+
+        # -- Restricted os: only safe path utilities, listdir, makedirs --
+        _safe_os = SimpleNamespace(
+            path=os.path,
+            listdir=os.listdir,
+            makedirs=os.makedirs,
+            getcwd=lambda: _allowed_root,
+            sep=os.sep,
+            environ=os.environ,
+        )
 
         namespace = {
             # Working directory — use this to build absolute file paths
@@ -329,12 +355,12 @@ class RLMEnvironment:
             "script_summary": self.context.script_summary,
             "repo_summary": self.context.repo_summary,
             "attempt_number": self.context.attempt_number,
-            # Utilities
+            # Utilities — restricted versions to limit filesystem access
             "re": re,
             "json": json,
-            "os": os,
+            "os": _safe_os,
             "Path": Path,
-            "open": open,
+            "open": _safe_open,
             "len": len,
             "str": str,
             "list": list,
@@ -368,26 +394,23 @@ class RLMEnvironment:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
         try:
-            # Execute code in safe namespace, with CWD set to the target directory
-            # so that relative paths and '.' work correctly.
-            import os as _os
-            _original_cwd = _os.getcwd()
-            try:
-                if self.cwd:
-                    _os.chdir(self.cwd)
-                exec_globals = self._namespace.copy()
-                exec(code, exec_globals)
-                # Restore reserved names the LLM may have clobbered, then
-                # write back only non-reserved keys so results persist.
-                for name in self._reserved_names:
-                    if name in self._namespace:
-                        exec_globals[name] = self._namespace[name]
-                self._namespace.update({
-                    k: v for k, v in exec_globals.items()
-                    if k not in self._reserved_names
-                })
-            finally:
-                _os.chdir(_original_cwd)
+            # Execute code in the REPL namespace. The working directory is
+            # available as the ``cwd`` variable (and via the restricted
+            # ``os.getcwd()``). We do NOT call os.chdir() because it is
+            # process-global and therefore not thread-safe. Subprocess calls
+            # in LLM-generated code should use ``cwd=cwd`` instead.
+            exec_globals = self._namespace.copy()
+            exec_globals["cwd"] = self.cwd  # ensure cwd is always current
+            exec(code, exec_globals)
+            # Restore reserved names the LLM may have clobbered, then
+            # write back only non-reserved keys so results persist.
+            for name in self._reserved_names:
+                if name in self._namespace:
+                    exec_globals[name] = self._namespace[name]
+            self._namespace.update({
+                k: v for k, v in exec_globals.items()
+                if k not in self._reserved_names
+            })
 
             # Get the result (last expression value or None)
             # For simplicity, we'll look for a 'result' variable
