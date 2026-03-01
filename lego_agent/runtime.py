@@ -106,7 +106,7 @@ class LangGraphAgent:
 
         accumulated_text: List[str] = []
 
-        async def run_stream():
+        async def run_stream() -> None:
             thinking_started = False
             async for event in self.graph.astream_events(
                 {"messages": messages}, version="v1", config=config
@@ -275,10 +275,10 @@ class FanOut(Runnable):
         else:
             prompts_to_run = self.items
 
-        async def _run_parallel():
+        async def _run_parallel() -> List[Any]:
             semaphore = asyncio.Semaphore(self.max_workers)
 
-            async def _run_one(p):
+            async def _run_one(p: str) -> Any:
                 async with semaphore:
                     if isinstance(self.agent, AsyncRunnable):
                         return await self.agent.generate_async(
@@ -479,7 +479,7 @@ def _build_runnable(config: Dict[str, Any]) -> Runnable:
     return factory(config)
 
 
-def run_yaml(config_path: str):
+def run_yaml(config_path: str) -> None:
     """Entry point to execute a YAML configuration."""
     path = Path(config_path)
     if not path.exists():
