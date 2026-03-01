@@ -281,12 +281,14 @@ def run_experiment_task(
     exp_name: str,
     progress: Progress,
     task_id,
+    overall_task_id,
     log_dir: Path,
     experiment_config: dict | None = None,
     repeat_idx: int = 0,
     total_repeats: int = 1,
 ) -> AppResult:
-    # Explicitly start the task timer
+    # Make the task visible and start the timer
+    progress.update(task_id, visible=True)
     progress.start_task(task_id)
 
     app_path = Path(app_path_str).resolve()
@@ -333,6 +335,7 @@ def run_experiment_task(
             progress.update(task_id, description=f"[red]{app_name}[/]: Init Failed", completed=100)
             time.sleep(1)
             progress.update(task_id, visible=False)
+            progress.advance(overall_task_id)
             return AppResult(
                 app=app_name,
                 success=False,
@@ -438,11 +441,13 @@ def run_experiment_task(
             progress.update(task_id, description=f"[green]{app_name}[/]: Done", completed=100)
             time.sleep(1)
             progress.update(task_id, visible=False)
+            progress.advance(overall_task_id)
             return AppResult(app=app_name, success=True, repeat=repeat, **extracted)
         else:
             progress.update(task_id, description=f"[red]{app_name}[/]: Failed", completed=100)
             time.sleep(1)
             progress.update(task_id, visible=False)
+            progress.advance(overall_task_id)
             return AppResult(app=app_name, success=False, repeat=repeat, **extracted)
 
 
@@ -451,6 +456,7 @@ def run_app_repeats(
     exp_name: str,
     progress: Progress,
     repeat_task_ids: list[tuple[int, object]],
+    overall_task_id,
     log_dir: Path,
     experiment_config: dict | None = None,
     total_repeats: int = 1,
@@ -458,7 +464,7 @@ def run_app_repeats(
     results = []
     for repeat_idx, task_id in repeat_task_ids:
         result = run_experiment_task(
-            app_path_str, exp_name, progress, task_id,
+            app_path_str, exp_name, progress, task_id, overall_task_id,
             log_dir, experiment_config, repeat_idx, total_repeats,
         )
         results.append(result)
@@ -553,6 +559,21 @@ def run_command(args: argparse.Namespace) -> int:
 
     exp_locks = {exp_name: threading.Lock() for exp_name, _, _, _ in resolved}
 
+    # Count total runs and already-completed runs for the global progress bar
+    total_runs = 0
+    already_done_count = 0
+    for exp_name, config_path, config, log_dir in resolved:
+        apps = config.get("apps", [])
+        repeats = config.get("repeats", 1)
+        completed_keys = completed_keys_by_exp[exp_name]
+        for app in apps:
+            app_name = Path(app).name
+            for i in range(repeats):
+                repeat = i + 1 if repeats > 1 else None
+                total_runs += 1
+                if (app_name, repeat) in completed_keys:
+                    already_done_count += 1
+
     with Progress(
         _ActiveSpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -561,6 +582,12 @@ def run_command(args: argparse.Namespace) -> int:
         TimeElapsedColumn(),
         console=console
     ) as progress:
+
+        overall_task_id = progress.add_task(
+            "[bold]Total runs[/bold]",
+            total=total_runs,
+            completed=already_done_count,
+        )
 
         # futures maps future -> (app, exp_name, log_dir, config)
         futures = {}
@@ -576,23 +603,18 @@ def run_command(args: argparse.Namespace) -> int:
                     for i in range(repeats):
                         repeat = i + 1 if repeats > 1 else None
                         if (app_name, repeat) in completed_keys:
-                            if repeats > 1:
-                                label = f"[dim]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Already done"
-                            else:
-                                label = f"[dim]{prefix}{app_name}[/]: Already done"
-                            progress.add_task(label, total=100, completed=100, start=False)
                             continue
                         if repeats > 1:
                             label = f"[white]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Pending"
                         else:
                             label = f"[white]{prefix}{app_name}[/]: Pending"
-                        task_id = progress.add_task(label, total=100, completed=0, start=False)
+                        task_id = progress.add_task(label, total=100, completed=0, start=False, visible=False)
                         repeat_task_ids.append((i, task_id))
                     if not repeat_task_ids:
                         continue
                     future = executor.submit(
                         run_app_repeats, app, exp_name,
-                        progress, repeat_task_ids, log_dir, config, repeats,
+                        progress, repeat_task_ids, overall_task_id, log_dir, config, repeats,
                     )
                     futures[future] = (app, exp_name, log_dir, config)
 
