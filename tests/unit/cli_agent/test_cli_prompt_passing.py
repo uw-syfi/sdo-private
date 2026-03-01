@@ -321,3 +321,29 @@ def test_agent_handles_empty_prompt(agent_info, mock_which, command_tracker):
 
     # Verify stdin write was attempted even with empty prompt
     assert len(stdin_writes) > 0
+
+
+def test_claude_prompt_not_double_quoted(mock_which, command_tracker):
+    """Test that Claude command does not wrap the prompt in extra quotes.
+
+    Regression test for issue #20: subprocess.run with a list passes
+    arguments directly, so wrapping in f'"{prompt}"' adds literal quote
+    characters around the prompt.
+    """
+    test_prompt = "Deploy the application"
+    track_popen, captured_commands, _ = command_tracker
+
+    with patch("shutil.which", side_effect=mock_which):
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
+            with patch("subprocess.Popen", side_effect=track_popen):
+                agent = ClaudeCodeCodingAgent()
+                agent.generate(test_prompt, silent=True)
+
+    assert len(captured_commands) > 0
+    cmd = captured_commands[0]
+
+    # The prompt should appear as a bare element, not wrapped in quotes
+    assert test_prompt in cmd, "Prompt should be in command list"
+    assert f'"{test_prompt}"' not in cmd, (
+        "Prompt should not be wrapped in extra quotes"
+    )

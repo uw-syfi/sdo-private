@@ -162,7 +162,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             "--output-format",
             "stream-json",
             "--verbose",
-            f'"{prompt}"',
+            prompt,
         ]
         if self.model:
             cmd.extend(["--model", self.model])
