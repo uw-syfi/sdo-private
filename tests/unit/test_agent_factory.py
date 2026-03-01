@@ -82,3 +82,18 @@ def test_create_agent_opencode(tmp_path, mock_binaries):
     config = Config(agent=AgentConfig(provider="opencode"))
     agent = create_agent_from_config(str(tmp_path), config=config)
     assert agent.__class__.__name__ == "OpencodeCodingAgent"
+
+
+def test_create_agent_unregistered_provider_raises_valueerror(tmp_path):
+    """Factory raises ValueError with available providers for unregistered provider."""
+    # Bypass AgentConfig validation by patching VALID_PROVIDERS
+    with patch(
+        "app_operator.config.AgentConfig.VALID_PROVIDERS",
+        {"not_registered", "codex", "gemini", "claude", "claude-code",
+         "opencode", "anthropic", "vertex", "openai"},
+    ):
+        config = Config(
+            agent=AgentConfig(provider="not_registered", model="m")
+        )
+        with pytest.raises(ValueError, match="Unknown agent provider"):
+            create_agent_from_config(str(tmp_path), config=config)

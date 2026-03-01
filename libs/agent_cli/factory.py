@@ -15,7 +15,7 @@ def create_agent_from_config(
 
     Looks for sds.toml or config.toml in the target directory, or uses the
     explicitly provided config path.
-    Default to CodexCodingAgent if no config found or provider is not specified.
+    Raises ValueError if the provider is not recognized.
 
     Args:
         target_dir: Directory to look for configuration files (if config_path not set).
@@ -44,5 +44,8 @@ def create_agent_from_config(
             kwargs["location"] = config.agent.location
         return AGENT_REGISTRY[provider_lower](**kwargs)
 
-    # Default fallback
-    return AGENT_REGISTRY["codex"](model=model)
+    available = sorted(AGENT_REGISTRY.keys())
+    raise ValueError(
+        f"Unknown agent provider '{provider}'. "
+        f"Available providers: {available}"
+    )
