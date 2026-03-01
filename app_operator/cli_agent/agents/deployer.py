@@ -639,8 +639,7 @@ class DeploymentAgent:
         if timeout is None:
             timeout = self.operator_config.deploy_timeout
         logger.info(
-            f"Running deployment script: {
-                self.deploy_script} {command}")
+            f"Running deployment script: {self.deploy_script} {command}")
 
         if log_file_path:
             logger.info(f"Logging output to: {log_file_path}")
@@ -786,8 +785,7 @@ class DeploymentAgent:
             "Fixing Deployment Issues", detail=f"Attempt {attempt}/{max_attempts}"
         )
         logger.info(
-            f"Asking {
-                self.agent.__class__.__name__} to Fix Deployment Issues")
+            f"Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
 
         # Prepare error context
         error_context = prepare_error_context(
@@ -809,8 +807,7 @@ class DeploymentAgent:
 
         try:
             logger.info(
-                f"Consulting {
-                    self.agent.__class__.__name__} to analyze and fix the issue..."
+                f"Consulting {self.agent.__class__.__name__} to analyze and fix the issue..."
             )
 
             # Run agent to get fix suggestions
@@ -823,8 +820,7 @@ class DeploymentAgent:
             )
             duration = time.time() - start_time
             logger.info(
-                f"Agent generation (fix) took {
-                    duration / 60:.2f} minutes")
+                f"Agent generation (fix) took {duration / 60:.2f} minutes")
 
             # Extract summary and save to log
             match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)

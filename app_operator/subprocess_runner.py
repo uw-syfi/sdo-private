@@ -260,9 +260,7 @@ class SubprocessRunner:
             summarizer.start(start_time=start_time)
             logger.debug(
                 f"SubprocessRunner: Started monitoring with summarizer "
-                f"(initial_delay={
-                    summarizer.initial_delay}s, interval={
-                    summarizer.summary_interval}s)"
+                f"(initial_delay={summarizer.initial_delay}s, interval={summarizer.summary_interval}s)"
             )
 
         # Handle timeout=0 as a special case that fails immediately
@@ -286,9 +284,7 @@ class SubprocessRunner:
             if summarizer is not None and loop_iterations % 100 == 0:
                 logger.debug(
                     f"SubprocessRunner: Monitoring loop iter={loop_iterations}, "
-                    f"elapsed={
-                        elapsed:.1f}s, process_running={
-                        self.process.poll() is None}"
+                    f"elapsed={elapsed:.1f}s, process_running={self.process.poll() is None}"
                 )
 
             # Check timeout

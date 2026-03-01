@@ -83,8 +83,7 @@ def run_health_check(
 
         status = "PASSED" if result.returncode == 0 else "FAILED"
         logger.info(
-            f"Health check finished: {status} (Exit Code: {
-                result.returncode})")
+            f"Health check finished: {status} (Exit Code: {result.returncode})")
 
         if ui:
             ui.on_tool_result(
