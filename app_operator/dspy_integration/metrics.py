@@ -8,11 +8,13 @@ Metrics for evaluating prompt performance:
 - HealthCheckQualityMetric: Validates health check scripts are non-trivial (prevents reward hacking)
 """
 
+import logging
 import re
-import sys
 from typing import Any
 
 import dspy
+
+logger = logging.getLogger(__name__)
 
 
 class DeploymentSuccessMetric:
@@ -257,7 +259,7 @@ class PredictionQualityMetric:
             )
             return _parse_judge_score(result.score)
         except Exception as e:
-            print(f"  [PredictionQualityMetric] judge call failed: {e}", file=sys.stderr)
+            logger.warning("PredictionQualityMetric judge call failed: %s", e)
             return 0.5
 
 

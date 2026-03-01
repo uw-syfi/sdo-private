@@ -183,6 +183,10 @@ COMPOSE_FAULTS: List[Fault] = [
 ]
 
 
+# Patterns for identifying authentication-related environment variable names.
+AUTH_ENV_PATTERNS = ["password", "secret", "token", "auth", "key", "credential"]
+
+
 class ComposeFaultInjector(FaultInjector):
     """Injects faults into Docker Compose YAML data structures.
 
@@ -294,9 +298,8 @@ class ComposeFaultInjector(FaultInjector):
         else:
             keys = [str(e).split("=")[0].lower() for e in env]
 
-        auth_patterns = ["password", "secret", "token", "auth", "key", "credential"]
         return any(
-            pat in k for k in keys for pat in auth_patterns
+            pat in k for k in keys for pat in AUTH_ENV_PATTERNS
         )
 
     # ------------------------------------------------------------------
@@ -440,13 +443,12 @@ class ComposeFaultInjector(FaultInjector):
     ) -> FaultResult:
         svc = data["services"][service]
         env = svc.get("environment", [])
-        auth_patterns = ["password", "secret", "token", "auth", "key", "credential"]
         removed = []
 
         if isinstance(env, dict):
             keys_to_remove = [
                 k for k in env
-                if any(p in k.lower() for p in auth_patterns)
+                if any(p in k.lower() for p in AUTH_ENV_PATTERNS)
             ]
             for k in keys_to_remove:
                 removed.append(f"{k}={env.pop(k)}")
@@ -454,7 +456,7 @@ class ComposeFaultInjector(FaultInjector):
             new_env = []
             for e in env:
                 var_name = str(e).split("=")[0].lower()
-                if any(p in var_name for p in auth_patterns):
+                if any(p in var_name for p in AUTH_ENV_PATTERNS):
                     removed.append(str(e))
                 else:
                     new_env.append(e)

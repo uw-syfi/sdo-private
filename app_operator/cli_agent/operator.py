@@ -142,6 +142,7 @@ class AppOperator:
             self.repo_path,
             self.agent,
             self.filesystem,
+            operator_config=self.config.operator,
             recorder=self.recorder,
             dspy_config=self.config.dspy,
             ui=self.ui,
@@ -239,6 +240,11 @@ class AppOperator:
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).
 
+        Sets the ``_shutdown_requested`` flag so that running loops exit
+        gracefully.  We intentionally do **not** raise ``KeyboardInterrupt``
+        from the signal handler because doing so is dangerous in
+        multi-threaded code (it can land in an arbitrary frame).
+
         Args:
             signum: The signal number.
             frame: The current stack frame.
@@ -249,10 +255,6 @@ class AppOperator:
             logger.info(
                 f"Received {signal_name} signal. Initiating graceful shutdown..."
             )
-
-            # Re-raise KeyboardInterrupt to interrupt blocking calls
-            if signum == signal.SIGINT:
-                raise KeyboardInterrupt()
 
     def _cleanup(self) -> None:
         """Shutdown the application and cleanup resources."""

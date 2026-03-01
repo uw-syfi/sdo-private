@@ -7,6 +7,8 @@ from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
 from .events import AgentEventHandler
 from app_operator.trajectory import TrajectoryRecorderProtocol
 
+OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
+
 
 class OpencodeGenerationSession(CLIGenerationSession):
     def __init__(self, **kwargs):
@@ -102,7 +104,7 @@ class OpencodeCodingAgent(CLICodingAgent):
             event_handler: Optional event handler for UI updates.
         """
         if not model:
-            model = "google-vertex/gemini-3-pro-preview"
+            model = OPENCODE_DEFAULT_MODEL
         super().__init__("opencode", model, recorder, event_handler)
 
     @property

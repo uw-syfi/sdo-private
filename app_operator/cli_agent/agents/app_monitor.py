@@ -1,9 +1,8 @@
 import time
 import re
-import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Any, List, TYPE_CHECKING
+from typing import Optional, Callable, Any, List, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
@@ -13,6 +12,7 @@ from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
+from app_operator.config import OperatorConfig
 from app_operator.cli_agent.healthcheck import run_health_check
 from app_operator.trajectory import (
     Phase,
@@ -21,11 +21,26 @@ from app_operator.trajectory import (
 )
 
 
+class MonitorLike(Protocol):
+    """Protocol describing the monitor interface used by MonitoringTask."""
+
+    repo_path: Path
+    agent: CodingAgent
+    filesystem: FileSystemInterface
+    recorder: TrajectoryRecorderProtocol
+    dspy_config: Optional["DSPyConfig"]
+    ui: OperatorUI
+    check_count: int
+    health_check_script: Path
+    log_dir: Path
+    operator_config: OperatorConfig
+
+
 class MonitoringTask(ABC):
     """Abstract base class for monitoring tasks."""
 
     @abstractmethod
-    def run(self, operator: Any) -> None:
+    def run(self, operator: MonitorLike) -> None:
         """Execute the monitoring task.
 
         Args:
@@ -34,7 +49,7 @@ class MonitoringTask(ABC):
         pass
 
     @abstractmethod
-    def analyze(self, operator: Any, result: Any) -> None:
+    def analyze(self, operator: MonitorLike, result: Any) -> None:
         """Use a coding agent to analyze results and provide suggestions."""
         pass
 
@@ -42,7 +57,7 @@ class MonitoringTask(ABC):
 class HealthCheckTask(MonitoringTask):
     """A monitoring task specifically for running health checks."""
 
-    def run(self, operator: Any) -> None:
+    def run(self, operator: MonitorLike) -> None:
         """Run the health check task.
 
         Args:
@@ -74,7 +89,7 @@ class HealthCheckTask(MonitoringTask):
 
             self.analyze(monitor, health_result)
 
-    def analyze(self, operator: Any, result: Any) -> None:
+    def analyze(self, operator: MonitorLike, result: Any) -> None:
         """Analyze health check results using the agent."""
         monitor = operator
         health_result = result
@@ -105,15 +120,15 @@ class HealthCheckTask(MonitoringTask):
                 f"Consulting {monitor.agent.__class__.__name__} for health analysis..."
             )
 
-            # Run agent and redirect its output to the log file
-            with open(log_file, "w") as f:
-                with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
-                    response = monitor.agent.generate(
-                        prompt, cwd=str(monitor.repo_path), timeout=120
-                    )
+            response = monitor.agent.generate(
+                prompt,
+                cwd=str(monitor.repo_path),
+                timeout=monitor.operator_config.agent_timeout,
+            )
 
-                # Explicitly write the response to the log file
-                f.write("\n\n=== Agent Analysis ===\n")
+            # Write the response to the log file
+            with open(log_file, "w") as f:
+                f.write("=== Agent Analysis ===\n")
                 f.write(response)
 
             # Extract executive summary
@@ -204,9 +219,6 @@ class HealthCheckTask(MonitoringTask):
             recorder=recorder,
         )
 
-        # Ensure the prompt explicitly requests <exec_summary> format
-        prompt += "\n\nProvide your analysis with an executive summary wrapped in <exec_summary> tags. The summary must be 1-2 sentences maximum."
-
         return prompt
 
 
@@ -218,6 +230,7 @@ class AppMonitor:
         repo_path: Path,
         agent: CodingAgent,
         filesystem: Optional[FileSystemInterface] = None,
+        operator_config: Optional[OperatorConfig] = None,
         recorder: Optional[TrajectoryRecorderProtocol] = None,
         dspy_config: Optional["DSPyConfig"] = None,
         ui: Optional[OperatorUI] = None,
@@ -228,6 +241,7 @@ class AppMonitor:
             repo_path: Path to the repository.
             agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+            operator_config: Optional operator configuration for timeouts.
             recorder: Trajectory recorder instance.
             dspy_config: Optional DSPy configuration for optimized prompts.
             ui: Optional UI interface.
@@ -235,6 +249,7 @@ class AppMonitor:
         self.repo_path = repo_path
         self.agent = agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+        self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()

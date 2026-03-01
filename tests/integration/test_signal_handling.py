@@ -4,7 +4,6 @@ These tests verify that the operator handles SIGINT and SIGTERM signals
 correctly, performing cleanup and exiting gracefully.
 """
 
-import pytest
 import signal
 import time
 import threading
@@ -213,8 +212,8 @@ class TestShutdownBehavior:
 
         assert operator._shutdown_requested is True
 
-    def test_sigint_raises_keyboard_interrupt(self, tmp_path):
-        """SIGINT should raise KeyboardInterrupt."""
+    def test_sigint_sets_shutdown_flag(self, tmp_path):
+        """SIGINT should set shutdown flag without raising (safe in threads)."""
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -223,9 +222,10 @@ class TestShutdownBehavior:
             agent=StubAgent(),
         )
 
-        # SIGINT should raise KeyboardInterrupt
-        with pytest.raises(KeyboardInterrupt):
-            operator._handle_shutdown_signal(signal.SIGINT, None)
+        assert operator._shutdown_requested is False
 
-        # And set the flag
+        # SIGINT should set the flag but NOT raise KeyboardInterrupt
+        # (raising from a signal handler is dangerous in multi-threaded code)
+        operator._handle_shutdown_signal(signal.SIGINT, None)
+
         assert operator._shutdown_requested is True
