@@ -1,7 +1,8 @@
 import pytest
 from unittest.mock import MagicMock
 
-from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent, get_fix_summary_path
+from app_operator.config import OperatorConfig, OperatorPhaseConfig
 from tests.fixtures.agents import ConfigurableAgent, StubAgent
 
 
@@ -41,7 +42,7 @@ def test_update_consolidated_summary_creates_new_file(repo_path):
 
     agent._update_consolidated_summary(1, summary)
 
-    summary_file = repo_path / ".sds" / "fix_summary.md"
+    summary_file = get_fix_summary_path(repo_path / ".sds")
     assert summary_file.exists()
     content = summary_file.read_text()
     assert expected_content == content
@@ -55,7 +56,7 @@ def test_update_consolidated_summary_appends(repo_path):
     agent = DeploymentAgent(repo_path, agent_mock)
 
     # Setup initial state
-    summary_file = repo_path / ".sds" / "fix_summary.md"
+    summary_file = get_fix_summary_path(repo_path / ".sds")
     summary_file.write_text("## Attempt 1\n\nOld summary\n")
 
     summary_2 = "Fix summary 2"
@@ -80,7 +81,7 @@ def test_update_consolidated_summary_respects_interval(repo_path, monkeypatch):
 
     # Attempt 1: Should not update
     agent._update_consolidated_summary(1, "summary 1")
-    summary_file = repo_path / ".sds" / "fix_summary.md"
+    summary_file = get_fix_summary_path(repo_path / ".sds")
     assert not summary_file.exists()
 
     # Attempt 2: Should update
@@ -96,7 +97,7 @@ def test_update_consolidated_summary_respects_interval(repo_path, monkeypatch):
 
 def test_run_cleans_summary_on_fresh_start(repo_path, monkeypatch):
     agent = DeploymentAgent(repo_path, StubAgent())
-    summary_file = repo_path / ".sds" / "fix_summary.md"
+    summary_file = get_fix_summary_path(repo_path / ".sds")
     summary_file.write_text("Old summary")
 
     # Mock _get_next_attempt_number to return 1
@@ -117,7 +118,7 @@ def test_run_cleans_summary_on_fresh_start(repo_path, monkeypatch):
 
 def test_run_keeps_summary_on_resume(repo_path, monkeypatch):
     agent = DeploymentAgent(repo_path, StubAgent())
-    summary_file = repo_path / ".sds" / "fix_summary.md"
+    summary_file = get_fix_summary_path(repo_path / ".sds")
     summary_file.write_text("Old summary")
 
     # Mock _get_next_attempt_number to return 2
@@ -128,6 +129,62 @@ def test_run_keeps_summary_on_resume(repo_path, monkeypatch):
                         lambda *args, **kwargs: {"success": True, "exit_code": 0})
 
     agent.run(max_attempts=1)
+
+    assert summary_file.exists()
+    assert summary_file.read_text() == "Old summary"
+
+
+def test_fix_with_agent_skips_consolidation_when_disabled(repo_path, monkeypatch):
+    """When fix_summary_consolidation=False, _fix_with_agent does not create the consolidated summary file."""
+    agent_mock = ConfigurableAgent()
+    agent_mock.set_default_response("<summary>Fix applied</summary>")
+
+    operator_config = OperatorConfig(
+        phase=OperatorPhaseConfig(fix_summary_consolidation=False)
+    )
+    deployer = DeploymentAgent(repo_path, agent_mock, operator_config=operator_config)
+
+    deploy_result = {"success": False, "exit_code": 1, "stdout": "", "stderr": "error"}
+    deployer._fix_with_agent(deploy_result, None, 1, 5)
+
+    summary_file = get_fix_summary_path(repo_path / ".sds")
+    assert not summary_file.exists()
+
+
+def test_fix_with_agent_creates_consolidation_when_enabled(repo_path, monkeypatch):
+    """When fix_summary_consolidation=True (default), _fix_with_agent creates the consolidated summary file."""
+    agent_mock = ConfigurableAgent()
+    agent_mock.set_default_response("<summary>Fix applied</summary>")
+
+    deployer = DeploymentAgent(repo_path, agent_mock)
+
+    deploy_result = {"success": False, "exit_code": 1, "stdout": "", "stderr": "error"}
+    deployer._fix_with_agent(deploy_result, None, 1, 5)
+
+    summary_file = get_fix_summary_path(repo_path / ".sds")
+    assert summary_file.exists()
+
+
+def test_run_skips_summary_cleanup_when_disabled(repo_path, monkeypatch):
+    """When fix_summary_consolidation=False, run() does not remove existing summary on fresh start."""
+    operator_config = OperatorConfig(
+        phase=OperatorPhaseConfig(fix_summary_consolidation=False)
+    )
+    deployer = DeploymentAgent(repo_path, StubAgent(), operator_config=operator_config)
+
+    summary_file = get_fix_summary_path(repo_path / ".sds")
+    summary_file.write_text("Old summary")
+
+    monkeypatch.setattr(deployer, "_get_next_attempt_number", lambda: 1)
+    deployer.run_deploy_command = MagicMock(
+        return_value={"success": True, "exit_code": 0}
+    )
+    monkeypatch.setattr(
+        "app_operator.cli_agent.agents.deployer.run_health_check",
+        lambda *args, **kwargs: {"success": True, "exit_code": 0},
+    )
+
+    deployer.run(max_attempts=1)
 
     assert summary_file.exists()
     assert summary_file.read_text() == "Old summary"

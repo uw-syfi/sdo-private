@@ -38,6 +38,12 @@ AGENT_FIX_TIMEOUT_SECS = 1800
 DEFAULT_DEPLOY_TIMEOUT_SECS = 900
 DEFAULT_AGENT_TIMEOUT_SECS = 300
 FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
+FIX_SUMMARY_FILENAME = "fix_summary.md"
+
+
+def get_fix_summary_path(sds_dir: Path) -> Path:
+    """Return the path to the consolidated fix summary file."""
+    return sds_dir / FIX_SUMMARY_FILENAME
 
 
 def generate_scripts(
@@ -407,8 +413,8 @@ class DeploymentAgent:
         start_attempt = self._get_next_attempt_number()
 
         # If starting fresh, ensure clean slate for summary
-        if start_attempt == 1:
-            summary_file = self.sds_dir / "fix_summary.md"
+        if start_attempt == 1 and self.operator_config.phase.fix_summary_consolidation:
+            summary_file = get_fix_summary_path(self.sds_dir)
             if self.filesystem.exists(summary_file):
                 self.filesystem.remove(summary_file)
 
@@ -666,7 +672,7 @@ class DeploymentAgent:
         if current_attempt % FIX_SUMMARY_CONSOLIDATION_INTERVAL != 0:
             return
 
-        summary_file = self.sds_dir / "fix_summary.md"
+        summary_file = get_fix_summary_path(self.sds_dir)
 
         # Read existing content if file exists
         existing_content = ""
@@ -778,6 +784,7 @@ class DeploymentAgent:
             self.health_check_script,
             dspy_config=self.dspy_config,
             recorder=self.recorder,
+            fix_summary_consolidation=self.operator_config.phase.fix_summary_consolidation,
         )
 
         try:
@@ -814,8 +821,9 @@ class DeploymentAgent:
             self.filesystem.write_text(log_file, summary_text)
             logger.info(f"Saved fix summary to {log_file}")
 
-            # Always update consolidated summary
-            self._update_consolidated_summary(attempt, summary_text)
+            # Update consolidated summary if enabled
+            if self.operator_config.phase.fix_summary_consolidation:
+                self._update_consolidated_summary(attempt, summary_text)
 
             logger.info("Agent response received")
 

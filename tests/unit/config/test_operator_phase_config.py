@@ -12,11 +12,17 @@ class TestOperatorPhaseConfig:
         """Test default configuration values."""
         config = OperatorPhaseConfig()
         assert config.code_analysis is True
+        assert config.fix_summary_consolidation is True
 
     def test_custom_values(self):
         """Test custom configuration values."""
         config = OperatorPhaseConfig(code_analysis=False)
         assert config.code_analysis is False
+
+    def test_custom_fix_summary_consolidation(self):
+        """Test custom fix_summary_consolidation value."""
+        config = OperatorPhaseConfig(fix_summary_consolidation=False)
+        assert config.fix_summary_consolidation is False
 
     def test_type_validation_bool_required(self):
         """Test that code_analysis must be a bool."""
@@ -28,6 +34,17 @@ class TestOperatorPhaseConfig:
 
         with pytest.raises(TypeError, match="code_analysis must be bool"):
             OperatorPhaseConfig(code_analysis=None)
+
+    def test_fix_summary_consolidation_type_validation(self):
+        """Test that fix_summary_consolidation must be a bool."""
+        with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
+            OperatorPhaseConfig(fix_summary_consolidation="true")
+
+        with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
+            OperatorPhaseConfig(fix_summary_consolidation=1)
+
+        with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
+            OperatorPhaseConfig(fix_summary_consolidation=None)
 
 
 class TestOperatorPhaseConfigParsing:
@@ -46,6 +63,19 @@ class TestOperatorPhaseConfigParsing:
         config = Config.from_dict(data)
         assert config.operator.interval == 60
         assert config.operator.phase.code_analysis is False
+
+    def test_nested_phase_fix_summary_consolidation_parsing(self):
+        """Test parsing fix_summary_consolidation from nested [operator.phase] section."""
+        data = {
+            "operator": {
+                "phase": {
+                    "fix_summary_consolidation": False
+                }
+            }
+        }
+        config = Config.from_dict(data)
+        assert config.operator.phase.fix_summary_consolidation is False
+        assert config.operator.phase.code_analysis is True  # Default
 
     def test_operator_without_phase_section(self):
         """Test that operator config works without phase section."""

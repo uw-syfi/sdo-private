@@ -141,11 +141,16 @@ class DeploymentConfig:
 class OperatorPhaseConfig:
     """Configuration for operator phase control."""
     code_analysis: bool = True
+    fix_summary_consolidation: bool = True
 
     def __post_init__(self):
         if not isinstance(self.code_analysis, bool):
             raise TypeError(
                 f"code_analysis must be bool, got {type(self.code_analysis).__name__}"
+            )
+        if not isinstance(self.fix_summary_consolidation, bool):
+            raise TypeError(
+                f"fix_summary_consolidation must be bool, got {type(self.fix_summary_consolidation).__name__}"
             )
 
 
