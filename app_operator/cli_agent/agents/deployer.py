@@ -10,7 +10,7 @@ from app_operator.types import CommandResult
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
 
-from app_operator.ui import OperatorUI, NullOperatorUI
+from app_operator.ui_protocol import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig, OperatorConfig

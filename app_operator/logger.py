@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from app_operator.ui.base import OperatorUI
+    from app_operator.ui_protocol import OperatorUI
 
 
 def formatter(record):

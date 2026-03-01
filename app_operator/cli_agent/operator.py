@@ -13,7 +13,7 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
 from app_operator.operator_base import OperatorBase
-from app_operator.ui import OperatorUI, NullOperatorUI
+from app_operator.ui_protocol import OperatorUI, NullOperatorUI
 from app_operator.trajectory import TrajectoryRecorder
 
 
