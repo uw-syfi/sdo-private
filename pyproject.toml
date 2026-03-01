@@ -62,7 +62,7 @@ dev = [
 ]
 
 [tool.importlinter]
-root_packages = ["app_operator", "lego_agent", "libs"]
+root_packages = ["app_operator", "lego_agent", "libs", "tests"]
 
 [[tool.importlinter.contracts]]
 name = "app_operator and lego_agent are independent siblings"
@@ -79,4 +79,27 @@ source_modules = ["libs"]
 forbidden_modules = [
     "app_operator",
     "lego_agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "libs.sds_core is the foundation layer and must not import from libs.agent_cli"
+type = "forbidden"
+source_modules = ["libs.sds_core"]
+forbidden_modules = ["libs.agent_cli"]
+
+[[tool.importlinter.contracts]]
+name = "operator runtimes are independent siblings"
+type = "independence"
+modules = [
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+]
+
+[[tool.importlinter.contracts]]
+name = "test suites are isolated from each other"
+type = "independence"
+modules = [
+    "tests.unit",
+    "tests.integration",
 ]
