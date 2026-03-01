@@ -102,9 +102,9 @@ def test_handle_shutdown_signal_sigint(app_operator):
     # Verify initial state
     assert op._shutdown_requested is False
 
-    # Simulate SIGINT signal - should raise KeyboardInterrupt
-    with pytest.raises(KeyboardInterrupt):
-        op._handle_shutdown_signal(signal.SIGINT, None)
+    # SIGINT should set the flag but NOT raise KeyboardInterrupt
+    # (raising from a signal handler is dangerous in multi-threaded code)
+    op._handle_shutdown_signal(signal.SIGINT, None)
 
     assert op._shutdown_requested is True
 

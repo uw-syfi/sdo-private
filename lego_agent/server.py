@@ -1,7 +1,6 @@
 import asyncio
 import os
 import sys
-import traceback
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
@@ -9,8 +8,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from lego_agent.engine import LegoAgentEngine
-from lego_agent.prompts import get_loader
-from app_operator.config import load_config
+from lego_agent.prompts import get_loader, PromptLoader
+from lego_agent.utils import find_repo_root
+from app_operator.config import load_config, Config
 from app_operator.logger import logger
 
 app = FastAPI()
@@ -134,13 +134,7 @@ async def websocket_endpoint(websocket: WebSocket):
     input_queue = asyncio.Queue()
     io = WebIO(websocket, input_queue)
 
-    # Configuration - similar to cli.py logic
-    # We assume running from root or we find it
-    repo_root = Path.cwd().resolve()
-    for parent in [repo_root, *repo_root.parents]:
-        if (parent / ".git").exists() or (parent / "sds.toml").exists():
-            repo_root = parent
-            break
+    repo_root = find_repo_root()
 
     try:
         config = load_config(str(repo_root), None)
@@ -277,19 +271,18 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         logger.info("Client disconnected")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        traceback.print_exc()
+        logger.error(f"WebSocket error: {e}", exc_info=True)
 
 
 async def run_engine_and_script(
     io: WebIO,
-    config: Any,
-    prompt_loader: Any,
+    config: Config,
+    prompt_loader: PromptLoader,
     output_dir: Path,
     work_dir: Path,
     repo_root: Path,
     user_prompt: str,
-):
+) -> None:
     try:
         # 1. Run Engine
         engine = LegoAgentEngine(
@@ -369,8 +362,7 @@ async def run_engine_and_script(
         await io._send_event("execution_result", {"exit_code": return_code})
 
     except Exception as e:
-        logger.error(f"Execution failed: {e}")
-        traceback.print_exc()
+        logger.error(f"Execution failed: {e}", exc_info=True)
         await io._send_event("log", {"message": f"Error: {e}", "level": "error"})
 
 

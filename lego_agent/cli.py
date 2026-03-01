@@ -7,6 +7,7 @@ from pathlib import Path
 
 from lego_agent.engine import LegoAgentEngine
 from lego_agent.io import ConsoleIO
+from lego_agent.utils import find_repo_root
 from app_operator.config import load_config
 from app_operator.logger import logger
 from lego_agent.prompts import get_loader
@@ -41,14 +42,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    # Determine repo root by searching upwards for .git or sds.toml
-    # This ensures we find the project root regardless of where the command is run
-    # or where the package is installed.
-    repo_root = Path.cwd().resolve()
-    for parent in [repo_root, *repo_root.parents]:
-        if (parent / ".git").exists() or (parent / "sds.toml").exists():
-            repo_root = parent
-            break
+    repo_root = find_repo_root()
 
     try:
         config = load_config(str(repo_root), args.config)

@@ -73,7 +73,7 @@ class TrajectoryDataLoader:
                     trajectory["_file_path"] = str(traj_file)
                     trajectories.append(trajectory)
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Warning: Failed to load {traj_file}: {e}")
+                logger.warning("Failed to load %s: %s", traj_file, e)
                 continue
 
         return trajectories

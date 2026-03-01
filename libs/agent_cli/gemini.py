@@ -4,6 +4,8 @@ import json
 import time
 from pathlib import Path
 
+import logging
+
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
 from .events import AgentEventHandler
@@ -12,6 +14,9 @@ from app_operator.trajectory import (
     get_run_id,
     TrajectoryRecorderProtocol,
 )
+
+
+_logger = logging.getLogger(__name__)
 
 
 class GeminiGenerationSession(CLIGenerationSession):
@@ -51,8 +56,7 @@ class GeminiGenerationSession(CLIGenerationSession):
                     with open(metadata_file, "w") as f:
                         json.dump(metadata, f, indent=2)
         except Exception:
-            # Silently fail - this is just metadata for convenience
-            pass
+            _logger.debug("Failed to write Gemini call metadata", exc_info=True)
 
     def run(self, prompt: str) -> str:
         """Execute the generation process, writing call metadata first."""
