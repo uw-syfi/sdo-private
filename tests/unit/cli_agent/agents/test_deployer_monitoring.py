@@ -1,3 +1,4 @@
+import itertools
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -73,25 +74,17 @@ def test_monitoring_summary_trigger(deployer, mock_agent):
 
     # Mock subprocess.Popen
     with patch("subprocess.Popen", return_value=mock_process):
-        # Mock time.time to advance significantly each call
-        # Start at 0
-        # Each poll loop calls time.time() multiple times (start, loop check, update)
-        # We need a sequence of times that simulates > 15s elapsed
-
-        start_time = 1000.0
-
-        # We need a mutable container for current time to share state
-        time_state = {"current": start_time}
+        # Use a monotonically incrementing counter for time.time so that
+        # every call returns a strictly increasing value (no fragile iterator).
+        base_time = 1000.0
+        tick = itertools.count(1)
 
         def fake_time():
-            # Advance time by 1s on each call to simulate passage of time
-            # fast enough to trigger logic
-            time_state["current"] += 1.0
-            return time_state["current"]
+            return base_time + next(tick)
 
         def fake_sleep(seconds):
-            # Advance time by sleep amount
-            time_state["current"] += seconds
+            # Consume a tick so the clock keeps moving forward
+            next(tick)
 
         with patch("time.time", side_effect=fake_time):
             with patch("time.sleep", side_effect=fake_sleep):
@@ -129,15 +122,16 @@ def test_short_command_no_summary(deployer, mock_agent):
     mock_process = MockProcess(stdout_lines, stderr_lines, duration_steps=2)
 
     with patch("subprocess.Popen", return_value=mock_process):
-        start_time = 1000.0
-        time_state = {"current": start_time}
+        # Use a monotonically incrementing counter with small step so
+        # total elapsed time stays under the 15s summary threshold.
+        base_time = 1000.0
+        tick = itertools.count(1)
 
         def fake_time():
-            time_state["current"] += 0.1  # Very fast
-            return time_state["current"]
+            return base_time + next(tick) * 0.1
 
         def fake_sleep(seconds):
-            time_state["current"] += seconds  # Sleep still adds up
+            next(tick)
 
         with patch("time.time", side_effect=fake_time):
             with patch("time.sleep", side_effect=fake_sleep):

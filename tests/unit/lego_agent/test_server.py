@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect, WebSocketState
+from starlette.websockets import WebSocketState, WebSocketDisconnect
 
 from lego_agent.server import WebIO, app, websocket_endpoint
 
@@ -36,7 +36,8 @@ async def test_webio_send_event(mock_websocket, input_queue):
     await io._send_event("test_type", {"key": "value"})
 
     assert len(mock_websocket.sent_messages) == 1
-    assert mock_websocket.sent_messages[0] == {"type": "test_type", "key": "value"}
+    assert mock_websocket.sent_messages[0] == {
+        "type": "test_type", "key": "value"}
 
 
 @pytest.mark.anyio
@@ -64,7 +65,8 @@ async def test_webio_ask_questions(mock_websocket, input_queue):
     answers = await io.ask_questions(["Q1"])
 
     assert answers == ["Ans1"]
-    assert {"type": "question", "questions": ["Q1"]} in mock_websocket.sent_messages
+    assert {"type": "question", "questions": [
+        "Q1"]} in mock_websocket.sent_messages
 
 
 @pytest.mark.anyio
@@ -102,7 +104,8 @@ async def test_server_logic(tmp_path):
         patch("lego_agent.server.LegoAgentEngine") as mock_engine_cls,
     ):
         mock_engine = AsyncMock()
-        mock_engine.run_async.return_value = MagicMock(script_path="/tmp/script.py")
+        mock_engine.run_async.return_value = MagicMock(
+            script_path="/tmp/script.py")
         mock_engine_cls.return_value = mock_engine
 
         # We can't easily test the websocket_endpoint directly without a client or careful mocking of the websocket object lifecycle.
@@ -142,7 +145,8 @@ async def test_server_logic(tmp_path):
             )
             # Log execution start
             io._send_event.assert_any_call(
-                "log", {"message": "Executing generated script...", "level": "info"}
+                "log", {"message": "Executing generated script...",
+                        "level": "info"}
             )
             # Execution result
             io._send_event.assert_any_call("execution_result", {"exit_code": 0})
