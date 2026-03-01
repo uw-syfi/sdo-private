@@ -12,6 +12,8 @@ from typing import Any, Tuple
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TOOL_RESULT_MAX_LENGTH = 500  # characters before truncating tool result output
+
 
 def parse_chunk_content(content: Any) -> str:
     """Extract text from a streaming chunk's content field.
@@ -39,7 +41,7 @@ def parse_chunk_content(content: Any) -> str:
 
 def extract_tool_result(
     output: Any,
-    max_length: int = 500,
+    max_length: int = DEFAULT_TOOL_RESULT_MAX_LENGTH,
 ) -> Tuple[str, str]:
     """Parse a tool-end event output into ``(status, result_text)``.
 

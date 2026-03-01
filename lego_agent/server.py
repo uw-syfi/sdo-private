@@ -13,6 +13,10 @@ from lego_agent.utils import find_repo_root
 from app_operator.config import load_config, Config
 from app_operator.logger import logger
 
+DEFAULT_LOOP_BOUND = 10  # default execution loop bound for generated scripts
+DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding
+MAX_DIR_SUGGESTIONS = 20  # maximum number of directory suggestions to return
+
 app = FastAPI()
 
 
@@ -288,7 +292,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                     suggestions.append(str(item))
 
                     # Sort and limit
-                    suggestions = sorted(suggestions)[:20]
+                    suggestions = sorted(suggestions)[:MAX_DIR_SUGGESTIONS]
                     await io._send_event("dir_options", {"options": suggestions})
 
                 except OSError as e:
@@ -336,8 +340,8 @@ async def run_engine_and_script(
             config=config,
             prompt_loader=prompt_loader,
             io=io,
-            loop_bound=10,  # Default
-            max_clarifications=5,  # Default
+            loop_bound=DEFAULT_LOOP_BOUND,
+            max_clarifications=DEFAULT_MAX_CLARIFICATIONS,
             agent_timeout=config.operator.agent_timeout,
             output_dir=output_dir,
             work_dir=work_dir,

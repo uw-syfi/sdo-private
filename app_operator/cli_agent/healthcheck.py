@@ -7,6 +7,8 @@ from app_operator.ui import OperatorUI
 from app_operator.logger import logger
 from app_operator.types import CommandResult
 
+DEFAULT_HEALTH_CHECK_TIMEOUT = 120  # seconds
+
 
 def _write_to_log(log_file, header: str, stdout: str = "",
                   stderr: str = "") -> None:
@@ -36,7 +38,7 @@ def _write_to_log(log_file, header: str, stdout: str = "",
 def run_health_check(
     repo_path: Path,
     health_check_script: Path,
-    timeout: int = 120,
+    timeout: int = DEFAULT_HEALTH_CHECK_TIMEOUT,
     log_file_path: Optional[Path] = None,
     ui: Optional[OperatorUI] = None,
 ) -> CommandResult:

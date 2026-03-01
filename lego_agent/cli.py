@@ -12,6 +12,9 @@ from app_operator.config import load_config
 from app_operator.logger import logger
 from lego_agent.prompts import get_loader
 
+DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding
+DEFAULT_LOOP_BOUND = 10  # default execution loop bound for generated scripts
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -21,7 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", help="Path to sds.toml config file")
     parser.add_argument("--model", help="Override agent model")
     parser.add_argument(
-        "--max-clarifications", type=int, default=5, help="Max clarification rounds"
+        "--max-clarifications", type=int, default=DEFAULT_MAX_CLARIFICATIONS,
+        help="Max clarification rounds"
     )
     parser.add_argument(
         "--loop-bound", type=int, help="Execution loop bound for generated script"
@@ -57,8 +61,7 @@ def main() -> int:
     prompt_loader = get_loader()
 
     # Get loop bound
-    # SDS-REVIEW: Magic Number - Default loop bound '10' is hardcoded. Define as constant.
-    loop_bound = args.loop_bound if args.loop_bound is not None else 10
+    loop_bound = args.loop_bound if args.loop_bound is not None else DEFAULT_LOOP_BOUND
 
     io = ConsoleIO()
 
