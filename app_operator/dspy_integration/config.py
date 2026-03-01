@@ -23,7 +23,6 @@ class DSPyOptimizationConfig:
     optimizer: str = "BootstrapFewShot"
     teacher_model: str = "claude-sonnet-4-5"
     num_examples: int = 30
-    n_candidates: int = 4
     validation_split: float = 0.2
     n_candidates: int = 4
     metric_weights: Dict[str, float] = field(
