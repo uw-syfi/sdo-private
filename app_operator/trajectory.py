@@ -7,8 +7,8 @@ into a structured trajectory.json file.
 """
 from __future__ import annotations
 from libs.agent_cli.trajectory import (
-    NullTrajectoryRecorder,
-    TrajectoryRecorderProtocol,
+    NullTrajectoryRecorder,  # noqa: F401
+    TrajectoryRecorderProtocol,  # noqa: F401
     register_context_providers as _register_context_providers,
 )
 
