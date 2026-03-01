@@ -394,6 +394,25 @@ def run_experiment_task(
             return {"app": app_name, "success": False, **extracted, **repeat_field}
 
 
+def run_app_repeats(
+    app_path_str: str,
+    exp_name: str,
+    progress: Progress,
+    repeat_task_ids: list[tuple[int, object]],
+    log_dir: Path,
+    experiment_config: dict | None = None,
+    total_repeats: int = 1,
+) -> list[dict]:
+    results = []
+    for repeat_idx, task_id in repeat_task_ids:
+        result = run_experiment_task(
+            app_path_str, exp_name, progress, task_id,
+            log_dir, experiment_config, repeat_idx, total_repeats,
+        )
+        results.append(result)
+    return results
+
+
 def _resolve_experiment(experiment_str: str) -> tuple[str, Path, dict, Path] | None:
     """Resolve an experiment string to (exp_name, config_path, config, log_dir).
 
@@ -484,38 +503,36 @@ def run_command(args: argparse.Namespace) -> int:
         console=console
     ) as progress:
 
-        # futures maps future -> (app, repeat_idx, exp_name, log_dir, config)
+        # futures maps future -> (app, exp_name, log_dir, config)
         futures = {}
         with ThreadPoolExecutor(max_workers=args.parallel) as executor:
             for exp_name, config_path, config, log_dir in resolved:
                 apps = config.get("apps", [])
                 repeats = config.get("repeats", 1)
                 for app in apps:
+                    app_name = Path(app).name
+                    prefix = f"{exp_name}/" if multi else ""
+                    repeat_task_ids = []
                     for i in range(repeats):
-                        app_name = Path(app).name
-                        if multi:
-                            prefix = f"{exp_name}/"
-                        else:
-                            prefix = ""
                         if repeats > 1:
                             label = f"[white]{prefix}{app_name} (run {i + 1}/{repeats})[/]: Pending"
                         else:
                             label = f"[white]{prefix}{app_name}[/]: Pending"
                         task_id = progress.add_task(label, total=100, start=False)
-                        future = executor.submit(
-                            run_experiment_task, app, exp_name,
-                            progress, task_id, log_dir, config,
-                            i, repeats,
-                        )
-                        futures[future] = (app, i, exp_name, log_dir, config)
+                        repeat_task_ids.append((i, task_id))
+                    future = executor.submit(
+                        run_app_repeats, app, exp_name,
+                        progress, repeat_task_ids, log_dir, config, repeats,
+                    )
+                    futures[future] = (app, exp_name, log_dir, config)
 
             # Collect results grouped by exp_name
             results_by_exp: dict[str, list[dict]] = {exp_name: [] for exp_name, _, _, _ in resolved}
             for future in as_completed(futures):
-                app, _, exp_name, log_dir, config = futures[future]
+                app, exp_name, log_dir, config = futures[future]
                 try:
-                    result = future.result()
-                    results_by_exp[exp_name].append(result)
+                    repeat_results = future.result()
+                    results_by_exp[exp_name].extend(repeat_results)
                 except Exception as e:
                     logger.error(f"Error running {app}: {e}")
                     results_by_exp[exp_name].append({
