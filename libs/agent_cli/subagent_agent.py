@@ -266,7 +266,7 @@ class SubagentCodingAgent(CodingAgent):
             summaries["repo"] = "(repository analysis unavailable)"
         logger.info("[Subagent] Repo analyst complete")
 
-        if self.recorder:
+        if self.recorder and hasattr(self.recorder, "add_assistant_message"):
             for name, summary in summaries.items():
                 self.recorder.add_assistant_message(
                     f"[Subagent {name} analyst]\n{summary[:500]}"

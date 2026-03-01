@@ -172,7 +172,7 @@ class HybridCodingAgent(CodingAgent):
             repo_summary = "(repository analysis unavailable)"
         logger.info("[Hybrid] Repo analyst complete")
 
-        if self.recorder:
+        if self.recorder and hasattr(self.recorder, "add_assistant_message"):
             for name, summary in [
                 ("trajectory", trajectory_summary),
                 ("error_log", error_summary),
