@@ -1,3 +1,5 @@
+import json
+
 try:
     import tomllib
 except ImportError:
@@ -6,6 +8,7 @@ except ImportError:
 import pytest
 
 from app_operator.commands.run_exp import (
+    _extract_results,
     _write_experiment_sds_config,
     _write_toml_simple,
 )
@@ -140,3 +143,64 @@ class TestWriteSdsConfig:
         assert parsed["agent"]["provider"] == "gemini"
         # Old content should be gone
         assert "codex" not in existing.read_text()
+
+
+class TestExtractResults:
+    def test_extract_from_trajectory(self, tmp_path):
+        """Parses a minimal trajectory JSON and returns correct iterations + status."""
+        traj_dir = tmp_path / ".sds" / "trajectories"
+        traj_dir.mkdir(parents=True)
+        traj = {
+            "metadata": {"status": "completed"},
+            "deployment": [{"attempt": 1}, {"attempt": 2}, {"attempt": 3}],
+        }
+        (traj_dir / "trajectory_001.json").write_text(json.dumps(traj))
+
+        result = _extract_results(tmp_path)
+
+        assert result["status"] == "completed"
+        assert result["deployment_iterations"] == 3
+
+    def test_no_trajectory_dir(self, tmp_path):
+        """Returns unknown/None when no .sds/trajectories exists."""
+        result = _extract_results(tmp_path)
+
+        assert result["status"] == "unknown"
+        assert result["deployment_iterations"] is None
+
+    def test_empty_deployment_phase(self, tmp_path):
+        """Returns 0 iterations when deployment array is empty."""
+        traj_dir = tmp_path / ".sds" / "trajectories"
+        traj_dir.mkdir(parents=True)
+        traj = {
+            "metadata": {"status": "failed"},
+            "deployment": [],
+        }
+        (traj_dir / "trajectory_001.json").write_text(json.dumps(traj))
+
+        result = _extract_results(tmp_path)
+
+        assert result["status"] == "failed"
+        assert result["deployment_iterations"] == 0
+
+    def test_multiple_trajectories_uses_latest(self, tmp_path):
+        """Picks the last trajectory file alphabetically."""
+        traj_dir = tmp_path / ".sds" / "trajectories"
+        traj_dir.mkdir(parents=True)
+
+        old_traj = {
+            "metadata": {"status": "failed"},
+            "deployment": [{"attempt": 1}],
+        }
+        (traj_dir / "trajectory_001.json").write_text(json.dumps(old_traj))
+
+        new_traj = {
+            "metadata": {"status": "completed"},
+            "deployment": [{"attempt": 1}, {"attempt": 2}],
+        }
+        (traj_dir / "trajectory_002.json").write_text(json.dumps(new_traj))
+
+        result = _extract_results(tmp_path)
+
+        assert result["status"] == "completed"
+        assert result["deployment_iterations"] == 2

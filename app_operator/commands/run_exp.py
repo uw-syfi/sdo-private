@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.console import Console
+from rich.table import Table
 
 from app_operator.logger import logger
 
@@ -103,6 +105,58 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _extract_results(exp_dir: Path) -> dict:
+    """Extract deployment iterations and status from trajectory files."""
+    traj_dir = exp_dir / ".sds" / "trajectories"
+    if not traj_dir.exists():
+        return {"status": "unknown", "deployment_iterations": None}
+
+    traj_files = sorted(traj_dir.glob("trajectory_*.json"))
+    if not traj_files:
+        return {"status": "unknown", "deployment_iterations": None}
+
+    try:
+        with open(traj_files[-1], "r") as f:
+            traj = json.load(f)
+        status = traj.get("metadata", {}).get("status", "unknown")
+        deployment_iterations = len(traj.get("deployment", []))
+        return {"status": status, "deployment_iterations": deployment_iterations}
+    except (json.JSONDecodeError, KeyError, OSError):
+        return {"status": "unknown", "deployment_iterations": None}
+
+
+def _write_results(log_dir: Path, exp_name: str, results: list[dict]) -> None:
+    """Write per-app results as JSON to the log directory."""
+    output = {
+        "experiment": exp_name,
+        "results": [
+            {
+                "app": r["app"],
+                "status": r["status"],
+                "deployment_iterations": r["deployment_iterations"],
+            }
+            for r in results
+        ],
+    }
+    results_path = log_dir / "results.json"
+    with open(results_path, "w") as f:
+        json.dump(output, f, indent=2)
+
+
+def _print_summary(console: Console, results: list[dict]) -> None:
+    """Print a Rich table summarizing experiment results."""
+    table = Table()
+    table.add_column("App")
+    table.add_column("Status")
+    table.add_column("Deploy Iterations")
+
+    for r in results:
+        iterations = str(r["deployment_iterations"]) if r["deployment_iterations"] is not None else "N/A"
+        table.add_row(r["app"], r["status"], iterations)
+
+    console.print(table)
+
+
 def tail_file(file_path: Path, stop_event: threading.Event, callback):
     """Tails a file and calls callback with new lines."""
     # Wait for file to exist
@@ -134,7 +188,7 @@ def run_experiment_task(
     task_id,
     log_dir: Path,
     experiment_config: dict | None = None,
-) -> bool:
+) -> dict:
     # Explicitly start the task timer
     progress.start_task(task_id)
 
@@ -174,7 +228,7 @@ def run_experiment_task(
 
         if init_proc.returncode != 0:
             progress.update(task_id, description=f"[red]{app_name}[/]: Init Failed")
-            return False
+            return {"app": app_name, "success": False, "status": "unknown", "deployment_iterations": None}
 
         # Write experiment sds config overrides into the experiment directory
         if experiment_config:
@@ -266,12 +320,14 @@ def run_experiment_task(
             for session_file in sds_dir.glob("gemini_session*.json"):
                 shutil.copy(session_file, log_dir)
 
+        extracted = _extract_results(exp_dir)
+
         if proc.returncode == 0:
             progress.update(task_id, description=f"[green]{app_name}[/]: Done", completed=100)
-            return True
+            return {"app": app_name, "success": True, **extracted}
         else:
             progress.update(task_id, description=f"[red]{app_name}[/]: Failed", completed=100)
-            return False
+            return {"app": app_name, "success": False, **extracted}
 
 
 def run_command(args: argparse.Namespace) -> int:
@@ -352,11 +408,22 @@ def run_command(args: argparse.Namespace) -> int:
                 futures[executor.submit(run_experiment_task, app, exp_name,
                                         progress, task_id, log_dir, config)] = app
 
+            results = []
             for future in as_completed(futures):
                 app = futures[future]
                 try:
-                    future.result()
+                    result = future.result()
+                    results.append(result)
                 except Exception as e:
                     logger.error(f"Error running {app}: {e}")
+                    results.append({
+                        "app": Path(app).name,
+                        "success": False,
+                        "status": "unknown",
+                        "deployment_iterations": None,
+                    })
+
+    _write_results(log_dir, exp_name, results)
+    _print_summary(console, results)
 
     return 0

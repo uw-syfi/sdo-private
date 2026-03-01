@@ -445,6 +445,8 @@ Run multiple experiments in parallel.
 
 The experiment config (`exp_config/<name>/config.toml`) lists apps and can include any `sds.toml` sections (e.g., `[agent]`, `[operator]`, `[operator.phase]`) that will be applied to all apps in the experiment. See [Per-experiment config overrides](#per-experiment-config-overrides) for details.
 
+After all apps complete, `run-exp` writes a `results.json` to the log directory with per-app deployment iterations and status, and prints a summary table to the console.
+
 ### `viz-graph`
 Visualize the agent's dependency graph (for LangGraph runtime).
 ```bash
