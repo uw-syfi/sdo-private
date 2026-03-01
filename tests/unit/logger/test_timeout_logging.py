@@ -140,9 +140,9 @@ echo "Health Check: Finished"
         # Should not reach here with our test
         raise RuntimeError("Unexpected call without timeout")
 
-    monkeypatch.setattr("app_operator.cli_agent.healthcheck.subprocess.run",
+    monkeypatch.setattr("app_operator.healthcheck.subprocess.run",
                         mock_subprocess_run)
-    monkeypatch.setattr("app_operator.cli_agent.healthcheck.time.time",
+    monkeypatch.setattr("app_operator.healthcheck.time.time",
                         lambda: next(mock_times))
 
     # Run with short timeout (2 seconds) - no actual waiting
