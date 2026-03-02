@@ -12,6 +12,7 @@ from app_operator.commands import (
     optimize_prompts,
     e2e_optimize,
     run_exp,
+    plot_exp,
 )
 import app_operator.langgraph.viz_graph as viz_graph
 from app_operator.logger import logger
@@ -119,6 +120,12 @@ Examples:
     )
     run_exp.add_arguments(run_exp_parser)
 
+    # 'plot-exp' command
+    plot_exp_parser = subparsers.add_parser(
+        "plot-exp", help="Plot and compare experiment results"
+    )
+    plot_exp.add_arguments(plot_exp_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
@@ -142,6 +149,8 @@ Examples:
         return e2e_optimize.run_command(args)
     elif args.command == "run-exp":
         return run_exp.run_command(args)
+    elif args.command == "plot-exp":
+        return plot_exp.run_command(args)
     else:
         parser.print_help()
         return 1
