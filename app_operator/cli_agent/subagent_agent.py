@@ -133,8 +133,7 @@ class SubagentCodingAgent(CodingAgent):
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.error(
-                f"[Subagent] Direct text LLM call failed: {
-                    type(e).__name__}: {e}")
+                f"[Subagent] Direct text LLM call failed: {type(e).__name__}: {e}")
             return f"LLM call failed: {type(e).__name__}: {e}"
 
     def _generate_files(self, prompt: str, repo_path: Path,
@@ -160,8 +159,7 @@ class SubagentCodingAgent(CodingAgent):
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.error(
-                f"[Subagent] Direct LLM call failed: {
-                    type(e).__name__}: {e}")
+                f"[Subagent] Direct LLM call failed: {type(e).__name__}: {e}")
             return f"LLM call failed: {type(e).__name__}: {e}"
 
         generate_and_write_files(raw, prompt, repo_path, "[Subagent]")
@@ -206,8 +204,7 @@ class SubagentCodingAgent(CodingAgent):
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(
-                f"[Subagent] Trajectory analyst failed, skipping: {
-                    type(e).__name__}: {e}")
+                f"[Subagent] Trajectory analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["trajectory"] = "(trajectory analysis unavailable)"
         logger.info("[Subagent] Trajectory analyst complete")
 
@@ -223,8 +220,7 @@ class SubagentCodingAgent(CodingAgent):
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(
-                f"[Subagent] Error log analyst failed, skipping: {
-                    type(e).__name__}: {e}")
+                f"[Subagent] Error log analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["error_log"] = "(error log analysis unavailable)"
         logger.info("[Subagent] Error log analyst complete")
 
@@ -243,8 +239,7 @@ class SubagentCodingAgent(CodingAgent):
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(
-                f"[Subagent] Script analyst failed, skipping: {
-                    type(e).__name__}: {e}")
+                f"[Subagent] Script analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["script"] = "(script analysis unavailable)"
         logger.info("[Subagent] Script analyst complete")
 
@@ -260,8 +255,7 @@ class SubagentCodingAgent(CodingAgent):
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(
-                f"[Subagent] Repo analyst failed, skipping: {
-                    type(e).__name__}: {e}")
+                f"[Subagent] Repo analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["repo"] = "(repository analysis unavailable)"
         logger.info("[Subagent] Repo analyst complete")
 
@@ -306,12 +300,8 @@ class SubagentCodingAgent(CodingAgent):
         user_parts = [
             f"TASK:\n{task_prompt}",
             f"\nCURRENT deploy.sh:\n{deploy_script}" if deploy_script else "",
-            f"\n--- Trajectory Analysis ---\n{
-                summaries.get(
-                    'trajectory', 'N/A')}",
-            f"\n--- Error Log Analysis ---\n{
-                summaries.get(
-                    'error_log', 'N/A')}",
+            f"\n--- Trajectory Analysis ---\n{summaries.get('trajectory', 'N/A')}",
+            f"\n--- Error Log Analysis ---\n{summaries.get('error_log', 'N/A')}",
             f"\n--- Script Analysis ---\n{summaries.get('script', 'N/A')}",
             f"\n--- Repository Analysis ---\n{summaries.get('repo', 'N/A')}",
         ]
@@ -336,8 +326,7 @@ class SubagentCodingAgent(CodingAgent):
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.error(
-                f"[Subagent] Root synthesis failed: {
-                    type(e).__name__}: {e}")
+                f"[Subagent] Root synthesis failed: {type(e).__name__}: {e}")
             return f"Root synthesis failed: {type(e).__name__}: {e}"
 
     def _write_deploy_sh_if_present(

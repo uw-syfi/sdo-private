@@ -12,7 +12,8 @@ import pytest
 
 
 def test_fan_out():
-    agent = MagicMock()
+    # spec=['run'] ensures the mock doesn't accidentally pass isinstance(AsyncRunnable)
+    agent = MagicMock(spec=["run"])
     # Mock run as it is called by fan_out (via asyncio.to_thread for non-AsyncRunnable)
     agent.run.side_effect = ["resp1", "resp2"]
 

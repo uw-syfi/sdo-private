@@ -38,7 +38,7 @@ def check_dependencies():
     if missing:
         for tool in missing:
             hint = INSTALL_HINTS.get(tool, f"Please install '{tool}' to continue.")
-            logger.error(f"Missing required dependency '{tool}': {hint}")
+            logger.error(f"Missing required system dependencies: {tool}: {hint}")
         sys.exit(1)
 
     # Check if docker daemon is running
