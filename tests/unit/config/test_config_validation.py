@@ -7,6 +7,27 @@ clear error messages, preventing runtime errors from bad configurations.
 import pytest
 from app_operator.config import AgentConfig, OperatorConfig, Config
 
+# Try to import hypothesis, skip tests if not available
+try:
+    from hypothesis import given, strategies as st, settings
+    HYPOTHESIS_AVAILABLE = True
+except ImportError:
+    HYPOTHESIS_AVAILABLE = False
+
+    def given(*args, **kwargs):
+        return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummySettings:
+        def __call__(self, *args, **kwargs):
+            return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummyStrategies:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    settings = DummySettings()
+    st = DummyStrategies()
+
 
 class TestOperatorConfigValidation:
     """Tests for OperatorConfig validation."""
@@ -334,3 +355,91 @@ class TestConfigIntegration:
         """Test Unicode characters in model name."""
         config = AgentConfig(model="模型-v1")
         assert config.model == "模型-v1"
+
+
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
+class TestOperatorConfigIntervalProperty:
+    """Property-based tests for OperatorConfig interval boundary sweep."""
+
+    @given(interval=st.integers(min_value=1, max_value=86400))
+    @settings(max_examples=50, deadline=1000)
+    def test_any_valid_interval_accepted(self, interval):
+        """Any integer in [1, 86400] is accepted and stored correctly on OperatorConfig."""
+        config = OperatorConfig(interval=interval)
+        assert config.interval == interval
+
+    @given(interval=st.integers().filter(lambda x: x < 1 or x > 86400))
+    @settings(max_examples=50, deadline=1000)
+    def test_any_invalid_interval_rejected(self, interval):
+        """Any integer outside [1, 86400] raises ValueError when constructing OperatorConfig."""
+        with pytest.raises(ValueError):
+            OperatorConfig(interval=interval)
+
+
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
+class TestOperatorConfigTimeoutsProperty:
+    """Property-based tests for OperatorConfig timeout and iteration fields."""
+
+    @given(st.data())
+    @settings(max_examples=50, deadline=1000)
+    def test_any_positive_timeout_accepted(self, data):
+        """Any positive integer for a timeout/max-iters field is accepted and stored correctly."""
+        field = data.draw(st.sampled_from([
+            "agent_fix_timeout",
+            "deploy_timeout",
+            "agent_timeout",
+            "monitoring_max_iters",
+            "deployment_max_iters",
+        ]))
+        value = data.draw(st.integers(min_value=1))
+        config = OperatorConfig(**{field: value})
+        assert getattr(config, field) == value
+
+    @given(st.data())
+    @settings(max_examples=50, deadline=1000)
+    def test_any_non_positive_timeout_rejected(self, data):
+        """Any non-positive integer for a timeout/max-iters field raises ValueError."""
+        field = data.draw(st.sampled_from([
+            "agent_fix_timeout",
+            "deploy_timeout",
+            "agent_timeout",
+            "monitoring_max_iters",
+            "deployment_max_iters",
+        ]))
+        value = data.draw(st.integers(max_value=0))
+        with pytest.raises(ValueError):
+            OperatorConfig(**{field: value})
+
+
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed")
+class TestConfigFromDictRoundTripProperty:
+    """Property-based round-trip tests for Config.from_dict."""
+
+    @given(
+        provider=st.sampled_from(sorted(["codex", "gemini", "claude", "claude-code", "opencode", "anthropic", "vertex", "openai", "rlm", "subagent", "hybrid"])),
+        interval=st.integers(min_value=1, max_value=86400),
+    )
+    @settings(max_examples=50, deadline=1000)
+    def test_valid_provider_and_interval_roundtrip(self, provider, interval):
+        """Config built from a dict preserves provider and interval exactly."""
+        config = Config.from_dict({"agent": {"provider": provider}, "operator": {"interval": interval}})
+        assert config.agent.provider == provider
+        assert config.operator.interval == interval
+
+    @given(
+        section_name=st.text(min_size=1, max_size=30).filter(
+            lambda s: s not in {"agent", "operator", "deployment", "runtime", "dspy", "fault_injection"}
+        ),
+    )
+    @settings(max_examples=50, deadline=1000)
+    def test_unknown_section_always_rejected(self, section_name):
+        """Any unknown top-level section key always raises an error."""
+        with pytest.raises(Exception):
+            Config.from_dict({section_name: {}})
+
+    @given(st.just({}))
+    @settings(max_examples=1, deadline=1000)
+    def test_default_config_from_empty_dict(self, data):
+        """Config.from_dict({}) always produces defaults matching Config()."""
+        assert Config.from_dict({}).agent.provider == Config().agent.provider
+        assert Config.from_dict({}).operator.interval == Config().operator.interval

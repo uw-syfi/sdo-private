@@ -8,15 +8,39 @@ These tests cover edge cases beyond basic Gemini session tests:
 """
 
 import json
+import shutil
+import tempfile
 import pytest
 import threading
 import time
+from pathlib import Path
 
 from app_operator.trajectory import (
     TrajectoryRecorder,
     Phase,
     TrajectoryMessage,
 )
+
+# Try to import hypothesis, skip tests if not available
+try:
+    from hypothesis import given, strategies as st, settings
+    HYPOTHESIS_AVAILABLE = True
+except ImportError:
+    HYPOTHESIS_AVAILABLE = False
+
+    def given(*args, **kwargs):
+        return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummySettings:
+        def __call__(self, *args, **kwargs):
+            return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummyStrategies:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    settings = DummySettings()
+    st = DummyStrategies()
 
 
 @pytest.fixture
@@ -409,3 +433,78 @@ class TestTrajectoryMessage:
         assert d["exit_code"] == 1
         assert d["timestamp"] == "2024-01-01 12:00:00"
         assert d["duration_seconds"] == 1.5
+
+
+@pytest.mark.skipif(
+    not HYPOTHESIS_AVAILABLE,
+    reason="hypothesis not installed - install with: uv add --dev hypothesis"
+)
+class TestTrajectoryUnicodeRoundTripProperty:
+    """Property-based tests for Unicode round-trip through TrajectoryRecorder."""
+
+    @given(text=st.text())
+    @settings(max_examples=50, deadline=5000)
+    def test_any_user_message_survives_file_roundtrip(self, text):
+        """Test that arbitrary Unicode user messages survive JSON file round-trip."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            recorder = TrajectoryRecorder(Path(tmpdir))
+            with recorder.phase(Phase.DEPLOYMENT):
+                recorder.add_user_message(text)
+            trajectory_path = recorder.finalize()
+            with open(trajectory_path) as f:
+                data = json.load(f)
+            messages = data["deployment"][0]["messages"]
+            user_msg = next(m for m in messages if m.get("role") == "user")
+            assert user_msg["content"] == text
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    @given(text=st.text())
+    @settings(max_examples=50, deadline=5000)
+    def test_any_assistant_message_survives_file_roundtrip(self, text):
+        """Test that arbitrary Unicode assistant messages survive JSON file round-trip."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            recorder = TrajectoryRecorder(Path(tmpdir))
+            with recorder.phase(Phase.DEPLOYMENT):
+                recorder.add_assistant_message(text)
+            trajectory_path = recorder.finalize()
+            with open(trajectory_path) as f:
+                data = json.load(f)
+            messages = data["deployment"][0]["messages"]
+            assistant_msg = next(m for m in messages if m.get("role") == "assistant")
+            assert assistant_msg["content"] == text
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    @given(
+        stdout=st.text(max_size=15000),
+        stderr=st.text(max_size=5000),
+    )
+    @settings(max_examples=30, deadline=5000)
+    def test_tool_output_truncation_invariant(self, stdout, stderr):
+        """Test truncation invariant: long outputs are truncated and flagged."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            recorder = TrajectoryRecorder(Path(tmpdir))
+            with recorder.phase(Phase.DEPLOYMENT):
+                recorder.add_tool_call(
+                    tool="run_command",
+                    args={"cmd": "test"},
+                    stdout=stdout,
+                    stderr=stderr,
+                    exit_code=0,
+                )
+            trajectory_path = recorder.finalize()
+            with open(trajectory_path) as f:
+                data = json.load(f)
+            messages = data["deployment"][0]["messages"]
+            tool_msg = next(m for m in messages if m.get("tool") == "run_command")
+            stored_stdout = tool_msg.get("stdout", "")
+            stored_stderr = tool_msg.get("stderr", "")
+            if len(stdout) + len(stderr) > recorder.max_output_length:
+                assert "truncated" in stored_stdout or "truncated" in stored_stderr
+                assert len(stored_stdout) + len(stored_stderr) < len(stdout) + len(stderr)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
