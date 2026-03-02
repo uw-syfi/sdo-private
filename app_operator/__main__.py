@@ -12,6 +12,7 @@ from app_operator.commands import (
     optimize_prompts,
     e2e_optimize,
     run_exp,
+    plot_exp,
 )
 import app_operator.langgraph.viz_graph as viz_graph
 from app_operator.logger import logger
@@ -20,6 +21,11 @@ from app_operator.logger import logger
 load_dotenv()
 
 REQUIRED_DEPENDENCIES = ["docker", "kubectl"]
+
+INSTALL_HINTS = {
+    "docker": "Install Docker: https://docs.docker.com/engine/install/",
+    "kubectl": "Install kubectl: https://kubernetes.io/docs/tasks/tools/",
+}
 
 
 def check_dependencies():
@@ -30,8 +36,9 @@ def check_dependencies():
             missing.append(tool)
 
     if missing:
-        logger.error(f"Missing required system dependencies: {', '.join(missing)}")
-        logger.info("Please install them to continue.")
+        for tool in missing:
+            hint = INSTALL_HINTS.get(tool, f"Please install '{tool}' to continue.")
+            logger.error(f"Missing required system dependencies: {tool}: {hint}")
         sys.exit(1)
 
     # Check if docker daemon is running
@@ -43,7 +50,7 @@ def check_dependencies():
         )
     except subprocess.CalledProcessError:
         logger.error("Docker daemon is not running or not accessible.")
-        logger.info("Please start Docker to continue.")
+        logger.info("Start Docker and try again: https://docs.docker.com/engine/install/")
         sys.exit(1)
 
 
@@ -113,6 +120,12 @@ Examples:
     )
     run_exp.add_arguments(run_exp_parser)
 
+    # 'plot-exp' command
+    plot_exp_parser = subparsers.add_parser(
+        "plot-exp", help="Plot and compare experiment results"
+    )
+    plot_exp.add_arguments(plot_exp_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
@@ -136,6 +149,8 @@ Examples:
         return e2e_optimize.run_command(args)
     elif args.command == "run-exp":
         return run_exp.run_command(args)
+    elif args.command == "plot-exp":
+        return plot_exp.run_command(args)
     else:
         parser.print_help()
         return 1

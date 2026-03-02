@@ -1,4 +1,5 @@
 # Example configuration for exp-runner
+# repeats = 1  # Number of times to run each application (default: 1)
 apps = [
     "apps/deathstarbench/hotelReservation",
     "apps/deathstarbench/socialNetwork"
