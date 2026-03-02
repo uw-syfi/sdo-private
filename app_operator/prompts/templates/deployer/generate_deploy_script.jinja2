@@ -33,27 +33,11 @@ CRITICAL REQUIREMENTS:
      image name, or any other string.
 {% endif %}
 
-2. **Docker Networking (Docker Compose only)**:
-   - Define one named Docker network (e.g. `<app>-network`) and attach every service to it.
-   - Add `ports:` mappings ONLY for the user-facing entry point (frontend / API gateway).
-   - ALL other services (consul, jaeger, databases, caches, internal microservices) MUST
-     omit `ports:` entirely — they are reachable by service name over the Docker network.
-   - Do NOT bind infrastructure services to host ports even for "observability" — container
-     logs and `docker exec` provide the same access without risking host-port conflicts.
+{% include "deployer/_deploy_script_schema.jinja2" %}
 
-3. **Script Requirements**:
+2. **Script Requirements**:
    - Create the file at: .sds/deploy.sh
-   - Use SCRIPT_DIR to determine paths relative to the script location
-   - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
-   - CRITICAL: The command MUST be accepted as a positional argument ($1), NOT via a flag.
-     The operator calls the script as: deploy.sh <command> (e.g. deploy.sh start)
-     Do NOT use getopts or -c flags. Parse $1 directly in a case statement.
-   - Make it robust, well-documented, and production-ready
-   - Include proper error handling and colored output
    - The script should work when executed from the .sds directory
    - Check for correct prerequisites
-
-4. **Platform-Specific Commands**:
-   - Use the commands that match the detected/target platform (see System Prompt).
 
 You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content.

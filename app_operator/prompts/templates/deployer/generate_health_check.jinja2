@@ -30,17 +30,13 @@ CRITICAL REQUIREMENTS:
      image name, or any other string.
 {% endif %}
 
+{% include "deployer/_health_check_schema.jinja2" %}
+
 2. **Script Requirements**:
    - Create the file at: .sds/health_check.sh
-   - Use SCRIPT_DIR to determine paths relative to the script location
    - Include checks for: containers/pods, ports, endpoints, databases, cache, performance
    - Include a summary report with health score
-   - Make it robust, well-documented, and production-ready
-   - Include proper error handling and colored output
    - Track total checks, passed checks, failed checks, warnings
    - The script should work when executed from the .sds directory
-
-3. **Platform-Specific Commands**:
-   - Use the checks that match the detected/target platform (see System Prompt).
 
 You must use the write_file tool to create the file .sds/health_check.sh directly. Do not just print the content.
