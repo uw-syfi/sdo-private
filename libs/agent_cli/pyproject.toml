@@ -1,0 +1,16 @@
+[project]
+name = "sds-agent-cli"
+version = "0.1.0"
+description = "AI provider CLI integrations for SDS agents"
+requires-python = ">=3.10"
+dependencies = [
+    "litellm>=1.0.0",
+    "loguru>=0.7.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["libs/agent_cli"]

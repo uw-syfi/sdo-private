@@ -29,6 +29,7 @@ class DSPyConfigProtocol(Protocol):
     canary_deployment: bool
     canary_percentage: float
 
+
 logger = logging.getLogger(__name__)
 
 # GEPA-style seed prompts: minimal starting points for optimization

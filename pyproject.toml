@@ -49,6 +49,9 @@ operator = "app_operator.__main__:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv.workspace]
+members = ["libs/agent_cli", "libs/sds_core"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["app_operator", "lego_agent", "libs"]
 
