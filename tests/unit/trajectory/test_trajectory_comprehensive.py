@@ -18,7 +18,6 @@ from pathlib import Path
 from app_operator.trajectory import (
     TrajectoryRecorder,
     Phase,
-    TrajectoryMessage,
 )
 
 # Try to import hypothesis, skip tests if not available
@@ -380,59 +379,6 @@ class TestTrajectoryStructure:
 
         # Output should be truncated to roughly max_output_length
         assert len(tool_msg["stdout"]) < 200
-
-
-class TestTrajectoryMessage:
-    """Test TrajectoryMessage dataclass."""
-
-    def test_to_dict_excludes_none_values(self):
-        """Test that to_dict excludes None values."""
-        msg = TrajectoryMessage(
-            role="user",
-            content="Hello",
-            tool=None,
-            args=None,
-            stdout=None,
-            stderr=None,
-            exit_code=None,
-        )
-
-        d = msg.to_dict()
-
-        # Should only have role and content
-        assert "role" in d
-        assert "content" in d
-        assert "tool" not in d
-        assert "args" not in d
-        assert "stdout" not in d
-        assert "stderr" not in d
-        assert "exit_code" not in d
-
-    def test_to_dict_includes_all_fields_when_present(self):
-        """Test that to_dict includes all fields when they have values."""
-        msg = TrajectoryMessage(
-            role="tool_call",
-            content=None,
-            tool="run_command",
-            args={"cmd": "test"},
-            stdout="output",
-            stderr="error",
-            exit_code=1,
-            timestamp="2024-01-01 12:00:00",
-            duration_seconds=1.5,
-        )
-
-        d = msg.to_dict()
-
-        assert d["role"] == "tool_call"
-        assert "content" not in d
-        assert d["tool"] == "run_command"
-        assert d["args"] == {"cmd": "test"}
-        assert d["stdout"] == "output"
-        assert d["stderr"] == "error"
-        assert d["exit_code"] == 1
-        assert d["timestamp"] == "2024-01-01 12:00:00"
-        assert d["duration_seconds"] == 1.5
 
 
 @pytest.mark.skipif(

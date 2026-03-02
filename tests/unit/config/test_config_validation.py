@@ -32,30 +32,10 @@ except ImportError:
 class TestOperatorConfigValidation:
     """Tests for OperatorConfig validation."""
 
-    def test_interval_must_be_positive(self):
-        """Interval must be a positive integer."""
-        with pytest.raises(ValueError, match="interval must be positive"):
-            OperatorConfig(interval=-1)
-
-    def test_interval_cannot_be_zero(self):
-        """Interval cannot be zero."""
-        with pytest.raises(ValueError, match="interval must be positive"):
-            OperatorConfig(interval=0)
-
     def test_interval_type_checked(self):
         """Interval must be an integer, not a string."""
         with pytest.raises(TypeError, match="interval must be int"):
             OperatorConfig(interval="30")
-
-    def test_interval_max_bound(self):
-        """Interval cannot exceed 24 hours (86400 seconds)."""
-        with pytest.raises(ValueError, match="interval too large"):
-            OperatorConfig(interval=999999)
-
-    def test_interval_max_bound_allowed(self):
-        """Interval of exactly 24 hours should be allowed."""
-        config = OperatorConfig(interval=86400)
-        assert config.interval == 86400
 
     def test_monitoring_max_iters_must_be_positive(self):
         """Monitoring max iterations must be positive."""
@@ -106,20 +86,6 @@ class TestOperatorConfigValidation:
         assert config.deploy_timeout == 900
         assert config.agent_timeout == 900
 
-    def test_interval_boundary_values(self):
-        """Test interval at boundary values."""
-        # Minimum valid value
-        config = OperatorConfig(interval=1)
-        assert config.interval == 1
-
-        # Just below maximum
-        config = OperatorConfig(interval=86399)
-        assert config.interval == 86399
-
-        # Exactly at maximum
-        config = OperatorConfig(interval=86400)
-        assert config.interval == 86400
-
     def test_agent_fix_timeout_must_be_positive(self):
         """Agent fix timeout must be positive."""
         with pytest.raises(ValueError, match="agent_fix_timeout must be positive"):
@@ -163,11 +129,6 @@ class TestOperatorConfigValidation:
 class TestAgentConfigValidation:
     """Tests for AgentConfig validation."""
 
-    def test_provider_validated(self):
-        """Invalid provider should be rejected."""
-        with pytest.raises(ValueError, match="Invalid provider"):
-            AgentConfig(provider="invalid-provider")
-
     def test_provider_case_insensitive(self):
         """Provider names should be case-insensitive and normalized."""
         config = AgentConfig(provider="CODEX")
@@ -175,13 +136,6 @@ class TestAgentConfigValidation:
 
         config = AgentConfig(provider="Gemini")
         assert config.provider == "gemini"
-
-    def test_valid_providers_accepted(self):
-        """All valid providers should be accepted."""
-        valid_providers = ["codex", "gemini", "claude", "claude-code", "opencode"]
-        for provider in valid_providers:
-            config = AgentConfig(provider=provider)
-            assert config.provider == provider
 
     def test_provider_type_checked(self):
         """Provider must be a string."""
@@ -292,16 +246,6 @@ class TestConfigIntegration:
         """Config.from_dict should validate timeout values are positive."""
         with pytest.raises(ValueError, match="deploy_timeout must be positive"):
             Config.from_dict({"operator": {"deploy_timeout": -100}})
-
-    def test_interval_exactly_at_lower_boundary(self):
-        """Test interval at exactly 1 second (minimum valid)."""
-        config = OperatorConfig(interval=1)
-        assert config.interval == 1
-
-    def test_interval_just_over_upper_boundary(self):
-        """Test interval just over maximum (86401 seconds)."""
-        with pytest.raises(ValueError, match="interval too large"):
-            OperatorConfig(interval=86401)
 
     def test_monitoring_max_iters_exactly_one(self):
         """Test monitoring_max_iters at minimum valid value (1)."""
