@@ -225,6 +225,25 @@ source_modules = [
 forbidden_modules = ["tests"]
 
 [[tool.importlinter.contracts]]
+name = "app_operator and lego_agent must not bypass the provider abstraction"
+type = "forbidden"
+source_modules = [
+    "app_operator",
+    "lego_agent",
+]
+forbidden_modules = [
+    "libs.agent_cli.claude",
+    "libs.agent_cli.claude_events",
+    "libs.agent_cli.codex",
+    "libs.agent_cli.gemini",
+    "libs.agent_cli.gemini_events",
+    "libs.agent_cli.opencode",
+    "libs.agent_cli.opencode_events",
+    "libs.agent_cli.rlm_utils",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 name = "app_operator foundational modules must not import from application layers"
 type = "forbidden"
 source_modules = [
