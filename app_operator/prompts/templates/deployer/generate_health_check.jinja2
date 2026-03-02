@@ -14,12 +14,20 @@ CRITICAL REQUIREMENTS:
    - Check pod status and readiness.
 {% elif platform == "docker" %}
 1. **Target Platform: Docker Compose**
-   - Use `docker compose --project-name <name> ps` to check container status.
+   - Set `PROJECT_NAME=$(basename "{{ target_dir }}")` near the top of the script and pass
+     `--project-name "$PROJECT_NAME"` to EVERY `docker compose` command. The project name
+     MUST be the basename of the target directory — NOT the service name, image name, or any
+     other string.
+   - Use `docker compose --project-name "$PROJECT_NAME" ps` to check container status.
    - NEVER use plain `docker ps` to verify service health — always use docker compose.
 {% else %}
 1. **Deployment Platform Detection**:
    - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
    - Use the appropriate status check commands.
+   - If using Docker Compose: set `PROJECT_NAME=$(basename "{{ target_dir }}")` near the top
+     of the script and pass `--project-name "$PROJECT_NAME"` to EVERY `docker compose` command.
+     The project name MUST be the basename of the target directory — NOT the service name,
+     image name, or any other string.
 {% endif %}
 
 2. **Script Requirements**:

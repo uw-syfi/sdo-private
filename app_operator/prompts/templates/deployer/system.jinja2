@@ -32,10 +32,12 @@ You MUST generate scripts for Docker deployment.
 - If a compose file exists: use it as the basis for deployment scripts.
 - If NO compose file exists: generate a docker-compose.yml from the Dockerfiles and
   application structure BEFORE generating deploy.sh.
-- **ALWAYS pass `--project-name <name>`** (derived from the app directory name) to every
-  `docker compose` command so container names are scoped and do not conflict with other runs.
-- Commands: docker compose --project-name <name> up --build -d (start),
-            docker compose --project-name <name> down (stop), etc.
+- **ALWAYS pass `--project-name <name>`** to every `docker compose` command so container
+  names are scoped and do not conflict with other runs. Derive the name from the **basename
+  of the app directory path**: `PROJECT_NAME=$(basename "$APP_DIR")`. Use `$PROJECT_NAME`
+  consistently — never use the service/application name or a hardcoded string.
+- Commands: `docker compose --project-name "$PROJECT_NAME" up --build -d` (start),
+            `docker compose --project-name "$PROJECT_NAME" down` (stop), etc.
 
 **CRITICAL REQUIREMENT**: The deployment method MUST be Docker Compose. DO NOT use plain `docker run` commands or Kubernetes commands.
 {% else %}
@@ -46,6 +48,9 @@ You MUST analyze the repository structure to determine the EXACT deployment plat
 ### Docker Compose Platform:
 - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
 - If found: Generate scripts that use `docker compose` commands.
+- **ALWAYS pass `--project-name <name>`** to every `docker compose` command. Derive the
+  name as `PROJECT_NAME=$(basename "$APP_DIR")` (the **basename** of the app directory
+  path). NEVER use the service/application name or a hardcoded string.
 
 ### Kubernetes Platform:
 - Look for: k8s/, kubernetes/, *.yaml manifests with "kind: Deployment"
@@ -72,6 +77,11 @@ You MUST analyze the repository structure to determine the EXACT deployment plat
 - Include summary reports and exit codes
 - **Create one named Docker network** shared by all services; reference it in every service's
   `networks:` key so containers resolve each other by service name.
+- **Always set `PROJECT_NAME=$(basename "$APP_DIR")` near the top of every deploy/health-check
+  script** and pass `--project-name "$PROJECT_NAME"` to every `docker compose` command.
+  The project name MUST be the filesystem basename of the app directory (e.g. if the app is
+  at `/apps/hotelReservation`, the project name is `hotelReservation`). Do NOT use the
+  service name, image name, or any other string.
 
 ## DON'Ts:
 - **NEVER mix deployment platforms** (e.g., don't use both docker compose and kubectl in the same script)
