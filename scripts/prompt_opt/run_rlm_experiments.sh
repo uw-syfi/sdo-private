@@ -10,7 +10,7 @@ set -euo pipefail
 
 SESSION="rlm-exp"
 SCRIPT="$(realpath "$0")"
-REPO="$(dirname "$SCRIPT")/.."
+REPO="$(dirname "$SCRIPT")/../.."
 
 # If not inside the tmux session yet, create one and re-invoke this script with --run.
 if [[ "${1:-}" != "--run" ]]; then
@@ -21,7 +21,7 @@ if [[ "${1:-}" != "--run" ]]; then
     fi
     tmux new-session -d -s "$SESSION" -c "$(realpath "$REPO")"
     tmux send-keys -t "$SESSION" \
-        "bash $SCRIPT --run 2>&1 | tee exp_config/rlm_experiments.log" Enter
+        "bash $SCRIPT --run 2>&1 | tee $(realpath "$REPO")/exp_config/rlm_experiments.log" Enter
     echo "Launched in tmux session '$SESSION'. Attaching..."
     tmux attach -t "$SESSION"
     exit 0
