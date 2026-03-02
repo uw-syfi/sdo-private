@@ -25,7 +25,15 @@ CRITICAL REQUIREMENTS:
    - Use the appropriate commands.
 {% endif %}
 
-2. **Script Requirements**:
+2. **Docker Networking (Docker Compose only)**:
+   - Define one named Docker network (e.g. `<app>-network`) and attach every service to it.
+   - Add `ports:` mappings ONLY for the user-facing entry point (frontend / API gateway).
+   - ALL other services (consul, jaeger, databases, caches, internal microservices) MUST
+     omit `ports:` entirely — they are reachable by service name over the Docker network.
+   - Do NOT bind infrastructure services to host ports even for "observability" — container
+     logs and `docker exec` provide the same access without risking host-port conflicts.
+
+3. **Script Requirements**:
    - Create the file at: .sds/deploy.sh
    - Use SCRIPT_DIR to determine paths relative to the script location
    - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
@@ -37,7 +45,7 @@ CRITICAL REQUIREMENTS:
    - The script should work when executed from the .sds directory
    - Check for correct prerequisites
 
-3. **Platform-Specific Commands**:
+4. **Platform-Specific Commands**:
    - Use the commands that match the detected/target platform (see System Prompt).
 
 You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content.

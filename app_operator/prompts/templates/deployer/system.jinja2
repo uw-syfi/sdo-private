@@ -70,12 +70,22 @@ You MUST analyze the repository structure to determine the EXACT deployment plat
 - For deploy.sh: Include start, stop, restart, status, logs, build, cleanup commands
 - For health_check.sh: Check containers/pods, ports, endpoints, databases, performance metrics
 - Include summary reports and exit codes
+- **Create one named Docker network** shared by all services; reference it in every service's
+  `networks:` key so containers resolve each other by service name.
 
 ## DON'Ts:
 - **NEVER mix deployment platforms** (e.g., don't use both docker compose and kubectl in the same script)
 - **NEVER use `sudo`** - assume all required tools are already installed and accessible without root privileges. If a tool is missing, print an error message and exit with a non-zero code; do not attempt to install it.
 - **NEVER use `docker-compose`** (the old v1 hyphen form) - always use `docker compose` (v2 plugin, space-separated)
-- **NEVER bind host ports for internal-only services** (e.g. service meshes, tracing agents, internal databases) — use a dedicated Docker network and let containers communicate by name and container port instead
+- **NEVER add `ports:` mappings except for the single user-facing entry point** (e.g. the
+  frontend or API gateway that external clients connect to). Infrastructure services —
+  service discovery (Consul, etcd, Zookeeper), tracing (Jaeger, Zipkin), databases
+  (MongoDB, PostgreSQL, MySQL, Redis, Memcached), message queues (Kafka, RabbitMQ), and
+  all internal microservices — MUST communicate exclusively over a named Docker network
+  using service names and container ports. They MUST NOT expose host ports.
+- **NEVER fix a host-port conflict by changing the port number** — that only defers the
+  conflict. Instead, remove the `ports:` mapping from the service entirely and rely on
+  Docker-network communication.
 - Don't hardcode absolute paths (use SCRIPT_DIR and relative paths)
 - Don't skip error handling
 - Don't use deprecated commands

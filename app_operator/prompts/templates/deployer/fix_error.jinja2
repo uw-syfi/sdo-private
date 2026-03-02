@@ -49,6 +49,9 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - **NEVER use commands from the wrong platform** (don't use kubectl if script uses docker compose)
 - **NEVER use `sudo`** - assume all tools are already installed and accessible without root privileges. If a tool is missing, print an error and exit; do not attempt to install it.
 - **NEVER use `docker-compose`** (the old v1 hyphen form) - always use `docker compose` (v2 plugin, space-separated)
+- **NEVER fix a host-port conflict by bumping the port number** — remove the `ports:` mapping
+  from the offending service instead. Only the user-facing entry point should have a `ports:`
+  mapping; all other services communicate over the Docker network.
 - Don't make random changes without understanding the error
 - Don't remove error handling or safety checks
 - Don't introduce new bugs while fixing old ones
