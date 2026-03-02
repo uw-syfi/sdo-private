@@ -409,3 +409,37 @@ class TestOperatorConfigTimeoutsProperty:
         value = data.draw(st.integers(max_value=0))
         with pytest.raises(ValueError):
             OperatorConfig(**{field: value})
+
+
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed")
+class TestConfigFromDictRoundTripProperty:
+    """Property-based round-trip tests for Config.from_dict."""
+
+    @given(
+        provider=st.sampled_from(sorted(["codex", "gemini", "claude", "claude-code", "opencode", "anthropic", "vertex", "openai", "rlm", "subagent", "hybrid"])),
+        interval=st.integers(min_value=1, max_value=86400),
+    )
+    @settings(max_examples=50, deadline=1000)
+    def test_valid_provider_and_interval_roundtrip(self, provider, interval):
+        """Config built from a dict preserves provider and interval exactly."""
+        config = Config.from_dict({"agent": {"provider": provider}, "operator": {"interval": interval}})
+        assert config.agent.provider == provider
+        assert config.operator.interval == interval
+
+    @given(
+        section_name=st.text(min_size=1, max_size=30).filter(
+            lambda s: s not in {"agent", "operator", "deployment", "runtime", "dspy", "fault_injection"}
+        ),
+    )
+    @settings(max_examples=50, deadline=1000)
+    def test_unknown_section_always_rejected(self, section_name):
+        """Any unknown top-level section key always raises an error."""
+        with pytest.raises(Exception):
+            Config.from_dict({section_name: {}})
+
+    @given(st.just({}))
+    @settings(max_examples=1, deadline=1000)
+    def test_default_config_from_empty_dict(self, data):
+        """Config.from_dict({}) always produces defaults matching Config()."""
+        assert Config.from_dict({}).agent.provider == Config().agent.provider
+        assert Config.from_dict({}).operator.interval == Config().operator.interval
