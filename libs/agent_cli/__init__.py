@@ -3,7 +3,7 @@ from .codex import CodexCodingAgent
 from .gemini import GeminiCodingAgent
 from .opencode import OpencodeCodingAgent
 from .claude import ClaudeCodeCodingAgent
-from .subagent_agent import SubagentCodingAgent
+from .subagent import call_subagent, _litellm_call_with_retry
 
 __all__ = [
     "CodingAgent",
@@ -11,5 +11,6 @@ __all__ = [
     "GeminiCodingAgent",
     "OpencodeCodingAgent",
     "ClaudeCodeCodingAgent",
-    "SubagentCodingAgent",
+    "call_subagent",
+    "_litellm_call_with_retry",
 ]

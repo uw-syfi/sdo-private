@@ -91,7 +91,7 @@ class TestRecorderGuardConsistency:
     def test_subagent_record_token_usage_guarded(self):
         """SubagentCodingAgent guards record_token_usage with hasattr."""
         import inspect
-        from libs.agent_cli.subagent_agent import SubagentCodingAgent
+        from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 
         source = inspect.getsource(SubagentCodingAgent.generate)
         assert 'hasattr(self.recorder, "record_token_usage")' in source
@@ -99,7 +99,7 @@ class TestRecorderGuardConsistency:
     def test_subagent_add_assistant_message_guarded(self):
         """SubagentCodingAgent guards add_assistant_message with hasattr."""
         import inspect
-        from libs.agent_cli.subagent_agent import SubagentCodingAgent
+        from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 
         source = inspect.getsource(SubagentCodingAgent._generate_fix)
         assert 'hasattr(self.recorder, "add_assistant_message")' in source
@@ -123,7 +123,7 @@ class TestRecorderGuardConsistency:
     def test_partial_recorder_does_not_crash_subagent(self, tmp_path):
         """A recorder missing record_token_usage should not crash SubagentCodingAgent."""
         import unittest.mock as mock
-        from libs.agent_cli.subagent_agent import SubagentCodingAgent
+        from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 
         class MinimalRecorder:
             """Recorder that lacks record_token_usage and add_assistant_message."""

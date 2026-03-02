@@ -93,3 +93,4 @@ rlm[0-9]*/
 .DS_Store
 
 .mcp.json
+.claude/worktrees/

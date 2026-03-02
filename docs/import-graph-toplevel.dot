@@ -1,0 +1,13 @@
+digraph sds {
+  rankdir=LR;
+  node [shape=box, fontsize=13, style=filled];
+  edge [color="#555555"];
+  "app_operator" [fillcolor="#AED6F1"];
+  "lego_agent" [fillcolor="#A9DFBF"];
+  "libs" [fillcolor="#EAECEE"];
+  "libs.agent_cli" [fillcolor="#F9E79F"];
+  "libs.sds_core" [fillcolor="#FAD7A0"];
+  "app_operator" -> "libs.agent_cli";
+  "app_operator" -> "libs.sds_core";
+  "lego_agent" -> "libs.sds_core";
+}
