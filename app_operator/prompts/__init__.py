@@ -1,15 +1,33 @@
 from __future__ import annotations
 
+import importlib
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Protocol, runtime_checkable
 import hashlib
 import logging
 import threading
 
 if TYPE_CHECKING:
-    from app_operator.dspy_integration.config import DSPyConfig
     from app_operator.trajectory import TrajectoryRecorderProtocol
+
+
+@runtime_checkable
+class DSPyConfigProtocol(Protocol):
+    """Protocol describing the DSPy configuration attributes used by PromptLoader.
+
+    This allows prompts to depend on an abstract interface rather than the
+    concrete DSPyConfig class from dspy_integration, keeping the dependency
+    arrow flowing dspy_integration -> prompts.
+    """
+
+    use_optimized: bool
+    use_seeds: bool
+    optimized_version: str
+    runtime_model: str | None
+    vertex_location: str | None
+    canary_deployment: bool
+    canary_percentage: float
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +61,50 @@ SEED_TEMPLATE_MAP = {
 }
 
 
+def _resolve_optimized_version(optimized_dir: Path, version: str) -> str | None:
+    """Resolve version string to actual version directory.
+
+    Handles the 'latest' special case by scanning for the highest-numbered
+    version directory.  Pure filesystem logic — no dspy dependency.
+
+    Args:
+        optimized_dir: Base directory containing versioned subdirectories.
+        version: Version string (e.g., 'v1', 'latest').
+
+    Returns:
+        Resolved version string (e.g., 'v3') or None if not found.
+    """
+    if not optimized_dir.exists():
+        logger.warning(f"Optimized prompts directory not found: {optimized_dir}")
+        return None
+
+    if version == "latest":
+        version_dirs = [
+            d for d in optimized_dir.iterdir()
+            if d.is_dir() and d.name.startswith('v') and d.name[1:].isdigit()
+        ]
+        if not version_dirs:
+            logger.warning(f"No versioned directories found in {optimized_dir}")
+            return None
+        version_dirs.sort(key=lambda d: int(d.name[1:]))
+        resolved = version_dirs[-1].name
+        logger.debug(f"Resolved 'latest' to {resolved}")
+        return resolved
+
+    version_dir = optimized_dir / version
+    if version_dir.exists():
+        return version
+    logger.warning(f"Version directory not found: {version_dir}")
+    return None
+
+
 class PromptLoader:
     """Helper class to load and render Jinja2 templates or DSPy modules for prompts."""
 
     def __init__(
         self,
         templates_dir: str | Path = None,
-        dspy_config: "DSPyConfig" | None = None,
+        dspy_config: DSPyConfigProtocol | None = None,
     ):
         """Initialize the loader.
 
@@ -257,9 +312,7 @@ class PromptLoader:
         if prompt_name in self._module_exists_cache:
             return self._module_exists_cache[prompt_name]
 
-        from app_operator.dspy_integration.loader import resolve_version
-
-        resolved = resolve_version(
+        resolved = _resolve_optimized_version(
             self.optimized_dir, self.dspy_config.optimized_version
         )
         if resolved is None:
@@ -290,11 +343,11 @@ class PromptLoader:
         Raises:
             Exception: If DSPy rendering fails
         """
-        from app_operator.dspy_integration.loader import load_optimized_module
-        from app_operator.dspy_integration.field_mappings import (
-            map_kwargs_to_fields,
-            get_output_field_name,
-        )
+        _loader_mod = importlib.import_module("app_operator.dspy_integration.loader")
+        load_optimized_module = _loader_mod.load_optimized_module
+        _field_mod = importlib.import_module("app_operator.dspy_integration.field_mappings")
+        map_kwargs_to_fields = _field_mod.map_kwargs_to_fields
+        get_output_field_name = _field_mod.get_output_field_name
 
         # Configure DSPy runtime LM (once on first use)
         self._configure_dspy_runtime()
@@ -408,7 +461,7 @@ _loader = None
 _loader_lock = threading.Lock()
 
 
-def get_loader(dspy_config: "DSPyConfig" | None = None) -> PromptLoader:
+def get_loader(dspy_config: DSPyConfigProtocol | None = None) -> PromptLoader:
     """Get or create the global PromptLoader instance.
 
     Args:

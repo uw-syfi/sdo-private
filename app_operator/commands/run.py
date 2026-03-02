@@ -1,11 +1,8 @@
 import argparse
 
-from app_operator.cli_agent.operator import AppOperator
-from app_operator.cli_agent import create_agent_from_config
-from app_operator.langgraph import LangGraphOperator
-from app_operator.adk import AdkOperator
 from app_operator.config import load_config
 from app_operator.logger import logger
+from app_operator.operator_factory import create_operator, create_tui_app
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -56,25 +53,10 @@ def run_command(args: argparse.Namespace) -> int:
     )
 
     try:
-        if config.runtime.impl == "langgraph":
-            return LangGraphOperator(**shared_kwargs).run()
-        elif config.runtime.impl == "adk":
-            return AdkOperator(**shared_kwargs).run()
+        if use_tui:
+            return create_tui_app(shared_kwargs, config)
         else:
-            # cli_agent
-            if use_tui:
-                from app_operator.ui.textual_tui import OperatorTUI
-
-                def op_factory(ui):
-                    agent = create_agent_from_config(args.directory, config=config)
-                    return AppOperator(**shared_kwargs, agent=agent, ui=ui)
-
-                app = OperatorTUI(op_factory)
-                app.run()
-                return app._exit_code
-            else:
-                agent = create_agent_from_config(args.directory, config=config)
-                return AppOperator(**shared_kwargs, agent=agent).run()
+            return create_operator(shared_kwargs, config).run()
 
     except ValueError as e:
         logger.error(f"Error: {e}")

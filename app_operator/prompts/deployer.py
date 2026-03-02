@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from app_operator.types import CommandResult
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.prompts import get_loader
+from app_operator.prompts import get_loader, DSPyConfigProtocol
 
 FIX_SUMMARY_FILENAME = "fix_summary.md"
-
-if TYPE_CHECKING:
-    from app_operator.dspy_integration.config import DSPyConfig
 
 
 def prepare_error_context(
@@ -64,7 +60,7 @@ def create_generate_script_prompt(
     repo_context: str,
     target_dir: str,
     platform: str,
-    dspy_config: DSPyConfig | None = None,
+    dspy_config: DSPyConfigProtocol | None = None,
     recorder=None,
     filesystem: FileSystemInterface | None = None,
 ) -> str:
@@ -132,7 +128,7 @@ def create_fix_prompt(
     error_context: str,
     deploy_script_path: Path,
     health_check_script_path: Path,
-    dspy_config: DSPyConfig | None = None,
+    dspy_config: DSPyConfigProtocol | None = None,
     recorder=None,
     fix_summary_consolidation: bool = True,
 ) -> str:

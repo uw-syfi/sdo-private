@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch, mock_open
 
-from app_operator.commands.viz_graph import add_arguments, run_command
+from app_operator.langgraph.viz_graph import add_arguments, run_command
 
 
 class TestAddArguments:
@@ -38,8 +38,8 @@ class TestAddArguments:
 class TestRunCommand:
     """Test run_command function."""
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.print")
     def test_run_command_stdout(self, mock_print, mock_config, mock_build_graph):
         """Test run_command outputs to stdout when no output file specified."""
@@ -57,8 +57,8 @@ class TestRunCommand:
         mock_print.assert_called_once_with("graph TD\nA-->B")
         mock_build_graph.assert_called_once()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_png_output(self, mock_file, mock_config, mock_build_graph):
         """Test run_command generates PNG file."""
@@ -77,8 +77,8 @@ class TestRunCommand:
         mock_file().write.assert_called_once_with(b"PNG binary data")
         mock_compiled.draw_mermaid_png.assert_called_once()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_mermaid_output(self, mock_file, mock_config, mock_build_graph):
         """Test run_command generates .mermaid file."""
@@ -97,8 +97,8 @@ class TestRunCommand:
         mock_file().write.assert_called_once_with("graph TD\nA-->B")
         mock_compiled.draw_mermaid.assert_called_once()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_txt_output(self, mock_file, mock_config, mock_build_graph):
         """Test run_command with .txt extension (should use mermaid format)."""
@@ -116,8 +116,8 @@ class TestRunCommand:
         mock_file.assert_called_once_with(Path("graph.txt"), "w", encoding="utf-8")
         mock_compiled.draw_mermaid.assert_called_once()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_no_extension(self, mock_file, mock_config, mock_build_graph):
         """Test run_command with no extension (should use mermaid format)."""
@@ -135,8 +135,8 @@ class TestRunCommand:
         mock_file.assert_called_once_with(Path("graph_output"), "w", encoding="utf-8")
         mock_compiled.draw_mermaid.assert_called_once()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     def test_run_command_build_graph_exception(self, mock_config, mock_build_graph):
         """Test run_command handles exception from build_graph."""
         mock_build_graph.side_effect = Exception("Graph build failed")
@@ -146,8 +146,8 @@ class TestRunCommand:
 
         assert exit_code == 1
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_file_write_exception(self, mock_file, mock_config, mock_build_graph):
         """Test run_command handles file write exception."""
@@ -166,8 +166,8 @@ class TestRunCommand:
 
         assert exit_code == 1
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_png_draw_exception(self, mock_file, mock_config, mock_build_graph):
         """Test run_command handles exception from draw_mermaid_png."""
@@ -185,8 +185,8 @@ class TestRunCommand:
         # File should not be written if PNG generation fails
         mock_file.assert_not_called()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     def test_run_command_uses_default_config(self, mock_config, mock_build_graph):
         """Test that run_command creates a default Config."""
         # Setup mocks
@@ -202,8 +202,8 @@ class TestRunCommand:
         # Config should be instantiated with defaults
         mock_config.assert_called_once()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     def test_run_command_builds_graph_with_correct_params(self, mock_config, mock_build_graph):
         """Test that build_graph is called with correct parameters."""
         # Setup mocks
@@ -226,8 +226,8 @@ class TestRunCommand:
         assert "llm" in call_args[1]
         assert "repo_path" in call_args[1]
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     def test_run_command_llm_is_mocked(self, mock_config, mock_build_graph):
         """Test that run_command creates a mock LLM with bind_tools."""
         # Setup mocks
@@ -245,8 +245,8 @@ class TestRunCommand:
         llm = call_args[1]["llm"]
         assert hasattr(llm, "bind_tools")
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_png_uppercase_extension(self, mock_file, mock_config, mock_build_graph):
         """Test run_command with uppercase PNG extension."""
@@ -264,8 +264,8 @@ class TestRunCommand:
         # Should still recognize .PNG as PNG format
         mock_compiled.draw_mermaid_png.assert_called_once()
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     @patch("builtins.open", new_callable=mock_open)
     def test_run_command_path_with_directories(self, mock_file, mock_config, mock_build_graph):
         """Test run_command with path containing directories."""
@@ -286,8 +286,8 @@ class TestRunCommand:
             encoding="utf-8"
         )
 
-    @patch("app_operator.commands.viz_graph.build_graph")
-    @patch("app_operator.commands.viz_graph.Config")
+    @patch("app_operator.langgraph.viz_graph.build_graph")
+    @patch("app_operator.langgraph.viz_graph.Config")
     def test_run_command_get_graph_exception(self, mock_config, mock_build_graph):
         """Test run_command handles exception from get_graph."""
         # Setup mocks
