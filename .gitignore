@@ -74,7 +74,6 @@ agentflow_runs/
 
 # DSPy optimization artifacts
 app_operator/prompts/optimized/
-exp_config/
 lego_agent_runs/
 !lego_agent/ui/lib/
 
