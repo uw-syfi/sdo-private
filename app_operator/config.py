@@ -7,12 +7,11 @@ from dataclasses import dataclass, field, fields
 
 from app_operator.logger import logger
 from app_operator.exceptions import ConfigurationError
-from app_operator.dspy_integration.config import DSPyConfig
-from app_operator.fault_injection.config import FaultInjectionConfig
 from app_operator.validation import (
     validate_field,
     validate_dataclass_fields,
     validate_type,
+    validate_range,
 )
 
 
@@ -26,6 +25,311 @@ class UnrecognizedFieldError(ConfigurationError):
     """Raised when an unrecognized field is found in a recognized section."""
 
     pass
+
+
+# ---------------------------------------------------------------------------
+# DSPy configuration dataclasses
+# Defined here (in the foundational config module) so that app_operator.config
+# does not need to import from app_operator.dspy_integration.
+# app_operator/dspy_integration/config.py re-exports these for backward compat.
+# ---------------------------------------------------------------------------
+
+# Label used for (int, float) type checks to match the existing "numeric" wording.
+_NUMERIC_LABEL = "numeric"
+
+
+@dataclass
+class DSPyOptimizationConfig:
+    """Configuration for DSPy optimization process.
+
+    Attributes:
+        optimizer: DSPy optimizer to use (e.g., 'BootstrapFewShot', 'MIPRO')
+        teacher_model: Model to use for generating training examples
+        num_examples: Number of examples for few-shot optimization
+        validation_split: Fraction of data reserved for validation (0.0-1.0)
+        metric_weights: Weights for different metrics (must sum to 1.0)
+    """
+
+    VALID_OPTIMIZERS = [
+        "BootstrapFewShot",
+        "BootstrapFewShotWithRandomSearch",
+        "MIPROv2",
+        "COPRO",
+    ]
+
+    optimizer: str = "BootstrapFewShot"
+    teacher_model: str = "claude-sonnet-4-5"
+    num_examples: int = 30
+    validation_split: float = 0.2
+    n_candidates: int = 4
+    metric_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "success": 0.5,
+            "efficiency": 0.25,
+            "tokens": 0.15,
+            "health_check": 0.1,
+        }
+    )
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        if self.optimizer not in self.VALID_OPTIMIZERS:
+            raise ValueError(
+                f"optimizer must be one of {self.VALID_OPTIMIZERS}, got '{self.optimizer}'"
+            )
+
+        # teacher_model: non-empty string
+        if not isinstance(self.teacher_model, str) or not self.teacher_model.strip():
+            raise ValueError(
+                f"teacher_model must be a non-empty string, got '{self.teacher_model}'"
+            )
+
+        validate_field(self.num_examples, "num_examples", int, positive=True)
+        validate_field(self.n_candidates, "n_candidates", int, min_val=1)
+
+        # validation_split: numeric in [0.0, 1.0)
+        validate_type(
+            self.validation_split, "validation_split", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.validation_split,
+            "validation_split",
+            min_val=0.0,
+            max_val=1.0,
+            max_exclusive=True,
+        )
+
+        # Validate metric_weights
+        validate_type(self.metric_weights, "metric_weights", dict)
+
+        # Support both old format (3 weights) and new format (4 weights with health_check)
+        required_metrics_new = {"success", "efficiency", "tokens", "health_check"}
+        required_metrics_old = {"success", "efficiency", "tokens"}
+
+        provided_metrics = set(self.metric_weights.keys())
+        if provided_metrics not in (required_metrics_old, required_metrics_new):
+            raise ValueError(
+                f"metric_weights must contain either {required_metrics_old} (legacy) "
+                f"or {required_metrics_new} (with health check quality), "
+                f"got {provided_metrics}"
+            )
+
+        for metric, weight in self.metric_weights.items():
+            if not isinstance(weight, (int, float)):
+                raise TypeError(
+                    f"metric_weights['{metric}'] must be numeric, "
+                    f"got {type(weight).__name__}"
+                )
+            if not 0.0 <= weight <= 1.0:
+                raise ValueError(
+                    f"metric_weights['{metric}'] must be in range [0.0, 1.0], "
+                    f"got {weight}"
+                )
+
+        total_weight = sum(self.metric_weights.values())
+        if not (0.99 <= total_weight <= 1.01):  # Allow small floating point error
+            raise ValueError(f"metric_weights must sum to 1.0, got {total_weight:.3f}")
+
+
+@dataclass
+class DSPyAutoRollbackConfig:
+    """Configuration for automatic rollback on performance degradation.
+
+    Attributes:
+        enabled: Whether to enable automatic rollback
+        success_rate_threshold: Rollback if success rate drops by this fraction
+        evaluation_window: Number of recent runs to evaluate
+    """
+
+    enabled: bool = True
+    success_rate_threshold: float = 0.05
+    evaluation_window: int = 100
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        validate_field(self.enabled, "enabled", bool)
+
+        validate_type(
+            self.success_rate_threshold, "success_rate_threshold", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.success_rate_threshold,
+            "success_rate_threshold",
+            min_val=0.0,
+            max_val=1.0,
+        )
+
+        validate_field(self.evaluation_window, "evaluation_window", int, positive=True)
+
+
+@dataclass
+class DSPyConfig:
+    """Configuration for DSPy prompt optimization.
+
+    Attributes:
+        use_optimized: Whether to use optimized prompts (default: False)
+        optimized_version: Version of optimized prompts to use (e.g., 'v1', 'latest')
+        runtime_model: Model to use for runtime DSPy invocation (auto-populated from agent.model)
+        fallback_to_baseline: Fall back to Jinja2 if DSPy fails (default: True)
+        enable_online_learning: Enable feedback collection during runs
+        feedback_sample_rate: Fraction of runs to collect feedback from (0.0-1.0)
+        canary_deployment: Enable canary deployment (gradual rollout)
+        canary_percentage: Percentage of runs to use optimized prompts (0.0-1.0)
+        optimization: Optimization process configuration
+        auto_rollback: Automatic rollback configuration
+    """
+
+    use_optimized: bool = False
+    use_seeds: bool = False
+    optimized_version: str = "latest"
+    runtime_model: str | None = None
+    vertex_location: str | None = None
+    fallback_to_baseline: bool = True
+    enable_online_learning: bool = False
+    feedback_sample_rate: float = 0.1
+    canary_deployment: bool = False
+    canary_percentage: float = 0.0
+    optimization: DSPyOptimizationConfig = field(default_factory=DSPyOptimizationConfig)
+    auto_rollback: DSPyAutoRollbackConfig = field(
+        default_factory=DSPyAutoRollbackConfig
+    )
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        validate_field(self.use_optimized, "use_optimized", bool)
+        validate_field(self.use_seeds, "use_seeds", bool)
+
+        if (
+            not isinstance(self.optimized_version, str)
+            or not self.optimized_version.strip()
+        ):
+            raise ValueError(
+                f"optimized_version must be a non-empty string, "
+                f"got '{self.optimized_version}'"
+            )
+
+        validate_field(self.fallback_to_baseline, "fallback_to_baseline", bool)
+        validate_field(self.enable_online_learning, "enable_online_learning", bool)
+
+        validate_type(
+            self.feedback_sample_rate, "feedback_sample_rate", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.feedback_sample_rate,
+            "feedback_sample_rate",
+            min_val=0.0,
+            max_val=1.0,
+        )
+
+        validate_field(self.canary_deployment, "canary_deployment", bool)
+
+        validate_type(
+            self.canary_percentage, "canary_percentage", (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.canary_percentage,
+            "canary_percentage",
+            min_val=0.0,
+            max_val=1.0,
+        )
+
+        validate_field(self.optimization, "optimization", DSPyOptimizationConfig)
+        validate_field(self.auto_rollback, "auto_rollback", DSPyAutoRollbackConfig)
+
+        # Canary deployment requires use_optimized
+        if self.canary_deployment and not self.use_optimized:
+            raise ValueError("canary_deployment requires use_optimized=true")
+
+
+# ---------------------------------------------------------------------------
+# FaultInjection configuration dataclass
+# Defined here (in the foundational config module) so that app_operator.config
+# does not need to import from app_operator.fault_injection.
+# app_operator/fault_injection/config.py re-exports this for backward compat.
+#
+# Note: valid category/severity values are hardcoded here as plain strings to
+# avoid importing FaultCategory/FaultSeverity from app_operator.fault_injection.
+# The enums in fault_injection.models must stay consistent with these sets.
+# ---------------------------------------------------------------------------
+
+_FAULT_VALID_CATEGORIES = {
+    "misconfiguration",
+    "security",
+    "metastable",
+    "correlated",
+    "infrastructure",
+}
+
+_FAULT_VALID_SEVERITIES = {
+    "low",
+    "medium",
+    "high",
+    "critical",
+}
+
+
+@dataclass
+class FaultInjectionConfig:
+    """Configuration for fault injection in training data collection.
+
+    Attributes:
+        enabled: Whether fault injection is active.
+        num_faults: Number of faults to inject per run (1-5).
+        categories: Which fault categories to include. Empty means all.
+        severities: Which severity levels to include. Empty means all.
+        exclude_faults: Fault IDs to exclude from selection.
+        seed: Random seed for reproducible fault selection.
+        backup_compose: Whether to back up compose files before injection.
+        platform: Target platform for fault selection ("compose" or "k8s").
+    """
+
+    VALID_PLATFORMS = {"compose", "k8s"}
+
+    enabled: bool = False
+    num_faults: int = 2
+    categories: list[str] = field(default_factory=list)
+    severities: list[str] = field(default_factory=list)
+    exclude_faults: list[str] = field(default_factory=list)
+    seed: int | None = None
+    backup_compose: bool = True
+    platform: str = "compose"
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        validate_field(self.enabled, "enabled", bool)
+
+        validate_type(self.num_faults, "num_faults", int)
+        if self.num_faults < 1 or self.num_faults > 5:
+            raise ValueError(
+                f"num_faults must be between 1 and 5, got {self.num_faults}"
+            )
+
+        validate_type(self.categories, "categories", list)
+        for cat in self.categories:
+            if cat not in _FAULT_VALID_CATEGORIES:
+                raise ValueError(
+                    f"Invalid category '{cat}'. "
+                    f"Valid categories: {sorted(_FAULT_VALID_CATEGORIES)}"
+                )
+
+        validate_type(self.severities, "severities", list)
+        for sev in self.severities:
+            if sev not in _FAULT_VALID_SEVERITIES:
+                raise ValueError(
+                    f"Invalid severity '{sev}'. "
+                    f"Valid severities: {sorted(_FAULT_VALID_SEVERITIES)}"
+                )
+
+        validate_field(self.exclude_faults, "exclude_faults", list)
+        validate_field(self.seed, "seed", int, nullable=True)
+        validate_field(self.backup_compose, "backup_compose", bool)
+        validate_field(
+            self.platform, "platform", str, valid_values=self.VALID_PLATFORMS
+        )
 
 
 @dataclass
@@ -269,12 +573,6 @@ class Config:
         if not dspy_data:
             return
 
-        from app_operator.dspy_integration.config import (
-            DSPyConfig,
-            DSPyOptimizationConfig,
-            DSPyAutoRollbackConfig,
-        )
-
         # Top-level DSPy fields
         validate_dataclass_fields(dspy_data, "dspy", DSPyConfig)
 
@@ -321,11 +619,6 @@ class Config:
         """
         if not dspy_data:
             return DSPyConfig()
-
-        from app_operator.dspy_integration.config import (
-            DSPyOptimizationConfig,
-            DSPyAutoRollbackConfig,
-        )
 
         # Make a copy to avoid modifying the input
         dspy_data = dict(dspy_data)
