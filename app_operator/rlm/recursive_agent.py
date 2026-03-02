@@ -267,9 +267,7 @@ class RecursiveDeploymentAgent:
         Returns:
             The assistant's response text.
         """
-        # Local import to break circular dependency:
-        # libs.agent_cli.subagent -> libs.agent_cli.rlm_agent -> app_operator.rlm.recursive_agent
-        from libs.agent_cli.subagent import call_subagent  # noqa: PLC0415
+        from libs.agent_cli import call_subagent  # noqa: PLC0415
 
         context_section = ""
         if filtered_context:

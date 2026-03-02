@@ -18,8 +18,8 @@ from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
-from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _litellm_call_with_retry
-from app_operator.cli_agent.subagent import call_subagent
+from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE
+from libs.agent_cli import call_subagent, _litellm_call_with_retry
 from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 # Shared analyst system prompts used by both SubagentCodingAgent and

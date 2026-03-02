@@ -23,7 +23,7 @@ from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE
 
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
-from app_operator.cli_agent.subagent import call_subagent
+from libs.agent_cli import call_subagent
 from app_operator.cli_agent.subagent_agent import (
     SubagentCodingAgent,
     TRAJECTORY_ANALYST_PROMPT,
