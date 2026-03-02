@@ -206,7 +206,6 @@ modules = [
     "libs.agent_cli.gemini",
     "libs.agent_cli.codex",
     "libs.agent_cli.opencode",
-    "libs.agent_cli.cli_agent",
 ]
 
 [[tool.importlinter.contracts]]
