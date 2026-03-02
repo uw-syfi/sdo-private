@@ -8,12 +8,12 @@ from dotenv import load_dotenv
 from app_operator.commands import (
     run,
     init_exp,
-    viz_graph,
     analyze_prompts,
     optimize_prompts,
     e2e_optimize,
     run_exp,
 )
+import app_operator.langgraph.viz_graph as viz_graph
 from app_operator.logger import logger
 
 # Load environment variables from .env file

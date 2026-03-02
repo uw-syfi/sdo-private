@@ -1,3 +1,5 @@
+"""Command handlers for visualizing the LangGraph agent graph."""
+
 import argparse
 from unittest.mock import MagicMock
 from pathlib import Path
