@@ -168,3 +168,79 @@ source_modules = [
     "app_operator.operator_base",
 ]
 forbidden_modules = ["app_operator.ui"]
+
+[[tool.importlinter.contracts]]
+name = "rlm must not import from operator runtimes"
+type = "forbidden"
+source_modules = ["app_operator.rlm"]
+forbidden_modules = [
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+]
+
+[[tool.importlinter.contracts]]
+name = "commands must not import from operator runtimes directly"
+type = "forbidden"
+source_modules = ["app_operator.commands"]
+forbidden_modules = [
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+]
+
+[[tool.importlinter.contracts]]
+name = "lego_agent core must not import from lego_agent.cli"
+type = "forbidden"
+source_modules = [
+    "lego_agent.engine",
+    "lego_agent.runtime",
+]
+forbidden_modules = ["lego_agent.cli"]
+
+[[tool.importlinter.contracts]]
+name = "libs.agent_cli provider implementations are independent siblings"
+type = "independence"
+modules = [
+    "libs.agent_cli.claude",
+    "libs.agent_cli.gemini",
+    "libs.agent_cli.codex",
+    "libs.agent_cli.opencode",
+    "libs.agent_cli.cli_agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "app_operator.prompts must not import from app_operator.dspy_integration"
+type = "forbidden"
+source_modules = ["app_operator.prompts"]
+forbidden_modules = ["app_operator.dspy_integration"]
+
+[[tool.importlinter.contracts]]
+name = "application source modules must not import from tests"
+type = "forbidden"
+source_modules = [
+    "app_operator",
+    "lego_agent",
+    "libs",
+]
+forbidden_modules = ["tests"]
+
+[[tool.importlinter.contracts]]
+name = "app_operator foundational modules must not import from application layers"
+type = "forbidden"
+source_modules = [
+    "app_operator.config",
+    "app_operator.exceptions",
+    "app_operator.types",
+    "app_operator.logger",
+]
+forbidden_modules = [
+    "app_operator.commands",
+    "app_operator.cli_agent",
+    "app_operator.langgraph",
+    "app_operator.adk",
+    "app_operator.dspy_integration",
+    "app_operator.fault_injection",
+    "app_operator.rlm",
+    "app_operator.ui",
+]
