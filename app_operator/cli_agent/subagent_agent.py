@@ -16,11 +16,11 @@ from pathlib import Path
 from loguru import logger
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
-from .base import CodingAgent, register_provider
-from .events import AgentEventHandler
-from libs.agent_cli.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _litellm_call_with_retry
-from .subagent import call_subagent
-from .utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
+from libs.agent_cli.base import CodingAgent, register_provider
+from libs.agent_cli.events import AgentEventHandler
+from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _litellm_call_with_retry
+from app_operator.cli_agent.subagent import call_subagent
+from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 # Shared analyst system prompts used by both SubagentCodingAgent and
 # HybridCodingAgent.

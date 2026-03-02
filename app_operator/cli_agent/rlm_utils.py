@@ -1,8 +1,7 @@
 """Shared utilities for RLM-based agents.
 
-Contains regex patterns and litellm retry helpers used by both
-SubagentCodingAgent (in libs/agent_cli) and RLMCodingAgent/HybridCodingAgent
-(in app_operator/cli_agent).
+Contains regex patterns and litellm retry helpers used by
+RLMCodingAgent, HybridCodingAgent, and SubagentCodingAgent.
 """
 import re
 import time

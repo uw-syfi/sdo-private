@@ -10,7 +10,7 @@ import subprocess
 
 from loguru import logger
 
-from libs.agent_cli.rlm_utils import _litellm_call_with_retry
+from app_operator.cli_agent.rlm_utils import _litellm_call_with_retry
 
 
 def call_subagent(

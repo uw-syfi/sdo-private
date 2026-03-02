@@ -4,8 +4,8 @@ import unittest.mock as mock
 
 import pytest
 
-from libs.agent_cli.subagent import call_subagent
-from libs.agent_cli.subagent_agent import SubagentCodingAgent
+from app_operator.cli_agent.subagent import call_subagent
+from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 
 # ---------------------------------------------------------------------------
 # Helpers
