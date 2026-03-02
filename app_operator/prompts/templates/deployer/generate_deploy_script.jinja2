@@ -13,11 +13,12 @@ CRITICAL REQUIREMENTS:
    - Use `kubectl` commands.
    - Ensure you handle manifest application and pod readiness.
 {% elif platform == "docker" %}
-1. **Target Platform: Docker**
-   - Use `docker compose` or `docker` commands as appropriate for the repo.
-   - CRITICAL: The `start` command MUST use `docker compose up --build -d`, not
-     plain `up -d`.  Without `--build`, Docker reuses cached images and never
-     compiles the current source code.  Every deployment must build from source.
+1. **Target Platform: Docker Compose**
+   - ALWAYS use `docker compose` commands — NEVER use plain `docker run` to start services.
+   - If no docker-compose.yml exists in the repo, generate one before creating deploy.sh.
+   - CRITICAL: The `start` command MUST use `docker compose --project-name <name> up --build -d`.
+     Without `--build`, Docker reuses cached images and never compiles current source code.
+     Every deployment must build from source.
 {% else %}
 1. **Deployment Platform Detection**:
    - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.

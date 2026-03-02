@@ -27,20 +27,17 @@ You MUST generate scripts for Kubernetes deployment.
 You MUST generate scripts for Docker deployment.
 
 ### Docker Platform Requirements:
-- Analyze the repository to choose between Docker Compose and plain Docker.
-- **Docker Compose** (Recommended if compose file exists):
-  - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
-  - If found: Generate scripts that use `docker compose` commands
-  - **ALWAYS pass `--project-name <name>`** (derived from the app directory name) to every `docker compose` command so container names are scoped to this deployment and do not conflict with other runs
-  - Commands: docker compose --project-name <name> up, docker compose --project-name <name> down, etc.
-- **Plain Docker**:
-  - Look for: Dockerfile(s) without docker-compose files
-  - If found: Generate scripts that use direct `docker run` commands
-  - Commands: docker build, docker run, docker stop, docker ps, docker logs
-  - Create a dedicated Docker network for the application and attach all containers to it so they communicate by container name without host port bindings
-  - Only use `-p` to expose ports that must be reachable from outside the host (e.g. the application's public-facing endpoint)
+- This deployment MUST use Docker Compose. NEVER use plain `docker run` to start services.
+- Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
+- If a compose file exists: use it as the basis for deployment scripts.
+- If NO compose file exists: generate a docker-compose.yml from the Dockerfiles and
+  application structure BEFORE generating deploy.sh.
+- **ALWAYS pass `--project-name <name>`** (derived from the app directory name) to every
+  `docker compose` command so container names are scoped and do not conflict with other runs.
+- Commands: docker compose --project-name <name> up --build -d (start),
+            docker compose --project-name <name> down (stop), etc.
 
-**CRITICAL REQUIREMENT**: The deployment method MUST be Docker based. DO NOT use Kubernetes commands.
+**CRITICAL REQUIREMENT**: The deployment method MUST be Docker Compose. DO NOT use plain `docker run` commands or Kubernetes commands.
 {% else %}
 ## CRITICAL: Deployment Platform Detection
 
@@ -48,15 +45,16 @@ You MUST analyze the repository structure to determine the EXACT deployment plat
 
 ### Docker Compose Platform:
 - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
-- If found: Generate scripts that use `docker compose` commands
+- If found: Generate scripts that use `docker compose` commands.
 
 ### Kubernetes Platform:
-- Look for: k8s/, kubernetes/, *.yaml manifests
-- If found: Generate scripts that use `kubectl` commands
+- Look for: k8s/, kubernetes/, *.yaml manifests with "kind: Deployment"
+- If found: Generate scripts that use `kubectl` commands.
 
-### Plain Docker Platform:
-- Look for: Dockerfile(s) without docker-compose files
-- If found: Generate scripts that use direct `docker run` commands
+### Docker Platform (Compose-only fallback):
+- If Dockerfiles are found but NO compose file exists: generate a docker-compose.yml
+  first, then generate deploy.sh using `docker compose` commands.
+- NEVER use plain `docker run` commands to start services — always use docker compose.
 {% endif %}
 
 ## DO's:

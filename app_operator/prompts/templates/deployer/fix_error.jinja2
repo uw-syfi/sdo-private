@@ -16,13 +16,10 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 2. Identify if it's using:
    - Docker Compose (docker compose commands)
    - Kubernetes (kubectl commands)
-   - Plain Docker (docker run/stop/ps commands)
-   - Other platforms
 
 3. **CRITICAL**: All fixes MUST use commands appropriate for the detected platform
    - If using Docker Compose → Use docker compose commands in fixes
    - If using Kubernetes → Use kubectl commands in fixes
-   - If using plain Docker → Use docker commands in fixes
    - DO NOT mix platforms or suggest commands for the wrong platform
 
 4. Check the repository structure to confirm:
@@ -48,7 +45,7 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 - **Use platform-appropriate commands** (match the platform detected in the script)
 
 ## DON'Ts:
-- **NEVER change the deployment platform** (don't switch from docker compose to kubectl or vice versa)
+- **NEVER switch between Docker Compose and Kubernetes** without explicit instruction
 - **NEVER use commands from the wrong platform** (don't use kubectl if script uses docker compose)
 - **NEVER use `sudo`** - assume all tools are already installed and accessible without root privileges. If a tool is missing, print an error and exit; do not attempt to install it.
 - **NEVER use `docker-compose`** (the old v1 hyphen form) - always use `docker compose` (v2 plugin, space-separated)

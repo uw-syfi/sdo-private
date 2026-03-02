@@ -13,9 +13,9 @@ CRITICAL REQUIREMENTS:
    - Use `kubectl` commands.
    - Check pod status and readiness.
 {% elif platform == "docker" %}
-1. **Target Platform: Docker**
-   - Use `docker compose ps` or `docker ps`.
-   - Check container status.
+1. **Target Platform: Docker Compose**
+   - Use `docker compose --project-name <name> ps` to check container status.
+   - NEVER use plain `docker ps` to verify service health — always use docker compose.
 {% else %}
 1. **Deployment Platform Detection**:
    - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
