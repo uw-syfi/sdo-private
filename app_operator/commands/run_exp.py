@@ -198,7 +198,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
             apps_seen.setdefault(r.app, []).append(r)
 
         aggregated = []
-        for app_name, app_results in apps_seen.items():
+        for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
             successes = sum(1 for r in app_results if r.success)
             iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
@@ -269,7 +269,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
         for r in results:
             apps_seen.setdefault(r.app, []).append(r)
 
-        for app_name, app_results in apps_seen.items():
+        for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
             successes = sum(1 for r in app_results if r.success)
             iters = sorted(r.deployment_iterations for r in app_results if r.deployment_iterations is not None)
