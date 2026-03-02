@@ -14,9 +14,7 @@ from loguru import logger
 from app_operator.rlm.environment import RLMContext
 from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
-from libs.agent_cli.rlm_utils import (
-    _FILE_GEN_RE,
-)
+from libs.agent_cli import _FILE_GEN_RE
 
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
