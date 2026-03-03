@@ -861,6 +861,13 @@ class DeploymentAgent:
 
             return True
 
+        except subprocess.TimeoutExpired:
+            timeout_min = self.operator_config.agent_fix_timeout // 60
+            logger.error(f"Agent fix timed out after {timeout_min} minutes")
+            self.recorder.add_assistant_message(
+                f"Agent fix timed out after {timeout_min} minutes"
+            )
+            return False
         except AgentError as e:
             logger.error(f"Agent failed to provide fix: {e}")
             self.recorder.add_assistant_message(f"Failed to provide fix: {e}")
