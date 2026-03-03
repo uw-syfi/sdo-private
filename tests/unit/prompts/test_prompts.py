@@ -126,6 +126,47 @@ def test_monitor_analyze_health(loader):
     assert "<exec_summary>" in rendered
 
 
+def test_fix_error_template_with_code_analysis(loader):
+    """Template renders architecture reconciliation block when has_code_analysis=True."""
+    rendered = loader.render(
+        "deployer/fix_error.jinja2",
+        repo_path="/repo",
+        attempt=1,
+        max_attempts=3,
+        error_context="error",
+        previous_summary_note="",
+        deploy_script=".sds/deploy.sh",
+        health_check_script=".sds/health_check.sh",
+        platform="auto",
+        has_code_analysis=True,
+    )
+    assert "code_analysis.md" in rendered
+    assert "Architecture Reconciliation" in rendered
+    # Spot-check key reconciliation categories are mentioned
+    assert "Missing services" in rendered
+    assert "Phantom services" in rendered
+    assert "Database mismatches" in rendered
+    assert "Port mismatches" in rendered
+
+
+def test_fix_error_template_without_code_analysis(loader):
+    """Template omits reconciliation block when has_code_analysis=False."""
+    rendered = loader.render(
+        "deployer/fix_error.jinja2",
+        repo_path="/repo",
+        attempt=1,
+        max_attempts=3,
+        error_context="error",
+        previous_summary_note="",
+        deploy_script=".sds/deploy.sh",
+        health_check_script=".sds/health_check.sh",
+        platform="auto",
+        has_code_analysis=False,
+    )
+    assert "Architecture Reconciliation" not in rendered
+    assert "Phantom services" not in rendered
+
+
 def test_fix_error_template_with_deployment_issues(loader):
     """Template renders TODO instructions when has_deployment_issues=True."""
     rendered = loader.render(

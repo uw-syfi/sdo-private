@@ -173,6 +173,7 @@ def create_fix_prompt(
             )
 
     has_deployment_issues = (repo_path / ".sds" / "deployment_issues.md").exists()
+    has_code_analysis = (repo_path / ".sds" / "code_analysis.md").exists()
 
     return get_loader(dspy_config).render(
         "deployer/fix_error.jinja2",
@@ -186,6 +187,7 @@ def create_fix_prompt(
         platform=platform,
         recorder=recorder,
         has_deployment_issues=has_deployment_issues,
+        has_code_analysis=has_code_analysis,
     )
 
 

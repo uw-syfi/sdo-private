@@ -307,6 +307,38 @@ class TestCreateFixPrompt:
         # Should include the error context
         assert "Permission denied" in prompt
 
+    def test_fix_prompt_includes_reconciliation_when_code_analysis_exists(self, tmp_path):
+        """When code_analysis.md exists, prompt contains architecture reconciliation instructions."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        (sds / "code_analysis.md").write_text("# Code Analysis Report\n")
+        prompt = create_fix_prompt(
+            repo_path=tmp_path,
+            attempt=1,
+            max_attempts=3,
+            error_context="container crashed",
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+        )
+        assert "Architecture Reconciliation" in prompt
+        assert "code_analysis.md" in prompt
+
+    def test_fix_prompt_omits_reconciliation_when_no_code_analysis(self, tmp_path):
+        """When code_analysis.md is absent, no reconciliation instructions appear."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        # code_analysis.md deliberately not created
+        prompt = create_fix_prompt(
+            repo_path=tmp_path,
+            attempt=1,
+            max_attempts=3,
+            error_context="container crashed",
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+        )
+        assert "Architecture Reconciliation" not in prompt
+        assert isinstance(prompt, str) and len(prompt) > 0
+
     def test_fix_prompt_includes_todo_instructions_when_issues_file_exists(self, tmp_path):
         """When deployment_issues.md exists, prompt contains TODO tracking instructions."""
         sds = tmp_path / ".sds"
