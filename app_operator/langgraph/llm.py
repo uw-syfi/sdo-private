@@ -20,49 +20,74 @@ def _normalize_provider(provider: str) -> str:
     return provider_lower
 
 
-def build_llm(config: Config) -> BaseChatModel:
-    provider = _normalize_provider(config.agent.provider)
-    model = config.agent.model
-    location = config.agent.location
-    if model is None:
-        raise ValueError("Model must be specified for langgraph agent")
+def _build_vertex_kwargs(
+    model: str,
+    location: str | None = None,
+    thinking_budget: int | None = None,
+) -> dict:
+    """Build kwargs for ChatGoogleGenerativeAI with Vertex AI."""
+    kwargs: dict = {"model": model, "vertexai": True}
+    if location:
+        kwargs["location"] = location
+    if thinking_budget:
+        kwargs["thinking_budget"] = thinking_budget
+        kwargs["include_thoughts"] = True
+    return kwargs
 
-    if provider == "openai":
+
+def create_chat_model(
+    provider: str,
+    model: str,
+    location: str | None = None,
+    thinking_budget: int | None = None,
+) -> BaseChatModel:
+    """Create a LangChain chat model from provider and model strings.
+
+    This is the low-level factory that can be used without a full Config object.
+    """
+    normalized = _normalize_provider(provider)
+
+    if normalized == "openai":
         return ChatOpenAI(model=model)
-    if provider == "anthropic":
-        kwargs = {"model": model}
-        if config.agent.thinking_budget:
+    if normalized == "anthropic":
+        kwargs: dict = {"model": model}
+        if thinking_budget:
             kwargs["thinking"] = {
                 "type": "enabled",
-                "budget_tokens": config.agent.thinking_budget,
+                "budget_tokens": thinking_budget,
             }
         return ChatAnthropic(**kwargs)
-    if provider == "gemini":
+    if normalized == "gemini":
         try:
             kwargs = {"model": model}
-            if config.agent.thinking_budget:
-                kwargs["thinking_budget"] = config.agent.thinking_budget
+            if thinking_budget:
+                kwargs["thinking_budget"] = thinking_budget
                 kwargs["include_thoughts"] = True
             return ChatGoogleGenerativeAI(**kwargs)
         except Exception as e:
-            # If API key is missing, try falling back to Vertex AI
             if "API key required" in str(e):
                 logger.info("Gemini API key not found, falling back to Vertex AI")
-                kwargs = {"model": model, "vertexai": True}
-                if location:
-                    kwargs["location"] = location
-                if config.agent.thinking_budget:
-                    kwargs["thinking_budget"] = config.agent.thinking_budget
-                    kwargs["include_thoughts"] = True
-                return ChatGoogleGenerativeAI(**kwargs)
+                return ChatGoogleGenerativeAI(
+                    **_build_vertex_kwargs(model, location, thinking_budget)
+                )
             raise
-    if provider == "vertex":
-        kwargs = {"model": model, "vertexai": True}
-        if location:
-            kwargs["location"] = location
-        if config.agent.thinking_budget:
-            kwargs["thinking_budget"] = config.agent.thinking_budget
-            kwargs["include_thoughts"] = True
-        return ChatGoogleGenerativeAI(**kwargs)
+    if normalized == "vertex":
+        return ChatGoogleGenerativeAI(
+            **_build_vertex_kwargs(model, location, thinking_budget)
+        )
 
-    raise ValueError(f"Unsupported langgraph provider: {config.agent.provider}")
+    raise ValueError(f"Unsupported provider: {provider}")
+
+
+def build_llm(config: Config) -> BaseChatModel:
+    """Build LLM from a full Config. Delegates to create_chat_model."""
+    model = config.agent.model
+    if model is None:
+        raise ValueError("Model must be specified for langgraph agent")
+
+    return create_chat_model(
+        provider=config.agent.provider,
+        model=model,
+        location=config.agent.location,
+        thinking_budget=config.agent.thinking_budget,
+    )

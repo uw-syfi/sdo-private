@@ -507,11 +507,76 @@ class RuntimeConfig:
 
 
 @dataclass
+class GEPAConfig:
+    """Configuration for GEPA prompt optimization.
+
+    Added to sds.toml under [gepa] section:
+
+    [gepa]
+    max_steps = 50
+    num_candidates = 10
+    minibatch_size = 3
+    reflection_provider = "gemini"
+    reflection_model = "gemini-2.5-pro"
+    output_dir = "gepa_runs"
+    """
+
+    max_steps: int = 50
+    num_candidates: int = 10
+    minibatch_size: int = 3
+    validation_size: int = 10
+    mutation_probability: float = 0.7
+    diversity_probability: float = 0.1
+    patience: int = 10
+    checkpoint_interval: int = 5
+    reflection_provider: str = "gemini"
+    reflection_model: str | None = "gemini-2.5-pro"
+    seed: int | None = None
+    output_dir: str = "gepa_runs"
+
+    def __post_init__(self):
+        """Validate configuration values after initialization."""
+        for field_name in [
+            "max_steps",
+            "num_candidates",
+            "minibatch_size",
+            "validation_size",
+            "patience",
+            "checkpoint_interval",
+        ]:
+            validate_field(getattr(self, field_name), field_name, int, positive=True)
+
+        for prob_field in ["mutation_probability", "diversity_probability"]:
+            validate_type(
+                getattr(self, prob_field), prob_field, (int, float),
+                type_label=_NUMERIC_LABEL,
+            )
+            validate_range(
+                getattr(self, prob_field), prob_field,
+                min_val=0.0, max_val=1.0,
+            )
+
+        validate_field(self.seed, "seed", int, nullable=True)
+
+        validate_field(self.reflection_provider, "reflection_provider", str)
+        self.reflection_provider = self.reflection_provider.lower()
+        if self.reflection_provider not in AgentConfig.VALID_PROVIDERS:
+            raise ValueError(
+                f"Invalid reflection_provider: '{self.reflection_provider}'. "
+                f"Valid providers: {', '.join(sorted(AgentConfig.VALID_PROVIDERS))}"
+            )
+
+        validate_field(self.reflection_model, "reflection_model", str, nullable=True)
+        validate_field(self.output_dir, "output_dir", str)
+
+
+@dataclass
 class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     operator: OperatorConfig = field(default_factory=OperatorConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    gepa: GEPAConfig = field(default_factory=GEPAConfig)
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
@@ -539,6 +604,7 @@ class Config:
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
+        gepa_data = data.get("gepa", {})
         dspy_data = data.get("dspy", {})
         fault_injection_data = data.get("fault_injection", {})
 
@@ -547,6 +613,7 @@ class Config:
         cls._validate_operator_phase_fields(operator_data)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
+        cls._validate_fields(gepa_data, "gepa", GEPAConfig)
         cls._validate_dspy_fields(dspy_data)
         cls._validate_fields(
             fault_injection_data, "fault_injection", FaultInjectionConfig
@@ -563,6 +630,7 @@ class Config:
             operator=cls._parse_operator_config(operator_data),
             deployment=DeploymentConfig(**deployment_data),
             runtime=RuntimeConfig(**runtime_data),
+            gepa=GEPAConfig(**gepa_data),
             dspy=dspy_config,
             fault_injection=FaultInjectionConfig(**fault_injection_data),
         )
