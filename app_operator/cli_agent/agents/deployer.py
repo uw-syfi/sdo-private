@@ -787,23 +787,26 @@ class DeploymentAgent:
         logger.info(
             f"Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
 
-        # Prepare error context
-        error_context = prepare_error_context(
-            deploy_result, health_result, log_file_path, health_check_log_path
-        )
-
-        # Create fix prompt
-        prompt = create_fix_prompt(
-            self.repo_path,
-            attempt,
-            max_attempts,
-            error_context,
-            self.deploy_script,
-            self.health_check_script,
-            dspy_config=self.dspy_config,
-            recorder=self.recorder,
-            fix_summary_consolidation=self.operator_config.phase.fix_summary_consolidation,
-        )
+        try:
+            error_context = prepare_error_context(
+                deploy_result, health_result, log_file_path, health_check_log_path
+            )
+            prompt = create_fix_prompt(
+                self.repo_path,
+                attempt,
+                max_attempts,
+                error_context,
+                self.deploy_script,
+                self.health_check_script,
+                platform=self.deployment_config.platform,
+                dspy_config=self.dspy_config,
+                recorder=self.recorder,
+                fix_summary_consolidation=self.operator_config.phase.fix_summary_consolidation,
+            )
+        except Exception as e:
+            logger.error(f"Failed to prepare fix prompt: {e}")
+            self.recorder.add_assistant_message(f"Failed to prepare fix prompt: {e}")
+            return False
 
         try:
             logger.info(

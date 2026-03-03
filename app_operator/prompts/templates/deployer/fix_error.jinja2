@@ -80,7 +80,24 @@ The deployment has failed. Please analyze the error and fix the application depl
 {{ previous_summary_note }}
 {% endif %}
 
-Please check `.sds/deployment_issues.md` for potential issues identified during initial analysis. Note that this file is static and might be out-of-date (some issues may have been fixed already), so verify findings against the current state of the codebase.
+{% if has_deployment_issues is defined and has_deployment_issues %}
+## Deployment Issues Tracker
+
+`.sds/deployment_issues.md` is a live TODO list of known potential issues. Read it before starting your analysis.
+
+**Fix now** any open issue (`- [ ]`) that meets either condition:
+- Confidence is **High** (regardless of whether it directly matches this error), OR
+- The issue description is **relevant to the current deployment error**
+
+**After fixing** an issue: update its entry in the `## TODO` section from `- [ ] #N` to `- [x] #N`.
+
+**If you discover a new issue** during your investigation that you are NOT fixing in this pass (because it is not relevant or not high confidence), append it to the file:
+- Assign the next available ID
+- Add a new `- [ ] #N — <title>` line to the TODO section
+- Add a full `### #N — <title>` block in the Issues section
+
+**Do not re-investigate** issues already marked `[x]` — they are resolved.
+{% endif %}
 
 The scripts are located at:
 - {{ deploy_script }}
