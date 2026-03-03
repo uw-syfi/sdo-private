@@ -64,7 +64,16 @@ You can run `docker compose ps` to inspect the container status and `docker comp
 You can run `kubectl get pods` to inspect pod status and `kubectl logs` to inspect pod logs.
 {% endif %}
 
-Check for container/pod abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs.
+Example signals to scan for (not exhaustive — use these as pattern-matching hints, not a checklist):
+- `Restarting`/`CrashLoopBackOff`, repeated restarts → entrypoint failing; exit 137 → OOMKill; exit 139 → SIGSEGV
+- No logs after start → crash before logging initialized
+- Repeated identical lines → spin loop / retry storm
+- `panic:`/`fatal:` (Go), uncaught exception at startup → application bug or missing dependency
+- `address already in use` → port conflict with host or sibling container
+- `connection refused` to DB/cache at startup → startup ordering race; add `depends_on: condition: service_healthy`
+- DNS failure / `no such host` → service not on shared network, or hostname typo in config
+- `KeyError` / `required` / `undefined` env var → incomplete environment config
+- High CPU throttle → startup timeouts; disk full (`df -h`) → silent build/pull failures
 
 ## CRITICAL: Context size limits
 
