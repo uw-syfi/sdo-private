@@ -2,8 +2,6 @@ import argparse
 import shutil
 import subprocess
 import sys
-import os
-import subprocess
 import time
 
 from dotenv import load_dotenv
@@ -82,7 +80,7 @@ def trigger_ai_remediation(max_retries: int):
                 return True # Exit the loop
             
             else:
-                print(f"\n⚠️ [SDS Operator] Agent finished, but system is NOT healthy yet.")
+                print("\n⚠️ [SDS Operator] Agent finished, but system is NOT healthy yet.")
                 print("   Retrying in 5 seconds...")
                 time.sleep(5)
 

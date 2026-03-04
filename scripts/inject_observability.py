@@ -1,5 +1,4 @@
 import os
-import sys
 import yaml
 import argparse
 import copy
