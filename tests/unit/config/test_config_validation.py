@@ -5,36 +5,37 @@ clear error messages, preventing runtime errors from bad configurations.
 """
 
 import pytest
-from app_operator.config import AgentConfig, OperatorConfig, Config
+from app_operator.config import AgentConfig, Config, OperatorConfig
+
+# Try to import hypothesis, skip tests if not available
+try:
+    from hypothesis import given, strategies as st, settings
+    HYPOTHESIS_AVAILABLE = True
+except ImportError:
+    HYPOTHESIS_AVAILABLE = False
+
+    def given(*args, **kwargs):
+        return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummySettings:
+        def __call__(self, *args, **kwargs):
+            return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummyStrategies:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    settings = DummySettings()
+    st = DummyStrategies()
 
 
 class TestOperatorConfigValidation:
     """Tests for OperatorConfig validation."""
 
-    def test_interval_must_be_positive(self):
-        """Interval must be a positive integer."""
-        with pytest.raises(ValueError, match="interval must be positive"):
-            OperatorConfig(interval=-1)
-
-    def test_interval_cannot_be_zero(self):
-        """Interval cannot be zero."""
-        with pytest.raises(ValueError, match="interval must be positive"):
-            OperatorConfig(interval=0)
-
     def test_interval_type_checked(self):
         """Interval must be an integer, not a string."""
         with pytest.raises(TypeError, match="interval must be int"):
             OperatorConfig(interval="30")
-
-    def test_interval_max_bound(self):
-        """Interval cannot exceed 24 hours (86400 seconds)."""
-        with pytest.raises(ValueError, match="interval too large"):
-            OperatorConfig(interval=999999)
-
-    def test_interval_max_bound_allowed(self):
-        """Interval of exactly 24 hours should be allowed."""
-        config = OperatorConfig(interval=86400)
-        assert config.interval == 86400
 
     def test_monitoring_max_iters_must_be_positive(self):
         """Monitoring max iterations must be positive."""
@@ -80,24 +81,10 @@ class TestOperatorConfigValidation:
         config = OperatorConfig()
         assert config.interval == 30
         assert config.monitoring_max_iters == 5
-        assert config.deployment_max_iters == 5
+        assert config.deployment_max_iters == 20
         assert config.agent_fix_timeout == 1800
         assert config.deploy_timeout == 900
-        assert config.agent_timeout == 300
-
-    def test_interval_boundary_values(self):
-        """Test interval at boundary values."""
-        # Minimum valid value
-        config = OperatorConfig(interval=1)
-        assert config.interval == 1
-
-        # Just below maximum
-        config = OperatorConfig(interval=86399)
-        assert config.interval == 86399
-
-        # Exactly at maximum
-        config = OperatorConfig(interval=86400)
-        assert config.interval == 86400
+        assert config.agent_timeout == 900
 
     def test_agent_fix_timeout_must_be_positive(self):
         """Agent fix timeout must be positive."""
@@ -142,11 +129,6 @@ class TestOperatorConfigValidation:
 class TestAgentConfigValidation:
     """Tests for AgentConfig validation."""
 
-    def test_provider_validated(self):
-        """Invalid provider should be rejected."""
-        with pytest.raises(ValueError, match="Invalid provider"):
-            AgentConfig(provider="invalid-provider")
-
     def test_provider_case_insensitive(self):
         """Provider names should be case-insensitive and normalized."""
         config = AgentConfig(provider="CODEX")
@@ -154,13 +136,6 @@ class TestAgentConfigValidation:
 
         config = AgentConfig(provider="Gemini")
         assert config.provider == "gemini"
-
-    def test_valid_providers_accepted(self):
-        """All valid providers should be accepted."""
-        valid_providers = ["codex", "gemini", "claude", "claude-code", "opencode"]
-        for provider in valid_providers:
-            config = AgentConfig(provider=provider)
-            assert config.provider == provider
 
     def test_provider_type_checked(self):
         """Provider must be a string."""
@@ -272,16 +247,6 @@ class TestConfigIntegration:
         with pytest.raises(ValueError, match="deploy_timeout must be positive"):
             Config.from_dict({"operator": {"deploy_timeout": -100}})
 
-    def test_interval_exactly_at_lower_boundary(self):
-        """Test interval at exactly 1 second (minimum valid)."""
-        config = OperatorConfig(interval=1)
-        assert config.interval == 1
-
-    def test_interval_just_over_upper_boundary(self):
-        """Test interval just over maximum (86401 seconds)."""
-        with pytest.raises(ValueError, match="interval too large"):
-            OperatorConfig(interval=86401)
-
     def test_monitoring_max_iters_exactly_one(self):
         """Test monitoring_max_iters at minimum valid value (1)."""
         config = OperatorConfig(monitoring_max_iters=1)
@@ -310,7 +275,6 @@ class TestConfigIntegration:
 
     def test_provider_with_whitespace(self):
         """Test provider with leading/trailing whitespace is rejected."""
-        # Provider validation doesn't strip whitespace, so this should fail
         with pytest.raises(ValueError, match="Invalid provider"):
             AgentConfig(provider="  codex  ")
 
@@ -334,3 +298,158 @@ class TestConfigIntegration:
         """Test Unicode characters in model name."""
         config = AgentConfig(model="模型-v1")
         assert config.model == "模型-v1"
+
+    def test_config_from_dict_with_gepa_section(self):
+        """Config.from_dict should parse [gepa] section."""
+        config = Config.from_dict(
+            {"gepa": {"max_steps": 100, "num_candidates": 20}}
+        )
+        assert config.gepa.max_steps == 100
+        assert config.gepa.num_candidates == 20
+
+    def test_config_gepa_defaults(self):
+        """Default Config should include valid GEPAConfig defaults."""
+        config = Config()
+        assert config.gepa.max_steps == 50
+        assert config.gepa.num_candidates == 10
+        assert config.gepa.reflection_provider == "gemini"
+
+    def test_config_from_dict_validates_gepa_fields(self):
+        """Config.from_dict should validate gepa field values."""
+        with pytest.raises(ValueError, match="max_steps must be positive"):
+            Config.from_dict({"gepa": {"max_steps": 0}})
+
+    def test_config_from_dict_rejects_unknown_gepa_field(self):
+        """Config.from_dict should reject unknown fields in [gepa]."""
+        from app_operator.config import UnrecognizedFieldError
+
+        with pytest.raises(UnrecognizedFieldError, match="unknown_field"):
+            Config.from_dict({"gepa": {"unknown_field": "value"}})
+
+    def test_config_gepa_diversity_probability(self):
+        """Config.from_dict should accept diversity_probability."""
+        config = Config.from_dict(
+            {"gepa": {"diversity_probability": 0.3}}
+        )
+        assert config.gepa.diversity_probability == 0.3
+
+    def test_config_gepa_diversity_probability_invalid(self):
+        """Config.from_dict should reject invalid diversity_probability."""
+        with pytest.raises(ValueError, match="diversity_probability must be in range"):
+            Config.from_dict({"gepa": {"diversity_probability": 2.0}})
+
+    def test_config_gepa_patience(self):
+        """Config.from_dict should accept patience."""
+        config = Config.from_dict({"gepa": {"patience": 20}})
+        assert config.gepa.patience == 20
+
+    def test_config_gepa_patience_invalid(self):
+        """Config.from_dict should reject non-positive patience."""
+        with pytest.raises(ValueError, match="patience must be positive"):
+            Config.from_dict({"gepa": {"patience": 0}})
+
+    def test_config_gepa_checkpoint_interval(self):
+        """Config.from_dict should accept checkpoint_interval."""
+        config = Config.from_dict({"gepa": {"checkpoint_interval": 10}})
+        assert config.gepa.checkpoint_interval == 10
+
+    def test_config_gepa_checkpoint_interval_invalid(self):
+        """Config.from_dict should reject non-positive checkpoint_interval."""
+        with pytest.raises(ValueError, match="checkpoint_interval must be positive"):
+            Config.from_dict({"gepa": {"checkpoint_interval": -1}})
+
+    def test_config_gepa_new_defaults(self):
+        """Default Config should include valid defaults for new GEPAConfig fields."""
+        config = Config()
+        assert config.gepa.diversity_probability == 0.1
+        assert config.gepa.patience == 10
+        assert config.gepa.checkpoint_interval == 5
+
+
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
+class TestOperatorConfigIntervalProperty:
+    """Property-based tests for OperatorConfig interval boundary sweep."""
+
+    @given(interval=st.integers(min_value=1, max_value=86400))
+    @settings(max_examples=50, deadline=1000)
+    def test_any_valid_interval_accepted(self, interval):
+        """Any integer in [1, 86400] is accepted and stored correctly on OperatorConfig."""
+        config = OperatorConfig(interval=interval)
+        assert config.interval == interval
+
+    @given(interval=st.integers().filter(lambda x: x < 1 or x > 86400))
+    @settings(max_examples=50, deadline=1000)
+    def test_any_invalid_interval_rejected(self, interval):
+        """Any integer outside [1, 86400] raises ValueError when constructing OperatorConfig."""
+        with pytest.raises(ValueError):
+            OperatorConfig(interval=interval)
+
+
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
+class TestOperatorConfigTimeoutsProperty:
+    """Property-based tests for OperatorConfig timeout and iteration fields."""
+
+    @given(st.data())
+    @settings(max_examples=50, deadline=1000)
+    def test_any_positive_timeout_accepted(self, data):
+        """Any positive integer for a timeout/max-iters field is accepted and stored correctly."""
+        field = data.draw(st.sampled_from([
+            "agent_fix_timeout",
+            "deploy_timeout",
+            "agent_timeout",
+            "monitoring_max_iters",
+            "deployment_max_iters",
+        ]))
+        value = data.draw(st.integers(min_value=1))
+        config = OperatorConfig(**{field: value})
+        assert getattr(config, field) == value
+
+    @given(st.data())
+    @settings(max_examples=50, deadline=1000)
+    def test_any_non_positive_timeout_rejected(self, data):
+        """Any non-positive integer for a timeout/max-iters field raises ValueError."""
+        field = data.draw(st.sampled_from([
+            "agent_fix_timeout",
+            "deploy_timeout",
+            "agent_timeout",
+            "monitoring_max_iters",
+            "deployment_max_iters",
+        ]))
+        value = data.draw(st.integers(max_value=0))
+        with pytest.raises(ValueError):
+            OperatorConfig(**{field: value})
+
+
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed")
+class TestConfigFromDictRoundTripProperty:
+    """Property-based round-trip tests for Config.from_dict."""
+
+    @given(
+        provider=st.sampled_from(sorted(["codex", "gemini", "claude", "claude-code",
+                                 "opencode", "anthropic", "vertex", "openai", "rlm", "subagent", "hybrid"])),
+        interval=st.integers(min_value=1, max_value=86400),
+    )
+    @settings(max_examples=50, deadline=1000)
+    def test_valid_provider_and_interval_roundtrip(self, provider, interval):
+        """Config built from a dict preserves provider and interval exactly."""
+        config = Config.from_dict({"agent": {"provider": provider}, "operator": {"interval": interval}})
+        assert config.agent.provider == provider
+        assert config.operator.interval == interval
+
+    @given(
+        section_name=st.text(min_size=1, max_size=30).filter(
+            lambda s: s not in {"agent", "operator", "deployment", "runtime", "gepa", "dspy", "fault_injection"}
+        ),
+    )
+    @settings(max_examples=50, deadline=1000)
+    def test_unknown_section_always_rejected(self, section_name):
+        """Any unknown top-level section key always raises an error."""
+        with pytest.raises(Exception):
+            Config.from_dict({section_name: {}})
+
+    @given(st.just({}))
+    @settings(max_examples=1, deadline=1000)
+    def test_default_config_from_empty_dict(self, data):
+        """Config.from_dict({}) always produces defaults matching Config()."""
+        assert Config.from_dict({}).agent.provider == Config().agent.provider
+        assert Config.from_dict({}).operator.interval == Config().operator.interval

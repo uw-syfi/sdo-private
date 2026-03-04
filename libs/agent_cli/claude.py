@@ -1,5 +1,4 @@
 from .base import register_provider
-from typing import Optional, List
 import json
 import time
 
@@ -13,7 +12,7 @@ from .claude_events import (
     ResultEvent,
 )
 from .events import AgentEventHandler
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
@@ -23,7 +22,6 @@ class ClaudeGenerationSession(CLIGenerationSession):
         self.tool_map = {}
         self.tool_start_times = {}
         self.tool_args = {}
-        self._at_line_start = True
         self.final_result = None
 
     def _process_stdout(self, line: str) -> None:
@@ -117,29 +115,6 @@ class ClaudeGenerationSession(CLIGenerationSession):
         if output:
             self._log_raw(output + "\n")
 
-    def _print_stream_content(self, content: str):
-        """Print streaming content with prefix handling."""
-        if not content:
-            return
-
-        lines = content.split("\n")
-
-        for i, line in enumerate(lines):
-            is_last = i == len(lines) - 1
-
-            if is_last:
-                if line:
-                    if self._at_line_start:
-                        self._log_raw(f"{self.log_prefix} ")
-                        self._at_line_start = False
-                    self._log_raw(line)
-            else:
-                if self._at_line_start:
-                    self._log_raw(f"{self.log_prefix} ")
-                self._log_raw(line)
-                self._log_raw("\n")
-                self._at_line_start = True
-
     def run(self, prompt: str) -> str:
         """Execute the command and return the result."""
         super().run(prompt)
@@ -155,9 +130,9 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         """Initialize the Claude Code coding agent.
 
@@ -178,7 +153,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Claude]"
 
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         cmd = [
             self.binary_path,
             "-p",  # Print mode, accepts prompt from stdin
@@ -186,7 +161,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             "--output-format",
             "stream-json",
             "--verbose",
-            f'"{prompt}"',
+            prompt,
         ]
         if self.model:
             cmd.extend(["--model", self.model])
@@ -194,11 +169,11 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
 
     def _create_session(
         self,
-        cmd: List[str],
-        cwd: Optional[str] = None,
+        cmd: list[str],
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> ClaudeGenerationSession:
         return ClaudeGenerationSession(
             binary_name=self.binary_name,

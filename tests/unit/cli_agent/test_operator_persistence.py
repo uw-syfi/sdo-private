@@ -4,22 +4,7 @@ from unittest.mock import MagicMock, patch
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import Config, DeploymentConfig
 from app_operator.filesystem import InMemoryFilesystem
-from libs.agent_cli.base import CodingAgent
-
-
-class StubAgent(CodingAgent):
-    def __init__(self, model=None):
-        self.model = model
-        self.recorder = None
-
-    def generate(self, *args, **kwargs):
-        return ""
-
-    def run(self, *args, **kwargs):
-        return {}
-
-    def start_event_stream(self, *args, **kwargs):
-        pass
+from tests.fixtures.agents import StubAgent
 
 
 @pytest.fixture
@@ -68,3 +53,24 @@ def test_operator_does_not_overwrite_existing_config(mock_trajectory):
     content = fs.read_text(sds_config)
     # Should still be docker because file existed and logic is "if not exists"
     assert 'platform = "docker"' in content
+
+
+def test_operator_loads_fault_metadata_from_filesystem(mock_trajectory):
+    fs = InMemoryFilesystem()
+    repo_path = Path("/tmp/repo")
+    fs.mkdir(repo_path)
+    fs.mkdir(repo_path / ".sds")
+
+    fault_meta_path = repo_path / ".sds" / "fault_injection.json"
+    fault_meta_content = '{"num_faults_injected": 2, "faults": [{"type": "config"}]}'
+    fs.write_text(fault_meta_path, fault_meta_content)
+
+    agent = StubAgent(model="test")
+    config = Config(deployment=DeploymentConfig(platform="docker", target="local"))
+
+    _ = AppOperator(repo_path=str(repo_path), filesystem=fs, agent=agent, config=config)
+
+    recorder = mock_trajectory.return_value
+    recorder.record_fault_injection.assert_called_once()
+    recorded = recorder.record_fault_injection.call_args[0][0]
+    assert recorded["num_faults_injected"] == 2

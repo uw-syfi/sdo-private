@@ -36,7 +36,7 @@ def test_chmod(fs):
     fs.write_text(file_path, "content")
 
     fs.chmod(file_path, 0o777)
-    assert fs.permissions[str(file_path)] == 0o777
+    assert fs.permissions[fs._normalize_path(file_path)] == 0o777
 
 
 def test_chmod_non_existent(fs):

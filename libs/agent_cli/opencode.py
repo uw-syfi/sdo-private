@@ -1,17 +1,17 @@
 from .base import register_provider
 import json
-from typing import Optional, List
 
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
 from .events import AgentEventHandler
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+
+OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
 
 class OpencodeGenerationSession(CLIGenerationSession):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._at_line_start = True
 
     def _process_stdout(self, line: str) -> None:
         """Process a line from stdout."""
@@ -85,29 +85,6 @@ class OpencodeGenerationSession(CLIGenerationSession):
         if output:
             self._log_raw(output + "\n")
 
-    def _print_stream_content(self, content: str):
-        """Print streaming content with prefix handling."""
-        if not content:
-            return
-
-        lines = content.split("\n")
-
-        for i, line in enumerate(lines):
-            is_last = i == len(lines) - 1
-
-            if is_last:
-                if line:
-                    if self._at_line_start:
-                        self._log_raw(f"{self.log_prefix} ")
-                        self._at_line_start = False
-                    self._log_raw(line)
-            else:
-                if self._at_line_start:
-                    self._log_raw(f"{self.log_prefix} ")
-                self._log_raw(line)
-                self._log_raw("\n")
-                self._at_line_start = True
-
 
 @register_provider("opencode")
 class OpencodeCodingAgent(CLICodingAgent):
@@ -115,9 +92,9 @@ class OpencodeCodingAgent(CLICodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         """Initialize the Opencode coding agent.
 
@@ -127,7 +104,7 @@ class OpencodeCodingAgent(CLICodingAgent):
             event_handler: Optional event handler for UI updates.
         """
         if not model:
-            model = "google-vertex/gemini-3-pro-preview"
+            model = OPENCODE_DEFAULT_MODEL
         super().__init__("opencode", model, recorder, event_handler)
 
     @property
@@ -135,7 +112,7 @@ class OpencodeCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Opencode]"
 
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         cmd = [self.binary_path, "run", f'"{prompt}"']
 
         if self.model:
@@ -148,11 +125,11 @@ class OpencodeCodingAgent(CLICodingAgent):
 
     def _create_session(
         self,
-        cmd: List[str],
-        cwd: Optional[str] = None,
+        cmd: list[str],
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> OpencodeGenerationSession:
         return OpencodeGenerationSession(
             binary_name=self.binary_name,

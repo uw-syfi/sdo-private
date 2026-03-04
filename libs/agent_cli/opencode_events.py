@@ -1,17 +1,21 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
+
+from .utils import truncate_params
 
 
 class OpencodeEvent(ABC):
     """Base class for Opencode stream events."""
 
     @abstractmethod
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         """Render the event as a string for terminal output."""
         pass
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> Optional["OpencodeEvent"]:
+    def from_dict(data: dict[str, Any]) -> "OpencodeEvent" | None:
         """Factory method to create events from JSON data."""
         msg_type = data.get("type")
         part = data.get("part", {})
@@ -41,7 +45,7 @@ class TextEvent(OpencodeEvent):
     def __init__(self, text: str):
         self.text = text
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # We will handle text printing in the agent loop to handle potential streaming
         # or just print it as is.
         # For now, let's return it.
@@ -57,41 +61,34 @@ class ToolUseEvent(OpencodeEvent):
 
     def render(self, log_prefix: str) -> str:
         # Render tool use and result
-        truncated_input = self._truncate(str(self.input_data))
+        truncated_input = truncate_params(str(self.input_data))
 
         output_str = ""
         if self.output_data:
-            truncated_output = self._truncate(str(self.output_data), max_lines=5)
+            # Truncate output to first 5 lines
+            out_lines = str(self.output_data).splitlines()
+            truncated_output = "\n".join(out_lines[:5] + (["..."] if len(out_lines) > 5 else []))
             output_str = (
                 f"\n{log_prefix} \033[32m[Tool Result] {truncated_output}\033[0m"
             )
 
         return f"{log_prefix} \033[34m[Tool Use] {self.tool_name} {truncated_input}\033[0m{output_str}"
 
-    def _truncate(self, s: str, max_lines: int = 1) -> str:
-        lines = s.splitlines()
-        if len(lines) > max_lines:
-            s = "\n".join(lines[:max_lines] + ["..."])
-
-        if len(s) > 200 and max_lines == 1:
-            return s[:200] + "..."
-        return s
-
 
 class StepStartEvent(OpencodeEvent):
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         return None
 
 
 class StepFinishEvent(OpencodeEvent):
     def __init__(
-        self, reason: Optional[str], cost: Optional[float], tokens: Optional[Dict]
+        self, reason: str | None, cost: float | None, tokens: dict | None
     ):
         self.reason = reason
         self.cost = cost
         self.tokens = tokens
 
-    def render(self, log_prefix: str) -> Optional[str]:
+    def render(self, log_prefix: str) -> str | None:
         # Optional: Print cost info?
         # For now, maybe just ignore or print verbose.
         # Let's keep it clean.

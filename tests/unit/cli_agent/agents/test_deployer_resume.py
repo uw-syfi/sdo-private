@@ -1,20 +1,11 @@
-from types import MethodType
 import pytest
 
-from app_operator.cli_agent.agents.deployer import (
-    DeploymentAgent,
-    DEFAULT_DEPLOY_TIMEOUT_SECS,
-)
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from tests.fixtures import bind_method
+from tests.fixtures.agents import StubAgent
 
-
-class StubAgent:
-    """Lightweight coding agent stub used by tests."""
-
-    def __init__(self, response: str = "ok"):
-        self.response = response
-
-    def generate(self, prompt: str, cwd=None, timeout=300, silent=False) -> str:
-        return self.response
+# Default deploy timeout used by OperatorConfig; kept here for test readability.
+DEFAULT_DEPLOY_TIMEOUT_SECS = 900
 
 
 @pytest.fixture
@@ -31,11 +22,7 @@ def repo_path(tmp_path):
 
 @pytest.fixture
 def agent(repo_path):
-    return DeploymentAgent(repo_path, StubAgent())
-
-
-def _bind_method(obj, name, func):
-    setattr(obj, name, MethodType(func, obj))
+    return DeploymentAgent(repo_path, StubAgent(response="ok"))
 
 
 def test_get_next_attempt_number_starts_at_one(agent):
@@ -86,8 +73,8 @@ def test_run_resumes_from_existing_attempts(agent, repo_path, monkeypatch):
     ):
         return True  # Continue
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     # Run for 2 more attempts
     agent.run(max_attempts=2)
@@ -116,8 +103,8 @@ def test_run_starts_fresh_without_logs(agent, monkeypatch):
     def fake_fix(self, *args, **kwargs):
         return True
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     agent.run(max_attempts=2)
 

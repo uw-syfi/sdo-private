@@ -50,6 +50,8 @@ Your task is to analyze deployment errors and fix the deployment scripts.
 ## DON'Ts:
 - **NEVER change the deployment platform** (don't switch from docker compose to kubectl or vice versa)
 - **NEVER use commands from the wrong platform** (don't use kubectl if script uses docker compose)
+- **NEVER use `sudo`** - assume all tools are already installed and accessible without root privileges. If a tool is missing, print an error and exit; do not attempt to install it.
+- **NEVER use `docker-compose`** (the old v1 hyphen form) - always use `docker compose` (v2 plugin, space-separated)
 - Don't make random changes without understanding the error
 - Don't remove error handling or safety checks
 - Don't introduce new bugs while fixing old ones
@@ -83,6 +85,16 @@ If the deployment script uses Docker or Docker Compose, you can run docker/docke
 If the deployment script uses Kubernetes, you can run kubectl commands to inspect pod status, logs, and events.
 
 Check for container/pod abnormalities, including recent restarts, high CPU or memory usage, or other abnormal behavior in their logs.
+
+## CRITICAL: Context size limits
+
+You are operating inside a context window with a hard token limit. Large outputs will cause you to exceed that limit and crash mid-diagnosis. Follow these rules strictly:
+
+- **Always use `--tail`** when reading container logs: `docker compose logs --tail=100 <service>` — never omit `--tail`.
+- **Diagnose one service at a time.** Do not run `docker compose logs` without specifying a service name.
+- **Read log files with `tail`**, not `cat`: `tail -100 .sds/logs/deploy_attempt_N.log`.
+- **Do not read the full `docker-compose.yml`** if you only need one service definition. Use `grep -A 20 <service_name> docker-compose.yml` instead.
+- **Stop reading logs once you have identified the root cause.** Do not collect logs from every service.
 
 The deployment has failed. Please analyze the error and fix the application deployment.
 

@@ -1,11 +1,8 @@
 import argparse
 
-from app_operator.cli_agent.operator import AppOperator
-from app_operator.cli_agent import create_agent_from_config
-from app_operator.langgraph import LangGraphOperator
-from app_operator.adk import AdkOperator
 from app_operator.config import load_config
 from app_operator.logger import logger
+from app_operator.operator_factory import create_operator, create_tui_app
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -47,56 +44,19 @@ def run_command(args: argparse.Namespace) -> int:
         logger.warning("TUI is only supported for cli_agent; falling back to CLI.")
         use_tui = False
 
+    shared_kwargs = dict(
+        repo_path=args.directory,
+        health_check_interval=interval,
+        health_check_max_count=config.operator.monitoring_max_iters,
+        max_deployment_attempts=config.operator.deployment_max_iters,
+        config=config,
+    )
+
     try:
-        if config.runtime.impl == "langgraph":
-            operator = LangGraphOperator(
-                repo_path=args.directory,
-                health_check_interval=interval,
-                health_check_max_count=config.operator.monitoring_max_iters,
-                max_deployment_attempts=config.operator.deployment_max_iters,
-                config=config,
-            )
-            return operator.run()
-        elif config.runtime.impl == "adk":
-            operator = AdkOperator(
-                repo_path=args.directory,
-                health_check_interval=interval,
-                health_check_max_count=config.operator.monitoring_max_iters,
-                max_deployment_attempts=config.operator.deployment_max_iters,
-                config=config,
-            )
-            return operator.run()
+        if use_tui:
+            return create_tui_app(shared_kwargs, config)
         else:
-            # cli_agent
-            if use_tui:
-                from app_operator.ui.textual_tui import OperatorTUI
-
-                def op_factory(ui):
-                    agent = create_agent_from_config(args.directory, config=config)
-                    return AppOperator(
-                        repo_path=args.directory,
-                        health_check_interval=interval,
-                        health_check_max_count=config.operator.monitoring_max_iters,
-                        max_deployment_attempts=config.operator.deployment_max_iters,
-                        agent=agent,
-                        config=config,
-                        ui=ui,
-                    )
-
-                app = OperatorTUI(op_factory)
-                app.run()
-                return app._exit_code
-            else:
-                agent = create_agent_from_config(args.directory, config=config)
-                operator = AppOperator(
-                    repo_path=args.directory,
-                    health_check_interval=interval,
-                    health_check_max_count=config.operator.monitoring_max_iters,
-                    max_deployment_attempts=config.operator.deployment_max_iters,
-                    agent=agent,
-                    config=config,
-                )
-                return operator.run()
+            return create_operator(shared_kwargs, config).run()
 
     except ValueError as e:
         logger.error(f"Error: {e}")

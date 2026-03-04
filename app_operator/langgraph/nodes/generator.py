@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from app_operator.config import Config
 from app_operator.prompts import PromptLoader
@@ -24,7 +24,7 @@ def generate_scripts(
     loader: PromptLoader,
     agent: Any,
     context_limit: int,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> OperatorState:
     recorder = recorder or NullTrajectoryRecorder()
     if state["scripts_done"]:

@@ -2,12 +2,12 @@
 System prompt generation for trajectory recording.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 def get_system_prompt(
     phase: str,
-    context: Optional[Dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
     agent_name: str = "AI Agent",
 ) -> str:
     """Generate system prompt for a phase.

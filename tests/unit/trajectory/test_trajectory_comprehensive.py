@@ -8,15 +8,38 @@ These tests cover edge cases beyond basic Gemini session tests:
 """
 
 import json
+import shutil
+import tempfile
 import pytest
 import threading
 import time
+from pathlib import Path
 
 from app_operator.trajectory import (
     TrajectoryRecorder,
     Phase,
-    TrajectoryMessage,
 )
+
+# Try to import hypothesis, skip tests if not available
+try:
+    from hypothesis import given, strategies as st, settings
+    HYPOTHESIS_AVAILABLE = True
+except ImportError:
+    HYPOTHESIS_AVAILABLE = False
+
+    def given(*args, **kwargs):
+        return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummySettings:
+        def __call__(self, *args, **kwargs):
+            return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummyStrategies:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    settings = DummySettings()
+    st = DummyStrategies()
 
 
 @pytest.fixture
@@ -358,54 +381,76 @@ class TestTrajectoryStructure:
         assert len(tool_msg["stdout"]) < 200
 
 
-class TestTrajectoryMessage:
-    """Test TrajectoryMessage dataclass."""
+@pytest.mark.skipif(
+    not HYPOTHESIS_AVAILABLE,
+    reason="hypothesis not installed - install with: uv add --dev hypothesis"
+)
+class TestTrajectoryUnicodeRoundTripProperty:
+    """Property-based tests for Unicode round-trip through TrajectoryRecorder."""
 
-    def test_to_dict_excludes_none_values(self):
-        """Test that to_dict excludes None values."""
-        msg = TrajectoryMessage(
-            role="user",
-            content="Hello",
-            tool=None,
-            args=None,
-            stdout=None,
-            stderr=None,
-            exit_code=None,
-        )
+    @given(text=st.text())
+    @settings(max_examples=50, deadline=5000)
+    def test_any_user_message_survives_file_roundtrip(self, text):
+        """Test that arbitrary Unicode user messages survive JSON file round-trip."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            recorder = TrajectoryRecorder(Path(tmpdir))
+            with recorder.phase(Phase.DEPLOYMENT):
+                recorder.add_user_message(text)
+            trajectory_path = recorder.finalize()
+            with open(trajectory_path) as f:
+                data = json.load(f)
+            messages = data["deployment"][0]["messages"]
+            user_msg = next(m for m in messages if m.get("role") == "user")
+            assert user_msg["content"] == text
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
-        d = msg.to_dict()
+    @given(text=st.text())
+    @settings(max_examples=50, deadline=5000)
+    def test_any_assistant_message_survives_file_roundtrip(self, text):
+        """Test that arbitrary Unicode assistant messages survive JSON file round-trip."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            recorder = TrajectoryRecorder(Path(tmpdir))
+            with recorder.phase(Phase.DEPLOYMENT):
+                recorder.add_assistant_message(text)
+            trajectory_path = recorder.finalize()
+            with open(trajectory_path) as f:
+                data = json.load(f)
+            messages = data["deployment"][0]["messages"]
+            assistant_msg = next(m for m in messages if m.get("role") == "assistant")
+            assert assistant_msg["content"] == text
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
-        # Should only have role and content
-        assert "role" in d
-        assert "content" in d
-        assert "tool" not in d
-        assert "args" not in d
-        assert "stdout" not in d
-        assert "stderr" not in d
-        assert "exit_code" not in d
-
-    def test_to_dict_includes_all_fields_when_present(self):
-        """Test that to_dict includes all fields when they have values."""
-        msg = TrajectoryMessage(
-            role="tool_call",
-            content=None,
-            tool="run_command",
-            args={"cmd": "test"},
-            stdout="output",
-            stderr="error",
-            exit_code=1,
-            timestamp="2024-01-01 12:00:00",
-            duration_seconds=1.5,
-        )
-
-        d = msg.to_dict()
-
-        assert d["role"] == "tool_call"
-        assert "content" not in d
-        assert d["tool"] == "run_command"
-        assert d["args"] == {"cmd": "test"}
-        assert d["stdout"] == "output"
-        assert d["stderr"] == "error"
-        assert d["exit_code"] == 1
-        assert d["timestamp"] == "2024-01-01 12:00:00"
-        assert d["duration_seconds"] == 1.5
+    @given(
+        stdout=st.text(max_size=15000),
+        stderr=st.text(max_size=5000),
+    )
+    @settings(max_examples=30, deadline=5000)
+    def test_tool_output_truncation_invariant(self, stdout, stderr):
+        """Test truncation invariant: long outputs are truncated and flagged."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            recorder = TrajectoryRecorder(Path(tmpdir))
+            with recorder.phase(Phase.DEPLOYMENT):
+                recorder.add_tool_call(
+                    tool="run_command",
+                    args={"cmd": "test"},
+                    stdout=stdout,
+                    stderr=stderr,
+                    exit_code=0,
+                )
+            trajectory_path = recorder.finalize()
+            with open(trajectory_path) as f:
+                data = json.load(f)
+            messages = data["deployment"][0]["messages"]
+            tool_msg = next(m for m in messages if m.get("tool") == "run_command")
+            stored_stdout = tool_msg.get("stdout", "")
+            stored_stderr = tool_msg.get("stderr", "")
+            if len(stdout) + len(stderr) > recorder.max_output_length:
+                assert "truncated" in stored_stdout or "truncated" in stored_stderr
+                assert len(stored_stdout) + len(stored_stderr) < len(stdout) + len(stderr)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)

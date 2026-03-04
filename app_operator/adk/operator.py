@@ -2,12 +2,13 @@ import time
 import asyncio
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.exceptions import AgentError
+from app_operator.operator_base import OperatorBase
 from app_operator.trajectory import (
     Phase,
     init_trajectory,
@@ -20,8 +21,8 @@ from app_operator.prompts.deployment_context import (
 from app_operator.prompts.deployer import (
     create_generate_script_prompt,
 )
-from app_operator.cli_agent.subprocess_runner import SubprocessRunner
-from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.subprocess_runner import SubprocessRunner
+from app_operator.healthcheck import run_health_check
 
 from app_operator.adk.models import build_adk_model
 from app_operator.adk.tools import build_tools
@@ -29,17 +30,17 @@ from app_operator.adk.agent_factory import build_adk_agent, build_loop_agent
 from app_operator.adk.runner import AdkAgentRunner
 
 
-class AdkOperator:
+class AdkOperator(OperatorBase):
     """Operator implementation using Google ADK."""
 
     def __init__(
         self,
         repo_path: str,
         health_check_interval: int = 30,
-        health_check_max_count: Optional[int] = 5,
+        health_check_max_count: int | None = 5,
         max_deployment_attempts: int = 5,
-        filesystem: Optional[FileSystemInterface] = None,
-        config: Optional[Config] = None,
+        filesystem: FileSystemInterface | None = None,
+        config: Config | None = None,
         agent: Any = None,  # For interface compatibility (ignored)
     ) -> None:
         self.repo_path = Path(repo_path).resolve()
@@ -48,6 +49,9 @@ class AdkOperator:
         self.max_deployment_attempts = max_deployment_attempts
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.config = config or Config()
+
+        if not self.config.agent.model:
+            raise ValueError("agent.model must be set for adk runtime")
 
         # Initialize recorder
         self.recorder = init_trajectory(self.repo_path)
@@ -64,6 +68,7 @@ class AdkOperator:
 
         # Paths
         self.sds_dir = self.repo_path / ".sds"
+        self._persist_deployment_config()
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
         self.logs_dir = self.sds_dir / "logs"
@@ -79,8 +84,11 @@ class AdkOperator:
             self.filesystem.mkdir(self.sds_dir, parents=True, exist_ok=True)
             self.filesystem.mkdir(self.logs_dir, parents=True, exist_ok=True)
 
-            # 1. Code Analysis
-            await self._run_analysis()
+            # 1. Code Analysis (conditional)
+            if self.config.operator.phase.code_analysis:
+                await self._run_analysis()
+            else:
+                logger.info("Code analysis disabled by configuration, skipping")
 
             # 2. Script Generation
             await self._generate_scripts()
@@ -210,14 +218,7 @@ class AdkOperator:
         )
 
         # 1. Define Deployer Agent
-        deployer_prompt = (
-            "You are the Deployer. Your goal is to deploy the application and verify its health.\n"
-            "1. Run `.sds/deploy.sh start` using the `run_command` tool. Provide a timeout.\n"
-            "2. If the deployment succeeds (exit code 0), run `.sds/health_check.sh` using the `run_command` tool. Provide a timeout.\n"
-            "3. If the health check also succeeds, output 'Deployment Successful' to complete the process.\n"
-            "4. If any step fails, stop and output 'Deployment failed' to yield to the Fixer.\n"
-            "Check the 'status' key in the tool response. If 'status' is 'error', treating it as a failure."
-        )
+        deployer_prompt = get_loader().render("deployer/adk_deployer.jinja2")
 
         deployer = build_adk_agent(
             name="Deployer",
@@ -227,13 +228,9 @@ class AdkOperator:
         )
 
         # 2. Define Fixer Agent
-        fixer_prompt = (
-            f"You are the Fixer. Your goal is to fix deployment or health check errors.\n"
-            f"1. Analyze the output and errors from the previous Deployer attempt.\n"
-            f"2. Use tools like `read_file`, `search_content`, `write_file`, `list_files`, `find_files` to investigate and fix the issues in the scripts or codebase.\n"
-            f"3. After applying fixes, yield back to the Deployer to retry.\n"
-            f"Context: Platform is {self.config.deployment.platform}.\n"
-            "Check the 'status' key in the tool response. If 'status' is 'error', the tool execution failed."
+        fixer_prompt = get_loader().render(
+            "deployer/adk_fixer.jinja2",
+            platform=self.config.deployment.platform,
         )
 
         fixer = build_adk_agent(
@@ -372,8 +369,8 @@ class AdkOperator:
     def _run_deploy_command(
         self,
         command: str = "start",
-        log_file_path: Optional[Path] = None,
-    ) -> Dict[str, Any]:
+        log_file_path: Path | None = None,
+    ) -> dict[str, Any]:
         """Run deployment script command."""
         runner = SubprocessRunner(
             command=[str(self.deploy_script), command],
@@ -395,27 +392,8 @@ class AdkOperator:
             return 1
 
         max_attempt = 0
-        # This part requires listing files, which filesystem interface might not support easily on glob
-        # RealFilesystem supports glob if we use path objects.
-        # But FileSystemInterface doesn't have glob.
-        # However, self.logs_dir is a Path object.
-        # If using RealFilesystem, self.logs_dir.glob works.
-        # If using InMemoryFilesystem for tests, we need to handle it.
-        # The plan says "Use InMemoryFilesystem + stubbed AdkAgentRunner".
-        # InMemoryFilesystem doesn't implement glob on Path objects it seems (it's stdlib Path).
-        # We might need to handle this.
-        # But `cli_agent` deployer uses `list(logs_dir.glob(...))`.
-        # This implies `logs_dir` being a Path object works on the underlying FS.
-        # If `InMemoryFilesystem` is used, `logs_dir.glob` will fail or return empty if directory doesn't exist on disk?
-        # Actually `InMemoryFilesystem` is for `filesystem` object. `logs_dir` is a `Path`.
-        # `Path.glob` checks real disk.
-        # So `cli_agent` logic breaks with `InMemoryFilesystem` unless we mock `Path.glob`.
-        # I'll stick to `cli_agent` logic and assume tests handle it or I use a workaround.
-
         try:
-            # Use tools.ls logic?
-            # Or just try/except
-            files = list(self.logs_dir.glob("deploy_attempt_*.log"))
+            files = self.filesystem.glob(self.logs_dir, "deploy_attempt_*.log")
             for log_file in files:
                 try:
                     name = log_file.stem

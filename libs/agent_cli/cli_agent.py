@@ -5,13 +5,12 @@ import subprocess
 import sys
 import threading
 from abc import abstractmethod
-from typing import Optional, List
 
-from app_operator.logger import logger
+from loguru import logger
 from .base import CodingAgent
 from .utils import _get_interactive_env
 from .events import AgentEventHandler
-from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
 
 
 class CLIGenerationSession:
@@ -22,13 +21,13 @@ class CLIGenerationSession:
         binary_name: str,
         env: dict,
         log_prefix: str,
-        cmd: List[str],
+        cmd: list[str],
         logger,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         self.binary_name = binary_name
         self.env = env
@@ -44,6 +43,7 @@ class CLIGenerationSession:
         # State initialization
         self.stdout_lines = []
         self.stderr_lines = []
+        self._at_line_start = True
 
     def _log_raw(self, message: str) -> None:
         """Log a raw message directly to output if not silent."""
@@ -61,11 +61,34 @@ class CLIGenerationSession:
 
         self.stdout_lines.append(line)
 
+    def _print_stream_content(self, content: str):
+        """Print streaming content with prefix handling."""
+        if not content:
+            return
+
+        lines = content.split("\n")
+
+        for i, line in enumerate(lines):
+            is_last = i == len(lines) - 1
+
+            if is_last:
+                if line:
+                    if self._at_line_start:
+                        self._log_raw(f"{self.log_prefix} ")
+                        self._at_line_start = False
+                    self._log_raw(line)
+            else:
+                if self._at_line_start:
+                    self._log_raw(f"{self.log_prefix} ")
+                self._log_raw(line)
+                self._log_raw("\n")
+                self._at_line_start = True
+
     def _process_stderr(self, line: str) -> None:
         """Process a line from stderr."""
         line_stripped = line.rstrip("\n")
         if not self.silent:
-            self.logger.info(f"[STDERR] {line_stripped}")
+            self.logger.bind(stderr=True).info(f"[STDERR] {line_stripped}")
         self.stderr_lines.append(line)
 
     def run(self, prompt: str) -> str:
@@ -156,9 +179,9 @@ class CLICodingAgent(CodingAgent):
     def __init__(
         self,
         binary_name: str,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         """Initialize the CLI coding agent.
 
@@ -218,7 +241,7 @@ class CLICodingAgent(CodingAgent):
             raise RuntimeError(f"Failed to check {self.binary_name} CLI tool: {e}")
 
     @abstractmethod
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         """Construct the command line arguments."""
         pass
 
@@ -229,11 +252,11 @@ class CLICodingAgent(CodingAgent):
 
     def _create_session(
         self,
-        cmd: List[str],
-        cwd: Optional[str] = None,
+        cmd: list[str],
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> CLIGenerationSession:
         """Create a session for a single generation request.
 
@@ -255,7 +278,7 @@ class CLICodingAgent(CodingAgent):
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
     ) -> str:

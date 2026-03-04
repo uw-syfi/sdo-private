@@ -1,4 +1,4 @@
-from typing import Protocol, List
+from typing import Protocol
 import click
 
 
@@ -25,7 +25,7 @@ class UserIO(Protocol):
         """Read the initial user prompt."""
         ...
 
-    async def ask_questions(self, questions: List[str]) -> List[str]:
+    async def ask_questions(self, questions: list[str]) -> list[str]:
         """Ask clarifying questions and return answers."""
         ...
 
@@ -84,7 +84,7 @@ class ConsoleIO:
         except (KeyboardInterrupt, EOFError):
             return ""
 
-    async def ask_questions(self, questions: List[str]) -> List[str]:
+    async def ask_questions(self, questions: list[str]) -> list[str]:
         answers = []
         for i, q in enumerate(questions, 1):
             click.echo(f"\n{Colors.BOLD}{Colors.YELLOW}Question {i}:{Colors.ENDC} {q}")

@@ -1,6 +1,30 @@
 import pytest
 from app_operator.config import DeploymentConfig, Config
 
+# Try to import hypothesis, skip tests if not available
+try:
+    from hypothesis import given, strategies as st, assume, settings
+    HYPOTHESIS_AVAILABLE = True
+except ImportError:
+    HYPOTHESIS_AVAILABLE = False
+
+    def given(*args, **kwargs):
+        return pytest.mark.skip(reason="hypothesis not installed")
+
+    def assume(*args, **kwargs):
+        pass
+
+    class DummySettings:
+        def __call__(self, *args, **kwargs):
+            return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummyStrategies:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    settings = DummySettings()
+    st = DummyStrategies()
+
 
 class TestDeploymentConfigValidation:
     """Tests for DeploymentConfig validation."""
@@ -45,3 +69,52 @@ class TestDeploymentConfigValidation:
         config = Config.from_dict(data)
         assert config.deployment.platform == "k8s"
         assert config.deployment.target == "local"
+
+
+@pytest.mark.skipif(
+    not HYPOTHESIS_AVAILABLE,
+    reason="hypothesis not installed - install with: uv add --dev hypothesis"
+)
+class TestDeploymentConfigProperty:
+    """Property-based tests for DeploymentConfig validation."""
+
+    @given(platform=st.sampled_from(["docker", "k8s"]))
+    @settings(max_examples=10, deadline=1000)
+    def test_any_valid_platform_accepted(self, platform):
+        """Any valid platform string should be accepted and stored as-is."""
+        config = DeploymentConfig(platform=platform)
+        assert config.platform == platform
+
+    @given(platform=st.text(min_size=1, max_size=50))
+    @settings(max_examples=50, deadline=1000)
+    def test_any_invalid_platform_rejected(self, platform):
+        """Any platform string not in the valid set should raise ValueError."""
+        assume(platform.lower() not in {"docker", "k8s"})
+        with pytest.raises(ValueError):
+            DeploymentConfig(platform=platform)
+
+    @given(platform=st.sampled_from(["DOCKER", "K8S", "Docker", "K8s"]))
+    @settings(max_examples=10, deadline=1000)
+    def test_case_sensitivity_for_platform(self, platform):
+        """Platform validation is case-sensitive; mixed-case values are rejected."""
+        with pytest.raises(ValueError):
+            DeploymentConfig(platform=platform)
+
+    @given(st.just("local"))
+    @settings(max_examples=1, deadline=1000)
+    def test_local_target_always_accepted(self, target):
+        """The 'local' target should always be accepted."""
+        config = DeploymentConfig(target=target)
+        assert config.target == "local"
+
+    @given(target=st.text(min_size=1, max_size=50))
+    @settings(max_examples=50, deadline=1000)
+    def test_non_local_target_always_rejected(self, target):
+        """Any target other than 'local' should raise ValueError.
+
+        Note: 'remote' is explicitly blocked even though it is technically in
+        VALID_TARGETS, so all non-'local' values raise ValueError.
+        """
+        assume(target != "local")
+        with pytest.raises(ValueError):
+            DeploymentConfig(target=target)

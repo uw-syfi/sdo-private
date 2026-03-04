@@ -1,11 +1,11 @@
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable
 
 from google.adk.agents import LlmAgent, LoopAgent
 from google.adk.tools.function_tool import FunctionTool
 
 
 def build_adk_agent(
-    name: str, instruction: str, model: Any, tools: List[Callable], **kwargs: Any
+    name: str, instruction: str, model: Any, tools: list[Callable], **kwargs: Any
 ) -> LlmAgent:
     """Build a specialized ADK LLM agent.
 
@@ -39,9 +39,9 @@ def build_adk_agent(
 
 def build_loop_agent(
     name: str,
-    sub_agents: List[LlmAgent],
+    sub_agents: list[LlmAgent],
     max_iterations: int = 5,
-    tools: Optional[List[Callable]] = None,
+    tools: list[Callable] | None = None,
 ) -> LoopAgent:
     """Build a LoopAgent.
 

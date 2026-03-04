@@ -1,5 +1,5 @@
 import time
-from typing import Dict, Any, Optional
+from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage, BaseMessage
 from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
@@ -9,10 +9,10 @@ from app_operator.langgraph.message_utils import extract_text
 class LangGraphTrajectoryHandler:
     """Handler for recording LangGraph interactions to the trajectory."""
 
-    def __init__(self, recorder: Optional[TrajectoryRecorderProtocol] = None):
+    def __init__(self, recorder: TrajectoryRecorderProtocol | None = None):
         self.recorder = recorder or NullTrajectoryRecorder()
-        self._pending_tool_calls: Dict[str, Dict[str, Any]] = {}
-        self._tool_start_times: Dict[str, float] = {}
+        self._pending_tool_calls: dict[str, dict[str, Any]] = {}
+        self._tool_start_times: dict[str, float] = {}
 
     def on_user_message(self, content: str):
         """Record a user message."""

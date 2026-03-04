@@ -5,7 +5,7 @@ scenarios without requiring actual agent execution.
 """
 
 import time
-from typing import List, Dict, Any, Optional
+from typing import Any
 from libs.agent_cli.base import CodingAgent
 
 
@@ -13,19 +13,49 @@ class StubAgent(CodingAgent):
     """Minimal agent that returns stub responses.
 
     Use this for tests that need an agent but don't care about its behavior.
+    Supports optional model, recorder, and response attributes used by
+    various test scenarios (e.g. operator persistence, cleanup tests).
     """
 
-    def generate(self, prompt: str, **kwargs) -> str:
-        """Return a stub response.
+    def __init__(self, response: str = "stub response", model=None):
+        """Initialize the stub agent.
 
         Args:
-            prompt: The prompt (ignored).
+            response: The canned response to return.
+            model: Optional model identifier for tests that check it.
+        """
+        self.response = response
+        self.model = model
+        self.recorder = None
+        self.calls: list[dict[str, Any]] = []
+        self.generate_calls: list[dict[str, Any]] = []
+
+    def generate(self, prompt: str, cwd=None, timeout=300, silent=False, **kwargs) -> str:
+        """Return a stub response and record the call.
+
+        Args:
+            prompt: The prompt (recorded but otherwise ignored).
+            cwd: Optional working directory.
+            timeout: Timeout value.
+            silent: Whether output is suppressed.
             **kwargs: Additional arguments (ignored).
 
         Returns:
-            str: A simple stub response.
+            str: The configured stub response.
         """
-        return "stub response"
+        call = {"prompt": prompt, "cwd": cwd, "timeout": timeout, "silent": silent}
+        call.update(kwargs)
+        self.calls.append(call)
+        self.generate_calls.append(call)
+        return self.response
+
+    def run(self, *args, **kwargs):
+        """No-op run method for operator tests."""
+        return {}
+
+    def start_event_stream(self, *args, **kwargs):
+        """No-op event stream for operator tests."""
+        pass
 
 
 class ErrorAgent(CodingAgent):
@@ -96,7 +126,7 @@ class TrackingAgent(CodingAgent):
         Args:
             response: The response to return for all calls.
         """
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
         self.fix_request_count = 0
         self.generation_count = 0
         self.response = response
@@ -135,9 +165,9 @@ class ConfigurableAgent(CodingAgent):
 
     def __init__(self):
         """Initialize the configurable agent."""
-        self.responses: Dict[str, str] = {}
+        self.responses: dict[str, str] = {}
         self.default_response = "default response"
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
     def set_response(self, keyword: str, response: str):
         """Configure a response for prompts containing a keyword.
@@ -187,7 +217,7 @@ class ScriptGeneratingAgent(CodingAgent):
     def __init__(
         self,
         generate_valid_scripts: bool = True,
-        responses: Optional[List[str]] = None,
+        responses: list[str] | None = None,
     ):
         """Initialize the script generating agent.
 
@@ -197,14 +227,14 @@ class ScriptGeneratingAgent(CodingAgent):
             responses: Custom script contents (if None, uses defaults).
         """
         self.generate_valid_scripts = generate_valid_scripts
-        self.calls: List[tuple[str, Optional[str], int]] = []
+        self.calls: list[tuple[str, str | None, int]] = []
         self.responses = responses or [
             "#!/bin/bash\necho deploy",
             "#!/bin/bash\necho health",
         ]
         self.call_count = 0
 
-    def generate(self, prompt: str, cwd: Optional[str] = None, timeout: int = 300, **kwargs) -> str:
+    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300, **kwargs) -> str:
         """Generate scripts based on the prompt.
 
         Args:
@@ -229,16 +259,19 @@ class ScriptGeneratingAgent(CodingAgent):
         # Create .sds directory if needed
         sds_dir.mkdir(exist_ok=True)
 
-        # Determine which file to write based on prompt
+        # Determine which file to write based on prompt content.
+        # Both prompts mention both scripts (via the shared system prompt),
+        # so we identify the *target* by finding which script path appears
+        # last in the prompt -- the generation instruction is always at the
+        # end, after the system-prompt preamble.
         filename = None
-        if "Create the file at: .sds/health_check.sh" in prompt:
+        prompt_lower = prompt.lower()
+        last_deploy = prompt_lower.rfind("deploy.sh")
+        last_health = prompt_lower.rfind("health_check.sh")
+        if last_health > last_deploy:
             filename = "health_check.sh"
-        elif "Create the file at: .sds/deploy.sh" in prompt:
+        elif last_deploy >= 0:
             filename = "deploy.sh"
-        elif "deploy.sh" in prompt.lower():
-            filename = "deploy.sh"
-        elif "health_check.sh" in prompt.lower():
-            filename = "health_check.sh"
 
         if filename:
             script_path = sds_dir / filename

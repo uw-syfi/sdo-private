@@ -1,17 +1,21 @@
+from __future__ import annotations
+
 import time
 import re
-import shutil
-import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Any, List
+from typing import Callable, Any, Protocol, TYPE_CHECKING
 
-from app_operator.ui import OperatorUI, NullOperatorUI
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
+
+from app_operator.ui_protocol import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
-from app_operator.cli_agent.healthcheck import run_health_check
+from app_operator.config import OperatorConfig
+from app_operator.healthcheck import run_health_check
 from app_operator.trajectory import (
     Phase,
     TrajectoryRecorderProtocol,
@@ -19,11 +23,26 @@ from app_operator.trajectory import (
 )
 
 
+class MonitorLike(Protocol):
+    """Protocol describing the monitor interface used by MonitoringTask."""
+
+    repo_path: Path
+    agent: CodingAgent
+    filesystem: FileSystemInterface
+    recorder: TrajectoryRecorderProtocol
+    dspy_config: "DSPyConfig" | None
+    ui: OperatorUI
+    check_count: int
+    health_check_script: Path
+    log_dir: Path
+    operator_config: OperatorConfig
+
+
 class MonitoringTask(ABC):
     """Abstract base class for monitoring tasks."""
 
     @abstractmethod
-    def run(self, operator: Any) -> None:
+    def run(self, operator: MonitorLike) -> None:
         """Execute the monitoring task.
 
         Args:
@@ -32,7 +51,7 @@ class MonitoringTask(ABC):
         pass
 
     @abstractmethod
-    def analyze(self, operator: Any, result: Any) -> None:
+    def analyze(self, operator: MonitorLike, result: Any) -> None:
         """Use a coding agent to analyze results and provide suggestions."""
         pass
 
@@ -40,7 +59,7 @@ class MonitoringTask(ABC):
 class HealthCheckTask(MonitoringTask):
     """A monitoring task specifically for running health checks."""
 
-    def run(self, operator: Any) -> None:
+    def run(self, operator: MonitorLike) -> None:
         """Run the health check task.
 
         Args:
@@ -72,7 +91,7 @@ class HealthCheckTask(MonitoringTask):
 
             self.analyze(monitor, health_result)
 
-    def analyze(self, operator: Any, result: Any) -> None:
+    def analyze(self, operator: MonitorLike, result: Any) -> None:
         """Analyze health check results using the agent."""
         monitor = operator
         health_result = result
@@ -84,7 +103,14 @@ class HealthCheckTask(MonitoringTask):
         context = self._prepare_health_context(health_result, monitor.check_count)
 
         # Create analysis prompt
-        prompt = self._create_analysis_prompt(context, monitor.repo_path)
+        prompt = self._create_analysis_prompt(
+            context,
+            monitor.repo_path,
+            health_result,
+            monitor.check_count,
+            monitor.dspy_config,
+            recorder=monitor.recorder,
+        )
 
         try:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -96,15 +122,15 @@ class HealthCheckTask(MonitoringTask):
                 f"Consulting {monitor.agent.__class__.__name__} for health analysis..."
             )
 
-            # Run agent and redirect its output to the log file
-            with open(log_file, "w") as f:
-                with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
-                    response = monitor.agent.generate(
-                        prompt, cwd=str(monitor.repo_path), timeout=120
-                    )
+            response = monitor.agent.generate(
+                prompt,
+                cwd=str(monitor.repo_path),
+                timeout=monitor.operator_config.agent_timeout,
+            )
 
-                # Explicitly write the response to the log file
-                f.write("\n\n=== Agent Analysis ===\n")
+            # Write the response to the log file
+            with open(log_file, "w") as f:
+                f.write("=== Agent Analysis ===\n")
                 f.write(response)
 
             # Extract executive summary
@@ -159,11 +185,43 @@ class HealthCheckTask(MonitoringTask):
 
         return "\n".join(context_parts)
 
-    def _create_analysis_prompt(self, context: str, repo_path: Path) -> str:
-        """Create a prompt for the coding agent to analyze health check results."""
-        return get_loader().render(
-            "monitor/analyze_health.jinja2", repo_path=repo_path, context=context
+    def _create_analysis_prompt(
+        self,
+        context: str,
+        repo_path: Path,
+        health_result: dict,
+        check_count: int,
+        dspy_config: "DSPyConfig" | None = None,
+        recorder=None,
+    ) -> str:
+        """Create a prompt for the coding agent to analyze health check results.
+
+        Args:
+            context: Formatted health check context (for Jinja2)
+            repo_path: Repository path
+            health_result: Raw health check result dict
+            check_count: Current monitoring iteration
+            dspy_config: Optional DSPy configuration
+            recorder: Optional trajectory recorder for kwargs capture
+
+        Returns:
+            Rendered prompt string
+        """
+        # Pass both Jinja2 fields (context, repo_path) and DSPy fields
+        # (health_check_output, exit_code, iteration) to support both renderers
+        prompt = get_loader(dspy_config).render(
+            "monitor/analyze_health.jinja2",
+            # Jinja2 fields (for backward compatibility)
+            repo_path=repo_path,
+            context=context,
+            # DSPy fields (for DSPy signature)
+            health_check_output=health_result.get("stdout", ""),
+            exit_code=health_result.get("exit_code", -1),
+            iteration=check_count,
+            recorder=recorder,
         )
+
+        return prompt
 
 
 class AppMonitor:
@@ -173,9 +231,11 @@ class AppMonitor:
         self,
         repo_path: Path,
         agent: CodingAgent,
-        filesystem: Optional[FileSystemInterface] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        ui: Optional[OperatorUI] = None,
+        filesystem: FileSystemInterface | None = None,
+        operator_config: OperatorConfig | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        dspy_config: "DSPyConfig" | None = None,
+        ui: OperatorUI | None = None,
     ):
         """Initialize the monitor agent.
 
@@ -183,15 +243,19 @@ class AppMonitor:
             repo_path: Path to the repository.
             agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
+            operator_config: Optional operator configuration for timeouts.
             recorder: Trajectory recorder instance.
+            dspy_config: Optional DSPy configuration for optimized prompts.
             ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
+        self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
-        self.monitoring_tasks: List[MonitoringTask] = [HealthCheckTask()]
+        self.monitoring_tasks: list[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
         self.log_dir = self.repo_path / ".sds" / "logs" / "monitor"
@@ -199,8 +263,8 @@ class AppMonitor:
     def run(
         self,
         interval: int = 30,
-        max_checks: Optional[int] = None,
-        check_shutdown: Optional[Callable[[], bool]] = None,
+        max_checks: int | None = None,
+        check_shutdown: Callable[[], bool] | None = None,
     ):
         """Monitor application health and provide agent analysis every interval.
 
@@ -215,8 +279,8 @@ class AppMonitor:
         )
 
         # Clear log directory on startup
-        if self.log_dir.exists():
-            shutil.rmtree(self.log_dir)
+        if self.filesystem.exists(self.log_dir):
+            self.filesystem.remove_tree(self.log_dir)
         self.filesystem.mkdir(self.log_dir, parents=True, exist_ok=True)
 
         self.check_count = 0

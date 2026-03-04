@@ -201,6 +201,45 @@ class TestCreateFixPrompt:
         assert "attempt #2" in prompt.lower()
         assert "previous" in prompt.lower()
 
+    def test_fix_summary_consolidation_disabled_omits_summary_path(self):
+        """Test that fix_summary_consolidation=False omits consolidated summary path."""
+        repo_path = Path("/test/repo")
+        deploy_script = Path("/test/repo/.sds/deploy.sh")
+        health_script = Path("/test/repo/.sds/health_check.sh")
+
+        prompt = create_fix_prompt(
+            repo_path,
+            attempt=2,
+            max_attempts=5,
+            error_context="error",
+            deploy_script_path=deploy_script,
+            health_check_script_path=health_script,
+            fix_summary_consolidation=False,
+        )
+
+        assert "fix_summary.md" not in prompt
+        assert "fix_summary_1.log" in prompt
+        assert "attempt #2" in prompt.lower()
+
+    def test_fix_summary_consolidation_enabled_includes_summary_path(self):
+        """Test that fix_summary_consolidation=True (default) includes consolidated summary path."""
+        repo_path = Path("/test/repo")
+        deploy_script = Path("/test/repo/.sds/deploy.sh")
+        health_script = Path("/test/repo/.sds/health_check.sh")
+
+        prompt = create_fix_prompt(
+            repo_path,
+            attempt=2,
+            max_attempts=5,
+            error_context="error",
+            deploy_script_path=deploy_script,
+            health_check_script_path=health_script,
+            fix_summary_consolidation=True,
+        )
+
+        assert "fix_summary.md" in prompt
+        assert "fix_summary_1.log" in prompt
+
     def test_special_characters_in_paths(self):
         """Test paths with special characters."""
         repo_path = Path("/test/repo with spaces & 日本語")

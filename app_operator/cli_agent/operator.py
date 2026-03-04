@@ -1,10 +1,10 @@
+import json
 import signal
 import threading
 from pathlib import Path
-from typing import Optional
 
 from libs.agent_cli.base import CodingAgent
-from libs.agent_cli.factory import create_agent_from_config
+from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
@@ -12,11 +12,12 @@ from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.config import load_config, Config
-from app_operator.ui import OperatorUI, NullOperatorUI
+from app_operator.operator_base import OperatorBase
+from app_operator.ui_protocol import OperatorUI, NullOperatorUI
 from app_operator.trajectory import TrajectoryRecorder
 
 
-class AppOperator:
+class AppOperator(OperatorBase):
     """Manages automated deployment with coding-agent-assisted error fixing and extensible monitoring.
 
     This operator:
@@ -29,12 +30,12 @@ class AppOperator:
         self,
         repo_path: str,
         health_check_interval: int = 30,
-        health_check_max_count: Optional[int] = 5,
+        health_check_max_count: int | None = 5,
         max_deployment_attempts: int = 5,
-        agent: Optional[CodingAgent] = None,
-        filesystem: Optional[FileSystemInterface] = None,
-        config: Optional[Config] = None,
-        ui: Optional[OperatorUI] = None,
+        agent: CodingAgent | None = None,
+        filesystem: FileSystemInterface | None = None,
+        config: Config | None = None,
+        ui: OperatorUI | None = None,
     ):
         """Initialize the application operator.
 
@@ -54,13 +55,9 @@ class AppOperator:
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.ui = ui or NullOperatorUI()
 
-        # Convert to Path and resolve only for real filesystem
-        # (InMemoryFilesystem doesn't need symlink resolution)
-        if isinstance(self.filesystem, RealFilesystem):
-            self.repo_path = Path(repo_path).resolve()
-        else:
-            # For InMemoryFilesystem, just use absolute path
-            self.repo_path = Path(repo_path).absolute()
+        # Use absolute() which works for both real and in-memory filesystems
+        # without making OS syscalls like resolve() does
+        self.repo_path = Path(repo_path).absolute()
 
         # Validate repository path
         if not self.filesystem.exists(self.repo_path):
@@ -102,6 +99,19 @@ class AppOperator:
         self.recorder = TrajectoryRecorder(self.repo_path)
         self.recorder.set_agent_name(self.agent.__class__.__name__)
 
+        # Pick up fault injection metadata if present
+        fault_meta_path = self.sds_dir / "fault_injection.json"
+        if self.filesystem.exists(fault_meta_path):
+            try:
+                fault_meta = json.loads(self.filesystem.read_text(fault_meta_path))
+                self.recorder.record_fault_injection(fault_meta)
+                logger.info(
+                    f"Loaded fault injection metadata: "
+                    f"{fault_meta.get('num_faults_injected', 0)} fault(s)"
+                )
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Failed to load fault injection metadata: {e}")
+
         # Attach recorder to agent
         self.agent.recorder = self.recorder
 
@@ -111,6 +121,7 @@ class AppOperator:
             self.agent,
             self.filesystem,
             recorder=self.recorder,
+            dspy_config=self.config.dspy,
             ui=self.ui,
         )
         self.deployer = DeploymentAgent(
@@ -120,34 +131,18 @@ class AppOperator:
             self.config.deployment,
             self.config.operator,
             recorder=self.recorder,
+            dspy_config=self.config.dspy,
             ui=self.ui,
         )
         self.monitor = AppMonitor(
             self.repo_path,
             self.agent,
             self.filesystem,
+            operator_config=self.config.operator,
             recorder=self.recorder,
+            dspy_config=self.config.dspy,
             ui=self.ui,
         )
-
-    def _persist_deployment_config(self) -> None:
-        """Persist deployment preference to .sds/config.toml."""
-        if not self.filesystem.exists(self.sds_dir):
-            self.filesystem.mkdir(self.sds_dir)
-
-        sds_config_path = self.sds_dir / "config.toml"
-
-        # We only write if the file doesn't exist to avoid overwriting user edits,
-        # ensuring we respect existing preferences if present (which would be loaded).
-        # If not present, we create it to track the current preference.
-        if not self.filesystem.exists(sds_config_path):
-            logger.info(f"Creating deployment config at {sds_config_path}")
-            config_content = (
-                "[deployment]\n"
-                f'platform = "{self.config.deployment.platform}"\n'
-                f'target = "{self.config.deployment.target}"\n'
-            )
-            self.filesystem.write_text(sds_config_path, config_content)
 
     def run(self) -> int:
         """Main entry point for application operation.
@@ -160,6 +155,7 @@ class AppOperator:
             signal.signal(signal.SIGINT, self._handle_shutdown_signal)
             signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
+        run_succeeded = False
         try:
             logger.info("Starting App Operator Mode")
             logger.info(f"Repository: {self.repo_path}")
@@ -169,9 +165,12 @@ class AppOperator:
 
             self.ui.set_stage("Initializing")
 
-            # Step 1: Code Analysis
-            self.ui.set_stage("Code Analysis")
-            self.analyzer.run()
+            # Step 1: Code Analysis (conditional)
+            if self.config.operator.phase.code_analysis:
+                self.ui.set_stage("Code Analysis")
+                self.analyzer.run()
+            else:
+                logger.info("Code analysis disabled by configuration, skipping")
 
             # Step 2: Deploy with automatic error fixing (includes script
             # generation)
@@ -193,6 +192,7 @@ class AppOperator:
                 check_shutdown=lambda: self._shutdown_requested,
             )
 
+            run_succeeded = True
             return 0
 
         except KeyboardInterrupt:
@@ -208,14 +208,19 @@ class AppOperator:
             return 1
         finally:
             self.ui.close(
-                status="completed" if self._deployed else "failed",
-                exit_code=0 if self._deployed else 1,
+                status="completed" if run_succeeded else "failed",
+                exit_code=0 if run_succeeded else 1,
             )
             self._cleanup()
-            self.recorder.finalize("completed" if self._deployed else "failed")
+            self.recorder.finalize("completed" if run_succeeded else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).
+
+        Sets the ``_shutdown_requested`` flag so that running loops exit
+        gracefully.  We intentionally do **not** raise ``KeyboardInterrupt``
+        from the signal handler because doing so is dangerous in
+        multi-threaded code (it can land in an arbitrary frame).
 
         Args:
             signum: The signal number.
@@ -228,11 +233,6 @@ class AppOperator:
                 f"Received {signal_name} signal. Initiating graceful shutdown..."
             )
 
-            # Re-raise KeyboardInterrupt to interrupt blocking calls
-            if signum == signal.SIGINT:
-                raise KeyboardInterrupt()
-
-    
     def _cleanup(self) -> None:
         """Shutdown the application and cleanup resources."""
         if not self._deployed:

@@ -1,11 +1,7 @@
 import asyncio
 import json
-import ast
 import yaml
 from typing import (
-    Optional,
-    Dict,
-    List,
     Any,
     Callable,
     Protocol,
@@ -18,15 +14,18 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 
-from app_operator.langgraph.llm import build_llm
-from app_operator.adk.tools import build_tools
-from app_operator.config import load_config
-from app_operator.filesystem import RealFilesystem
-from app_operator.logger import logger
+from loguru import logger
+from lego_agent.config import load_config
+from lego_agent.llm import build_llm
+from libs.sds_core.filesystem import RealFilesystem
+from libs.sds_core.tools import build_tools
 from lego_agent.io import Colors
+from lego_agent.streaming import parse_chunk_content, extract_tool_result
 
-# Global constant for compatibility with generated scripts
-MAX_ITERATIONS = 10
+# Default timeout (seconds) for agent generation calls
+DEFAULT_AGENT_TIMEOUT = 300
+DEFAULT_FAN_OUT_MAX_WORKERS = 4  # maximum parallel workers for FanOut
+DEFAULT_JUDGE_LOOP_MAX_ITERATIONS = 10  # default maximum iterations for JudgeLoop
 
 
 @runtime_checkable
@@ -36,18 +35,23 @@ class Runnable(Protocol):
     def run(self, input_data: Any) -> Any: ...
 
 
+@runtime_checkable
+class AsyncRunnable(Protocol):
+    """Protocol for components that support async execution."""
+
+    def run(self, input_data: Any) -> Any: ...
+
+    async def generate_async(self, prompt: str, timeout: int) -> str: ...
+
+
 class LangGraphAgent:
     """Agent wrapper around LangGraph prebuilt React agent."""
-
-    # SDS-REVIEW: Architecture - Duplicate logic.
-    # Streaming and tool handling logic overlaps significantly with `lego_agent.engine.LegoAgentEngine`.
-    # Suggest extracting a common `BaseAgent` or `StreamProcessor`.
 
     def __init__(
         self,
         model_name: str,
         llm: Any,
-        tools: List[Callable],
+        tools: list[Callable],
         instruction: str = "",
         agent_name: str = "LegoAgentWorker",
     ):
@@ -62,16 +66,13 @@ class LangGraphAgent:
             model=self.llm, tools=self.tools, prompt=self.instruction
         )
 
-    def _wrap_tools(self, tools: List[Callable]) -> List[StructuredTool]:
+    def _wrap_tools(self, tools: list[Callable]) -> list[StructuredTool]:
         """Wrap ADK tools into LangChain StructuredTools."""
         wrapped_tools = []
         for t in tools:
             if isinstance(t, StructuredTool):
                 wrapped_tools.append(t)
             elif callable(t):
-                # Assume it's a function with docstrings
-                # ADK tools return a dict, we want to return the string output mostly,
-                # but returning the whole dict is also fine for the LLM to see status.
                 wrapped_tools.append(tool(t))
             else:
                 logger.warning(f"Unknown tool type: {type(t)}")
@@ -80,37 +81,31 @@ class LangGraphAgent:
     def generate(
         self,
         prompt: str,
-        cwd: Optional[str] = None,
-        timeout: int = 300,
+        cwd: str | None = None,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
         silent: bool = False,
     ) -> str:
-        """Generate response using LangGraph agent."""
-        # Run in a separate thread if called from sync context to avoid blocking
-        # But since we are likely inside an async loop (or not), safest is to run_async
-        # However, generate() is sync API.
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+        """Generate response using LangGraph agent.
 
-        if loop and loop.is_running():
-            # If we are in an event loop, we can't use asyncio.run
-            # We assume this method is called from a thread or we use a blocking call
-            # But standard usage of generate() in generated scripts is sync.
-            # If the generated script is sync, asyncio.run works.
-            # If the generated script is running in an event loop, this will fail.
-            # Generated scripts are "if __name__ == '__main__': main()", so usually sync main.
-            return asyncio.run(self._generate_async(prompt, timeout))
-        else:
-            return asyncio.run(self._generate_async(prompt, timeout))
+        This is a **sync-only** entry point.  It must be called from a
+        context where no asyncio event loop is already running (e.g. a
+        plain ``if __name__ == '__main__'`` script).  If you already have
+        an event loop, call :meth:`generate_async` directly instead.
+        """
+        return asyncio.run(self.generate_async(prompt, timeout))
 
-    async def _generate_async(self, prompt: str, timeout: int) -> str:
+    async def generate_async(self, prompt: str, timeout: int) -> str:
+        """Async implementation of generate.
+
+        Public so that callers such as :class:`FanOut` can await it
+        directly without reaching into private internals.
+        """
         messages = [HumanMessage(content=prompt)]
         config: RunnableConfig = {"recursion_limit": 50}
 
-        accumulated_text = []
+        accumulated_text: list[str] = []
 
-        async def run_stream():
+        async def run_stream() -> None:
             thinking_started = False
             async for event in self.graph.astream_events(
                 {"messages": messages}, version="v1", config=config
@@ -121,19 +116,7 @@ class LangGraphAgent:
                     chunk = event["data"].get("chunk")
                     if not chunk:
                         continue
-                    content = chunk.content
-                    text_chunk = ""
-                    if isinstance(content, str):
-                        text_chunk = content
-                    elif isinstance(content, list):
-                        for part in content:
-                            if isinstance(part, dict):
-                                if part.get("type") == "text":
-                                    text_chunk += part.get("text", "")
-                                elif part.get("type") == "thinking":
-                                    text_chunk += part.get("thinking", "")
-                            elif isinstance(part, str):
-                                text_chunk += part
+                    text_chunk = parse_chunk_content(chunk.content)
 
                     if text_chunk:
                         if not thinking_started:
@@ -163,48 +146,14 @@ class LangGraphAgent:
                 elif kind == "on_tool_end":
                     name = event["name"]
                     output = event["data"].get("output")
+                    status, result_text = extract_tool_result(output)
 
                     symbol = ""
-                    result_text = ""
+                    if status == "success":
+                        symbol = f"{Colors.GREEN}\u2713{Colors.ENDC} "
+                    elif status == "error":
+                        symbol = f"{Colors.RED}\u2717{Colors.ENDC} "
 
-                    # Handle ToolMessage or simple output
-                    content = getattr(output, "content", output)
-
-                    try:
-                        if isinstance(content, str):
-                            # Try parsing as JSON first
-                            try:
-                                content_dict = json.loads(content)
-                            except json.JSONDecodeError:
-                                try:
-                                    content_dict = ast.literal_eval(content)
-                                except (ValueError, SyntaxError):
-                                    content_dict = None
-
-                            if isinstance(content_dict, dict):
-                                status = content_dict.get("status")
-                                if status == "success":
-                                    symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                                elif status == "error":
-                                    symbol = f"{Colors.RED}✗{Colors.ENDC} "
-
-                                result_text = str(content_dict.get("output", ""))
-                            else:
-                                result_text = content
-                        elif isinstance(content, dict):
-                            status = content.get("status")
-                            if status == "success":
-                                symbol = f"{Colors.GREEN}✓{Colors.ENDC} "
-                            elif status == "error":
-                                symbol = f"{Colors.RED}✗{Colors.ENDC} "
-                            result_text = str(content.get("output", ""))
-                        else:
-                            result_text = str(content)
-                    except Exception:
-                        result_text = str(content)
-
-                    if len(result_text) > 500:
-                        result_text = result_text[:500] + "\n... (truncated)"
                     print(
                         "\n"
                         f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
@@ -231,31 +180,22 @@ class LangGraphAgent:
 
     def run(self, input_data: Any) -> Any:
         """Implement Runnable protocol."""
-        # Input can be a string prompt or structured data
         prompt = str(input_data)
         return self.generate(prompt)
 
 
 def create_agent(
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    config_path: Optional[str] = None,
-    repo_path: Optional[str] = None,
-    instruction: Optional[str] = None,
-    tools: Optional[List[str]] = None,
+    provider: str | None = None,
+    model: str | None = None,
+    config_path: str | None = None,
+    repo_path: str | None = None,
+    instruction: str | None = None,
+    tools: list[str] | None = None,
 ) -> LangGraphAgent:
     """Create a coding agent instance using LangGraph."""
-    # 1. Load configuration
     target_dir = repo_path or "."
-    try:
-        config = load_config(target_dir, config_path)
-    except Exception as e:
-        logger.warning(f"Failed to load config: {e}. Using defaults.")
-        # Create a dummy config if load fails, or re-raise?
-        # load_config usually raises.
-        raise
+    config = load_config(target_dir, config_path)
 
-    # 2. Setup Components
     if provider:
         config.agent.provider = provider
     if model:
@@ -295,7 +235,7 @@ def create_agent(
 class Chain(Runnable):
     """Executes a sequence of steps, passing output from one to the next."""
 
-    def __init__(self, steps: List[Runnable]):
+    def __init__(self, steps: list[Runnable]):
         self.steps = steps
 
     def run(self, input_data: Any) -> Any:
@@ -311,79 +251,45 @@ class Chain(Runnable):
 class FanOut(Runnable):
     """Executes multiple prompts/tasks in parallel using the same agent/runnable."""
 
-    def __init__(self, agent: Runnable, items: List[str], max_workers: int = 4):
+    def __init__(
+        self,
+        agent: Runnable,
+        items: list[str],
+        max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
+    ):
         self.agent = agent
         self.items = items
         self.max_workers = max_workers
+        self.timeout = timeout
 
-    def run(self, input_data: Any) -> List[Any]:
-        # input_data is ignored if items are hardcoded, or could be used to format items?
-        # For now, we assume items are fully formed prompts or instructions.
-        # But for composition, maybe input_data *is* the list of items?
-        # Or input_data is context injected into items?
-        # Let's assume self.items are templates or direct prompts.
-        # If input_data is provided, we can prepend it or use it.
-
+    def run(self, input_data: Any) -> list[Any]:
         prompts_to_run = []
         if input_data:
-            # If input provided, format items with it or append it?
-            # Simple approach: If items are strings, format them with input_data if it's a string
             for item in self.items:
                 if isinstance(item, str) and "{input}" in item:
                     prompts_to_run.append(item.format(input=str(input_data)))
                 else:
-                    # Append input as context
                     prompts_to_run.append(f"{item}\n\nContext:\n{input_data}")
         else:
             prompts_to_run = self.items
 
-        # We need to run this async, but run() is sync.
-        # Check for event loop.
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        async def _run_parallel():
+        async def _run_parallel() -> list[Any]:
             semaphore = asyncio.Semaphore(self.max_workers)
 
-            async def _run_one(p):
+            async def _run_one(p: str) -> Any:
                 async with semaphore:
-                    # We need to call agent.run(p). If agent.run is blocking/sync, we should wrap it.
-                    # Since agent is likely LangGraphAgent, it has internal async handling but exposed via sync run().
-                    # Ideally we should use agent.generate_async if available.
-                    if isinstance(self.agent, LangGraphAgent):
-                        return await self.agent._generate_async(p, timeout=300)
+                    if isinstance(self.agent, AsyncRunnable):
+                        return await self.agent.generate_async(
+                            p, timeout=self.timeout
+                        )
                     else:
-                        # General runnable, run in thread
                         return await asyncio.to_thread(self.agent.run, p)
 
             tasks = [_run_one(p) for p in prompts_to_run]
             return await asyncio.gather(*tasks)
 
-        if loop and loop.is_running():
-            return asyncio.run(_run_parallel())  # This fails if loop is running.
-            # If we are nested, we are already in async context usually?
-            # Wait, `run` is called synchronously.
-            # If we are inside a `Chain` which called `run`, we might be in sync code.
-            # If `Chain` was called from `fan_out`, we are in async?
-            # Let's stick to the pattern used in `fan_out` function previously.
-            # But here we are inside a class method.
-
-        # Simplified: Just use asyncio.run if no loop.
-        if loop and loop.is_running():
-            # We can't use asyncio.run. We are likely in a thread or nested.
-            # This is a known issue with mixing sync/async.
-            # For now, let's assume top level is sync.
-            # If nested, this will crash.
-            # WORKAROUND: Use nest_asyncio if needed, or just handle the top level.
-            # Or, use a fresh loop in a new thread.
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                return pool.submit(asyncio.run, _run_parallel()).result()
-        else:
-            return asyncio.run(_run_parallel())
+        return asyncio.run(_run_parallel())
 
 
 class Summarize(Runnable):
@@ -394,7 +300,6 @@ class Summarize(Runnable):
         self.instruction = instruction
 
     def run(self, input_data: Any) -> str:
-        # input_data is expected to be a list of strings (from FanOut)
         if isinstance(input_data, list):
             combined_input = "\n\n---\n\n".join([str(x) for x in input_data])
         else:
@@ -417,8 +322,7 @@ class JudgeLoop(Runnable):
         self.task = task
         self.max_iterations = max_iterations
 
-    def run(self, input_data: Any) -> Dict[str, str]:
-        # input_data can be optional initial context
+    def run(self, input_data: Any) -> dict[str, str]:
         current_output = None
 
         for i in range(self.max_iterations):
@@ -444,7 +348,6 @@ class JudgeLoop(Runnable):
             )
 
             logger.info(f"Judge prompt sent to {type(self.judge).__name__}")
-            # Judge can be a Chain or Agent. Its output should be the JSON string.
             judge_resp = str(self.judge.run(judge_prompt))
 
             # Parse JSON
@@ -497,65 +400,85 @@ class JudgeLoop(Runnable):
             "iterations": str(self.max_iterations),
         }
 
+# ---------------------------------------------------------------------------
+# Registry-based runnable builder
+# ---------------------------------------------------------------------------
 
-def _build_runnable(config: Dict[str, Any]) -> Runnable:
+
+def _create_agent_from_config(config: dict[str, Any]) -> Runnable:
+    return create_agent(
+        instruction=config.get("instruction"),
+        tools=config.get("tools"),
+        provider=config.get("provider"),
+        model=config.get("model"),
+    )
+
+
+def _create_chain_from_config(config: dict[str, Any]) -> Runnable:
+    steps_config = config.get("steps", [])
+    if not steps_config:
+        raise ValueError("Chain must have 'steps'")
+    steps = [_build_runnable(step) for step in steps_config]
+    return Chain(steps)
+
+
+def _create_fan_out_from_config(config: dict[str, Any]) -> Runnable:
+    agent_config = config.get("agent")
+    if not agent_config:
+        raise ValueError("FanOut must have 'agent'")
+    items = config.get("items", [])
+    return FanOut(
+        agent=_build_runnable(agent_config),
+        items=items,
+        max_workers=config.get("max_workers", DEFAULT_FAN_OUT_MAX_WORKERS),
+        timeout=config.get("timeout", DEFAULT_AGENT_TIMEOUT),
+    )
+
+
+def _create_summarize_from_config(config: dict[str, Any]) -> Runnable:
+    agent_config = config.get("agent")
+    if not agent_config:
+        raise ValueError("Summarize must have 'agent'")
+    instruction = config.get("instruction", "Summarize the inputs.")
+    return Summarize(agent=_build_runnable(agent_config), instruction=instruction)
+
+
+def _create_judge_loop_from_config(config: dict[str, Any]) -> Runnable:
+    judge_config = config.get("judge")
+    if not judge_config:
+        raise ValueError("JudgeLoop must have 'judge'")
+    worker_config = config.get("worker")
+    if not worker_config:
+        raise ValueError("JudgeLoop must have 'worker'")
+    task = config.get("task", "")
+    max_iters = config.get("max_iterations", DEFAULT_JUDGE_LOOP_MAX_ITERATIONS)
+    return JudgeLoop(
+        judge=_build_runnable(judge_config),
+        worker=_build_runnable(worker_config),
+        task=task,
+        max_iterations=max_iters,
+    )
+
+
+RUNNABLE_TYPES: dict[str, Callable[[dict[str, Any]], Runnable]] = {
+    "agent": _create_agent_from_config,
+    "chain": _create_chain_from_config,
+    "fan_out": _create_fan_out_from_config,
+    "summarize": _create_summarize_from_config,
+    "judge_loop": _create_judge_loop_from_config,
+}
+
+
+def _build_runnable(config: dict[str, Any]) -> Runnable:
     """Recursively build a Runnable from dictionary config."""
     kind = config.get("type")
-
-    if kind == "agent":
-        return create_agent(
-            instruction=config.get("instruction"),
-            tools=config.get("tools"),
-            provider=config.get("provider"),
-            model=config.get("model"),
-        )
-
-    elif kind == "chain":
-        steps_config = config.get("steps", [])
-        if not steps_config:
-            raise ValueError("Chain must have 'steps'")
-        steps = [_build_runnable(step) for step in steps_config]
-        return Chain(steps)
-
-    elif kind == "fan_out":
-        agent_config = config.get("agent")
-        if not agent_config:
-            raise ValueError("FanOut must have 'agent'")
-        items = config.get("items", [])
-        return FanOut(
-            agent=_build_runnable(agent_config),
-            items=items,
-            max_workers=config.get("max_workers", 4),
-        )
-
-    elif kind == "summarize":
-        agent_config = config.get("agent")
-        if not agent_config:
-            raise ValueError("Summarize must have 'agent'")
-        instruction = config.get("instruction", "Summarize the inputs.")
-        return Summarize(agent=_build_runnable(agent_config), instruction=instruction)
-
-    elif kind == "judge_loop":
-        judge_config = config.get("judge")
-        if not judge_config:
-            raise ValueError("JudgeLoop must have 'judge'")
-        worker_config = config.get("worker")
-        if not worker_config:
-            raise ValueError("JudgeLoop must have 'worker'")
-        task = config.get("task", "")
-        max_iters = config.get("max_iterations", 10)
-        return JudgeLoop(
-            judge=_build_runnable(judge_config),
-            worker=_build_runnable(worker_config),
-            task=task,
-            max_iterations=max_iters,
-        )
-
-    else:
+    factory = RUNNABLE_TYPES.get(kind)
+    if factory is None:
         raise ValueError(f"Unknown Runnable type: {kind}")
+    return factory(config)
 
 
-def run_yaml(config_path: str):
+def run_yaml(config_path: str) -> None:
     """Entry point to execute a YAML configuration."""
     path = Path(config_path)
     if not path.exists():
@@ -577,22 +500,24 @@ def run_yaml(config_path: str):
     print(f"\n{Colors.BOLD}{Colors.GREEN}Workflow Complete!{Colors.ENDC}")
     print(f"Result:\n{result}")
 
-
 # Wrapper functions for script usage
-def fan_out(agent: Runnable, items: List[str], max_workers: int = 4) -> List[Any]:
+
+
+def fan_out(agent: Runnable, items: list[str], max_workers: int = DEFAULT_FAN_OUT_MAX_WORKERS) -> list[Any]:
     """Execute multiple items in parallel using the agent."""
     return FanOut(agent, items, max_workers).run(None)
 
 
 def summarize(
-    agent: Runnable, items: List[str], instruction: str = "Summarize the inputs."
+    agent: Runnable, items: list[str], instruction: str = "Summarize the inputs."
 ) -> str:
     """Summarize a list of items using the agent."""
     return Summarize(agent, instruction).run(items)
 
 
 def judge_loop(
-    judge: Runnable, worker: Runnable, task: str, max_iterations: int = 10
-) -> Dict[str, str]:
+    judge: Runnable, worker: Runnable, task: str,
+    max_iterations: int = DEFAULT_JUDGE_LOOP_MAX_ITERATIONS
+) -> dict[str, str]:
     """Execute a judge-worker loop."""
     return JudgeLoop(judge, worker, task, max_iterations).run(None)

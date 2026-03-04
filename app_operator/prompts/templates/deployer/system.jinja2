@@ -31,11 +31,14 @@ You MUST generate scripts for Docker deployment.
 - **Docker Compose** (Recommended if compose file exists):
   - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
   - If found: Generate scripts that use `docker compose` commands
-  - Commands: docker compose up, docker compose down, docker compose ps, docker compose logs
+  - **ALWAYS pass `--project-name <name>`** (derived from the app directory name) to every `docker compose` command so container names are scoped to this deployment and do not conflict with other runs
+  - Commands: docker compose --project-name <name> up, docker compose --project-name <name> down, etc.
 - **Plain Docker**:
   - Look for: Dockerfile(s) without docker-compose files
   - If found: Generate scripts that use direct `docker run` commands
   - Commands: docker build, docker run, docker stop, docker ps, docker logs
+  - Create a dedicated Docker network for the application and attach all containers to it so they communicate by container name without host port bindings
+  - Only use `-p` to expose ports that must be reachable from outside the host (e.g. the application's public-facing endpoint)
 
 **CRITICAL REQUIREMENT**: The deployment method MUST be Docker based. DO NOT use Kubernetes commands.
 {% else %}
@@ -72,6 +75,9 @@ You MUST analyze the repository structure to determine the EXACT deployment plat
 
 ## DON'Ts:
 - **NEVER mix deployment platforms** (e.g., don't use both docker compose and kubectl in the same script)
+- **NEVER use `sudo`** - assume all required tools are already installed and accessible without root privileges. If a tool is missing, print an error message and exit with a non-zero code; do not attempt to install it.
+- **NEVER use `docker-compose`** (the old v1 hyphen form) - always use `docker compose` (v2 plugin, space-separated)
+- **NEVER bind host ports for internal-only services** (e.g. service meshes, tracing agents, internal databases) — use a dedicated Docker network and let containers communicate by name and container port instead
 - Don't hardcode absolute paths (use SCRIPT_DIR and relative paths)
 - Don't skip error handling
 - Don't use deprecated commands

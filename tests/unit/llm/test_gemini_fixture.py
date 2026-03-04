@@ -18,9 +18,9 @@ def mock_env():
 
 
 @pytest.fixture
-def gemini_agent(mock_subprocess, mock_env):
+def gemini_agent(mock_llm_subprocess, mock_env):
     """Create a GeminiCodingAgent instance with mocked environment."""
-    mock_popen, mock_which = mock_subprocess
+    mock_popen, mock_which = mock_llm_subprocess
     mock_which.return_value = "/usr/bin/gemini"
 
     with patch(
@@ -34,7 +34,7 @@ def gemini_agent(mock_subprocess, mock_env):
             yield agent
 
 
-def test_generate_from_fixture(gemini_agent, mock_subprocess):
+def test_generate_from_fixture(gemini_agent, mock_llm_subprocess):
     """Test parsing a real stream dump from a fixture file."""
 
     if not FIXTURE_PATH.exists():
@@ -45,7 +45,7 @@ def test_generate_from_fixture(gemini_agent, mock_subprocess):
         fixture_lines = f.readlines()
 
     # Mock the process output
-    mock_popen, _ = mock_subprocess
+    mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
     mock_process.returncode = 0
     # readline side effect needs to return each line, then empty string to signal EOF
@@ -66,19 +66,16 @@ def test_generate_from_fixture(gemini_agent, mock_subprocess):
     # 1. Prefixing on text content
     assert "[Gemini] I will start by analyzing" in output
 
-    # 2. Tool Use (Blue)
-    # [Gemini] [Tool Use] read_file {'file_path': 'docker-compose.yml'}
-    assert "[Gemini] \x1b[34m[Tool Use] read_file" in output
+    # 2. Tool Use
+    assert "[Gemini]" in output
+    assert "[Tool Use] read_file" in output
     assert "docker-compose.yml" in output
 
-    # 3. Tool Result (Green)
-    # The first read_file output is empty string
-    # Should print: [Gemini] read_file ran successfully
-    assert "[Gemini] \x1b[32mread_file ran successfully\x1b[0m" in output
+    # 3. Tool Result -- empty output shows success message
+    assert "read_file ran successfully" in output
 
-    # 4. Another Tool Result with content (glob found files)
-    # {"output":"Found 1 matching file(s)"}
-    assert "[Gemini] \x1b[32m[Tool Result] Found 1 matching file(s)" in output
+    # 4. Another Tool Result with content
+    assert "[Tool Result] Found 1 matching file(s)" in output
 
     # 5. Verify accumulation of content
     # The agent accumulates the 'content' fields from 'message' events

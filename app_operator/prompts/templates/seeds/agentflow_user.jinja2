@@ -1,0 +1,9 @@
+Generate a Python script for this task.
+
+Task: {{ user_request }}
+{% if clarification_history %}Previous Q&A: {{ clarification_history }}{% endif %}
+Work directory: {{ work_dir }}
+Loop bound: {{ loop_bound }}
+
+If you need clarification, output status='clarify' with questions.
+If ready, output status='ready' with the script code.

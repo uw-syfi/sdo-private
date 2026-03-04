@@ -9,13 +9,27 @@ import time
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app_operator.commands import run, init_exp, viz_graph, run_exp
+from app_operator.commands import (
+    run,
+    init_exp,
+    analyze_prompts,
+    optimize_prompts,
+    e2e_optimize,
+    run_exp,
+    plot_exp,
+)
+import app_operator.langgraph.viz_graph as viz_graph
 from app_operator.logger import logger
 
 # Load environment variables from .env file
 load_dotenv()
 
 REQUIRED_DEPENDENCIES = ["docker", "kubectl"]
+
+INSTALL_HINTS = {
+    "docker": "Install Docker: https://docs.docker.com/engine/install/",
+    "kubectl": "Install kubectl: https://kubernetes.io/docs/tasks/tools/",
+}
 
 
 def trigger_ai_remediation(max_retries: int):
@@ -88,8 +102,9 @@ def check_dependencies():
             missing.append(tool)
 
     if missing:
-        logger.error(f"Missing required system dependencies: {', '.join(missing)}")
-        logger.info("Please install them to continue.")
+        for tool in missing:
+            hint = INSTALL_HINTS.get(tool, f"Please install '{tool}' to continue.")
+            logger.error(f"Missing required system dependencies: {tool}: {hint}")
         sys.exit(1)
 
     # Check if docker daemon is running
@@ -101,7 +116,7 @@ def check_dependencies():
         )
     except subprocess.CalledProcessError:
         logger.error("Docker daemon is not running or not accessible.")
-        logger.info("Please start Docker to continue.")
+        logger.info("Start Docker and try again: https://docs.docker.com/engine/install/")
         sys.exit(1)
 
 
@@ -111,8 +126,6 @@ def main() -> int:
     Returns:
         int: Exit code (0 for success, non-zero for failure).
     """
-    check_dependencies()
-
     parser = argparse.ArgumentParser(
         prog="operator",
         description="Codex-assisted deployment mode with automatic error fixing.",
@@ -149,16 +162,45 @@ Examples:
     )
     viz_graph.add_arguments(viz_graph_parser)
 
+    # 'analyze-prompts' command
+    analyze_prompts_parser = subparsers.add_parser(
+        "analyze-prompts", help="Analyze prompt performance from trajectory data"
+    )
+    analyze_prompts.add_arguments(analyze_prompts_parser)
+
+    # 'optimize-prompts' command
+    optimize_prompts_parser = subparsers.add_parser(
+        "optimize-prompts", help="Optimize prompts using DSPy"
+    )
+    optimize_prompts.add_arguments(optimize_prompts_parser)
+
+    # 'e2e-optimize' command
+    e2e_optimize_parser = subparsers.add_parser(
+        "e2e-optimize", help="Run end-to-end optimization loop"
+    )
+    e2e_optimize.add_arguments(e2e_optimize_parser)
+
     # 'run-exp' command
     run_exp_parser = subparsers.add_parser(
         "run-exp", help="Run experiments defined in a TOML config file"
     )
     run_exp.add_arguments(run_exp_parser)
 
+    # 'plot-exp' command
+    plot_exp_parser = subparsers.add_parser(
+        "plot-exp", help="Plot and compare experiment results"
+    )
+    plot_exp.add_arguments(plot_exp_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
     args = parser.parse_args()
+
+    # Check Docker dependencies for commands that need them
+    if args.command in ["run", "init-exp"]:
+        check_dependencies()
+
     if args.command == "run":
         # return run.run_command(args)
         exit_code = run.run_command(args)
@@ -172,8 +214,16 @@ Examples:
         return init_exp.run_command(args)
     elif args.command == "viz-graph":
         return viz_graph.run_command(args)
+    elif args.command == "analyze-prompts":
+        return analyze_prompts.run_command(args)
+    elif args.command == "optimize-prompts":
+        return optimize_prompts.run_command(args)
+    elif args.command == "e2e-optimize":
+        return e2e_optimize.run_command(args)
     elif args.command == "run-exp":
         return run_exp.run_command(args)
+    elif args.command == "plot-exp":
+        return plot_exp.run_command(args)
     else:
         parser.print_help()
         return 1

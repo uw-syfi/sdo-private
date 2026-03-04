@@ -1,7 +1,5 @@
-from typing import Optional, List
 
 from .cli_agent import CLICodingAgent
-
 
 from .base import register_provider
 
@@ -10,7 +8,7 @@ from .base import register_provider
 class CodexCodingAgent(CLICodingAgent):
     """Coding agent implementation using the Codex CLI tool."""
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(self, model: str | None = None):
         """Initialize the Codex coding agent.
 
         Args:
@@ -28,7 +26,7 @@ class CodexCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Codex]"
 
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         cmd = [self.binary_path, "exec", "--dangerously-bypass-approvals-and-sandbox"]
         if self.model:
             cmd.extend(["--model", self.model])

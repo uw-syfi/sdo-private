@@ -1,5 +1,19 @@
 # Example configuration for exp-runner
+# repeats = 1  # Number of times to run each application (default: 1)
 apps = [
     "apps/deathstarbench/hotelReservation",
     "apps/deathstarbench/socialNetwork"
 ]
+
+# Any standard sds.toml sections below will be written as sds.toml
+# into each experiment directory, overriding the app's own config.
+#
+# [agent]
+# provider = "gemini"
+# model = "gemini-2.0-flash"
+#
+# [operator]
+# monitoring_max_iters = 3
+#
+# [operator.phase]
+# fix_summary_consolidation = true

@@ -3,7 +3,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-
 from lego_agent.storage import LegoAgentStorage
 
 
@@ -66,16 +65,14 @@ def test_write_script_timestamp_format(tmp_path):
 
 def test_write_script_multiple_scripts_different_timestamps(tmp_path):
     """Test writing multiple scripts creates separate directories."""
-    storage = LegoAgentStorage(tmp_path)
-
     timestamps = ["20240101-120000", "20240101-120001"]
     paths = []
 
     for ts in timestamps:
         with patch("time.strftime") as mock_strftime:
             mock_strftime.return_value = ts
-            # Reset current_run_dir to force new directory creation
-            storage.current_run_dir = None
+            # Use a fresh instance per timestamp so each write starts clean
+            storage = LegoAgentStorage(tmp_path)
             path = storage.write_script(f"# Script {ts}")
             paths.append(path)
 

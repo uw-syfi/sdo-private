@@ -32,7 +32,6 @@ def mock_config():
         runtime=RuntimeConfig(impl="cli_agent"),
     )
 
-
 # ============================================================================
 # add_arguments Tests
 # ============================================================================
@@ -81,7 +80,6 @@ def test_add_arguments_config_is_optional():
     args = parser.parse_args(["/path"])
     assert args.config is None
 
-
 # ============================================================================
 # run_command Tests - Error Cases
 # ============================================================================
@@ -115,7 +113,7 @@ def test_run_command_returns_1_on_value_error(mock_args, mock_config):
     """Test that run_command returns 1 when ValueError is raised."""
     with patch("app_operator.commands.run.load_config", return_value=mock_config):
         with patch(
-            "app_operator.commands.run.create_agent_from_config",
+            "app_operator.commands.run.create_operator",
             side_effect=ValueError("Test error"),
         ):
             exit_code = run_command(mock_args)
@@ -127,13 +125,12 @@ def test_run_command_returns_1_on_generic_exception(mock_args, mock_config):
     """Test that run_command returns 1 on unexpected exceptions."""
     with patch("app_operator.commands.run.load_config", return_value=mock_config):
         with patch(
-            "app_operator.commands.run.create_agent_from_config",
+            "app_operator.commands.run.create_operator",
             side_effect=RuntimeError("Unexpected error"),
         ):
             exit_code = run_command(mock_args)
 
     assert exit_code == 1
-
 
 # ============================================================================
 # run_command Tests - cli_agent Runtime
@@ -144,29 +141,16 @@ def test_run_command_runs_cli_agent_operator(mock_args, mock_config):
     """Test that run_command creates and runs AppOperator for cli_agent."""
     mock_operator = MagicMock()
     mock_operator.run.return_value = 0
-    mock_agent = MagicMock()
 
     with patch("app_operator.commands.run.load_config", return_value=mock_config):
         with patch(
-            "app_operator.commands.run.create_agent_from_config",
-            return_value=mock_agent,
-        ):
-            with patch(
-                "app_operator.commands.run.AppOperator",
-                return_value=mock_operator,
-            ) as mock_app_op_class:
-                exit_code = run_command(mock_args)
+            "app_operator.commands.run.create_operator",
+            return_value=mock_operator,
+        ) as mock_create:
+            exit_code = run_command(mock_args)
 
-    # Verify operator was created with correct parameters
-    mock_app_op_class.assert_called_once()
-    call_kwargs = mock_app_op_class.call_args[1]
-    assert call_kwargs["repo_path"] == "/test/repo"
-    assert call_kwargs["health_check_interval"] == 30
-    assert call_kwargs["health_check_max_count"] == 5
-    assert call_kwargs["max_deployment_attempts"] == 20
-    assert call_kwargs["agent"] == mock_agent
-    assert call_kwargs["config"] == mock_config
-
+    # Verify create_operator was called
+    mock_create.assert_called_once()
     # Verify operator.run() was called
     mock_operator.run.assert_called_once()
     assert exit_code == 0
@@ -179,7 +163,6 @@ def test_run_command_passes_custom_config_path(mock_config):
     args.config = "/custom/sds.toml"
     args.tui = False
 
-    mock_agent = MagicMock()
     mock_operator = MagicMock()
     mock_operator.run.return_value = 0
 
@@ -187,18 +170,13 @@ def test_run_command_passes_custom_config_path(mock_config):
         "app_operator.commands.run.load_config", return_value=mock_config
     ) as mock_load:
         with patch(
-            "app_operator.commands.run.create_agent_from_config",
-            return_value=mock_agent,
+            "app_operator.commands.run.create_operator",
+            return_value=mock_operator,
         ):
-            with patch(
-                "app_operator.commands.run.AppOperator",
-                return_value=mock_operator,
-            ):
-                run_command(args)
+            run_command(args)
 
     # Verify custom config path was passed
     mock_load.assert_called_once_with("/test/repo", "/custom/sds.toml")
-
 
 # ============================================================================
 # run_command Tests - langgraph Runtime
@@ -224,24 +202,15 @@ def test_run_command_runs_langgraph_operator(mock_args):
         "app_operator.commands.run.load_config", return_value=langgraph_config
     ):
         with patch(
-            "app_operator.commands.run.LangGraphOperator",
+            "app_operator.commands.run.create_operator",
             return_value=mock_operator,
-        ) as mock_lg_class:
+        ) as mock_create:
             exit_code = run_command(mock_args)
 
-    # Verify LangGraphOperator was created with correct parameters
-    mock_lg_class.assert_called_once()
-    call_kwargs = mock_lg_class.call_args[1]
-    assert call_kwargs["repo_path"] == "/test/repo"
-    assert call_kwargs["health_check_interval"] == 30
-    assert call_kwargs["health_check_max_count"] == 5
-    assert call_kwargs["max_deployment_attempts"] == 20
-    assert call_kwargs["config"] == langgraph_config
-
-    # Verify operator.run() was called
+    # Verify create_operator was called and returned expected result
+    mock_create.assert_called_once()
     mock_operator.run.assert_called_once()
     assert exit_code == 0
-
 
 # ============================================================================
 # run_command Tests - adk Runtime
@@ -265,23 +234,15 @@ def test_run_command_runs_adk_operator(mock_args):
 
     with patch("app_operator.commands.run.load_config", return_value=adk_config):
         with patch(
-            "app_operator.commands.run.AdkOperator", return_value=mock_operator
-        ) as mock_adk_class:
+            "app_operator.commands.run.create_operator",
+            return_value=mock_operator,
+        ) as mock_create:
             exit_code = run_command(mock_args)
 
-    # Verify AdkOperator was created with correct parameters
-    mock_adk_class.assert_called_once()
-    call_kwargs = mock_adk_class.call_args[1]
-    assert call_kwargs["repo_path"] == "/test/repo"
-    assert call_kwargs["health_check_interval"] == 30
-    assert call_kwargs["health_check_max_count"] == 5
-    assert call_kwargs["max_deployment_attempts"] == 20
-    assert call_kwargs["config"] == adk_config
-
-    # Verify operator.run() was called
+    # Verify create_operator was called and returned expected result
+    mock_create.assert_called_once()
     mock_operator.run.assert_called_once()
     assert exit_code == 0
-
 
 # ============================================================================
 # run_command Tests - TUI Mode
@@ -295,25 +256,15 @@ def test_run_command_enables_tui_for_cli_agent(mock_config):
     args.config = None
     args.tui = True
 
-    mock_app = MagicMock()
-    mock_app._exit_code = 0
-    mock_agent = MagicMock()
-
     with patch("app_operator.commands.run.load_config", return_value=mock_config):
         with patch(
-            "app_operator.commands.run.create_agent_from_config",
-            return_value=mock_agent,
-        ):
-            # OperatorTUI is imported locally, so patch where it's used
-            with patch(
-                "app_operator.ui.textual_tui.OperatorTUI",
-                return_value=mock_app,
-            ) as mock_tui_class:
-                exit_code = run_command(args)
+            "app_operator.commands.run.create_tui_app",
+            return_value=0,
+        ) as mock_tui:
+            exit_code = run_command(args)
 
-    # Verify TUI was created and run
-    mock_tui_class.assert_called_once()
-    mock_app.run.assert_called_once()
+    # Verify TUI was invoked
+    mock_tui.assert_called_once()
     assert exit_code == 0
 
 
@@ -338,66 +289,44 @@ def test_run_command_disables_tui_for_non_cli_agent(mock_args):
         "app_operator.commands.run.load_config", return_value=langgraph_config
     ):
         with patch(
-            "app_operator.commands.run.LangGraphOperator",
+            "app_operator.commands.run.create_operator",
             return_value=mock_operator,
         ):
-            # OperatorTUI is imported locally, patch where it's used
             with patch(
-                "app_operator.ui.textual_tui.OperatorTUI"
-            ) as mock_tui_class:
+                "app_operator.commands.run.create_tui_app"
+            ) as mock_tui:
                 exit_code = run_command(mock_args)
 
-    # TUI should NOT be created for non-cli_agent runtime
-    mock_tui_class.assert_not_called()
+    # TUI should NOT be invoked for non-cli_agent runtime
+    mock_tui.assert_not_called()
     # Regular operator should run instead
     mock_operator.run.assert_called_once()
     assert exit_code == 0
 
 
 def test_run_command_tui_operator_factory(mock_config):
-    """Test that TUI operator factory creates operator correctly."""
+    """Test that TUI path delegates to create_tui_app with correct args."""
     args = argparse.Namespace()
     args.directory = "/test/repo"
     args.config = None
     args.tui = True
 
-    mock_app = MagicMock()
-    mock_app._exit_code = 0
-    mock_agent = MagicMock()
-    mock_ui = MagicMock()
-
-    # Track the factory function passed to TUI
-    captured_factory = None
-
-    def capture_factory(factory):
-        nonlocal captured_factory
-        captured_factory = factory
-        return mock_app
-
     with patch("app_operator.commands.run.load_config", return_value=mock_config):
         with patch(
-            "app_operator.commands.run.create_agent_from_config",
-            return_value=mock_agent,
-        ):
-            # OperatorTUI is imported locally, patch where it's used
-            with patch(
-                "app_operator.ui.textual_tui.OperatorTUI",
-                side_effect=capture_factory,
-            ):
-                with patch(
-                    "app_operator.commands.run.AppOperator"
-                ) as mock_app_op_class:
-                    run_command(args)
+            "app_operator.commands.run.create_tui_app",
+            return_value=0,
+        ) as mock_tui:
+            exit_code = run_command(args)
 
-                    # Call the captured factory function
-                    captured_factory(mock_ui)
-
-    # Verify operator was created with UI
-    mock_app_op_class.assert_called_once()
-    call_kwargs = mock_app_op_class.call_args[1]
-    assert call_kwargs["ui"] == mock_ui
-    assert call_kwargs["agent"] == mock_agent
-
+    # Verify create_tui_app was called with shared_kwargs and config
+    mock_tui.assert_called_once()
+    call_args = mock_tui.call_args
+    shared_kwargs = call_args[0][0]
+    config_arg = call_args[0][1]
+    assert shared_kwargs["repo_path"] == "/test/repo"
+    assert shared_kwargs["health_check_interval"] == 30
+    assert config_arg == mock_config
+    assert exit_code == 0
 
 # ============================================================================
 # run_command Tests - Configuration Values
@@ -421,23 +350,19 @@ def test_run_command_uses_config_intervals():
         runtime=RuntimeConfig(impl="cli_agent"),
     )
 
-    mock_agent = MagicMock()
     mock_operator = MagicMock()
     mock_operator.run.return_value = 0
 
     with patch("app_operator.commands.run.load_config", return_value=custom_config):
         with patch(
-            "app_operator.commands.run.create_agent_from_config",
-            return_value=mock_agent,
-        ):
-            with patch(
-                "app_operator.commands.run.AppOperator",
-                return_value=mock_operator,
-            ) as mock_app_op_class:
-                run_command(args)
+            "app_operator.commands.run.create_operator",
+            return_value=mock_operator,
+        ) as mock_create:
+            run_command(args)
 
-    # Verify custom values were passed
-    call_kwargs = mock_app_op_class.call_args[1]
-    assert call_kwargs["health_check_interval"] == 60
-    assert call_kwargs["health_check_max_count"] == 10
-    assert call_kwargs["max_deployment_attempts"] == 15
+    # Verify shared_kwargs were passed with correct values
+    call_args = mock_create.call_args
+    shared_kwargs = call_args[0][0]
+    assert shared_kwargs["health_check_interval"] == 60
+    assert shared_kwargs["health_check_max_count"] == 10
+    assert shared_kwargs["max_deployment_attempts"] == 15

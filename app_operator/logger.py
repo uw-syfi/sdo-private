@@ -3,13 +3,19 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from app_operator.ui.base import OperatorUI
+    from app_operator.ui_protocol import OperatorUI
 
 
 def formatter(record):
-    """Custom formatter that changes format based on presence of agent_prefix."""
+    """Custom formatter that changes format based on presence of agent_prefix or stderr."""
     if "agent_prefix" in record["extra"]:
+        # Check if this is a stderr line
+        if record["extra"].get("stderr", False):
+            return "{extra[agent_prefix]} <red>{message}</red>\n"
         return "{extra[agent_prefix]} {message}\n"
+    # Check if this is a stderr line without agent_prefix
+    if record["extra"].get("stderr", False):
+        return "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <red>{message}</red>\n"
     return "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>\n"
 
 

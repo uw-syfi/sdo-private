@@ -1,138 +1,109 @@
 # SDS (Self-Defining Systems)
 
-SDS is an AI-native approach that embeds agentic LLMs into the full systems lifecycle—specification, design, implementation, and operation—to autonomously explore, validate, and evolve infrastructure.
+SDS is a research project exploring how AI agents can autonomously take over systems work — design, implementation, operation, and improvement. This repository starts with one slice of that vision: **autonomous system operation**.
 
-## Components
+SDS targets online applications. Microservices are the first class studied; benchmark apps live in `apps/`.
 
-The repository consists of two primary tools:
+Two components in this repo:
 
-- **sds_operator**: An intelligent deployment and monitoring tool that autonomously manages applications. It generates deployment/health scripts, self-corrects errors, and performs continuous monitoring using AI agents.
-- **lego_agent (experimental)**: An autonomous script generation tool that uses AI agents to create orchestrated Python scripts for complex multi-agent workflows using patterns like `fan_out`, `summarize`, and `judge_loop`.
+- **`sds_operator`** — the primary research artifact. Deploys applications, self-heals on errors, monitors health, and improves its own prompts over time using trajectory data.
+- **`lego_agent`** — an experimental agent workflow generator, designed as potential shared infrastructure across future SDS components.
 
 ---
 
-## Getting Started
+## How the Operator Works
 
-### Installation
+```
+sds_operator run <app>
+  ├── CodeAnalyzerAgent  → reads codebase → .sds/code_analysis.md
+  ├── DeploymentAgent    → generates deploy.sh, self-heals on errors, retries
+  ├── AppMonitor         → periodic health checks after deploy succeeds
+  └── Trajectory recorder → .sds/trajectories/*.json
+```
 
-Clone the repository with submodules recursively to include target applications:
+All agents share a single LLM provider (gemini, claude, codex…) configured in `sds.toml` and accessed via `libs/agent_cli/`. Provider choice and runtime choice are independent — switching from Claude to Gemini or from `cli_agent` to `langgraph` requires only editing `sds.toml`.
+
+**Trajectories** are structured JSON recordings of every agent call — the raw material for offline prompt optimization with DSPy.
+
+---
+
+## Quick Start
 
 ```bash
 git clone --recursive git@gitlab.cs.washington.edu:syslab/sds.git
 cd sds
 uv sync
+cp sds.example.toml sds.toml
 ```
 
-### Environment Setup
+Set your API key in `.env` (e.g., `GOOGLE_API_KEY=...` for Gemini or `ANTHROPIC_API_KEY=...` for Claude), then run:
 
-1. **API Keys**: Create a `.env` file in the project root with your keys (OpenAI, Gemini/Vertex, Anthropic).
-2. **Configuration**: Copy the example configuration and edit it to select your preferred agent provider and runtime:
-   ```bash
-   cp sds.example.toml sds.toml
-   ```
-
----
-
-## Running SDS Operator
-
-The `sds_operator` manages the deployment and health lifecycle of applications.
-
-### Single Application Run
-To deploy and monitor a specific application directory (this will auto-generate scripts if missing):
 ```bash
 ./sds_operator run apps/deathstarbench/hotelReservation
 ```
 
-### Experiment Workflow
-For controlled experiments, use the `init-exp` and `run` commands:
-
-1. **Initialize**: Create an isolated experiment environment from an existing app.
-   ```bash
-   ./sds_operator init-exp apps/deathstarbench/hotelReservation my-test-run
-   ```
-2. **Run**: Execute the operator on the created experiment.
-   ```bash
-   ./sds_operator run exp/hotelReservation/my-test-run
-   ```
-
-### Multi-Experiment Runs
-To orchestrate multiple experiments in parallel using a configuration file:
-```bash
-./sds_operator run-exp <exp-name> --parallel 2
-```
-This looks for configuration in `exp_config/<exp-name>/config.toml`. See `exp_config/example/config.toml` for an example.
+The operator will analyze the codebase, generate `deploy.sh` and `health_check.sh`, attempt deployment, self-correct any errors, and then monitor the running application. All output lands in `.sds/` inside the app directory.
 
 ---
 
-## Running LegoAgent (Experimental)
+## Configuration
 
-LegoAgent uses an interactive clarification loop to refine requirements before generating and running an agent workflow graph.
+Minimal `sds.toml` for the first week:
 
-### Web UI Mode (Recommended)
-Launch the modern web interface to interact with the agent:
-```bash
-./scripts/start_lego_ui.sh
+```toml
+[agent]
+provider = "gemini"   # gemini | claude | codex | openai | rlm
+model = "gemini-1.5-pro"
+
+[runtime]
+impl = "cli_agent"    # cli_agent (default) | langgraph | adk
 ```
-This will start the backend server and frontend application. Open `http://localhost:3000` in your browser.
 
-### Terminal Mode (CLI)
-Run the agent directly from the terminal without the UI. Note that `--work-dir` is required to specify where the generated script will run.
-
-```bash
-# Using the wrapper script
-./sds_lego_agent --prompt "Improve application test coverage to >= 80%" --work-dir .
-
-# Or using uv directly
-uv run -m lego_agent --prompt "Your task description" --work-dir .
-```
+Full schema in `app_operator/config.py`. Provider credentials, runtime tradeoffs, and all other fields are in `docs/architecture.md`.
 
 ---
 
-## Component Details
+## Key Commands
 
-### SDS Operator Runtimes
-SDS provides three runtime implementations of the Application Operator, selectable in `sds.toml`:
+| Command | What it does |
+|---|---|
+| `./sds_operator run <app>` | Deploy and monitor an application |
+| `./sds_operator init-exp <app> <name>` | Create an isolated experiment copy |
+| `./sds_operator run-exp <name>` | Run multiple experiments in parallel |
+| `./sds_operator analyze-prompts` | Report trajectory metrics |
+| `./sds_operator optimize-prompts` | Run DSPy offline prompt optimization |
+| `./sds_lego_agent --prompt "..."` | Generate and run an agent workflow (CLI) |
+| `./scripts/start_lego_ui.sh` | Launch the lego_agent web UI |
 
-- **CLI Agent Runtime (`cli_agent`)**: The default implementation. It communicates with external coding agents (like Gemini, Claude, or Codex) via their CLI interfaces.
-- **LangGraph Runtime (`langgraph`)**: Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes using LangChain.
-- **ADK Runtime (`adk`)**: Uses Google's Agent Development Kit with Gemini models for deterministic orchestration of agent tasks.
-
-### Operator Outputs & Trajectories
-The operator creates a `.sds/` directory in the target application with:
-- `deploy.sh` and `health_check.sh`: AI-generated scripts.
-- `logs/`: Detailed logs for every deployment and monitoring attempt.
-- `trajectories/`: Structured JSON recordings of all agent interactions, including sequential call IDs and correlation with external session logs (e.g., Gemini sessions).
-
-### LegoAgent Features & Orchestration
-LegoAgent is designed for complex task automation:
-- **Clarification Loop**: AI-powered questions to resolve ambiguities before script generation.
-- **Orchestration Patterns**: Built-in support for `fan_out` (parallel execution), `summarize` (aggregation), and `judge_loop` (iterative refinement).
-- **Validation**: Generated scripts are validated for syntax and safety before execution.
+Full option reference for each command is in `docs/architecture.md`.
 
 ---
 
-## Command Reference
+## Understanding the Output
 
-### `run`
-Deploy and monitor an application with autonomous error fixing.
-```bash
-./sds_operator run <DIR> [--config <FILE>] [--tui]
+After `sds_operator run`, the app directory contains a `.sds/` folder:
+
+```
+.sds/
+├── deploy.sh            # AI-generated deployment script
+├── health_check.sh      # AI-generated health check script
+├── code_analysis.md     # CodeAnalyzerAgent output (feeds DeploymentAgent)
+├── logs/                # Per-attempt logs for deployment and monitoring
+└── trajectories/        # JSON recordings of every agent call
+    └── *.json           # One file per run; used for analyze-prompts / optimize-prompts
 ```
 
-### `init-exp`
-Initialize a new experiment from an existing application.
-```bash
-./sds_operator init-exp <APP_PATH> <EXP_NAME>
-```
+Trajectory files contain phase, prompt, response, token counts, and success/failure for each agent call. They are the input to DSPy prompt optimization.
 
-### `run-exp`
-Run multiple experiments in parallel.
-```bash
-./sds_operator run-exp <EXPERIMENT_NAME_OR_PATH> [--parallel <N>]
-```
+---
 
-### `viz-graph`
-Visualize the agent's dependency graph (for LangGraph runtime).
-```bash
-./sds_operator viz-graph [-o graph.png]
-```
+## Going Deeper
+
+| Question | Document |
+|---|---|
+| How do runtimes, providers, and agents relate? | `docs/architecture.md` |
+| How do I optimize prompts with DSPy? | `docs/dspy-optimization.md` |
+| How do I use lego_agent? | `docs/lego-agent.md` |
+| How do I inject faults? | `docs/fault-injection.md` |
+| How do I use RLM for large logs? | `docs/rlm-integration.md` |
+| How do I write tests? | `docs/testing-guide.md` |

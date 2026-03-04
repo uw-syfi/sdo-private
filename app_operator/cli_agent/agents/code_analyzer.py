@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
-from app_operator.ui import OperatorUI, NullOperatorUI
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.config import DSPyConfig
+
+from app_operator.ui_protocol import OperatorUI, NullOperatorUI
 from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -24,9 +29,10 @@ class CodeAnalyzerAgent:
         self,
         repo_path: Path,
         coding_agent: CodingAgent,
-        filesystem: Optional[FileSystemInterface] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        ui: Optional[OperatorUI] = None,
+        filesystem: FileSystemInterface | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        dspy_config: "DSPyConfig" | None = None,
+        ui: OperatorUI | None = None,
     ):
         """Initialize the code analyzer agent.
 
@@ -35,16 +41,38 @@ class CodeAnalyzerAgent:
             coding_agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
+            dspy_config: Optional DSPy configuration for optimized prompts.
             ui: Optional UI interface.
         """
         self.repo_path = repo_path
         self.agent = coding_agent
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
+        self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"
         self.issues_file = self.sds_dir / "deployment_issues.md"
+
+    def _get_file_tree(self) -> str:
+        """Generate a simple file tree of the repository."""
+        try:
+            # Get list of files, excluding hidden ones and common ignore patterns
+            files = []
+            for path in self.filesystem.rglob(self.repo_path, "*"):
+                if self.filesystem.is_file(path) and not any(
+                    p.startswith(".") for p in path.relative_to(self.repo_path).parts
+                ):
+                    files.append(str(path.relative_to(self.repo_path)))
+
+            # Sort and limit to prevent context overflow
+            files.sort()
+            if len(files) > 100:
+                files = files[:100] + ["... (truncated)"]
+
+            return "\n".join(files)
+        except Exception:
+            return "Unable to generate file tree"
 
     def run(self) -> bool:
         """Run the code analysis.
@@ -66,10 +94,21 @@ class CodeAnalyzerAgent:
                 # Ensure .sds directory exists
                 self.filesystem.mkdir(self.sds_dir, exist_ok=True)
 
+                # Generate file tree for context
+                file_tree = self._get_file_tree()
+
                 # Create the prompt
-                system_prompt = get_loader().render("code_analyzer/system.jinja2")
-                user_prompt = get_loader().render(
-                    "code_analyzer/user.jinja2", repo_path=self.repo_path
+                system_prompt = get_loader(self.dspy_config).render(
+                    "code_analyzer/system.jinja2",
+                    repo_path=self.repo_path,
+                    agent_name=self.agent.__class__.__name__,  # Added for signature
+                    recorder=self.recorder,
+                )
+                user_prompt = get_loader(self.dspy_config).render(
+                    "code_analyzer/user.jinja2",
+                    repo_path=self.repo_path,
+                    file_tree=file_tree,  # Added for signature
+                    recorder=self.recorder,
                 )
 
                 logger.info(

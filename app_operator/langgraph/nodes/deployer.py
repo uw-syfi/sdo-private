@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface
@@ -27,8 +27,8 @@ def deploy_attempt(
     repo_path: Path,
     filesystem: FileSystemInterface,
     operator_config: Config,
-    check_shutdown: Optional[Callable[[], bool]],
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    check_shutdown: Callable[[], bool] | None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> OperatorState:
     recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():
@@ -64,8 +64,8 @@ def fix_errors(
     loader: PromptLoader,
     agent: Any,
     context_limit: int,
-    check_shutdown: Optional[Callable[[], bool]],
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    check_shutdown: Callable[[], bool] | None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> OperatorState:
     recorder = recorder or NullTrajectoryRecorder()
     if check_shutdown and check_shutdown():

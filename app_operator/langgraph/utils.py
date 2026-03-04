@@ -1,7 +1,7 @@
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 from langchain_core.messages import (
     SystemMessage,
@@ -24,7 +24,7 @@ RESET = "\033[0m"
 MAX_DISPLAY_CONTENT = 100
 
 
-def _extract_token_usage(message: BaseMessage) -> Dict[str, int]:
+def _extract_token_usage(message: BaseMessage) -> dict[str, int]:
     if not isinstance(message, AIMessage):
         return {}
 
@@ -45,7 +45,7 @@ def _extract_token_usage(message: BaseMessage) -> Dict[str, int]:
     return usage
 
 
-def _update_usage(state: OperatorState, new_usage: Dict[str, int]) -> None:
+def _update_usage(state: OperatorState, new_usage: dict[str, int]) -> None:
     current = state.get("token_usage") or {"input": 0, "output": 0, "total": 0}
     state["token_usage"] = {
         "input": current.get("input", 0) + new_usage.get("input", 0),
@@ -69,7 +69,7 @@ def invoke_agent(
     user_prompt: str,
     agent_name: str = "Agent",
     context_limit: int = 128000,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> tuple[str, list[BaseMessage]]:
     handler = LangGraphTrajectoryHandler(recorder)
 
@@ -156,10 +156,10 @@ def run_script(
     repo_path: Path,
     filesystem: FileSystemInterface,
     command: str,
-    log_file_path: Optional[Path] = None,
+    log_file_path: Path | None = None,
     timeout: int = 900,
-    recorder: Optional[TrajectoryRecorderProtocol] = None,
-) -> Dict[str, Any]:
+    recorder: TrajectoryRecorderProtocol | None = None,
+) -> dict[str, Any]:
     start_time = time.time()
     try:
         result = subprocess.run(

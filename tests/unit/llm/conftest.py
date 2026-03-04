@@ -5,11 +5,11 @@ from unittest.mock import MagicMock
 
 
 @pytest.fixture
-def mock_subprocess(monkeypatch):
+def mock_llm_subprocess(monkeypatch):
     """Mock subprocess operations for LLM agent tests.
 
-    This fixture overrides the global mock_subprocess to provide the specific
-    structure needed by the LLM tests (tuple of mock_popen, mock_which).
+    Provides a (mock_popen, mock_which) tuple tailored for LLM stream tests.
+    Named distinctly from the root conftest mock_subprocess to avoid shadowing.
     """
     mock_popen = MagicMock()
     mock_process = MagicMock()

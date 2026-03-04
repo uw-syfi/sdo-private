@@ -1,18 +1,18 @@
-from types import MethodType
 from unittest.mock import MagicMock
 
 import pytest
 
 import app_operator.cli_agent.agents.deployer as deployer_module
-from app_operator.cli_agent.agents.deployer import (
-    DeploymentAgent,
-    DEFAULT_DEPLOY_TIMEOUT_SECS,
-)
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.prompts.deployer import (
     prepare_error_context,
     create_fix_prompt,
 )
+from tests.fixtures import bind_method
 from tests.fixtures.agents import TrackingAgent
+
+# Default deploy timeout used by OperatorConfig; kept here for test readability.
+DEFAULT_DEPLOY_TIMEOUT_SECS = 900
 
 
 @pytest.fixture
@@ -50,6 +50,7 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
         deployment_config=None,
         operator_config=None,
         recorder=None,
+        dspy_config=None,
     ):
         generated["args"] = (directory, agent)
         sds_dir = repo / ".sds"
@@ -72,7 +73,7 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
 
     monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
 
     assert agent.run(max_attempts=1) is True
     assert generated["args"] == (str(repo), stub_agent)
@@ -95,16 +96,13 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
         deployment_config=None,
         operator_config=None,
         recorder=None,
+        dspy_config=None,
     ):
         return False, "boom"
 
     monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
 
     assert agent.run() is False
-
-
-def _bind_method(obj, name, func):
-    setattr(obj, name, MethodType(func, obj))
 
 
 def test_run_succeeds_without_fix(agent, monkeypatch):
@@ -139,9 +137,9 @@ def test_run_succeeds_without_fix(agent, monkeypatch):
     def unexpected_fix(self, *args, **kwargs):
         raise AssertionError("fix should not be invoked on success")
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "_fix_with_agent", unexpected_fix)
+    bind_method(agent, "_fix_with_agent", unexpected_fix)
 
     assert agent.run(max_attempts=1) is True
 
@@ -189,9 +187,9 @@ def test_run_retries_after_failure(agent, monkeypatch):
         fix_calls.append((attempt, max_attempts, deploy_result["exit_code"]))
         return True
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
     monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=3) is True
     assert fix_calls == [(1, 3, 1)]
@@ -223,8 +221,8 @@ def test_run_respects_max_attempts(agent):
         fix_calls["count"] += 1
         return False
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=1) is False
     assert fix_calls["count"] == 1
@@ -279,6 +277,7 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
     Verifies that when a deployment command times out, the agent properly
     sets exit_code to -1 and includes timeout message in stderr.
     """
+
     class MockProcess:
         def __init__(self, *args, **kwargs):
             self.stdout = MagicMock()
@@ -465,6 +464,181 @@ def test_create_fix_prompt_includes_repo_and_scripts(agent):
     assert "2 of 5" in prompt
 
 
+def test_run_health_recheck_after_fix_succeeds(agent, monkeypatch):
+    """Agent fixes health_check.sh → recheck passes → no full re-deploy needed."""
+    health_call_count = {"n": 0}
+    deploy_call_count = {"n": 0}
+
+    def fake_run_deploy(
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
+    ):
+        deploy_call_count["n"] += 1
+        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
+
+    def fake_run_health(repo, script, timeout=120, log_file_path=None):
+        health_call_count["n"] += 1
+        if health_call_count["n"] == 1:
+            return {
+                "success": False,
+                "exit_code": 1,
+                "stdout": "8 failed",
+                "stderr": "",
+            }
+        # Post-fix recheck passes
+        return {"success": True, "exit_code": 0, "stdout": "healthy", "stderr": ""}
+
+    def fake_fix(
+        self,
+        deploy_result,
+        health_result,
+        attempt,
+        max_attempts,
+        log_file_path=None,
+        health_check_log_path=None,
+    ):
+        return True
+
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
+    bind_method(agent, "_fix_with_agent", fake_fix)
+
+    assert agent.run(max_attempts=3) is True
+    # Only one deploy; health called twice (initial + recheck)
+    assert deploy_call_count["n"] == 1
+    assert health_call_count["n"] == 2
+
+
+def test_run_health_recheck_after_fix_still_fails_retries(agent, monkeypatch):
+    """Recheck after agent fix still fails → falls through to full re-deploy."""
+    deploy_call_count = {"n": 0}
+    health_call_count = {"n": 0}
+
+    def fake_run_deploy(
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
+    ):
+        deploy_call_count["n"] += 1
+        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
+
+    def fake_run_health(repo, script, timeout=120, log_file_path=None):
+        health_call_count["n"] += 1
+        if health_call_count["n"] <= 2:
+            # Attempt-1 initial + recheck both fail
+            return {"success": False, "exit_code": 1, "stdout": "broken", "stderr": ""}
+        # Attempt-2 initial health check passes
+        return {"success": True, "exit_code": 0, "stdout": "healthy", "stderr": ""}
+
+    def fake_fix(
+        self,
+        deploy_result,
+        health_result,
+        attempt,
+        max_attempts,
+        log_file_path=None,
+        health_check_log_path=None,
+    ):
+        return True
+
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
+    bind_method(agent, "_fix_with_agent", fake_fix)
+
+    assert agent.run(max_attempts=3) is True
+    # Two deploys (attempt 1 + retry attempt 2)
+    assert deploy_call_count["n"] == 2
+    # Three health checks: attempt1-initial, attempt1-recheck, attempt2-initial
+    assert health_call_count["n"] == 3
+
+
+def test_exit_code_zero_recorded_correctly(repo_path, stub_agent, monkeypatch):
+    """Regression: 'int(ec or -1)' coerces 0 to -1.  Verify 0 is recorded as 0."""
+    recorded_exit_codes = []
+
+    class RecordingRecorder:
+        """Minimal recorder that captures exit_codes passed to add_tool_call."""
+
+        def start_phase(self, phase, context=None):
+            pass
+
+        def end_phase(self, status=None):
+            pass
+
+        def add_user_message(self, content):
+            pass
+
+        def add_assistant_message(self, content, duration=None):
+            pass
+
+        def add_tool_call(
+            self, tool, args, stdout="", stderr="", exit_code=None, duration=None
+        ):
+            recorded_exit_codes.append(exit_code)
+
+        def set_phase_status(self, status):
+            pass
+
+        def set_agent_name(self, name):
+            pass
+
+        def set_prompt_version(self, version):
+            pass
+
+        def record_fallback(self):
+            pass
+
+        def record_prompt_kwargs(self, kwargs):
+            pass
+
+        def record_rendered_prompt(self, rendered):
+            pass
+
+        def finalize(self, status="completed"):
+            from pathlib import Path
+
+            return Path("/dev/null")
+
+        @property
+        def phase(self):
+            from contextlib import contextmanager
+
+            @contextmanager
+            def _phase(phase, context=None):
+                self.start_phase(phase, context)
+                yield self
+                self.end_phase()
+
+            return _phase
+
+    def fake_run_deploy(
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
+    ):
+        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
+
+    def fake_run_health(repo, script, timeout=120, log_file_path=None):
+        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
+
+    recorder = RecordingRecorder()
+    agent = DeploymentAgent(repo_path, stub_agent, recorder=recorder)
+
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
+
+    assert agent.run(max_attempts=1) is True
+    # Both deploy and health_check exit_code=0 must be recorded as 0, not -1
+    assert recorded_exit_codes == [0, 0]
+
+
 def test_run_retries_if_fix_fails(agent):
     # This test verifies that if _fix_with_agent returns False (e.g. agent timeout/error),
     # the deployment loop continues until max attempts are reached.
@@ -495,8 +669,8 @@ def test_run_retries_if_fix_fails(agent):
         fix_calls["count"] += 1
         return False  # Agent failed to fix
 
-    _bind_method(agent, "run_deploy_command", fake_run_deploy)
-    _bind_method(agent, "_fix_with_agent", fake_fix)
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "_fix_with_agent", fake_fix)
 
     # Run with max_attempts=3.
     # It should retry 3 times.

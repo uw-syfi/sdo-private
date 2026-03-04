@@ -1,17 +1,17 @@
 from .base import register_provider
-from typing import Optional, List
 import json
 import time
 from pathlib import Path
 
+import logging
+
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
 from .events import AgentEventHandler
-from app_operator.trajectory import (
-    get_current_call_id,
-    get_run_id,
-    TrajectoryRecorderProtocol,
-)
+import libs.agent_cli.trajectory as _trajectory_module
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+
+_logger = logging.getLogger(__name__)
 
 
 class GeminiGenerationSession(CLIGenerationSession):
@@ -21,11 +21,9 @@ class GeminiGenerationSession(CLIGenerationSession):
         self.tool_map = {}
         self.tool_start_times = {}
         self.tool_args = {}
-        self._at_line_start = True
-
         # Capture call_id and run_id for correlation
-        self.call_id = get_current_call_id()
-        self.run_id = get_run_id()
+        self.call_id = _trajectory_module.get_current_call_id()
+        self.run_id = _trajectory_module.get_run_id()
 
     def _write_call_metadata(self):
         """Write metadata file to help correlate Gemini session with trajectory call."""
@@ -53,13 +51,15 @@ class GeminiGenerationSession(CLIGenerationSession):
                     with open(metadata_file, "w") as f:
                         json.dump(metadata, f, indent=2)
         except Exception:
-            # Silently fail - this is just metadata for convenience
-            pass
+            _logger.debug("Failed to write Gemini call metadata", exc_info=True)
 
     def run(self, prompt: str) -> str:
         """Execute the generation process, writing call metadata first."""
         # Write metadata file to correlate with trajectory
         self._write_call_metadata()
+
+        if not self.silent:
+            self._log_raw(f"{self.log_prefix} Input Prompt:\n{prompt}\n")
 
         # Call parent implementation
         return super().run(prompt)
@@ -147,29 +147,6 @@ class GeminiGenerationSession(CLIGenerationSession):
         if output:
             self._log_raw(output + "\n")
 
-    def _print_stream_content(self, content: str):
-        """Print streaming content with prefix handling."""
-        if not content:
-            return
-
-        lines = content.split("\n")
-
-        for i, line in enumerate(lines):
-            is_last = i == len(lines) - 1
-
-            if is_last:
-                if line:
-                    if self._at_line_start:
-                        self._log_raw(f"{self.log_prefix} ")
-                        self._at_line_start = False
-                    self._log_raw(line)
-            else:
-                if self._at_line_start:
-                    self._log_raw(f"{self.log_prefix} ")
-                self._log_raw(line)
-                self._log_raw("\n")
-                self._at_line_start = True
-
 
 @register_provider("gemini")
 class GeminiCodingAgent(CLICodingAgent):
@@ -177,9 +154,9 @@ class GeminiCodingAgent(CLICodingAgent):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
-        event_handler: Optional[AgentEventHandler] = None,
+        model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
     ):
         """Initialize the Gemini coding agent.
 
@@ -200,7 +177,7 @@ class GeminiCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Gemini]"
 
-    def _get_command(self, prompt: str) -> List[str]:
+    def _get_command(self, prompt: str) -> list[str]:
         cmd = [self.binary_path]
 
         # Enable yolo mode
@@ -216,11 +193,11 @@ class GeminiCodingAgent(CLICodingAgent):
 
     def _create_session(
         self,
-        cmd: List[str],
-        cwd: Optional[str] = None,
+        cmd: list[str],
+        cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
-        recorder: Optional[TrajectoryRecorderProtocol] = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> GeminiGenerationSession:
         return GeminiGenerationSession(
             binary_name=self.binary_name,

@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+from typing import Literal
 
 
 @dataclass
@@ -10,8 +10,8 @@ class LegoAgentResponse:
     """Structured response from the agent."""
 
     status: Literal["clarify", "ready"]
-    questions: List[str] = field(default_factory=list)
-    yaml_config: Optional[str] = None
+    questions: list[str] = field(default_factory=list)
+    yaml_config: str | None = None
 
     def validate(self) -> None:
         """Validate the response consistency."""
@@ -32,20 +32,7 @@ class LegoAgentResult:
     script_path: Path
     config_path: Path
     script_text: str
-    clarifications: List[Tuple[str, str]]
-
-
-def get_lego_agent_response_schema() -> dict:
-    """Return the JSON schema for LegoAgentResponse."""
-    return {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["clarify", "ready"]},
-            "questions": {"type": "array", "items": {"type": "string"}},
-            "yaml_config": {"type": "string"},
-        },
-        "required": ["status"],
-    }
+    clarifications: list[tuple[str, str]]
 
 
 def extract_json(text: str) -> str:
@@ -62,7 +49,8 @@ def extract_json(text: str) -> str:
             json.loads(candidate)
             return candidate
         except json.JSONDecodeError:
-            pass  # Try fallback if regex extraction isn't valid JSON
+            # Regex match is not valid JSON; fall through to brace-slice fallback
+            pass
 
     # Fallback: look for the first { and last }
     start = text.find("{")
@@ -73,6 +61,7 @@ def extract_json(text: str) -> str:
             json.loads(candidate)
             return candidate
         except json.JSONDecodeError:
+            # Brace-slice is also not valid JSON; return best-effort text below
             pass
 
     # If we get here, neither method produced valid JSON.

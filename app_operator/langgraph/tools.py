@@ -1,10 +1,11 @@
 import re
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Callable
+from typing import Any, Callable
 
 from langchain_core.tools import tool
 
+from app_operator.command_validation import DangerousCommandError, validate_command
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 
 
@@ -67,9 +68,9 @@ def _build_ls(context: ToolContext) -> Callable[[str], str]:
     return ls
 
 
-def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
+def _build_glob(context: ToolContext) -> Callable[[str], list[str]]:
     @tool("Glob")
-    def glob(pattern: str) -> List[str]:
+    def glob(pattern: str) -> list[str]:
         """Find files matching the pattern."""
         try:
             if Path(pattern).is_absolute():
@@ -108,14 +109,14 @@ def _build_read(context: ToolContext) -> Callable[[str], str]:
     return read
 
 
-def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
+def _build_grep(context: ToolContext) -> Callable[[str, str], list[str]]:
     @tool("Grep")
-    def grep(pattern: str, path: str = ".") -> List[str]:
+    def grep(pattern: str, path: str = ".") -> list[str]:
         """Search for a regex pattern in files."""
         try:
             target = context.resolve_path(path)
             regex = re.compile(pattern)
-            matches: List[str] = []
+            matches: list[str] = []
 
             if context.filesystem.exists(target) and not context.filesystem.is_dir(
                 target
@@ -133,7 +134,7 @@ def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
     return grep
 
 
-def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path) -> List[str]:
+def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path) -> list[str]:
     results = []
     try:
         content = file_path.read_text(errors="ignore")
@@ -166,11 +167,12 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
     return write_file
 
 
-def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
+def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
     @tool("bash")
-    def bash(command: str, timeout: int = 120) -> Dict[str, Any]:
+    def bash(command: str, timeout: int = 120) -> dict[str, Any]:
         """Execute a bash command."""
         try:
+            validate_command(command)
             result = subprocess.run(
                 command,
                 cwd=str(context.repo_root),
@@ -185,6 +187,14 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
                 "exit_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
+            }
+        except DangerousCommandError as e:
+            error_msg = str(e)
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": error_msg,
             }
         except subprocess.TimeoutExpired:
             error_msg = f"Command timed out after {timeout} seconds"
@@ -208,7 +218,7 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
 
 def build_tools(
     repo_path: Path, filesystem: FileSystemInterface = None
-) -> List[Callable[..., Any]]:
+) -> list[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 

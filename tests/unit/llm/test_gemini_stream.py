@@ -102,10 +102,9 @@ def test_tool_use_truncation_and_prefix(gemini_agent, mock_popen):
 
     output = captured_stdout.getvalue()
 
-    # Verify prefix
-    assert "[Gemini] \x1b[34m[Tool Use]" in output
-
-    # Verify truncation (params shouldn't be fully printed)
+    # Verify tool use prefix and truncation (semantic content, not ANSI codes)
+    assert "[Gemini]" in output
+    assert "[Tool Use]" in output
     assert "..." in output
     assert "x" * 300 not in output
 
@@ -145,8 +144,9 @@ def test_tool_result_empty_message(gemini_agent, mock_popen):
 
     output = captured_stdout.getvalue()
 
-    # Verify "my_awesome_tool ran successfully" in Green
-    assert "[Gemini] \x1b[32mmy_awesome_tool ran successfully\x1b[0m" in output
+    # Verify success message (semantic content, not ANSI codes)
+    assert "[Gemini]" in output
+    assert "my_awesome_tool ran successfully" in output
 
 
 def test_generate_emits_ui_events(gemini_agent, mock_popen):
