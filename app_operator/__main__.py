@@ -206,28 +206,6 @@ Examples:
         if exit_code == 0:
             # Call the loop (it handles the retries internally)
             trigger_ai_remediation(max_retries=5)
-            
-            # --- NEW AUTOMATED TEARDOWN ---
-            print("\n" + "="*50)
-            input("⏸️  Agent run complete. Press [ENTER] to teardown the environment...")
-            print("🧹 Tearing down containers and restoring files...")
-            
-            try:
-                # 1. Stop Docker containers
-                subprocess.run(["docker-compose", "down", "--remove-orphans"], cwd=args.directory, check=True)
-                
-                # 2. Restore the YAML files
-                subprocess.run(["git", "restore", "docker-compose.yml"], cwd=args.directory, check=True)
-                
-                # Optional: Remove the generated prometheus.yml file
-                prom_path = Path(args.directory) / "prometheus.yml"
-                if prom_path.exists():
-                    prom_path.unlink()
-                    
-                print("✅ Teardown complete!")
-            except Exception as e:
-                logger.error(f"❌ Error during teardown: {e}")
-            
         return exit_code
     elif args.command == "init-exp":
         return init_exp.run_command(args)
