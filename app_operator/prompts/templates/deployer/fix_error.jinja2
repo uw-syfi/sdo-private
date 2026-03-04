@@ -111,3 +111,22 @@ The scripts are located at:
 - {{ health_check_script }}
 
 You have read/write access to these files. Please fix the issues and help get the deployment working.
+
+## Git workflow and merge requests
+
+If you have access to a tool named `make_change_on_remote_copy`, you should use it to safely publish your changes for human review once you have finished applying all necessary fixes.
+
+After you have:
+- identified and fixed the deployment problem,
+- updated any relevant scripts or code,
+- and verified (as far as possible from logs and reasoning) that the fixes are correct,
+
+then:
+
+1. Choose a clear, descriptive feature branch name, for example: `sds-fix-attempt-{{ attempt }}`.
+2. Call the `make_change_on_remote_copy` tool **exactly once** with:
+   - `branch_name`: the feature branch name you chose
+   - `commit_message`: a concise summary of the changes you made
+   - `mr_title`: a short, human‑readable title for the merge request
+   - `mr_description`: a brief description of what you changed and why, including any risks or follow‑up checks the human reviewer should perform
+3. Do **not** call this tool before your fixes are complete, and do **not** call it multiple times for the same attempt unless explicitly instructed.
