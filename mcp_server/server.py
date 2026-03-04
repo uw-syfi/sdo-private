@@ -84,39 +84,3 @@ def read_prometheus_metric(query: str = "up") -> str:
 
 if __name__ == "__main__":
     mcp.run()
-
-## BASIC FILE TO MAKE SURE EVERYTHING IS WORKING ##
-# # sds/mcp_server/server.py
-# from mcp.server.fastmcp import FastMCP
-# import subprocess
-
-# # Name your server (this shows up in logs/clients)
-# mcp = FastMCP("SDS_Controller")
-
-# @mcp.tool()
-# def list_running_containers() -> str:
-#     """
-#     Checks which Docker containers are currently running.
-#     Returns the raw output of 'docker ps'.
-#     """
-#     try:
-#         result = subprocess.check_output(["docker", "ps"], text=True)
-#         return result
-#     except subprocess.CalledProcessError as e:
-#         return f"Error checking Docker: {e}"
-
-# @mcp.tool()
-# def stop_container(container_id: str) -> str:
-#     """
-#     Stops a specific Docker container by ID.
-#     Args:
-#         container_id: The ID or name of the container to stop.
-#     """
-#     try:
-#         subprocess.check_call(["docker", "stop", container_id])
-#         return f"Successfully stopped container {container_id}"
-#     except subprocess.CalledProcessError:
-#         return f"Failed to stop container {container_id}"
-
-# if __name__ == "__main__":
-#     mcp.run()

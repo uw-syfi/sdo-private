@@ -45,7 +45,7 @@ def trigger_ai_remediation(max_retries: int):
             # 2. Run Gemini and CAPTURE the output
             #    We use 'tee' behavior: print to screen AND capture to variable
             process = subprocess.Popen(
-                ["gemini", playbook_content],
+                ["gemini", "-y", playbook_content],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -58,6 +58,7 @@ def trigger_ai_remediation(max_retries: int):
             for line in process.stdout:
                 print(line, end="") # Print to user
                 full_output += line # Save for analysis
+            
             
             process.wait() # Wait for agent to finish
 

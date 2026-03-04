@@ -110,6 +110,7 @@ class OperatorConfig:
     agent_fix_timeout: int = 1800
     deploy_timeout: int = 900
     agent_timeout: int = 300
+    dynamic_observability_injection: bool = False
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
