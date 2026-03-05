@@ -260,24 +260,7 @@ fix_summary_consolidation = true
 
 Any section valid in `sds.toml` (`[agent]`, `[operator]`, `[runtime]`, etc.) can be used as an override.
 
----
-
-## Operator Phase Flags
-
-`[operator.phase]` in `sds.toml` controls which optional operator capabilities are active. All flags default to a safe, minimal-footprint baseline.
-
-```toml
-[operator.phase]
-code_analysis = true          # default: true
-fix_summary_consolidation = true  # default: true
-git_integration = false       # default: false
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `code_analysis` | `true` | Run `CodeAnalyzerAgent` before deployment. Produces `.sds/code_analysis.md` and injects app structure understanding into the deployer prompt. Disable to skip the analysis step and reduce token usage. |
-| `fix_summary_consolidation` | `true` | After the self-healing loop, consolidate fix summaries across iterations into a single structured report. |
-| `git_integration` | `false` | Expose the `make_change_on_remote_copy` tool to the agent. When enabled, the agent can push branches and open GitLab MRs from within the operator loop. Requires GitLab credentials. **Opt-in only** — do not enable in local dev environments. |
+See [`docs/feature-flags.md`](feature-flags.md) for the full list of `[operator.phase]` flags.
 
 ---
 
