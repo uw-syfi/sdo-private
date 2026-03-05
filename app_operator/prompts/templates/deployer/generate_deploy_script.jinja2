@@ -13,30 +13,46 @@ CRITICAL REQUIREMENTS:
    - Use `kubectl` commands.
    - Ensure you handle manifest application and pod readiness.
 {% elif platform == "docker" %}
-1. **Target Platform: Docker**
-   - Use `docker compose` or `docker` commands as appropriate for the repo.
-   - CRITICAL: The `start` command MUST use `docker compose up --build -d`, not
-     plain `up -d`.  Without `--build`, Docker reuses cached images and never
-     compiles the current source code.  Every deployment must build from source.
+1. **Target Platform: Docker Compose**
+   - ALWAYS use `docker compose` commands — NEVER use plain `docker run` to start services.
+   - If no docker-compose.yml exists in the repo, generate one before creating deploy.sh.
+   - CRITICAL: Set `PROJECT_NAME=$(basename "{{ target_dir }}")` near the top of the script
+     and pass `--project-name "$PROJECT_NAME"` to EVERY `docker compose` command.
+     The project name MUST be the basename of the target directory — NOT the service name,
+     image name, or any other string.
+   - CRITICAL: The `start` command MUST use `docker compose --project-name "$PROJECT_NAME" up --build -d`.
+     Without `--build`, Docker reuses cached images and never compiles current source code.
+     Every deployment must build from source.
 {% else %}
 1. **Deployment Platform Detection**:
    - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
    - Use the appropriate commands.
+   - If using Docker Compose: set `PROJECT_NAME=$(basename "{{ target_dir }}")` near the top
+     of the script and pass `--project-name "$PROJECT_NAME"` to EVERY `docker compose` command.
+     The project name MUST be the basename of the target directory — NOT the service name,
+     image name, or any other string.
 {% endif %}
+
+{% include "deployer/_deploy_script_schema.jinja2" %}
 
 2. **Script Requirements**:
    - Create the file at: .sds/deploy.sh
-   - Use SCRIPT_DIR to determine paths relative to the script location
-   - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
-   - CRITICAL: The command MUST be accepted as a positional argument ($1), NOT via a flag.
-     The operator calls the script as: deploy.sh <command> (e.g. deploy.sh start)
-     Do NOT use getopts or -c flags. Parse $1 directly in a case statement.
-   - Make it robust, well-documented, and production-ready
-   - Include proper error handling and colored output
    - The script should work when executed from the .sds directory
    - Check for correct prerequisites
 
-3. **Platform-Specific Commands**:
-   - Use the commands that match the detected/target platform (see System Prompt).
+{% if code_analysis %}
+## Architecture Reconciliation
+
+`.sds/code_analysis.md` describes the application's intended architecture: its services, databases, ports, inter-service dependencies, and recommended startup order. Before writing deploy.sh, read it and use it to inform your script.
+
+The following is a recommended (non-exhaustive) list of things to check:
+
+- **Missing services**: a service listed in the architecture is absent from the deployment manifest — add it
+- **Phantom services**: a service defined in the deployment manifest has no corresponding code or Dockerfile in the repository — remove or correct it
+- **Database mismatches**: the architecture identifies a database type or name for a service but the deployment manifest provisions a different one, or omits it entirely — align the manifest
+- **Port mismatches**: a service's declared port in the architecture differs from what the deployment config uses — correct the config
+- **Broken dependency wiring**: the architecture's dependency graph shows service A depends on service B, but the deployment manifest has no `depends_on` (or equivalent) reflecting that — add the missing dependency
+- **Startup order violations**: the architecture specifies an infrastructure-first startup order (e.g. databases → service discovery → core services → gateway) that the deploy script does not honour — fix the ordering
+{% endif %}
 
 You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content.

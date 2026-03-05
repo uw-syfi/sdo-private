@@ -476,7 +476,7 @@ class OperatorConfig:
     interval: int = 30
     monitoring_max_iters: int = 5
     deployment_max_iters: int = 20
-    agent_fix_timeout: int = 1800
+    agent_fix_timeout: int = 2700
     deploy_timeout: int = 900
     agent_timeout: int = 900
     phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)

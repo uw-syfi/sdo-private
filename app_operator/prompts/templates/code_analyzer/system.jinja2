@@ -205,99 +205,50 @@ MYSQL_ROOT_PASSWORD=<secret>
 ### File 2: `.sds/deployment_issues.md`
 
 ```markdown
-# Deployment Issues Report
+# Deployment Issues
 
 **Repository:** <repo-name>
 **Analysis Date:** <timestamp>
-**Total Issues Found:** <count>
 
-## Summary
+## TODO
 
-| Severity | Count | Description |
-|----------|-------|-------------|
-| Critical | <n> | Must fix before deployment |
-| High | <n> | Likely to cause deployment failure |
-| Medium | <n> | May cause issues in production |
-| Low | <n> | Best practice recommendations |
+<!-- Updated by the fix agent as issues are resolved. Do not remove resolved entries. -->
+- [ ] #1 — <concise title ≤ 8 words>
+- [ ] #2 — <concise title ≤ 8 words>
 
 ---
 
-## Critical Issues
+## Issues
 
-Issues that will prevent successful deployment.
+### #1 — <title>
 
-### Issue 1: <title>
-
-- **Category:** <Configuration Mismatch|Missing Component|Resource Conflict|...>
+- **Severity:** Critical | High | Medium | Low
+- **Confidence:** High | Medium | Low — <one sentence justifying the rating>
+- **Category:** Configuration Mismatch | Missing Component | Resource Conflict | ...
 - **Affected:** <service-name or file-path>
 - **Description:** <detailed explanation>
 - **Evidence:**
   - Found in `<file>`: <relevant snippet>
-  - Expected: <what should be there>
-  - Actual: <what was found>
 - **Impact:** <what will fail>
 - **Recommended Fix:** <specific steps>
 
----
-
-## High Severity Issues
-
-Issues likely to cause deployment failures.
-
-### Issue N: <title>
-
-- **Category:** <category>
-- **Affected:** <service-or-file>
-- **Description:** <explanation>
-- **Impact:** <consequences>
-- **Recommended Fix:** <solution>
-
----
-
-## Medium Severity Issues
-
-Issues that may cause problems in production.
-
-### Issue N: <title>
-
-- **Category:** <category>
-- **Affected:** <service-or-file>
-- **Description:** <explanation>
-- **Recommended Fix:** <solution>
-
----
-
-## Low Severity / Recommendations
-
-Best practices that won't block deployment.
-
-### Issue N: <title>
-
-- **Category:** <category>
-- **Affected:** <service-or-file>
-- **Recommended Fix:** <solution>
-
----
-
-## Issues by Service
-
-| Service | Critical | High | Medium | Low |
-|---------|----------|------|--------|-----|
-| ts-auth-service | 0 | 1 | 2 | 1 |
-
-## Issues by Category
-
-| Category | Count | Examples |
-|----------|-------|----------|
-| Database Mismatch | 5 | ts-auth-service expects MySQL, configured with MongoDB |
-
-## Fix Priority Order
-
-Recommended order for fastest path to deployment:
-
-1. <issue-title> - <reason>
-2. <issue-title> - <reason>
+### #2 — ...
 ```
+
+**Confidence levels:**
+- **High**: Clear evidence in code/config — this will definitely cause a failure
+- **Medium**: Strong suspicion from patterns, but not 100% confirmed
+- **Low**: Possible issue; requires runtime verification to confirm
+
+**Example confidence entries:**
+- `- **Confidence:** High — Dockerfile copies certs into /tmp but the service reads them from /etc/ssl/certs, which will always be empty at runtime.`
+- `- **Confidence:** Medium — Memcached connection string in config.json uses localhost, which would fail in a multi-container setup, but a docker-compose service alias could override this.`
+- `- **Confidence:** Low — Rate service query uses bson.D{} which may return all hotels; requires a live database to confirm whether this causes wrong data or a timeout.`
+
+**Rules:**
+- IDs start at `#1`, sequential, never reused
+- All issues start unchecked (`- [ ]`) in the TODO section
+- Order issues most-severe first: Critical → High → Medium → Low
 
 ---
 

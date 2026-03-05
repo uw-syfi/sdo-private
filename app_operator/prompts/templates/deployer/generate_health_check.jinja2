@@ -13,26 +13,30 @@ CRITICAL REQUIREMENTS:
    - Use `kubectl` commands.
    - Check pod status and readiness.
 {% elif platform == "docker" %}
-1. **Target Platform: Docker**
-   - Use `docker compose ps` or `docker ps`.
-   - Check container status.
+1. **Target Platform: Docker Compose**
+   - Set `PROJECT_NAME=$(basename "{{ target_dir }}")` near the top of the script and pass
+     `--project-name "$PROJECT_NAME"` to EVERY `docker compose` command. The project name
+     MUST be the basename of the target directory — NOT the service name, image name, or any
+     other string.
+   - Use `docker compose --project-name "$PROJECT_NAME" ps` to check container status.
+   - NEVER use plain `docker ps` to verify service health — always use docker compose.
 {% else %}
 1. **Deployment Platform Detection**:
    - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
    - Use the appropriate status check commands.
+   - If using Docker Compose: set `PROJECT_NAME=$(basename "{{ target_dir }}")` near the top
+     of the script and pass `--project-name "$PROJECT_NAME"` to EVERY `docker compose` command.
+     The project name MUST be the basename of the target directory — NOT the service name,
+     image name, or any other string.
 {% endif %}
+
+{% include "deployer/_health_check_schema.jinja2" %}
 
 2. **Script Requirements**:
    - Create the file at: .sds/health_check.sh
-   - Use SCRIPT_DIR to determine paths relative to the script location
    - Include checks for: containers/pods, ports, endpoints, databases, cache, performance
    - Include a summary report with health score
-   - Make it robust, well-documented, and production-ready
-   - Include proper error handling and colored output
    - Track total checks, passed checks, failed checks, warnings
    - The script should work when executed from the .sds directory
-
-3. **Platform-Specific Commands**:
-   - Use the checks that match the detected/target platform (see System Prompt).
 
 You must use the write_file tool to create the file .sds/health_check.sh directly. Do not just print the content.

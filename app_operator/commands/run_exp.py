@@ -198,7 +198,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
             apps_seen.setdefault(r.app, []).append(r)
 
         aggregated = []
-        for app_name, app_results in apps_seen.items():
+        for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
             successes = sum(1 for r in app_results if r.success)
             iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
@@ -269,7 +269,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
         for r in results:
             apps_seen.setdefault(r.app, []).append(r)
 
-        for app_name, app_results in apps_seen.items():
+        for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
             successes = sum(1 for r in app_results if r.success)
             iters = sorted(r.deployment_iterations for r in app_results if r.deployment_iterations is not None)
@@ -362,8 +362,18 @@ def run_experiment_task(
     progress.update(task_id, description=f"[cyan]{display_name}[/]: Initializing", completed=0)
 
     # 1. Init Experiment
-    # Remove existing exp dir if it exists to ensure fresh init
+    # Teardown any existing Docker stack before wiping the directory
     if exp_dir.exists():
+        deploy_sh = exp_dir / ".sds" / "deploy.sh"
+        if deploy_sh.exists():
+            progress.update(task_id, description=f"[cyan]{display_name}[/]: Teardown", completed=0)
+            subprocess.run(
+                ["bash", str(deploy_sh), "cleanup"],
+                cwd=exp_dir,
+                capture_output=True,
+                timeout=120,
+            )
+        # Remove existing exp dir to ensure fresh init
         if exp_dir.is_dir():
             shutil.rmtree(exp_dir)
         else:

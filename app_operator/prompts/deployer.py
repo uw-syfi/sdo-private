@@ -128,6 +128,7 @@ def create_fix_prompt(
     error_context: str,
     deploy_script_path: Path,
     health_check_script_path: Path,
+    platform: str = "auto",
     dspy_config: DSPyConfigProtocol | None = None,
     recorder=None,
     fix_summary_consolidation: bool = True,
@@ -141,6 +142,7 @@ def create_fix_prompt(
         error_context: Formatted error context.
         deploy_script_path: Path to the deploy script.
         health_check_script_path: Path to the health check script.
+        platform: Deployment platform (e.g., 'docker', 'k8s').
         dspy_config: Optional DSPy configuration for optimized prompts.
         recorder: Optional trajectory recorder for kwargs capture.
         fix_summary_consolidation: Whether consolidated fix summary is enabled.
@@ -170,6 +172,9 @@ def create_fix_prompt(
                 "Please review the previous attempts to avoid repeating mistakes."
             )
 
+    has_deployment_issues = (repo_path / ".sds" / "deployment_issues.md").exists()
+    has_code_analysis = (repo_path / ".sds" / "code_analysis.md").exists()
+
     return get_loader(dspy_config).render(
         "deployer/fix_error.jinja2",
         repo_path=repo_path,
@@ -179,7 +184,10 @@ def create_fix_prompt(
         previous_summary_note=previous_summary_note,
         deploy_script=deploy_script_path,
         health_check_script=health_check_script_path,
+        platform=platform,
         recorder=recorder,
+        has_deployment_issues=has_deployment_issues,
+        has_code_analysis=has_code_analysis,
     )
 
 

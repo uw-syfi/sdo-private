@@ -27,20 +27,17 @@ You MUST generate scripts for Kubernetes deployment.
 You MUST generate scripts for Docker deployment.
 
 ### Docker Platform Requirements:
-- Analyze the repository to choose between Docker Compose and plain Docker.
-- **Docker Compose** (Recommended if compose file exists):
-  - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
-  - If found: Generate scripts that use `docker compose` commands
-  - **ALWAYS pass `--project-name <name>`** (derived from the app directory name) to every `docker compose` command so container names are scoped to this deployment and do not conflict with other runs
-  - Commands: docker compose --project-name <name> up, docker compose --project-name <name> down, etc.
-- **Plain Docker**:
-  - Look for: Dockerfile(s) without docker-compose files
-  - If found: Generate scripts that use direct `docker run` commands
-  - Commands: docker build, docker run, docker stop, docker ps, docker logs
-  - Create a dedicated Docker network for the application and attach all containers to it so they communicate by container name without host port bindings
-  - Only use `-p` to expose ports that must be reachable from outside the host (e.g. the application's public-facing endpoint)
+- This deployment MUST use Docker Compose. NEVER use plain `docker run` to start services.
+- Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
+- If a compose file exists: use it as the basis for deployment scripts.
+- If NO compose file exists: generate a docker-compose.yml from the Dockerfiles and
+  application structure BEFORE generating deploy.sh.
+- **ALWAYS pass `--project-name "$PROJECT_NAME"`** to every `docker compose` command
+  (see DO's below for how to derive `PROJECT_NAME`).
+- Commands: `docker compose --project-name "$PROJECT_NAME" up --build -d` (start),
+            `docker compose --project-name "$PROJECT_NAME" down` (stop), etc.
 
-**CRITICAL REQUIREMENT**: The deployment method MUST be Docker based. DO NOT use Kubernetes commands.
+**CRITICAL REQUIREMENT**: The deployment method MUST be Docker Compose. DO NOT use plain `docker run` commands or Kubernetes commands.
 {% else %}
 ## CRITICAL: Deployment Platform Detection
 
@@ -48,68 +45,48 @@ You MUST analyze the repository structure to determine the EXACT deployment plat
 
 ### Docker Compose Platform:
 - Look for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
-- If found: Generate scripts that use `docker compose` commands
+- If found: Generate scripts that use `docker compose` commands.
+- **ALWAYS pass `--project-name "$PROJECT_NAME"`** to every `docker compose` command
+  (see DO's below for derivation).
 
 ### Kubernetes Platform:
-- Look for: k8s/, kubernetes/, *.yaml manifests
-- If found: Generate scripts that use `kubectl` commands
+- Look for: k8s/, kubernetes/, *.yaml manifests with "kind: Deployment"
+- If found: Generate scripts that use `kubectl` commands.
 
-### Plain Docker Platform:
-- Look for: Dockerfile(s) without docker-compose files
-- If found: Generate scripts that use direct `docker run` commands
+### Docker Platform (Compose-only fallback):
+- If Dockerfiles are found but NO compose file exists: generate a docker-compose.yml
+  first, then generate deploy.sh using `docker compose` commands.
+- NEVER use plain `docker run` commands to start services — always use docker compose.
 {% endif %}
 
 ## DO's:
 - Use proper bash scripting practices (set -e, proper error handling)
-- Include color-coded output (RED, GREEN, YELLOW, BLUE, CYAN, MAGENTA, NC)
-- Add helper functions for printing (print_header, print_success, print_error, print_warning, print_info)
 - Check prerequisites (Docker, Docker Compose, kubectl, etc. based on platform)
-- Use SCRIPT_DIR and proper path resolution
-- Include comprehensive error handling
-- Add command-line argument parsing
-- Include help/usage information
-- Make scripts executable-ready (shebang #!/bin/bash)
 - For deploy.sh: Include start, stop, restart, status, logs, build, cleanup commands
 - For health_check.sh: Check containers/pods, ports, endpoints, databases, performance metrics
 - Include summary reports and exit codes
+- **Create one named Docker network** shared by all services; reference it in every service's
+  `networks:` key so containers resolve each other by service name.
+- **Always set `PROJECT_NAME=$(basename "$APP_DIR")` near the top of every deploy/health-check
+  script** and pass `--project-name "$PROJECT_NAME"` to every `docker compose` command.
+  The project name MUST be the filesystem basename of the app directory (e.g. if the app is
+  at `/apps/hotelReservation`, the project name is `hotelReservation`). Do NOT use the
+  service name, image name, or any other string.
 
 ## DON'Ts:
 - **NEVER mix deployment platforms** (e.g., don't use both docker compose and kubectl in the same script)
 - **NEVER use `sudo`** - assume all required tools are already installed and accessible without root privileges. If a tool is missing, print an error message and exit with a non-zero code; do not attempt to install it.
 - **NEVER use `docker-compose`** (the old v1 hyphen form) - always use `docker compose` (v2 plugin, space-separated)
-- **NEVER bind host ports for internal-only services** (e.g. service meshes, tracing agents, internal databases) — use a dedicated Docker network and let containers communicate by name and container port instead
+- **NEVER add `ports:` mappings except for the single user-facing entry point** (e.g. the
+  frontend or API gateway that external clients connect to). Infrastructure services —
+  service discovery (Consul, etcd, Zookeeper), tracing (Jaeger, Zipkin), databases
+  (MongoDB, PostgreSQL, MySQL, Redis, Memcached), message queues (Kafka, RabbitMQ), and
+  all internal microservices — MUST communicate exclusively over a named Docker network
+  using service names and container ports. They MUST NOT expose host ports.
+- **NEVER fix a host-port conflict by changing the port number** — that only defers the
+  conflict. Instead, remove the `ports:` mapping from the service entirely and rely on
+  Docker-network communication.
 - Don't hardcode absolute paths (use SCRIPT_DIR and relative paths)
-- Don't skip error handling
-- Don't use deprecated commands
-- Don't generate overly complex scripts - keep them maintainable
-- Don't assume specific port numbers without checking the codebase
-- Don't include hardcoded credentials or secrets
-- Don't generate scripts that modify files outside the application directory
-- Don't skip prerequisite checks
-
-## Example Structure (ADAPT TO REPOSITORY):
-
-deploy.sh should include:
-- Configuration section with paths and env vars
-- Helper functions
-- check_prerequisites()
-- build_images() (if needed)
-- start_services()
-- stop_services()
-- restart_services()
-- check_health()
-- view_logs()
-- cleanup()
-- Main command dispatcher
-
-health_check.sh should include:
-- Configuration section
-- Helper functions
-- check_platform_specific_resources()
-- check_ports()
-- check_endpoints()
-- print_summary()
-- Main execution flow
 
 ## Important:
 - **STEP 1**: Confirm the repository structure matches the target platform.
