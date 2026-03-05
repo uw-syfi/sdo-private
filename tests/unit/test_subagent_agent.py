@@ -389,7 +389,7 @@ class TestSubagentRegistration:
         from app_operator.config import Config, AgentConfig
         from app_operator.cli_agent.factory import create_agent_from_config
 
-        config = Config(agent=AgentConfig(provider="subagent"))
+        config = Config(agent=AgentConfig(provider="subagent", model="test-model"))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, SubagentCodingAgent)
 
@@ -400,6 +400,7 @@ class TestSubagentRegistration:
         config = Config(
             agent=AgentConfig(
                 provider="subagent",
+                model="test-model",
                 location="us-west1"))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, SubagentCodingAgent)
@@ -411,7 +412,7 @@ class TestSubagentRegistration:
 
         dspy_cfg = DSPyConfig()
         config = Config(
-            agent=AgentConfig(provider="subagent"),
+            agent=AgentConfig(provider="subagent", model="test-model"),
             dspy=dspy_cfg,
         )
         agent = create_agent_from_config("/tmp", config=config)

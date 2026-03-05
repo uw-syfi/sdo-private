@@ -53,6 +53,7 @@ class TestOperatorPhaseConfigParsing:
     def test_nested_phase_section_parsing(self):
         """Test parsing nested [operator.phase] section."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "interval": 60,
                 "phase": {
@@ -67,6 +68,7 @@ class TestOperatorPhaseConfigParsing:
     def test_nested_phase_fix_summary_consolidation_parsing(self):
         """Test parsing fix_summary_consolidation from nested [operator.phase] section."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "fix_summary_consolidation": False
@@ -80,6 +82,7 @@ class TestOperatorPhaseConfigParsing:
     def test_operator_without_phase_section(self):
         """Test that operator config works without phase section."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "interval": 60
             }
@@ -90,14 +93,14 @@ class TestOperatorPhaseConfigParsing:
 
     def test_empty_operator_section(self):
         """Test that empty operator section uses defaults."""
-        data = {"operator": {}}
+        data = {"agent": {"provider": "codex", "model": "test-model"}, "operator": {}}
         config = Config.from_dict(data)
         assert config.operator.interval == 30  # Default
         assert config.operator.phase.code_analysis is True  # Default
 
     def test_no_operator_section(self):
         """Test that missing operator section uses defaults."""
-        data = {}
+        data = {"agent": {"provider": "codex", "model": "test-model"}}
         config = Config.from_dict(data)
         assert config.operator.interval == 30  # Default
         assert config.operator.phase.code_analysis is True  # Default
@@ -105,6 +108,7 @@ class TestOperatorPhaseConfigParsing:
     def test_phase_section_only(self):
         """Test that phase section can be specified alone."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -164,7 +168,8 @@ class TestOperatorPhaseConfigParsing:
         # Simulate old config file
         data = {
             "agent": {
-                "provider": "codex"
+                "provider": "codex",
+                "model": "test-model",
             },
             "operator": {
                 "interval": 30,
@@ -181,6 +186,7 @@ class TestOperatorPhaseConfigParsing:
     def test_complete_config_with_phase(self):
         """Test complete config with all operator fields including phase."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "interval": 60,
                 "monitoring_max_iters": 10,
@@ -216,11 +222,11 @@ class TestOperatorPhaseConfigParsing:
             Config.from_dict(data)
 
     def test_git_integration_defaults_to_false(self):
-        config = Config.from_dict({})
+        config = Config.from_dict({"agent": {"provider": "codex", "model": "test-model"}})
         assert config.operator.phase.git_integration is False
 
     def test_git_integration_enabled_via_config(self):
-        config = Config.from_dict({"operator": {"phase": {"git_integration": True}}})
+        config = Config.from_dict({"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"git_integration": True}}})
         assert config.operator.phase.git_integration is True
 
     def test_git_integration_rejects_non_bool(self):

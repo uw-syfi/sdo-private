@@ -14,7 +14,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.config import Config, DSPyConfig
+from app_operator.config import AgentConfig, Config, DSPyConfig
 from app_operator.dspy_integration.loader import reset_cache
 from libs.agent_cli.base import CodingAgent
 
@@ -160,7 +160,7 @@ def test_dspy_disabled_uses_jinja2(temp_repo, dspy_config_disabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_disabled)
+    config = Config(agent=AgentConfig(provider="codex", model="test-model"), dspy=dspy_config_disabled)
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -205,7 +205,7 @@ def test_dspy_fallback_to_jinja2(temp_repo, dspy_config_enabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(agent=AgentConfig(provider="codex", model="test-model"), dspy=dspy_config_enabled)
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -239,7 +239,7 @@ def test_dspy_enabled_uses_optimized_modules(temp_repo, dspy_config_enabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(agent=AgentConfig(provider="codex", model="test-model"), dspy=dspy_config_enabled)
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -349,7 +349,7 @@ def test_trajectory_tracks_prompt_version(temp_repo, dspy_config_disabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_disabled)
+    config = Config(agent=AgentConfig(provider="codex", model="test-model"), dspy=dspy_config_disabled)
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -396,7 +396,7 @@ def test_dspy_fallback_recorded_in_trajectory(temp_repo, dspy_config_enabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(agent=AgentConfig(provider="codex", model="test-model"), dspy=dspy_config_enabled)
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -451,7 +451,7 @@ def test_dspy_module_invocation_error_falls_back(mock_load, temp_repo, dspy_conf
 
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(agent=AgentConfig(provider="codex", model="test-model"), dspy=dspy_config_enabled)
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -520,7 +520,7 @@ def test_multiple_deployments_with_canary(tmp_path, dspy_config_canary):
         repo.mkdir()
 
         agent = agent_class(repo)
-        config = Config(dspy=dspy_config_canary)
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"), dspy=dspy_config_canary)
 
         operator = AppOperator(
             repo_path=str(repo),

@@ -28,7 +28,7 @@ class TestCLIOperatorPhaseControl:
 
     def test_analysis_enabled_by_default(self, temp_repo):
         """Test that code analysis runs by default."""
-        config = Config.from_dict({})
+        config = Config.from_dict({"agent": {"provider": "codex", "model": "test-model"}})
         assert config.operator.phase.code_analysis is True
 
         filesystem = InMemoryFilesystem()
@@ -61,6 +61,7 @@ class TestCLIOperatorPhaseControl:
     def test_analysis_skipped_when_disabled(self, temp_repo):
         """Test that code analysis is skipped when disabled."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -99,6 +100,7 @@ class TestCLIOperatorPhaseControl:
     def test_deployment_succeeds_without_analysis(self, temp_repo):
         """Test that deployment can succeed without analysis files."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -134,6 +136,7 @@ class TestCLIOperatorPhaseControl:
     def test_analysis_files_not_created_when_disabled(self, temp_repo):
         """Test that analysis files are not created when disabled."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -173,6 +176,7 @@ class TestCLIOperatorPhaseControl:
     def test_ui_stages_reflect_skip(self, temp_repo):
         """Test that UI stages are set correctly when analysis is skipped."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -214,6 +218,7 @@ class TestCLIOperatorPhaseControl:
     def test_analysis_enabled_explicitly(self, temp_repo):
         """Test that explicitly enabling analysis works."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": True

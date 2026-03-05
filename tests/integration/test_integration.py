@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from app_operator.cli_agent.operator import AppOperator
+from app_operator.config import AgentConfig, Config
 from libs.agent_cli.base import CodingAgent
 
 # --- Fake Agent ---
@@ -153,6 +154,7 @@ def test_cold_start_success(temp_repo):
         health_check_max_count=1,  # Run monitoring once
         health_check_interval=0,  # Fast execution
         max_deployment_attempts=1,
+        config=Config(agent=AgentConfig(provider="codex", model="test-model")),
     )
 
     # Run the operator
@@ -190,6 +192,7 @@ def test_deployment_fix_loop(temp_repo):
         health_check_max_count=1,
         health_check_interval=0,  # Fast execution
         max_deployment_attempts=3,
+        config=Config(agent=AgentConfig(provider="codex", model="test-model")),
     )
 
     exit_code = operator.run()
@@ -222,6 +225,7 @@ def test_monitoring_execution(temp_repo):
         health_check_interval=0,  # fast as possible
         health_check_max_count=3,
         max_deployment_attempts=1,
+        config=Config(agent=AgentConfig(provider="codex", model="test-model")),
     )
 
     exit_code = operator.run()

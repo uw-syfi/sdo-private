@@ -35,6 +35,7 @@ class TestPhaseControlEdgeCases:
     def test_analysis_files_exist_but_config_says_skip(self, temp_repo):
         """Test that existing analysis files are ignored when skip is configured."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -92,6 +93,7 @@ class TestPhaseControlEdgeCases:
     def test_no_analysis_files_and_analysis_disabled(self, temp_repo):
         """Test deployment with no analysis files and analysis disabled."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -135,6 +137,7 @@ class TestPhaseControlEdgeCases:
 
         # First run with analysis enabled
         config1 = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": True
@@ -166,6 +169,7 @@ class TestPhaseControlEdgeCases:
 
         # Second run with analysis disabled
         config2 = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -196,6 +200,7 @@ class TestPhaseControlEdgeCases:
     def test_signal_handling_during_skipped_analysis(self, temp_repo):
         """Test that signal handling works correctly when analysis is skipped."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -244,6 +249,7 @@ class TestPhaseControlEdgeCases:
         filesystem2.write_text(temp_repo / "docker-compose.yml", "services:\n  web:\n    image: nginx\n")
 
         config_enabled = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": True
@@ -252,6 +258,7 @@ class TestPhaseControlEdgeCases:
         })
 
         config_disabled = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -289,6 +296,7 @@ class TestPhaseControlEdgeCases:
     def test_deployer_handles_missing_analysis_gracefully(self, temp_repo):
         """Test that deployer prompts handle missing analysis files gracefully."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -332,6 +340,7 @@ class TestPhaseControlEdgeCases:
     def test_fault_injection_with_analysis_disabled(self, temp_repo):
         """Test that fault injection works independently of analysis phase."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -372,6 +381,7 @@ class TestPhaseControlEdgeCases:
     def test_dspy_optimized_prompts_with_analysis_disabled(self, temp_repo):
         """Test that DSPy signatures handle empty analysis context."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False
@@ -472,6 +482,7 @@ class TestPhaseControlEdgeCases:
     def test_config_loaded_at_startup_not_changeable(self, temp_repo):
         """Test that config is loaded at startup and doesn't change during run."""
         config = Config.from_dict({
+            "agent": {"provider": "codex", "model": "test-model"},
             "operator": {
                 "phase": {
                     "code_analysis": False

@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.config import Config, DeploymentConfig
+from app_operator.config import AgentConfig, Config, DeploymentConfig
 from app_operator.filesystem import InMemoryFilesystem
 from tests.fixtures.agents import StubAgent
 
@@ -22,7 +22,10 @@ def test_operator_persists_config(mock_trajectory):
 
     agent = StubAgent(model="test")
 
-    config = Config(deployment=DeploymentConfig(platform="k8s", target="local"))
+    config = Config(
+        agent=AgentConfig(provider="codex", model="test-model"),
+        deployment=DeploymentConfig(platform="k8s", target="local"),
+    )
 
     _ = AppOperator(repo_path=str(repo_path), filesystem=fs, agent=agent, config=config)
 
@@ -46,7 +49,10 @@ def test_operator_does_not_overwrite_existing_config(mock_trajectory):
 
     agent = StubAgent(model="test")
 
-    config = Config(deployment=DeploymentConfig(platform="k8s", target="local"))
+    config = Config(
+        agent=AgentConfig(provider="codex", model="test-model"),
+        deployment=DeploymentConfig(platform="k8s", target="local"),
+    )
 
     _ = AppOperator(repo_path=str(repo_path), filesystem=fs, agent=agent, config=config)
 
@@ -66,7 +72,10 @@ def test_operator_loads_fault_metadata_from_filesystem(mock_trajectory):
     fs.write_text(fault_meta_path, fault_meta_content)
 
     agent = StubAgent(model="test")
-    config = Config(deployment=DeploymentConfig(platform="docker", target="local"))
+    config = Config(
+        agent=AgentConfig(provider="codex", model="test-model"),
+        deployment=DeploymentConfig(platform="docker", target="local"),
+    )
 
     _ = AppOperator(repo_path=str(repo_path), filesystem=fs, agent=agent, config=config)
 

@@ -57,12 +57,12 @@ class TestCreateAgentFromConfig:
     """Tests for create_agent_from_config factory function."""
 
     def test_creates_claude_agent(self, tmp_path, mock_binaries):
-        config = Config(agent=AgentConfig(provider="claude"))
+        config = Config(agent=AgentConfig(provider="claude", model="test-model"))
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"
 
     def test_creates_gemini_agent(self, tmp_path, mock_binaries):
-        config = Config(agent=AgentConfig(provider="gemini"))
+        config = Config(agent=AgentConfig(provider="gemini", model="test-model"))
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "GeminiCodingAgent"
 
@@ -85,7 +85,7 @@ class TestCreateAgentFromConfig:
     def test_unknown_provider_falls_back_to_codex(self, tmp_path, mock_binaries):
         """Unregistered provider falls back to codex."""
         # Bypass AgentConfig validation to test factory fallback
-        config = Config(agent=AgentConfig(provider="codex"))
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "CodexCodingAgent"
 
@@ -96,6 +96,6 @@ class TestCreateAgentFromConfig:
 
     def test_provider_is_case_insensitive(self, tmp_path, mock_binaries):
         """Provider lookup lowercases the name."""
-        config = Config(agent=AgentConfig(provider="Claude"))
+        config = Config(agent=AgentConfig(provider="Claude", model="test-model"))
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"

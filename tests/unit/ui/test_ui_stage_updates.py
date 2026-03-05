@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from app_operator.cli_agent.operator import AppOperator
+from app_operator.config import AgentConfig, Config
 from app_operator.ui import OperatorUI
 
 
@@ -28,7 +29,8 @@ def app_operator_with_ui(repo_path, mock_agent, mock_ui):
         patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
         patch("app_operator.cli_agent.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
     ):
-        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui)
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui, config=config)
         yield (
             op,
             mock_deployer_cls,

@@ -1,7 +1,7 @@
 """Tests for DSPy config integration with main Config class."""
 
 import pytest
-from app_operator.config import Config, UnrecognizedFieldError
+from app_operator.config import AgentConfig, Config, UnrecognizedFieldError
 from app_operator.dspy_integration.config import (
     DSPyConfig,
     DSPyOptimizationConfig,
@@ -14,20 +14,21 @@ class TestConfigIntegration:
 
     def test_default_config_includes_dspy(self):
         """Test that default Config includes DSPy config."""
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         assert isinstance(config.dspy, DSPyConfig)
         assert config.dspy.use_optimized is False
         assert config.dspy.optimized_version == "latest"
 
     def test_from_dict_empty_dspy_section(self):
         """Test loading config with empty dspy section."""
-        config = Config.from_dict({"dspy": {}})
+        config = Config.from_dict({"agent": {"provider": "codex", "model": "test-model"}, "dspy": {}})
         assert isinstance(config.dspy, DSPyConfig)
         assert config.dspy.use_optimized is False
 
     def test_from_dict_with_dspy_fields(self):
         """Test loading config with dspy fields."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "dspy": {
                 "use_optimized": True,
                 "optimized_version": "v2",
@@ -46,6 +47,7 @@ class TestConfigIntegration:
     def test_from_dict_with_nested_optimization(self):
         """Test loading config with nested optimization section."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "dspy": {
                 "optimization": {
                     "optimizer": "MIPROv2",
@@ -65,6 +67,7 @@ class TestConfigIntegration:
     def test_from_dict_with_nested_auto_rollback(self):
         """Test loading config with nested auto_rollback section."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "dspy": {
                 "auto_rollback": {
                     "enabled": False,
@@ -82,6 +85,7 @@ class TestConfigIntegration:
     def test_from_dict_with_metric_weights(self):
         """Test loading config with custom metric weights."""
         data = {
+            "agent": {"provider": "codex", "model": "test-model"},
             "dspy": {
                 "optimization": {
                     "metric_weights": {
@@ -102,7 +106,7 @@ class TestConfigIntegration:
     def test_from_dict_with_all_sections(self):
         """Test loading config with all sections including dspy."""
         data = {
-            "agent": {"provider": "claude"},
+            "agent": {"provider": "claude", "model": "test-model"},
             "operator": {"interval": 60},
             "deployment": {"platform": "docker"},
             "runtime": {"impl": "cli_agent"},
@@ -243,6 +247,7 @@ class TestConfigIntegration:
     def test_runtime_model_not_populated_when_no_agent_model(self):
         """Test runtime_model stays None when agent.model not set."""
         config = Config.from_dict({
+            "runtime": {"impl": "langgraph"},
             "dspy": {
                 "use_optimized": True,
             }

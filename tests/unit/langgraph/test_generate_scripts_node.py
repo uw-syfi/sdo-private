@@ -2,7 +2,7 @@
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
-from app_operator.config import Config
+from app_operator.config import AgentConfig, Config
 from app_operator.trajectory import NullTrajectoryRecorder, Phase
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.nodes.generator import generate_scripts
@@ -24,7 +24,7 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
@@ -58,7 +58,7 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 
@@ -84,7 +84,7 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 
@@ -113,7 +113,7 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 
@@ -151,7 +151,7 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
@@ -185,7 +185,7 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         config.deployment.platform = "kubernetes"
         loader = Mock()
         agent = Mock()

@@ -2,7 +2,7 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from app_operator.config import Config
+from app_operator.config import AgentConfig, Config
 from app_operator.filesystem import InMemoryFilesystem
 from app_operator.trajectory import NullTrajectoryRecorder, Phase
 from app_operator.langgraph.state import OperatorState
@@ -26,7 +26,7 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         check_shutdown = Mock(return_value=False)
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.start_phase = Mock()
@@ -59,7 +59,7 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         check_shutdown = Mock(return_value=False)
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
@@ -86,7 +86,7 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         check_shutdown = Mock(return_value=True)
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
@@ -112,7 +112,7 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
             mock_run.return_value = {"exit_code": 0}
@@ -138,7 +138,7 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
             mock_run.return_value = {"exit_code": 0}
