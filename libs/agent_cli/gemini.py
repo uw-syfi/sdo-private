@@ -14,6 +14,8 @@ from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 _logger = logging.getLogger(__name__)
 
 
+
+
 class GeminiGenerationSession(CLIGenerationSession):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -166,6 +168,32 @@ class GeminiCodingAgent(CLICodingAgent):
             event_handler: Optional event handler for UI updates.
         """
         super().__init__("gemini", model, recorder, event_handler)
+
+    def inject_mcp_server(self, repo_path: Path, sds_root: Path) -> None:
+        """Inject docker_controller MCP server into the target app's .gemini/settings.json."""
+        gemini_dir = repo_path / ".gemini"
+        gemini_dir.mkdir(parents=True, exist_ok=True)
+        settings_path = gemini_dir / "settings.json"
+
+        settings: dict = {}
+        if settings_path.exists():
+            try:
+                with open(settings_path) as f:
+                    settings = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                _logger.warning(f"Could not read {settings_path}, starting fresh: {e}")
+
+        mcp_server_path = str(sds_root / "mcp_server" / "server.py")
+        settings.setdefault("mcpServers", {})["docker_controller"] = {
+            "command": "uv",
+            "args": ["run", mcp_server_path],
+        }
+
+        with open(settings_path, "w") as f:
+            json.dump(settings, f, indent=2)
+            f.write("\n")
+
+        _logger.info(f"Injected docker_controller MCP server into {settings_path}")
 
     @property
     def gemini_path(self) -> str:

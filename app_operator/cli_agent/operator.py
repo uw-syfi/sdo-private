@@ -88,6 +88,16 @@ class AppOperator(OperatorBase):
         else:
             self.agent = agent
 
+        # Inject MCP server config into the experiment's agent settings when
+        # dynamic observability is enabled. Providers that don't support this
+        # will raise NotImplementedError, which we silently skip.
+        if self.config.operator.dynamic_observability_injection:
+            sds_root = Path(__file__).resolve().parent.parent.parent
+            try:
+                self.agent.inject_mcp_server(self.repo_path, sds_root)
+            except NotImplementedError:
+                pass
+
         # Attach UI to agent if supported
         if hasattr(self.agent, "event_handler"):
             self.agent.event_handler = self.ui
