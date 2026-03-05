@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app_operator.dspy_integration.config import DSPyConfig, DSPyOptimizationConfig
-from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
+from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer, _TrajectoryEvidence
 
 
 def _make_optimizer(
@@ -637,3 +637,235 @@ def test_optimize_score_mode_skips_llm_judge(monkeypatch, tmp_path):
     assert result["best_candidate"] == 1
     assert result["selection"]["selection_mode"] == "score"
     assert result["selection"]["llm_used"] is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for newly extracted helper methods (refactored from deep nesting)
+# ---------------------------------------------------------------------------
+
+
+def _make_notes(*texts):
+    return list(texts)
+
+
+def test_context_sections_for_prompt_trajectory_analyst():
+    sections = EvalExecuteOptimizer._context_sections_for_prompt(
+        "subagent_trajectory_analyst",
+        run_summaries=_make_notes("run1"),
+        trajectory_notes=_make_notes("traj1"),
+        error_notes=_make_notes("err1"),
+        script_notes=_make_notes("script1"),
+        repo_notes=_make_notes("repo1"),
+    )
+    titles = [s[0] for s in sections]
+    assert "Trajectory analyst findings" in titles
+    assert "Error-log analyst findings" not in titles
+    assert "Repository analyst findings" not in titles
+
+
+def test_context_sections_for_prompt_error_log_analyst():
+    sections = EvalExecuteOptimizer._context_sections_for_prompt(
+        "subagent_error_log_analyst",
+        run_summaries=_make_notes("run1"),
+        trajectory_notes=_make_notes("traj1"),
+        error_notes=_make_notes("err1"),
+        script_notes=[],
+        repo_notes=[],
+    )
+    titles = [s[0] for s in sections]
+    assert "Error-log analyst findings" in titles
+    assert "Trajectory analyst findings" not in titles
+    assert len(sections) == 2
+
+
+def test_context_sections_for_prompt_root_synthesis_includes_all():
+    sections = EvalExecuteOptimizer._context_sections_for_prompt(
+        "subagent_root_synthesis",
+        run_summaries=_make_notes("run1"),
+        trajectory_notes=_make_notes("traj1"),
+        error_notes=_make_notes("err1"),
+        script_notes=_make_notes("script1"),
+        repo_notes=_make_notes("repo1"),
+    )
+    titles = [s[0] for s in sections]
+    assert "Trajectory findings" in titles
+    assert "Error findings" in titles
+    assert "Script findings" in titles
+    assert "Repository findings" in titles
+
+
+def test_context_sections_for_prompt_default_fallback():
+    sections = EvalExecuteOptimizer._context_sections_for_prompt(
+        "deployer_fix_error",
+        run_summaries=_make_notes("run1"),
+        trajectory_notes=[],
+        error_notes=_make_notes("err1"),
+        script_notes=_make_notes("script1"),
+        repo_notes=[],
+    )
+    titles = [s[0] for s in sections]
+    assert "Recent run outcomes" in titles
+    assert "Recurring error patterns" in titles
+    assert "Script findings" in titles
+    assert "Trajectory analyst findings" not in titles
+
+
+def test_classify_assistant_snippet_trajectory():
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    EvalExecuteOptimizer._classify_assistant_snippet(
+        "deploy.sh is re-run repeatedly",
+        "[subagent trajectory analyst] deploy.sh is re-run repeatedly",
+        evidence,
+    )
+    assert evidence.trajectory_insights == ["deploy.sh is re-run repeatedly"]
+    assert evidence.error_insights == []
+
+
+def test_classify_assistant_snippet_error_log():
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    EvalExecuteOptimizer._classify_assistant_snippet(
+        "docker-compose.yml not found",
+        "[subagent error_log analyst] docker-compose.yml not found",
+        evidence,
+    )
+    assert evidence.error_insights == ["docker-compose.yml not found"]
+    assert evidence.trajectory_insights == []
+
+
+def test_classify_assistant_snippet_script():
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    EvalExecuteOptimizer._classify_assistant_snippet(
+        "stale relative path",
+        "[subagent script analyst] stale relative path",
+        evidence,
+    )
+    assert evidence.script_insights == ["stale relative path"]
+
+
+def test_classify_assistant_snippet_auto_validation_warning():
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    EvalExecuteOptimizer._classify_assistant_snippet(
+        "deploy.sh references missing paths",
+        "[rlm auto-validation]\nauto-validation warning detected",
+        evidence,
+    )
+    assert evidence.script_insights == ["deploy.sh references missing paths"]
+
+
+def test_classify_assistant_snippet_repo():
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    EvalExecuteOptimizer._classify_assistant_snippet(
+        "compose lives under compose/",
+        "[subagent repo analyst] compose lives under compose/",
+        evidence,
+    )
+    assert evidence.repo_insights == ["compose lives under compose/"]
+
+
+def test_classify_assistant_snippet_unrecognized_is_ignored():
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    EvalExecuteOptimizer._classify_assistant_snippet(
+        "some unrelated content",
+        "some unrelated content",
+        evidence,
+    )
+    assert not evidence.trajectory_insights
+    assert not evidence.error_insights
+    assert not evidence.script_insights
+    assert not evidence.repo_insights
+
+
+def test_pad_variants_extends_short_list():
+    result = EvalExecuteOptimizer._pad_variants(["a", "b"], n=4, fallback="default")
+    assert result == ["a", "b", "default", "default"]
+
+
+def test_pad_variants_truncates_long_list():
+    result = EvalExecuteOptimizer._pad_variants(["a", "b", "c", "d"], n=2, fallback="default")
+    assert result == ["a", "b"]
+
+
+def test_pad_variants_exact_length():
+    result = EvalExecuteOptimizer._pad_variants(["x", "y", "z"], n=3, fallback="fb")
+    assert result == ["x", "y", "z"]
+
+
+def test_load_optimized_instruction_returns_none_when_no_resolved(tmp_path):
+    """Returns None when version cannot be resolved."""
+    optimizer = _make_optimizer(tmp_path)
+    result = optimizer._load_optimized_instruction("deployer_fix_error", "nonexistent_version")
+    assert result is None
+
+
+def test_load_optimized_instruction_returns_none_when_file_missing(tmp_path):
+    """Returns None when version resolves but dspy.json file is absent."""
+    optimizer = _make_optimizer(tmp_path)
+    # Create a bare version directory with no .dspy.json files
+    version_dir = optimizer.optimized_dir / "v1"
+    version_dir.mkdir(parents=True)
+    result = optimizer._load_optimized_instruction("deployer_fix_error", "v1")
+    assert result is None
+
+
+def test_load_optimized_instruction_returns_instruction_when_present(tmp_path):
+    """Returns the saved instruction when it exists."""
+    optimizer = _make_optimizer(tmp_path)
+    version_dir = optimizer.optimized_dir / "v1"
+    version_dir.mkdir(parents=True)
+    state = {"optimized_instruction": "Be concise and check paths before executing."}
+    (version_dir / "deployer_fix_error.dspy.json").write_text(json.dumps(state))
+    result = optimizer._load_optimized_instruction("deployer_fix_error", "v1")
+    assert result == "Be concise and check paths before executing."
+
+
+def test_list_compose_container_ids(monkeypatch):
+    """Should parse docker ps output into a list of container ID strings."""
+    import subprocess as _subprocess
+
+    def _fake_run(cmd, capture_output=True, text=True):
+        return SimpleNamespace(stdout="abc123\ndef456\n\n", returncode=0, stderr="")
+
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.subprocess.run",
+        _fake_run,
+    )
+    ids = EvalExecuteOptimizer._list_compose_container_ids("my-project")
+    assert ids == ["abc123", "def456"]
+
+
+def test_list_compose_container_ids_empty(monkeypatch):
+    """Returns empty list when no containers found."""
+    def _fake_run(cmd, capture_output=True, text=True):
+        return SimpleNamespace(stdout="", returncode=0, stderr="")
+
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.subprocess.run",
+        _fake_run,
+    )
+    ids = EvalExecuteOptimizer._list_compose_container_ids("empty-project")
+    assert ids == []
+
+
+def test_process_trajectory_message_assistant_classified(tmp_path):
+    """_process_trajectory_message routes assistant snippets to the right list."""
+    optimizer = _make_optimizer(tmp_path)
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    msg = {
+        "role": "assistant",
+        "content": "[Subagent error_log analyst]\ndocker-compose.yml not found in working dir.",
+    }
+    optimizer._process_trajectory_message(msg, evidence)
+    assert evidence.error_insights
+    assert "docker-compose.yml" in evidence.error_insights[0]
+
+
+def test_process_trajectory_message_tool_call_extracts_error_signals(tmp_path):
+    """_process_trajectory_message collects error-line signals from tool_call messages."""
+    optimizer = _make_optimizer(tmp_path)
+    evidence = _TrajectoryEvidence(run_name="r", app_name="a", status="ok", attempts=1)
+    msg = {
+        "role": "tool_call",
+        "stderr": "ERROR: no such file or directory: deploy.sh\nsome normal output",
+    }
+    optimizer._process_trajectory_message(msg, evidence)
+    assert any("error" in sig.lower() for sig in evidence.error_signals)
