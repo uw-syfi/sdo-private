@@ -316,6 +316,8 @@ class LegoAgentEngine:
             elif response.status == "ready":
                 return self._handle_ready_response(response, qa_pairs)
 
+        raise AgentError("Max clarifications exceeded without reaching 'ready' state.")
+
     def _validate_config(self, yaml_text: str) -> None:
         """Validate the generated YAML config."""
         try:
