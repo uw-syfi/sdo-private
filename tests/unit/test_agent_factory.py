@@ -61,7 +61,7 @@ def test_create_agent_registered_provider(tmp_path):
 
 
 def test_create_agent_gemini(tmp_path, mock_binaries):
-    config = Config(agent=AgentConfig(provider="gemini"))
+    config = Config(agent=AgentConfig(provider="gemini", model="test-model"))
     agent = create_agent_from_config(str(tmp_path), config=config)
     assert agent.__class__.__name__ == "GeminiCodingAgent"
 
@@ -73,13 +73,13 @@ def test_create_agent_codex_default(tmp_path):
 
 
 def test_create_agent_claude_alias(tmp_path, mock_binaries):
-    config = Config(agent=AgentConfig(provider="anthropic"))
+    config = Config(agent=AgentConfig(provider="anthropic", model="test-model"))
     agent = create_agent_from_config(str(tmp_path), config=config)
     assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"
 
 
 def test_create_agent_opencode(tmp_path, mock_binaries):
-    config = Config(agent=AgentConfig(provider="opencode"))
+    config = Config(agent=AgentConfig(provider="opencode", model="test-model"))
     agent = create_agent_from_config(str(tmp_path), config=config)
     assert agent.__class__.__name__ == "OpencodeCodingAgent"
 

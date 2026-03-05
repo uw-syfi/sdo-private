@@ -23,7 +23,7 @@ def mock_args():
 def mock_config():
     """Create a mock Config object."""
     return Config(
-        agent=AgentConfig(provider="codex"),
+        agent=AgentConfig(provider="codex", model="test-model"),
         operator=OperatorConfig(
             interval=30,
             monitoring_max_iters=5,
@@ -340,7 +340,7 @@ def test_run_command_uses_config_intervals():
     args.tui = False
 
     custom_config = Config(
-        agent=AgentConfig(provider="codex"),
+        agent=AgentConfig(provider="codex", model="test-model"),
         operator=OperatorConfig(
             interval=60,  # Custom interval
             monitoring_max_iters=10,  # Custom monitoring

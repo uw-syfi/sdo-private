@@ -565,6 +565,13 @@ class Config:
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
+    def __post_init__(self):
+        if self.runtime.impl == "cli_agent" and self.agent.model is None:
+            raise ValueError(
+                "agent.model is required when runtime.impl is 'cli_agent'. "
+                "Set [agent] model in your sds.toml to ensure reproducible results."
+            )
+
     @staticmethod
     def _validate_fields(section_data: dict, section_name: str, config_class: type) -> None:
         """Validate that all fields in a section are recognized."""

@@ -265,7 +265,7 @@ class TestHybridRegistration:
         from app_operator.cli_agent.factory import create_agent_from_config
         from app_operator.config import AgentConfig, Config
 
-        config = Config(agent=AgentConfig(provider="hybrid"))
+        config = Config(agent=AgentConfig(provider="hybrid", model="test-model"))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, HybridCodingAgent)
 
@@ -273,7 +273,7 @@ class TestHybridRegistration:
         from app_operator.cli_agent.factory import create_agent_from_config
         from app_operator.config import AgentConfig, Config
 
-        config = Config(agent=AgentConfig(provider="hybrid", location="us-west1"))
+        config = Config(agent=AgentConfig(provider="hybrid", model="test-model", location="us-west1"))
         agent = create_agent_from_config("/tmp", config=config)
         assert agent.location == "us-west1"
 
@@ -283,7 +283,7 @@ class TestHybridRegistration:
 
         dspy_cfg = DSPyConfig()
         config = Config(
-            agent=AgentConfig(provider="hybrid"),
+            agent=AgentConfig(provider="hybrid", model="test-model"),
             dspy=dspy_cfg,
         )
         agent = create_agent_from_config("/tmp", config=config)

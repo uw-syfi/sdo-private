@@ -49,9 +49,14 @@ deployment_max_iters = 3
 
 
 def test_load_config_defaults(tmp_path):
-    """Test loading config with defaults when no file exists."""
-    # Use explicit non-existent config path to avoid picking up root sds.toml
-    config = load_config(str(tmp_path), config_path=str(tmp_path / "nonexistent.toml"))
+    """Test loading config with defaults when no file exists.
+
+    cli_agent runtime (the default) requires a model, so we use a
+    non-cli_agent runtime to test the remaining defaults.
+    """
+    config_file = tmp_path / "sds.toml"
+    config_file.write_text('[runtime]\nimpl = "langgraph"\n')
+    config = load_config(str(tmp_path))
     assert config.agent.provider == "codex"
     assert config.agent.model is None
     assert config.operator.interval == 30
@@ -251,6 +256,7 @@ def test_config_only_agent_section(tmp_path):
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
 provider = "claude"
+model = "claude-sonnet-4-5"
 """)
 
     config = load_config(str(tmp_path))
@@ -270,6 +276,34 @@ interval = 90
     config = load_config(str(target_dir))
     assert config.agent.provider == "gemini"  # inherited from root sds.toml
     assert config.operator.interval == 90
+
+
+class TestCliAgentRequiresModel:
+    """Test that cli_agent runtime requires agent.model to be set."""
+
+    def test_cli_agent_without_model_raises(self):
+        data = {
+            "runtime": {"impl": "cli_agent"},
+            "agent": {"provider": "gemini"},
+        }
+        with pytest.raises(ValueError, match="agent.model is required"):
+            Config.from_dict(data)
+
+    def test_cli_agent_with_model_ok(self):
+        data = {
+            "runtime": {"impl": "cli_agent"},
+            "agent": {"provider": "gemini", "model": "gemini-2.5-pro"},
+        }
+        config = Config.from_dict(data)
+        assert config.agent.model == "gemini-2.5-pro"
+
+    def test_non_cli_agent_without_model_ok(self):
+        data = {
+            "runtime": {"impl": "langgraph"},
+            "agent": {"provider": "gemini"},
+        }
+        config = Config.from_dict(data)
+        assert config.agent.model is None
 
 
 def test_exception_hierarchy():
