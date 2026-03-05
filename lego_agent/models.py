@@ -83,6 +83,9 @@ def parse_lego_agent_response(text: str) -> LegoAgentResponse:
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse JSON response: {e}\nRaw text: {text}")
 
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected JSON object, got {type(data).__name__}: {json_text}")
+
     response = LegoAgentResponse(
         status=data.get("status"),
         questions=data.get("questions", []),
