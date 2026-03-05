@@ -92,7 +92,7 @@ class AppOperator(OperatorBase):
         # Inject MCP server config into the experiment's agent settings when
         # dynamic observability is enabled. Providers that don't support this
         # will raise NotImplementedError, which we silently skip.
-        if self.config.operator.dynamic_observability_injection:
+        if self.config.operator.prometheus_integration:
             sds_root = Path(__file__).resolve().parent.parent.parent
             try:
                 self.agent.inject_mcp_server(self.repo_path, sds_root)
@@ -201,7 +201,8 @@ class AppOperator(OperatorBase):
             )
 
             run_succeeded = True
-            self._trigger_ai_remediation(max_retries=5)
+            if self.config.operator.prometheus_integration:
+                self._trigger_ai_remediation(max_retries=5)
             return 0
 
         except KeyboardInterrupt:
