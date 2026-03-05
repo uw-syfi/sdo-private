@@ -111,6 +111,16 @@ def test_init_exp_resets_git_history(source_app, execute_command):
     )
     assert result.stdout.strip() == "main"
 
+    # Verify initial commit was created
+    result = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=target_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "1"
+
 
 def test_init_exp_removes_sds_config(source_app, execute_command):
     """Verify .sds directory is removed from the target."""

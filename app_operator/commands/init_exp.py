@@ -71,6 +71,20 @@ def run_command(args: argparse.Namespace) -> int:
             check=True,
             stdout=subprocess.DEVNULL,
         )
+        subprocess.run(
+            ["git", "add", "."],
+            cwd=target_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["git", "-c", "user.name=sds", "-c", "user.email=sds@localhost",
+             "commit", "-m", "Initial commit"],
+            cwd=target_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
         logger.info(f"Successfully initialized experiment at '{target_path}'")
         return 0
