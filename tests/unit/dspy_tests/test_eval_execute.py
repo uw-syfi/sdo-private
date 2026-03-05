@@ -820,7 +820,6 @@ def test_load_optimized_instruction_returns_instruction_when_present(tmp_path):
 
 def test_list_compose_container_ids(monkeypatch):
     """Should parse docker ps output into a list of container ID strings."""
-    import subprocess as _subprocess
 
     def _fake_run(cmd, capture_output=True, text=True):
         return SimpleNamespace(stdout="abc123\ndef456\n\n", returncode=0, stderr="")
@@ -835,6 +834,7 @@ def test_list_compose_container_ids(monkeypatch):
 
 def test_list_compose_container_ids_empty(monkeypatch):
     """Returns empty list when no containers found."""
+
     def _fake_run(cmd, capture_output=True, text=True):
         return SimpleNamespace(stdout="", returncode=0, stderr="")
 

@@ -861,9 +861,7 @@ class EvalExecuteOptimizer:
 
         if role == "tool_call":
             for field in ("stderr", "stdout"):
-                evidence.error_signals.extend(
-                    self._extract_error_signal_lines(str(msg.get(field) or ""))
-                )
+                evidence.error_signals.extend(self._extract_error_signal_lines(str(msg.get(field) or "")))
 
     @staticmethod
     def _classify_assistant_snippet(
@@ -1074,11 +1072,16 @@ class EvalExecuteOptimizer:
     def _run_compose_down(project_name: str, compose_file: Path) -> None:
         """Run ``docker compose down`` for a given project and compose file."""
         cmd = [
-            "docker", "compose",
-            "--project-name", project_name,
-            "-f", str(compose_file),
-            "down", "--remove-orphans",
-            "--timeout", "0",
+            "docker",
+            "compose",
+            "--project-name",
+            project_name,
+            "-f",
+            str(compose_file),
+            "down",
+            "--remove-orphans",
+            "--timeout",
+            "0",
         ]
         subprocess.run(cmd, capture_output=True, text=True)
 
@@ -1086,8 +1089,12 @@ class EvalExecuteOptimizer:
     def _list_compose_container_ids(project_name: str) -> list[str]:
         """Return container IDs belonging to *project_name* via docker ps filter."""
         cmd = [
-            "docker", "ps", "-a", "-q",
-            "--filter", f"label=com.docker.compose.project={project_name}",
+            "docker",
+            "ps",
+            "-a",
+            "-q",
+            "--filter",
+            f"label=com.docker.compose.project={project_name}",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         return [cid for cid in result.stdout.strip().splitlines() if cid]
