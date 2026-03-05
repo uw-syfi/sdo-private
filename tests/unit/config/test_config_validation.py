@@ -360,7 +360,8 @@ class TestConfigFromDictRoundTripProperty:
     """Property-based round-trip tests for Config.from_dict."""
 
     @given(
-        provider=st.sampled_from(sorted(["codex", "gemini", "claude", "claude-code", "opencode", "anthropic", "vertex", "openai", "rlm", "subagent", "hybrid"])),
+        provider=st.sampled_from(sorted(["codex", "gemini", "claude", "claude-code",
+                                 "opencode", "anthropic", "vertex", "openai", "rlm", "subagent", "hybrid"])),
         interval=st.integers(min_value=1, max_value=86400),
     )
     @settings(max_examples=50, deadline=1000)

@@ -405,6 +405,66 @@ class TestSubagentRegistration:
         assert isinstance(agent, SubagentCodingAgent)
         assert agent.location == "us-west1"
 
+    def test_factory_forwards_dspy_config(self):
+        from app_operator.config import Config, AgentConfig, DSPyConfig
+        from app_operator.cli_agent.factory import create_agent_from_config
+
+        dspy_cfg = DSPyConfig()
+        config = Config(
+            agent=AgentConfig(provider="subagent"),
+            dspy=dspy_cfg,
+        )
+        agent = create_agent_from_config("/tmp", config=config)
+        assert isinstance(agent, SubagentCodingAgent)
+        assert agent.dspy_config is dspy_cfg
+
+
+# ---------------------------------------------------------------------------
+# dspy_config storage
+# ---------------------------------------------------------------------------
+
+
+class TestSubagentDspyConfig:
+    """Tests that SubagentCodingAgent stores and uses dspy_config."""
+
+    def test_stores_dspy_config(self):
+        cfg = mock.MagicMock()
+        agent = SubagentCodingAgent(model="test-model", dspy_config=cfg)
+        assert agent.dspy_config is cfg
+
+    def test_default_dspy_config_is_none(self):
+        agent = SubagentCodingAgent(model="test-model")
+        assert agent.dspy_config is None
+
+    def test_fix_path_calls_render_functions(self, tmp_path):
+        """The fix path should use render functions for subagent prompts."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        (sds / "deploy.sh").write_text("#!/bin/bash\n")
+        logs = sds / "logs"
+        logs.mkdir()
+        (logs / "deploy.log").write_text("error\n")
+        (logs / "health_check.log").write_text("fail\n")
+
+        agent = SubagentCodingAgent(model="test-model")
+        captured_system_prompts = []
+
+        def mock_completion(**kwargs):
+            messages = kwargs["messages"]
+            if len(messages) == 2 and messages[0]["role"] == "system":
+                captured_system_prompts.append(messages[0]["content"])
+            return _make_litellm_response("ok")
+
+        with mock.patch("litellm.completion", side_effect=mock_completion):
+            agent.generate("Fix the deployment error", cwd=str(tmp_path))
+
+        # 4 subagent calls + 1 root = 5 system prompts
+        assert len(captured_system_prompts) == 5
+        # Verify the prompts came from templates (contain analyst-related text)
+        assert any("trajectory" in p.lower() for p in captured_system_prompts)
+        assert any("error" in p.lower() for p in captured_system_prompts)
+        assert any("script" in p.lower() for p in captured_system_prompts)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

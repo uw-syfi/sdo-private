@@ -18,12 +18,19 @@ from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
-from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE
+from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _FIX_ERROR_RE
 from libs.agent_cli import call_subagent, _litellm_call_with_retry
 from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
+from app_operator.prompts import DSPyConfigProtocol
+from app_operator.prompts.subagent import (
+    render_trajectory_analyst_prompt,
+    render_error_log_analyst_prompt,
+    render_script_analyst_prompt,
+    render_repo_analyst_prompt,
+    render_root_synthesis_prompt,
+)
 
-# Shared analyst system prompts used by both SubagentCodingAgent and
-# HybridCodingAgent.
+# Deprecated: use render functions from app_operator.prompts.subagent instead.
 TRAJECTORY_ANALYST_PROMPT = (
     "You are a trajectory analyst. Summarise what deployment "
     "fixes have been tried so far, which error patterns recur, "
@@ -72,11 +79,13 @@ class SubagentCodingAgent(CodingAgent):
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
         location: str | None = None,
+        dspy_config: DSPyConfigProtocol | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder = recorder
         self.event_handler = event_handler
         self.location = location
+        self.dspy_config = dspy_config
         self._total_token_usage: dict = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -96,9 +105,10 @@ class SubagentCodingAgent(CodingAgent):
             "completion_tokens": 0,
             "total_tokens": 0}
 
-        if _DIRECT_TEXT_RE.search(prompt):
+        is_fix = _FIX_ERROR_RE.search(prompt)
+        if not is_fix and _DIRECT_TEXT_RE.search(prompt):
             result = self._generate_direct(prompt, call_tokens)
-        elif _FILE_GEN_RE.search(prompt):
+        elif not is_fix and _FILE_GEN_RE.search(prompt):
             result = self._generate_files(prompt, repo_path, call_tokens)
         else:
             result = self._generate_fix(prompt, repo_path, call_tokens)
@@ -195,7 +205,11 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["trajectory"] = call_subagent(
                 model=self.model,
-                system_prompt=TRAJECTORY_ANALYST_PROMPT,
+                system_prompt=render_trajectory_analyst_prompt(
+                    data_description="deployment trajectory JSON",
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=trajectory_text or "(no trajectory data available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -211,7 +225,11 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["error_log"] = call_subagent(
                 model=self.model,
-                system_prompt=ERROR_LOG_ANALYST_PROMPT,
+                system_prompt=render_error_log_analyst_prompt(
+                    data_description="deploy.log and health_check.log",
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=error_log or "(no error log available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -230,7 +248,11 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["script"] = call_subagent(
                 model=self.model,
-                system_prompt=SCRIPT_ANALYST_PROMPT,
+                system_prompt=render_script_analyst_prompt(
+                    has_original_script=str(bool(original_script)),
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=script_input or "(no deploy script available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -246,7 +268,11 @@ class SubagentCodingAgent(CodingAgent):
         try:
             summaries["repo"] = call_subagent(
                 model=self.model,
-                system_prompt=REPO_ANALYST_PROMPT,
+                system_prompt=render_repo_analyst_prompt(
+                    available_files="Dockerfile, docker-compose, README, code_analysis",
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=repo_context or "(no repository context available)",
                 location=self.location,
                 token_acc=token_acc,
@@ -285,16 +311,10 @@ class SubagentCodingAgent(CodingAgent):
         """Single root LLM call that receives all subagent summaries."""
         import os
 
-        system_msg = (
-            "You are a deployment fix agent. You have received analysis from "
-            "4 independent analysts. Use their summaries to produce the "
-            "correct fix.\n\n"
-            "IMPORTANT: Write the complete corrected deploy.sh file in your "
-            "response, wrapped in:\n"
-            "FILE: .sds/deploy.sh\n"
-            "```\n<content>\n```\n\n"
-            "Do not reference non-existent files. Remove any lines that "
-            "reference paths that do not exist."
+        system_msg = render_root_synthesis_prompt(
+            num_analysts=str(len(summaries)),
+            dspy_config=self.dspy_config,
+            recorder=self.recorder,
         )
 
         user_parts = [

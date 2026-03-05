@@ -59,6 +59,12 @@ SEED_TEMPLATE_MAP = {
     "agentflow_system": "seeds/agentflow_system.jinja2",
     "agentflow_user": "seeds/agentflow_user.jinja2",
     "agentflow_repair": "seeds/agentflow_repair.jinja2",
+    "subagent_trajectory_analyst": "seeds/subagent_trajectory_analyst.jinja2",
+    "subagent_error_log_analyst": "seeds/subagent_error_log_analyst.jinja2",
+    "subagent_script_analyst": "seeds/subagent_script_analyst.jinja2",
+    "subagent_repo_analyst": "seeds/subagent_repo_analyst.jinja2",
+    "subagent_root_synthesis": "seeds/subagent_root_synthesis.jinja2",
+    "rlm_deployer_fix_error": "seeds/rlm_deployer_fix_error.jinja2",
 }
 
 

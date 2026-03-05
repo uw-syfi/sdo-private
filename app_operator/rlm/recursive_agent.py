@@ -14,6 +14,8 @@ from typing import Any
 import litellm
 
 from app_operator.logger import logger
+from app_operator.prompts import DSPyConfigProtocol
+from app_operator.prompts.rlm import render_fix_error_task_prompt
 from app_operator.rate_limit_handler import detect_rate_limit_error
 from app_operator.rlm.environment import (
     RLMEnvironment,
@@ -47,6 +49,7 @@ class RecursiveDeploymentAgent:
         compaction: bool = False,
         compaction_threshold: float = 0.85,
         model_context_tokens: int = 32_768,
+        dspy_config: DSPyConfigProtocol | None = None,
     ):
         """Initialize RLM deployment agent.
 
@@ -79,6 +82,7 @@ class RecursiveDeploymentAgent:
         self.compaction = compaction
         self.compaction_threshold = compaction_threshold
         self.model_context_tokens = model_context_tokens
+        self.dspy_config = dspy_config
         self.rlm_env: RLMEnvironment | None = None
         self._system_prompt: str = ""
         self._messages: list[dict[str, str]] = []
@@ -439,18 +443,17 @@ class RecursiveDeploymentAgent:
         if self.trajectory:
             self.trajectory.add_user_message(self._system_prompt)
 
-        current_prompt = (
-            f"Task:\n{task}\n\n"
-            "MANDATORY FIRST STEPS (do these before any other actions):\n"
-            "1. Run validate_file_refs(deployment_script, cwd) to find paths that do "
-            "not exist on disk. Remove every line that references a MISSING path.\n"
-            "2. If original_script is non-empty, compare it to deployment_script. "
-            "Lines present in deployment_script but not in original_script that "
-            "reference MISSING paths are regressions from a previous fix — revert "
-            "those lines to restore the working baseline.\n"
-            "Only after completing steps 1 and 2, analyse the error and apply a fix.\n\n"
-            "Use the context variables as needed via EXECUTE_CODE, then provide FINAL_ANSWER."
+        rendered_wrapper = render_fix_error_task_prompt(
+            repo_path=repo_path,
+            available_variables=", ".join(sorted(context.to_dict().keys())),
+            error_log_size=str(len(context.error_log)),
+            attempt=str(context.attempt_number),
+            max_attempts=str(self.max_iterations),
+            has_original_script=str(bool(context.original_script)),
+            dspy_config=self.dspy_config,
+            recorder=self.trajectory if hasattr(self.trajectory, "record_prompt_kwargs") else None,
         )
+        current_prompt = f"Task:\n{task}\n\n{rendered_wrapper}"
 
         consecutive_explore_count = 0
         consecutive_errors = 0

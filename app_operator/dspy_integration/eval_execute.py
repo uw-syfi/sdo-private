@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +21,43 @@ import litellm
 
 from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.signatures import SIGNATURES, get_signature
+from app_operator.experiment_naming import normalize_experiment_token
 from app_operator.logger import logger
 from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 from app_operator.rlm.metrics import extract_rlm_statistics_from_trajectory
+
+_TRAIN_RUN_RE = re.compile(r"^iter(\d+)_c\d+_(.+)$")
+_VAL_RUN_RE = re.compile(r"^(.+)_iter(\d+)_val$")
+_ERROR_LINE_MARKERS = (
+    "error",
+    "failed",
+    "exception",
+    "traceback",
+    "no such file",
+    "not found",
+    "permission denied",
+    "timeout",
+    "timed out",
+    "connection refused",
+)
+_SUCCESS_STATUS_MARKERS = ("success", "succeeded", "completed", "ok", "healthy")
+_FAILURE_STATUS_MARKERS = ("fail", "error", "timeout", "crash", "oom", "unhealthy")
+
+
+@dataclass
+class _TrajectoryEvidence:
+    """Compressed evidence extracted from one experiment trajectory."""
+
+    run_name: str
+    app_name: str
+    status: str
+    attempts: int
+    trajectory_insights: list[str] = field(default_factory=list)
+    error_insights: list[str] = field(default_factory=list)
+    script_insights: list[str] = field(default_factory=list)
+    repo_insights: list[str] = field(default_factory=list)
+    error_signals: list[str] = field(default_factory=list)
+    weight: float = 1.0
 
 
 class EvalExecuteOptimizer:
@@ -106,11 +141,32 @@ class EvalExecuteOptimizer:
                 f"{current_instructions[pname][:120]}..."
             )
 
-        # 2. Generate n_candidates instruction variants per prompt
-        logger.info(
-            f"[EvalExecute] Generating {self.n_candidates} candidate variants per prompt..."
+        trajectory_context = self._build_recent_trajectory_context(
+            work_dir=work_dir,
+            iteration=iteration,
+            prompt_names=prompt_names,
         )
-        candidates = self._generate_candidates(prompt_names, current_instructions)
+
+        # Cold start bootstrap: when there is no optimized baseline and no
+        # trajectory evidence yet, run a single seed candidate first to collect
+        # real execution data before asking the teacher LM for variants.
+        has_evidence = any(
+            bool(context.strip()) for context in trajectory_context.values()
+        )
+        if current_version is None and not has_evidence:
+            logger.info(
+                "[EvalExecute] Cold start detected (no prior trajectory evidence). "
+                "Running seed-only bootstrap candidate."
+            )
+            candidates = [dict(current_instructions)]
+        else:
+            logger.info(
+                "[EvalExecute] Generating %d candidate variants per prompt...",
+                self.n_candidates,
+            )
+            candidates = self._generate_candidates(
+                prompt_names, current_instructions, trajectory_context
+            )
         logger.info(f"[EvalExecute] Generated {len(candidates)} candidates")
 
         # 3. Evaluate each candidate by running the operator on all training apps
@@ -131,7 +187,7 @@ class EvalExecuteOptimizer:
             total_runs = 0
             rlm_scores: list[float] = []
             for app_path in train_apps:
-                app_name = app_path.name
+                app_name = normalize_experiment_token(app_path.name)
                 exp_dir = work_dir / f"iter{iteration}_c{c_idx + 1}_{app_name}"
 
                 self._cleanup_experiment_containers(exp_dir)
@@ -306,12 +362,19 @@ class EvalExecuteOptimizer:
         self,
         prompt_names: list[str],
         current_instructions: dict[str, str],
+        trajectory_context: dict[str, str] | None = None,
     ) -> list[dict[str, str]]:
         """Generate self.n_candidates candidate dicts (prompt_name -> instruction)."""
         per_prompt: dict[str, list[str]] = {}
         for pname in prompt_names:
+            prompt_context = ""
+            if trajectory_context:
+                prompt_context = trajectory_context.get(pname, "")
             per_prompt[pname] = self._generate_instruction_variants(
-                pname, current_instructions[pname], self.n_candidates
+                pname,
+                current_instructions[pname],
+                self.n_candidates,
+                trajectory_context=prompt_context,
             )
 
         candidates = []
@@ -326,7 +389,11 @@ class EvalExecuteOptimizer:
         return candidates
 
     def _generate_instruction_variants(
-        self, prompt_name: str, current_instruction: str, n: int
+        self,
+        prompt_name: str,
+        current_instruction: str,
+        n: int,
+        trajectory_context: str = "",
     ) -> list[str]:
         """Use the teacher LLM to produce *n* instruction variants."""
         model = self.config.optimization.teacher_model
@@ -342,9 +409,18 @@ class EvalExecuteOptimizer:
             "You are a prompt optimization expert helping improve AI deployment agent "
             "instructions to increase deployment success rates."
         )
+        evidence_block = ""
+        if trajectory_context:
+            evidence_block = (
+                "Evidence from prior SDS runs (compressed):\n"
+                f"{trajectory_context}\n\n"
+                "Use this evidence to address recurring failures and avoid previously "
+                "ineffective behaviors.\n\n"
+            )
         user_msg = (
             f"Current instruction for the '{prompt_name}' step:\n"
             f"{current_instruction}\n\n"
+            f"{evidence_block}"
             f"Generate exactly {n} improved variants. "
             "Return ONLY a JSON array of strings, e.g. [\"variant1\", \"variant2\"]. "
             "Each variant should be 1-3 sentences and focus on clearer guidance for "
@@ -380,6 +456,325 @@ class EvalExecuteOptimizer:
 
         # Fallback: repeat the current instruction
         return [current_instruction] * n
+
+    def _build_recent_trajectory_context(
+        self,
+        work_dir: Path,
+        iteration: int,
+        prompt_names: list[str],
+    ) -> dict[str, str]:
+        """Build per-prompt trajectory context from recent experiment runs."""
+        evidences = self._collect_recent_trajectory_evidence(work_dir, iteration)
+        if not evidences:
+            return {pname: "" for pname in prompt_names}
+
+        run_summaries = self._rank_weighted_notes([
+            (
+                e.weight,
+                f"{e.app_name} via {e.run_name}: status={e.status}, attempts={e.attempts}",
+            )
+            for e in evidences
+        ])
+        trajectory_notes = self._rank_weighted_notes([
+            (e.weight, note) for e in evidences for note in e.trajectory_insights
+        ])
+        error_notes = self._rank_weighted_notes([
+            (e.weight, note)
+            for e in evidences
+            for note in (e.error_insights + e.error_signals)
+        ])
+        script_notes = self._rank_weighted_notes([
+            (e.weight, note) for e in evidences for note in e.script_insights
+        ])
+        repo_notes = self._rank_weighted_notes([
+            (e.weight, note) for e in evidences for note in e.repo_insights
+        ])
+
+        context_by_prompt: dict[str, str] = {}
+        for prompt_name in prompt_names:
+            if prompt_name == "subagent_trajectory_analyst":
+                context = self._format_context_sections([
+                    ("Recent run outcomes", run_summaries),
+                    ("Trajectory analyst findings", trajectory_notes),
+                    ("Recurring error patterns", error_notes),
+                ])
+            elif prompt_name == "subagent_error_log_analyst":
+                context = self._format_context_sections([
+                    ("Recent run outcomes", run_summaries),
+                    ("Error-log analyst findings", error_notes),
+                ])
+            elif prompt_name == "subagent_script_analyst":
+                context = self._format_context_sections([
+                    ("Recent run outcomes", run_summaries),
+                    ("Script analyst findings", script_notes),
+                    ("Recurring error patterns", error_notes),
+                ])
+            elif prompt_name == "subagent_repo_analyst":
+                context = self._format_context_sections([
+                    ("Recent run outcomes", run_summaries),
+                    ("Repository analyst findings", repo_notes),
+                    ("Recurring error patterns", error_notes),
+                ])
+            elif prompt_name == "subagent_root_synthesis":
+                context = self._format_context_sections([
+                    ("Recent run outcomes", run_summaries),
+                    ("Trajectory findings", trajectory_notes),
+                    ("Error findings", error_notes),
+                    ("Script findings", script_notes),
+                    ("Repository findings", repo_notes),
+                ])
+            else:
+                context = self._format_context_sections([
+                    ("Recent run outcomes", run_summaries),
+                    ("Recurring error patterns", error_notes),
+                    ("Script findings", script_notes),
+                ])
+
+            if context:
+                logger.info(
+                    "[EvalExecute] Using {} chars of trajectory context for {}",
+                    len(context),
+                    prompt_name,
+                )
+            context_by_prompt[prompt_name] = context
+
+        return context_by_prompt
+
+    def _collect_recent_trajectory_evidence(
+        self,
+        work_dir: Path,
+        iteration: int,
+        max_runs: int = 8,
+    ) -> list[_TrajectoryEvidence]:
+        """Collect compressed evidence from recent training-run trajectories.
+
+        Validation runs are intentionally excluded to avoid leaking validation
+        outcomes back into subsequent training-time prompt generation.
+        """
+        if not work_dir.exists():
+            return []
+
+        candidate_dirs: list[Path] = []
+        for child in work_dir.iterdir():
+            if not child.is_dir():
+                continue
+            if not _TRAIN_RUN_RE.match(child.name):
+                continue
+            run_iter, _app_name = self._parse_run_dir_name(child.name)
+            if run_iter is None or run_iter > iteration:
+                continue
+            candidate_dirs.append(child)
+
+        candidate_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        evidences: list[_TrajectoryEvidence] = []
+        for recency_index, run_dir in enumerate(candidate_dirs[:max_runs]):
+            evidence = self._summarize_run_trajectory(run_dir)
+            if evidence:
+                evidence.weight = self._evidence_weight(evidence.status, recency_index)
+                evidences.append(evidence)
+        return evidences
+
+    def _parse_run_dir_name(self, run_name: str) -> tuple[int | None, str]:
+        """Parse iteration/app from experiment run directory name."""
+        m_train = _TRAIN_RUN_RE.match(run_name)
+        if m_train:
+            return int(m_train.group(1)), m_train.group(2)
+
+        m_val = _VAL_RUN_RE.match(run_name)
+        if m_val:
+            return int(m_val.group(2)), m_val.group(1)
+
+        return None, run_name
+
+    def _summarize_run_trajectory(self, run_dir: Path) -> _TrajectoryEvidence | None:
+        """Summarize one run trajectory into compact textual evidence."""
+        traj_dir = run_dir / ".sds" / "trajectories"
+        if not traj_dir.exists():
+            return None
+
+        traj_files = sorted(traj_dir.glob("trajectory_*.json"), reverse=True)
+        if not traj_files:
+            return None
+
+        try:
+            trajectory = json.loads(traj_files[0].read_text())
+        except Exception as e:
+            logger.warning(
+                f"[EvalExecute] Failed to parse trajectory {traj_files[0]}: {e}"
+            )
+            return None
+
+        _iter, app_name = self._parse_run_dir_name(run_dir.name)
+        deployment = trajectory.get("deployment", [])
+        evidence = _TrajectoryEvidence(
+            run_name=run_dir.name,
+            app_name=app_name,
+            status=str(trajectory.get("metadata", {}).get("status", "unknown")),
+            attempts=len(deployment),
+        )
+
+        for convo in deployment:
+            for msg in convo.get("messages", []):
+                role = msg.get("role")
+                content = str(msg.get("content") or "")
+
+                if role == "assistant" and content:
+                    lower = content.lower()
+                    snippet = self._extract_analysis_snippet(content)
+                    if not snippet:
+                        continue
+
+                    if (
+                        "[subagent trajectory analyst]" in lower
+                        or "[hybrid pre-analysis: trajectory]" in lower
+                    ):
+                        evidence.trajectory_insights.append(snippet)
+                    elif (
+                        "[subagent error_log analyst]" in lower
+                        or "[hybrid pre-analysis: error_log]" in lower
+                    ):
+                        evidence.error_insights.append(snippet)
+                    elif (
+                        "[subagent script analyst]" in lower
+                        or "[hybrid pre-analysis: script]" in lower
+                        or "auto-validation warning" in lower
+                    ):
+                        evidence.script_insights.append(snippet)
+                    elif (
+                        "[subagent repo analyst]" in lower
+                        or "[hybrid pre-analysis: repo]" in lower
+                    ):
+                        evidence.repo_insights.append(snippet)
+
+                if role == "tool_call":
+                    for field in ("stderr", "stdout"):
+                        evidence.error_signals.extend(
+                            self._extract_error_signal_lines(str(msg.get(field) or ""))
+                        )
+
+        return evidence
+
+    @staticmethod
+    def _evidence_weight(status: str, recency_index: int) -> float:
+        """Weight evidence by recency and failure status.
+
+        More recent trajectories get higher base weight. Failed runs are
+        boosted so recurring failure patterns are more likely to influence
+        subsequent candidate generation.
+        """
+        recency_weight = max(0.45, 1.0 - (0.10 * recency_index))
+        normalized = status.strip().lower()
+        if any(marker in normalized for marker in _FAILURE_STATUS_MARKERS):
+            status_weight = 1.4
+        elif any(marker in normalized for marker in _SUCCESS_STATUS_MARKERS):
+            status_weight = 1.0
+        else:
+            status_weight = 1.15
+        return recency_weight * status_weight
+
+    @staticmethod
+    def _rank_weighted_notes(
+        weighted_items: list[tuple[float, str]],
+        limit: int = 8,
+    ) -> list[str]:
+        """Rank note texts by weight, deduping by text with highest weight."""
+        best_by_text: dict[str, tuple[float, int]] = {}
+        for index, (weight, text) in enumerate(weighted_items):
+            clean = text.strip()
+            if not clean:
+                continue
+            existing = best_by_text.get(clean)
+            if existing is None:
+                best_by_text[clean] = (weight, index)
+                continue
+            best_weight, first_seen = existing
+            if weight > best_weight:
+                best_by_text[clean] = (weight, first_seen)
+
+        ranked = sorted(
+            best_by_text.items(),
+            key=lambda item: (-item[1][0], item[1][1], item[0]),
+        )
+        return [text for text, _meta in ranked[:limit]]
+
+    @staticmethod
+    def _extract_analysis_snippet(content: str, max_chars: int = 260) -> str:
+        """Extract concise text from an assistant analysis message."""
+        lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+        if lines and lines[0].startswith("["):
+            lines = lines[1:]
+        if not lines:
+            return ""
+        text = " ".join(lines)
+        if len(text) > max_chars:
+            return text[: max_chars - 3].rstrip() + "..."
+        return text
+
+    @staticmethod
+    def _extract_error_signal_lines(text: str, max_lines: int = 3) -> list[str]:
+        """Extract representative failure lines from command output."""
+        if not text:
+            return []
+
+        signals: list[str] = []
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            lower = line.lower()
+            if any(marker in lower for marker in _ERROR_LINE_MARKERS):
+                if len(line) > 220:
+                    line = line[:217].rstrip() + "..."
+                signals.append(line)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for signal in signals:
+            if signal in seen:
+                continue
+            seen.add(signal)
+            deduped.append(signal)
+            if len(deduped) >= max_lines:
+                break
+        return deduped
+
+    @staticmethod
+    def _dedupe_limit(items: list[str], limit: int = 8) -> list[str]:
+        """Deduplicate while preserving order and limiting length."""
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            clean = item.strip()
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            out.append(clean)
+            if len(out) >= limit:
+                break
+        return out
+
+    def _format_context_sections(
+        self,
+        sections: list[tuple[str, list[str]]],
+        max_chars: int = 2200,
+    ) -> str:
+        """Render compact context text from titled evidence sections."""
+        lines: list[str] = []
+        for title, items in sections:
+            chosen = self._dedupe_limit(items)
+            if not chosen:
+                continue
+            lines.append(f"{title}:")
+            lines.extend(f"- {item}" for item in chosen)
+
+        if not lines:
+            return ""
+
+        text = "\n".join(lines)
+        if len(text) > max_chars:
+            return text[: max_chars - 3].rstrip() + "..."
+        return text
 
     def _write_candidate(self, candidate: dict[str, str], version: str) -> None:
         """Write .dspy.json files for all prompts in *candidate* to *version* dir."""
@@ -422,32 +817,78 @@ class EvalExecuteOptimizer:
         Uses the docker compose project label (com.docker.compose.project) to find
         containers belonging to this experiment slot and force-removes them.
         """
-        project_name = exp_dir.name.lower()
+        project_names = self._candidate_project_names(exp_dir.name)
         try:
-            result = subprocess.run(
-                [
-                    "docker", "ps", "-a", "-q",
-                    "--filter", f"label=com.docker.compose.project={project_name}",
-                ],
-                capture_output=True,
-                text=True,
-            )
-            container_ids = [c for c in result.stdout.strip().splitlines() if c]
-            if container_ids:
-                logger.info(
-                    f"[EvalExecute] Removing {len(container_ids)} leftover containers "
-                    f"for project '{project_name}'..."
-                )
-                subprocess.run(
-                    ["docker", "rm", "-f"] + container_ids,
+            compose_file = self._find_compose_file(exp_dir)
+            if compose_file:
+                for project_name in project_names:
+                    subprocess.run(
+                        [
+                            "docker",
+                            "compose",
+                            "--project-name",
+                            project_name,
+                            "-f",
+                            str(compose_file),
+                            "down",
+                            "--remove-orphans",
+                            "--timeout",
+                            "0",
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+
+            container_ids: set[str] = set()
+            for project_name in project_names:
+                result = subprocess.run(
+                    [
+                        "docker", "ps", "-a", "-q",
+                        "--filter", f"label=com.docker.compose.project={project_name}",
+                    ],
                     capture_output=True,
                     text=True,
                 )
-                logger.info(f"[EvalExecute] Cleaned up containers for '{project_name}'")
+                for container_id in result.stdout.strip().splitlines():
+                    if container_id:
+                        container_ids.add(container_id)
+
+            if container_ids:
+                logger.info(
+                    f"[EvalExecute] Removing {len(container_ids)} leftover containers "
+                    f"for projects {project_names}..."
+                )
+                subprocess.run(
+                    ["docker", "rm", "-f"] + sorted(container_ids),
+                    capture_output=True,
+                    text=True,
+                )
+                logger.info(f"[EvalExecute] Cleaned up containers for {project_names}")
         except Exception as e:
             logger.warning(
-                f"[EvalExecute] Could not clean up containers for '{project_name}': {e}"
+                f"[EvalExecute] Could not clean up containers for {project_names}: {e}"
             )
+
+    @staticmethod
+    def _candidate_project_names(exp_dir_name: str) -> list[str]:
+        """Return plausible Docker Compose project names for an experiment slot."""
+        raw = exp_dir_name.lower()
+        normalized = re.sub(r"[^a-z0-9_-]", "", raw)
+        hyphenized = normalized.replace("_", "-")
+        names: list[str] = []
+        for name in (normalized, hyphenized):
+            if name and name not in names:
+                names.append(name)
+        return names
+
+    @staticmethod
+    def _find_compose_file(exp_dir: Path) -> Path | None:
+        """Locate a compose file in an experiment directory."""
+        for candidate in ("docker-compose.yml", "compose.yml", "compose.yaml"):
+            compose_file = exp_dir / candidate
+            if compose_file.exists():
+                return compose_file
+        return None
 
     def _score_rlm_trajectory(self, exp_dir: Path) -> float | None:
         """Extract RLM efficiency score from a run's trajectory, if available.

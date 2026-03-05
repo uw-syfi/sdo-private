@@ -40,6 +40,8 @@ def create_agent_from_config(
         kwargs = {"model": model}
         if provider_lower in ("rlm", "subagent", "hybrid"):
             kwargs["location"] = config.agent.location
+        if provider_lower in ("rlm", "subagent", "hybrid"):
+            kwargs["dspy_config"] = config.dspy
         return AGENT_REGISTRY[provider_lower](**kwargs)
 
     available = sorted(AGENT_REGISTRY.keys())

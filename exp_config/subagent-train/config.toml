@@ -19,7 +19,7 @@ impl = "cli_agent"
 [operator]
 interval = 30
 monitoring_max_iters = 3
-deployment_max_iters = 20
+deployment_max_iters = 5
 
 [deployment]
 platform = "docker"
