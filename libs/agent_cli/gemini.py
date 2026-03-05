@@ -14,8 +14,6 @@ from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 _logger = logging.getLogger(__name__)
 
 
-
-
 class GeminiGenerationSession(CLIGenerationSession):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
