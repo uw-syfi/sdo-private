@@ -609,18 +609,22 @@ def _build_make_change_on_remote_copy(
 
 
 def build_tools(
-    repo_path: Path, filesystem: FileSystemInterface = None
+    repo_path: Path,
+    filesystem: FileSystemInterface = None,
+    git_integration: bool = False,
 ) -> List[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 
     context = ToolContext(repo_root=repo_path.resolve(), filesystem=filesystem)
-    return [
+    tools = [
         _build_ls(context),
         _build_glob(context),
         _build_read(context),
         _build_grep(context),
         _build_write_file(context),
         _build_bash(context),
-        _build_make_change_on_remote_copy(context),
     ]
+    if git_integration:
+        tools.append(_build_make_change_on_remote_copy(context))
+    return tools

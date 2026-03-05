@@ -35,7 +35,7 @@ def build_graph(
     if filesystem is None:
         filesystem = RealFilesystem()
 
-    tools = build_tools(repo_path, filesystem)
+    tools = build_tools(repo_path, filesystem, git_integration=config.operator.phase.git_integration)
     analyze_agent = create_react_agent(llm, tools=tools)
     script_agent = create_react_agent(llm, tools=tools)
     fix_agent = create_react_agent(llm, tools=tools)
