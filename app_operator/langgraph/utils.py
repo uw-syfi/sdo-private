@@ -156,7 +156,7 @@ def run_script(
 ) -> dict[str, Any]:
     start_time = time.time()
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
             command,
             cwd=str(repo_path),
             shell=True,

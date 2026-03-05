@@ -77,9 +77,8 @@ def cmd_revert(args: argparse.Namespace) -> int:
     if orchestrator.revert(repo_path):
         print("Compose file restored from backup")
         return 0
-    else:
-        print("No backup found to restore", file=sys.stderr)
-        return 1
+    print("No backup found to restore", file=sys.stderr)
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:

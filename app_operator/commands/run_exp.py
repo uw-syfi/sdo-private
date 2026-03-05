@@ -164,20 +164,19 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
     try:
         with open(results_path) as f:
             data = json.load(f)
-        results = []
-        for entry in data.get("results", []):
-            results.append(
-                AppResult(
-                    app=entry["app"],
-                    success=entry.get("success", entry.get("status") == "success"),
-                    status=entry["status"],
-                    deployment_iterations=entry.get("deployment_iterations"),
-                    repeat=entry.get("repeat"),
-                    elapsed_seconds=entry.get("elapsed_seconds"),
-                    phase_durations=entry.get("phase_durations"),
-                    total_tokens=entry.get("total_tokens"),
-                )
+        results = [
+            AppResult(
+                app=entry["app"],
+                success=entry.get("success", entry.get("status") == "success"),
+                status=entry["status"],
+                deployment_iterations=entry.get("deployment_iterations"),
+                repeat=entry.get("repeat"),
+                elapsed_seconds=entry.get("elapsed_seconds"),
+                phase_durations=entry.get("phase_durations"),
+                total_tokens=entry.get("total_tokens"),
             )
+            for entry in data.get("results", [])
+        ]
         return results
     except (json.JSONDecodeError, KeyError, OSError):
         return []
@@ -349,7 +348,7 @@ def tail_file(file_path: Path, stop_event: threading.Event, callback):
                 callback(line.strip())
 
             # Read remaining
-            for line in f.readlines():
+            for line in f:
                 callback(line.strip())
     except Exception:
         pass
@@ -544,19 +543,18 @@ def run_experiment_task(
                 phase_durations=phase_durations,
                 **extracted,
             )
-        else:
-            progress.update(task_id, description=f"[red]{display_name}[/]: Failed", completed=100)
-            time.sleep(1)
-            progress.update(task_id, visible=False)
-            progress.advance(overall_task_id)
-            return AppResult(
-                app=app_name,
-                success=False,
-                repeat=repeat,
-                elapsed_seconds=elapsed_seconds,
-                phase_durations=phase_durations,
-                **extracted,
-            )
+        progress.update(task_id, description=f"[red]{display_name}[/]: Failed", completed=100)
+        time.sleep(1)
+        progress.update(task_id, visible=False)
+        progress.advance(overall_task_id)
+        return AppResult(
+            app=app_name,
+            success=False,
+            repeat=repeat,
+            elapsed_seconds=elapsed_seconds,
+            phase_durations=phase_durations,
+            **extracted,
+        )
 
 
 def run_app_repeats(

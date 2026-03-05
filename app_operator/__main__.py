@@ -38,10 +38,7 @@ INSTALL_HINTS = {
 
 def check_dependencies():
     """Check if required system dependencies are installed."""
-    missing = []
-    for tool in REQUIRED_DEPENDENCIES:
-        if not shutil.which(tool):
-            missing.append(tool)
+    missing = [tool for tool in REQUIRED_DEPENDENCIES if not shutil.which(tool)]
 
     if missing:
         for tool in missing:
@@ -131,23 +128,22 @@ Examples:
 
     if args.command == "run":
         return run.run_command(args)
-    elif args.command == "init-exp":
+    if args.command == "init-exp":
         return init_exp.run_command(args)
-    elif args.command == "viz-graph":
+    if args.command == "viz-graph":
         return viz_graph.run_command(args)
-    elif args.command == "analyze-prompts":
+    if args.command == "analyze-prompts":
         return analyze_prompts.run_command(args)
-    elif args.command == "optimize-prompts":
+    if args.command == "optimize-prompts":
         return optimize_prompts.run_command(args)
-    elif args.command == "e2e-optimize":
+    if args.command == "e2e-optimize":
         return e2e_optimize.run_command(args)
-    elif args.command == "run-exp":
+    if args.command == "run-exp":
         return run_exp.run_command(args)
-    elif args.command == "plot-exp":
+    if args.command == "plot-exp":
         return plot_exp.run_command(args)
-    else:
-        parser.print_help()
-        return 1
+    parser.print_help()
+    return 1
 
 
 if __name__ == "__main__":

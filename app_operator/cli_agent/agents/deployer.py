@@ -3,14 +3,15 @@ from __future__ import annotations
 import re
 import subprocess
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app_operator.types import CommandResult
-
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from app_operator.dspy_integration.config import DSPyConfig
+    from app_operator.types import CommandResult
+    from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
@@ -36,7 +37,6 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
-from libs.agent_cli.base import CodingAgent
 
 FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 FIX_SUMMARY_FILENAME = "fix_summary.md"
@@ -231,8 +231,7 @@ def _generate_script(
         script_path = Path(target_dir) / ".sds" / script_name
         if filesystem.exists(script_path):
             return True, f"Successfully generated {script_name}"
-        else:
-            return False, f"Agent failed to create .sds/{script_name}"
+        return False, f"Agent failed to create .sds/{script_name}"
 
     except subprocess.TimeoutExpired:
         timeout = operator_config.agent_timeout // 60
@@ -447,27 +446,26 @@ class DeploymentAgent:
                     log_file_path,
                     r,
                 )
-            else:
-                res = deploy_result["exit_code"]
-                logger.error(f"Deployment script failed (exit code: {res})")
-                r.add_assistant_message(f"Deployment script failed (exit code: {res}). Analyzing errors...")
+            res = deploy_result["exit_code"]
+            logger.error(f"Deployment script failed (exit code: {res})")
+            r.add_assistant_message(f"Deployment script failed (exit code: {res}). Analyzing errors...")
 
-                # Deployment failed - ask agent to analyze and fix
-                if self._fix_with_agent(
-                    deploy_result,
-                    None,
-                    attempt,
-                    absolute_max_attempts,
-                    log_file_path,
-                ):
+            # Deployment failed - ask agent to analyze and fix
+            if self._fix_with_agent(
+                deploy_result,
+                None,
+                attempt,
+                absolute_max_attempts,
+                log_file_path,
+            ):
+                r.set_phase_status("needs_retry")
+            else:
+                if attempt < absolute_max_attempts:
+                    logger.warning("Agent failed to fix (or crashed), but retrying...")
                     r.set_phase_status("needs_retry")
                 else:
-                    if attempt < absolute_max_attempts:
-                        logger.warning("Agent failed to fix (or crashed), but retrying...")
-                        r.set_phase_status("needs_retry")
-                    else:
-                        r.set_phase_status("failed")
-                        return False
+                    r.set_phase_status("failed")
+                    return False
 
         return None
 

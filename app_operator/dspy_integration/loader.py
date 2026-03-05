@@ -105,9 +105,8 @@ def resolve_version(optimized_dir: Path, version: str) -> str | None:
     version_dir = optimized_dir / version
     if version_dir.exists():
         return version
-    else:
-        logger.warning(f"Version directory not found: {version_dir}")
-        return None
+    logger.warning(f"Version directory not found: {version_dir}")
+    return None
 
 
 def load_optimized_module(prompt_name: str, optimized_dir: Path, version: str = "latest") -> dspy.Module | None:

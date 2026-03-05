@@ -41,9 +41,9 @@ class WebIO:
         if self._pending_tasks:
             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
 
-    async def _send_event(self, type: str, data: dict[str, Any]) -> None:
+    async def _send_event(self, event_type: str, data: dict[str, Any]) -> None:
         if self.websocket.client_state == WebSocketState.CONNECTED:
-            await self.websocket.send_json({"type": type, **data})
+            await self.websocket.send_json({"type": event_type, **data})
 
     async def _flush_thinking(self) -> None:
         if self._thinking_buffer:

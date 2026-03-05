@@ -20,13 +20,13 @@ class GeminiEvent(ABC):
 
         if msg_type == "message":
             return MessageEvent(role=data.get("role", ""), content=data.get("content", ""))
-        elif msg_type == "tool_use":
+        if msg_type == "tool_use":
             return ToolUseEvent(
                 tool_name=data.get("tool_name", "Tool"),
                 tool_id=data.get("tool_id"),
                 parameters=data.get("parameters"),
             )
-        elif msg_type == "tool_result":
+        if msg_type == "tool_result":
             return ToolResultEvent(output=data.get("output", ""), tool_id=data.get("tool_id"))
         return None
 
@@ -62,6 +62,5 @@ class ToolResultEvent(GeminiEvent):
     def render(self, log_prefix: str) -> str:
         if not self.output:
             return f"{log_prefix} \033[32m{self.tool_name_resolved} ran successfully\033[0m"
-        else:
-            truncated = truncate_content(self.output)
-            return f"{log_prefix} \033[32m[Tool Result] {truncated}\033[0m"
+        truncated = truncate_content(self.output)
+        return f"{log_prefix} \033[32m[Tool Result] {truncated}\033[0m"

@@ -47,10 +47,9 @@ def trigger_ai_remediation(max_retries: int):
                 print(f"\n✅ [SDS Operator] Success! System healed on attempt {attempt}.")
                 return True
 
-            else:
-                print("\n⚠️ [SDS Operator] Agent finished, but system is NOT healthy yet.")
-                print("   Retrying in 5 seconds...")
-                time.sleep(5)
+            print("\n⚠️ [SDS Operator] Agent finished, but system is NOT healthy yet.")
+            print("   Retrying in 5 seconds...")
+            time.sleep(5)
 
         except Exception as e:
             logger.error(f"❌ Execution error: {e}")

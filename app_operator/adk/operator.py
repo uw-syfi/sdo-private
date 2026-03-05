@@ -257,10 +257,9 @@ class AdkOperator(OperatorBase):
                     logger.success("Deployment Loop completed successfully.")
                     r.add_assistant_message("Deployment Loop completed successfully.")
                     return True
-                else:
-                    logger.error("Deployment Loop ended without success signal.")
-                    r.add_assistant_message("Deployment Loop failed.")
-                    return False
+                logger.error("Deployment Loop ended without success signal.")
+                r.add_assistant_message("Deployment Loop failed.")
+                return False
 
             except Exception as e:
                 logger.error(f"Deployment Loop failed: {e}")
