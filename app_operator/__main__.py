@@ -20,7 +20,14 @@ import app_operator.langgraph.viz_graph as viz_graph
 from app_operator.logger import logger
 
 # Load environment variables from .env file
-load_dotenv()
+# Find the SDS repo root (where .env should be) by looking for this file's parent directory
+# or searching upward for .git or pyproject.toml
+_sds_root = Path(__file__).parent.parent.parent.resolve()
+if (_sds_root / ".env").exists():
+    load_dotenv(_sds_root / ".env")
+else:
+    # Fallback: search from current directory
+    load_dotenv()
 
 REQUIRED_DEPENDENCIES = ["docker", "kubectl"]
 

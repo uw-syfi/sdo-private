@@ -107,3 +107,4 @@ Trajectory files contain phase, prompt, response, token counts, and success/fail
 | How do I inject faults? | `docs/fault-injection.md` |
 | How do I use RLM for large logs? | `docs/rlm-integration.md` |
 | How do I write tests? | `docs/testing-guide.md` |
+| What feature flags are available? | `docs/feature-flags.md` |

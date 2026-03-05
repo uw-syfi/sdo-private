@@ -214,3 +214,15 @@ class TestOperatorPhaseConfigParsing:
         }
         with pytest.raises(ValueError, match="interval must be positive"):
             Config.from_dict(data)
+
+    def test_git_integration_defaults_to_false(self):
+        config = Config.from_dict({})
+        assert config.operator.phase.git_integration is False
+
+    def test_git_integration_enabled_via_config(self):
+        config = Config.from_dict({"operator": {"phase": {"git_integration": True}}})
+        assert config.operator.phase.git_integration is True
+
+    def test_git_integration_rejects_non_bool(self):
+        with pytest.raises(TypeError):
+            Config.from_dict({"operator": {"phase": {"git_integration": "yes"}}})

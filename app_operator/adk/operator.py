@@ -59,7 +59,8 @@ class AdkOperator(OperatorBase):
 
         # Build ADK components
         self.model = build_adk_model(self.config)
-        self.tools = build_tools(self.repo_path, self.filesystem)
+        self.tools = build_tools(self.repo_path, self.filesystem,
+                                 git_integration=self.config.operator.phase.git_integration)
         self.runner = AdkAgentRunner(
             app_name="sds-adk-operator",
             recorder=self.recorder,
