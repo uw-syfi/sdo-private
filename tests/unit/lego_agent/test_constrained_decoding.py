@@ -1,8 +1,10 @@
-import pytest
 import asyncio
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app_operator.config import AgentConfig, Config, OperatorConfig
 from lego_agent.engine import LegoAgentEngine
-from app_operator.config import Config, AgentConfig, OperatorConfig
 
 
 @pytest.fixture
@@ -38,7 +40,9 @@ def test_submit_response_tool_usage(tmp_path, mock_config):
                     "input": {
                         "status": "ready",
                         "yaml_config": "workflow: ...",
-                        "python_script": 'import lego_agent.runtime\nMAX_ITERATIONS = 10\nif __name__ == "__main__": pass',
+                        "python_script": (
+                            'import lego_agent.runtime\nMAX_ITERATIONS = 10\nif __name__ == "__main__": pass'
+                        ),
                     }
                 },
             }

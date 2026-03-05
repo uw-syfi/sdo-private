@@ -1,9 +1,11 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from app_operator.cli_agent.factory import create_agent_from_config
+from app_operator.config import AgentConfig, Config
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.cli_agent import CLICodingAgent
-from app_operator.config import Config, AgentConfig
 
 
 @pytest.fixture
@@ -19,9 +21,7 @@ def mock_binaries(monkeypatch):
         return None
 
     # We need to patch shutil in the cli_agent module where it's used
-    monkeypatch.setattr(
-        "libs.agent_cli.cli_agent.shutil.which", mock_which
-    )
+    monkeypatch.setattr("libs.agent_cli.cli_agent.shutil.which", mock_which)
 
     # Also mock _check_cli to avoid running subprocess
     monkeypatch.setattr(CLICodingAgent, "_check_cli", lambda self: None)
@@ -89,11 +89,8 @@ def test_create_agent_unregistered_provider_raises_valueerror(tmp_path):
     # Bypass AgentConfig validation by patching VALID_PROVIDERS
     with patch(
         "app_operator.config.AgentConfig.VALID_PROVIDERS",
-        {"not_registered", "codex", "gemini", "claude", "claude-code",
-         "opencode", "anthropic", "vertex", "openai"},
+        {"not_registered", "codex", "gemini", "claude", "claude-code", "opencode", "anthropic", "vertex", "openai"},
     ):
-        config = Config(
-            agent=AgentConfig(provider="not_registered", model="m")
-        )
+        config = Config(agent=AgentConfig(provider="not_registered", model="m"))
         with pytest.raises(ValueError, match="Unknown agent provider"):
             create_agent_from_config(str(tmp_path), config=config)

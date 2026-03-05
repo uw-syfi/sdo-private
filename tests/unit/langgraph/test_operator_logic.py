@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
-from app_operator.langgraph.operator import LangGraphOperator
-from app_operator.config import Config, AgentConfig, DeploymentConfig, RuntimeConfig
+import pytest
+
+from app_operator.config import AgentConfig, Config, DeploymentConfig, RuntimeConfig
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import InMemoryFilesystem
+from app_operator.langgraph.operator import LangGraphOperator
 
 
 @pytest.fixture
@@ -37,9 +38,7 @@ def test_init_success(repo_path, mock_config, memory_fs):
         patch("app_operator.langgraph.operator.build_graph"),
         patch("app_operator.langgraph.operator.TrajectoryRecorder"),
     ):
-        operator = LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        operator = LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
         assert operator.repo_path == repo_path
         assert operator.config == mock_config
@@ -52,9 +51,7 @@ def test_init_repo_not_exist(repo_path, mock_config, memory_fs):
     # Don't create repo in memory_fs
 
     with pytest.raises(ValueError, match="Repository path does not exist"):
-        LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
 
 def test_init_repo_not_dir(repo_path, mock_config, memory_fs):
@@ -66,9 +63,7 @@ def test_init_repo_not_dir(repo_path, mock_config, memory_fs):
     memory_fs.write_text(repo_path, "not a dir")
 
     with pytest.raises(ValueError, match="Repository path is not a directory"):
-        LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
 
 def test_init_llm_failure(repo_path, mock_config, memory_fs):
@@ -83,9 +78,7 @@ def test_init_llm_failure(repo_path, mock_config, memory_fs):
         patch("app_operator.langgraph.operator.TrajectoryRecorder"),
     ):
         with pytest.raises(AgentError, match="Failed to initialize LangGraph LLM"):
-            LangGraphOperator(
-                repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-            )
+            LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
 
 def test_run_success(repo_path, mock_config, memory_fs):
@@ -108,9 +101,7 @@ def test_run_success(repo_path, mock_config, memory_fs):
             return_value=mock_recorder,
         ),
     ):
-        operator = LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        operator = LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
         exit_code = operator.run()
 
@@ -140,15 +131,11 @@ def test_run_failure(repo_path, mock_config, memory_fs):
             return_value=mock_recorder,
         ),
     ):
-        operator = LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        operator = LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
         exit_code = operator.run()
 
-        assert (
-            exit_code == 0
-        )  # run returns 0 even if deployment failed, logic says _deployed is False
+        assert exit_code == 0  # run returns 0 even if deployment failed, logic says _deployed is False
         assert operator._deployed is False
         mock_recorder.finalize.assert_called_with("failed")
 
@@ -170,9 +157,7 @@ def test_run_exception(repo_path, mock_config, memory_fs):
             return_value=mock_recorder,
         ),
     ):
-        operator = LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        operator = LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
         exit_code = operator.run()
 
@@ -197,9 +182,7 @@ def test_run_keyboard_interrupt(repo_path, mock_config, memory_fs):
             return_value=mock_recorder,
         ),
     ):
-        operator = LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        operator = LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
         exit_code = operator.run()
 
@@ -218,9 +201,7 @@ def test_handle_shutdown_signal(repo_path, mock_config, memory_fs):
         patch("app_operator.langgraph.operator.build_graph"),
         patch("app_operator.langgraph.operator.TrajectoryRecorder"),
     ):
-        operator = LangGraphOperator(
-            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config
-        )
+        operator = LangGraphOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
         import signal
 

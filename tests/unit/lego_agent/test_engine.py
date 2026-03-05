@@ -1,11 +1,12 @@
-import pytest
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from app_operator.config import AgentConfig, Config, OperatorConfig
 from lego_agent.engine import LegoAgentEngine
 from lego_agent.io import UserIO
 from lego_agent.prompts import get_loader
-from app_operator.config import Config, AgentConfig, OperatorConfig
 
 
 class MockIO(UserIO):
@@ -106,11 +107,7 @@ def test_engine_happy_path(engine, tmp_path):
             }
 
         async def mock_ainvoke(*args, **kwargs):
-            return {
-                "messages": [
-                    MagicMock(content='{"status": "error", "output": "fallback"}')
-                ]
-            }
+            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
 
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke
@@ -119,9 +116,7 @@ def test_engine_happy_path(engine, tmp_path):
         result = asyncio.run(engine.run_async("do something"))
 
         assert result.script_text is not None
-        assert (
-            tmp_path / result.script_path.parent.name / "generated_script.py"
-        ).exists()
+        assert (tmp_path / result.script_path.parent.name / "generated_script.py").exists()
         assert result.clarifications == []
 
 
@@ -160,11 +155,7 @@ def test_engine_clarification_loop(engine, mock_io):
             }
 
         async def mock_ainvoke(*args, **kwargs):
-            return {
-                "messages": [
-                    MagicMock(content='{"status": "error", "output": "fallback"}')
-                ]
-            }
+            return {"messages": [MagicMock(content='{"status": "error", "output": "fallback"}')]}
 
         mock_agent.astream_events = mock_astream_events
         mock_agent.ainvoke = mock_ainvoke
@@ -212,11 +203,7 @@ def test_engine_validation_failure_and_repair(engine):
         async def mock_ainvoke_impl(*args, **kwargs):
             # This is the repair call
             return {
-                "messages": [
-                    MagicMock(
-                        content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: test"}"""
-                    )
-                ]
+                "messages": [MagicMock(content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: test"}""")]
             }
 
         mock_agent.astream_events = mock_astream_events
@@ -268,9 +255,7 @@ def test_engine_yaml_validation_repair(engine):
             # This is the repair call
             return {
                 "messages": [
-                    MagicMock(
-                        content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: repaired"}"""
-                    )
+                    MagicMock(content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: repaired"}""")
                 ]
             }
 

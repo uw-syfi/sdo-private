@@ -1,10 +1,10 @@
-import unittest
-from unittest.mock import patch
-from pathlib import Path
 import subprocess
+import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from app_operator.langgraph.utils import run_script
 from app_operator.filesystem import InMemoryFilesystem
+from app_operator.langgraph.utils import run_script
 
 
 class TestGraphRunScriptErrorHandling(unittest.TestCase):

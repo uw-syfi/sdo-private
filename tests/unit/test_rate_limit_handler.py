@@ -1,9 +1,9 @@
 """Tests for rate limit error detection and handling."""
 
 from app_operator.rate_limit_handler import (
+    RateLimitError,
     detect_rate_limit_error,
     exponential_backoff,
-    RateLimitError,
 )
 
 
@@ -102,9 +102,7 @@ class TestRateLimitError:
 
     def test_create_rate_limit_error(self):
         """Test creating a RateLimitError."""
-        error = RateLimitError(
-            provider="gemini", message="Rate limit exceeded", retry_after=60
-        )
+        error = RateLimitError(provider="gemini", message="Rate limit exceeded", retry_after=60)
         assert error.provider == "gemini"
         assert error.message == "Rate limit exceeded"
         assert error.retry_after == 60
@@ -122,13 +120,12 @@ class TestSubprocessErrorLogging:
         """stderr is logged in full — not truncated — when subprocess fails."""
         import subprocess
         from unittest.mock import patch
+
         from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 
         long_stderr = "E: " + "x" * 2000  # exceeds any reasonable truncation limit
 
-        fake_result = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr=long_stderr
-        )
+        fake_result = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=long_stderr)
 
         logged_messages = []
 

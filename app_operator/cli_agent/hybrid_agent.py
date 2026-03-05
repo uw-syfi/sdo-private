@@ -17,22 +17,22 @@ import subprocess
 from pathlib import Path
 
 from loguru import logger
-from app_operator.rlm.environment import RLMContext
-from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
-from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _FIX_ERROR_RE
 
-from libs.agent_cli.base import CodingAgent, register_provider
-from libs.agent_cli.events import AgentEventHandler
-from libs.agent_cli import call_subagent
+from app_operator.cli_agent.rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
+from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 from app_operator.prompts import DSPyConfigProtocol
 from app_operator.prompts.subagent import (
-    render_trajectory_analyst_prompt,
     render_error_log_analyst_prompt,
-    render_script_analyst_prompt,
     render_repo_analyst_prompt,
+    render_script_analyst_prompt,
+    render_trajectory_analyst_prompt,
 )
-from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
+from app_operator.rlm.environment import RLMContext
+from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
+from libs.agent_cli import call_subagent
+from libs.agent_cli.base import CodingAgent, register_provider
+from libs.agent_cli.events import AgentEventHandler
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 
 @register_provider("hybrid")
@@ -60,7 +60,7 @@ class HybridCodingAgent(CodingAgent):
         dspy_config: DSPyConfigProtocol | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder = recorder
+        self.recorder: TrajectoryRecorderProtocol | None = recorder
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
@@ -83,14 +83,10 @@ class HybridCodingAgent(CodingAgent):
         is_fix = _FIX_ERROR_RE.search(prompt)
         if not is_fix and _DIRECT_TEXT_RE.search(prompt):
             # Reuse SubagentCodingAgent's direct-text path (same implementation)
-            helper = SubagentCodingAgent(
-                model=self.model, location=self.location,
-                dspy_config=self.dspy_config)
+            helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
             result = helper._generate_direct(prompt, call_tokens)
         elif not is_fix and _FILE_GEN_RE.search(prompt):
-            helper = SubagentCodingAgent(
-                model=self.model, location=self.location,
-                dspy_config=self.dspy_config)
+            helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
             result = helper._generate_files(prompt, repo_path, call_tokens)
         else:
             result = self._generate_fix(prompt, repo_path, call_tokens)
@@ -99,7 +95,7 @@ class HybridCodingAgent(CodingAgent):
             self._total_token_usage[k] += call_tokens[k]
 
         if self.recorder and hasattr(self.recorder, "record_token_usage"):
-            self.recorder.record_token_usage(self._total_token_usage.copy())
+            self.recorder.record_token_usage(self._total_token_usage.copy())  # type: ignore[reportArgumentType]
 
         return result
 
@@ -110,9 +106,7 @@ class HybridCodingAgent(CodingAgent):
         token_acc: dict | None = None,
     ) -> str:
         """Pre-run 4 subagent analyses, then hand off to the RLM loop."""
-        helper = SubagentCodingAgent(
-            model=self.model, location=self.location,
-            dspy_config=self.dspy_config)
+        helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
         sds = repo_path / ".sds"
 
         trajectory_text = helper._read_trajectory(sds)
@@ -203,9 +197,7 @@ class HybridCodingAgent(CodingAgent):
                 ("script", script_summary),
                 ("repo", repo_summary),
             ]:
-                self.recorder.add_assistant_message(
-                    f"[Hybrid pre-analysis: {name}]\n{summary[:500]}"
-                )
+                self.recorder.add_assistant_message(f"[Hybrid pre-analysis: {name}]\n{summary[:500]}")
 
         # Build the backup before creating context (same as RLMCodingAgent)
         deploy_sh = sds / "deploy.sh"
@@ -225,13 +217,9 @@ class HybridCodingAgent(CodingAgent):
             health_check_output=health_check_log,
             dockerfile=helper._read(repo_path / "Dockerfile"),
             docker_compose=(
-                helper._read(repo_path / "docker-compose.yml")
-                or helper._read(repo_path / "docker-compose.yaml")
+                helper._read(repo_path / "docker-compose.yml") or helper._read(repo_path / "docker-compose.yaml")
             ),
-            readme=(
-                helper._read(repo_path / "README.md")
-                or helper._read(repo_path / "README.rst")
-            ),
+            readme=(helper._read(repo_path / "README.md") or helper._read(repo_path / "README.rst")),
             analysis_report=helper._read(sds / "code_analysis.md"),
             original_script=original_script,
             # Pre-computed summaries injected into the REPL namespace

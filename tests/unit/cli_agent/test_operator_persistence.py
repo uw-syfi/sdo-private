@@ -1,6 +1,8 @@
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config, DeploymentConfig
 from app_operator.filesystem import InMemoryFilesystem

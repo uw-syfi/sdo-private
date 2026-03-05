@@ -62,9 +62,7 @@ class SDSPromptAdapter:
 
     def __init__(self, templates_dir: Path | None = None) -> None:
         if templates_dir is None:
-            self.templates_dir = (
-                Path(__file__).resolve().parent.parent / "prompts" / "templates"
-            )
+            self.templates_dir = Path(__file__).resolve().parent.parent / "prompts" / "templates"
         else:
             self.templates_dir = Path(templates_dir)
 
@@ -101,10 +99,7 @@ class SDSPromptAdapter:
             original_content = self.read_template(template_name)
             original_vars = self._extract_variables(original_content)
         except FileNotFoundError:
-            logger.warning(
-                f"Original template not found for variable extraction: "
-                f"{template_name}"
-            )
+            logger.warning(f"Original template not found for variable extraction: {template_name}")
             return False
 
         try:
@@ -126,11 +121,7 @@ class SDSPromptAdapter:
 
     def get_templates_for_agent(self, agent_type: str) -> list[str]:
         """Get all template names for a given agent type."""
-        return [
-            name
-            for name, info in self.OPTIMIZABLE_TEMPLATES.items()
-            if info.agent_type == agent_type
-        ]
+        return [name for name, info in self.OPTIMIZABLE_TEMPLATES.items() if info.agent_type == agent_type]
 
     def get_template_info(self, template_name: str) -> TemplateInfo | None:
         """Get metadata for a template."""

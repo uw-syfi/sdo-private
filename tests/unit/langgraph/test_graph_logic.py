@@ -1,7 +1,8 @@
-from unittest.mock import MagicMock, patch
 from pathlib import Path
-from app_operator.langgraph.graph import build_graph
+from unittest.mock import MagicMock, patch
+
 from app_operator.filesystem import InMemoryFilesystem
+from app_operator.langgraph.graph import build_graph
 
 
 def test_analyze_code_skips_if_files_exist():

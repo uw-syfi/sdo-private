@@ -1,15 +1,15 @@
-from .base import register_provider
 import json
+import logging
 import time
 from pathlib import Path
 
-import logging
-
-from .cli_agent import CLICodingAgent, CLIGenerationSession
-from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
-from .events import AgentEventHandler
 import libs.agent_cli.trajectory as _trajectory_module
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+
+from .base import register_provider
+from .cli_agent import CLICodingAgent, CLIGenerationSession
+from .events import AgentEventHandler
+from .gemini_events import GeminiEvent, MessageEvent, ToolResultEvent, ToolUseEvent
 
 _logger = logging.getLogger(__name__)
 
@@ -106,28 +106,27 @@ class GeminiGenerationSession(CLIGenerationSession):
                 if self.event_handler:
                     self.event_handler.on_tool_call(event.tool_name, event.parameters)
 
-        elif isinstance(event, ToolResultEvent):
-            if event.tool_id:
-                # Inject resolved name into the event for rendering
-                event.tool_name_resolved = self.tool_map.get(event.tool_id, "Tool")
+        elif isinstance(event, ToolResultEvent) and event.tool_id:
+            # Inject resolved name into the event for rendering
+            event.tool_name_resolved = self.tool_map.get(event.tool_id, "Tool")
 
-                start_time = self.tool_start_times.get(event.tool_id)
-                duration = time.time() - start_time if start_time else None
-                args = self.tool_args.get(event.tool_id, {})
+            start_time = self.tool_start_times.get(event.tool_id)
+            duration = time.time() - start_time if start_time else None
+            args = self.tool_args.get(event.tool_id, {})
 
-                self.recorder.add_tool_call(
+            self.recorder.add_tool_call(
+                tool=event.tool_name_resolved,
+                args=args,
+                stdout=event.output,
+                duration=duration,
+            )
+
+            if self.event_handler:
+                self.event_handler.on_tool_result(
                     tool=event.tool_name_resolved,
-                    args=args,
                     stdout=event.output,
                     duration=duration,
                 )
-
-                if self.event_handler:
-                    self.event_handler.on_tool_result(
-                        tool=event.tool_name_resolved,
-                        stdout=event.output,
-                        duration=duration,
-                    )
 
     def _render_event(self, event: GeminiEvent):
         """Render the event to stdout."""

@@ -1,11 +1,12 @@
 """Tests for generate_scripts node function."""
+
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from app_operator.config import AgentConfig, Config
-from app_operator.trajectory import NullTrajectoryRecorder, Phase
-from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.nodes.generator import generate_scripts
+from app_operator.langgraph.state import OperatorState
+from app_operator.trajectory import NullTrajectoryRecorder, Phase
 
 
 class TestGenerateScripts:
@@ -20,7 +21,7 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -28,8 +29,7 @@ class TestGenerateScripts:
         loader = Mock()
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
-        recorder.phase = Mock(return_value=MagicMock(
-            __enter__=Mock(), __exit__=Mock()))
+        recorder.phase = Mock(return_value=MagicMock(__enter__=Mock(), __exit__=Mock()))
 
         with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
             mock_invoke.return_value = ("Script generated", [])
@@ -37,9 +37,7 @@ class TestGenerateScripts:
             with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
                 mock_analyze.return_value = {"files": []}
 
-                result_state = generate_scripts(
-                    state, config, repo_path, loader, agent, 10000, recorder
-                )
+                result_state = generate_scripts(state, config, repo_path, loader, agent, 10000, recorder)
 
         assert result_state["scripts_done"] is True
         # Should invoke agent twice: once for deploy.sh, once for health_check.sh
@@ -54,7 +52,7 @@ class TestGenerateScripts:
             scripts_done=True,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -63,9 +61,7 @@ class TestGenerateScripts:
         agent = Mock()
 
         with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
-            result_state = generate_scripts(
-                state, config, repo_path, loader, agent, 10000
-            )
+            result_state = generate_scripts(state, config, repo_path, loader, agent, 10000)
 
         # Should not invoke agent when scripts already done
         mock_invoke.assert_not_called()
@@ -80,7 +76,7 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -94,8 +90,7 @@ class TestGenerateScripts:
             with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
                 mock_analyze.return_value = {"files": ["file1.py", "file2.py"]}
 
-                generate_scripts(state, config, repo_path,
-                                 loader, agent, 10000)
+                generate_scripts(state, config, repo_path, loader, agent, 10000)
 
                 # Verify repository was analyzed
                 mock_analyze.assert_called_once_with(repo_path)
@@ -109,7 +104,7 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -126,15 +121,13 @@ class TestGenerateScripts:
                 with patch("app_operator.langgraph.nodes.generator.create_generate_script_prompt") as mock_prompt:
                     mock_prompt.return_value = "prompt"
 
-                    generate_scripts(state, config, repo_path,
-                                     loader, agent, 10000)
+                    generate_scripts(state, config, repo_path, loader, agent, 10000)
 
                     # Check that prompts were created for both scripts
                     assert mock_prompt.call_count == 2
                     call_args_list = mock_prompt.call_args_list
 
-                    script_names = [call[1]["script_name"]
-                                    for call in call_args_list]
+                    script_names = [call[1]["script_name"] for call in call_args_list]
                     assert "deploy.sh" in script_names
                     assert "health_check.sh" in script_names
 
@@ -147,7 +140,7 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -164,8 +157,7 @@ class TestGenerateScripts:
             with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
                 mock_analyze.return_value = {}
 
-                generate_scripts(state, config, repo_path,
-                                 loader, agent, 10000, recorder)
+                generate_scripts(state, config, repo_path, loader, agent, 10000, recorder)
 
                 # Verify phase context was used
                 recorder.phase.assert_called_once_with(Phase.SCRIPT_GENERATION)
@@ -181,7 +173,7 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -199,8 +191,7 @@ class TestGenerateScripts:
                 with patch("app_operator.langgraph.nodes.generator.create_generate_script_prompt") as mock_prompt:
                     mock_prompt.return_value = "prompt"
 
-                    generate_scripts(state, config, repo_path,
-                                     loader, agent, 10000)
+                    generate_scripts(state, config, repo_path, loader, agent, 10000)
 
                     # Verify platform was passed
                     call_args_list = mock_prompt.call_args_list

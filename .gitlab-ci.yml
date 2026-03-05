@@ -66,6 +66,7 @@ unit_tests_python:
   script:
     - echo "Running Python Tests..."
     - ./scripts/test_python.sh
+  coverage: '/TOTAL\s+\d+\s+\d+\s+(\d+%)/'
 
 unit_tests_js:
   stage: test

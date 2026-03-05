@@ -4,8 +4,8 @@ from unittest.mock import patch
 import pytest
 from loguru import logger
 
-from libs.agent_cli.gemini import GeminiCodingAgent
 from app_operator.logger import formatter
+from libs.agent_cli.gemini import GeminiCodingAgent
 
 
 @pytest.fixture
@@ -24,9 +24,7 @@ def mock_which():
 @pytest.fixture
 def gemini_agent(mock_which, mock_env):
     """Create a GeminiCodingAgent instance with mocked environment."""
-    with patch(
-        "libs.agent_cli.cli_agent._get_interactive_env", return_value=mock_env
-    ):
+    with patch("libs.agent_cli.cli_agent._get_interactive_env", return_value=mock_env):
         with patch("libs.agent_cli.cli_agent.CLICodingAgent._check_cli"):
             agent = GeminiCodingAgent()
             yield agent

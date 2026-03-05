@@ -1,28 +1,28 @@
 import argparse
 import json
-import sys
 import shutil
 import subprocess
+import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    import tomli as tomllib  # type: ignore[reportMissingImports]
 
+from rich.console import Console
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
     TimeElapsedColumn,
 )
-from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
@@ -118,7 +118,7 @@ def _write_experiment_sds_config(exp_dir: Path, experiment_config: dict) -> None
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "experiments",
-        nargs='+',
+        nargs="+",
         help="One or more experiment names or full paths to TOML config files",
     )
     parser.add_argument(
@@ -140,7 +140,7 @@ def _extract_results(exp_dir: Path) -> dict:
         return {"status": "unknown", "deployment_iterations": None, "total_tokens": None}
 
     try:
-        with open(traj_files[-1], "r") as f:
+        with open(traj_files[-1]) as f:
             traj = json.load(f)
         metadata = traj.get("metadata", {})
         status = metadata.get("status", "unknown")
@@ -166,16 +166,18 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
             data = json.load(f)
         results = []
         for entry in data.get("results", []):
-            results.append(AppResult(
-                app=entry["app"],
-                success=entry.get("success", entry.get("status") == "success"),
-                status=entry["status"],
-                deployment_iterations=entry.get("deployment_iterations"),
-                repeat=entry.get("repeat"),
-                elapsed_seconds=entry.get("elapsed_seconds"),
-                phase_durations=entry.get("phase_durations"),
-                total_tokens=entry.get("total_tokens"),
-            ))
+            results.append(
+                AppResult(
+                    app=entry["app"],
+                    success=entry.get("success", entry.get("status") == "success"),
+                    status=entry["status"],
+                    deployment_iterations=entry.get("deployment_iterations"),
+                    repeat=entry.get("repeat"),
+                    elapsed_seconds=entry.get("elapsed_seconds"),
+                    phase_durations=entry.get("phase_durations"),
+                    total_tokens=entry.get("total_tokens"),
+                )
+            )
         return results
     except (json.JSONDecodeError, KeyError, OSError):
         return []
@@ -300,7 +302,8 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
             else:
                 iter_str = "N/A"
             if elapsed:
-                elapsed_str = f"{_fmt_seconds(elapsed[0])}–{_fmt_seconds(elapsed[-1])} / {_fmt_seconds(sum(elapsed) / len(elapsed))}"
+                mean_elapsed = sum(elapsed) / len(elapsed)
+                elapsed_str = f"{_fmt_seconds(elapsed[0])}–{_fmt_seconds(elapsed[-1])} / {_fmt_seconds(mean_elapsed)}"
             else:
                 elapsed_str = "N/A"
             if tokens:
@@ -337,7 +340,7 @@ def tail_file(file_path: Path, stop_event: threading.Event, callback):
         time.sleep(0.1)
 
     try:
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             while not stop_event.is_set():
                 line = f.readline()
                 if not line:
@@ -413,12 +416,7 @@ def run_experiment_task(
 
         # Run init-exp
         init_cmd = [sys.executable, "-m", "app_operator", "init-exp", str(app_path), run_exp_name]
-        init_proc = subprocess.run(
-            init_cmd,
-            stdout=f_log,
-            stderr=subprocess.STDOUT,
-            cwd=Path.cwd()
-        )
+        init_proc = subprocess.run(init_cmd, stdout=f_log, stderr=subprocess.STDOUT, cwd=Path.cwd())
 
         if init_proc.returncode != 0:
             progress.update(task_id, description=f"[red]{display_name}[/]: Init Failed", completed=100)
@@ -453,9 +451,7 @@ def run_experiment_task(
             now = time.monotonic()
             prev = phase_state["current"]
             if prev is not None:
-                phase_state["durations"][prev] = (
-                    phase_state["durations"].get(prev, 0.0) + (now - phase_state["start"])
-                )
+                phase_state["durations"][prev] = phase_state["durations"].get(prev, 0.0) + (now - phase_state["start"])
             phase_state["current"] = name
             phase_state["start"] = now
 
@@ -466,16 +462,10 @@ def run_experiment_task(
             lower_line = line.lower()
             if "code analysis" in lower_line and "step 1" in lower_line:
                 _transition_phase("code_analysis")
-                progress.update(
-                    task_id,
-                    description=f"[yellow]{display_name}[/]: Code Analysis",
-                    completed=20)
+                progress.update(task_id, description=f"[yellow]{display_name}[/]: Code Analysis", completed=20)
             elif "generating deployment scripts" in lower_line:
                 _transition_phase("script_generation")
-                progress.update(
-                    task_id,
-                    description=f"[yellow]{display_name}[/]: Script Generation",
-                    completed=30)
+                progress.update(task_id, description=f"[yellow]{display_name}[/]: Script Generation", completed=30)
             elif "deployment attempt" in lower_line:
                 _transition_phase("deployment")
                 # Extract attempt number if possible "Deployment Attempt #1"
@@ -483,14 +473,10 @@ def run_experiment_task(
                     parts = line.split("#")
                     attempt = parts[-1].split()[0]
                     progress.update(
-                        task_id,
-                        description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})",
-                        completed=40)
+                        task_id, description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})", completed=40
+                    )
                 except Exception:
-                    progress.update(
-                        task_id,
-                        description=f"[yellow]{display_name}[/]: Deployment",
-                        completed=40)
+                    progress.update(task_id, description=f"[yellow]{display_name}[/]: Deployment", completed=40)
             elif "monitoring cycle" in lower_line:
                 _transition_phase("monitoring")
                 try:
@@ -499,18 +485,13 @@ def run_experiment_task(
                     progress.update(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Health-monitor (Attempt {cycle})",
-                        completed=70)
+                        completed=70,
+                    )
                 except Exception:
-                    progress.update(
-                        task_id,
-                        description=f"[yellow]{display_name}[/]: Monitoring",
-                        completed=70)
+                    progress.update(task_id, description=f"[yellow]{display_name}[/]: Monitoring", completed=70)
             elif "shutting down" in lower_line:
                 _transition_phase("finishing")
-                progress.update(
-                    task_id,
-                    description=f"[green]{display_name}[/]: Finishing",
-                    completed=90)
+                progress.update(task_id, description=f"[green]{display_name}[/]: Finishing", completed=90)
 
         tail_thread = threading.Thread(target=tail_file, args=(log_file, stop_tail, check_status))
         tail_thread.start()
@@ -556,8 +537,11 @@ def run_experiment_task(
             progress.update(task_id, visible=False)
             progress.advance(overall_task_id)
             return AppResult(
-                app=app_name, success=True, repeat=repeat,
-                elapsed_seconds=elapsed_seconds, phase_durations=phase_durations,
+                app=app_name,
+                success=True,
+                repeat=repeat,
+                elapsed_seconds=elapsed_seconds,
+                phase_durations=phase_durations,
                 **extracted,
             )
         else:
@@ -566,8 +550,11 @@ def run_experiment_task(
             progress.update(task_id, visible=False)
             progress.advance(overall_task_id)
             return AppResult(
-                app=app_name, success=False, repeat=repeat,
-                elapsed_seconds=elapsed_seconds, phase_durations=phase_durations,
+                app=app_name,
+                success=False,
+                repeat=repeat,
+                elapsed_seconds=elapsed_seconds,
+                phase_durations=phase_durations,
                 **extracted,
             )
 
@@ -585,8 +572,15 @@ def run_app_repeats(
     results = []
     for repeat_idx, task_id in repeat_task_ids:
         result = run_experiment_task(
-            app_path_str, exp_name, progress, task_id, overall_task_id,
-            log_dir, experiment_config, repeat_idx, total_repeats,
+            app_path_str,
+            exp_name,
+            progress,
+            task_id,
+            overall_task_id,
+            log_dir,
+            experiment_config,
+            repeat_idx,
+            total_repeats,
         )
         results.append(result)
     return results
@@ -646,7 +640,7 @@ def run_command(args: argparse.Namespace) -> int:
         resolved.append(result)
 
     # Validate all experiments before starting any work
-    for exp_name, config_path, config, log_dir in resolved:
+    for exp_name, _config_path, config, _log_dir in resolved:
         apps = config.get("apps", [])
         if not apps:
             logger.warning(f"No apps found in config for experiment '{exp_name}'")
@@ -658,7 +652,7 @@ def run_command(args: argparse.Namespace) -> int:
             return 1
 
     # Print summary header
-    for exp_name, config_path, config, log_dir in resolved:
+    for exp_name, _config_path, config, log_dir in resolved:
         apps = config.get("apps", [])
         repeats = config.get("repeats", 1)
         console.print(f"[bold]Running Experiment: {exp_name}[/bold]")
@@ -670,7 +664,7 @@ def run_command(args: argparse.Namespace) -> int:
     # Prepare log directories and load any existing results (for resume support)
     results_by_exp: dict[str, list[AppResult]] = {}
     completed_keys_by_exp: dict[str, set[tuple[str, int | None]]] = {}
-    for exp_name, config_path, config, log_dir in resolved:
+    for exp_name, _config_path, _config, log_dir in resolved:
         log_dir.mkdir(parents=True, exist_ok=True)
         existing = _load_existing_results(log_dir)
         results_by_exp[exp_name] = list(existing)
@@ -683,7 +677,7 @@ def run_command(args: argparse.Namespace) -> int:
     # Count total runs and already-completed runs for the global progress bar
     total_runs = 0
     already_done_count = 0
-    for exp_name, config_path, config, log_dir in resolved:
+    for exp_name, _config_path, config, _log_dir in resolved:
         apps = config.get("apps", [])
         repeats = config.get("repeats", 1)
         completed_keys = completed_keys_by_exp[exp_name]
@@ -701,9 +695,8 @@ def run_command(args: argparse.Namespace) -> int:
         BarColumn(),
         TaskProgressColumn(),
         TimeElapsedColumn(),
-        console=console
+        console=console,
     ) as progress:
-
         overall_task_id = progress.add_task(
             "[bold]Total runs[/bold]",
             total=total_runs,
@@ -713,7 +706,7 @@ def run_command(args: argparse.Namespace) -> int:
         # futures maps future -> (app, exp_name, log_dir, config)
         futures = {}
         with ThreadPoolExecutor(max_workers=args.parallel) as executor:
-            for exp_name, config_path, config, log_dir in resolved:
+            for exp_name, _config_path, config, log_dir in resolved:
                 apps = config.get("apps", [])
                 repeats = config.get("repeats", 1)
                 completed_keys = completed_keys_by_exp[exp_name]
@@ -731,8 +724,15 @@ def run_command(args: argparse.Namespace) -> int:
                     if not repeat_task_ids:
                         continue
                     future = executor.submit(
-                        run_app_repeats, app, exp_name,
-                        progress, repeat_task_ids, overall_task_id, log_dir, config, repeats,
+                        run_app_repeats,
+                        app,
+                        exp_name,
+                        progress,
+                        repeat_task_ids,
+                        overall_task_id,
+                        log_dir,
+                        config,
+                        repeats,
                     )
                     futures[future] = (app, exp_name, log_dir, config)
 
@@ -753,16 +753,18 @@ def run_command(args: argparse.Namespace) -> int:
                         for i in range(repeats):
                             repeat = i + 1 if repeats > 1 else None
                             if (Path(app).name, repeat) not in completed_keys:
-                                results_by_exp[exp_name].append(AppResult(
-                                    app=Path(app).name,
-                                    success=False,
-                                    status="unknown",
-                                    deployment_iterations=None,
-                                    repeat=repeat,
-                                ))
+                                results_by_exp[exp_name].append(
+                                    AppResult(
+                                        app=Path(app).name,
+                                        success=False,
+                                        status="unknown",
+                                        deployment_iterations=None,
+                                        repeat=repeat,
+                                    )
+                                )
                         _write_results(log_dir, exp_name, results_by_exp[exp_name])
 
-    for exp_name, config_path, config, log_dir in resolved:
+    for exp_name, _config_path, _config, log_dir in resolved:
         results = results_by_exp[exp_name]
         _write_results(log_dir, exp_name, results)
         if multi:

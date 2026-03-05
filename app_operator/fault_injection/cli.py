@@ -95,29 +95,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     # inject
     inject_parser = subparsers.add_parser("inject", help="Inject faults")
+    inject_parser.add_argument("--repo-path", required=True, help="Path to the repository")
+    inject_parser.add_argument("--num-faults", type=int, default=2, help="Number of faults (1-5)")
+    inject_parser.add_argument("--seed", type=int, default=None, help="Random seed")
     inject_parser.add_argument(
-        "--repo-path", required=True, help="Path to the repository"
-    )
-    inject_parser.add_argument(
-        "--num-faults", type=int, default=2, help="Number of faults (1-5)"
-    )
-    inject_parser.add_argument(
-        "--seed", type=int, default=None, help="Random seed"
-    )
-    inject_parser.add_argument(
-        "--categories", nargs="*", default=None,
+        "--categories",
+        nargs="*",
+        default=None,
         help="Fault categories to include",
     )
     inject_parser.add_argument(
-        "--severities", nargs="*", default=None,
+        "--severities",
+        nargs="*",
+        default=None,
         help="Fault severities to include",
     )
 
     # revert
     revert_parser = subparsers.add_parser("revert", help="Revert fault injection")
-    revert_parser.add_argument(
-        "--repo-path", required=True, help="Path to the repository"
-    )
+    revert_parser.add_argument("--repo-path", required=True, help="Path to the repository")
 
     return parser
 

@@ -5,11 +5,14 @@ verifying robustness against arbitrary string inputs.
 """
 
 import json
+
 import pytest
 
 # Try to import hypothesis, skip tests if not available
 try:
-    from hypothesis import given, strategies as st, assume, settings
+    from hypothesis import assume, given, settings
+    from hypothesis import strategies as st
+
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
@@ -39,11 +42,10 @@ except ImportError:
     settings = DummySettings()
     st = DummyStrategies()
 
-from lego_agent.models import extract_json, parse_lego_agent_response, LegoAgentResponse
+from lego_agent.models import LegoAgentResponse, extract_json, parse_lego_agent_response
 
 pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
+    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
 )
 
 # ---------------------------------------------------------------------------
@@ -60,10 +62,13 @@ if HYPOTHESIS_AVAILABLE:
     @st.composite
     def clarify_json_strategy(draw):
         """Generate a valid clarify JSON payload embedded in arbitrary text."""
-        questions = draw(st.lists(
-            st.text(min_size=1, max_size=80).filter(str.strip),
-            min_size=1, max_size=5,
-        ))
+        questions = draw(
+            st.lists(
+                st.text(min_size=1, max_size=80).filter(str.strip),
+                min_size=1,
+                max_size=5,
+            )
+        )
         payload = json.dumps({"status": "clarify", "questions": questions})
         prefix = draw(_safe_text)
         suffix = draw(_safe_text)
@@ -78,6 +83,7 @@ if HYPOTHESIS_AVAILABLE:
         suffix = draw(_safe_text)
         return prefix + payload + suffix, yaml_config
 else:
+
     def clarify_json_strategy():
         pass
 
@@ -88,6 +94,7 @@ else:
 # ---------------------------------------------------------------------------
 # extract_json
 # ---------------------------------------------------------------------------
+
 
 class TestExtractJsonProperties:
     """Property-based tests for extract_json."""
@@ -103,7 +110,8 @@ class TestExtractJsonProperties:
         payload=st.dictionaries(
             st.text(min_size=1, max_size=20),
             st.text(max_size=50),
-            min_size=1, max_size=5,
+            min_size=1,
+            max_size=5,
         ),
         prefix=st.text(max_size=30),
         suffix=st.text(max_size=30),
@@ -124,7 +132,8 @@ class TestExtractJsonProperties:
         payload=st.dictionaries(
             st.text(min_size=1, max_size=20).filter(lambda s: '"' not in s),
             st.text(max_size=50).filter(lambda s: '"' not in s),
-            min_size=1, max_size=3,
+            min_size=1,
+            max_size=3,
         ),
         prefix=st.text(max_size=20).filter(lambda s: "```" not in s and "{" not in s),
         suffix=st.text(max_size=20).filter(lambda s: "```" not in s and "}" not in s),
@@ -143,6 +152,7 @@ class TestExtractJsonProperties:
 # parse_lego_agent_response robustness
 # ---------------------------------------------------------------------------
 
+
 class TestParseLegAgentResponseProperties:
     """Property-based tests for parse_lego_agent_response robustness."""
 
@@ -156,9 +166,7 @@ class TestParseLegAgentResponseProperties:
         except ValueError:
             pass  # Expected failure mode
         except (AttributeError, KeyError, TypeError) as exc:
-            pytest.fail(
-                f"parse_lego_agent_response raised {type(exc).__name__} for input {text!r}: {exc}"
-            )
+            pytest.fail(f"parse_lego_agent_response raised {type(exc).__name__} for input {text!r}: {exc}")
 
     @given(args=clarify_json_strategy())
     @settings(max_examples=50, deadline=1000)

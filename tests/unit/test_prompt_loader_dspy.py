@@ -2,8 +2,8 @@
 
 from unittest.mock import Mock, patch
 
-from app_operator.prompts import PromptLoader, reset_loader, get_loader
 from app_operator.dspy_integration.config import DSPyConfig
+from app_operator.prompts import PromptLoader, get_loader, reset_loader
 
 
 class TestPromptLoaderDSPyInit:
@@ -35,19 +35,18 @@ class TestTemplateToPromptName:
     def test_convert_deployer_template(self):
         """Should convert deployer template paths."""
         loader = PromptLoader()
-        assert loader._template_to_prompt_name('deployer/system.jinja2') == 'deployer_system'
-        assert loader._template_to_prompt_name('deployer/fix_error.jinja2') == 'deployer_fix_error'
+        assert loader._template_to_prompt_name("deployer/system.jinja2") == "deployer_system"
+        assert loader._template_to_prompt_name("deployer/fix_error.jinja2") == "deployer_fix_error"
 
     def test_convert_monitor_template(self):
         """Should convert monitor template paths."""
         loader = PromptLoader()
-        assert loader._template_to_prompt_name(
-            'monitor/analyze_health.jinja2') == 'monitor_analyze_health'
+        assert loader._template_to_prompt_name("monitor/analyze_health.jinja2") == "monitor_analyze_health"
 
     def test_convert_agentflow_template(self):
         """Should convert agentflow template paths."""
         loader = PromptLoader()
-        assert loader._template_to_prompt_name('agentflow/system.jinja2') == 'agentflow_system'
+        assert loader._template_to_prompt_name("agentflow/system.jinja2") == "agentflow_system"
 
 
 class TestShouldUseDSPy:
@@ -60,45 +59,41 @@ class TestShouldUseDSPy:
     def test_no_config_returns_false(self):
         """Without config, should return False."""
         loader = PromptLoader()
-        result = loader._should_use_dspy('deployer_fix_error', {})
+        result = loader._should_use_dspy("deployer_fix_error", {})
         assert result is False
 
     def test_use_optimized_false_returns_false(self):
         """With use_optimized=False, should return False."""
         config = DSPyConfig(use_optimized=False)
         loader = PromptLoader(dspy_config=config)
-        result = loader._should_use_dspy('deployer_fix_error', {})
+        result = loader._should_use_dspy("deployer_fix_error", {})
         assert result is False
 
     def test_use_optimized_true_without_canary(self):
         """With use_optimized=True and no canary, should return True."""
         config = DSPyConfig(use_optimized=True, canary_deployment=False)
         loader = PromptLoader(dspy_config=config)
-        with patch.object(loader, '_optimized_module_exists', return_value=True):
-            result = loader._should_use_dspy('deployer_fix_error', {})
+        with patch.object(loader, "_optimized_module_exists", return_value=True):
+            result = loader._should_use_dspy("deployer_fix_error", {})
         assert result is True
 
     def test_canary_deployment_deterministic_routing(self):
         """Canary deployment should route deterministically based on repo_path."""
-        config = DSPyConfig(
-            use_optimized=True,
-            canary_deployment=True,
-            canary_percentage=0.5
-        )
+        config = DSPyConfig(use_optimized=True, canary_deployment=True, canary_percentage=0.5)
         loader = PromptLoader(dspy_config=config)
 
-        with patch.object(loader, '_optimized_module_exists', return_value=True):
+        with patch.object(loader, "_optimized_module_exists", return_value=True):
             # Same repo_path should always give same result
-            kwargs1 = {'repo_path': '/repo/test1'}
-            result1a = loader._should_use_dspy('deployer_fix_error', kwargs1)
-            result1b = loader._should_use_dspy('deployer_fix_error', kwargs1)
+            kwargs1 = {"repo_path": "/repo/test1"}
+            result1a = loader._should_use_dspy("deployer_fix_error", kwargs1)
+            result1b = loader._should_use_dspy("deployer_fix_error", kwargs1)
             assert result1a == result1b
 
             # Different repo_paths should give different results (with high probability)
             results = []
             for i in range(100):
-                kwargs = {'repo_path': f'/repo/test{i}'}
-                result = loader._should_use_dspy('deployer_fix_error', kwargs)
+                kwargs = {"repo_path": f"/repo/test{i}"}
+                result = loader._should_use_dspy("deployer_fix_error", kwargs)
                 results.append(result)
 
         # Should have roughly 50% True (within tolerance)
@@ -107,13 +102,9 @@ class TestShouldUseDSPy:
 
     def test_canary_without_repo_path_falls_back(self):
         """Canary without repo_path should fall back to Jinja2."""
-        config = DSPyConfig(
-            use_optimized=True,
-            canary_deployment=True,
-            canary_percentage=0.5
-        )
+        config = DSPyConfig(use_optimized=True, canary_deployment=True, canary_percentage=0.5)
         loader = PromptLoader(dspy_config=config)
-        result = loader._should_use_dspy('deployer_fix_error', {})
+        result = loader._should_use_dspy("deployer_fix_error", {})
         assert result is False
 
     def test_script_generation_prompts_never_use_dspy(self):
@@ -157,7 +148,7 @@ class TestRenderWithDSPy:
         template_file.write_text("Hello {{ name }}!")
 
         loader = PromptLoader(templates_dir=templates_dir)
-        result = loader.render('test.jinja2', name='World')
+        result = loader.render("test.jinja2", name="World")
 
         assert result == "Hello World!"
 
@@ -180,7 +171,7 @@ class TestRenderWithDSPy:
         loader = PromptLoader(templates_dir=templates_dir, dspy_config=config)
         loader.optimized_dir = optimized_dir
 
-        result = loader.render('deployer/system.jinja2', repo_path='/repo')
+        result = loader.render("deployer/system.jinja2", repo_path="/repo")
 
         # Should fall back to Jinja2
         assert result == "System prompt for /repo"
@@ -242,9 +233,9 @@ class TestTrajectoryIntegration:
         mock_recorder = Mock()
         loader = PromptLoader(templates_dir=templates_dir)
 
-        loader.render('test.jinja2', name='World', recorder=mock_recorder)
+        loader.render("test.jinja2", name="World", recorder=mock_recorder)
 
-        mock_recorder.set_prompt_version.assert_called_once_with('jinja2')
+        mock_recorder.set_prompt_version.assert_called_once_with("jinja2")
 
     def test_record_rendered_prompt_jinja2(self, tmp_path):
         """Should record the rendered prompt string in trajectory."""
@@ -256,11 +247,11 @@ class TestTrajectoryIntegration:
         mock_recorder = Mock()
         loader = PromptLoader(templates_dir=templates_dir)
 
-        loader.render('test.jinja2', name='World', recorder=mock_recorder)
+        loader.render("test.jinja2", name="World", recorder=mock_recorder)
 
         mock_recorder.record_rendered_prompt.assert_called_once_with("Hello World!")
 
-    @patch('app_operator.dspy_integration.loader.load_optimized_module')
+    @patch("app_operator.dspy_integration.loader.load_optimized_module")
     def test_record_fallback(self, mock_load, tmp_path):
         """Should record fallback when DSPy module exists but invocation fails."""
         templates_dir = tmp_path / "templates"
@@ -285,11 +276,7 @@ class TestTrajectoryIntegration:
         loader.optimized_dir = optimized_dir
 
         mock_recorder = Mock()
-        loader.render(
-            'deployer/system.jinja2',
-            repo_path='/repo',
-            recorder=mock_recorder
-        )
+        loader.render("deployer/system.jinja2", repo_path="/repo", recorder=mock_recorder)
 
         # DSPy was attempted (module file existed) but load returned None →
         # fallback to Jinja2 and fallback event recorded

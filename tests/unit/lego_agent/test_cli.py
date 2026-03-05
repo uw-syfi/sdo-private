@@ -1,5 +1,6 @@
 import sys
 from unittest.mock import MagicMock, patch
+
 from lego_agent.cli import main
 from lego_agent.models import LegoAgentResult
 

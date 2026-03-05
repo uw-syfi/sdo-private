@@ -12,20 +12,22 @@ from app_operator.fault_injection.reporter import FaultReport
 class TestFaultReport:
     def test_to_trajectory_metadata_success(self):
         fault1 = Fault(
-            fault_id="MISC-001", name="wrong_port",
+            fault_id="MISC-001",
+            name="wrong_port",
             category=FaultCategory.MISCONFIGURATION,
-            severity=FaultSeverity.LOW, description="d",
+            severity=FaultSeverity.LOW,
+            description="d",
         )
         fault2 = Fault(
-            fault_id="SEC-001", name="removed_auth",
+            fault_id="SEC-001",
+            name="removed_auth",
             category=FaultCategory.SECURITY,
-            severity=FaultSeverity.MEDIUM, description="d",
+            severity=FaultSeverity.MEDIUM,
+            description="d",
         )
         results = [
-            FaultResult(fault=fault1, target_service="frontend", success=True,
-                        modified_fields={"ports": "changed"}),
-            FaultResult(fault=fault2, target_service="geo", success=True,
-                        modified_fields={"env": "removed"}),
+            FaultResult(fault=fault1, target_service="frontend", success=True, modified_fields={"ports": "changed"}),
+            FaultResult(fault=fault2, target_service="geo", success=True, modified_fields={"env": "removed"}),
         ]
         meta = FaultReport.to_trajectory_metadata(results)
         assert meta["enabled"] is True
@@ -40,13 +42,14 @@ class TestFaultReport:
 
     def test_to_trajectory_metadata_with_failures(self):
         fault = Fault(
-            fault_id="MISC-002", name="missing_env",
+            fault_id="MISC-002",
+            name="missing_env",
             category=FaultCategory.MISCONFIGURATION,
-            severity=FaultSeverity.MEDIUM, description="d",
+            severity=FaultSeverity.MEDIUM,
+            description="d",
         )
         results = [
-            FaultResult(fault=fault, target_service="svc", success=False,
-                        error_message="No env vars"),
+            FaultResult(fault=fault, target_service="svc", success=False, error_message="No env vars"),
         ]
         meta = FaultReport.to_trajectory_metadata(results)
         assert meta["num_faults_injected"] == 0

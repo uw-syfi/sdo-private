@@ -24,9 +24,9 @@ def _write_e2e_config(
             [
                 f"iterations = {iterations}",
                 'prompts = ["deployer_fix_error"]',
-                '[training]',
+                "[training]",
                 f"apps = [{train_items}]",
-                '[validation]',
+                "[validation]",
                 f"apps = [{val_items}]",
                 "",
             ]
@@ -70,9 +70,7 @@ def test_run_command_dry_run_validates_without_execution(tmp_path):
     )
 
     with patch("app_operator.commands.e2e_optimize.EvalExecuteOptimizer") as mock_eval:
-        with patch(
-            "app_operator.commands.e2e_optimize.run_subprocess_with_rate_limit_handling"
-        ) as mock_run:
+        with patch("app_operator.commands.e2e_optimize.run_subprocess_with_rate_limit_handling") as mock_run:
             rc = run_command(args)
 
     assert rc == 0
@@ -94,9 +92,7 @@ def test_run_command_dry_run_fails_when_training_app_missing(tmp_path):
     )
 
     with patch("app_operator.commands.e2e_optimize.EvalExecuteOptimizer") as mock_eval:
-        with patch(
-            "app_operator.commands.e2e_optimize.run_subprocess_with_rate_limit_handling"
-        ) as mock_run:
+        with patch("app_operator.commands.e2e_optimize.run_subprocess_with_rate_limit_handling") as mock_run:
             rc = run_command(args)
 
     assert rc == 1
@@ -170,6 +166,7 @@ def test_run_command_infers_provider_from_app_model_when_no_override(tmp_path):
         return_value=app_config,
     ):
         with patch("app_operator.commands.e2e_optimize.EvalExecuteOptimizer") as mock_eval:
+
             def _optimize_side_effect(**kwargs):
                 captured_provider["provider"] = kwargs["provider"]
                 return {"success": True}

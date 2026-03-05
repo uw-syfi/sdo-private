@@ -8,12 +8,12 @@ This command orchestrates a full optimization cycle:
 """
 
 import argparse
-import re
-import sys
-import shutil
-import subprocess
 import json
 import os
+import re
+import shutil
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -21,12 +21,12 @@ from typing import Any
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    import tomli as tomllib  # type: ignore[reportMissingImports]
 
-from app_operator.logger import logger
-from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
 from app_operator.config import load_config as load_app_config
+from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
 from app_operator.experiment_naming import normalize_experiment_token
+from app_operator.logger import logger
 from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 
 
@@ -137,19 +137,19 @@ def _replace_in_agent_section(
 
     for line in lines:
         stripped = line.strip()
-        if re.match(r'^\[agent\]$', stripped):
+        if re.match(r"^\[agent\]$", stripped):
             in_agent = True
         elif stripped.startswith("[") and in_agent:
             in_agent = False
 
         if in_agent and provider_override and not provider_replaced:
-            m = re.match(r'^(\s*provider\s*=\s*).*$', line)
+            m = re.match(r"^(\s*provider\s*=\s*).*$", line)
             if m:
                 line = f'{m.group(1)}"{provider_override}"'
                 provider_replaced = True
 
         if in_agent and model_override and not model_replaced:
-            m = re.match(r'^(\s*model\s*=\s*).*$', line)
+            m = re.match(r"^(\s*model\s*=\s*).*$", line)
             if m:
                 line = f'{m.group(1)}"{model_override}"'
                 model_replaced = True
@@ -222,13 +222,12 @@ def _update_sds_toml(
         new_lines = []
         skip = False
         for line in lines:
-            if re.match(r'^\[dspy(\..*)?\]$', line.strip()):
+            if re.match(r"^\[dspy(\..*)?\]$", line.strip()):
                 skip = True
                 continue
-            if skip and line.strip().startswith("["):
+            if skip and line.strip().startswith("[") and not re.match(r"^\[dspy(\..*)?\]$", line.strip()):
                 # Only stop skipping if this is NOT a dspy subsection
-                if not re.match(r'^\[dspy(\..*)?\]$', line.strip()):
-                    skip = False
+                skip = False
 
             if not skip:
                 new_lines.append(line)
@@ -237,9 +236,7 @@ def _update_sds_toml(
     # Override provider/model only within the [agent] section.
     # We locate the [agent] block and do targeted substitution within it.
     if provider_override or model_override:
-        content = _replace_in_agent_section(
-            content, provider_override, model_override
-        )
+        content = _replace_in_agent_section(content, provider_override, model_override)
 
     final_content = content + "\n" + new_section_content
     sds_toml.write_text(final_content)
@@ -328,17 +325,11 @@ class StateManager:
             try:
                 for key, expected_type in schema.items():
                     if key not in data:
-                        raise ValueError(
-                            f"Missing required key: {key}")
+                        raise ValueError(f"Missing required key: {key}")
                     if not isinstance(data[key], expected_type):
-                        raise TypeError(
-                            f"Key '{key}' has wrong type: "
-                            f"expected {expected_type}, "
-                            f"got {type(data[key])}"
-                        )
+                        raise TypeError(f"Key '{key}' has wrong type: expected {expected_type}, got {type(data[key])}")
             except (ValueError, TypeError) as e:
-                logger.warning(
-                    f"Invalid state file schema ({e}), starting fresh.")
+                logger.warning(f"Invalid state file schema ({e}), starting fresh.")
                 return default_state
 
             return data
@@ -536,9 +527,7 @@ def run_command(args: argparse.Namespace) -> int:
                         current_version = f"{output_prefix}/{next_version}"
                     else:
                         current_version = next_version
-                    logger.info(
-                        f"Optimization successful. New version: {current_version}"
-                    )
+                    logger.info(f"Optimization successful. New version: {current_version}")
                     state_manager.mark_optimization_done(current_version)
                 else:
                     logger.error("Optimization failed.")
@@ -580,10 +569,7 @@ def run_command(args: argparse.Namespace) -> int:
                     operation_name=f"Validation run: {exp_path.name}",
                 )
                 if not success:
-                    logger.warning(
-                        f"Validation failed for {app_name}: "
-                        f"{error_msg or 'unknown error'}. Continuing."
-                    )
+                    logger.warning(f"Validation failed for {app_name}: {error_msg or 'unknown error'}. Continuing.")
                     continue
                 state_manager.mark_val_app_completed(app_name)
 

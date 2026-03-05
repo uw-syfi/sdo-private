@@ -37,9 +37,7 @@ class FaultInjector(ABC):
         """
 
     @abstractmethod
-    def get_applicable_services(
-        self, fault: Fault, compose_data: dict[str, Any]
-    ) -> list[str]:
+    def get_applicable_services(self, fault: Fault, compose_data: dict[str, Any]) -> list[str]:
         """Get services this fault can be applied to.
 
         Args:
@@ -60,9 +58,7 @@ class ComposeManipulator:
         return compose_data.get("services", {})
 
     @staticmethod
-    def get_service_ports(
-        compose_data: dict[str, Any], service: str
-    ) -> list[str]:
+    def get_service_ports(compose_data: dict[str, Any], service: str) -> list[str]:
         """Get port mappings for a service.
 
         Returns:
@@ -73,9 +69,7 @@ class ComposeManipulator:
         return list(svc.get("ports", []))
 
     @staticmethod
-    def get_service_environment(
-        compose_data: dict[str, Any], service: str
-    ) -> list[str]:
+    def get_service_environment(compose_data: dict[str, Any], service: str) -> list[str]:
         """Get environment variables for a service.
 
         Normalizes both dict and list formats to list format.
@@ -92,9 +86,7 @@ class ComposeManipulator:
         return list(env)
 
     @staticmethod
-    def classify_service(
-        service_name: str, service_config: dict[str, Any]
-    ) -> str:
+    def classify_service(service_name: str, service_config: dict[str, Any]) -> str:
         """Classify a service by its role based on image/name heuristics.
 
         Returns one of: "database", "cache", "frontend", "backend",

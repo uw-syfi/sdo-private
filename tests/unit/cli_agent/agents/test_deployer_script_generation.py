@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import Mock
+
+import pytest
+
 from app_operator.cli_agent.agents.deployer import generate_scripts
 from app_operator.prompts.deployment_context import analyze_repository
 from tests.fixtures.agents import ScriptGeneratingAgent
@@ -8,10 +10,12 @@ from tests.fixtures.agents import ScriptGeneratingAgent
 @pytest.fixture
 def stub_agent():
     """Create a script-generating agent for testing."""
-    return ScriptGeneratingAgent(responses=[
-        "#!/bin/bash\necho deploy",
-        "#!/bin/bash\necho health",
-    ])
+    return ScriptGeneratingAgent(
+        responses=[
+            "#!/bin/bash\necho deploy",
+            "#!/bin/bash\necho health",
+        ]
+    )
 
 
 def test_analyze_repository_detects_languages(tmp_path):
@@ -36,12 +40,8 @@ def test_generate_scripts_creates_files(tmp_path, stub_agent):
     assert (repo / ".sds" / "health_check.sh").exists()
 
     # Verify content
-    assert (repo / ".sds" / "deploy.sh").read_text(
-        encoding="utf-8"
-    ) == "#!/bin/bash\necho deploy"
-    assert (repo / ".sds" / "health_check.sh").read_text(
-        encoding="utf-8"
-    ) == "#!/bin/bash\necho health"
+    assert (repo / ".sds" / "deploy.sh").read_text(encoding="utf-8") == "#!/bin/bash\necho deploy"
+    assert (repo / ".sds" / "health_check.sh").read_text(encoding="utf-8") == "#!/bin/bash\necho health"
 
 
 def test_generate_scripts_sends_correct_prompts(tmp_path, stub_agent):

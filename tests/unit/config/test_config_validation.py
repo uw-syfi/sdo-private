@@ -5,11 +5,14 @@ clear error messages, preventing runtime errors from bad configurations.
 """
 
 import pytest
+
 from app_operator.config import AgentConfig, Config, OperatorConfig
 
 # Try to import hypothesis, skip tests if not available
 try:
-    from hypothesis import given, strategies as st, settings
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
+
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
@@ -77,9 +80,7 @@ class TestOperatorConfigValidation:
 
     def test_valid_config_accepted(self):
         """Valid configuration values should be accepted."""
-        config = OperatorConfig(
-            interval=60, monitoring_max_iters=10, deployment_max_iters=3
-        )
+        config = OperatorConfig(interval=60, monitoring_max_iters=10, deployment_max_iters=3)
         assert config.interval == 60
         assert config.monitoring_max_iters == 10
         assert config.deployment_max_iters == 3
@@ -126,9 +127,7 @@ class TestOperatorConfigValidation:
 
     def test_custom_timeout_values_accepted(self):
         """Custom timeout values should be accepted."""
-        config = OperatorConfig(
-            agent_fix_timeout=3600, deploy_timeout=1800, agent_timeout=600
-        )
+        config = OperatorConfig(agent_fix_timeout=3600, deploy_timeout=1800, agent_timeout=600)
         assert config.agent_fix_timeout == 3600
         assert config.deploy_timeout == 1800
         assert config.agent_timeout == 600
@@ -188,7 +187,7 @@ class TestAgentConfigValidation:
 
     def test_provider_error_message_includes_valid_options(self):
         """Error message should list valid provider options."""
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Invalid provider") as exc_info:
             AgentConfig(provider="bad-provider")
 
         error_msg = str(exc_info.value)
@@ -204,9 +203,7 @@ class TestConfigIntegration:
         """Full configuration with valid values should work."""
         config = Config(
             agent=AgentConfig(provider="claude", model="claude-3"),
-            operator=OperatorConfig(
-                interval=60, monitoring_max_iters=10, deployment_max_iters=5
-            ),
+            operator=OperatorConfig(interval=60, monitoring_max_iters=10, deployment_max_iters=5),
         )
         assert config.agent.provider == "claude"
         assert config.agent.model == "claude-3"
@@ -270,8 +267,8 @@ class TestConfigIntegration:
         """Test very large but valid timeout values."""
         config = OperatorConfig(
             agent_fix_timeout=86400,  # 24 hours
-            deploy_timeout=7200,       # 2 hours
-            agent_timeout=3600         # 1 hour
+            deploy_timeout=7200,  # 2 hours
+            agent_timeout=3600,  # 1 hour
         )
         assert config.agent_fix_timeout == 86400
         assert config.deploy_timeout == 7200
@@ -310,9 +307,7 @@ class TestConfigIntegration:
 
     def test_config_from_dict_with_gepa_section(self):
         """Config.from_dict should parse [gepa] section."""
-        config = Config.from_dict(
-            {"agent": {"model": "test-model"}, "gepa": {"max_steps": 100, "num_candidates": 20}}
-        )
+        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"max_steps": 100, "num_candidates": 20}})
         assert config.gepa.max_steps == 100
         assert config.gepa.num_candidates == 20
 
@@ -337,9 +332,7 @@ class TestConfigIntegration:
 
     def test_config_gepa_diversity_probability(self):
         """Config.from_dict should accept diversity_probability."""
-        config = Config.from_dict(
-            {"agent": {"model": "test-model"}, "gepa": {"diversity_probability": 0.3}}
-        )
+        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"diversity_probability": 0.3}})
         assert config.gepa.diversity_probability == 0.3
 
     def test_config_gepa_diversity_probability_invalid(self):
@@ -390,7 +383,7 @@ class TestOperatorConfigIntervalProperty:
     @settings(max_examples=50, deadline=1000)
     def test_any_invalid_interval_rejected(self, interval):
         """Any integer outside [1, 86400] raises ValueError when constructing OperatorConfig."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="interval (must be positive|too large)"):
             OperatorConfig(interval=interval)
 
 
@@ -402,13 +395,17 @@ class TestOperatorConfigTimeoutsProperty:
     @settings(max_examples=50, deadline=1000)
     def test_any_positive_timeout_accepted(self, data):
         """Any positive integer for a timeout/max-iters field is accepted and stored correctly."""
-        field = data.draw(st.sampled_from([
-            "agent_fix_timeout",
-            "deploy_timeout",
-            "agent_timeout",
-            "monitoring_max_iters",
-            "deployment_max_iters",
-        ]))
+        field = data.draw(
+            st.sampled_from(
+                [
+                    "agent_fix_timeout",
+                    "deploy_timeout",
+                    "agent_timeout",
+                    "monitoring_max_iters",
+                    "deployment_max_iters",
+                ]
+            )
+        )
         value = data.draw(st.integers(min_value=1))
         config = OperatorConfig(**{field: value})
         assert getattr(config, field) == value
@@ -417,15 +414,19 @@ class TestOperatorConfigTimeoutsProperty:
     @settings(max_examples=50, deadline=1000)
     def test_any_non_positive_timeout_rejected(self, data):
         """Any non-positive integer for a timeout/max-iters field raises ValueError."""
-        field = data.draw(st.sampled_from([
-            "agent_fix_timeout",
-            "deploy_timeout",
-            "agent_timeout",
-            "monitoring_max_iters",
-            "deployment_max_iters",
-        ]))
+        field = data.draw(
+            st.sampled_from(
+                [
+                    "agent_fix_timeout",
+                    "deploy_timeout",
+                    "agent_timeout",
+                    "monitoring_max_iters",
+                    "deployment_max_iters",
+                ]
+            )
+        )
         value = data.draw(st.integers(max_value=0))
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="must be positive"):
             OperatorConfig(**{field: value})
 
 
@@ -434,8 +435,23 @@ class TestConfigFromDictRoundTripProperty:
     """Property-based round-trip tests for Config.from_dict."""
 
     @given(
-        provider=st.sampled_from(sorted(["codex", "gemini", "claude", "claude-code",
-                                 "opencode", "anthropic", "vertex", "openai", "rlm", "subagent", "hybrid"])),
+        provider=st.sampled_from(
+            sorted(
+                [
+                    "codex",
+                    "gemini",
+                    "claude",
+                    "claude-code",
+                    "opencode",
+                    "anthropic",
+                    "vertex",
+                    "openai",
+                    "rlm",
+                    "subagent",
+                    "hybrid",
+                ]
+            )
+        ),
         interval=st.integers(min_value=1, max_value=86400),
     )
     @settings(max_examples=50, deadline=1000)
@@ -453,7 +469,7 @@ class TestConfigFromDictRoundTripProperty:
     @settings(max_examples=50, deadline=1000)
     def test_unknown_section_always_rejected(self, section_name):
         """Any unknown top-level section key always raises an error."""
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="(Unknown|Invalid|Unexpected|unexpected|unknown|invalid|Unrecognized)"):
             Config.from_dict({section_name: {}})
 
     @given(st.just({}))

@@ -1,6 +1,7 @@
 import pytest
-from app_operator.cli_agent.agents.app_monitor import AppMonitor, HealthCheckTask
+
 import app_operator.cli_agent.agents.app_monitor as app_monitor_module
+from app_operator.cli_agent.agents.app_monitor import AppMonitor, HealthCheckTask
 from tests.fixtures.agents import StubAgent
 
 
@@ -86,9 +87,7 @@ def test_analyze_health_calls_agent(monitor, stub_agent):
 def test_analyze_parses_exec_summary(monitor, stub_agent, capture_logs, tmp_path):
     # Setup valid XML response
     stub_agent.response = (
-        "Here is the analysis:\n"
-        "<exec_summary>System is healthy and performing well.</exec_summary>\n"
-        "Details: ..."
+        "Here is the analysis:\n<exec_summary>System is healthy and performing well.</exec_summary>\nDetails: ..."
     )
 
     task = HealthCheckTask()
@@ -100,9 +99,7 @@ def test_analyze_parses_exec_summary(monitor, stub_agent, capture_logs, tmp_path
 
     task.analyze(monitor, health_result)
 
-    assert any(
-        "Summary: System is healthy and performing well." in msg for msg in capture_logs
-    )
+    assert any("Summary: System is healthy and performing well." in msg for msg in capture_logs)
 
     # Verify log file creation
     log_files = list(monitor.log_dir.glob("*.log"))
@@ -122,9 +119,7 @@ def test_analyze_handles_missing_summary(monitor, stub_agent, capture_logs, tmp_
 
     task.analyze(monitor, health_result)
 
-    assert any(
-        "Summary not found in expected XML format" in msg for msg in capture_logs
-    )
+    assert any("Summary not found in expected XML format" in msg for msg in capture_logs)
 
 
 def test_analyze_handles_agent_exception(monitor, stub_agent, capture_logs, tmp_path):
@@ -141,6 +136,4 @@ def test_analyze_handles_agent_exception(monitor, stub_agent, capture_logs, tmp_
     # Should not crash
     task.analyze(monitor, health_result)
 
-    assert any(
-        "Agent analysis failed: Agent API failure" in msg for msg in capture_logs
-    )
+    assert any("Agent analysis failed: Agent API failure" in msg for msg in capture_logs)

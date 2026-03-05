@@ -1,7 +1,9 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
-from tests.fixtures.agents import StubAgent, ErrorAgent
+from tests.fixtures.agents import ErrorAgent, StubAgent
 
 
 @pytest.fixture
@@ -22,6 +24,7 @@ def test_run_generates_analysis_files_when_missing(repo_path, agent):
     When code_analysis.md and deployment_issues.md are missing, the agent should
     invoke the coding agent to generate them.
     """
+
     # Setup: agent generates the files
     def fake_generate(prompt, cwd=None, timeout=None):
         sds_dir = repo_path / ".sds"

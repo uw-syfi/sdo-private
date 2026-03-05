@@ -7,12 +7,15 @@ Note: These tests require hypothesis to be installed. Install with:
     uv add --dev hypothesis
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 # Try to import hypothesis, skip tests if not available
 try:
-    from hypothesis import given, strategies as st, assume, settings
+    from hypothesis import assume, given, settings
+    from hypothesis import strategies as st
+
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
@@ -46,12 +49,12 @@ except ImportError:
 from app_operator.filesystem import InMemoryFilesystem
 
 pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
+    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
 )
 
 # Custom strategies for filesystem testing
 if HYPOTHESIS_AVAILABLE:
+
     @st.composite
     def valid_filename(draw):
         """Generate valid filenames (no path separators)."""
@@ -94,17 +97,14 @@ if HYPOTHESIS_AVAILABLE:
     @st.composite
     def file_content_strategy(draw):
         """Generate various file contents."""
-        return draw(st.one_of(
-            st.text(min_size=0, max_size=10000),  # Regular text
-            st.binary(
-                min_size=0,
-                max_size=10000).map(
-                lambda b: b.decode(
-                    "utf-8",
-                    errors="ignore")),
-            # Binary-like
-            st.text(st.characters(min_codepoint=0x1F300, max_codepoint=0x1F6FF)),  # Emoji
-        ))
+        return draw(
+            st.one_of(
+                st.text(min_size=0, max_size=10000),  # Regular text
+                st.binary(min_size=0, max_size=10000).map(lambda b: b.decode("utf-8", errors="ignore")),
+                # Binary-like
+                st.text(st.characters(min_codepoint=0x1F300, max_codepoint=0x1F6FF)),  # Emoji
+            )
+        )
 else:
     # Dummy strategies for when hypothesis is not available
     def valid_filename():
@@ -210,7 +210,7 @@ class TestPropertyBasedFilesystem:
         filtered_paths = []
         for i, p in enumerate(paths):
             is_prefix = False
-            for other in paths[i + 1:]:
+            for other in paths[i + 1 :]:
                 if str(other).startswith(str(p) + "/"):
                     is_prefix = True
                     break
@@ -325,7 +325,7 @@ class TestPropertyBasedFilesystem:
         filtered_paths = []
         for i, (path, content) in enumerate(sorted_paths):
             is_prefix = False
-            for other_path, _ in sorted_paths[i + 1:]:
+            for other_path, _ in sorted_paths[i + 1 :]:
                 if str(other_path).startswith(str(path) + "/"):
                     is_prefix = True
                     break
@@ -453,7 +453,7 @@ class TestPropertyBasedConcurrency:
         filtered_paths = []
         for i, p in enumerate(paths):
             is_prefix = False
-            for other in paths[i + 1:]:
+            for other in paths[i + 1 :]:
                 if str(other).startswith(str(p) + "/"):
                     is_prefix = True
                     break

@@ -16,9 +16,7 @@ class DeployerSystemSignature(dspy.Signature):
     repo_path = dspy.InputField(desc="Path to the repository being deployed")
     agent_name = dspy.InputField(desc="Name of the deployment agent")
 
-    system_prompt = dspy.OutputField(
-        desc="Comprehensive system instructions for deployment"
-    )
+    system_prompt = dspy.OutputField(desc="Comprehensive system instructions for deployment")
 
 
 class DeployerGenerateDeployScriptSignature(dspy.Signature):
@@ -84,14 +82,11 @@ class DeployerFixErrorSignature(dspy.Signature):
 
     repo_path = dspy.InputField(desc="Path to the repository being deployed")
     error_context = dspy.InputField(
-        desc="Error messages and logs from the failed deployment attempt, "
-        "including the exit code and status"
+        desc="Error messages and logs from the failed deployment attempt, including the exit code and status"
     )
     attempt = dspy.InputField(desc="Current deployment attempt number")
     max_attempts = dspy.InputField(desc="Maximum number of deployment attempts allowed")
-    deploy_script = dspy.InputField(
-        desc="Full path to the deploy.sh script (e.g. /path/to/repo/.sds/deploy.sh)"
-    )
+    deploy_script = dspy.InputField(desc="Full path to the deploy.sh script (e.g. /path/to/repo/.sds/deploy.sh)")
     health_check_script = dspy.InputField(
         desc="Full path to the health_check.sh script (e.g. /path/to/repo/.sds/health_check.sh)"
     )
@@ -119,9 +114,7 @@ class DeployerSummarizeSignature(dspy.Signature):
     <output_msg>...</output_msg> XML tags, with no other text or debug info.
     """
 
-    deployment_log = dspy.InputField(
-        desc="Recent output snippet from the deployment command"
-    )
+    deployment_log = dspy.InputField(desc="Recent output snippet from the deployment command")
 
     rendered_prompt = dspy.OutputField(
         desc="The full instruction prompt to send to the coding agent. Must ask "
@@ -144,14 +137,10 @@ class RLMDeployerFixErrorSignature(dspy.Signature):
         desc="Summary of context variables available in the RLM REPL environment "
         "(e.g. error_log, deployment_script, dockerfile)"
     )
-    error_log_size = dspy.InputField(
-        desc="Size of the error log in characters (used to decide filtering strategy)"
-    )
+    error_log_size = dspy.InputField(desc="Size of the error log in characters (used to decide filtering strategy)")
     attempt = dspy.InputField(desc="Current deployment attempt number")
     max_attempts = dspy.InputField(desc="Maximum number of deployment attempts allowed")
-    has_original_script = dspy.InputField(
-        desc="Whether an original deploy.sh backup is available for backtracking"
-    )
+    has_original_script = dspy.InputField(desc="Whether an original deploy.sh backup is available for backtracking")
 
     rendered_prompt = dspy.OutputField(
         desc="The task prompt for the RLM agent. Must instruct the agent to: "
@@ -184,9 +173,7 @@ class CodeAnalyzerUserSignature(dspy.Signature):
     repo_path = dspy.InputField(desc="Path to the repository")
     file_tree = dspy.InputField(desc="Repository file tree structure")
 
-    code_analysis = dspy.OutputField(
-        desc="Analysis of codebase structure and deployment requirements"
-    )
+    code_analysis = dspy.OutputField(desc="Analysis of codebase structure and deployment requirements")
     deployment_issues = dspy.OutputField(desc="Potential deployment issues identified")
 
 
@@ -213,9 +200,7 @@ class AgentflowSystemSignature(dspy.Signature):
     work_dir = dspy.InputField(desc="Working directory for script execution")
     loop_bound = dspy.InputField(desc="Maximum iterations for loops")
 
-    system_prompt = dspy.OutputField(
-        desc="Comprehensive system instructions with orchestration patterns"
-    )
+    system_prompt = dspy.OutputField(desc="Comprehensive system instructions with orchestration patterns")
 
 
 class AgentflowUserSignature(dspy.Signature):
@@ -225,17 +210,13 @@ class AgentflowUserSignature(dspy.Signature):
     """
 
     user_request = dspy.InputField(desc="User's task description")
-    clarification_history = dspy.InputField(
-        desc="Previous clarification Q&A", default=""
-    )
+    clarification_history = dspy.InputField(desc="Previous clarification Q&A", default="")
     work_dir = dspy.InputField(desc="Working directory")
     loop_bound = dspy.InputField(desc="Maximum loop iterations")
 
     script_code = dspy.OutputField(desc="Generated Python script")
     status = dspy.OutputField(desc="Status: 'ready' or 'clarify'")
-    questions = dspy.OutputField(
-        desc="Clarification questions if status='clarify'", default=""
-    )
+    questions = dspy.OutputField(desc="Clarification questions if status='clarify'", default="")
 
 
 class AgentflowRepairSignature(dspy.Signature):
@@ -256,9 +237,7 @@ class SubagentTrajectoryAnalystSignature(dspy.Signature):
     Instructs the analyst to summarise deployment trajectory data.
     """
 
-    data_description = dspy.InputField(
-        desc="Brief description of the trajectory data available"
-    )
+    data_description = dspy.InputField(desc="Brief description of the trajectory data available")
 
     system_prompt = dspy.OutputField(
         desc="System prompt instructing the analyst to summarise deployment "
@@ -272,13 +251,10 @@ class SubagentErrorLogAnalystSignature(dspy.Signature):
     Instructs the analyst to identify key errors and root causes.
     """
 
-    data_description = dspy.InputField(
-        desc="Brief description of the error log data available"
-    )
+    data_description = dspy.InputField(desc="Brief description of the error log data available")
 
     system_prompt = dspy.OutputField(
-        desc="System prompt instructing the analyst to identify key errors, "
-        "root causes, and most likely fixes"
+        desc="System prompt instructing the analyst to identify key errors, root causes, and most likely fixes"
     )
 
 
@@ -288,9 +264,7 @@ class SubagentScriptAnalystSignature(dspy.Signature):
     Instructs the analyst to examine the deployment script for issues.
     """
 
-    has_original_script = dspy.InputField(
-        desc="Whether an original pre-fix script backup is available"
-    )
+    has_original_script = dspy.InputField(desc="Whether an original pre-fix script backup is available")
 
     system_prompt = dspy.OutputField(
         desc="System prompt instructing the analyst to examine the deployment "
@@ -305,8 +279,7 @@ class SubagentRepoAnalystSignature(dspy.Signature):
     """
 
     available_files = dspy.InputField(
-        desc="Comma-separated list of repository context files available "
-        "(e.g. Dockerfile, docker-compose.yml, README)"
+        desc="Comma-separated list of repository context files available (e.g. Dockerfile, docker-compose.yml, README)"
     )
 
     system_prompt = dspy.OutputField(
@@ -321,13 +294,10 @@ class SubagentRootSynthesisSignature(dspy.Signature):
     Instructs the agent to produce a deployment fix using analyst summaries.
     """
 
-    num_analysts = dspy.InputField(
-        desc="Number of independent analyst summaries provided"
-    )
+    num_analysts = dspy.InputField(desc="Number of independent analyst summaries provided")
 
     system_prompt = dspy.OutputField(
-        desc="System prompt instructing the agent to synthesise analyst "
-        "summaries into a corrected deploy.sh file"
+        desc="System prompt instructing the agent to synthesise analyst summaries into a corrected deploy.sh file"
     )
 
 
@@ -368,7 +338,6 @@ def get_signature(prompt_name: str) -> type[dspy.Signature]:
     """
     if prompt_name not in SIGNATURES:
         raise KeyError(
-            f"No signature found for '{prompt_name}'. "
-            f"Available prompts: {', '.join(sorted(SIGNATURES.keys()))}"
+            f"No signature found for '{prompt_name}'. Available prompts: {', '.join(sorted(SIGNATURES.keys()))}"
         )
     return SIGNATURES[prompt_name]

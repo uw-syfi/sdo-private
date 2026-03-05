@@ -14,6 +14,7 @@ from app_operator.fault_injection.models import FaultCategory, FaultResult, Faul
 try:
     from hypothesis import given, settings
     from hypothesis import strategies as st
+
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
@@ -342,9 +343,7 @@ class TestAutoServiceSelection:
         result = injector.inject(fault, hotel_compose)
         assert result.success
         # Should have targeted a service with ports
-        assert result.target_service in [
-            "frontend", "geo", "rate", "consul", "memcached-rate", "jaeger"
-        ]
+        assert result.target_service in ["frontend", "geo", "rate", "consul", "memcached-rate", "jaeger"]
 
     def test_auto_selects_service_with_env(self, hotel_compose, injector):
         fault = _get_fault("MISC-002")
@@ -363,6 +362,7 @@ class TestAutoServiceSelection:
 class TestComposeFaultInjectorDispatch:
     def test_unknown_fault_id(self, hotel_compose, injector):
         from app_operator.fault_injection.models import Fault
+
         fault = Fault(
             fault_id="UNKNOWN-999",
             name="unknown",
@@ -379,6 +379,7 @@ class TestComposeFaultInjectorDispatch:
 # Strategy for property-based tests
 # ---------------------------------------------------------------------------
 if HYPOTHESIS_AVAILABLE:
+
     @st.composite
     def compose_data_strategy(draw):
         """Generate a minimal docker-compose dict with varying services."""
@@ -399,9 +400,7 @@ if HYPOTHESIS_AVAILABLE:
             # Randomly add an image
             has_image = draw(st.booleans())
             if has_image:
-                config["image"] = draw(
-                    st.sampled_from(["nginx:latest", "postgres:14", "redis:7", "myapp:1.0"])
-                )
+                config["image"] = draw(st.sampled_from(["nginx:latest", "postgres:14", "redis:7", "myapp:1.0"]))
             services[name] = config
         return {"services": services}
 
@@ -436,9 +435,7 @@ class TestComposeFaultInjectionProperty:
 
     @given(
         compose_data=compose_data_strategy() if HYPOTHESIS_AVAILABLE else st.none(),
-        fault_index=st.integers(min_value=0, max_value=len(COMPOSE_FAULTS) - 1)
-        if HYPOTHESIS_AVAILABLE
-        else st.none(),
+        fault_index=st.integers(min_value=0, max_value=len(COMPOSE_FAULTS) - 1) if HYPOTHESIS_AVAILABLE else st.none(),
     )
     @settings(max_examples=50, deadline=2000)
     def test_inject_never_raises_exception(self, compose_data, fault_index):
@@ -448,7 +445,5 @@ class TestComposeFaultInjectionProperty:
         try:
             result = injector.inject(fault, compose_data)
             assert isinstance(result, FaultResult)
-        except Exception as exc:  # noqa: BLE001
-            pytest.fail(
-                f"inject() raised {type(exc).__name__} for fault {fault.fault_id}: {exc}"
-            )
+        except Exception as exc:
+            pytest.fail(f"inject() raised {type(exc).__name__} for fault {fault.fault_id}: {exc}")

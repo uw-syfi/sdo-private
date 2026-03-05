@@ -1,10 +1,11 @@
 import pytest
+
 import app_operator.config as _config_module
 from app_operator.config import (
-    load_config,
     Config,
-    UnrecognizedSectionError,
     UnrecognizedFieldError,
+    UnrecognizedSectionError,
+    load_config,
 )
 from app_operator.exceptions import ConfigurationError
 
@@ -200,7 +201,7 @@ def test_config_from_dict_valid():
     """Test Config.from_dict with valid data."""
     data = {
         "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
-        "operator": {"interval": 60, "monitoring_max_iters": 10}
+        "operator": {"interval": 60, "monitoring_max_iters": 10},
     }
     config = Config.from_dict(data)
     assert config.agent.provider == "gemini"
@@ -211,11 +212,7 @@ def test_config_from_dict_valid():
 
 def test_config_from_dict_unrecognized_section():
     """Test Config.from_dict raises error for unrecognized section."""
-    data = {
-        "agent": {"provider": "gemini"},
-        "operator": {"interval": 30},
-        "unknown": {"field": "value"}
-    }
+    data = {"agent": {"provider": "gemini"}, "operator": {"interval": 30}, "unknown": {"field": "value"}}
     with pytest.raises(UnrecognizedSectionError) as exc_info:
         Config.from_dict(data)
     assert "unknown" in str(exc_info.value)
@@ -223,10 +220,7 @@ def test_config_from_dict_unrecognized_section():
 
 def test_config_from_dict_unrecognized_field_agent():
     """Test Config.from_dict raises error for unrecognized field in agent."""
-    data = {
-        "agent": {"provider": "gemini", "unknown_field": "value"},
-        "operator": {"interval": 30}
-    }
+    data = {"agent": {"provider": "gemini", "unknown_field": "value"}, "operator": {"interval": 30}}
     with pytest.raises(UnrecognizedFieldError) as exc_info:
         Config.from_dict(data)
     assert "unknown_field" in str(exc_info.value)
@@ -235,10 +229,7 @@ def test_config_from_dict_unrecognized_field_agent():
 
 def test_config_from_dict_unrecognized_field_operator():
     """Test Config.from_dict raises error for unrecognized field in operator."""
-    data = {
-        "agent": {"provider": "gemini"},
-        "operator": {"interval": 30, "unknown_field": "value"}
-    }
+    data = {"agent": {"provider": "gemini"}, "operator": {"interval": 30, "unknown_field": "value"}}
     with pytest.raises(UnrecognizedFieldError) as exc_info:
         Config.from_dict(data)
     assert "unknown_field" in str(exc_info.value)

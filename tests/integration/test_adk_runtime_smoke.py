@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from app_operator.adk.operator import AdkOperator
 from app_operator.config import Config
 from app_operator.filesystem import InMemoryFilesystem
@@ -29,9 +30,7 @@ def test_adk_smoke_run(tmp_path):
             patch("app_operator.adk.operator.build_loop_agent") as mock_build_loop,
             patch("app_operator.adk.operator.asyncio.sleep"),
             patch("app_operator.adk.operator.run_health_check") as mock_health,
-            patch(
-                "app_operator.adk.operator.analyze_repository", return_value="context"
-            ),
+            patch("app_operator.adk.operator.analyze_repository", return_value="context"),
         ):
             mock_health.return_value = {
                 "success": True,
@@ -45,9 +44,7 @@ def test_adk_smoke_run(tmp_path):
             mock_loop_agent.name = "DeploymentLoop"
             mock_build_loop.return_value = mock_loop_agent
 
-            operator = AdkOperator(
-                str(repo_path), filesystem=fs, config=config, health_check_max_count=1
-            )
+            operator = AdkOperator(str(repo_path), filesystem=fs, config=config, health_check_max_count=1)
 
             # Pre-create scripts to skip generation phase (which requires agent to
             # actually write files)

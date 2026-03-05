@@ -13,7 +13,6 @@ from app_operator.gepa.evaluator import (
 )
 from app_operator.gepa.optimizer import GEPAOptimizer
 
-
 # --- Test doubles ---
 
 
@@ -33,9 +32,7 @@ class StubEvaluator:
         candidate_id="",
     ):
         self.call_count += 1
-        score = min(
-            self.base_score + (self.call_count * self.improvement), 1.0
-        )
+        score = min(self.base_score + (self.call_count * self.improvement), 1.0)
         return EvaluationResult(
             candidate_id=candidate_id,
             scores={"test": score},
@@ -65,9 +62,7 @@ class StubReflector:
             f"mutation rationale #{self.mutate_count}",
         )
 
-    def crossover(
-        self, prompt_a, prompt_b, traces_a, traces_b, template_name
-    ):
+    def crossover(self, prompt_a, prompt_b, traces_a, traces_b, template_name):
         self.crossover_count += 1
         return (
             prompt_a + "\n" + prompt_b,
@@ -81,9 +76,7 @@ class FailingReflector:
     def mutate(self, current_prompt, traces, template_name):
         raise ValueError("LLM failure")
 
-    def crossover(
-        self, prompt_a, prompt_b, traces_a, traces_b, template_name
-    ):
+    def crossover(self, prompt_a, prompt_b, traces_a, traces_b, template_name):
         raise ValueError("LLM failure")
 
 
@@ -165,9 +158,7 @@ class TestGEPAOptimizerOptimize:
             reflector=StubReflector(),
             evaluator=StubEvaluator(),
         )
-        results = optimizer.optimize(
-            "deployer/system.jinja2", examples, examples
-        )
+        results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         # Core result fields
         assert results["best_prompt"] is not None
         assert results["best_score"] > 0
@@ -196,9 +187,7 @@ class TestGEPAOptimizerOptimize:
             reflector=FailingReflector(),
             evaluator=StubEvaluator(),
         )
-        results = optimizer.optimize(
-            "deployer/system.jinja2", examples, examples
-        )
+        results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         assert results["best_prompt"] is not None
 
     def test_invalid_mutation_skipped(self, gepa_config, examples):
@@ -208,9 +197,7 @@ class TestGEPAOptimizerOptimize:
             reflector=StubReflector(),
             evaluator=StubEvaluator(),
         )
-        results = optimizer.optimize(
-            "deployer/system.jinja2", examples, examples
-        )
+        results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         assert results["final_pool_size"] == 1
 
 
@@ -234,9 +221,7 @@ class TestGEPAOptimizerEarlyStopping:
             reflector=StubReflector(),
             evaluator=evaluator,
         )
-        results = optimizer.optimize(
-            "deployer/system.jinja2", examples, examples
-        )
+        results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         assert len(results["history"]) < 20
         log_content = (optimizer.output_dir / "optimization.log").read_text()
         assert "Early stopping" in log_content
@@ -284,9 +269,7 @@ class TestGEPAOptimizerResume:
             reflector=StubReflector(),
             evaluator=StubEvaluator(),
         )
-        results = resume_optimizer.resume(
-            str(optimizer.output_dir), examples, examples
-        )
+        results = resume_optimizer.resume(str(optimizer.output_dir), examples, examples)
         assert results["best_prompt"] is not None
         assert results["best_score"] > 0
 
@@ -302,9 +285,7 @@ class TestGEPAOptimizerResume:
             evaluator=StubEvaluator(),
         )
         with pytest.raises(FileNotFoundError, match="No checkpoint"):
-            optimizer.resume(
-                str(tmp_path / "nonexistent"), examples, examples
-            )
+            optimizer.resume(str(tmp_path / "nonexistent"), examples, examples)
 
     def test_resume_empty_pool_raises(self, tmp_path, examples):
         checkpoint_dir = tmp_path / "empty_checkpoint"
@@ -329,9 +310,7 @@ class TestGEPAOptimizerResume:
             evaluator=StubEvaluator(),
         )
         with pytest.raises(ValueError, match="no candidates"):
-            optimizer.resume(
-                str(checkpoint_dir), examples, examples
-            )
+            optimizer.resume(str(checkpoint_dir), examples, examples)
 
 
 class TestGEPAOptimizerSeed:
@@ -339,12 +318,7 @@ class TestGEPAOptimizerSeed:
 
     def test_seed_produces_deterministic_minibatch(self, tmp_path):
         """Same seed should produce the same minibatch sampling order."""
-        examples = [
-            EvaluationExample(
-                Path(f"/tmp/repo{i}"), {}, "deployer", f"repo{i}"
-            )
-            for i in range(10)
-        ]
+        examples = [EvaluationExample(Path(f"/tmp/repo{i}"), {}, "deployer", f"repo{i}") for i in range(10)]
 
         batches = []
         for run in range(2):

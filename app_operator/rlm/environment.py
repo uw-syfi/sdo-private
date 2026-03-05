@@ -4,11 +4,12 @@ Implements the core RLM paradigm: context stored as variables in a REPL
 that the LLM can programmatically query, filter, and recursively process.
 """
 
-import re
 import json
+import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
 from enum import Enum
+from typing import Any
 
 from app_operator.logger import logger
 
@@ -29,6 +30,7 @@ def _estimate_tokens(text: str) -> int:
 
     try:
         import tiktoken
+
         enc = tiktoken.get_encoding("cl100k_base")
         return len(enc.encode(text))
     except Exception:
@@ -131,12 +133,14 @@ class RLMContext:
             else "- original_script: str (0 chars) ← not available"
         )
 
-        has_summaries = any([
-            self.trajectory_summary,
-            self.error_summary,
-            self.script_summary,
-            self.repo_summary,
-        ])
+        has_summaries = any(
+            [
+                self.trajectory_summary,
+                self.error_summary,
+                self.script_summary,
+                self.repo_summary,
+            ]
+        )
         summaries_section = ""
         if has_summaries:
             summaries_section = (
@@ -158,7 +162,7 @@ class RLMContext:
 - deployment_script: str ({len(self.deployment_script)} chars)
 - health_check_output: str ({len(self.health_check_output)} chars)
 - previous_attempts: list[Dict] ({len(self.previous_attempts)} attempts)
-- trajectory_data: Dict (run_id: {self.trajectory_data.get('metadata', {}).get('run_id', 'N/A')})
+- trajectory_data: Dict (run_id: {self.trajectory_data.get("metadata", {}).get("run_id", "N/A")})
 - dockerfile: str ({len(self.dockerfile)} chars)
 - docker_compose: str ({len(self.docker_compose)} chars)
 - readme: str ({len(self.readme)} chars)
@@ -215,13 +219,13 @@ def _validate_file_refs(script: str, cwd: str) -> str:
     """
     import os as _os
 
-    # (pattern, capture-group-index)
+    # Each tuple is (pattern, capture-group-index).
     _PATTERNS = [
-        (re.compile(r'chmod\s+\S+\s+(\S+)'), 1),
-        (re.compile(r'\b(?:cp|mv)\s+(?:-\S+\s+)*(\S+)\s+\S+'), 1),
-        (re.compile(r'\bsource\s+(\S+)'), 1),
-        (re.compile(r'(?<!\w)\.\s+(\S+)'), 1),
-        (re.compile(r'\bcat\s+(\S+)'), 1),
+        (re.compile(r"chmod\s+\S+\s+(\S+)"), 1),
+        (re.compile(r"\b(?:cp|mv)\s+(?:-\S+\s+)*(\S+)\s+\S+"), 1),
+        (re.compile(r"\bsource\s+(\S+)"), 1),
+        (re.compile(r"(?<!\w)\.\s+(\S+)"), 1),
+        (re.compile(r"\bcat\s+(\S+)"), 1),
     ]
 
     missing: list = []
@@ -232,13 +236,7 @@ def _validate_file_refs(script: str, cwd: str) -> str:
         for pat, grp in _PATTERNS:
             for m in pat.finditer(stripped):
                 path = m.group(grp)
-                if (
-                    path.startswith("$")
-                    or path.startswith("-")
-                    or "*" in path
-                    or "?" in path
-                    or path.startswith("/dev/")
-                ):
+                if path.startswith(("$", "-", "/dev/")) or "*" in path or "?" in path:
                     continue
                 full = _os.path.join(cwd, path) if not _os.path.isabs(path) else path
                 if not _os.path.exists(full):
@@ -289,10 +287,21 @@ class RLMEnvironment:
         self._namespace = self._create_safe_namespace()
 
         # Names that must never be clobbered by LLM-generated code
-        self._reserved_names = frozenset({
-            "validate_file_refs", "re", "json", "os", "Path", "open",
-            "len", "str", "list", "dict", "print",
-        })
+        self._reserved_names = frozenset(
+            {
+                "validate_file_refs",
+                "re",
+                "json",
+                "os",
+                "Path",
+                "open",
+                "len",
+                "str",
+                "list",
+                "dict",
+                "print",
+            }
+        )
 
     def _create_safe_namespace(self) -> dict[str, Any]:
         """Create a restricted namespace for code execution.
@@ -322,27 +331,21 @@ class RLMEnvironment:
             """open() wrapper that restricts file access to the working directory."""
             resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
             if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
-                raise PermissionError(
-                    f"Access denied: {path!r} resolves outside the working directory"
-                )
+                raise PermissionError(f"Access denied: {path!r} resolves outside the working directory")
             return open(resolved, mode, *args, **kwargs)
 
         def _safe_listdir(path="."):
             """os.listdir() wrapper restricted to the working directory."""
             resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
             if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
-                raise PermissionError(
-                    f"Access denied: {path!r} resolves outside the working directory"
-                )
+                raise PermissionError(f"Access denied: {path!r} resolves outside the working directory")
             return os.listdir(resolved)
 
         def _safe_makedirs(path, *args, **kwargs):
             """os.makedirs() wrapper restricted to the working directory."""
             resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
             if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
-                raise PermissionError(
-                    f"Access denied: {path!r} resolves outside the working directory"
-                )
+                raise PermissionError(f"Access denied: {path!r} resolves outside the working directory")
             return os.makedirs(resolved, *args, **kwargs)
 
         # -- Restricted os: only safe path utilities, listdir, makedirs --
@@ -419,38 +422,80 @@ class RLMEnvironment:
             # in LLM-generated code should use ``cwd=cwd`` instead.
             exec_globals = self._namespace.copy()
             exec_globals["cwd"] = self.cwd  # ensure cwd is always current
-            _SAFE_MODULES = frozenset({
-                "re", "json", "math", "string", "textwrap",
-                "collections", "itertools", "functools",
-                "pathlib", "posixpath", "ntpath",
-                "datetime", "time", "copy", "hashlib",
-            })
+            _SAFE_MODULES = frozenset(
+                {
+                    "re",
+                    "json",
+                    "math",
+                    "string",
+                    "textwrap",
+                    "collections",
+                    "itertools",
+                    "functools",
+                    "pathlib",
+                    "posixpath",
+                    "ntpath",
+                    "datetime",
+                    "time",
+                    "copy",
+                    "hashlib",
+                }
+            )
 
             def _safe_import(name, *args, **kwargs):
                 if name not in _SAFE_MODULES:
-                    raise ImportError(
-                        f"Import of {name!r} is not allowed in the sandbox"
-                    )
+                    raise ImportError(f"Import of {name!r} is not allowed in the sandbox")
                 return __import__(name, *args, **kwargs)
 
             exec_globals["__builtins__"] = {
                 "__import__": _safe_import,
-                "True": True, "False": False, "None": None,
-                "int": int, "float": float, "str": str, "bool": bool,
-                "list": list, "dict": dict, "tuple": tuple, "set": set,
-                "len": len, "range": range, "enumerate": enumerate,
-                "sorted": sorted, "filter": filter, "map": map,
-                "zip": zip, "min": min, "max": max, "sum": sum,
-                "abs": abs, "round": round, "any": any, "all": all,
-                "isinstance": isinstance, "type": type, "hasattr": hasattr,
-                "getattr": getattr, "setattr": setattr,
-                "ValueError": ValueError, "TypeError": TypeError,
-                "KeyError": KeyError, "IndexError": IndexError,
-                "RuntimeError": RuntimeError, "PermissionError": PermissionError,
-                "FileNotFoundError": FileNotFoundError, "OSError": OSError,
-                "Exception": Exception, "StopIteration": StopIteration,
-                "print": print, "repr": repr, "iter": iter, "next": next,
-                "reversed": reversed, "chr": chr, "ord": ord,
+                "True": True,
+                "False": False,
+                "None": None,
+                "int": int,
+                "float": float,
+                "str": str,
+                "bool": bool,
+                "list": list,
+                "dict": dict,
+                "tuple": tuple,
+                "set": set,
+                "len": len,
+                "range": range,
+                "enumerate": enumerate,
+                "sorted": sorted,
+                "filter": filter,
+                "map": map,
+                "zip": zip,
+                "min": min,
+                "max": max,
+                "sum": sum,
+                "abs": abs,
+                "round": round,
+                "any": any,
+                "all": all,
+                "isinstance": isinstance,
+                "type": type,
+                "hasattr": hasattr,
+                "getattr": getattr,
+                "setattr": setattr,
+                "ValueError": ValueError,
+                "TypeError": TypeError,
+                "KeyError": KeyError,
+                "IndexError": IndexError,
+                "RuntimeError": RuntimeError,
+                "PermissionError": PermissionError,
+                "FileNotFoundError": FileNotFoundError,
+                "OSError": OSError,
+                "Exception": Exception,
+                "StopIteration": StopIteration,
+                "print": print,
+                "repr": repr,
+                "iter": iter,
+                "next": next,
+                "reversed": reversed,
+                "chr": chr,
+                "ord": ord,
             }
             exec(code, exec_globals)
             # Restore reserved names the LLM may have clobbered, then
@@ -458,10 +503,7 @@ class RLMEnvironment:
             for name in self._reserved_names:
                 if name in self._namespace:
                     exec_globals[name] = self._namespace[name]
-            self._namespace.update({
-                k: v for k, v in exec_globals.items()
-                if k not in self._reserved_names
-            })
+            self._namespace.update({k: v for k, v in exec_globals.items() if k not in self._reserved_names})
 
             # Get the result (last expression value or None)
             # For simplicity, we'll look for a 'result' variable
@@ -473,10 +515,7 @@ class RLMEnvironment:
             # Truncate oversized results to prevent filling the next LLM prompt
             if len(output) > self.max_result_chars:
                 truncated = len(output) - self.max_result_chars
-                output = (
-                    output[:self.max_result_chars]
-                    + f"\n... [{truncated} chars truncated]"
-                )
+                output = output[: self.max_result_chars] + f"\n... [{truncated} chars truncated]"
 
             # Estimate tokens saved: context filtered programmatically
             # instead of sending full context to LLM
@@ -510,7 +549,7 @@ class RLMEnvironment:
             return output
 
         except Exception as e:
-            error_msg = f"Code execution failed: {str(e)}"
+            error_msg = f"Code execution failed: {e!s}"
             logger.error(error_msg)
 
             # Still record the failed call
@@ -572,12 +611,8 @@ class RLMEnvironment:
 
             # Estimate tokens saved by using filtered context
             if filtered_context:
-                filtered_tokens = sum(
-                    _estimate_tokens(str(v)) for v in filtered_context.values()
-                )
-                full_tokens = sum(
-                    _estimate_tokens(str(v)) for v in self.context.to_dict().values()
-                )
+                filtered_tokens = sum(_estimate_tokens(str(v)) for v in filtered_context.values())
+                full_tokens = sum(_estimate_tokens(str(v)) for v in self.context.to_dict().values())
                 tokens_saved = max(0, full_tokens - filtered_tokens)
             else:
                 tokens_saved = 0
@@ -613,9 +648,7 @@ class RLMEnvironment:
         """
         total_calls = len(self.call_history)
         code_calls = sum(1 for c in self.call_history if c.action_type == ActionType.EXECUTE_CODE)
-        recursive_calls = sum(
-            1 for c in self.call_history if c.action_type == ActionType.RECURSIVE_CALL
-        )
+        recursive_calls = sum(1 for c in self.call_history if c.action_type == ActionType.RECURSIVE_CALL)
         max_depth_reached = max((c.depth for c in self.call_history), default=0)
 
         # Estimate what a single-call baseline would have spent on prompt tokens.
@@ -709,8 +742,11 @@ RULES:
 FILE VALIDATION (mandatory when fixing deploy.sh):
 - Run validate_file_refs(deployment_script, cwd) early to find paths that do not exist on disk.
 - Any line in deploy.sh that references a MISSING path MUST be removed — do not try to create the missing file.
-- If original_script is non-empty, diff it against the current deployment_script to find lines added by previous fix attempts. If those added lines reference MISSING paths, they are regressions — remove them and restore the original lines.
-- After writing the corrected script, run validate_file_refs again on the new content to confirm no missing references remain.
+- If original_script is non-empty, diff it against the current deployment_script to find lines
+  added by previous fix attempts. If those added lines reference MISSING paths, they are
+  regressions — remove them and restore the original lines.
+- After writing the corrected script, run validate_file_refs again on the new content
+  to confirm no missing references remain.
 
 Current recursion depth: {self.current_depth}/{self.max_recursion_depth}
 """

@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
+
 from langchain_core.messages import AIMessage, ToolMessage
+
 from app_operator.langgraph.utils import invoke_agent
 
 
@@ -22,9 +24,7 @@ def test_invoke_agent_simple():
 
     mock_recorder = MagicMock()
 
-    text, messages = invoke_agent(
-        state, mock_agent, "System prompt", "User prompt", recorder=mock_recorder
-    )
+    text, messages = invoke_agent(state, mock_agent, "System prompt", "User prompt", recorder=mock_recorder)
 
     assert text == "Hello world"
     assert len(messages) == 3  # System, User, AI

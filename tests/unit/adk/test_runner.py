@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 from app_operator.adk.runner import AdkAgentRunner, _extract_text_from_event
 from app_operator.trajectory import NullTrajectoryRecorder
 

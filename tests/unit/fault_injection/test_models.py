@@ -20,7 +20,7 @@ class TestFaultCategory:
 
     def test_string_comparison(self):
         assert FaultCategory.MISCONFIGURATION == "misconfiguration"
-        assert "security" == FaultCategory.SECURITY
+        assert FaultCategory.SECURITY == "security"
 
 
 class TestFaultSeverity:

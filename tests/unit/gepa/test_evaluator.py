@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 
 from app_operator.gepa.evaluator import (
-    EvaluationExample,
     METRICS_REGISTRY,
+    EvaluationExample,
     SDSEvaluator,
-    extract_generated_scripts,
     analysis_accuracy_metric,
     analysis_completeness_metric,
     deployment_progress_metric,
     extract_efficiency_metrics,
+    extract_generated_scripts,
     fix_quality_metric,
     health_analysis_depth_metric,
     health_check_metric,
@@ -256,11 +256,7 @@ class TestFixQualityMetric:
 
     def test_first_try_success_returns_one(self):
         """A prompt that succeeds first try should not be penalized."""
-        trajectory = {
-            "deployment": [
-                {"messages": [{"role": "tool_call", "args": "deploy", "exit_code": 0}]}
-            ]
-        }
+        trajectory = {"deployment": [{"messages": [{"role": "tool_call", "args": "deploy", "exit_code": 0}]}]}
         assert fix_quality_metric(_example(), trajectory) == 1.0
 
     def test_fix_with_read_and_write(self):
@@ -322,18 +318,8 @@ warning: High memory usage on service-a.
 recommend scaling up service-a.
 CPU utilization at 80%.
 """
-        trajectory = {
-            "monitoring": [
-                {
-                    "messages": [
-                        {"role": "assistant", "content": content}
-                    ]
-                }
-            ]
-        }
-        score = health_analysis_depth_metric(
-            _example("monitor"), trajectory
-        )
+        trajectory = {"monitoring": [{"messages": [{"role": "assistant", "content": content}]}]}
+        score = health_analysis_depth_metric(_example("monitor"), trajectory)
         assert score == pytest.approx(1.0)
 
 
@@ -392,9 +378,7 @@ class TestAnalysisCompletenessMetric:
                 }
             ]
         }
-        score = analysis_completeness_metric(
-            _example("code_analyzer"), trajectory
-        )
+        score = analysis_completeness_metric(_example("code_analyzer"), trajectory)
         assert score == pytest.approx(1.0)
 
 
@@ -417,9 +401,7 @@ class TestAnalysisAccuracyMetric:
                 }
             ]
         }
-        score = analysis_accuracy_metric(
-            _example("code_analyzer"), trajectory
-        )
+        score = analysis_accuracy_metric(_example("code_analyzer"), trajectory)
         assert score == pytest.approx(1.0)
 
 
@@ -437,8 +419,7 @@ class TestSDSEvaluatorEvaluate:
                         {
                             "role": "tool_call",
                             "args": {"script": "deploy.sh start"},
-                            "stdout": "check_prerequisites\nBuilding\n"
-                            "Services started up and running",
+                            "stdout": "check_prerequisites\nBuilding\nServices started up and running",
                             "stderr": "",
                             "exit_code": 0,
                         }
@@ -450,9 +431,7 @@ class TestSDSEvaluatorEvaluate:
             metrics={"deployment_progress": deployment_progress_metric},
             trajectory_data=trajectory,
         )
-        result = evaluator.evaluate(
-            "prompt", "deployer/system.jinja2", [_example()], "c1"
-        )
+        result = evaluator.evaluate("prompt", "deployer/system.jinja2", [_example()], "c1")
         assert result.candidate_id == "c1"
         assert result.scores["deployment_progress"] > 0
         assert result.overall_score > 0
@@ -463,9 +442,7 @@ class TestSDSEvaluatorEvaluate:
             metrics={"deployment_progress": deployment_progress_metric},
             trajectory_data={},
         )
-        result = evaluator.evaluate(
-            "prompt", "deployer/system.jinja2", []
-        )
+        result = evaluator.evaluate("prompt", "deployer/system.jinja2", [])
         assert result.overall_score == 0.0
         assert result.traces == []
 
@@ -512,7 +489,7 @@ class TestExtractEfficiencyMetrics:
         assert m.turn_count == 3
 
     @pytest.mark.parametrize(
-        "metadata,expected_seconds",
+        ("metadata", "expected_seconds"),
         [
             (
                 {"start_time": "2026-01-01 10:00:00", "end_time": "2026-01-01 10:05:30"},
@@ -597,16 +574,18 @@ class TestMetricsRegistry:
     """Test METRICS_REGISTRY completeness."""
 
     def test_all_agent_types_registered_with_expected_metrics(self):
-        assert set(METRICS_REGISTRY.keys()) == {
-            "deployer", "monitor", "code_analyzer"
-        }
+        assert set(METRICS_REGISTRY.keys()) == {"deployer", "monitor", "code_analyzer"}
         assert set(METRICS_REGISTRY["deployer"].keys()) == {
-            "script_completeness", "deployment_progress",
-            "health_check", "fix_quality",
+            "script_completeness",
+            "deployment_progress",
+            "health_check",
+            "fix_quality",
         }
         assert set(METRICS_REGISTRY["monitor"].keys()) == {
-            "health_analysis_depth", "monitoring_coverage",
+            "health_analysis_depth",
+            "monitoring_coverage",
         }
         assert set(METRICS_REGISTRY["code_analyzer"].keys()) == {
-            "analysis_completeness", "analysis_accuracy",
+            "analysis_completeness",
+            "analysis_accuracy",
         }

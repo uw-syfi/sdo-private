@@ -1,7 +1,7 @@
-import json
 import io
-from unittest.mock import MagicMock, patch
+import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from loguru import logger
@@ -35,9 +35,7 @@ def claude_agent(mock_llm_subprocess, mock_env, mock_recorder):
         "libs.agent_cli.cli_agent._get_interactive_env",
         return_value=mock_env,
     ):
-        with patch(
-            "libs.agent_cli.cli_agent.CLICodingAgent._check_cli"
-        ):
+        with patch("libs.agent_cli.cli_agent.CLICodingAgent._check_cli"):
             agent = ClaudeCodeCodingAgent(recorder=mock_recorder)
             yield agent
 
@@ -222,7 +220,7 @@ def test_parse_tool_result(claude_agent, mock_llm_subprocess):
         mock_recorder.add_tool_call.assert_called_once()
         call_args = mock_recorder.add_tool_call.call_args
         # Accessing call_args kwargs or positional args
-        # add_tool_call(tool=..., args=..., stdout=..., duration=...)
+        # add_tool_call(tool=..., args=..., stdout=..., duration=...)  # noqa: ERA001
         assert call_args.kwargs["tool"] == "read_file"
         assert call_args.kwargs["stdout"] == "File contents here"
     finally:
@@ -574,9 +572,7 @@ def test_trajectory_recording(claude_agent, mock_llm_subprocess):
 def test_parse_real_fixture(claude_agent, mock_llm_subprocess):
     """Test parsing the real fixture file."""
     # Fix path since we moved the test file to tests/unit/llm
-    fixture_path = (
-        Path(__file__).parents[2] / "fixtures" / "claude" / "example_stream_json.txt"
-    )
+    fixture_path = Path(__file__).parents[2] / "fixtures" / "claude" / "example_stream_json.txt"
 
     if not fixture_path.exists():
         pytest.skip(f"Fixture file not found at {fixture_path}")
@@ -585,7 +581,7 @@ def test_parse_real_fixture(claude_agent, mock_llm_subprocess):
     mock_process = mock_popen.return_value
     mock_process.returncode = 0
 
-    with open(fixture_path, "r") as f:
+    with open(fixture_path) as f:
         stream_lines = f.readlines()
 
     mock_process.stdout.readline.side_effect = stream_lines + [""]

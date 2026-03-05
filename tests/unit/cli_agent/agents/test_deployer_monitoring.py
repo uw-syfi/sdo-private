@@ -2,6 +2,7 @@ import itertools
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 
 

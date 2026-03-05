@@ -8,8 +8,6 @@ to provide clear error categories and better error messages with context.
 class SdsOperatorError(Exception):
     """Base exception for all operator errors."""
 
-    pass
-
 
 class ConfigurationError(SdsOperatorError):
     """Configuration-related errors.
@@ -18,8 +16,6 @@ class ConfigurationError(SdsOperatorError):
     cannot be loaded properly.
     """
 
-    pass
-
 
 class DeploymentError(SdsOperatorError):
     """Deployment-related errors.
@@ -27,7 +23,7 @@ class DeploymentError(SdsOperatorError):
     Raised when deployment operations fail.
     """
 
-    def __init__(self, message: str, exit_code: int = None, attempt: int = None):
+    def __init__(self, message: str, exit_code: int | None = None, attempt: int | None = None):
         """Initialize deployment error with context.
 
         Args:
@@ -46,8 +42,6 @@ class FileSystemError(SdsOperatorError):
     Raised when file operations (read, write, chmod, mkdir) fail.
     """
 
-    pass
-
 
 class ProcessError(SdsOperatorError):
     """Process execution errors.
@@ -55,7 +49,7 @@ class ProcessError(SdsOperatorError):
     Raised when subprocess operations fail or timeout.
     """
 
-    def __init__(self, message: str, exit_code: int = None, timeout: bool = False):
+    def __init__(self, message: str, exit_code: int | None = None, timeout: bool = False):
         """Initialize process error with context.
 
         Args:
@@ -73,5 +67,3 @@ class AgentError(SdsOperatorError):
 
     Raised when the coding agent fails to generate, fix, or analyze.
     """
-
-    pass

@@ -1,6 +1,8 @@
 import os
-from app_operator.config import Config
+
 from google import genai
+
+from app_operator.config import Config
 
 
 def build_adk_model(config: Config) -> str:
@@ -15,10 +17,7 @@ def build_adk_model(config: Config) -> str:
 
     # Only Gemini/Vertex providers are supported by ADK runtime
     if provider not in ("gemini", "vertex"):
-        raise ValueError(
-            f"ADK runtime only supports 'gemini' or 'vertex' providers, "
-            f"got '{provider}'"
-        )
+        raise ValueError(f"ADK runtime only supports 'gemini' or 'vertex' providers, got '{provider}'")
 
     if provider == "vertex":
         # Configure genai.Client to use Vertex by default via monkeypatching
@@ -38,7 +37,7 @@ def build_adk_model(config: Config) -> str:
                 original_init(self, *args, **kwargs)
 
             genai.Client.__init__ = new_init
-            genai.Client._sds_patched = True
+            genai.Client._sds_patched = True  # type: ignore[reportAttributeAccessIssue]
 
     # Return the model name directly
     return config.agent.model

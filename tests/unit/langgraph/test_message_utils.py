@@ -29,7 +29,7 @@ class TestExtractText:
         content = [
             {"type": "text", "text": "Part 1"},
             {"type": "text", "text": "Part 2"},
-            {"type": "text", "text": "Part 3"}
+            {"type": "text", "text": "Part 3"},
         ]
         result = extract_text(content)
         assert result == "Part 1Part 2Part 3"
@@ -42,11 +42,7 @@ class TestExtractText:
 
     def test_extract_text_from_list_with_mixed_types(self):
         """Test extracting text from list with mixed string and dict parts."""
-        content = [
-            "Plain string",
-            {"type": "text", "text": " and dict"},
-            " and another string"
-        ]
+        content = ["Plain string", {"type": "text", "text": " and dict"}, " and another string"]
         result = extract_text(content)
         assert result == "Plain string and dict and another string"
 
@@ -58,19 +54,13 @@ class TestExtractText:
 
     def test_extract_text_from_list_with_empty_text_dict(self):
         """Test extracting text from list with text dict containing empty text."""
-        content = [
-            {"type": "text", "text": ""},
-            {"type": "text", "text": "Non-empty"}
-        ]
+        content = [{"type": "text", "text": ""}, {"type": "text", "text": "Non-empty"}]
         result = extract_text(content)
         assert result == "Non-empty"
 
     def test_extract_text_from_list_with_missing_text_key(self):
         """Test extracting text from list with dict missing 'text' key."""
-        content = [
-            {"type": "text"},
-            {"type": "text", "text": "Has text"}
-        ]
+        content = [{"type": "text"}, {"type": "text", "text": "Has text"}]
         result = extract_text(content)
         assert result == "Has text"
 
@@ -79,7 +69,7 @@ class TestExtractText:
         content = [
             {"type": "image", "url": "image.png"},
             {"type": "text", "text": "Text part"},
-            {"type": "tool_use", "name": "tool"}
+            {"type": "tool_use", "name": "tool"},
         ]
         result = extract_text(content)
         assert result == "Text part"
@@ -89,7 +79,7 @@ class TestExtractText:
         content = [
             {"type": "text", "text": "Start"},
             {"type": "other", "nested": {"type": "text", "text": "Ignored"}},
-            {"type": "text", "text": "End"}
+            {"type": "text", "text": "End"},
         ]
         result = extract_text(content)
         assert result == "StartEnd"
@@ -132,28 +122,19 @@ class TestExtractText:
 
     def test_extract_text_preserves_whitespace_in_list(self):
         """Test that whitespace is preserved in list content."""
-        content = [
-            {"type": "text", "text": "  spaces  "},
-            {"type": "text", "text": "\ttabs\t"}
-        ]
+        content = [{"type": "text", "text": "  spaces  "}, {"type": "text", "text": "\ttabs\t"}]
         result = extract_text(content)
         assert result == "  spaces  \ttabs\t"
 
     def test_extract_text_from_list_with_unicode(self):
         """Test extracting text with Unicode characters."""
-        content = [
-            {"type": "text", "text": "Hello 世界"},
-            {"type": "text", "text": " 🌍"}
-        ]
+        content = [{"type": "text", "text": "Hello 世界"}, {"type": "text", "text": " 🌍"}]
         result = extract_text(content)
         assert result == "Hello 世界 🌍"
 
     def test_extract_text_from_list_with_special_characters(self):
         """Test extracting text with special characters."""
-        content = [
-            {"type": "text", "text": "Special: !@#$%^&*()"},
-            {"type": "text", "text": " <>?/\\"}
-        ]
+        content = [{"type": "text", "text": "Special: !@#$%^&*()"}, {"type": "text", "text": " <>?/\\"}]
         result = extract_text(content)
         assert result == "Special: !@#$%^&*() <>?/\\"
 
@@ -166,7 +147,7 @@ class TestExtractText:
             " plain middle",
             {"type": "text"},  # Missing text key
             {"type": "text", "text": ""},  # Empty text
-            {"type": "text", "text": " end"}
+            {"type": "text", "text": " end"},
         ]
         result = extract_text(content)
         assert result == "Plain start text dict plain middle end"
@@ -176,7 +157,7 @@ class TestExtractText:
         content = [
             {"type": "text", "text": "Line 1\n"},
             {"type": "text", "text": "Line 2\n"},
-            {"type": "text", "text": "Line 3"}
+            {"type": "text", "text": "Line 3"},
         ]
         result = extract_text(content)
         assert result == "Line 1\nLine 2\nLine 3"

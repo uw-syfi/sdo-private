@@ -1,18 +1,18 @@
-import unittest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
 import subprocess
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+from app_operator.filesystem import InMemoryFilesystem
 from app_operator.langgraph.tools import (
     ToolContext,
-    _build_ls,
-    _build_glob,
-    _build_read,
-    _build_grep,
-    _build_write_file,
     _build_bash,
+    _build_glob,
+    _build_grep,
+    _build_ls,
+    _build_read,
+    _build_write_file,
 )
-from app_operator.filesystem import InMemoryFilesystem
 
 
 class TestLangGraphToolsErrorHandling(unittest.TestCase):
@@ -33,9 +33,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         self.assertTrue(result.startswith("Error: Path does not exist"))
 
         # Test internal error (simulate by mocking resolve_path to raise)
-        with patch.object(
-            self.context, "resolve_path", side_effect=Exception("Unexpected error")
-        ):
+        with patch.object(self.context, "resolve_path", side_effect=Exception("Unexpected error")):
             result = ls_tool.invoke({"path": "."})
             self.assertEqual(result, "Error: Unexpected error")
 
@@ -43,9 +41,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         # 1. Test pattern escaping root (uses real Path logic, so use real context)
         glob_tool = _build_glob(self.context)
         result = glob_tool.invoke({"pattern": "/outside/repo/*.txt"})
-        self.assertEqual(
-            result, ["Error: Pattern escapes repository root: /outside/repo/*.txt"]
-        )
+        self.assertEqual(result, ["Error: Pattern escapes repository root: /outside/repo/*.txt"])
 
         # 2. Test generic exception during glob iteration
         # Create a context with a mock repo_root that raises on glob()

@@ -6,9 +6,9 @@ Loads training examples from trajectory files for prompt optimization.
 import json
 import logging
 import re
-from typing import Any
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class TrajectoryDataLoader:
                     trajectory = json.load(f)
                     trajectory["_file_path"] = str(traj_file)
                     trajectories.append(trajectory)
-            except (json.JSONDecodeError, IOError) as e:
+            except (OSError, json.JSONDecodeError) as e:
                 logger.warning("Failed to load %s: %s", traj_file, e)
                 continue
 
@@ -106,9 +106,7 @@ class TrajectoryDataLoader:
 
             # Extract fault injection metadata
             fault_meta = trajectory.get("metadata", {}).get("fault_injection", {})
-            fault_injected = bool(
-                fault_meta.get("enabled") and fault_meta.get(
-                    "num_faults_injected", 0) > 0)
+            fault_injected = bool(fault_meta.get("enabled") and fault_meta.get("num_faults_injected", 0) > 0)
             fault_ids = fault_meta.get("fault_ids", [])
             fault_categories = fault_meta.get("categories", [])
             fault_severities = fault_meta.get("severities", [])
@@ -203,21 +201,18 @@ class TrajectoryDataLoader:
         tool_calls = []
         for msg in messages:
             if msg.get("role") == "tool_call":
-                tool_calls.append({
-                    "tool": msg.get("tool"),
-                    "args": msg.get("args"),
-                    "exit_code": msg.get("exit_code"),
-                    "stdout": msg.get("stdout", ""),
-                    "stderr": msg.get("stderr", ""),
-                })
+                tool_calls.append(
+                    {
+                        "tool": msg.get("tool"),
+                        "args": msg.get("args"),
+                        "exit_code": msg.get("exit_code"),
+                        "stdout": msg.get("stdout", ""),
+                        "stderr": msg.get("stderr", ""),
+                    }
+                )
         return tool_calls
 
-    def _determine_success(
-        self,
-        messages: list[dict[str, Any]],
-        phase: str,
-        overall_success: bool
-    ) -> bool:
+    def _determine_success(self, messages: list[dict[str, Any]], phase: str, overall_success: bool) -> bool:
         """Determine if this conversation was successful."""
         # For deployment phase, check exit codes
         if phase == "deployment":
@@ -246,13 +241,23 @@ class TrajectoryDataLoader:
             summary = self._extract_exec_summary(messages)
             if summary:
                 summary_lower = summary.lower()
-                if any(w in summary_lower for w in [
-                    "fully operational", "healthy", "all checks passing",
-                ]):
+                if any(
+                    w in summary_lower
+                    for w in [
+                        "fully operational",
+                        "healthy",
+                        "all checks passing",
+                    ]
+                ):
                     return True
-                if any(w in summary_lower for w in [
-                    "unhealthy", "critical failure", "system down",
-                ]):
+                if any(
+                    w in summary_lower
+                    for w in [
+                        "unhealthy",
+                        "critical failure",
+                        "system down",
+                    ]
+                ):
                     return False
             # No exec_summary or inconclusive — fall through to overall status
             return overall_success

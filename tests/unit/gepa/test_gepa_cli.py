@@ -13,10 +13,14 @@ class TestBuildParser:
     def test_default_values_are_none(self):
         """CLI args default to None so sds.toml values take precedence."""
         parser = build_parser()
-        args = parser.parse_args([
-            "--agent-type", "deployer",
-            "--test-repos", "apps/test",
-        ])
+        args = parser.parse_args(
+            [
+                "--agent-type",
+                "deployer",
+                "--test-repos",
+                "apps/test",
+            ]
+        )
         assert args.max_steps is None
         assert args.num_candidates is None
         assert args.patience is None
@@ -40,18 +44,26 @@ class TestMainFunction:
         assert result == 1
 
     def test_resume_missing_dir(self):
-        result = main([
-            "--resume", "/tmp/nonexistent_gepa_run",
-            "--test-repos", "apps/test",
-        ])
+        result = main(
+            [
+                "--resume",
+                "/tmp/nonexistent_gepa_run",
+                "--test-repos",
+                "apps/test",
+            ]
+        )
         assert result == 1
 
     def test_dry_run_returns_zero(self):
-        result = main([
-            "--agent-type", "deployer",
-            "--test-repos", "apps/test",
-            "--dry-run",
-        ])
+        result = main(
+            [
+                "--agent-type",
+                "deployer",
+                "--test-repos",
+                "apps/test",
+                "--dry-run",
+            ]
+        )
         assert result == 0
 
 
@@ -73,13 +85,13 @@ class TestApplyBest:
 
         templates_dir = tmp_path / "templates"
         (templates_dir / "deployer").mkdir(parents=True)
-        (templates_dir / "deployer" / "system.jinja2").write_text(
-            "Deploy on {{ platform }}."
-        )
+        (templates_dir / "deployer" / "system.jinja2").write_text("Deploy on {{ platform }}.")
 
         from app_operator.gepa.adapter import SDSPromptAdapter
+
         monkeypatch.setattr(
-            SDSPromptAdapter, "__init__",
+            SDSPromptAdapter,
+            "__init__",
             lambda self: setattr(self, "templates_dir", templates_dir),
         )
 

@@ -1,9 +1,12 @@
 import pytest
-from app_operator.config import DeploymentConfig, Config
+
+from app_operator.config import Config, DeploymentConfig
 
 # Try to import hypothesis, skip tests if not available
 try:
-    from hypothesis import given, strategies as st, assume, settings
+    from hypothesis import assume, given, settings
+    from hypothesis import strategies as st
+
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
@@ -61,9 +64,7 @@ class TestDeploymentConfigValidation:
 
     def test_target_remote_raises_error(self):
         """Remote target should raise ValueError."""
-        with pytest.raises(
-            ValueError, match="Remote deployment is not currently supported"
-        ):
+        with pytest.raises(ValueError, match="Remote deployment is not currently supported"):
             DeploymentConfig(target="remote")
 
     def test_invalid_target(self):
@@ -79,10 +80,7 @@ class TestDeploymentConfigValidation:
         assert config.deployment.target == "local"
 
 
-@pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
 class TestDeploymentConfigProperty:
     """Property-based tests for DeploymentConfig validation."""
 
@@ -98,14 +96,14 @@ class TestDeploymentConfigProperty:
     def test_any_invalid_platform_rejected(self, platform):
         """Any platform string not in the valid set should raise ValueError."""
         assume(platform.lower() not in {"docker", "k8s"})
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid platform"):
             DeploymentConfig(platform=platform)
 
     @given(platform=st.sampled_from(["DOCKER", "K8S", "Docker", "K8s"]))
     @settings(max_examples=10, deadline=1000)
     def test_case_sensitivity_for_platform(self, platform):
         """Platform validation is case-sensitive; mixed-case values are rejected."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid platform"):
             DeploymentConfig(platform=platform)
 
     @given(st.just("local"))
@@ -124,5 +122,5 @@ class TestDeploymentConfigProperty:
         VALID_TARGETS, so all non-'local' values raise ValueError.
         """
         assume(target != "local")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="(Invalid target|Remote deployment)"):
             DeploymentConfig(target=target)

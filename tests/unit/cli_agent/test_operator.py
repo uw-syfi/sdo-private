@@ -1,6 +1,8 @@
-import pytest
-from unittest.mock import Mock, patch
 import signal
+from unittest.mock import Mock, patch
+
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config
 from app_operator.ui import OperatorUI
@@ -37,9 +39,7 @@ def app_operator(repo_path, mock_agent):
 
 
 def test_operator_init_validates_path(tmp_path):
-    with patch(
-        "app_operator.cli_agent.operator.create_agent_from_config"
-    ) as mock_create_agent:
+    with patch("app_operator.cli_agent.operator.create_agent_from_config") as mock_create_agent:
         mock_create_agent.return_value = Mock()
         with pytest.raises(ValueError, match="does not exist"):
             AppOperator(str(tmp_path / "nonexistent"))

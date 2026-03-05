@@ -8,10 +8,11 @@ Tests the end-to-end DSPy integration including:
 """
 
 import json
-import pytest
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
+
+import pytest
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config, DSPyConfig
@@ -101,6 +102,7 @@ fi
 The system appears to be running smoothly.
 """
 
+
 # --- Fixtures ---
 
 
@@ -146,6 +148,7 @@ def reset_dspy_cache():
     reset_cache()
     yield
     reset_cache()
+
 
 # --- Tests ---
 
@@ -268,8 +271,9 @@ def test_canary_deployment_routing(temp_repo, tmp_path, dspy_config_canary):
     2. Routing is deterministic (hash-based)
     3. Different repos get different routing
     """
-    from app_operator.prompts import PromptLoader
     import hashlib
+
+    from app_operator.prompts import PromptLoader
 
     # Set up an optimized dir with the module file so the existence check
     # passes and the canary hash logic is actually exercised.
@@ -434,7 +438,7 @@ def test_dspy_fallback_recorded_in_trajectory(temp_repo, dspy_config_enabled):
     assert "script_generation" in trajectory or "deployment" in trajectory
 
 
-@patch('app_operator.dspy_integration.loader.load_optimized_module')
+@patch("app_operator.dspy_integration.loader.load_optimized_module")
 def test_dspy_module_invocation_error_falls_back(mock_load, temp_repo, dspy_config_enabled):
     """
     Test that errors during DSPy module invocation trigger fallback.

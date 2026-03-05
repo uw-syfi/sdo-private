@@ -1,33 +1,33 @@
-import time
 import asyncio
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
+from app_operator.adk.agent_factory import build_adk_agent, build_loop_agent
+from app_operator.adk.models import build_adk_model
+from app_operator.adk.runner import AdkAgentRunner
+from app_operator.adk.tools import build_tools
 from app_operator.config import Config
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.logger import logger
 from app_operator.exceptions import AgentError
+from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.healthcheck import run_health_check
+from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
-from app_operator.trajectory import (
-    Phase,
-    init_trajectory,
-)
 from app_operator.prompts import get_loader
+from app_operator.prompts.deployer import (
+    create_generate_script_prompt,
+)
 from app_operator.prompts.deployment_context import (
     analyze_repository,
     create_system_prompt,
 )
-from app_operator.prompts.deployer import (
-    create_generate_script_prompt,
-)
 from app_operator.subprocess_runner import SubprocessRunner
-from app_operator.healthcheck import run_health_check
-
-from app_operator.adk.models import build_adk_model
-from app_operator.adk.tools import build_tools
-from app_operator.adk.agent_factory import build_adk_agent, build_loop_agent
-from app_operator.adk.runner import AdkAgentRunner
+from app_operator.trajectory import (
+    Phase,
+    init_trajectory,
+)
+from app_operator.types import CommandResult
 
 
 class AdkOperator(OperatorBase):
@@ -59,8 +59,7 @@ class AdkOperator(OperatorBase):
 
         # Build ADK components
         self.model = build_adk_model(self.config)
-        self.tools = build_tools(self.repo_path, self.filesystem,
-                                 git_integration=self.config.operator.phase.git_integration)
+        self.tools = build_tools(self.repo_path, self.filesystem)
         self.runner = AdkAgentRunner(
             app_name="sds-adk-operator",
             recorder=self.recorder,
@@ -124,14 +123,10 @@ class AdkOperator(OperatorBase):
             # Patch system prompt to update tool names to match new ADK tools
             system_prompt = system_prompt.replace("- **Glob**:", "- **find_files**:")
             system_prompt = system_prompt.replace("- **Read**:", "- **read_file**:")
-            system_prompt = system_prompt.replace(
-                "- **Grep**:", "- **search_content**:"
-            )
+            system_prompt = system_prompt.replace("- **Grep**:", "- **search_content**:")
             system_prompt = system_prompt.replace("- **LS**:", "- **list_files**:")
 
-            user_prompt = get_loader().render(
-                "code_analyzer/user.jinja2", repo_path=str(self.repo_path)
-            )
+            user_prompt = get_loader().render("code_analyzer/user.jinja2", repo_path=str(self.repo_path))
 
             # Create agent
 
@@ -214,9 +209,7 @@ class AdkOperator(OperatorBase):
 
     async def _deploy_with_retries(self) -> bool:
         """Deploy application using LoopAgent."""
-        logger.info(
-            f"Deploying with LoopAgent (max {self.max_deployment_attempts} retries)..."
-        )
+        logger.info(f"Deploying with LoopAgent (max {self.max_deployment_attempts} retries)...")
 
         # 1. Define Deployer Agent
         deployer_prompt = get_loader().render("deployer/adk_deployer.jinja2")
@@ -255,15 +248,12 @@ class AdkOperator(OperatorBase):
             try:
                 # The user prompt triggers the loop
                 response = await self.runner.run_async(
-                    loop_agent,
+                    loop_agent,  # type: ignore[reportArgumentType]
                     "Start the deployment process. Alternate between Deployer and Fixer until successful.",
                 )
 
                 # Check for success signal
-                if (
-                    "DEPLOYMENT_FINISHED" in response
-                    or "Deployment Successful" in response
-                ):
+                if "DEPLOYMENT_FINISHED" in response or "Deployment Successful" in response:
                     logger.success("Deployment Loop completed successfully.")
                     r.add_assistant_message("Deployment Loop completed successfully.")
                     return True
@@ -282,9 +272,7 @@ class AdkOperator(OperatorBase):
         if not self.health_check_max_count:
             return
 
-        logger.info(
-            f"Starting monitoring (max {self.health_check_max_count} checks)..."
-        )
+        logger.info(f"Starting monitoring (max {self.health_check_max_count} checks)...")
 
         # Monitor agent
         monitor_agent = build_adk_agent(
@@ -308,19 +296,9 @@ class AdkOperator(OperatorBase):
                 # Run health check
                 log_file = monitor_logs / f"check_{i}.log"
                 start_time = time.time()
-                result = run_health_check(
-                    self.repo_path, self.health_check_script, log_file_path=log_file
-                )
-                # I'll check run_health_check signature in healthcheck.py
-                # Based on usage in AppMonitor (app_operator/cli_agent/agents/app_monitor.py),
-                # run_health_check(repo_path, script_path, log_file_path=...) ?
-                # The read of app_monitor.py shows:
-                # health_result = run_health_check(monitor.repo_path, monitor.health_check_script)
-                # It does not pass log_file_path.
-                # But DeploymentAgent passes log_file_path.
-                # Let's assume it supports it or handle logging manually.
-
-                # I'll rely on result dict.
+                result = run_health_check(self.repo_path, self.health_check_script, log_file_path=log_file)
+                # AppMonitor does not pass log_file_path to run_health_check,
+                # but DeploymentAgent does. We assume it supports it here.
                 duration = time.time() - start_time
 
                 r.add_tool_call(
@@ -347,14 +325,12 @@ class AdkOperator(OperatorBase):
                 self.filesystem.write_text(analysis_log, response)
                 logger.info(f"Analysis saved to {analysis_log}")
 
-    def _prepare_health_context(self, health_result: dict, check_count: int) -> str:
+    def _prepare_health_context(self, health_result: CommandResult, check_count: int) -> str:
         """Prepare health check context for analysis."""
         context_parts = []
         context_parts.append(f"## Health Check #{check_count}")
         context_parts.append(f"Exit Code: {health_result['exit_code']}")
-        context_parts.append(
-            f"Status: {'PASSED' if health_result['success'] else 'FAILED'}"
-        )
+        context_parts.append(f"Status: {'PASSED' if health_result['success'] else 'FAILED'}")
         context_parts.append(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         if health_result["stdout"]:
@@ -371,7 +347,7 @@ class AdkOperator(OperatorBase):
         self,
         command: str = "start",
         log_file_path: Path | None = None,
-    ) -> dict[str, Any]:
+    ) -> CommandResult:
         """Run deployment script command."""
         runner = SubprocessRunner(
             command=[str(self.deploy_script), command],
@@ -413,4 +389,3 @@ class AdkOperator(OperatorBase):
     def _cleanup(self) -> None:
         """Cleanup resources."""
         # Stop any background processes if needed
-        pass
