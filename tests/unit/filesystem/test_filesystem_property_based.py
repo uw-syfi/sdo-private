@@ -28,10 +28,17 @@ except ImportError:
         def __call__(self, *args, **kwargs):
             return pytest.mark.skip(reason="hypothesis not installed")
 
+    class _DummyStrategy:
+        """Placeholder that supports arbitrary chaining and operators."""
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: self
+
+        def __or__(self, other):
+            return self
+
     class DummyStrategies:
         def __getattr__(self, name):
-            # Return a callable that returns None
-            return lambda *args, **kwargs: None
+            return lambda *args, **kwargs: _DummyStrategy()
 
     settings = DummySettings()
     st = DummyStrategies()

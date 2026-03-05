@@ -18,6 +18,28 @@ try:
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
 
+    def given(*args, **kwargs):
+        return pytest.mark.skip(reason="hypothesis not installed")
+
+    class DummySettings:
+        def __call__(self, *args, **kwargs):
+            return pytest.mark.skip(reason="hypothesis not installed")
+
+    class _DummyStrategy:
+        """Placeholder that supports arbitrary chaining and operators."""
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: self
+
+        def __or__(self, other):
+            return self
+
+    class DummyStrategies:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: _DummyStrategy()
+
+    settings = DummySettings()
+    st = DummyStrategies()
+
 
 @pytest.fixture
 def hotel_compose():
