@@ -145,7 +145,12 @@ class TestClassifyServiceProperties:
     @given(config=service_config_strategy())
     @settings(max_examples=50, deadline=1000)
     def test_nginx_name_classified_as_proxy(self, config):
-        """A service named 'nginx' is always classified as proxy."""
+        """A service named 'nginx' is classified as proxy when the image doesn't match a higher-priority category."""
+        image = str(config.get("image", "")).lower()
+        # DB/cache patterns are checked before proxy patterns in classify_service,
+        # so an image like "redis" would override the name-based classification.
+        db_cache_patterns = ["mongo", "mysql", "postgres", "mariadb", "redis", "memcache"]
+        assume(not any(pat in image for pat in db_cache_patterns))
         result = ComposeManipulator.classify_service("nginx", config)
         assert result == "proxy"
 
