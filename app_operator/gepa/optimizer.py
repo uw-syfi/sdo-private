@@ -5,7 +5,7 @@ import random
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from app_operator.config import GEPAConfig
 from app_operator.gepa.adapter import SDSPromptAdapter
@@ -58,16 +58,22 @@ class GEPAOptimizer:
         self.run_id = time.strftime("%Y%m%d-%H%M%S")
         self.output_dir = Path(config.output_dir) / self.run_id
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._log_file = open(
-            self.output_dir / "optimization.log", "a"
-        )
+        self._log_file: IO[str] | None = None
+
+    def _ensure_log_file(self) -> IO[str]:
+        """Lazily open the optimization log file."""
+        if self._log_file is None:
+            self._log_file = (self.output_dir / "optimization.log").open("a")
+        return self._log_file
 
     def close(self) -> None:
         """Close the optimization log file."""
-        if self._log_file and not self._log_file.closed:
+        if self._log_file is not None:
             self._log_file.close()
+            self._log_file = None
 
     def __enter__(self) -> "GEPAOptimizer":
+        self._ensure_log_file()
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -105,29 +111,23 @@ class GEPAOptimizer:
 
         self._populate_traces_with_scores(initial_result)
 
-        history = [
-            self._history_entry(0, initial_candidate, "initial", pool)
-        ]
-        self._log(
-            f"Initial candidate score: "
-            f"{initial_candidate.validation_score:.3f}"
-        )
+        history = [self._history_entry(0, initial_candidate, "initial", pool)]
+        self._log(f"Initial candidate score: {initial_candidate.validation_score:.3f}")
         self._log_metric_breakdown(initial_candidate)
 
         self._run_evolution_loop(
-            pool, template_name, train_examples, val_examples, history,
+            pool,
+            template_name,
+            train_examples,
+            val_examples,
+            history,
             start_step=1,
         )
 
         best = pool.get_best()
-        self._log(
-            f"\nBest: {best.id} "
-            f"(score={best.validation_score or 0.0:.3f})"
-        )
+        self._log(f"\nBest: {best.id} (score={best.validation_score or 0.0:.3f})")
 
-        results = self._build_results(
-            template_name, best, initial_candidate, pool, history
-        )
+        results = self._build_results(template_name, best, initial_candidate, pool, history)
         self._save_results(results, template_name)
         return results
 
@@ -141,14 +141,8 @@ class GEPAOptimizer:
         templates = self.adapter.get_templates_for_agent(agent_type)
         results = {}
         for template_name in templates:
-            self._log(
-                f"\n{'=' * 60}\n"
-                f"Optimizing: {template_name}\n"
-                f"{'=' * 60}"
-            )
-            results[template_name] = self.optimize(
-                template_name, train_examples, val_examples
-            )
+            self._log(f"\n{'=' * 60}\nOptimizing: {template_name}\n{'=' * 60}")
+            results[template_name] = self.optimize(template_name, train_examples, val_examples)
         return results
 
     def resume(
@@ -170,13 +164,9 @@ class GEPAOptimizer:
         run_path = Path(run_dir)
         checkpoint_files = list(run_path.glob("checkpoint_*.json"))
         if not checkpoint_files:
-            raise FileNotFoundError(
-                f"No checkpoint files found in {run_dir}"
-            )
+            raise FileNotFoundError(f"No checkpoint files found in {run_dir}")
 
-        checkpoint_file = max(
-            checkpoint_files, key=lambda p: p.stat().st_mtime
-        )
+        checkpoint_file = max(checkpoint_files, key=lambda p: p.stat().st_mtime)
         with open(checkpoint_file) as f:
             checkpoint = json.load(f)
 
@@ -207,19 +197,18 @@ class GEPAOptimizer:
         initial_candidate = pool.candidates[0]
 
         self._run_evolution_loop(
-            pool, template_name, train_examples, val_examples, history,
+            pool,
+            template_name,
+            train_examples,
+            val_examples,
+            history,
             start_step=start_step,
         )
 
         best = pool.get_best()
-        self._log(
-            f"\nBest: {best.id} "
-            f"(score={best.validation_score or 0.0:.3f})"
-        )
+        self._log(f"\nBest: {best.id} (score={best.validation_score or 0.0:.3f})")
 
-        results = self._build_results(
-            template_name, best, initial_candidate, pool, history
-        )
+        results = self._build_results(template_name, best, initial_candidate, pool, history)
         self._save_results(results, template_name)
         return results
 
@@ -249,10 +238,7 @@ class GEPAOptimizer:
 
             selected = pool.pareto_select(rng=self._rng)
             sel_score = selected.validation_score or 0.0
-            self._log(
-                f"Selected: {selected.id} "
-                f"(score={sel_score:.3f})"
-            )
+            self._log(f"Selected: {selected.id} (score={sel_score:.3f})")
             self._log_metric_breakdown(selected)
 
             minibatch = self._sample_minibatch(train_examples)
@@ -277,12 +263,8 @@ class GEPAOptimizer:
                 self._log(f"  Mutation failed: {e}, skipping step")
                 continue
 
-            if not self.adapter.validate_template(
-                template_name, mutated_text
-            ):
-                self._log(
-                    "  Mutation invalid (broke template), skipping"
-                )
+            if not self.adapter.validate_template(template_name, mutated_text):
+                self._log("  Mutation invalid (broke template), skipping")
                 continue
 
             new_candidate = self._make_candidate(
@@ -304,18 +286,13 @@ class GEPAOptimizer:
             new_candidate.scores = val_result.scores
 
             new_score = new_candidate.validation_score or 0.0
-            self._log(
-                f"  {mutation_type}: {new_score:.3f} "
-                f"(parent: {sel_score:.3f})"
-            )
+            self._log(f"  {mutation_type}: {new_score:.3f} (parent: {sel_score:.3f})")
             self._log_metric_delta(selected, new_candidate)
 
             if new_score > sel_score:
                 pool.add(new_candidate)
                 delta = new_score - sel_score
-                self._log(
-                    f"  Added to pool (improvement: +{delta:.3f})"
-                )
+                self._log(f"  Added to pool (improvement: +{delta:.3f})")
             elif self._rng.random() < self.config.diversity_probability:
                 pool.add(new_candidate)
                 self._log("  Added to pool (diversity)")
@@ -325,7 +302,11 @@ class GEPAOptimizer:
             step_duration = time.time() - step_start
             history.append(
                 self._history_entry(
-                    step, new_candidate, mutation_type, pool, rationale,
+                    step,
+                    new_candidate,
+                    mutation_type,
+                    pool,
+                    rationale,
                     step_duration=step_duration,
                     efficiency=val_result.efficiency,
                 )
@@ -338,10 +319,7 @@ class GEPAOptimizer:
                 steps_without_improvement += 1
 
             if steps_without_improvement >= self.config.patience:
-                self._log(
-                    f"Early stopping: no improvement for "
-                    f"{self.config.patience} steps"
-                )
+                self._log(f"Early stopping: no improvement for {self.config.patience} steps")
                 break
 
             if step % self.config.checkpoint_interval == 0:
@@ -356,22 +334,13 @@ class GEPAOptimizer:
         minibatch: list[EvaluationExample],
     ) -> tuple[str, str, str]:
         """Perform mutation or crossover."""
-        if (
-            self._rng.random() < self.config.mutation_probability
-            or len(pool) < 2
-        ):
-            mutated_text, rationale = self.reflector.mutate(
-                selected.prompt_text, traces, template_name
-            )
+        if self._rng.random() < self.config.mutation_probability or len(pool) < 2:
+            mutated_text, rationale = self.reflector.mutate(selected.prompt_text, traces, template_name)
             return mutated_text, rationale, "mutate"
 
         other = pool.pareto_select(rng=self._rng)
         attempts = 0
-        while (
-            other.id == selected.id
-            and len(pool) > 1
-            and attempts < 10
-        ):
+        while other.id == selected.id and len(pool) > 1 and attempts < 10:
             other = pool.pareto_select(rng=self._rng)
             attempts += 1
 
@@ -394,13 +363,9 @@ class GEPAOptimizer:
         """Populate traces with metric scores and generated scripts."""
         for trace in eval_result.traces:
             trace.metric_scores = eval_result.scores
-            scripts = extract_generated_scripts(
-                {trace.phase: [{"messages": trace.messages}]}
-            )
+            scripts = extract_generated_scripts({trace.phase: [{"messages": trace.messages}]})
             if not scripts:
-                scripts = extract_generated_scripts(
-                    {"script_generation": [{"messages": trace.messages}]}
-                )
+                scripts = extract_generated_scripts({"script_generation": [{"messages": trace.messages}]})
             trace.generated_scripts = scripts
 
     def _make_candidate(self, **kwargs) -> PromptCandidate:
@@ -409,9 +374,7 @@ class GEPAOptimizer:
 
     def _sample_minibatch(self, examples: list[EvaluationExample]) -> list[EvaluationExample]:
         """Sample a minibatch from training examples."""
-        return self._rng.sample(
-            examples, min(self.config.minibatch_size, len(examples))
-        )
+        return self._rng.sample(examples, min(self.config.minibatch_size, len(examples)))
 
     def _history_entry(
         self,
@@ -448,30 +411,17 @@ class GEPAOptimizer:
         history: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Build the final results dict."""
-        step_durations = [
-            h.get("step_duration_seconds", 0)
-            for h in history if h.get("step", 0) > 0
-        ]
-        efficiency_entries = [
-            h["efficiency"] for h in history
-            if h.get("efficiency") is not None
-        ]
+        step_durations = [h.get("step_duration_seconds", 0) for h in history if h.get("step", 0) > 0]
+        efficiency_entries = [h["efficiency"] for h in history if h.get("efficiency") is not None]
 
         efficiency_summary = {}
         if efficiency_entries:
             efficiency_summary = {
-                "avg_estimated_tokens": sum(
-                    e["estimated_tokens"] for e in efficiency_entries
-                ) / len(efficiency_entries),
-                "avg_turn_count": sum(
-                    e["turn_count"] for e in efficiency_entries
-                ) / len(efficiency_entries),
-                "avg_tool_calls": sum(
-                    e["tool_call_count"] for e in efficiency_entries
-                ) / len(efficiency_entries),
-                "total_wall_clock_seconds": sum(
-                    e["wall_clock_seconds"] for e in efficiency_entries
-                ),
+                "avg_estimated_tokens": sum(e["estimated_tokens"] for e in efficiency_entries)
+                / len(efficiency_entries),
+                "avg_turn_count": sum(e["turn_count"] for e in efficiency_entries) / len(efficiency_entries),
+                "avg_tool_calls": sum(e["tool_call_count"] for e in efficiency_entries) / len(efficiency_entries),
+                "total_wall_clock_seconds": sum(e["wall_clock_seconds"] for e in efficiency_entries),
             }
 
         return {
@@ -480,10 +430,7 @@ class GEPAOptimizer:
             "best_score": best.validation_score or 0.0,
             "best_scores": best.scores,
             "initial_score": initial.validation_score or 0.0,
-            "improvement": (
-                (best.validation_score or 0.0)
-                - (initial.validation_score or 0.0)
-            ),
+            "improvement": ((best.validation_score or 0.0) - (initial.validation_score or 0.0)),
             "total_steps": self.config.max_steps,
             "final_pool_size": len(pool),
             "total_wall_clock_seconds": sum(step_durations),
@@ -515,8 +462,9 @@ class GEPAOptimizer:
     def _log(self, message: str) -> None:
         """Log a message to both loguru and the optimization log file."""
         logger.info(message)
-        self._log_file.write(f"{time.strftime('%H:%M:%S')} {message}\n")
-        self._log_file.flush()
+        log_file = self._ensure_log_file()
+        log_file.write(f"{time.strftime('%H:%M:%S')} {message}\n")
+        log_file.flush()
 
     def _log_metric_breakdown(self, candidate: PromptCandidate) -> None:
         """Log per-metric breakdown for a candidate."""
@@ -525,9 +473,7 @@ class GEPAOptimizer:
         parts = [f"{k}={v:.2f}" for k, v in sorted(candidate.scores.items())]
         self._log(f"  Metric breakdown: {', '.join(parts)}")
 
-    def _log_metric_delta(
-        self, parent: PromptCandidate, child: PromptCandidate
-    ) -> None:
+    def _log_metric_delta(self, parent: PromptCandidate, child: PromptCandidate) -> None:
         """Log per-metric delta between parent and child."""
         if not parent.scores or not child.scores:
             return
@@ -543,9 +489,7 @@ class GEPAOptimizer:
                 delta_str = f"+{delta:.2f}"
             else:
                 delta_str = f"{delta:.2f}"
-            parts.append(
-                f"    {key}: {old:.2f}\u2192{new:.2f} ({delta_str})"
-            )
+            parts.append(f"    {key}: {old:.2f}\u2192{new:.2f} ({delta_str})")
         self._log("\n".join(parts))
 
     def _save_checkpoint(

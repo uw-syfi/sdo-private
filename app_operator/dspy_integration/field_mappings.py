@@ -7,8 +7,8 @@ where field names differ between template context and signature definitions.
 from pathlib import Path
 from typing import Any
 
-# Explicit field mappings for prompts where Jinja2 kwargs don't match DSPy fields
-# Format: {prompt_name: {jinja2_kwarg: dspy_field_name}}
+# Explicit field mappings for prompts where Jinja2 kwargs don't match DSPy fields.
+# Maps prompt_name to a dict of jinja2_kwarg -> dspy_field_name.
 EXPLICIT_MAPPINGS: dict[str, dict[str, str]] = {
     "deployer_fix_error": {
         "previous_summary_note": "previous_summary",
@@ -111,8 +111,7 @@ def get_output_field_name(prompt_name: str) -> str:
 
     if prompt_name not in OUTPUT_FIELDS:
         raise KeyError(
-            f"No output field mapping for '{prompt_name}'. "
-            f"Available prompts: {', '.join(sorted(OUTPUT_FIELDS.keys()))}"
+            f"No output field mapping for '{prompt_name}'. Available prompts: {', '.join(sorted(OUTPUT_FIELDS.keys()))}"
         )
 
     return OUTPUT_FIELDS[prompt_name]

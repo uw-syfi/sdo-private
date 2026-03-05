@@ -1,14 +1,9 @@
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from app_operator.filesystem import FileSystemInterface
-from app_operator.prompts import PromptLoader
-from app_operator.trajectory import (
-    Phase,
-    TrajectoryRecorderProtocol,
-    NullTrajectoryRecorder,
-)
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import (
     BLUE,
@@ -16,6 +11,12 @@ from app_operator.langgraph.utils import (
     invoke_agent,
     run_script,
     write_log_file,
+)
+from app_operator.prompts import PromptLoader
+from app_operator.trajectory import (
+    NullTrajectoryRecorder,
+    Phase,
+    TrajectoryRecorderProtocol,
 )
 
 
@@ -35,9 +36,7 @@ def health_check(
         state["health_result"] = None
         return state
 
-    log_file = (
-        repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
-    )
+    log_file = repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
 
     print(f"\n{BLUE}Running health check script...{RESET}")
     print(f"Logging output to: {log_file}")
@@ -81,11 +80,7 @@ def monitor_health(
     state["monitor_count"] += 1
 
     log_file = (
-        repo_path
-        / ".sds"
-        / "logs"
-        / "monitor"
-        / f"check_{state['monitor_count']}_{time.strftime('%Y%m%d-%H%M%S')}.log"
+        repo_path / ".sds" / "logs" / "monitor" / f"check_{state['monitor_count']}_{time.strftime('%Y%m%d-%H%M%S')}.log"
     )
 
     result = run_script(
@@ -116,9 +111,7 @@ def monitor_analyze(
     context_parts = []
     context_parts.append(f"## Health Check #{state['monitor_count']}")
     context_parts.append(f"Exit Code: {health_result.get('exit_code')}")
-    context_parts.append(
-        f"Status: {'PASSED' if health_result.get('success') else 'FAILED'}"
-    )
+    context_parts.append(f"Status: {'PASSED' if health_result.get('success') else 'FAILED'}")
     context_parts.append(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     if health_result.get("stdout"):
@@ -130,9 +123,7 @@ def monitor_analyze(
         context_parts.append(health_result.get("stderr"))
 
     context = "\n".join(context_parts)
-    prompt = loader.render(
-        "monitor/analyze_health.jinja2", repo_path=repo_path, context=context
-    )
+    prompt = loader.render("monitor/analyze_health.jinja2", repo_path=repo_path, context=context)
 
     response, messages = invoke_agent(
         state,
@@ -145,13 +136,7 @@ def monitor_analyze(
     )
     state["messages"] = messages
 
-    log_file = (
-        repo_path
-        / ".sds"
-        / "logs"
-        / "monitor"
-        / f"analysis_{state['monitor_count']}.log"
-    )
+    log_file = repo_path / ".sds" / "logs" / "monitor" / f"analysis_{state['monitor_count']}.log"
     write_log_file(filesystem, log_file, response)
 
     # End the monitoring phase

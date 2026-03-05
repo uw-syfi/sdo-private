@@ -66,8 +66,11 @@ class TestFaultInjectionConfig:
     def test_valid_all_categories(self):
         config = FaultInjectionConfig(
             categories=[
-                "misconfiguration", "security", "metastable",
-                "correlated", "infrastructure",
+                "misconfiguration",
+                "security",
+                "metastable",
+                "correlated",
+                "infrastructure",
             ]
         )
         assert len(config.categories) == 5
@@ -82,9 +85,7 @@ class TestFaultInjectionConfig:
             FaultInjectionConfig(severities=["invalid"])
 
     def test_valid_all_severities(self):
-        config = FaultInjectionConfig(
-            severities=["low", "medium", "high", "critical"]
-        )
+        config = FaultInjectionConfig(severities=["low", "medium", "high", "critical"])
         assert len(config.severities) == 4
 
     # --- exclude_faults ---

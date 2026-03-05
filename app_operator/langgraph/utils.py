@@ -4,18 +4,18 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import (
-    SystemMessage,
-    HumanMessage,
-    BaseMessage,
     AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
     ToolMessage,
 )
 
 from app_operator.filesystem import FileSystemInterface
+from app_operator.langgraph.message_utils import extract_text
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.trajectory_handler import LangGraphTrajectoryHandler
 from app_operator.trajectory import TrajectoryRecorderProtocol
-from app_operator.langgraph.message_utils import extract_text
 
 BLUE = "\033[34m"
 GREEN = "\033[32m"
@@ -92,7 +92,7 @@ def invoke_agent(
     print("=" * 50 + "\n")
 
     for chunk in agent.stream({"messages": messages}, stream_mode="updates"):
-        for node_name, updates in chunk.items():
+        for _node_name, updates in chunk.items():
             new_messages = updates.get("messages", [])
             if not new_messages:
                 continue
@@ -112,12 +112,8 @@ def invoke_agent(
                         for tool_call in msg.tool_calls:
                             args_str = str(tool_call["args"])
                             if len(args_str) > MAX_DISPLAY_CONTENT:
-                                args_str = (
-                                    f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
-                                )
-                            print(
-                                f"{BLUE}[Tool Use] {tool_call['name']} {args_str}{RESET}"
-                            )
+                                args_str = f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
+                            print(f"{BLUE}[Tool Use] {tool_call['name']} {args_str}{RESET}")
 
                     content_text = extract_text(msg.content)
                     if content_text:
@@ -127,9 +123,7 @@ def invoke_agent(
 
                     if usage.get("total", 0) > 0:
                         pct = round((usage["total"] / context_limit) * 100, 1)
-                        print(
-                            f"\nToken Usage: {pct}% ({usage['total']}/{context_limit})"
-                        )
+                        print(f"\nToken Usage: {pct}% ({usage['total']}/{context_limit})")
 
                 elif isinstance(msg, ToolMessage):
                     content = extract_text(msg.content)
@@ -184,7 +178,7 @@ def run_script(
     except Exception as e:
         success = False
         stdout = ""
-        stderr = f"Error: {str(e)}"
+        stderr = f"Error: {e!s}"
         exit_code = -1
 
     duration = time.time() - start_time

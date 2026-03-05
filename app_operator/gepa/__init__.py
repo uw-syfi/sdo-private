@@ -1,13 +1,13 @@
 """GEPA (Genetic-Pareto Prompt Evolution) integration for SDS."""
 
-from app_operator.config import GEPAConfig  # noqa: F401 - re-export
+from app_operator.config import GEPAConfig
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.candidate import CandidatePool, PromptCandidate
 from app_operator.gepa.evaluator import (
+    METRICS_REGISTRY,
     EfficiencyMetrics,
     EvaluationExample,
     EvaluationResult,
-    METRICS_REGISTRY,
     SDSEvaluator,
     extract_efficiency_metrics,
     extract_generated_scripts,

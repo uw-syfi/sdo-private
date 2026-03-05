@@ -56,7 +56,7 @@ def extract_json(text: str) -> str:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1:
-        candidate = text[start: end + 1]
+        candidate = text[start : end + 1]
         try:
             json.loads(candidate)
             return candidate
@@ -70,7 +70,7 @@ def extract_json(text: str) -> str:
     if match:
         return match.group(1)
     if start != -1 and end != -1:
-        return text[start: end + 1]
+        return text[start : end + 1]
 
     return text
 
@@ -81,13 +81,13 @@ def parse_lego_agent_response(text: str) -> LegoAgentResponse:
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse JSON response: {e}\nRaw text: {text}")
+        raise ValueError(f"Failed to parse JSON response: {e}\nRaw text: {text}") from e
 
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object, got {type(data).__name__}: {json_text}")
 
     response = LegoAgentResponse(
-        status=data.get("status"),
+        status=data.get("status", "ready"),  # type: ignore[reportArgumentType]
         questions=data.get("questions", []),
         yaml_config=data.get("yaml_config"),
     )

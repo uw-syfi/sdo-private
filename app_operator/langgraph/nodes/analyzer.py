@@ -2,15 +2,15 @@ from pathlib import Path
 from typing import Any
 
 from app_operator.filesystem import FileSystemInterface
+from app_operator.langgraph.state import OperatorState
+from app_operator.langgraph.utils import invoke_agent
 from app_operator.logger import logger
 from app_operator.prompts import PromptLoader
 from app_operator.trajectory import (
+    NullTrajectoryRecorder,
     Phase,
     TrajectoryRecorderProtocol,
-    NullTrajectoryRecorder,
 )
-from app_operator.langgraph.state import OperatorState
-from app_operator.langgraph.utils import invoke_agent
 
 
 def analyze_code(

@@ -2,7 +2,7 @@
 
 import json
 
-from app_operator.trajectory import TrajectoryRecorder, Phase
+from app_operator.trajectory import Phase, TrajectoryRecorder
 
 
 class TestPromptVersionTracking:

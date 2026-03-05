@@ -1,13 +1,15 @@
 import pytest
+
 from app_operator.cli_agent.factory import create_agent_from_config
-from libs.agent_cli.base import CodingAgent, AGENT_REGISTRY, register_provider
+from app_operator.config import AgentConfig, Config
+from libs.agent_cli.base import AGENT_REGISTRY, CodingAgent, register_provider
 from libs.agent_cli.cli_agent import CLICodingAgent
-from app_operator.config import Config, AgentConfig
 
 
 @pytest.fixture
 def mock_binaries(monkeypatch):
     """Mock binary checks so CLI agents can be instantiated without real binaries."""
+
     def mock_which(cmd, path=None):
         return f"/usr/bin/{cmd}"
 
@@ -38,6 +40,7 @@ class TestAgentRegistry:
 
     def test_register_provider_adds_to_registry(self):
         """register_provider decorator adds the class under each given name."""
+
         @register_provider("test_dummy_provider_xyz")
         class DummyAgent(CodingAgent):
             def __init__(self, model=None):
@@ -67,18 +70,12 @@ class TestCreateAgentFromConfig:
         assert agent.__class__.__name__ == "GeminiCodingAgent"
 
     def test_model_override_takes_precedence(self, tmp_path, mock_binaries):
-        config = Config(
-            agent=AgentConfig(provider="claude", model="original-model")
-        )
-        agent = create_agent_from_config(
-            str(tmp_path), model_override="override-model", config=config
-        )
+        config = Config(agent=AgentConfig(provider="claude", model="original-model"))
+        agent = create_agent_from_config(str(tmp_path), model_override="override-model", config=config)
         assert agent.model == "override-model"
 
     def test_model_from_config_when_no_override(self, tmp_path, mock_binaries):
-        config = Config(
-            agent=AgentConfig(provider="claude", model="config-model")
-        )
+        config = Config(agent=AgentConfig(provider="claude", model="config-model"))
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.model == "config-model"
 

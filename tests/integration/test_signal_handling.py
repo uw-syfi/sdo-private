@@ -7,6 +7,7 @@ correctly, performing cleanup and exiting gracefully.
 import signal
 import threading
 from unittest.mock import patch
+
 from app_operator.cli_agent.operator import AppOperator
 from tests.fixtures.agents import StubAgent
 

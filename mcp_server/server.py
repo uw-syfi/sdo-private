@@ -1,9 +1,10 @@
 # sds/mcp_server/server.py
-from mcp.server.fastmcp import FastMCP
 import subprocess
-import urllib.request
 import urllib.parse
+import urllib.request
 from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
 
 # Initialize the server
 mcp = FastMCP("SDS_Controller")
@@ -15,6 +16,7 @@ SERVER_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SERVER_DIR.parent
 HEALTH_SCRIPT = PROJECT_ROOT / "apps/deathstarbench/hotelReservation/.sds/health_check.sh"
 
+
 @mcp.tool()
 def list_running_containers() -> str:
     """Checks which Docker containers are currently running."""
@@ -22,6 +24,7 @@ def list_running_containers() -> str:
         return subprocess.check_output(["docker", "ps"], text=True)
     except subprocess.CalledProcessError as e:
         return f"Error checking Docker: {e}"
+
 
 @mcp.tool()
 def stop_container(container_id: str) -> str:
@@ -32,10 +35,11 @@ def stop_container(container_id: str) -> str:
     except subprocess.CalledProcessError:
         return f"Failed to stop container {container_id}"
 
+
 @mcp.tool()
 def restart_container(container_name: str) -> str:
     """
-    Restarts a Docker container by name. 
+    Restarts a Docker container by name.
     Use this to fix services that are unhealthy or stuck.
     """
     try:
@@ -45,6 +49,7 @@ def restart_container(container_name: str) -> str:
     except subprocess.CalledProcessError as e:
         return f"Failed to restart {container_name}: {e}"
 
+
 @mcp.tool()
 def run_health_check() -> str:
     """
@@ -53,17 +58,14 @@ def run_health_check() -> str:
     """
     if not HEALTH_SCRIPT.exists():
         return f"Error: Could not find health script at {HEALTH_SCRIPT}"
-    
+
     try:
         # Run the bash script and capture output
-        result = subprocess.run(
-            ["bash", str(HEALTH_SCRIPT)],
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(["bash", str(HEALTH_SCRIPT)], capture_output=True, text=True)
         return result.stdout + "\n" + result.stderr
     except Exception as e:
-        return f"Failed to run health check: {str(e)}"
+        return f"Failed to run health check: {e!s}"
+
 
 @mcp.tool()
 def read_prometheus_metric(query: str = "up") -> str:
@@ -77,7 +79,8 @@ def read_prometheus_metric(query: str = "up") -> str:
         with urllib.request.urlopen(prometheus_url, timeout=10) as response:
             return response.read().decode("utf-8")
     except Exception as e:
-        return f"Failed to query Prometheus: {str(e)}"
+        return f"Failed to query Prometheus: {e!s}"
+
 
 if __name__ == "__main__":
     mcp.run()

@@ -1,10 +1,11 @@
 """Tests for DSPy configuration validation."""
 
 import pytest
+
 from app_operator.dspy_integration.config import (
+    DSPyAutoRollbackConfig,
     DSPyConfig,
     DSPyOptimizationConfig,
-    DSPyAutoRollbackConfig,
 )
 
 
@@ -128,33 +129,23 @@ class TestDSPyOptimizationConfig:
     def test_invalid_metric_weight_value_type(self):
         """Test invalid metric weight value type raises TypeError."""
         with pytest.raises(TypeError, match="metric_weights\\['success'\\] must be numeric"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": "0.6", "efficiency": 0.25, "tokens": 0.15}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": "0.6", "efficiency": 0.25, "tokens": 0.15})
 
     def test_invalid_metric_weight_value_range(self):
         """Test metric weight out of range raises ValueError."""
         with pytest.raises(ValueError, match="metric_weights\\['success'\\] must be in range"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": -0.1, "efficiency": 0.6, "tokens": 0.5}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": -0.1, "efficiency": 0.6, "tokens": 0.5})
 
         with pytest.raises(ValueError, match="metric_weights\\['efficiency'\\] must be in range"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": 0.5, "efficiency": 1.5, "tokens": 0.0}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": 0.5, "efficiency": 1.5, "tokens": 0.0})
 
     def test_metric_weights_sum_validation(self):
         """Test metric weights must sum to 1.0."""
         with pytest.raises(ValueError, match="metric_weights must sum to 1.0"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": 0.5, "efficiency": 0.3, "tokens": 0.1}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": 0.5, "efficiency": 0.3, "tokens": 0.1})
 
         with pytest.raises(ValueError, match="metric_weights must sum to 1.0"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": 0.7, "efficiency": 0.3, "tokens": 0.2}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": 0.7, "efficiency": 0.3, "tokens": 0.2})
 
     def test_metric_weights_sum_tolerance(self):
         """Test metric weights sum allows small floating point error."""
@@ -335,12 +326,8 @@ class TestDSPyConfig:
         """Test nested config objects are validated."""
         # This should raise from the nested DSPyOptimizationConfig
         with pytest.raises(ValueError, match="num_examples must be positive"):
-            DSPyConfig(
-                optimization=DSPyOptimizationConfig(num_examples=-5)
-            )
+            DSPyConfig(optimization=DSPyOptimizationConfig(num_examples=-5))
 
         # This should raise from the nested DSPyAutoRollbackConfig
         with pytest.raises(ValueError, match="evaluation_window must be positive"):
-            DSPyConfig(
-                auto_rollback=DSPyAutoRollbackConfig(evaluation_window=0)
-            )
+            DSPyConfig(auto_rollback=DSPyAutoRollbackConfig(evaluation_window=0))

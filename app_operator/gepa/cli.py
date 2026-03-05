@@ -21,8 +21,8 @@ from pathlib import Path
 from app_operator.config import GEPAConfig, load_config
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.evaluator import (
-    EvaluationExample,
     METRICS_REGISTRY,
+    EvaluationExample,
     SDSEvaluator,
 )
 from app_operator.gepa.optimizer import GEPAOptimizer
@@ -32,9 +32,7 @@ from app_operator.logger import logger
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the GEPA CLI."""
-    parser = argparse.ArgumentParser(
-        description="GEPA Prompt Optimization for SDS"
-    )
+    parser = argparse.ArgumentParser(description="GEPA Prompt Optimization for SDS")
     parser.add_argument(
         "--agent-type",
         choices=["deployer", "monitor", "code_analyzer"],
@@ -44,9 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--template",
         help="Optimize a specific template (e.g. deployer/system.jinja2)",
     )
-    parser.add_argument(
-        "--max-steps", type=int, default=None, help="Evolution steps"
-    )
+    parser.add_argument("--max-steps", type=int, default=None, help="Evolution steps")
     parser.add_argument(
         "--num-candidates",
         type=int,
@@ -99,9 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Model for reflection LM",
     )
-    parser.add_argument(
-        "--output-dir", default=None, help="Output directory"
-    )
+    parser.add_argument("--output-dir", default=None, help="Output directory")
     parser.add_argument(
         "--test-repos",
         nargs="+",
@@ -171,20 +165,14 @@ def main(argv: list[str] | None = None) -> int:
     val_examples = _build_examples(val_repos, agent_type)
 
     if args.dry_run:
-        _print_dry_run(
-            adapter, agent_type, args.template, train_examples
-        )
+        _print_dry_run(adapter, agent_type, args.template, train_examples)
         return 0
 
     with _build_optimizer(args, adapter) as optimizer:
         if args.template:
-            optimizer.optimize(
-                args.template, train_examples, val_examples
-            )
+            optimizer.optimize(args.template, train_examples, val_examples)
         else:
-            optimizer.optimize_all(
-                agent_type, train_examples, val_examples
-            )
+            optimizer.optimize_all(agent_type, train_examples, val_examples)
 
     return 0
 
@@ -289,9 +277,7 @@ def _get_metrics_for_agent(
     return METRICS_REGISTRY.get(agent_type, METRICS_REGISTRY["deployer"])
 
 
-def _build_examples(
-    repo_paths: list[str], agent_type: str
-) -> list[EvaluationExample]:
+def _build_examples(repo_paths: list[str], agent_type: str) -> list[EvaluationExample]:
     """Build EvaluationExamples from test repo paths."""
     return [
         EvaluationExample(
@@ -337,16 +323,10 @@ def _apply_best(run_dir: str) -> int:
 
         if adapter.validate_template(template_name, best_prompt):
             adapter.write_template(template_name, best_prompt)
-            logger.info(
-                f"Applied best prompt for {template_name} "
-                f"(score: {results.get('best_score', 'N/A')})"
-            )
+            logger.info(f"Applied best prompt for {template_name} (score: {results.get('best_score', 'N/A')})")
             applied += 1
         else:
-            logger.warning(
-                f"Skipping {template_name}: "
-                f"optimized prompt failed validation"
-            )
+            logger.warning(f"Skipping {template_name}: optimized prompt failed validation")
 
     logger.info(f"Applied {applied} optimized prompt(s)")
     return 0

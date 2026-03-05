@@ -6,9 +6,10 @@ of session collection is done in integration tests.
 """
 
 import json
+
 import pytest
 
-from app_operator.trajectory import TrajectoryRecorder, Phase
+from app_operator.trajectory import Phase, TrajectoryRecorder
 
 
 @pytest.fixture

@@ -5,6 +5,7 @@ standalone library code can use without depending on app_operator.
 
 The full TrajectoryRecorder implementation lives in app_operator/trajectory.py.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -38,15 +39,11 @@ class FaultInjectionMetadata(TypedDict):
 class TrajectoryRecorderProtocol(Protocol):
     """Protocol for trajectory recorders."""
 
-    def start_phase(
-        self, phase: Any, context: dict[str, Any] | None = None
-    ) -> None: ...
+    def start_phase(self, phase: Any, context: dict[str, Any] | None = None) -> None: ...
     def end_phase(self, status: str | None = None) -> None: ...
     def add_user_message(self, content: str) -> None: ...
 
-    def add_assistant_message(
-        self, content: str, duration: float | None = None
-    ) -> None: ...
+    def add_assistant_message(self, content: str, duration: float | None = None) -> None: ...
 
     def add_tool_call(
         self,
@@ -67,9 +64,7 @@ class TrajectoryRecorderProtocol(Protocol):
     def record_token_usage(self, usage: TokenUsage) -> None: ...
     def finalize(self, status: str = "completed") -> Path: ...
 
-    def phase(
-        self, phase: Any, context: dict[str, Any] | None = None
-    ) -> Any: ...
+    def phase(self, phase: Any, context: dict[str, Any] | None = None) -> Any: ...
 
 
 class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
@@ -79,9 +74,7 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
     Every method is a no-op, so callers never need to check for None.
     """
 
-    def start_phase(
-        self, phase: Any, context: dict[str, Any] | None = None
-    ) -> None:
+    def start_phase(self, phase: Any, context: dict[str, Any] | None = None) -> None:
         pass
 
     def end_phase(self, status: str | None = None) -> None:
@@ -90,9 +83,7 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
     def add_user_message(self, content: str) -> None:
         pass
 
-    def add_assistant_message(
-        self, content: str, duration: float | None = None
-    ) -> None:
+    def add_assistant_message(self, content: str, duration: float | None = None) -> None:
         pass
 
     def add_tool_call(
@@ -156,7 +147,7 @@ def register_context_providers(
     thread-local implementations. Standalone consumers get None from the
     default def stubs, which is correct outside of app_operator.
     """
-    global _call_id_provider, _run_id_provider  # noqa: PLW0603
+    global _call_id_provider, _run_id_provider
     _call_id_provider = call_id_fn
     _run_id_provider = run_id_fn
 

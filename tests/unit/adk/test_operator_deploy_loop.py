@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from app_operator.adk.operator import AdkOperator
 from app_operator.config import Config
 from app_operator.filesystem import InMemoryFilesystem
@@ -38,17 +39,13 @@ def test_deploy_loop_success_first_try(tmp_path):
             if "comprehensive deploy.sh" in prompt_str:
                 # AdkOperator uses 'ScriptGenerator' (no space)
                 if "ScriptGenerator" not in str(agent.name):
-                    raise AssertionError(
-                        f"Expected ScriptGenerator for deploy.sh, got {agent.name}"
-                    )
+                    raise AssertionError(f"Expected ScriptGenerator for deploy.sh, got {agent.name}")
                 fs.write_text(repo_path / ".sds" / "deploy.sh", "echo 'starting'")
                 return "Generated deploy.sh"
 
             if "comprehensive health_check.sh" in prompt_str:
                 if "ScriptGenerator" not in str(agent.name):
-                    raise AssertionError(
-                        f"Expected ScriptGenerator for health_check.sh, got {agent.name}"
-                    )
+                    raise AssertionError(f"Expected ScriptGenerator for health_check.sh, got {agent.name}")
                 fs.write_text(repo_path / ".sds" / "health_check.sh", "echo 'healthy'")
                 return "Generated health_check.sh"
 
@@ -69,12 +66,8 @@ def test_deploy_loop_success_first_try(tmp_path):
             patch("app_operator.adk.operator.build_adk_model"),
             patch("app_operator.adk.operator.build_tools"),
             patch("app_operator.adk.operator.build_adk_agent") as mock_build_agent,
-            patch(
-                "app_operator.adk.operator.build_loop_agent"
-            ) as mock_build_loop_agent,
-            patch(
-                "app_operator.adk.operator.asyncio.sleep"
-            ),  # Patch sleep to avoid waiting
+            patch("app_operator.adk.operator.build_loop_agent") as mock_build_loop_agent,
+            patch("app_operator.adk.operator.asyncio.sleep"),  # Patch sleep to avoid waiting
         ):
             # Setup build_adk_agent to return a mock with name
             def side_effect_build_agent(name, instruction, model, tools):
@@ -113,9 +106,7 @@ def test_deploy_loop_success_first_try(tmp_path):
                     }
 
                     # Mock analyze_repository
-                    with patch(
-                        "app_operator.adk.operator.analyze_repository"
-                    ) as mock_analyze:
+                    with patch("app_operator.adk.operator.analyze_repository") as mock_analyze:
                         mock_analyze.return_value = "repo context"
 
                         # Run operator
@@ -155,9 +146,7 @@ def test_deploy_loop_handles_failure(tmp_path):
             patch("app_operator.adk.operator.build_adk_agent"),
             patch("app_operator.adk.operator.build_loop_agent"),
             patch("app_operator.adk.operator.asyncio.sleep"),
-            patch(
-                "app_operator.adk.operator.analyze_repository", return_value="context"
-            ),
+            patch("app_operator.adk.operator.analyze_repository", return_value="context"),
         ):
             operator = AdkOperator(str(repo_path), filesystem=fs, config=config)
 

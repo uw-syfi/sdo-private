@@ -4,14 +4,15 @@ Provides reusable functions for the isinstance -> TypeError,
 value check -> ValueError pattern used across all config dataclasses.
 """
 
+from collections.abc import Collection
 from dataclasses import fields
-from typing import Any, Collection, Type
+from typing import Any
 
 
 def validate_type(
     value: Any,
     name: str,
-    expected_type: Type | tuple[Type, ...],
+    expected_type: type | tuple[type, ...],
     *,
     nullable: bool = False,
     type_label: str | None = None,
@@ -97,9 +98,7 @@ def validate_range(
     if min_val is not None and max_val is not None:
         left = "(" if min_exclusive else "["
         right = ")" if max_exclusive else "]"
-        raise ValueError(
-            f"{name} must be in range {left}{min_val}, {max_val}{right}, got {value}"
-        )
+        raise ValueError(f"{name} must be in range {left}{min_val}, {max_val}{right}, got {value}")
     elif min_val is not None:
         op = ">" if min_exclusive else ">="
         raise ValueError(f"{name} must be {op} {min_val}, got {value}")
@@ -115,24 +114,19 @@ def validate_in(
 ) -> None:
     """Raise ``ValueError`` if *value* is not in *valid_values*."""
     if value not in valid_values:
-        raise ValueError(
-            f"Invalid {name}: '{value}'. "
-            f"Valid {name}s: {', '.join(sorted(str(v) for v in valid_values))}"
-        )
+        raise ValueError(f"Invalid {name}: '{value}'. Valid {name}s: {', '.join(sorted(str(v) for v in valid_values))}")
 
 
 def validate_non_empty_str(value: Any, name: str) -> None:
     """Raise ``ValueError`` if *value* is not a non-empty (stripped) string."""
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(
-            f"{name} must be a non-empty string, got '{value}'"
-        )
+        raise ValueError(f"{name} must be a non-empty string, got '{value}'")
 
 
 def validate_field(
     value: Any,
     name: str,
-    expected_type: Type | tuple[Type, ...],
+    expected_type: type | tuple[type, ...],
     *,
     nullable: bool = False,
     positive: bool = False,
@@ -195,6 +189,7 @@ def validate_dataclass_fields(
 
     if unrecognized:
         from app_operator.config import UnrecognizedFieldError
+
         raise UnrecognizedFieldError(
             f"Unrecognized field(s) in [{section_name}] section: "
             f"{', '.join(sorted(unrecognized))}. "

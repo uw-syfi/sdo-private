@@ -1,5 +1,5 @@
-import json
 import io
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -81,12 +81,7 @@ def test_tool_use_truncation_and_prefix(gemini_agent, mock_popen):
     mock_process.returncode = 0
 
     long_params = {"data": "x" * 300}
-    stream_data = [
-        json.dumps(
-            {"type": "tool_use", "tool_name": "test_tool", "parameters": long_params}
-        )
-        + "\n"
-    ]
+    stream_data = [json.dumps({"type": "tool_use", "tool_name": "test_tool", "parameters": long_params}) + "\n"]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]
     mock_process.stderr.readline.return_value = ""
@@ -156,8 +151,7 @@ def test_generate_emits_ui_events(gemini_agent, mock_popen):
 
     tool_id = "test-tool-123"
     stream_data = [
-        json.dumps({"type": "message", "role": "assistant", "content": "Thinking..."})
-        + "\n",
+        json.dumps({"type": "message", "role": "assistant", "content": "Thinking..."}) + "\n",
         json.dumps(
             {
                 "type": "tool_use",
@@ -167,8 +161,7 @@ def test_generate_emits_ui_events(gemini_agent, mock_popen):
             }
         )
         + "\n",
-        json.dumps({"type": "tool_result", "tool_id": tool_id, "output": "Result"})
-        + "\n",
+        json.dumps({"type": "tool_result", "tool_id": tool_id, "output": "Result"}) + "\n",
     ]
 
     mock_process.stdout.readline.side_effect = stream_data + [""]

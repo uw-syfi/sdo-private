@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import MagicMock
+
 from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
 
 
@@ -23,9 +24,7 @@ class TestAdkTrajectoryPlugin(unittest.IsolatedAsyncioTestCase):
         tool.name = "my_tool"
 
         # Test simple string result
-        await plugin.after_tool_callback(
-            tool=tool, tool_args={"arg": "val"}, tool_context=None, result="Success"
-        )
+        await plugin.after_tool_callback(tool=tool, tool_args={"arg": "val"}, tool_context=None, result="Success")
 
         recorder.add_tool_call.assert_called_with(
             tool="my_tool",
@@ -45,13 +44,9 @@ class TestAdkTrajectoryPlugin(unittest.IsolatedAsyncioTestCase):
         # Test dict result (like bash tool)
         result = {"stdout": "output", "stderr": "error", "exit_code": 1}
 
-        await plugin.after_tool_callback(
-            tool=tool, tool_args="ls", tool_context=None, result=result
-        )
+        await plugin.after_tool_callback(tool=tool, tool_args="ls", tool_context=None, result=result)
 
-        recorder.add_tool_call.assert_called_with(
-            tool="bash", args="ls", stdout="output", stderr="error", exit_code=1
-        )
+        recorder.add_tool_call.assert_called_with(tool="bash", args="ls", stdout="output", stderr="error", exit_code=1)
 
     async def test_on_tool_error_callback_records_error(self):
         recorder = MagicMock()
@@ -62,9 +57,7 @@ class TestAdkTrajectoryPlugin(unittest.IsolatedAsyncioTestCase):
 
         error = ValueError("Something went wrong")
 
-        await plugin.on_tool_error_callback(
-            tool=tool, tool_args={}, tool_context=None, error=error
-        )
+        await plugin.on_tool_error_callback(tool=tool, tool_args={}, tool_context=None, error=error)
 
         recorder.add_tool_call.assert_called_with(
             tool="broken_tool",

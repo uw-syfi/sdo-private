@@ -5,15 +5,9 @@ import sys
 def truncate_content(content, max_lines=5, max_chars=500):
     lines = content.splitlines()
     if len(lines) > max_lines * 2:
-        return "\n".join(
-            lines[:max_lines] + ["... (truncated) ..."] + lines[-max_lines:]
-        )
+        return "\n".join(lines[:max_lines] + ["... (truncated) ..."] + lines[-max_lines:])
     if len(content) > max_chars:
-        return (
-            content[: max_chars / 2]
-            + " ... (truncated) ... "
-            + content[-max_chars / 2:]
-        )
+        return content[: max_chars / 2] + " ... (truncated) ... " + content[-max_chars / 2 :]
     return content
 
 
@@ -45,22 +39,22 @@ def process_line(line):
 
 
 def main():
-    with open("example_stream_json.txt", "r") as f:
+    with open("example_stream_json.txt") as f:
         for line in f:
             if not line.strip():
                 continue
-            # The example file has "00001| " prefix from the read tool, I need to strip it if I used the output directly,
+            # The example file has "00001| " prefix from the read tool,
+            # I need to strip it if I used the output directly,
             # but here I am reading the file on disk.
             # Wait, the example content I read previously had line numbers because of cat -n format from the Read tool.
             # The actual file on disk probably doesn't have "00001| ".
             # I should double check the file content without line numbers.
-            pass
 
     # Actually, I'll just rely on the read I did before.
     # The read output I saw earlier had line numbers because the tool adds them.
     # The actual file `example_stream_json.txt` should be clean JSON lines.
 
-    with open("example_stream_json.txt", "r") as f:
+    with open("example_stream_json.txt") as f:
         for line in f:
             line = line.strip()
             if not line:

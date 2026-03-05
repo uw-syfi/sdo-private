@@ -6,6 +6,7 @@ scenarios without requiring actual agent execution.
 
 import time
 from typing import Any
+
 from libs.agent_cli.base import CodingAgent
 
 
@@ -55,7 +56,6 @@ class StubAgent(CodingAgent):
 
     def start_event_stream(self, *args, **kwargs):
         """No-op event stream for operator tests."""
-        pass
 
 
 class ErrorAgent(CodingAgent):

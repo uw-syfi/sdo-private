@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import importlib
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
-from pathlib import Path
-from typing import Any, TYPE_CHECKING, Protocol, runtime_checkable
 import hashlib
+import importlib
 import logging
 import threading
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 if TYPE_CHECKING:
     from app_operator.trajectory import TrajectoryRecorderProtocol
@@ -40,11 +41,13 @@ logger = logging.getLogger(__name__)
 #   - agent.generate() receives that bash script, _FILE_GEN_RE fails to match,
 #     and the RLM loop runs on a bash script as its task → infinite explore loop
 # These prompts rely on Jinja2 → _FILE_GEN_RE match → _generate_files() to work.
-_AGENT_INSTRUCTION_PROMPTS: frozenset[str] = frozenset({
-    "deployer_generate_deploy_script",
-    "deployer_generate_health_check",
-    "deployer_generate_script",
-})
+_AGENT_INSTRUCTION_PROMPTS: frozenset[str] = frozenset(
+    {
+        "deployer_generate_deploy_script",
+        "deployer_generate_health_check",
+        "deployer_generate_script",
+    }
+)
 
 SEED_TEMPLATE_MAP = {
     "deployer_system": "seeds/deployer_system.jinja2",
@@ -87,8 +90,7 @@ def _resolve_optimized_version(optimized_dir: Path, version: str) -> str | None:
 
     if version == "latest":
         version_dirs = [
-            d for d in optimized_dir.iterdir()
-            if d.is_dir() and d.name.startswith('v') and d.name[1:].isdigit()
+            d for d in optimized_dir.iterdir() if d.is_dir() and d.name.startswith("v") and d.name[1:].isdigit()
         ]
         if not version_dirs:
             logger.warning(f"No versioned directories found in {optimized_dir}")
@@ -110,7 +112,7 @@ class PromptLoader:
 
     def __init__(
         self,
-        templates_dir: str | Path = None,
+        templates_dir: str | Path | None = None,
         dspy_config: DSPyConfigProtocol | None = None,
     ):
         """Initialize the loader.
@@ -128,9 +130,7 @@ class PromptLoader:
             self.templates_dir = Path(templates_dir)
 
         if not self.templates_dir.exists():
-            raise FileNotFoundError(
-                f"Prompts directory not found: {self.templates_dir}"
-            )
+            raise FileNotFoundError(f"Prompts directory not found: {self.templates_dir}")
 
         self.env = Environment(
             loader=FileSystemLoader(str(self.templates_dir)),
@@ -157,21 +157,18 @@ class PromptLoader:
 
         try:
             import os
+
             import dspy
 
             # Configure DSPy with the runtime model
             kwargs = {"model": self.dspy_config.runtime_model, "cache": False}
-            vertex_location = self.dspy_config.vertex_location or os.environ.get(
-                "VERTEX_LOCATION"
-            )
+            vertex_location = self.dspy_config.vertex_location or os.environ.get("VERTEX_LOCATION")
             if vertex_location:
                 kwargs["vertex_location"] = vertex_location
             lm = dspy.LM(**kwargs)
             dspy.settings.configure(lm=lm)
             self._dspy_configured = True
-            logger.info(
-                f"Configured DSPy runtime with model: {self.dspy_config.runtime_model}"
-            )
+            logger.info(f"Configured DSPy runtime with model: {self.dspy_config.runtime_model}")
 
         except Exception as e:
             logger.error(f"Failed to configure DSPy runtime: {e}")
@@ -180,7 +177,7 @@ class PromptLoader:
     def render(
         self,
         template_name: str,
-        recorder: "TrajectoryRecorderProtocol" | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
         **kwargs: Any,
     ) -> str:
         """Render a template with the given context.
@@ -209,10 +206,7 @@ class PromptLoader:
                 self._notify_recorder(recorder, "record_rendered_prompt", result)
                 return result
             except Exception as e:
-                logger.warning(
-                    f"DSPy rendering failed for {prompt_name}: {e}. "
-                    f"Falling back to Jinja2."
-                )
+                logger.warning(f"DSPy rendering failed for {prompt_name}: {e}. Falling back to Jinja2.")
                 # Record fallback in trajectory if available
                 self._notify_recorder(recorder, "record_fallback")
 
@@ -293,15 +287,11 @@ class PromptLoader:
                 except (TypeError, ValueError, AttributeError):
                     # If canary_percentage is not numeric (e.g., in tests with mocks)
                     logger.warning(
-                        "Canary deployment enabled but canary_percentage is invalid. "
-                        "Falling back to Jinja2."
+                        "Canary deployment enabled but canary_percentage is invalid. Falling back to Jinja2."
                     )
                     return False
             else:
-                logger.warning(
-                    "Canary deployment enabled but repo_path not in context. "
-                    "Falling back to Jinja2."
-                )
+                logger.warning("Canary deployment enabled but repo_path not in context. Falling back to Jinja2.")
                 return False
 
         # Normal mode - use DSPy for prompts that have optimized modules
@@ -319,9 +309,8 @@ class PromptLoader:
         if prompt_name in self._module_exists_cache:
             return self._module_exists_cache[prompt_name]
 
-        resolved = _resolve_optimized_version(
-            self.optimized_dir, self.dspy_config.optimized_version
-        )
+        assert self.dspy_config is not None
+        resolved = _resolve_optimized_version(self.optimized_dir, self.dspy_config.optimized_version)
         if resolved is None:
             result = False
         else:
@@ -335,7 +324,7 @@ class PromptLoader:
         self,
         prompt_name: str,
         kwargs: dict,
-        recorder: "TrajectoryRecorderProtocol" | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> str:
         """Render using DSPy optimized module.
 
@@ -359,10 +348,9 @@ class PromptLoader:
         # Configure DSPy runtime LM (once on first use)
         self._configure_dspy_runtime()
 
+        assert self.dspy_config is not None
         # Load the optimized module
-        module = load_optimized_module(
-            prompt_name, self.optimized_dir, self.dspy_config.optimized_version
-        )
+        module = load_optimized_module(prompt_name, self.optimized_dir, self.dspy_config.optimized_version)
 
         if module is None:
             raise RuntimeError(f"Failed to load DSPy module for {prompt_name}")
@@ -371,23 +359,20 @@ class PromptLoader:
         fields = map_kwargs_to_fields(prompt_name, kwargs)
 
         # Invoke the module
-        logger.debug(
-            f"Invoking DSPy module for {prompt_name} with fields: {list(fields.keys())}"
-        )
+        logger.debug(f"Invoking DSPy module for {prompt_name} with fields: {list(fields.keys())}")
         result = module(**fields)
 
         # Extract the primary output field
         output_field = get_output_field_name(prompt_name)
         if not hasattr(result, output_field):
-            raise RuntimeError(
-                f"DSPy result missing expected field '{output_field}' for {prompt_name}"
-            )
+            raise RuntimeError(f"DSPy result missing expected field '{output_field}' for {prompt_name}")
 
         output = getattr(result, output_field)
 
         # Record prompt version in trajectory if available
         self._notify_recorder(
-            recorder, "set_prompt_version",
+            recorder,
+            "set_prompt_version",
             f"dspy_{self.dspy_config.optimized_version}",
         )
 
@@ -401,7 +386,7 @@ class PromptLoader:
         self,
         template_name: str,
         kwargs: dict,
-        recorder: "TrajectoryRecorderProtocol" | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> str:
         """Render using Jinja2 template.
 
@@ -422,9 +407,7 @@ class PromptLoader:
                 prompt_name = self._template_to_prompt_name(template_name)
                 if prompt_name in SEED_TEMPLATE_MAP:
                     template_name = SEED_TEMPLATE_MAP[prompt_name]
-                    logger.debug(
-                        f"Using seed template for {prompt_name}: {template_name}"
-                    )
+                    logger.debug(f"Using seed template for {prompt_name}: {template_name}")
 
             template = self.env.get_template(template_name)
             result = template.render(**kwargs)
@@ -435,13 +418,11 @@ class PromptLoader:
             return result
         except Exception as e:
             # Wrap Jinja2 errors for clearer debugging context
-            raise RuntimeError(
-                f"Failed to render template '{template_name}': {e}"
-            ) from e
+            raise RuntimeError(f"Failed to render template '{template_name}': {e}") from e
 
     @staticmethod
     def _notify_recorder(
-        recorder: "TrajectoryRecorderProtocol" | None,
+        recorder: TrajectoryRecorderProtocol | None,
         method_name: str,
         *args: Any,
     ) -> None:
@@ -482,9 +463,8 @@ def get_loader(dspy_config: DSPyConfigProtocol | None = None) -> PromptLoader:
 
     with _loader_lock:
         # Reset loader if config changed (including when new config is None)
-        if _loader is not None:
-            if _loader.dspy_config != dspy_config:
-                _loader = None
+        if _loader is not None and _loader.dspy_config != dspy_config:
+            _loader = None
 
         if _loader is None:
             _loader = PromptLoader(dspy_config=dspy_config)

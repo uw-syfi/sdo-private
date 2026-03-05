@@ -256,9 +256,7 @@ class TestResolveExperiment:
         monkeypatch.chdir(tmp_path)
         exp_dir = tmp_path / "exp_config" / "my-exp"
         exp_dir.mkdir(parents=True)
-        (exp_dir / "config.toml").write_bytes(
-            b'apps = ["/some/app"]\n'
-        )
+        (exp_dir / "config.toml").write_bytes(b'apps = ["/some/app"]\n')
 
         result = _resolve_experiment("my-exp")
 

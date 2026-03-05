@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.ui import OperatorUI
 
@@ -39,9 +41,7 @@ def app_operator_with_ui(repo_path, mock_agent, mock_ui):
 
 
 def test_run_success_flow_updates_ui_stages(app_operator_with_ui):
-    op, mock_deployer_cls, mock_monitor_cls, mock_analyzer_cls, mock_ui = (
-        app_operator_with_ui
-    )
+    op, mock_deployer_cls, mock_monitor_cls, mock_analyzer_cls, mock_ui = app_operator_with_ui
 
     # Setup mocks
     mock_deployer_cls.return_value.run.return_value = True

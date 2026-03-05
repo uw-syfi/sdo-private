@@ -3,18 +3,18 @@ import signal
 import threading
 from pathlib import Path
 
-from libs.agent_cli.base import CodingAgent
-from app_operator.cli_agent.factory import create_agent_from_config
-from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
+from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.cli_agent.factory import create_agent_from_config
+from app_operator.config import Config, load_config
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
-from app_operator.config import load_config, Config
 from app_operator.operator_base import OperatorBase
-from app_operator.ui_protocol import OperatorUI, NullOperatorUI
 from app_operator.trajectory import TrajectoryRecorder
+from app_operator.ui_protocol import NullOperatorUI, OperatorUI
+from libs.agent_cli.base import CodingAgent
 
 
 class AppOperator(OperatorBase):
@@ -79,12 +79,10 @@ class AppOperator(OperatorBase):
         # Initialize agent if not provided
         if agent is None:
             try:
-                self.agent = create_agent_from_config(
-                    str(self.repo_path), config=self.config
-                )
+                self.agent = create_agent_from_config(str(self.repo_path), config=self.config)
             except RuntimeError as e:
                 # Fallback or error if no default agent can be created
-                raise AgentError(f"Failed to initialize default coding agent: {e}")
+                raise AgentError(f"Failed to initialize default coding agent: {e}") from e
         else:
             self.agent = agent
 
@@ -115,11 +113,8 @@ class AppOperator(OperatorBase):
             try:
                 fault_meta = json.loads(self.filesystem.read_text(fault_meta_path))
                 self.recorder.record_fault_injection(fault_meta)
-                logger.info(
-                    f"Loaded fault injection metadata: "
-                    f"{fault_meta.get('num_faults_injected', 0)} fault(s)"
-                )
-            except (json.JSONDecodeError, IOError) as e:
+                logger.info(f"Loaded fault injection metadata: {fault_meta.get('num_faults_injected', 0)} fault(s)")
+            except (OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Failed to load fault injection metadata: {e}")
 
         # Attach recorder to agent
@@ -239,9 +234,7 @@ class AppOperator(OperatorBase):
         if not self._shutdown_requested:
             self._shutdown_requested = True
             signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
-            logger.info(
-                f"Received {signal_name} signal. Initiating graceful shutdown..."
-            )
+            logger.info(f"Received {signal_name} signal. Initiating graceful shutdown...")
 
     def _cleanup(self) -> None:
         """Shutdown the application and cleanup resources."""

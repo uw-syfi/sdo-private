@@ -1,5 +1,7 @@
-import pytest
 from pathlib import Path
+
+import pytest
+
 from app_operator.filesystem import InMemoryFilesystem
 
 
@@ -160,6 +162,7 @@ def test_path_traversal_attempt(fs):
 def test_concurrent_writes_same_file(fs):
     """Test behavior with concurrent writes to same file."""
     import threading
+
     path = Path("concurrent.txt")
     results = []
 
@@ -167,8 +170,7 @@ def test_concurrent_writes_same_file(fs):
         fs.write_text(path, content)
         results.append(fs.read_text(path))
 
-    threads = [threading.Thread(target=writer, args=(
-        f"content{i}",)) for i in range(10)]
+    threads = [threading.Thread(target=writer, args=(f"content{i}",)) for i in range(10)]
     for t in threads:
         t.start()
     for t in threads:
@@ -234,6 +236,7 @@ def test_concurrent_read_write(fs):
     Uses threading.Event for deterministic synchronization instead of time.sleep.
     """
     import threading
+
     path = Path("rw_test.txt")
     fs.write_text(path, "initial")
 
@@ -281,6 +284,7 @@ def test_concurrent_read_write(fs):
 def test_concurrent_directory_operations(fs):
     """Test concurrent directory creation and file operations."""
     import threading
+
     base_dir = Path("/concurrent")
     errors = []
 
@@ -293,8 +297,7 @@ def test_concurrent_directory_operations(fs):
         except Exception as e:
             errors.append(e)
 
-    threads = [threading.Thread(target=create_structure, args=(i,))
-               for i in range(20)]
+    threads = [threading.Thread(target=create_structure, args=(i,)) for i in range(20)]
     for t in threads:
         t.start()
     for t in threads:
@@ -327,8 +330,7 @@ def test_concurrent_remove_operations(fs):
         except Exception as e:
             errors.append(e)
 
-    threads = [threading.Thread(target=remove_file, args=(i,))
-               for i in range(10)]
+    threads = [threading.Thread(target=remove_file, args=(i,)) for i in range(10)]
     for t in threads:
         t.start()
     for t in threads:
@@ -399,8 +401,7 @@ def test_concurrent_permission_checks(fs):
         except PermissionError:
             results.append((index, False))
 
-    threads = [threading.Thread(target=check_access, args=(i,))
-               for i in range(5)]
+    threads = [threading.Thread(target=check_access, args=(i,)) for i in range(5)]
     for t in threads:
         t.start()
     for t in threads:
@@ -417,6 +418,7 @@ def test_concurrent_permission_checks(fs):
 def test_race_condition_file_creation(fs):
     """Test race condition during file creation."""
     import threading
+
     path = Path("race.txt")
 
     success_count = [0]
@@ -447,6 +449,7 @@ def test_read_during_write_operation(fs):
     Uses threading.Event for synchronization instead of time.sleep.
     """
     import threading
+
     path = Path("partial.txt")
     fs.write_text(path, "initial")
 

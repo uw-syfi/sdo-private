@@ -52,38 +52,21 @@ class TestOperatorPhaseConfigParsing:
 
     def test_nested_phase_section_parsing(self):
         """Test parsing nested [operator.phase] section."""
-        data = {
-            "operator": {
-                "interval": 60,
-                "phase": {
-                    "code_analysis": False
-                }
-            }
-        }
+        data = {"operator": {"interval": 60, "phase": {"code_analysis": False}}}
         config = Config.from_dict(data)
         assert config.operator.interval == 60
         assert config.operator.phase.code_analysis is False
 
     def test_nested_phase_fix_summary_consolidation_parsing(self):
         """Test parsing fix_summary_consolidation from nested [operator.phase] section."""
-        data = {
-            "operator": {
-                "phase": {
-                    "fix_summary_consolidation": False
-                }
-            }
-        }
+        data = {"operator": {"phase": {"fix_summary_consolidation": False}}}
         config = Config.from_dict(data)
         assert config.operator.phase.fix_summary_consolidation is False
         assert config.operator.phase.code_analysis is True  # Default
 
     def test_operator_without_phase_section(self):
         """Test that operator config works without phase section."""
-        data = {
-            "operator": {
-                "interval": 60
-            }
-        }
+        data = {"operator": {"interval": 60}}
         config = Config.from_dict(data)
         assert config.operator.interval == 60
         assert config.operator.phase.code_analysis is True  # Default
@@ -104,57 +87,28 @@ class TestOperatorPhaseConfigParsing:
 
     def test_phase_section_only(self):
         """Test that phase section can be specified alone."""
-        data = {
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
-            }
-        }
+        data = {"operator": {"phase": {"code_analysis": False}}}
         config = Config.from_dict(data)
         assert config.operator.interval == 30  # Default
         assert config.operator.phase.code_analysis is False
 
     def test_unrecognized_phase_field_error(self):
         """Test that unrecognized fields in phase section raise error."""
-        data = {
-            "operator": {
-                "phase": {
-                    "code_analysis": False,
-                    "unknown_field": True
-                }
-            }
-        }
+        data = {"operator": {"phase": {"code_analysis": False, "unknown_field": True}}}
         with pytest.raises(
-            UnrecognizedFieldError,
-            match=r"Unrecognized field\(s\) in \[operator\.phase\] section: unknown_field"
+            UnrecognizedFieldError, match=r"Unrecognized field\(s\) in \[operator\.phase\] section: unknown_field"
         ):
             Config.from_dict(data)
 
     def test_multiple_unrecognized_phase_fields(self):
         """Test error message with multiple unrecognized fields."""
-        data = {
-            "operator": {
-                "phase": {
-                    "code_analysis": False,
-                    "foo": True,
-                    "bar": False
-                }
-            }
-        }
-        with pytest.raises(
-            UnrecognizedFieldError,
-            match=r"Unrecognized field\(s\) in \[operator\.phase\] section"
-        ):
+        data = {"operator": {"phase": {"code_analysis": False, "foo": True, "bar": False}}}
+        with pytest.raises(UnrecognizedFieldError, match=r"Unrecognized field\(s\) in \[operator\.phase\] section"):
             Config.from_dict(data)
 
     def test_phase_not_a_dict(self):
         """Test that phase must be a dict if present."""
-        data = {
-            "operator": {
-                "phase": "not a dict"
-            }
-        }
+        data = {"operator": {"phase": "not a dict"}}
         # Should raise an error when trying to create OperatorPhaseConfig
         with pytest.raises((TypeError, AttributeError)):
             Config.from_dict(data)
@@ -163,14 +117,8 @@ class TestOperatorPhaseConfigParsing:
         """Test that existing configs without phase section still work."""
         # Simulate old config file
         data = {
-            "agent": {
-                "provider": "codex"
-            },
-            "operator": {
-                "interval": 30,
-                "monitoring_max_iters": 5,
-                "deployment_max_iters": 20
-            }
+            "agent": {"provider": "codex"},
+            "operator": {"interval": 30, "monitoring_max_iters": 5, "deployment_max_iters": 20},
         }
         config = Config.from_dict(data)
         assert config.operator.interval == 30
@@ -188,9 +136,7 @@ class TestOperatorPhaseConfigParsing:
                 "agent_fix_timeout": 3600,
                 "deploy_timeout": 1800,
                 "agent_timeout": 600,
-                "phase": {
-                    "code_analysis": False
-                }
+                "phase": {"code_analysis": False},
             }
         }
         config = Config.from_dict(data)
@@ -207,9 +153,7 @@ class TestOperatorPhaseConfigParsing:
         data = {
             "operator": {
                 "interval": -1,  # Invalid
-                "phase": {
-                    "code_analysis": False
-                }
+                "phase": {"code_analysis": False},
             }
         }
         with pytest.raises(ValueError, match="interval must be positive"):

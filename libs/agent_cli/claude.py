@@ -1,18 +1,19 @@
-from .base import register_provider
 import json
 import time
 
-from .cli_agent import CLICodingAgent, CLIGenerationSession
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+
+from .base import register_provider
 from .claude_events import (
     ClaudeEvent,
-    TextEvent,
-    ToolUseEvent,
-    ToolResultEvent,
     MultiEvent,
     ResultEvent,
+    TextEvent,
+    ToolResultEvent,
+    ToolUseEvent,
 )
+from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 
 class ClaudeGenerationSession(CLIGenerationSession):

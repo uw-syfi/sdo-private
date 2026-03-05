@@ -52,17 +52,15 @@ class CandidatePool:
     def _get_pareto_frontier(self) -> list[PromptCandidate]:
         """Identify non-dominated candidates (Pareto frontier)."""
         frontier = [
-            candidate for candidate in self.candidates
-            if not any(
-                self._is_dominated(candidate, other)
-                for other in self.candidates
-                if other is not candidate
-            )
+            candidate
+            for candidate in self.candidates
+            if not any(self._is_dominated(candidate, other) for other in self.candidates if other is not candidate)
         ]
         return frontier if frontier else list(self.candidates)
 
     def pareto_select(
-        self, rng: random.Random | None = None,
+        self,
+        rng: random.Random | None = None,
     ) -> PromptCandidate:
         """Select a candidate using multi-objective Pareto-aware sampling.
 
@@ -106,15 +104,11 @@ class CandidatePool:
         dominated_candidates = [c for c in self.candidates if c.id not in frontier_ids]
 
         if len(frontier_candidates) >= max_pool_size:
-            frontier_candidates.sort(
-                key=lambda c: c.validation_score or 0.0, reverse=True
-            )
+            frontier_candidates.sort(key=lambda c: c.validation_score or 0.0, reverse=True)
             self.candidates = frontier_candidates[:max_pool_size]
         else:
             remaining = max_pool_size - len(frontier_candidates)
-            dominated_candidates.sort(
-                key=lambda c: c.validation_score or 0.0, reverse=True
-            )
+            dominated_candidates.sort(key=lambda c: c.validation_score or 0.0, reverse=True)
             self.candidates = frontier_candidates + dominated_candidates[:remaining]
 
     def get_best(self) -> PromptCandidate:

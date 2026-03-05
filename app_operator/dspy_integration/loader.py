@@ -89,8 +89,7 @@ def resolve_version(optimized_dir: Path, version: str) -> str | None:
     # Handle 'latest' - find highest version number
     if version == "latest":
         version_dirs = [
-            d for d in optimized_dir.iterdir()
-            if d.is_dir() and d.name.startswith('v') and d.name[1:].isdigit()
+            d for d in optimized_dir.iterdir() if d.is_dir() and d.name.startswith("v") and d.name[1:].isdigit()
         ]
         if not version_dirs:
             logger.warning(f"No versioned directories found in {optimized_dir}")
@@ -111,11 +110,7 @@ def resolve_version(optimized_dir: Path, version: str) -> str | None:
         return None
 
 
-def load_optimized_module(
-    prompt_name: str,
-    optimized_dir: Path,
-    version: str = "latest"
-) -> dspy.Module | None:
+def load_optimized_module(prompt_name: str, optimized_dir: Path, version: str = "latest") -> dspy.Module | None:
     """Load an optimized DSPy module from disk.
 
     Args:
@@ -166,19 +161,18 @@ def load_optimized_module(
         module = dspy.Predict(signature_class)
 
         # Load the optimized state
-        with open(module_file, 'r') as f:
+        with open(module_file) as f:
             state = json.load(f)
 
         # Load demonstrations if present
-        if 'demos' in state:
-            module.demos = state['demos']
+        if "demos" in state:
+            module.demos = state["demos"]
             logger.debug(f"Loaded {len(module.demos)} demonstrations")
 
         # Restore optimized instruction if present (COPRO / MIPROv2 artifact)
-        if state.get('optimized_instruction'):
-            module.signature = module.signature.with_instructions(state['optimized_instruction'])
-            logger.debug(
-                f"Restored optimized instruction ({len(state['optimized_instruction'])} chars)")
+        if state.get("optimized_instruction"):
+            module.signature = module.signature.with_instructions(state["optimized_instruction"])
+            logger.debug(f"Restored optimized instruction ({len(state['optimized_instruction'])} chars)")
 
         # Store in cache
         _module_cache.set(cache_key, module)

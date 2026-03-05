@@ -1,44 +1,34 @@
 import argparse
 import asyncio
-import sys
 import os
 import subprocess
+import sys
 from pathlib import Path
 
+from loguru import logger
+
+from lego_agent.config import load_config
 from lego_agent.engine import LegoAgentEngine
 from lego_agent.io import ConsoleIO
-from lego_agent.utils import find_repo_root
-from loguru import logger
-from lego_agent.config import load_config
 from lego_agent.prompts import get_loader
+from lego_agent.utils import find_repo_root
 
 DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding
 DEFAULT_LOOP_BOUND = 10  # default execution loop bound for generated scripts
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="LegoAgent: Autonomous script generator"
-    )
+    parser = argparse.ArgumentParser(description="LegoAgent: Autonomous script generator")
     parser.add_argument("--prompt", help="Initial user prompt")
     parser.add_argument("--config", help="Path to sds.toml config file")
     parser.add_argument("--model", help="Override agent model")
     parser.add_argument(
-        "--max-clarifications", type=int, default=DEFAULT_MAX_CLARIFICATIONS,
-        help="Max clarification rounds"
+        "--max-clarifications", type=int, default=DEFAULT_MAX_CLARIFICATIONS, help="Max clarification rounds"
     )
-    parser.add_argument(
-        "--loop-bound", type=int, help="Execution loop bound for generated script"
-    )
-    parser.add_argument(
-        "--output-dir", default="lego_agent_runs", help="Output directory"
-    )
-    parser.add_argument(
-        "--work-dir", required=True, help="Directory to run the generated script in"
-    )
-    parser.add_argument(
-        "--no-run", action="store_true", help="Generate script but do not execute it"
-    )
+    parser.add_argument("--loop-bound", type=int, help="Execution loop bound for generated script")
+    parser.add_argument("--output-dir", default="lego_agent_runs", help="Output directory")
+    parser.add_argument("--work-dir", required=True, help="Directory to run the generated script in")
+    parser.add_argument("--no-run", action="store_true", help="Generate script but do not execute it")
     return parser
 
 

@@ -10,19 +10,22 @@ These tests cover edge cases beyond basic Gemini session tests:
 import json
 import shutil
 import tempfile
-import pytest
 import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from app_operator.trajectory import (
-    TrajectoryRecorder,
     Phase,
+    TrajectoryRecorder,
 )
 
 # Try to import hypothesis, skip tests if not available
 try:
-    from hypothesis import given, strategies as st, settings
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
+
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
@@ -109,9 +112,9 @@ class TestConcurrentPhaseTracking:
 
     def test_phase_context_manager_with_exception(self, recorder):
         """Test phase context manager properly handles exceptions."""
-        with pytest.raises(ValueError):
+        recorder.add_user_message("Start deployment")
+        with pytest.raises(ValueError, match="Simulated error"):
             with recorder.phase(Phase.DEPLOYMENT):
-                recorder.add_user_message("Start deployment")
                 raise ValueError("Simulated error")
 
         # Phase should have been ended with "failed" status
@@ -131,7 +134,7 @@ class TestMessageSerialization:
 
     def test_special_characters_in_messages(self, recorder):
         """Test messages with special characters are properly serialized."""
-        special_chars = '\\n\\t"\'<>&\x00\u2603\U0001F4A9'
+        special_chars = "\\n\\t\"'<>&\x00\u2603\U0001f4a9"
 
         with recorder.phase(Phase.DEPLOYMENT):
             recorder.add_user_message(f"Message with special chars: {special_chars}")
@@ -296,7 +299,7 @@ class TestErrorHandlingAndRecovery:
         # No errors should occur
         assert len(errors) == 0
         # All paths should be the same
-        assert len(set(str(p) for p in paths)) == 1
+        assert len({str(p) for p in paths}) == 1
 
 
 class TestTrajectoryStructure:
@@ -381,10 +384,7 @@ class TestTrajectoryStructure:
         assert len(tool_msg["stdout"]) < 200
 
 
-@pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
+@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
 class TestTrajectoryUnicodeRoundTripProperty:
     """Property-based tests for Unicode round-trip through TrajectoryRecorder."""
 

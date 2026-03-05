@@ -35,16 +35,19 @@ def _litellm_call_with_retry(
             if token_acc is not None:
                 usage = getattr(response, "usage", None)
                 if usage:
-                    token_acc["prompt_tokens"] = token_acc.get(
-                        "prompt_tokens", 0) + (getattr(usage, "prompt_tokens", 0) or 0)
-                    token_acc["completion_tokens"] = token_acc.get(
-                        "completion_tokens", 0) + (getattr(usage, "completion_tokens", 0) or 0)
-                    token_acc["total_tokens"] = token_acc.get(
-                        "total_tokens", 0) + (getattr(usage, "total_tokens", 0) or 0)
-            return response.choices[0].message.content or ""
+                    token_acc["prompt_tokens"] = token_acc.get("prompt_tokens", 0) + (
+                        getattr(usage, "prompt_tokens", 0) or 0
+                    )
+                    token_acc["completion_tokens"] = token_acc.get("completion_tokens", 0) + (
+                        getattr(usage, "completion_tokens", 0) or 0
+                    )
+                    token_acc["total_tokens"] = token_acc.get("total_tokens", 0) + (
+                        getattr(usage, "total_tokens", 0) or 0
+                    )
+            return response.choices[0].message.content or ""  # type: ignore[reportAttributeAccessIssue]
         except Exception as e:
             if any(m in str(e).lower() for m in _NETWORK_ERROR_MARKERS) and attempt < max_attempts - 1:
-                delay = 15 * (2 ** attempt)
+                delay = 15 * (2**attempt)
                 logger.warning(
                     f"[RLM] {label}: transient network error (attempt {attempt + 1}/{max_attempts}), "
                     f"retrying in {delay}s: {e}"
@@ -52,6 +55,8 @@ def _litellm_call_with_retry(
                 time.sleep(delay)
             else:
                 raise
+
+    return ""  # unreachable; satisfies type checker
 
 
 def call_subagent(

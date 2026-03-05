@@ -34,10 +34,7 @@ STRIDE = 1000
 
 def find_exp_dirs(root: Path) -> list[Path]:
     """Immediate subdirectories that contain docker-compose.yml, sorted."""
-    return sorted(
-        d for d in root.iterdir()
-        if d.is_dir() and (d / "docker-compose.yml").exists()
-    )
+    return sorted(d for d in root.iterdir() if d.is_dir() and (d / "docker-compose.yml").exists())
 
 
 def parse_service_ports(compose_path: Path) -> dict[str, list[tuple[str, str]]]:
@@ -84,7 +81,7 @@ def apply_offsets(root: Path, reference_name: str | None = None) -> None:
     print()
 
     # ── apply offsets ────────────────────────────────────────────────────
-    all_host_ports: dict[str, set[int]] = {}   # dir_name -> final host ports
+    all_host_ports: dict[str, set[int]] = {}  # dir_name -> final host ports
 
     for idx, dir_path in enumerate(dirs):
         offset = idx * STRIDE
@@ -106,7 +103,7 @@ def apply_offsets(root: Path, reference_name: str | None = None) -> None:
                     break
                 cur_host, cur_container = cur_mappings[i]
                 if cur_container != ref_container:
-                    continue           # shape mismatch; leave alone
+                    continue  # shape mismatch; leave alone
                 target = str(int(ref_host) + offset)
                 if target != cur_host:
                     replacements[(cur_host, cur_container)] = target
@@ -126,12 +123,8 @@ def apply_offsets(root: Path, reference_name: str | None = None) -> None:
         # single-quoted, or bare).  Process longer host-port strings first to
         # avoid any theoretical overlap with shorter ones.
         changes: list[str] = []
-        for (old_host, container_spec), target_host in sorted(
-            replacements.items(), key=lambda item: -len(item[0][0])
-        ):
-            pat = re.compile(
-                r"(?<!\d)" + re.escape(old_host) + ":" + re.escape(container_spec) + r"(?!\d)"
-            )
+        for (old_host, container_spec), target_host in sorted(replacements.items(), key=lambda item: -len(item[0][0])):
+            pat = re.compile(r"(?<!\d)" + re.escape(old_host) + ":" + re.escape(container_spec) + r"(?!\d)")
             new_val = f"{target_host}:{container_spec}"
             if pat.search(content):
                 content = pat.sub(new_val, content)
@@ -179,9 +172,14 @@ def apply_offsets(root: Path, reference_name: str | None = None) -> None:
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("root", type=Path, help="Experiment root directory (e.g. exp/socialNetwork)")
-    parser.add_argument("--reference", metavar="DIR", default=None,
-                        help="Subdirectory to use as port reference (default: first alphabetically)")
+    parser.add_argument(
+        "--reference",
+        metavar="DIR",
+        default=None,
+        help="Subdirectory to use as port reference (default: first alphabetically)",
+    )
     args = parser.parse_args()
     apply_offsets(args.root, args.reference)

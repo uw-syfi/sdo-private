@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app_operator.types import CommandResult
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.prompts import get_loader, DSPyConfigProtocol
+from app_operator.prompts import DSPyConfigProtocol, get_loader
+from app_operator.types import CommandResult
 
 FIX_SUMMARY_FILENAME = "fix_summary.md"
 
@@ -29,27 +29,20 @@ def prepare_error_context(
     context_parts = []
 
     if log_file_path:
-        context_parts.append(
-            f"Full deployment logs available at: {log_file_path}")
+        context_parts.append(f"Full deployment logs available at: {log_file_path}")
 
     if health_check_log_path:
-        context_parts.append(
-            f"Health check outputs available at: {health_check_log_path}"
-        )
+        context_parts.append(f"Health check outputs available at: {health_check_log_path}")
 
     # Deployment result
     context_parts.append("## Deployment Script Result")
     context_parts.append(f"Exit Code: {deploy_result['exit_code']}")
-    context_parts.append(
-        f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}"
-    )
+    context_parts.append(f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}")
 
     if health_result is not None:
         context_parts.append("\n## Health Check Result")
         context_parts.append(f"Exit Code: {health_result['exit_code']}")
-        context_parts.append(
-            f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}"
-        )
+        context_parts.append(f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}")
 
     return "\n".join(context_parts)
 
@@ -153,8 +146,7 @@ def create_fix_prompt(
     previous_summary_note = ""
     if attempt > 1:
         consolidated_summary_path = repo_path / ".sds" / FIX_SUMMARY_FILENAME
-        prev_log_path = repo_path / ".sds" / \
-            "logs" / f"fix_summary_{attempt - 1}.log"
+        prev_log_path = repo_path / ".sds" / "logs" / f"fix_summary_{attempt - 1}.log"
 
         if fix_summary_consolidation:
             previous_summary_note = (

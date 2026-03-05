@@ -1,11 +1,11 @@
 """Command handlers for visualizing the LangGraph agent graph."""
 
 import argparse
-from unittest.mock import MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock
 
-from app_operator.langgraph.graph import build_graph
 from app_operator.config import Config
+from app_operator.langgraph.graph import build_graph
 from app_operator.logger import logger
 
 
@@ -31,9 +31,7 @@ def run_command(args: argparse.Namespace) -> int:
         # Use current directory as dummy repo path
         repo_path = Path(".")
 
-        graph = build_graph(
-            llm=llm, repo_path=repo_path, config=config, health_check_interval=30
-        )
+        graph = build_graph(llm=llm, repo_path=repo_path, config=config, health_check_interval=30)
 
         compiled_graph = graph.get_graph()
 
@@ -42,9 +40,7 @@ def run_command(args: argparse.Namespace) -> int:
             suffix = output_path.suffix.lower()
 
             if suffix == ".png":
-                logger.info(
-                    "Generating PNG image (this requires internet access to mermaid.ink)..."
-                )
+                logger.info("Generating PNG image (this requires internet access to mermaid.ink)...")
                 png_data = compiled_graph.draw_mermaid_png()
                 with open(output_path, "wb") as f:
                     f.write(png_data)

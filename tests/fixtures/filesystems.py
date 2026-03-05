@@ -5,6 +5,7 @@ test scenarios.
 """
 
 from pathlib import Path
+
 from app_operator.filesystem import InMemoryFilesystem
 
 

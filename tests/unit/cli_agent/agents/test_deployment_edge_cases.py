@@ -5,7 +5,7 @@ scenarios in the deployment process.
 """
 
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
-from tests.fixtures.agents import StubAgent, ErrorAgent, TrackingAgent
+from tests.fixtures.agents import ErrorAgent, StubAgent, TrackingAgent
 
 
 class TestDeploymentAttemptBoundaries:

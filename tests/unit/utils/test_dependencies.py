@@ -1,6 +1,8 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from app_operator.__main__ import check_dependencies, REQUIRED_DEPENDENCIES
+
+from app_operator.__main__ import REQUIRED_DEPENDENCIES, check_dependencies
 
 
 def test_check_dependencies_success():
@@ -42,10 +44,7 @@ def test_check_dependencies_missing_tool(capture_logs):
         assert excinfo.value.code == 1
 
         # Verify output
-        assert any(
-            f"Missing required system dependencies: {tool_to_fail}" in msg
-            for msg in capture_logs
-        )
+        assert any(f"Missing required system dependencies: {tool_to_fail}" in msg for msg in capture_logs)
 
 
 def test_main_calls_check_dependencies():
@@ -83,10 +82,7 @@ def test_check_dependencies_checks_docker(capture_logs):
         assert excinfo.value.code == 1
 
         # Verify output
-        assert any(
-            "Missing required system dependencies: docker" in msg
-            for msg in capture_logs
-        )
+        assert any("Missing required system dependencies: docker" in msg for msg in capture_logs)
 
 
 def test_check_dependencies_checks_kubectl(capture_logs):
@@ -107,7 +103,4 @@ def test_check_dependencies_checks_kubectl(capture_logs):
         assert excinfo.value.code == 1
 
         # Verify output
-        assert any(
-            "Missing required system dependencies: kubectl" in msg
-            for msg in capture_logs
-        )
+        assert any("Missing required system dependencies: kubectl" in msg for msg in capture_logs)

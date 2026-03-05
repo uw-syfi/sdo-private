@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app_operator.prompts import get_loader, DSPyConfigProtocol
+from app_operator.prompts import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
     from app_operator.trajectory import TrajectoryRecorderProtocol
@@ -23,7 +23,7 @@ def render_fix_error_task_prompt(
     max_attempts: str = "",
     has_original_script: str = "",
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder: "TrajectoryRecorderProtocol | None" = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> str:
     """Render the RLM deployer fix-error task wrapper prompt."""
     return get_loader(dspy_config).render(

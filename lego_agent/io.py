@@ -1,4 +1,5 @@
 from typing import Protocol
+
 import click
 
 
@@ -76,9 +77,7 @@ class ConsoleIO:
 
     def read_prompt(self) -> str:
         try:
-            click.echo(
-                f"\n{Colors.BOLD}{Colors.BLUE}Please enter your prompt:{Colors.ENDC}"
-            )
+            click.echo(f"\n{Colors.BOLD}{Colors.BLUE}Please enter your prompt:{Colors.ENDC}")
             click.echo(f"{Colors.CYAN}> {Colors.ENDC}", nl=False)
             return input()
         except (KeyboardInterrupt, EOFError):
@@ -107,9 +106,7 @@ class ConsoleIO:
                     return n
                 click.echo(f"{Colors.RED}Please enter a positive integer.{Colors.ENDC}")
             except ValueError:
-                click.echo(
-                    f"{Colors.RED}Invalid number. Please try again.{Colors.ENDC}"
-                )
+                click.echo(f"{Colors.RED}Invalid number. Please try again.{Colors.ENDC}")
 
     def info(self, message: str) -> None:
         click.echo(message)
@@ -131,9 +128,7 @@ class ConsoleIO:
             symbol = f"{Colors.RED}✗{Colors.ENDC} "
 
         click.echo(
-            "\n"
-            f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
-            f"{Colors.LIGHT_GRAY}{output}{Colors.ENDC}"
+            f"\n{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n{Colors.LIGHT_GRAY}{output}{Colors.ENDC}"
         )
 
     def render_error(self, message: str) -> None:
@@ -149,4 +144,3 @@ class ConsoleIO:
         # For console, we just print a simple text representation or info message
         click.echo(f"\n{Colors.BOLD}{Colors.BLUE}[Graph Generated]{Colors.ENDC}")
         # We could print a tree here, but for now just acknowledge it
-        pass

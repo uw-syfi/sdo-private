@@ -30,9 +30,7 @@ class TestGEPAConfigIntegerFields:
 class TestGEPAConfigProbabilityFields:
     """Test probability field validation."""
 
-    @pytest.mark.parametrize("field_name", [
-        "mutation_probability", "diversity_probability"
-    ])
+    @pytest.mark.parametrize("field_name", ["mutation_probability", "diversity_probability"])
     def test_out_of_range_rejected(self, field_name):
         with pytest.raises(ValueError, match=f"{field_name} must be in range"):
             GEPAConfig(**{field_name: -0.1})

@@ -5,8 +5,8 @@ import pytest
 import app_operator.cli_agent.agents.deployer as deployer_module
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.prompts.deployer import (
-    prepare_error_context,
     create_fix_prompt,
+    prepare_error_context,
 )
 from tests.fixtures import bind_method
 from tests.fixtures.agents import TrackingAgent
@@ -300,9 +300,7 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
         def kill(self):
             pass
 
-    monkeypatch.setattr(
-        deployer_module.subprocess, "Popen", lambda *args, **kwargs: MockProcess()
-    )
+    monkeypatch.setattr(deployer_module.subprocess, "Popen", lambda *args, **kwargs: MockProcess())
 
     # Mock time to simulate timeout
     # Initial call: start_time
@@ -355,9 +353,7 @@ def test_deployment_skips_fix_when_max_attempts_reached(tmp_path, stub_agent):
     assert len(stub_agent.calls) == 0
 
 
-def test_deployment_calls_agent_on_failure_when_under_max_attempts(
-    tmp_path, tracking_agent
-):
+def test_deployment_calls_agent_on_failure_when_under_max_attempts(tmp_path, tracking_agent):
     """Test that deployment calls agent to fix errors when under max attempts."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -576,9 +572,7 @@ def test_exit_code_zero_recorded_correctly(repo_path, stub_agent, monkeypatch):
         def add_assistant_message(self, content, duration=None):
             pass
 
-        def add_tool_call(
-            self, tool, args, stdout="", stderr="", exit_code=None, duration=None
-        ):
+        def add_tool_call(self, tool, args, stdout="", stderr="", exit_code=None, duration=None):
             recorded_exit_codes.append(exit_code)
 
         def set_phase_status(self, status):

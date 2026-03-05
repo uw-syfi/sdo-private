@@ -3,12 +3,12 @@ import threading
 import time
 from pathlib import Path
 
-from app_operator.config import load_config, Config
+from app_operator.config import Config, load_config
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.logger import logger
-from app_operator.langgraph.llm import build_llm
 from app_operator.langgraph.graph import build_graph
+from app_operator.langgraph.llm import build_llm
+from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
 from app_operator.trajectory import TrajectoryRecorder
 
@@ -56,7 +56,7 @@ class LangGraphOperator(OperatorBase):
         try:
             self.llm = build_llm(self.config)
         except Exception as e:
-            raise AgentError(f"Failed to initialize LangGraph LLM: {e}")
+            raise AgentError(f"Failed to initialize LangGraph LLM: {e}") from e
 
         self._shutdown_requested = False
         self._deployed = False
@@ -101,9 +101,7 @@ class LangGraphOperator(OperatorBase):
             }
 
             thread_id = str(int(time.time()))
-            final_state = self.graph.invoke(
-                initial_state, config={"configurable": {"thread_id": thread_id}}
-            )
+            final_state = self.graph.invoke(initial_state, config={"configurable": {"thread_id": thread_id}})  # type: ignore[reportArgumentType]
 
             if final_state:
                 usage = final_state.get("token_usage", {})
@@ -132,8 +130,6 @@ class LangGraphOperator(OperatorBase):
         if not self._shutdown_requested:
             self._shutdown_requested = True
             signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
-            logger.info(
-                f"Received {signal_name} signal. Initiating graceful shutdown..."
-            )
+            logger.info(f"Received {signal_name} signal. Initiating graceful shutdown...")
             if signum == signal.SIGINT:
                 raise KeyboardInterrupt()

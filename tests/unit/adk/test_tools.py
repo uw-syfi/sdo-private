@@ -1,7 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from app_operator.filesystem import InMemoryFilesystem
+
 from app_operator.adk.tools import build_tools
+from app_operator.filesystem import InMemoryFilesystem
 
 
 def test_resolve_path_prevents_escape():
@@ -198,18 +199,14 @@ def test_run_command(mock_run):
     tools = {t.__name__: t for t in build_tools(repo_root, fs)}
 
     # Mock success
-    mock_run.return_value = MagicMock(
-        returncode=0, stdout="command output", stderr=""
-    )
+    mock_run.return_value = MagicMock(returncode=0, stdout="command output", stderr="")
 
     result = tools["run_command"]("ls -la", 10)
     assert result["status"] == "success"
     assert result["output"] == "command output"
 
     # Mock failure
-    mock_run.return_value = MagicMock(
-        returncode=1, stdout="", stderr="command failed"
-    )
+    mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="command failed")
 
     result = tools["run_command"]("invalid", 10)
     assert result["status"] == "error"

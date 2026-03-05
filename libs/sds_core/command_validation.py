@@ -55,9 +55,7 @@ class DangerousCommandError(ValueError):
     """Raised when a command matches a known-dangerous pattern."""
 
     def __init__(self, command: str, reason: str):
-        super().__init__(
-            f"Dangerous command rejected: {reason}. Command: {command}"
-        )
+        super().__init__(f"Dangerous command rejected: {reason}. Command: {command}")
         self.command = command
         self.reason = reason
 

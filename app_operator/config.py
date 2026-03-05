@@ -1,30 +1,26 @@
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
-from pathlib import Path
+    import tomli as tomllib  # type: ignore[reportMissingImports]
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 
-from app_operator.logger import logger
 from app_operator.exceptions import ConfigurationError
+from app_operator.logger import logger
 from app_operator.validation import (
-    validate_field,
     validate_dataclass_fields,
-    validate_type,
+    validate_field,
     validate_range,
+    validate_type,
 )
 
 
 class UnrecognizedSectionError(ConfigurationError):
     """Raised when an unrecognized section is found in the config file."""
 
-    pass
-
 
 class UnrecognizedFieldError(ConfigurationError):
     """Raised when an unrecognized field is found in a recognized section."""
-
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -81,29 +77,24 @@ class DSPyOptimizationConfig:
     def __post_init__(self):
         """Validate configuration after initialization."""
         if self.optimizer not in self.VALID_OPTIMIZERS:
-            raise ValueError(
-                f"optimizer must be one of {self.VALID_OPTIMIZERS}, got '{self.optimizer}'"
-            )
+            raise ValueError(f"optimizer must be one of {self.VALID_OPTIMIZERS}, got '{self.optimizer}'")
 
         # teacher_model: non-empty string
         if not isinstance(self.teacher_model, str) or not self.teacher_model.strip():
-            raise ValueError(
-                f"teacher_model must be a non-empty string, got '{self.teacher_model}'"
-            )
+            raise ValueError(f"teacher_model must be a non-empty string, got '{self.teacher_model}'")
 
         validate_field(self.num_examples, "num_examples", int, positive=True)
         validate_field(self.n_candidates, "n_candidates", int, min_val=1)
         validate_field(self.selection_mode, "selection_mode", str)
         if self.selection_mode not in self.VALID_SELECTION_MODES:
-            raise ValueError(
-                f"selection_mode must be one of {self.VALID_SELECTION_MODES}, "
-                f"got '{self.selection_mode}'"
-            )
+            raise ValueError(f"selection_mode must be one of {self.VALID_SELECTION_MODES}, got '{self.selection_mode}'")
         validate_field(self.selection_top_k, "selection_top_k", int, min_val=1)
 
         # validation_split: numeric in [0.0, 1.0)
         validate_type(
-            self.validation_split, "validation_split", (int, float),
+            self.validation_split,
+            "validation_split",
+            (int, float),
             type_label=_NUMERIC_LABEL,
         )
         validate_range(
@@ -131,15 +122,9 @@ class DSPyOptimizationConfig:
 
         for metric, weight in self.metric_weights.items():
             if not isinstance(weight, (int, float)):
-                raise TypeError(
-                    f"metric_weights['{metric}'] must be numeric, "
-                    f"got {type(weight).__name__}"
-                )
+                raise TypeError(f"metric_weights['{metric}'] must be numeric, got {type(weight).__name__}")
             if not 0.0 <= weight <= 1.0:
-                raise ValueError(
-                    f"metric_weights['{metric}'] must be in range [0.0, 1.0], "
-                    f"got {weight}"
-                )
+                raise ValueError(f"metric_weights['{metric}'] must be in range [0.0, 1.0], got {weight}")
 
         total_weight = sum(self.metric_weights.values())
         if not (0.99 <= total_weight <= 1.01):  # Allow small floating point error
@@ -165,7 +150,9 @@ class DSPyAutoRollbackConfig:
         validate_field(self.enabled, "enabled", bool)
 
         validate_type(
-            self.success_rate_threshold, "success_rate_threshold", (int, float),
+            self.success_rate_threshold,
+            "success_rate_threshold",
+            (int, float),
             type_label=_NUMERIC_LABEL,
         )
         validate_range(
@@ -206,29 +193,23 @@ class DSPyConfig:
     canary_deployment: bool = False
     canary_percentage: float = 0.0
     optimization: DSPyOptimizationConfig = field(default_factory=DSPyOptimizationConfig)
-    auto_rollback: DSPyAutoRollbackConfig = field(
-        default_factory=DSPyAutoRollbackConfig
-    )
+    auto_rollback: DSPyAutoRollbackConfig = field(default_factory=DSPyAutoRollbackConfig)
 
     def __post_init__(self):
         """Validate configuration after initialization."""
         validate_field(self.use_optimized, "use_optimized", bool)
         validate_field(self.use_seeds, "use_seeds", bool)
 
-        if (
-            not isinstance(self.optimized_version, str)
-            or not self.optimized_version.strip()
-        ):
-            raise ValueError(
-                f"optimized_version must be a non-empty string, "
-                f"got '{self.optimized_version}'"
-            )
+        if not isinstance(self.optimized_version, str) or not self.optimized_version.strip():
+            raise ValueError(f"optimized_version must be a non-empty string, got '{self.optimized_version}'")
 
         validate_field(self.fallback_to_baseline, "fallback_to_baseline", bool)
         validate_field(self.enable_online_learning, "enable_online_learning", bool)
 
         validate_type(
-            self.feedback_sample_rate, "feedback_sample_rate", (int, float),
+            self.feedback_sample_rate,
+            "feedback_sample_rate",
+            (int, float),
             type_label=_NUMERIC_LABEL,
         )
         validate_range(
@@ -241,7 +222,9 @@ class DSPyConfig:
         validate_field(self.canary_deployment, "canary_deployment", bool)
 
         validate_type(
-            self.canary_percentage, "canary_percentage", (int, float),
+            self.canary_percentage,
+            "canary_percentage",
+            (int, float),
             type_label=_NUMERIC_LABEL,
         )
         validate_range(
@@ -318,32 +301,22 @@ class FaultInjectionConfig:
 
         validate_type(self.num_faults, "num_faults", int)
         if self.num_faults < 1 or self.num_faults > 5:
-            raise ValueError(
-                f"num_faults must be between 1 and 5, got {self.num_faults}"
-            )
+            raise ValueError(f"num_faults must be between 1 and 5, got {self.num_faults}")
 
         validate_type(self.categories, "categories", list)
         for cat in self.categories:
             if cat not in _FAULT_VALID_CATEGORIES:
-                raise ValueError(
-                    f"Invalid category '{cat}'. "
-                    f"Valid categories: {sorted(_FAULT_VALID_CATEGORIES)}"
-                )
+                raise ValueError(f"Invalid category '{cat}'. Valid categories: {sorted(_FAULT_VALID_CATEGORIES)}")
 
         validate_type(self.severities, "severities", list)
         for sev in self.severities:
             if sev not in _FAULT_VALID_SEVERITIES:
-                raise ValueError(
-                    f"Invalid severity '{sev}'. "
-                    f"Valid severities: {sorted(_FAULT_VALID_SEVERITIES)}"
-                )
+                raise ValueError(f"Invalid severity '{sev}'. Valid severities: {sorted(_FAULT_VALID_SEVERITIES)}")
 
         validate_field(self.exclude_faults, "exclude_faults", list)
         validate_field(self.seed, "seed", int, nullable=True)
         validate_field(self.backup_compose, "backup_compose", bool)
-        validate_field(
-            self.platform, "platform", str, valid_values=self.VALID_PLATFORMS
-        )
+        validate_field(self.platform, "platform", str, valid_values=self.VALID_PLATFORMS)
 
 
 @dataclass
@@ -378,8 +351,7 @@ class AgentConfig:
         # Case-insensitive check
         if self.provider.lower() not in self.VALID_PROVIDERS:
             raise ValueError(
-                f"Invalid provider: '{self.provider}'. "
-                f"Valid providers: {', '.join(sorted(self.VALID_PROVIDERS))}"
+                f"Invalid provider: '{self.provider}'. Valid providers: {', '.join(sorted(self.VALID_PROVIDERS))}"
             )
         # Normalize provider name
         self.provider = self.provider.lower()
@@ -393,9 +365,7 @@ class AgentConfig:
         # Validate retry configuration
         validate_field(self.max_retries, "max_retries", int, non_negative=True)
         validate_field(self.retry_base_delay, "retry_base_delay", int, positive=True)
-        validate_field(
-            self.rate_limit_backoff, "rate_limit_backoff", int, positive=True
-        )
+        validate_field(self.rate_limit_backoff, "rate_limit_backoff", int, positive=True)
 
 
 # Canonical mapping from SDS provider name to the litellm model prefix.
@@ -456,32 +426,26 @@ class DeploymentConfig:
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
-        validate_field(
-            self.platform, "platform", str, valid_values=self.VALID_PLATFORMS
-        )
+        validate_field(self.platform, "platform", str, valid_values=self.VALID_PLATFORMS)
 
         validate_type(self.target, "target", str)
         if self.target == "remote":
             raise ValueError("Remote deployment is not currently supported")
         if self.target not in self.VALID_TARGETS:
-            raise ValueError(
-                f"Invalid target: '{self.target}'. "
-                f"Valid targets: {', '.join(sorted(self.VALID_TARGETS))}"
-            )
+            raise ValueError(f"Invalid target: '{self.target}'. Valid targets: {', '.join(sorted(self.VALID_TARGETS))}")
 
 
 @dataclass
 class OperatorPhaseConfig:
     """Configuration for operator phase control."""
+
     code_analysis: bool = True
     fix_summary_consolidation: bool = True
     git_integration: bool = False
 
     def __post_init__(self):
         validate_field(self.code_analysis, "code_analysis", bool)
-        validate_field(
-            self.fix_summary_consolidation, "fix_summary_consolidation", bool
-        )
+        validate_field(self.fix_summary_consolidation, "fix_summary_consolidation", bool)
         validate_field(self.git_integration, "git_integration", bool)
 
 
@@ -565,12 +529,16 @@ class GEPAConfig:
 
         for prob_field in ["mutation_probability", "diversity_probability"]:
             validate_type(
-                getattr(self, prob_field), prob_field, (int, float),
+                getattr(self, prob_field),
+                prob_field,
+                (int, float),
                 type_label=_NUMERIC_LABEL,
             )
             validate_range(
-                getattr(self, prob_field), prob_field,
-                min_val=0.0, max_val=1.0,
+                getattr(self, prob_field),
+                prob_field,
+                min_val=0.0,
+                max_val=1.0,
             )
 
         validate_field(self.seed, "seed", int, nullable=True)
@@ -598,9 +566,7 @@ class Config:
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
     @staticmethod
-    def _validate_fields(
-        section_data: dict, section_name: str, config_class: type
-    ) -> None:
+    def _validate_fields(section_data: dict, section_name: str, config_class: type) -> None:
         """Validate that all fields in a section are recognized."""
         validate_dataclass_fields(section_data, section_name, config_class)
 
@@ -632,9 +598,7 @@ class Config:
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
         cls._validate_fields(gepa_data, "gepa", GEPAConfig)
         cls._validate_dspy_fields(dspy_data)
-        cls._validate_fields(
-            fault_injection_data, "fault_injection", FaultInjectionConfig
-        )
+        cls._validate_fields(fault_injection_data, "fault_injection", FaultInjectionConfig)
 
         # Create agent config first to access model info
         agent_config = AgentConfig(**agent_data)
@@ -665,17 +629,13 @@ class Config:
         if "optimization" in dspy_data:
             opt_data = dspy_data["optimization"]
             if isinstance(opt_data, dict):
-                validate_dataclass_fields(
-                    opt_data, "dspy.optimization", DSPyOptimizationConfig
-                )
+                validate_dataclass_fields(opt_data, "dspy.optimization", DSPyOptimizationConfig)
 
         # Validate nested auto_rollback section
         if "auto_rollback" in dspy_data:
             rollback_data = dspy_data["auto_rollback"]
             if isinstance(rollback_data, dict):
-                validate_dataclass_fields(
-                    rollback_data, "dspy.auto_rollback", DSPyAutoRollbackConfig
-                )
+                validate_dataclass_fields(rollback_data, "dspy.auto_rollback", DSPyAutoRollbackConfig)
 
     @classmethod
     def _validate_operator_phase_fields(cls, operator_data: dict) -> None:
@@ -690,9 +650,7 @@ class Config:
         validate_dataclass_fields(phase_data, "operator.phase", OperatorPhaseConfig)
 
     @classmethod
-    def _parse_dspy_config(
-        cls, dspy_data: dict, agent_config: AgentConfig
-    ) -> DSPyConfig:
+    def _parse_dspy_config(cls, dspy_data: dict, agent_config: AgentConfig) -> DSPyConfig:
         """Parse DSPy configuration with nested sections.
 
         Args:
@@ -734,21 +692,11 @@ class Config:
                 provider = agent_config.provider
                 model = agent_config.model
 
-                dspy_data["runtime_model"] = qualify_model_for_litellm(
-                    model, provider=provider
-                )
+                dspy_data["runtime_model"] = qualify_model_for_litellm(model, provider=provider)
 
         # Create nested config objects
-        optimization = (
-            DSPyOptimizationConfig(**optimization_data)
-            if optimization_data
-            else DSPyOptimizationConfig()
-        )
-        auto_rollback = (
-            DSPyAutoRollbackConfig(**auto_rollback_data)
-            if auto_rollback_data
-            else DSPyAutoRollbackConfig()
-        )
+        optimization = DSPyOptimizationConfig(**optimization_data) if optimization_data else DSPyOptimizationConfig()
+        auto_rollback = DSPyAutoRollbackConfig(**auto_rollback_data) if auto_rollback_data else DSPyAutoRollbackConfig()
 
         # Propagate agent location to DSPy runtime if not already set
         if "vertex_location" not in dspy_data and agent_config.location:
@@ -770,11 +718,7 @@ class Config:
         operator_data = dict(operator_data)  # Copy to avoid mutation
         phase_data = operator_data.pop("phase", {})
 
-        phase = (
-            OperatorPhaseConfig(**phase_data)
-            if phase_data
-            else OperatorPhaseConfig()
-        )
+        phase = OperatorPhaseConfig(**phase_data) if phase_data else OperatorPhaseConfig()
 
         return OperatorConfig(**operator_data, phase=phase)
 

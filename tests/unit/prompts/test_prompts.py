@@ -1,5 +1,6 @@
 import pytest
-from app_operator.prompts import get_loader, reset_loader, PromptLoader
+
+from app_operator.prompts import PromptLoader, get_loader, reset_loader
 
 
 @pytest.fixture
@@ -95,9 +96,7 @@ def test_fix_error_prompt(loader):
 
 
 def test_summarize_prompt(loader):
-    rendered = loader.render(
-        "deployer/summarize.jinja2", output_snippet="OUTPUT_SNIPPET"
-    )
+    rendered = loader.render("deployer/summarize.jinja2", output_snippet="OUTPUT_SNIPPET")
     # Verify input injection and XML formatting requirements
     assert "OUTPUT_SNIPPET" in rendered
     assert "<output_msg>" in rendered
@@ -117,9 +116,7 @@ def test_code_analyzer_user(loader):
 
 
 def test_monitor_analyze_health(loader):
-    rendered = loader.render(
-        "monitor/analyze_health.jinja2", repo_path="/repo", context="HEALTH_CONTEXT"
-    )
+    rendered = loader.render("monitor/analyze_health.jinja2", repo_path="/repo", context="HEALTH_CONTEXT")
     # Verify context injection and output format tags
     assert "Repository: /repo" in rendered
     assert "HEALTH_CONTEXT" in rendered

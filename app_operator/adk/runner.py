@@ -1,14 +1,15 @@
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Any
-
-from app_operator.trajectory import TrajectoryRecorderProtocol
-from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
+from typing import Any
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+
+from app_operator.adk.trajectory_plugin import AdkTrajectoryPlugin
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 class AdkAgentRunner:
@@ -46,17 +47,13 @@ class AdkAgentRunner:
         session_id = str(uuid.uuid4())
 
         # Create session explicitly
-        await self.session_service.create_session(
-            app_name=self.app_name, user_id="sds", session_id=session_id
-        )
+        await self.session_service.create_session(app_name=self.app_name, user_id="sds", session_id=session_id)
 
         response_text = ""
 
         if hasattr(runner, "run_async"):
             content = types.Content(role="user", parts=[types.Part(text=user_prompt)])
-            async for event in runner.run_async(
-                user_id="sds", session_id=session_id, new_message=content
-            ):
+            async for event in runner.run_async(user_id="sds", session_id=session_id, new_message=content):
                 if on_event:
                     on_event(event)
                 # Accumulate text from events (deltas)

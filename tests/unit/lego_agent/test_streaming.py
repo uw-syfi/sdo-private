@@ -1,7 +1,8 @@
 """Tests for lego_agent.streaming shared utilities."""
 
 from types import SimpleNamespace
-from lego_agent.streaming import parse_chunk_content, extract_tool_result
+
+from lego_agent.streaming import extract_tool_result, parse_chunk_content
 
 # --- parse_chunk_content ---
 
@@ -38,19 +39,18 @@ class TestParseChunkContent:
     def test_non_string_non_list(self):
         assert parse_chunk_content(42) == "42"
 
+
 # --- extract_tool_result ---
 
 
 class TestExtractToolResult:
     def test_json_success(self):
-        status, text = extract_tool_result(
-            '{"status": "success", "output": "ok"}')
+        status, text = extract_tool_result('{"status": "success", "output": "ok"}')
         assert status == "success"
         assert text == "ok"
 
     def test_json_error(self):
-        status, text = extract_tool_result(
-            '{"status": "error", "output": "fail"}')
+        status, text = extract_tool_result('{"status": "error", "output": "fail"}')
         assert status == "error"
         assert text == "fail"
 
@@ -60,8 +60,7 @@ class TestExtractToolResult:
         assert text == "just text"
 
     def test_dict_content(self):
-        status, text = extract_tool_result(
-            {"status": "success", "output": "done"})
+        status, text = extract_tool_result({"status": "success", "output": "done"})
         assert status == "success"
         assert text == "done"
 

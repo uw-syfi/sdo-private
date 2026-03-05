@@ -83,8 +83,7 @@ class TestCandidatePoolPruneDominated:
     def test_prunes_to_max_size(self):
         pool = CandidatePool()
         for i in range(10):
-            pool.add(_make_candidate(f"c{i}", score=float(i),
-                                     scores={"m1": float(i)}))
+            pool.add(_make_candidate(f"c{i}", score=float(i), scores={"m1": float(i)}))
         pool.prune_dominated(max_pool_size=3)
         assert len(pool) == 3
 

@@ -1,8 +1,10 @@
 """Tests for TrajectoryDataLoader."""
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
+
 from app_operator.dspy_integration.data_loader import TrajectoryDataLoader, TrajectoryExample
 
 
@@ -381,8 +383,12 @@ class TestTrajectoryDataLoader:
         loader = TrajectoryDataLoader(Path())
         messages = [
             {"role": "user", "content": "Deploy"},
-            {"role": "tool_call", "tool": "bash", "exit_code": -1,
-             "stdout": "Services started\nSUCCESS: System appears healthy.\n"},
+            {
+                "role": "tool_call",
+                "tool": "bash",
+                "exit_code": -1,
+                "stdout": "Services started\nSUCCESS: System appears healthy.\n",
+            },
         ]
         assert loader._determine_success(messages, "deployment", False) is True
 
@@ -391,8 +397,7 @@ class TestTrajectoryDataLoader:
         loader = TrajectoryDataLoader(Path())
         messages = [
             {"role": "user", "content": "Deploy"},
-            {"role": "tool_call", "tool": "bash", "exit_code": -1,
-             "stdout": "Container crashed during startup\n"},
+            {"role": "tool_call", "tool": "bash", "exit_code": -1, "stdout": "Container crashed during startup\n"},
         ]
         assert loader._determine_success(messages, "deployment", True) is False
 
@@ -400,10 +405,12 @@ class TestTrajectoryDataLoader:
         """exec_summary stating system is healthy overrides error keywords in body."""
         loader = TrajectoryDataLoader(Path())
         messages = [
-            {"role": "assistant", "content":
-             "<exec_summary>The system is fully operational with all checks passing.</exec_summary>\n"
-             "### Details\n"
-             "Log Noise/Errors: frontend reports resolver errors (non-critical)."},
+            {
+                "role": "assistant",
+                "content": "<exec_summary>The system is fully operational with all checks passing.</exec_summary>\n"
+                "### Details\n"
+                "Log Noise/Errors: frontend reports resolver errors (non-critical).",
+            },
         ]
         # Would be False with naive keyword matching; True with exec_summary
         assert loader._determine_success(messages, "monitoring", False) is True
@@ -412,9 +419,11 @@ class TestTrajectoryDataLoader:
         """exec_summary indicating critical failure marks monitoring as failed."""
         loader = TrajectoryDataLoader(Path())
         messages = [
-            {"role": "assistant", "content":
-             "<exec_summary>Critical failure: system down, database unreachable.</exec_summary>\n"
-             "All endpoints returning 503."},
+            {
+                "role": "assistant",
+                "content": "<exec_summary>Critical failure: system down, database unreachable.</exec_summary>\n"
+                "All endpoints returning 503.",
+            },
         ]
         assert loader._determine_success(messages, "monitoring", True) is False
 
@@ -431,20 +440,23 @@ class TestTrajectoryDataLoader:
         """Token usage is estimated from message content lengths."""
         loader = TrajectoryDataLoader(Path())
         messages = [
-            {"role": "system", "content": "A" * 400},   # 100 input tokens
-            {"role": "user", "content": "B" * 200},      # 50 input tokens
+            {"role": "system", "content": "A" * 400},  # 100 input tokens
+            {"role": "user", "content": "B" * 200},  # 50 input tokens
             {"role": "assistant", "content": "C" * 120},  # 30 output tokens
-            {"role": "tool_call", "tool": "bash",
-             "content": "",
-             # ~10 input tokens (str repr adds a few chars)
-             "args": {"cmd": "D" * 40},
-             "stdout": "E" * 80},                        # 20 input tokens
+            {
+                "role": "tool_call",
+                "tool": "bash",
+                "content": "",
+                # ~10 input tokens (str repr adds a few chars)
+                "args": {"cmd": "D" * 40},
+                "stdout": "E" * 80,
+            },  # 20 input tokens
         ]
         usage = loader._extract_token_usage(messages)
         assert usage is not None
         assert usage["estimated"] is True
-        # input: (400 + 200 + len(str({"cmd":"D"*40})) + 80) / 4
-        # output: 120 / 4 = 30
+        # Expected output tokens: 120 / 4 = 30
+        # Expected input tokens: (400 + 200 + tool_call_repr + 80) / 4
         assert usage["output"] == 30
         assert usage["input"] > 150  # at least system + user + stdout
 

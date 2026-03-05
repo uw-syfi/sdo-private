@@ -1,26 +1,27 @@
 from __future__ import annotations
 
-import time
 import re
+import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Any, Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
 
-from app_operator.ui_protocol import OperatorUI, NullOperatorUI
-from libs.agent_cli.base import CodingAgent
+from app_operator.config import OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
-from app_operator.config import OperatorConfig
-from app_operator.healthcheck import run_health_check
 from app_operator.trajectory import (
+    NullTrajectoryRecorder,
     Phase,
     TrajectoryRecorderProtocol,
-    NullTrajectoryRecorder,
 )
+from app_operator.ui_protocol import NullOperatorUI, OperatorUI
+from libs.agent_cli.base import CodingAgent
 
 
 class MonitorLike(Protocol):
@@ -30,7 +31,7 @@ class MonitorLike(Protocol):
     agent: CodingAgent
     filesystem: FileSystemInterface
     recorder: TrajectoryRecorderProtocol
-    dspy_config: "DSPyConfig" | None
+    dspy_config: DSPyConfig | None
     ui: OperatorUI
     check_count: int
     health_check_script: Path
@@ -48,12 +49,10 @@ class MonitoringTask(ABC):
         Args:
             operator: The AppOperator/AppMonitor instance running this task.
         """
-        pass
 
     @abstractmethod
     def analyze(self, operator: MonitorLike, result: Any) -> None:
         """Use a coding agent to analyze results and provide suggestions."""
-        pass
 
 
 class HealthCheckTask(MonitoringTask):
@@ -67,9 +66,7 @@ class HealthCheckTask(MonitoringTask):
         """
         monitor = operator
         # Start monitoring phase in trajectory
-        with monitor.recorder.phase(
-            Phase.MONITORING, {"cycle": monitor.check_count}
-        ) as r:
+        with monitor.recorder.phase(Phase.MONITORING, {"cycle": monitor.check_count}) as r:
             # Run health check
             start_time = time.time()
             health_result = run_health_check(
@@ -95,9 +92,7 @@ class HealthCheckTask(MonitoringTask):
         """Analyze health check results using the agent."""
         monitor = operator
         health_result = result
-        logger.info(
-            f"Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results"
-        )
+        logger.info(f"Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results")
 
         # Prepare health check context
         context = self._prepare_health_context(health_result, monitor.check_count)
@@ -118,9 +113,7 @@ class HealthCheckTask(MonitoringTask):
             monitor.filesystem.mkdir(monitor.log_dir, parents=True, exist_ok=True)
             log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
 
-            logger.info(
-                f"Consulting {monitor.agent.__class__.__name__} for health analysis..."
-            )
+            logger.info(f"Consulting {monitor.agent.__class__.__name__} for health analysis...")
 
             response = monitor.agent.generate(
                 prompt,
@@ -134,16 +127,12 @@ class HealthCheckTask(MonitoringTask):
                 f.write(response)
 
             # Extract executive summary
-            match = re.search(
-                r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL
-            )
+            match = re.search(r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
             if match:
                 summary = match.group(1).strip()
                 logger.info(f"Summary: {summary}")
             else:
-                logger.warning(
-                    "Summary not found in expected XML format. See log for full analysis."
-                )
+                logger.warning("Summary not found in expected XML format. See log for full analysis.")
 
             logger.info(f"Full analysis saved to: {log_file}")
 
@@ -161,9 +150,7 @@ class HealthCheckTask(MonitoringTask):
 
         context_parts.append(f"## Health Check #{check_count}")
         context_parts.append(f"Exit Code: {health_result['exit_code']}")
-        context_parts.append(
-            f"Status: {'PASSED' if health_result['success'] else 'FAILED'}"
-        )
+        context_parts.append(f"Status: {'PASSED' if health_result['success'] else 'FAILED'}")
         context_parts.append(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         if health_result["stdout"]:
@@ -191,7 +178,7 @@ class HealthCheckTask(MonitoringTask):
         repo_path: Path,
         health_result: dict,
         check_count: int,
-        dspy_config: "DSPyConfig" | None = None,
+        dspy_config: DSPyConfig | None = None,
         recorder=None,
     ) -> str:
         """Create a prompt for the coding agent to analyze health check results.
@@ -234,7 +221,7 @@ class AppMonitor:
         filesystem: FileSystemInterface | None = None,
         operator_config: OperatorConfig | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
-        dspy_config: "DSPyConfig" | None = None,
+        dspy_config: DSPyConfig | None = None,
         ui: OperatorUI | None = None,
     ):
         """Initialize the monitor agent.
@@ -287,9 +274,7 @@ class AppMonitor:
 
         while not (check_shutdown and check_shutdown()):
             if max_checks is not None and self.check_count >= max_checks:
-                logger.info(
-                    f"Reached maximum number of checks ({max_checks}). Stopping monitor."
-                )
+                logger.info(f"Reached maximum number of checks ({max_checks}). Stopping monitor.")
                 break
 
             # Wait for interval

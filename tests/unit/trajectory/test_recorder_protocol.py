@@ -4,8 +4,8 @@ import unittest.mock as mock
 from pathlib import Path
 
 from app_operator.trajectory import (
-    TrajectoryRecorderProtocol,
     NullTrajectoryRecorder,
+    TrajectoryRecorderProtocol,
 )
 
 
@@ -49,8 +49,7 @@ class TestTrajectoryRecorderProtocol:
             def add_assistant_message(self, content, duration=None):
                 pass
 
-            def add_tool_call(self, tool, args, stdout="", stderr="",
-                              exit_code=None, duration=None):
+            def add_tool_call(self, tool, args, stdout="", stderr="", exit_code=None, duration=None):
                 pass
 
             def set_phase_status(self, status):
@@ -92,6 +91,7 @@ class TestRecorderGuardConsistency:
     def test_subagent_record_token_usage_guarded(self):
         """SubagentCodingAgent guards record_token_usage with hasattr."""
         import inspect
+
         from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 
         source = inspect.getsource(SubagentCodingAgent.generate)
@@ -100,6 +100,7 @@ class TestRecorderGuardConsistency:
     def test_subagent_add_assistant_message_guarded(self):
         """SubagentCodingAgent guards add_assistant_message with hasattr."""
         import inspect
+
         from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 
         source = inspect.getsource(SubagentCodingAgent._generate_fix)
@@ -108,6 +109,7 @@ class TestRecorderGuardConsistency:
     def test_hybrid_record_token_usage_guarded(self):
         """HybridCodingAgent guards record_token_usage with hasattr."""
         import inspect
+
         from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 
         source = inspect.getsource(HybridCodingAgent.generate)
@@ -116,6 +118,7 @@ class TestRecorderGuardConsistency:
     def test_hybrid_add_assistant_message_guarded(self):
         """HybridCodingAgent guards add_assistant_message with hasattr."""
         import inspect
+
         from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 
         source = inspect.getsource(HybridCodingAgent._generate_fix)
@@ -127,7 +130,6 @@ class TestRecorderGuardConsistency:
 
         class MinimalRecorder:
             """Recorder that lacks record_token_usage and add_assistant_message."""
-            pass
 
         agent = SubagentCodingAgent(model="test-model", recorder=MinimalRecorder())
 
@@ -154,7 +156,6 @@ class TestRecorderGuardConsistency:
 
         class MinimalRecorder:
             """Recorder that lacks record_token_usage and add_assistant_message."""
-            pass
 
         agent = HybridCodingAgent(model="test-model", recorder=MinimalRecorder())
 

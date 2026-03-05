@@ -10,21 +10,5 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 echo "Running Python tests..."
 cd "$PROJECT_ROOT"
 
-PYTEST_ARGS=()
-COVERAGE=false
-
-for arg in "$@"; do
-    if [ "$arg" == "--cov" ]; then
-        COVERAGE=true
-    else
-        PYTEST_ARGS+=("$arg")
-    fi
-done
-
-if [ "$COVERAGE" = true ]; then
-    # Run with coverage for main packages
-    uv run pytest tests/unit/lego_agent
-else
-    # Run standard pytest
-    uv run --extra test pytest "${PYTEST_ARGS[@]}" tests
-fi
+# Run pytest with coverage
+uv run --extra test pytest --cov --cov-report=term-missing "$@" tests

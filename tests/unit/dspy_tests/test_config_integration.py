@@ -1,11 +1,12 @@
 """Tests for DSPy config integration with main Config class."""
 
 import pytest
+
 from app_operator.config import Config, UnrecognizedFieldError
 from app_operator.dspy_integration.config import (
+    DSPyAutoRollbackConfig,
     DSPyConfig,
     DSPyOptimizationConfig,
-    DSPyAutoRollbackConfig,
 )
 
 
@@ -197,56 +198,64 @@ class TestConfigIntegration:
 
     def test_runtime_model_auto_populated_from_agent(self):
         """Test runtime_model is auto-populated from agent config."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-3-pro-preview",
-            },
-            "dspy": {
-                "use_optimized": True,
+        config = Config.from_dict(
+            {
+                "agent": {
+                    "provider": "gemini",
+                    "model": "gemini-3-pro-preview",
+                },
+                "dspy": {
+                    "use_optimized": True,
+                },
             }
-        })
+        )
 
         # Should auto-populate runtime_model from agent config
         assert config.dspy.runtime_model == "gemini/gemini-3-pro-preview"
 
     def test_runtime_model_auto_populated_anthropic(self):
         """Test runtime_model auto-population for Anthropic provider."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "claude",
-                "model": "claude-sonnet-4-5",
-            },
-            "dspy": {
-                "use_optimized": True,
+        config = Config.from_dict(
+            {
+                "agent": {
+                    "provider": "claude",
+                    "model": "claude-sonnet-4-5",
+                },
+                "dspy": {
+                    "use_optimized": True,
+                },
             }
-        })
+        )
 
         assert config.dspy.runtime_model == "anthropic/claude-sonnet-4-5"
 
     def test_runtime_model_explicit_overrides_auto(self):
         """Test explicit runtime_model overrides auto-population."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-3-pro-preview",
-            },
-            "dspy": {
-                "use_optimized": True,
-                "runtime_model": "openai/gpt-4",
+        config = Config.from_dict(
+            {
+                "agent": {
+                    "provider": "gemini",
+                    "model": "gemini-3-pro-preview",
+                },
+                "dspy": {
+                    "use_optimized": True,
+                    "runtime_model": "openai/gpt-4",
+                },
             }
-        })
+        )
 
         # Explicit value should take precedence
         assert config.dspy.runtime_model == "openai/gpt-4"
 
     def test_runtime_model_not_populated_when_no_agent_model(self):
         """Test runtime_model stays None when agent.model not set."""
-        config = Config.from_dict({
-            "dspy": {
-                "use_optimized": True,
+        config = Config.from_dict(
+            {
+                "dspy": {
+                    "use_optimized": True,
+                }
             }
-        })
+        )
 
         # Should remain None
         assert config.dspy.runtime_model is None
@@ -259,50 +268,56 @@ class TestConfigIntegration:
         not on Vertex AI).  teacher_model is already a qualified litellm string
         that is known to work, so it is preferred as the default.
         """
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-3-pro-preview",
-            },
-            "dspy": {
-                "use_optimized": True,
-                "optimization": {
-                    "teacher_model": "vertex_ai/gemini-2.5-pro",
-                }
+        config = Config.from_dict(
+            {
+                "agent": {
+                    "provider": "gemini",
+                    "model": "gemini-3-pro-preview",
+                },
+                "dspy": {
+                    "use_optimized": True,
+                    "optimization": {
+                        "teacher_model": "vertex_ai/gemini-2.5-pro",
+                    },
+                },
             }
-        })
+        )
 
         # teacher_model is a qualified litellm string; used as default
         assert config.dspy.runtime_model == "vertex_ai/gemini-2.5-pro"
 
     def test_runtime_model_vertex_ai_when_agent_provider_is_vertex(self):
         """Test runtime_model uses vertex_ai when [agent] provider is vertex."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "vertex",
-                "model": "gemini-2.5-pro",
-            },
-            "dspy": {
-                "use_optimized": True,
+        config = Config.from_dict(
+            {
+                "agent": {
+                    "provider": "vertex",
+                    "model": "gemini-2.5-pro",
+                },
+                "dspy": {
+                    "use_optimized": True,
+                },
             }
-        })
+        )
 
         assert config.dspy.runtime_model == "vertex_ai/gemini-2.5-pro"
 
     def test_runtime_model_uses_gemini_when_not_vertex(self):
         """Test runtime_model uses gemini provider when not using Vertex AI."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-pro",
-            },
-            "dspy": {
-                "use_optimized": True,
-                "optimization": {
-                    "teacher_model": "gemini-pro",  # Not vertex_ai
-                }
+        config = Config.from_dict(
+            {
+                "agent": {
+                    "provider": "gemini",
+                    "model": "gemini-pro",
+                },
+                "dspy": {
+                    "use_optimized": True,
+                    "optimization": {
+                        "teacher_model": "gemini-pro",  # Not vertex_ai
+                    },
+                },
             }
-        })
+        )
 
         # Should use gemini provider
         assert config.dspy.runtime_model == "gemini/gemini-pro"

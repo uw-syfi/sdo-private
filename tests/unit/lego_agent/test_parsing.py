@@ -1,4 +1,5 @@
 import pytest
+
 from lego_agent.models import parse_lego_agent_response
 
 

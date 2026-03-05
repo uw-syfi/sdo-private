@@ -12,9 +12,9 @@ Public API:
 """
 
 from app_operator.dspy_integration.config import (
+    DSPyAutoRollbackConfig,
     DSPyConfig,
     DSPyOptimizationConfig,
-    DSPyAutoRollbackConfig,
 )
 
 __all__ = [

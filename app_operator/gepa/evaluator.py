@@ -61,9 +61,7 @@ def extract_efficiency_metrics(
     turn_count = 0
     tool_call_count = 0
 
-    for phase_key in [
-        "deployment", "script_generation", "monitoring", "exploration"
-    ]:
+    for phase_key in ["deployment", "script_generation", "monitoring", "exploration"]:
         conversations = trajectory.get(phase_key, [])
         turn_count += len(conversations)
         for conv in conversations:
@@ -149,9 +147,7 @@ class SDSEvaluator:
                 text=True,
             )
             if result.returncode != 0:
-                raise ValueError(
-                    f"Not a git repository (or git failed): {repo}"
-                )
+                raise ValueError(f"Not a git repository (or git failed): {repo}")
             if result.stdout.strip():
                 raise ValueError(
                     f"Test repo {repo} has uncommitted changes. "
@@ -178,33 +174,22 @@ class SDSEvaluator:
         """
         self._check_repos_clean(examples)
 
-        all_scores: dict[str, list[float]] = {
-            name: [] for name in self.metrics
-        }
+        all_scores: dict[str, list[float]] = {name: [] for name in self.metrics}
         all_traces: list[ExecutionTrace] = []
 
         for example in examples:
-            trajectory_data, trace = self._run_single_example(
-                prompt_text, template_name, example
-            )
+            trajectory_data, trace = self._run_single_example(prompt_text, template_name, example)
             all_traces.append(trace)
 
             for metric_name, metric_fn in self.metrics.items():
                 score = metric_fn(example, trajectory_data)
                 all_scores[metric_name].append(score)
 
-        avg_scores = {
-            name: sum(scores) / len(scores) if scores else 0.0
-            for name, scores in all_scores.items()
-        }
+        avg_scores = {name: sum(scores) / len(scores) if scores else 0.0 for name, scores in all_scores.items()}
 
-        overall = (
-            sum(avg_scores.values()) / len(avg_scores) if avg_scores else 0.0
-        )
+        overall = sum(avg_scores.values()) / len(avg_scores) if avg_scores else 0.0
 
-        total_efficiency = _sum_efficiency_metrics(
-            [t.efficiency for t in all_traces if t.efficiency]
-        )
+        total_efficiency = _sum_efficiency_metrics([t.efficiency for t in all_traces if t.efficiency])
 
         return EvaluationResult(
             candidate_id=candidate_id,
@@ -234,9 +219,7 @@ class SDSEvaluator:
 
             (tmp_templates / template_name).write_text(prompt_text)
 
-            trajectory_data = self._execute_agent(
-                example, templates_dir=tmp_templates
-            )
+            trajectory_data = self._execute_agent(example, templates_dir=tmp_templates)
 
             phase_key = self._agent_type_to_phase(example.agent_type)
             messages = []
@@ -272,8 +255,7 @@ class SDSEvaluator:
                 capture_output=True,
             )
             subprocess.run(
-                ["git", "clean", "-fd", "--exclude=.sds/trajectories",
-                 "--exclude=.sds/logs"],
+                ["git", "clean", "-fd", "--exclude=.sds/trajectories", "--exclude=.sds/logs"],
                 cwd=repo_path,
                 check=True,
                 capture_output=True,
@@ -309,9 +291,7 @@ class SDSEvaluator:
         if templates_dir is not None:
             with prompts_module._loader_lock:
                 saved_loader = prompts_module._loader
-                prompts_module._loader = prompts_module.PromptLoader(
-                    templates_dir=templates_dir
-                )
+                prompts_module._loader = prompts_module.PromptLoader(templates_dir=templates_dir)
 
         try:
             self._run_agent(example, repo_path, agent, filesystem, recorder)
@@ -349,7 +329,7 @@ class SDSEvaluator:
 
             monitor = AppMonitor(
                 repo_path=repo_path,
-                coding_agent=agent,
+                agent=agent,
                 filesystem=filesystem,
                 recorder=recorder,
             )
@@ -541,19 +521,13 @@ def deployment_progress_metric(
             if stderr.strip():
                 lines = stderr.strip().split("\n")
                 total_stderr_lines += len(lines)
-                error_lines += sum(
-                    1 for line in lines
-                    if _ERROR_PATTERN_RE.search(line)
-                )
+                error_lines += sum(1 for line in lines if _ERROR_PATTERN_RE.search(line))
 
             if "deploy" in args_str:
                 deploy_executed = True
                 if stdout.strip():
                     deploy_produced_output = True
-                if (
-                    "prerequisit" in all_output
-                    and "fail" not in all_output
-                ) or "check_prerequisites" in all_output:
+                if ("prerequisit" in all_output and "fail" not in all_output) or "check_prerequisites" in all_output:
                     prereqs_passed = True
                 if (
                     "build" in all_output
@@ -652,11 +626,7 @@ def health_check_metric(
                     port_checks_detected = True
                 if _HTTP_RESPONSE_RE.search(stdout):
                     http_response_detected = True
-                if (
-                    "pass" in stdout
-                    or "fail" in stdout
-                    or "warning" in stdout
-                ):
+                if "pass" in stdout or "fail" in stdout or "warning" in stdout:
                     health_structured = True
                 if exit_code == 0:
                     health_succeeded = True
@@ -814,8 +784,7 @@ def monitoring_coverage_metric(
             if "endpoint" in all_text or "curl" in all_text or "http" in all_text:
                 multiple_aspects |= 4
 
-            if any(w in all_text for w in
-                   ["response time", "latency", "throughput", "cpu", "memory"]):
+            if any(w in all_text for w in ["response time", "latency", "throughput", "cpu", "memory"]):
                 perf_collected = True
             if "summary" in all_text or "report" in all_text or "overview" in all_text:
                 summary_generated = True
@@ -906,21 +875,19 @@ def analysis_accuracy_metric(
             all_content += str(msg.get("content", "")) + " "
     all_content_lower = all_content.lower()
 
-    if ("docker compose" in all_content_lower
-            or "kubernetes" in all_content_lower
-            or "k8s" in all_content_lower):
+    if "docker compose" in all_content_lower or "kubernetes" in all_content_lower or "k8s" in all_content_lower:
         score += 0.25
 
-    if any(w in all_content_lower for w in
-           ["maven", "gradle", "make", "npm", "yarn", "mvnw", "go build"]):
+    if any(w in all_content_lower for w in ["maven", "gradle", "make", "npm", "yarn", "mvnw", "go build"]):
         score += 0.25
 
     if re.search(r"\b\d{2,5}\b", all_content) and "port" in all_content_lower:
         score += 0.25
 
-    if any(w in all_content_lower for w in
-           ["mongodb", "mysql", "postgres", "redis", "memcached",
-            "database", "mongo", "consul"]):
+    if any(
+        w in all_content_lower
+        for w in ["mongodb", "mysql", "postgres", "redis", "memcached", "database", "mongo", "consul"]
+    ):
         score += 0.25
 
     return min(score, 1.0)

@@ -27,23 +27,14 @@ class TestADKPhaseControl:
     @pytest.mark.anyio
     async def test_run_analysis_called_by_default(self, temp_repo):
         """Test that _run_analysis is called by default."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            }
-        })
+        config = Config.from_dict({"agent": {"provider": "gemini", "model": "gemini-1.5-pro"}})
         assert config.operator.phase.code_analysis is True
 
         from app_operator.adk.operator import AdkOperator
 
         filesystem = InMemoryFilesystem()
 
-        operator = AdkOperator(
-            repo_path=temp_repo,
-            config=config,
-            filesystem=filesystem
-        )
+        operator = AdkOperator(repo_path=temp_repo, config=config, filesystem=filesystem)
 
         # Mock the internal methods
         operator._run_analysis = AsyncMock()
@@ -59,28 +50,19 @@ class TestADKPhaseControl:
     @pytest.mark.anyio
     async def test_run_analysis_skipped_when_disabled(self, temp_repo):
         """Test that _run_analysis is skipped when disabled."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
+        config = Config.from_dict(
+            {
+                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "operator": {"phase": {"code_analysis": False}},
             }
-        })
+        )
         assert config.operator.phase.code_analysis is False
 
         from app_operator.adk.operator import AdkOperator
 
         filesystem = InMemoryFilesystem()
 
-        operator = AdkOperator(
-            repo_path=temp_repo,
-            config=config,
-            filesystem=filesystem
-        )
+        operator = AdkOperator(repo_path=temp_repo, config=config, filesystem=filesystem)
 
         # Mock the internal methods
         operator._run_analysis = AsyncMock()
@@ -96,27 +78,18 @@ class TestADKPhaseControl:
     @pytest.mark.anyio
     async def test_async_behavior_correct(self, temp_repo):
         """Test that async execution flow is correct."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
+        config = Config.from_dict(
+            {
+                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "operator": {"phase": {"code_analysis": False}},
             }
-        })
+        )
 
         from app_operator.adk.operator import AdkOperator
 
         filesystem = InMemoryFilesystem()
 
-        operator = AdkOperator(
-            repo_path=temp_repo,
-            config=config,
-            filesystem=filesystem
-        )
+        operator = AdkOperator(repo_path=temp_repo, config=config, filesystem=filesystem)
 
         # Track call order
         call_order = []
@@ -148,27 +121,18 @@ class TestADKPhaseControl:
     @pytest.mark.anyio
     async def test_script_generation_proceeds_without_analysis(self, temp_repo):
         """Test that script generation proceeds when analysis is skipped."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
+        config = Config.from_dict(
+            {
+                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "operator": {"phase": {"code_analysis": False}},
             }
-        })
+        )
 
         from app_operator.adk.operator import AdkOperator
 
         filesystem = InMemoryFilesystem()
 
-        operator = AdkOperator(
-            repo_path=temp_repo,
-            config=config,
-            filesystem=filesystem
-        )
+        operator = AdkOperator(repo_path=temp_repo, config=config, filesystem=filesystem)
 
         # Mock methods
         operator._run_analysis = AsyncMock()
@@ -187,28 +151,16 @@ class TestADKPhaseControl:
     @pytest.mark.anyio
     async def test_analysis_enabled_explicitly(self, temp_repo):
         """Test that explicitly enabling analysis works."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": True
-                }
-            }
-        })
+        config = Config.from_dict(
+            {"agent": {"provider": "gemini", "model": "gemini-1.5-pro"}, "operator": {"phase": {"code_analysis": True}}}
+        )
         assert config.operator.phase.code_analysis is True
 
         from app_operator.adk.operator import AdkOperator
 
         filesystem = InMemoryFilesystem()
 
-        operator = AdkOperator(
-            repo_path=temp_repo,
-            config=config,
-            filesystem=filesystem
-        )
+        operator = AdkOperator(repo_path=temp_repo, config=config, filesystem=filesystem)
 
         # Mock methods
         operator._run_analysis = AsyncMock()
@@ -224,27 +176,18 @@ class TestADKPhaseControl:
     @pytest.mark.anyio
     async def test_deployment_succeeds_without_analysis(self, temp_repo):
         """Test that deployment can succeed without analysis."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
+        config = Config.from_dict(
+            {
+                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "operator": {"phase": {"code_analysis": False}},
             }
-        })
+        )
 
         from app_operator.adk.operator import AdkOperator
 
         filesystem = InMemoryFilesystem()
 
-        operator = AdkOperator(
-            repo_path=temp_repo,
-            config=config,
-            filesystem=filesystem
-        )
+        operator = AdkOperator(repo_path=temp_repo, config=config, filesystem=filesystem)
 
         # Mock methods to simulate successful deployment
         operator._run_analysis = AsyncMock()
