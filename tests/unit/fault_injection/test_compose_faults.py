@@ -8,7 +8,15 @@ from app_operator.fault_injection.compose_faults import (
     COMPOSE_FAULTS,
     ComposeFaultInjector,
 )
-from app_operator.fault_injection.models import FaultCategory, FaultSeverity
+from app_operator.fault_injection.models import FaultCategory, FaultResult, FaultSeverity
+
+# Try to import hypothesis, skip property tests if not available
+try:
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
+    HYPOTHESIS_AVAILABLE = True
+except ImportError:
+    HYPOTHESIS_AVAILABLE = False
 
 
 @pytest.fixture
@@ -343,3 +351,82 @@ class TestComposeFaultInjectorDispatch:
         result = injector.inject(fault, hotel_compose, "frontend")
         assert not result.success
         assert "No handler" in result.error_message
+
+
+# ---------------------------------------------------------------------------
+# Strategy for property-based tests
+# ---------------------------------------------------------------------------
+if HYPOTHESIS_AVAILABLE:
+    @st.composite
+    def compose_data_strategy(draw):
+        """Generate a minimal docker-compose dict with varying services."""
+        num_services = draw(st.integers(min_value=0, max_value=8))
+        services = {}
+        for i in range(num_services):
+            name = f"svc{i}"
+            config = {}
+            # Randomly add ports
+            has_ports = draw(st.booleans())
+            if has_ports:
+                host = draw(st.integers(min_value=1024, max_value=60000))
+                config["ports"] = [f"{host}:{host}"]
+            # Randomly add environment
+            has_env = draw(st.booleans())
+            if has_env:
+                config["environment"] = [f"KEY{i}=val{i}"]
+            # Randomly add an image
+            has_image = draw(st.booleans())
+            if has_image:
+                config["image"] = draw(
+                    st.sampled_from(["nginx:latest", "postgres:14", "redis:7", "myapp:1.0"])
+                )
+            services[name] = config
+        return {"services": services}
+
+
+@pytest.mark.skipif(
+    not HYPOTHESIS_AVAILABLE,
+    reason="hypothesis not installed - install with: uv add --dev hypothesis",
+)
+class TestComposeFaultInjectionProperty:
+    """Property-based tests for ComposeFaultInjector over generated compose topologies."""
+
+    @given(compose_data=compose_data_strategy() if HYPOTHESIS_AVAILABLE else st.none())
+    @settings(max_examples=50, deadline=2000)
+    def test_inject_result_always_has_fault_id(self, compose_data):
+        """Injecting any fault always returns a result whose fault_id matches the fault."""
+        injector = ComposeFaultInjector(rng=random.Random(0))
+        fault = COMPOSE_FAULTS[0]
+        result = injector.inject(fault, compose_data)
+        assert isinstance(result, FaultResult)
+        assert result.fault.fault_id == fault.fault_id
+
+    @given(compose_data=compose_data_strategy() if HYPOTHESIS_AVAILABLE else st.none())
+    @settings(max_examples=50, deadline=2000)
+    def test_failed_injection_has_error_message(self, compose_data):
+        """When injection fails, the result must carry a non-empty error message."""
+        injector = ComposeFaultInjector(rng=random.Random(0))
+        fault = COMPOSE_FAULTS[0]
+        result = injector.inject(fault, compose_data)
+        if not result.success:
+            assert result.error_message is not None
+            assert len(result.error_message) > 0
+
+    @given(
+        compose_data=compose_data_strategy() if HYPOTHESIS_AVAILABLE else st.none(),
+        fault_index=st.integers(min_value=0, max_value=len(COMPOSE_FAULTS) - 1)
+        if HYPOTHESIS_AVAILABLE
+        else st.none(),
+    )
+    @settings(max_examples=50, deadline=2000)
+    def test_inject_never_raises_exception(self, compose_data, fault_index):
+        """inject() must never raise an uncaught exception for any compose topology."""
+        injector = ComposeFaultInjector(rng=random.Random(0))
+        fault = COMPOSE_FAULTS[fault_index]
+        try:
+            result = injector.inject(fault, compose_data)
+            assert isinstance(result, FaultResult)
+        except Exception as exc:  # noqa: BLE001
+            pytest.fail(
+                f"inject() raised {type(exc).__name__} for fault {fault.fault_id}: {exc}"
+            )
