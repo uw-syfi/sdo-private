@@ -59,7 +59,7 @@ def trigger_ai_remediation(max_retries: int):
             process = subprocess.Popen(
                 ["gemini", "-y", playbook_content],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 universal_newlines=True
@@ -200,7 +200,6 @@ Examples:
         check_dependencies()
 
     if args.command == "run":
-        # return run.run_command(args)
         exit_code = run.run_command(args)
         
         if exit_code == 0:
