@@ -129,18 +129,17 @@ class CodeAnalyzerAgent:
                     logger.success("Code analysis completed successfully")
                     r.add_assistant_message("Code analysis completed successfully")
                     return True
-                else:
-                    missing = []
-                    if not self.filesystem.exists(self.analysis_file):
-                        missing.append(str(self.analysis_file))
-                    if not self.filesystem.exists(self.issues_file):
-                        missing.append(str(self.issues_file))
+                missing = []
+                if not self.filesystem.exists(self.analysis_file):
+                    missing.append(str(self.analysis_file))
+                if not self.filesystem.exists(self.issues_file):
+                    missing.append(str(self.issues_file))
 
-                    error_msg = f"Agent failed to create analysis files: {', '.join(missing)}"
-                    logger.error(error_msg)
-                    r.set_phase_status("failed")
-                    r.add_assistant_message(error_msg)
-                    return False
+                error_msg = f"Agent failed to create analysis files: {', '.join(missing)}"
+                logger.error(error_msg)
+                r.set_phase_status("failed")
+                r.add_assistant_message(error_msg)
+                return False
 
             except Exception as e:
                 logger.error(f"Code analysis failed: {e}")

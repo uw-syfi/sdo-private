@@ -21,16 +21,16 @@ class OpencodeEvent(ABC):
 
         if msg_type == "text":
             return TextEvent(text=part.get("text", ""))
-        elif msg_type == "tool_use":
+        if msg_type == "tool_use":
             return ToolUseEvent(
                 tool_name=part.get("tool", "Tool"),
                 input_data=part.get("state", {}).get("input"),
                 output_data=part.get("state", {}).get("output"),
                 status=part.get("state", {}).get("status"),
             )
-        elif msg_type == "step_start":
+        if msg_type == "step_start":
             return StepStartEvent()
-        elif msg_type == "step_finish":
+        if msg_type == "step_finish":
             return StepFinishEvent(
                 reason=part.get("reason"),
                 cost=part.get("cost"),

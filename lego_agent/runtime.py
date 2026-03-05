@@ -273,8 +273,7 @@ class FanOut(Runnable):
                 async with semaphore:
                     if isinstance(self.agent, AsyncRunnable):
                         return await self.agent.generate_async(p, timeout=self.timeout)
-                    else:
-                        return await asyncio.to_thread(self.agent.run, p)
+                    return await asyncio.to_thread(self.agent.run, p)
 
             tasks = [_run_one(p) for p in prompts_to_run]
             return await asyncio.gather(*tasks)

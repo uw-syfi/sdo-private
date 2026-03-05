@@ -198,7 +198,7 @@ class RecursiveDeploymentAgent:
                     "description": description,
                 }
 
-            elif action == "recursive_call":
+            if action == "recursive_call":
                 subtask_match = re.search(r"^SUBTASK:\s*(.+)$", response, re.MULTILINE)
                 subtask = subtask_match.group(1).strip() if subtask_match else ""
 
@@ -221,7 +221,7 @@ class RecursiveDeploymentAgent:
                     "context": filtered_context,
                 }
 
-            elif action == "final_answer":
+            if action == "final_answer":
                 answer_match = re.search(r"^ANSWER:\s*(.*)", response, re.MULTILINE | re.DOTALL)
                 if answer_match:
                     answer = answer_match.group(1).strip()
@@ -231,8 +231,7 @@ class RecursiveDeploymentAgent:
 
                 return {"action": ActionType.FINAL_ANSWER, "answer": answer}
 
-            else:
-                raise ValueError(f"Unknown action: {action}")
+            raise ValueError(f"Unknown action: {action}")
 
         except Exception as e:
             logger.error(f"Failed to parse RLM response: {e}")

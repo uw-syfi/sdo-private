@@ -543,19 +543,18 @@ def run_experiment_task(
                 phase_durations=phase_durations,
                 **extracted,
             )
-        else:
-            progress.update(task_id, description=f"[red]{display_name}[/]: Failed", completed=100)
-            time.sleep(1)
-            progress.update(task_id, visible=False)
-            progress.advance(overall_task_id)
-            return AppResult(
-                app=app_name,
-                success=False,
-                repeat=repeat,
-                elapsed_seconds=elapsed_seconds,
-                phase_durations=phase_durations,
-                **extracted,
-            )
+        progress.update(task_id, description=f"[red]{display_name}[/]: Failed", completed=100)
+        time.sleep(1)
+        progress.update(task_id, visible=False)
+        progress.advance(overall_task_id)
+        return AppResult(
+            app=app_name,
+            success=False,
+            repeat=repeat,
+            elapsed_seconds=elapsed_seconds,
+            phase_durations=phase_durations,
+            **extracted,
+        )
 
 
 def run_app_repeats(
