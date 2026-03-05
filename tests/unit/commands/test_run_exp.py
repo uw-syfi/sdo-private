@@ -112,7 +112,7 @@ class TestWriteSdsConfig:
         """Written file is loadable by load_config() and produces correct Config."""
         config = {
             "apps": ["app1"],
-            "agent": {"provider": "gemini"},
+            "agent": {"provider": "gemini", "model": "test-model"},
             "operator": {
                 "monitoring_max_iters": 3,
                 "phase": {"fix_summary_consolidation": False},

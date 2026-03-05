@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from app_operator.config import Config
+from app_operator.config import AgentConfig, Config
 from app_operator.filesystem import InMemoryFilesystem
 from app_operator.langgraph.nodes.deployer import fix_errors
 from app_operator.langgraph.state import OperatorState
@@ -27,7 +27,7 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
         check_shutdown = Mock(return_value=False)
@@ -62,7 +62,7 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 
@@ -90,7 +90,7 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 
@@ -118,7 +118,7 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 
@@ -150,7 +150,7 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
         check_shutdown = Mock(return_value=True)
@@ -182,7 +182,7 @@ class TestFixErrors:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         filesystem.mkdir(repo_path / ".sds" / "logs", parents=True)
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 
@@ -217,7 +217,7 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config()
+        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
 

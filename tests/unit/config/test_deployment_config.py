@@ -21,9 +21,18 @@ except ImportError:
         def __call__(self, *args, **kwargs):
             return pytest.mark.skip(reason="hypothesis not installed")
 
+    class _DummyStrategy:
+        """Placeholder that supports arbitrary chaining and operators."""
+
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: self
+
+        def __or__(self, other):
+            return self
+
     class DummyStrategies:
         def __getattr__(self, name):
-            return lambda *args, **kwargs: None
+            return lambda *args, **kwargs: _DummyStrategy()
 
     settings = DummySettings()
     st = DummyStrategies()
@@ -66,7 +75,10 @@ class TestDeploymentConfigValidation:
 
     def test_from_dict(self):
         """Config.from_dict should parse deployment section."""
-        data = {"deployment": {"platform": "k8s", "target": "local"}}
+        data = {
+            "agent": {"provider": "codex", "model": "test-model"},
+            "deployment": {"platform": "k8s", "target": "local"},
+        }
         config = Config.from_dict(data)
         assert config.deployment.platform == "k8s"
         assert config.deployment.target == "local"

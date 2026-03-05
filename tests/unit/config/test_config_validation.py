@@ -24,9 +24,18 @@ except ImportError:
         def __call__(self, *args, **kwargs):
             return pytest.mark.skip(reason="hypothesis not installed")
 
+    class _DummyStrategy:
+        """Placeholder that supports arbitrary chaining and operators."""
+
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: self
+
+        def __or__(self, other):
+            return self
+
     class DummyStrategies:
         def __getattr__(self, name):
-            return lambda *args, **kwargs: None
+            return lambda *args, **kwargs: _DummyStrategy()
 
     settings = DummySettings()
     st = DummyStrategies()
@@ -205,7 +214,7 @@ class TestConfigIntegration:
 
     def test_default_full_config_valid(self):
         """Default full configuration should be valid."""
-        config = Config()
+        config = Config(agent=AgentConfig(model="test-model"))
         assert config.agent.provider == "codex"
         assert config.operator.interval == 30
 
@@ -223,11 +232,12 @@ class TestConfigIntegration:
         """Config.from_dict should accept custom timeout values."""
         config = Config.from_dict(
             {
+                "agent": {"model": "test-model"},
                 "operator": {
                     "agent_fix_timeout": 3600,
                     "deploy_timeout": 1800,
                     "agent_timeout": 600,
-                }
+                },
             }
         )
         assert config.operator.agent_fix_timeout == 3600
@@ -298,13 +308,13 @@ class TestConfigIntegration:
 
     def test_config_from_dict_with_gepa_section(self):
         """Config.from_dict should parse [gepa] section."""
-        config = Config.from_dict({"gepa": {"max_steps": 100, "num_candidates": 20}})
+        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"max_steps": 100, "num_candidates": 20}})
         assert config.gepa.max_steps == 100
         assert config.gepa.num_candidates == 20
 
     def test_config_gepa_defaults(self):
         """Default Config should include valid GEPAConfig defaults."""
-        config = Config()
+        config = Config(agent=AgentConfig(model="test-model"))
         assert config.gepa.max_steps == 50
         assert config.gepa.num_candidates == 10
         assert config.gepa.reflection_provider == "gemini"
@@ -323,7 +333,7 @@ class TestConfigIntegration:
 
     def test_config_gepa_diversity_probability(self):
         """Config.from_dict should accept diversity_probability."""
-        config = Config.from_dict({"gepa": {"diversity_probability": 0.3}})
+        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"diversity_probability": 0.3}})
         assert config.gepa.diversity_probability == 0.3
 
     def test_config_gepa_diversity_probability_invalid(self):
@@ -333,7 +343,7 @@ class TestConfigIntegration:
 
     def test_config_gepa_patience(self):
         """Config.from_dict should accept patience."""
-        config = Config.from_dict({"gepa": {"patience": 20}})
+        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"patience": 20}})
         assert config.gepa.patience == 20
 
     def test_config_gepa_patience_invalid(self):
@@ -343,7 +353,7 @@ class TestConfigIntegration:
 
     def test_config_gepa_checkpoint_interval(self):
         """Config.from_dict should accept checkpoint_interval."""
-        config = Config.from_dict({"gepa": {"checkpoint_interval": 10}})
+        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"checkpoint_interval": 10}})
         assert config.gepa.checkpoint_interval == 10
 
     def test_config_gepa_checkpoint_interval_invalid(self):
@@ -353,7 +363,7 @@ class TestConfigIntegration:
 
     def test_config_gepa_new_defaults(self):
         """Default Config should include valid defaults for new GEPAConfig fields."""
-        config = Config()
+        config = Config(agent=AgentConfig(model="test-model"))
         assert config.gepa.diversity_probability == 0.1
         assert config.gepa.patience == 10
         assert config.gepa.checkpoint_interval == 5
@@ -448,7 +458,9 @@ class TestConfigFromDictRoundTripProperty:
     @settings(max_examples=50, deadline=1000)
     def test_valid_provider_and_interval_roundtrip(self, provider, interval):
         """Config built from a dict preserves provider and interval exactly."""
-        config = Config.from_dict({"agent": {"provider": provider}, "operator": {"interval": interval}})
+        config = Config.from_dict(
+            {"agent": {"provider": provider, "model": "test-model"}, "operator": {"interval": interval}}
+        )
         assert config.agent.provider == provider
         assert config.operator.interval == interval
 
@@ -466,6 +478,8 @@ class TestConfigFromDictRoundTripProperty:
     @given(st.just({}))
     @settings(max_examples=1, deadline=1000)
     def test_default_config_from_empty_dict(self, data):
-        """Config.from_dict({}) always produces defaults matching Config()."""
-        assert Config.from_dict({}).agent.provider == Config().agent.provider
-        assert Config.from_dict({}).operator.interval == Config().operator.interval
+        """Config.from_dict({}) always produces defaults matching Config(agent=AgentConfig(model='m'))."""
+        default = Config(agent=AgentConfig(model="m"))
+        from_dict = Config.from_dict({"agent": {"model": "m"}})
+        assert from_dict.agent.provider == default.agent.provider
+        assert from_dict.operator.interval == default.operator.interval
