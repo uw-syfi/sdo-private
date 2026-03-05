@@ -24,6 +24,9 @@ from app_operator.trajectory import (
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
+HEALTH_OUTPUT_MAX_LENGTH = 5000  # characters before truncating health check stdout
+HEALTH_OUTPUT_TRUNCATE_AT = 2000  # characters to keep when truncating health check stderr
+
 
 class MonitorLike(Protocol):
     """Protocol describing the monitor interface used by MonitoringTask."""
@@ -157,18 +160,18 @@ class HealthCheckTask(MonitoringTask):
         if health_result["stdout"]:
             context_parts.append("\n### Output:")
             stdout = health_result["stdout"]
-            # For health checks, include more output (up to 5000 chars)
-            if len(stdout) > 5000:
-                stdout = stdout[-5000:]
-                context_parts.append("... (truncated, showing last 5000 chars)")
+            # For health checks, include more output (up to HEALTH_OUTPUT_MAX_LENGTH chars)
+            if len(stdout) > HEALTH_OUTPUT_MAX_LENGTH:
+                stdout = stdout[-HEALTH_OUTPUT_MAX_LENGTH:]
+                context_parts.append(f"... (truncated, showing last {HEALTH_OUTPUT_MAX_LENGTH} chars)")
             context_parts.append(stdout)
 
         if health_result["stderr"]:
             context_parts.append("\n### Errors:")
             stderr = health_result["stderr"]
-            if len(stderr) > 2000:
-                stderr = stderr[-2000:]
-                context_parts.append("... (truncated, showing last 2000 chars)")
+            if len(stderr) > HEALTH_OUTPUT_TRUNCATE_AT:
+                stderr = stderr[-HEALTH_OUTPUT_TRUNCATE_AT:]
+                context_parts.append(f"... (truncated, showing last {HEALTH_OUTPUT_TRUNCATE_AT} chars)")
             context_parts.append(stderr)
 
         return "\n".join(context_parts)
