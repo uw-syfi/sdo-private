@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from app_operator.dspy_integration.config import DSPyConfig
+    from libs.agent_cli.base import CodingAgent
 
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -16,7 +18,6 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
-from libs.agent_cli.base import CodingAgent
 
 # Constants
 DEFAULT_ANALYSIS_TIMEOUT_SECS = 600  # 10 minutes
@@ -61,9 +62,8 @@ class CodeAnalyzerAgent:
             files = [
                 str(path.relative_to(self.repo_path))
                 for path in self.filesystem.rglob(self.repo_path, "*")
-                if self.filesystem.is_file(path) and not any(
-                    p.startswith(".") for p in path.relative_to(self.repo_path).parts
-                )
+                if self.filesystem.is_file(path)
+                and not any(p.startswith(".") for p in path.relative_to(self.repo_path).parts)
             ]
 
             # Sort and limit to prevent context overflow

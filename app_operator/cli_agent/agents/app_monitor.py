@@ -3,12 +3,14 @@ from __future__ import annotations
 import re
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
     from app_operator.dspy_integration.config import DSPyConfig
+    from libs.agent_cli.base import CodingAgent
 
 from app_operator.config import OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
@@ -21,7 +23,6 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
-from libs.agent_cli.base import CodingAgent
 
 
 class MonitorLike(Protocol):

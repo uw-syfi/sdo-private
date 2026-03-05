@@ -4,9 +4,13 @@
 modifications to Docker Compose YAML data structures.
 """
 
+from __future__ import annotations
+
 import random
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from app_operator.fault_injection.base import ComposeManipulator, FaultInjector
 from app_operator.fault_injection.models import (

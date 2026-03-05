@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Protocol,
     runtime_checkable,
@@ -10,8 +12,12 @@ from typing import (
 
 import yaml
 from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool, tool
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 from loguru import logger
 

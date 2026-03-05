@@ -3,14 +3,15 @@ from __future__ import annotations
 import re
 import subprocess
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app_operator.types import CommandResult
-
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from app_operator.dspy_integration.config import DSPyConfig
+    from app_operator.types import CommandResult
+    from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
@@ -36,7 +37,6 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
-from libs.agent_cli.base import CodingAgent
 
 FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 FIX_SUMMARY_FILENAME = "fix_summary.md"
