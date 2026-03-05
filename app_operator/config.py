@@ -464,7 +464,7 @@ class OperatorConfig:
     deployment_max_iters: int = 20
     agent_fix_timeout: int = 2700
     deploy_timeout: int = 900
-    dynamic_observability_injection: bool = False
+    prometheus_integration: bool = False
     agent_timeout: int = 900
     phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
 
