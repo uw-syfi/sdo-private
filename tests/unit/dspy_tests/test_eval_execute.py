@@ -8,21 +8,29 @@ from app_operator.dspy_integration.config import DSPyConfig, DSPyOptimizationCon
 from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
 
 
-def _make_optimizer(tmp_path):
+def _make_optimizer(
+    tmp_path,
+    *,
+    n_candidates=2,
+    selection_mode="hybrid",
+    selection_top_k=3,
+):
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     config = DSPyConfig(
         optimization=DSPyOptimizationConfig(
             optimizer="BootstrapFewShot",
             teacher_model="gemini-2.5-pro",
-            n_candidates=2,
+            n_candidates=n_candidates,
+            selection_mode=selection_mode,
+            selection_top_k=selection_top_k,
         )
     )
     return EvalExecuteOptimizer(
         config=config,
         prompts_dir=prompts_dir,
         project_root=tmp_path,
-        n_candidates=2,
+        n_candidates=n_candidates,
     )
 
 
@@ -430,3 +438,239 @@ def test_optimize_uses_seed_only_bootstrap_on_cold_start(monkeypatch, tmp_path):
 
     metadata = json.loads((output_dir / "metadata.json").read_text())
     assert metadata["n_candidates"] == 1
+
+
+def test_optimize_hybrid_selection_uses_llm_on_top_k(monkeypatch, tmp_path):
+    """Hybrid mode should allow judge to choose among top-k score candidates."""
+    optimizer = _make_optimizer(
+        tmp_path,
+        n_candidates=3,
+        selection_mode="hybrid",
+        selection_top_k=2,
+    )
+
+    app_a = tmp_path / "appa"
+    app_b = tmp_path / "appb"
+    app_a.mkdir()
+    app_b.mkdir()
+    (app_a / "README.md").write_text("a")
+    (app_b / "README.md").write_text("b")
+
+    work_dir = tmp_path / "workdir"
+    work_dir.mkdir()
+    output_dir = tmp_path / "prompts" / "optimized" / "v1"
+
+    monkeypatch.setattr(
+        optimizer,
+        "_generate_candidates",
+        lambda prompt_names, current_instructions, trajectory_context: [
+            {prompt_names[0]: "candidate one"},
+            {prompt_names[0]: "candidate two"},
+            {prompt_names[0]: "candidate three"},
+        ],
+    )
+    monkeypatch.setattr(optimizer, "_cleanup_experiment_containers", lambda exp_dir: None)
+    monkeypatch.setattr(optimizer, "_clean_exp_dir", lambda exp_dir: None)
+    monkeypatch.setattr(optimizer, "_write_sds_toml", lambda *args, **kwargs: None)
+    monkeypatch.setattr(optimizer, "_score_rlm_trajectory", lambda exp_dir: None)
+
+    outcomes = {
+        "candidate_1_appa": True,
+        "candidate_1_appb": True,
+        "candidate_2_appa": True,
+        "candidate_2_appb": False,
+        "candidate_3_appa": False,
+        "candidate_3_appb": False,
+    }
+
+    def _fake_run(**kwargs):
+        op = kwargs["operation_name"]
+        success = outcomes[op]
+        return (
+            SimpleNamespace(returncode=0 if success else 1),
+            success,
+            None if success else "simulated failure",
+        )
+
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.run_subprocess_with_rate_limit_handling",
+        _fake_run,
+    )
+
+    def _fake_completion(**kwargs):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content='{"chosen_candidate": 2, "reason": "better failure profile", "confidence": 0.77}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.litellm.completion",
+        _fake_completion,
+    )
+
+    result = optimizer.optimize(
+        prompt_names=["deployer_fix_error"],
+        train_apps=[app_a, app_b],
+        work_dir=work_dir,
+        output_dir=output_dir,
+        iteration=1,
+        current_version="v0",
+        provider="gemini",
+        max_retries=1,
+        rate_limit_backoff=1,
+        inter_run_delay=0,
+    )
+
+    assert result["success"] is True
+    assert result["best_candidate"] == 2
+    assert result["selection"]["selection_mode"] == "hybrid"
+    assert result["selection"]["llm_used"] is True
+    assert result["selection"]["fallback_to_score"] is False
+    assert result["selection"]["llm_choice"] == 2
+
+    state = json.loads((output_dir / "deployer_fix_error.dspy.json").read_text())
+    assert state["optimized_instruction"] == "candidate two"
+
+
+def test_optimize_hybrid_falls_back_to_score_when_judge_invalid(monkeypatch, tmp_path):
+    """Hybrid mode should fall back to score winner when judge output is invalid."""
+    optimizer = _make_optimizer(
+        tmp_path,
+        n_candidates=2,
+        selection_mode="hybrid",
+        selection_top_k=2,
+    )
+
+    app_a = tmp_path / "appa"
+    app_b = tmp_path / "appb"
+    app_a.mkdir()
+    app_b.mkdir()
+    (app_a / "README.md").write_text("a")
+    (app_b / "README.md").write_text("b")
+
+    work_dir = tmp_path / "workdir"
+    work_dir.mkdir()
+    output_dir = tmp_path / "prompts" / "optimized" / "v1"
+
+    monkeypatch.setattr(
+        optimizer,
+        "_generate_candidates",
+        lambda prompt_names, current_instructions, trajectory_context: [
+            {prompt_names[0]: "candidate one"},
+            {prompt_names[0]: "candidate two"},
+        ],
+    )
+    monkeypatch.setattr(optimizer, "_cleanup_experiment_containers", lambda exp_dir: None)
+    monkeypatch.setattr(optimizer, "_clean_exp_dir", lambda exp_dir: None)
+    monkeypatch.setattr(optimizer, "_write_sds_toml", lambda *args, **kwargs: None)
+    monkeypatch.setattr(optimizer, "_score_rlm_trajectory", lambda exp_dir: None)
+
+    outcomes = {
+        "candidate_1_appa": True,
+        "candidate_1_appb": True,
+        "candidate_2_appa": False,
+        "candidate_2_appb": False,
+    }
+
+    def _fake_run(**kwargs):
+        op = kwargs["operation_name"]
+        success = outcomes[op]
+        return (
+            SimpleNamespace(returncode=0 if success else 1),
+            success,
+            None if success else "simulated failure",
+        )
+
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.run_subprocess_with_rate_limit_handling",
+        _fake_run,
+    )
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.litellm.completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))]
+        ),
+    )
+
+    result = optimizer.optimize(
+        prompt_names=["deployer_fix_error"],
+        train_apps=[app_a, app_b],
+        work_dir=work_dir,
+        output_dir=output_dir,
+        iteration=1,
+        current_version="v0",
+        provider="gemini",
+        max_retries=1,
+        rate_limit_backoff=1,
+        inter_run_delay=0,
+    )
+
+    assert result["success"] is True
+    assert result["best_candidate"] == 1
+    assert result["selection"]["llm_used"] is True
+    assert result["selection"]["fallback_to_score"] is True
+    assert "JSON" in result["selection"]["llm_reason"]
+
+
+def test_optimize_score_mode_skips_llm_judge(monkeypatch, tmp_path):
+    """Score mode should not invoke judge selection."""
+    optimizer = _make_optimizer(
+        tmp_path,
+        n_candidates=2,
+        selection_mode="score",
+    )
+
+    app_a = tmp_path / "appa"
+    app_b = tmp_path / "appb"
+    app_a.mkdir()
+    app_b.mkdir()
+    (app_a / "README.md").write_text("a")
+    (app_b / "README.md").write_text("b")
+
+    work_dir = tmp_path / "workdir"
+    work_dir.mkdir()
+    output_dir = tmp_path / "prompts" / "optimized" / "v1"
+
+    monkeypatch.setattr(
+        optimizer,
+        "_generate_candidates",
+        lambda prompt_names, current_instructions, trajectory_context: [
+            {prompt_names[0]: "candidate one"},
+            {prompt_names[0]: "candidate two"},
+        ],
+    )
+    monkeypatch.setattr(optimizer, "_cleanup_experiment_containers", lambda exp_dir: None)
+    monkeypatch.setattr(optimizer, "_clean_exp_dir", lambda exp_dir: None)
+    monkeypatch.setattr(optimizer, "_write_sds_toml", lambda *args, **kwargs: None)
+    monkeypatch.setattr(optimizer, "_score_rlm_trajectory", lambda exp_dir: None)
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.run_subprocess_with_rate_limit_handling",
+        lambda **kwargs: (SimpleNamespace(returncode=0), True, None),
+    )
+    monkeypatch.setattr(
+        "app_operator.dspy_integration.eval_execute.litellm.completion",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Judge should not be called")),
+    )
+
+    result = optimizer.optimize(
+        prompt_names=["deployer_fix_error"],
+        train_apps=[app_a, app_b],
+        work_dir=work_dir,
+        output_dir=output_dir,
+        iteration=1,
+        current_version="v0",
+        provider="gemini",
+        max_retries=1,
+        rate_limit_backoff=1,
+        inter_run_delay=0,
+    )
+
+    assert result["success"] is True
+    assert result["best_candidate"] == 1
+    assert result["selection"]["selection_mode"] == "score"
+    assert result["selection"]["llm_used"] is False

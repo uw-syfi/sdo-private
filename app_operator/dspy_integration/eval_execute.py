@@ -171,6 +171,7 @@ class EvalExecuteOptimizer:
 
         # 3. Evaluate each candidate by running the operator on all training apps
         scores: list[float] = []
+        candidate_summaries: list[dict[str, Any]] = []
         for c_idx, candidate in enumerate(candidates):
             logger.info(
                 f"[EvalExecute] Evaluating candidate {c_idx + 1}/{len(candidates)}..."
@@ -186,6 +187,7 @@ class EvalExecuteOptimizer:
             successful_runs = 0
             total_runs = 0
             rlm_scores: list[float] = []
+            run_outcomes: list[dict[str, Any]] = []
             for app_path in train_apps:
                 app_name = normalize_experiment_token(app_path.name)
                 exp_dir = work_dir / f"iter{iteration}_c{c_idx + 1}_{app_name}"
@@ -222,6 +224,14 @@ class EvalExecuteOptimizer:
                 rlm_score = self._score_rlm_trajectory(exp_dir)
                 if rlm_score is not None:
                     rlm_scores.append(rlm_score)
+                run_outcomes.append(
+                    {
+                        "app_name": app_name,
+                        "success": success,
+                        "error": error_msg or "",
+                        "rlm_score": rlm_score,
+                    }
+                )
 
                 # Stop containers immediately so they don't hold ports
                 self._cleanup_experiment_containers(exp_dir)
@@ -240,6 +250,19 @@ class EvalExecuteOptimizer:
             else:
                 score = success_rate
             scores.append(score)
+            candidate_summaries.append(
+                {
+                    "candidate_index": c_idx + 1,
+                    "score": score,
+                    "success_rate": success_rate,
+                    "successful_runs": successful_runs,
+                    "total_runs": total_runs,
+                    "avg_rlm_score": (
+                        sum(rlm_scores) / len(rlm_scores) if rlm_scores else None
+                    ),
+                    "run_outcomes": run_outcomes,
+                }
+            )
             logger.info(
                 f"[EvalExecute] Candidate {c_idx + 1} score: {score:.2f} "
                 f"({successful_runs}/{total_runs} runs succeeded)"
@@ -249,7 +272,12 @@ class EvalExecuteOptimizer:
             return {"success": False, "error": "No candidates were evaluated"}
 
         # 4. Pick the best candidate
-        best_idx = max(range(len(scores)), key=lambda i: scores[i])
+        best_idx, selection_info = self._select_best_candidate(
+            candidates=candidates,
+            prompt_names=prompt_names,
+            scores=scores,
+            candidate_summaries=candidate_summaries,
+        )
         best_score = scores[best_idx]
         best_candidate = candidates[best_idx]
         if output_prefix:
@@ -258,7 +286,8 @@ class EvalExecuteOptimizer:
             best_version = f"eval_{iteration}_c{best_idx + 1}"
 
         logger.info(
-            f"[EvalExecute] Best candidate: {best_idx + 1} with score {best_score:.2f}"
+            f"[EvalExecute] Best candidate: {best_idx + 1} with score {best_score:.2f} "
+            f"(selection_mode={selection_info['selection_mode']})"
         )
 
         # 5. Copy winning candidate to output_dir
@@ -276,6 +305,7 @@ class EvalExecuteOptimizer:
             "best_candidate_index": best_idx + 1,
             "best_score": best_score,
             "all_scores": scores,
+            "selection": selection_info,
             "prompts": {
                 pname: {
                     "optimized": True,
@@ -308,6 +338,7 @@ class EvalExecuteOptimizer:
             "best_candidate": best_idx + 1,
             "best_score": best_score,
             "all_scores": scores,
+            "selection": selection_info,
         }
 
     # ------------------------------------------------------------------
@@ -358,6 +389,189 @@ class EvalExecuteOptimizer:
         }
         return defaults.get(prompt_name, f"Perform the {prompt_name} task.")
 
+    @staticmethod
+    def _normalize_model_name(model: str) -> str:
+        """Normalize short model names into litellm provider/model format."""
+        if "/" in model:
+            return model
+        lower = model.lower()
+        if "claude" in lower:
+            return f"anthropic/{model}"
+        if "gemini" in lower:
+            return f"gemini/{model}"
+        if "gpt" in lower or "o1" in lower:
+            return f"openai/{model}"
+        return model
+
+    def _select_best_candidate(
+        self,
+        candidates: list[dict[str, str]],
+        prompt_names: list[str],
+        scores: list[float],
+        candidate_summaries: list[dict[str, Any]],
+    ) -> tuple[int, dict[str, Any]]:
+        """Select best candidate using score, llm, or hybrid strategy."""
+        ranked_indices = sorted(
+            range(len(scores)),
+            key=lambda i: scores[i],
+            reverse=True,
+        )
+        score_best_idx = ranked_indices[0]
+        top_k = min(
+            len(scores),
+            max(1, self.config.optimization.selection_top_k),
+        )
+        selection_mode = self.config.optimization.selection_mode
+        selection_info: dict[str, Any] = {
+            "selection_mode": selection_mode,
+            "score_best_candidate": score_best_idx + 1,
+            "score_ranking": [idx + 1 for idx in ranked_indices],
+            "top_k": top_k,
+            "llm_used": False,
+            "llm_choice": None,
+            "fallback_to_score": False,
+            "llm_reason": "",
+        }
+
+        if selection_mode == "score":
+            return score_best_idx, selection_info
+
+        if selection_mode == "hybrid":
+            candidate_pool = ranked_indices[:top_k]
+        else:  # llm mode
+            candidate_pool = ranked_indices
+
+        if len(candidate_pool) <= 1:
+            selection_info["fallback_to_score"] = True
+            selection_info["llm_reason"] = "Insufficient candidate pool for LLM selection."
+            return score_best_idx, selection_info
+
+        llm_choice, llm_info = self._judge_candidates_with_llm(
+            candidate_pool=candidate_pool,
+            prompt_names=prompt_names,
+            candidates=candidates,
+            candidate_summaries=candidate_summaries,
+        )
+        selection_info.update(llm_info)
+        selection_info["llm_used"] = True
+
+        if llm_choice is None:
+            selection_info["fallback_to_score"] = True
+            return score_best_idx, selection_info
+        return llm_choice, selection_info
+
+    def _judge_candidates_with_llm(
+        self,
+        candidate_pool: list[int],
+        prompt_names: list[str],
+        candidates: list[dict[str, str]],
+        candidate_summaries: list[dict[str, Any]],
+    ) -> tuple[int | None, dict[str, Any]]:
+        """Ask teacher LLM to choose the best candidate from candidate_pool."""
+        summary_by_index = {
+            int(s["candidate_index"]) - 1: s for s in candidate_summaries
+        }
+        sections: list[str] = []
+        for idx in candidate_pool:
+            summary = summary_by_index.get(idx, {})
+            run_outcomes = summary.get("run_outcomes", [])
+            failures = []
+            for outcome in run_outcomes:
+                if outcome.get("success"):
+                    continue
+                error = str(outcome.get("error") or "unknown failure").strip()
+                if len(error) > 220:
+                    error = error[:217].rstrip() + "..."
+                failures.append(f"{outcome.get('app_name', 'unknown')}: {error}")
+                if len(failures) >= 3:
+                    break
+
+            prompt_preview = candidates[idx].get(prompt_names[0], "")
+            prompt_preview = " ".join(prompt_preview.split())
+            if len(prompt_preview) > 180:
+                prompt_preview = prompt_preview[:177].rstrip() + "..."
+
+            section_lines = [
+                f"Candidate {idx + 1}:",
+                f"- score: {summary.get('score', 0.0):.4f}",
+                (
+                    "- success_rate: "
+                    f"{summary.get('successful_runs', 0)}/{summary.get('total_runs', 0)} "
+                    f"({summary.get('success_rate', 0.0):.4f})"
+                ),
+                (
+                    "- avg_rlm_score: "
+                    f"{summary.get('avg_rlm_score'):.4f}"
+                    if summary.get("avg_rlm_score") is not None
+                    else "- avg_rlm_score: n/a"
+                ),
+                f"- instruction_preview ({prompt_names[0]}): {prompt_preview}",
+            ]
+            if failures:
+                section_lines.append("- key_failures:")
+                for failure in failures:
+                    section_lines.append(f"  - {failure}")
+            else:
+                section_lines.append("- key_failures: none")
+            sections.append("\n".join(section_lines))
+
+        model = self._normalize_model_name(self.config.optimization.teacher_model)
+        system_msg = (
+            "You are selecting the strongest prompt candidate for an SDS deployment agent. "
+            "Prioritize objective runtime outcomes over style. "
+            "Use score and success_rate as primary signals, and failures for tie-breaking."
+        )
+        user_msg = (
+            "Choose exactly one candidate from the pool below.\n"
+            "Return ONLY JSON: "
+            "{\"chosen_candidate\": <integer>, \"reason\": \"<brief>\", \"confidence\": <0_to_1>}.\n\n"
+            f"Candidate pool: {[idx + 1 for idx in candidate_pool]}\n\n"
+            + "\n\n".join(sections)
+        )
+
+        llm_info: dict[str, Any] = {
+            "llm_choice": None,
+            "llm_reason": "",
+            "llm_confidence": None,
+        }
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            "cache": {"no-cache": True},
+        }
+        location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
+        if location:
+            kwargs["vertex_location"] = location
+
+        try:
+            response = litellm.completion(**kwargs)
+            raw = response.choices[0].message.content or ""
+            llm_info["llm_raw"] = raw
+            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if not json_match:
+                llm_info["llm_reason"] = "Judge response did not contain JSON."
+                return None, llm_info
+            parsed = json.loads(json_match.group())
+            chosen = int(parsed.get("chosen_candidate"))
+            if chosen - 1 not in candidate_pool:
+                llm_info["llm_reason"] = (
+                    f"Judge selected candidate {chosen} outside pool "
+                    f"{[idx + 1 for idx in candidate_pool]}."
+                )
+                return None, llm_info
+            llm_info["llm_choice"] = chosen
+            llm_info["llm_reason"] = str(parsed.get("reason", "")).strip()
+            confidence = parsed.get("confidence")
+            if isinstance(confidence, (int, float)):
+                llm_info["llm_confidence"] = max(0.0, min(1.0, float(confidence)))
+            return chosen - 1, llm_info
+        except Exception as e:
+            llm_info["llm_reason"] = f"Judge call failed: {e}"
+            return None, llm_info
+
     def _generate_candidates(
         self,
         prompt_names: list[str],
@@ -396,14 +610,7 @@ class EvalExecuteOptimizer:
         trajectory_context: str = "",
     ) -> list[str]:
         """Use the teacher LLM to produce *n* instruction variants."""
-        model = self.config.optimization.teacher_model
-        if "/" not in model:
-            if "claude" in model.lower():
-                model = f"anthropic/{model}"
-            elif "gemini" in model.lower():
-                model = f"gemini/{model}"
-            elif "gpt" in model.lower() or "o1" in model.lower():
-                model = f"openai/{model}"
+        model = self._normalize_model_name(self.config.optimization.teacher_model)
 
         system_msg = (
             "You are a prompt optimization expert helping improve AI deployment agent "
