@@ -129,7 +129,7 @@ class RecursiveDeploymentAgent:
                 if (repo_path / rf).exists():
                     readme = (repo_path / rf).read_text()
                     break
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"Failed to read some context files: {e}")
 
         # Get trajectory data
@@ -233,7 +233,7 @@ class RecursiveDeploymentAgent:
 
             raise ValueError(f"Unknown action: {action}")
 
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.error(f"Failed to parse RLM response: {e}")
             logger.debug(f"Response was: {response}")
 
@@ -293,7 +293,7 @@ class RecursiveDeploymentAgent:
         self._messages.append({"role": "user", "content": prompt})
         try:
             content = self._llm_client.complete(self._messages, label="rlm main loop")
-        except Exception as e:
+        except (ConnectionError, TimeoutError, RuntimeError) as e:
             logger.error(f"[RLM] LLM call failed: {e}")
             content = f"ACTION: final_answer\nANSWER: LLM call failed: {e}"
         self._messages.append({"role": "assistant", "content": content})
@@ -305,7 +305,7 @@ class RecursiveDeploymentAgent:
             return False
         try:
             count = litellm.token_counter(model=self.llm_provider, messages=self._messages)
-        except Exception:
+        except (ValueError, RuntimeError):
             count = sum(len(m.get("content", "")) for m in self._messages) // 4
         return count >= self.model_context_tokens * self.compaction_threshold
 
@@ -329,7 +329,7 @@ class RecursiveDeploymentAgent:
         ]
         try:
             summary = self._llm_client.complete(summary_messages, label="rlm compaction")
-        except Exception as e:
+        except (ConnectionError, TimeoutError, RuntimeError) as e:
             logger.warning(f"[RLM] Compaction failed: {e}, keeping full history")
             return
 
@@ -527,7 +527,7 @@ class RecursiveDeploymentAgent:
                 if self.trajectory:
                     self.trajectory.add_assistant_message(f"[RLM Auto-Validation]{warning}", duration=0.0)
                 return answer + warning
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"[RLM] Auto-validation of deploy.sh failed: {e}")
 
         return answer

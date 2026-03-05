@@ -197,7 +197,7 @@ class TestProgressSummarizer:
 
     def test_summarize_handles_agent_exception_gracefully(self):
         """Test summarize() handles agent exceptions without crashing."""
-        agent_fn = Mock(side_effect=Exception("Agent error"))
+        agent_fn = Mock(side_effect=RuntimeError("Agent error"))
         summarizer = ProgressSummarizer(agent_fn)
         summarizer.start(start_time=100.0)
 

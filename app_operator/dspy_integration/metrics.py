@@ -254,7 +254,7 @@ class PredictionQualityMetric:
                 generated_prompt=pred_text,
             )
             return _parse_judge_score(result.score)
-        except Exception as e:
+        except (RuntimeError, ValueError, AttributeError) as e:
             logger.warning("PredictionQualityMetric judge call failed: %s", e)
             return 0.5
 

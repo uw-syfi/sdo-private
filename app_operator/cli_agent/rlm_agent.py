@@ -121,7 +121,7 @@ class RLMCodingAgent(CodingAgent):
                 ],
                 label="rlm file gen",
             )
-        except Exception as e:
+        except (ConnectionError, TimeoutError, RuntimeError) as e:
             logger.error(f"[RLM] Direct LLM call failed: {e}")
             return f"LLM call failed: {e}"
 
@@ -240,7 +240,7 @@ class RLMCodingAgent(CodingAgent):
         try:
             if path.exists():
                 return path.read_text()
-        except Exception:
+        except OSError:
             pass
         return ""
 

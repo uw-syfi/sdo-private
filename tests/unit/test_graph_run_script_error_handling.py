@@ -30,7 +30,7 @@ class TestGraphRunScriptErrorHandling(unittest.TestCase):
     @patch("subprocess.run")
     def test_run_script_exception(self, mock_run):
         # Simulate generic exception
-        mock_run.side_effect = Exception("System failure")
+        mock_run.side_effect = OSError("System failure")
 
         result = run_script(self.repo_root, self.fs, "ls")
 

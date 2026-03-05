@@ -144,7 +144,7 @@ def test_run_handles_keyboard_interrupt(app_operator):
 def test_run_handles_exception_gracefully(app_operator):
     op, mock_deployer, _, _ = app_operator
 
-    mock_deployer.run.side_effect = Exception("Unexpected crash")
+    mock_deployer.run.side_effect = RuntimeError("Unexpected crash")
 
     exit_code = op.run()
 

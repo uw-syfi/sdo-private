@@ -189,6 +189,6 @@ def load_optimized_module(prompt_name: str, optimized_dir: Path, version: str = 
     except KeyError as e:
         logger.error(f"Invalid DSPy signature for '{prompt_name}': {e}")
         return None
-    except Exception as e:
+    except (OSError, RuntimeError, AttributeError) as e:
         logger.error(f"Failed to load DSPy module from {module_file}: {e}")
         return None

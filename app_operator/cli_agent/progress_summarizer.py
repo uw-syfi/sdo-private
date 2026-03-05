@@ -125,7 +125,7 @@ class ProgressSummarizer:
             # Update last summary time
             self.last_summary_time = self.time_func()
 
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             # If summarization fails, log but don't interrupt the flow
             logger.warning(f"ProgressSummarizer: Failed to generate summary: {e}", exc_info=True)
 

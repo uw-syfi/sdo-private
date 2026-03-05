@@ -122,7 +122,7 @@ def run_command(args) -> int:
             config = load_config(str(Path.cwd()))
 
         dspy_config = copy.deepcopy(config.dspy)
-    except Exception as e:
+    except (OSError, KeyError, ValueError) as e:
         print(f"Error loading config: {e}", file=sys.stderr)
         return 1
 
@@ -205,9 +205,10 @@ def run_command(args) -> int:
     except RuntimeError as e:
         print(f"\nError: {e}", file=sys.stderr)
         return 1
-    except Exception as e:
-        print(f"\nUnexpected error: {e}", file=sys.stderr)
+    except (OSError, AttributeError) as e:
+        # Top-level catch to prevent uncaught exception — specific types are too numerous
         import traceback
 
+        print(f"\nUnexpected error: {e}", file=sys.stderr)
         traceback.print_exc()
         return 1

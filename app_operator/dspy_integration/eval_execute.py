@@ -569,7 +569,7 @@ class EvalExecuteOptimizer:
             if isinstance(confidence, (int, float)):
                 llm_info["llm_confidence"] = max(0.0, min(1.0, float(confidence)))
             return chosen - 1, llm_info
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, KeyError, ConnectionError, TimeoutError) as e:
             llm_info["llm_reason"] = f"Judge call failed: {e}"
             return None, llm_info
 
@@ -653,7 +653,7 @@ class EvalExecuteOptimizer:
                 parsed = json.loads(json_match.group())
                 if isinstance(parsed, list) and parsed:
                     return self._pad_variants(parsed, n, current_instruction)
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, ConnectionError, TimeoutError) as e:
             logger.warning(f"[EvalExecute] Failed to generate variants for {prompt_name}: {e}")
 
         # Fallback: repeat the current instruction
@@ -825,7 +825,7 @@ class EvalExecuteOptimizer:
 
         try:
             trajectory = json.loads(traj_files[0].read_text())
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, ValueError) as e:
             logger.warning(f"[EvalExecute] Failed to parse trajectory {traj_files[0]}: {e}")
             return None
 
@@ -1065,7 +1065,7 @@ class EvalExecuteOptimizer:
                     text=True,
                 )
                 logger.info(f"[EvalExecute] Cleaned up containers for {project_names}")
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             logger.warning(f"[EvalExecute] Could not clean up containers for {project_names}: {e}")
 
     @staticmethod
@@ -1162,7 +1162,7 @@ class EvalExecuteOptimizer:
 
             return calls_score * 0.4 + depth_score * 0.3 + ratio_score * 0.3
 
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
             logger.warning(f"[EvalExecute] Failed to score RLM trajectory: {e}")
             return None
 

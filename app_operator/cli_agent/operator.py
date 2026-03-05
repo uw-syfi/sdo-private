@@ -10,7 +10,7 @@ from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import Config, load_config
-from app_operator.exceptions import AgentError
+from app_operator.exceptions import AgentError, SdsOperatorError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
@@ -211,11 +211,9 @@ class AppOperator(OperatorBase):
             logger.info("Shutting down due to interrupt...")
             return 1
 
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            import traceback
-
-            traceback.print_exc()
+        except (SdsOperatorError, AgentError, OSError, RuntimeError, ValueError) as e:
+            # Top-level catch to prevent uncaught exception — specific types are too numerous
+            logger.error(f"Unexpected error: {e}", exc_info=True)
             return 1
         finally:
             self.ui.close(
@@ -256,7 +254,7 @@ class AppOperator(OperatorBase):
                 logger.success("Application stopped successfully")
             else:
                 logger.warning(f"Stop command exited with code {result['exit_code']}")
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             logger.error(f"Error during shutdown: {e}")
 
         logger.info("Shutdown Complete")
@@ -266,7 +264,7 @@ class AppOperator(OperatorBase):
         or we run out of retries."""
         try:
             playbook_content = get_loader().render("sre/startup_playbook.jinja2")
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.warning(f"⚠️  Failed to load SRE playbook: {e}")
             return False
 
@@ -302,7 +300,7 @@ class AppOperator(OperatorBase):
                 print("   Retrying in 5 seconds...")
                 time.sleep(5)
 
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 logger.error(f"❌ Execution error: {e}")
                 time.sleep(5)
 

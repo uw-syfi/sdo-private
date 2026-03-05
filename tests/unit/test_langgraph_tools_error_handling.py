@@ -33,7 +33,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         self.assertTrue(result.startswith("Error: Path does not exist"))
 
         # Test internal error (simulate by mocking resolve_path to raise)
-        with patch.object(self.context, "resolve_path", side_effect=Exception("Unexpected error")):
+        with patch.object(self.context, "resolve_path", side_effect=OSError("Unexpected error")):
             result = ls_tool.invoke({"path": "."})
             self.assertEqual(result, "Error: Unexpected error")
 
@@ -46,7 +46,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         # 2. Test generic exception during glob iteration
         # Create a context with a mock repo_root that raises on glob()
         mock_root = MagicMock()
-        mock_root.glob.side_effect = Exception("Glob failed")
+        mock_root.glob.side_effect = OSError("Glob failed")
         # We need to ensure Path(pattern).relative_to(mock_root) doesn't crash before glob is called
         # if pattern is absolute. We use relative pattern here.
 
@@ -101,7 +101,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         self.assertIn("Command timed out", result["stderr"])
 
         # Test generic exception
-        mock_run.side_effect = Exception("System failure")
+        mock_run.side_effect = OSError("System failure")
         result = bash_tool.invoke({"command": "ls"})
         self.assertFalse(result["success"])
         self.assertEqual(result["exit_code"], -1)

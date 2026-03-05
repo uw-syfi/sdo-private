@@ -377,7 +377,7 @@ def run_command(args: argparse.Namespace) -> int:
     try:
         config_path = Path(args.config)
         config = load_config(config_path)
-    except Exception as e:
+    except (OSError, KeyError, ValueError) as e:
         logger.error(f"Failed to load config: {e}")
         return 1
 
@@ -456,7 +456,7 @@ def run_command(args: argparse.Namespace) -> int:
         agent_provider = provider_override or app_config.agent.provider
         app_location = app_config.agent.location
         provider_model = model_override or app_config.agent.model
-    except Exception as e:
+    except (OSError, KeyError, ValueError) as e:
         logger.warning(f"Failed to load app config, assuming 'gemini' provider: {e}")
         agent_provider = provider_override or "gemini"
     provider = _infer_llm_provider(provider_model, agent_provider)
@@ -486,7 +486,7 @@ def run_command(args: argparse.Namespace) -> int:
                     f"n_candidates={dspy_config.optimization.n_candidates}"
                 )
                 app_location = app_config.agent.location
-            except Exception as e:
+            except (OSError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to load project config, using defaults: {e}")
                 from app_operator.dspy_integration.config import DSPyConfig
 
@@ -533,7 +533,7 @@ def run_command(args: argparse.Namespace) -> int:
                     logger.error("Optimization failed.")
                     return 1
 
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Optimization error: {e}")
                 return 1
 

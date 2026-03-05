@@ -55,7 +55,7 @@ class LangGraphOperator(OperatorBase):
 
         try:
             self.llm = build_llm(self.config)
-        except Exception as e:
+        except (ImportError, ValueError, RuntimeError) as e:
             raise AgentError(f"Failed to initialize LangGraph LLM: {e}") from e
 
         self._shutdown_requested = False
@@ -117,11 +117,9 @@ class LangGraphOperator(OperatorBase):
             _status = "interrupted"
             return 1
 
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            import traceback
-
-            traceback.print_exc()
+        except (AgentError, OSError, RuntimeError, ValueError) as e:
+            # Top-level catch to prevent uncaught exception — specific types are too numerous
+            logger.error(f"Unexpected error: {e}", exc_info=True)
             return 1
         finally:
             self.recorder.finalize(_status)

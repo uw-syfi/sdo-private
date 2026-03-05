@@ -170,7 +170,7 @@ class PromptLoader:
             self._dspy_configured = True
             logger.info(f"Configured DSPy runtime with model: {self.dspy_config.runtime_model}")
 
-        except Exception as e:
+        except (ImportError, RuntimeError, ValueError) as e:
             logger.error(f"Failed to configure DSPy runtime: {e}")
             # Don't raise - will fallback to Jinja2
 
@@ -205,7 +205,7 @@ class PromptLoader:
                 logger.info(f"Successfully rendered {prompt_name} using DSPy")
                 self._notify_recorder(recorder, "record_rendered_prompt", result)
                 return result
-            except Exception as e:
+            except (ImportError, RuntimeError, AttributeError, KeyError) as e:
                 logger.warning(f"DSPy rendering failed for {prompt_name}: {e}. Falling back to Jinja2.")
                 # Record fallback in trajectory if available
                 self._notify_recorder(recorder, "record_fallback")
@@ -416,8 +416,8 @@ class PromptLoader:
             self._notify_recorder(recorder, "set_prompt_version", "jinja2")
 
             return result
-        except Exception as e:
-            # Wrap Jinja2 errors for clearer debugging context
+        except (OSError, ValueError, KeyError) as e:
+            # Wrap Jinja2/template errors for clearer debugging context
             raise RuntimeError(f"Failed to render template '{template_name}': {e}") from e
 
     @staticmethod

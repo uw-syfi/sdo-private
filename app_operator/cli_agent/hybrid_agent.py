@@ -206,7 +206,7 @@ class HybridCodingAgent(CodingAgent):
             try:
                 backup.write_text(deploy_script)
                 logger.info(f"[Hybrid] Saved deploy.sh backup: {backup}")
-            except Exception as e:
+            except OSError as e:
                 logger.warning(f"[Hybrid] Could not save deploy.sh backup: {e}")
 
         deploy_log = helper._read(sds / "logs" / "deploy.log")

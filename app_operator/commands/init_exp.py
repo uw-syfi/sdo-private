@@ -88,7 +88,7 @@ def run_command(args: argparse.Namespace) -> int:
         logger.info(f"Successfully initialized experiment at '{target_path}'")
         return 0
 
-    except Exception as e:
+    except (OSError, subprocess.CalledProcessError, ValueError) as e:
         logger.error(f"Error initializing experiment: {e}")
         # Cleanup if partial failure?
         # For now, let user handle it to avoid accidental data loss logic

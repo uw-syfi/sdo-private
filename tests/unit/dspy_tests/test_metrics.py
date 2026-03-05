@@ -492,7 +492,7 @@ class TestPredictionQualityMetric:
 
     def test_falls_back_to_neutral_on_judge_error(self):
         """Any exception from the judge returns 0.5."""
-        mock_judge = Mock(side_effect=Exception("LM error"))
+        mock_judge = Mock(side_effect=RuntimeError("LM error"))
 
         metric = PredictionQualityMetric()
         metric._judge = mock_judge

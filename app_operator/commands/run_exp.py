@@ -350,7 +350,7 @@ def tail_file(file_path: Path, stop_event: threading.Event, callback):
             # Read remaining
             for line in f:
                 callback(line.strip())
-    except Exception:
+    except OSError:
         pass
 
 
@@ -474,7 +474,7 @@ def run_experiment_task(
                     progress.update(
                         task_id, description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})", completed=40
                     )
-                except Exception:
+                except (IndexError, ValueError):
                     progress.update(task_id, description=f"[yellow]{display_name}[/]: Deployment", completed=40)
             elif "monitoring cycle" in lower_line:
                 _transition_phase("monitoring")
@@ -486,7 +486,7 @@ def run_experiment_task(
                         description=f"[yellow]{display_name}[/]: Health-monitor (Attempt {cycle})",
                         completed=70,
                     )
-                except Exception:
+                except (IndexError, ValueError):
                     progress.update(task_id, description=f"[yellow]{display_name}[/]: Monitoring", completed=70)
             elif "shutting down" in lower_line:
                 _transition_phase("finishing")
@@ -613,7 +613,7 @@ def _resolve_experiment(experiment_str: str) -> tuple[str, Path, dict, Path] | N
         else:
             exp_name = config_path.parent.name
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"Error parsing experiment name from path: {e}")
         return None
 
@@ -743,7 +743,7 @@ def run_command(args: argparse.Namespace) -> int:
                     with lock:
                         results_by_exp[exp_name].extend(repeat_results)
                         _write_results(log_dir, exp_name, results_by_exp[exp_name])
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError) as e:
                     logger.error(f"Error running {app}: {e}")
                     repeats = config.get("repeats", 1)
                     completed_keys = completed_keys_by_exp[exp_name]

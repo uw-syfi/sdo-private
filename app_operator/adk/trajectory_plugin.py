@@ -29,7 +29,7 @@ class AdkTrajectoryPlugin(BasePlugin):
                 content = str(llm_response.content)
             else:
                 content = str(llm_response)
-        except Exception:
+        except (AttributeError, TypeError):
             content = str(llm_response)
 
         self.recorder.add_assistant_message(content)

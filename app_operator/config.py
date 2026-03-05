@@ -818,7 +818,7 @@ def load_config(target_dir: str, config_path: str | None = None) -> Config:
         except (ConfigurationError, TypeError):
             # Re-raise config validation errors and TypeError from dataclass
             raise
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             # Re-raise parsing errors to prevent silent fallback to defaults
             raise ConfigurationError(f"Failed to parse {config_file}: {e}") from e
 

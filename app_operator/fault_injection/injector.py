@@ -113,7 +113,7 @@ class FaultInjectionOrchestrator:
                 with os.fdopen(fd, "w") as f:
                     yaml.dump(compose_data, f, default_flow_style=False, sort_keys=False)
                 os.replace(tmp_path, str(compose_file))
-            except Exception:
+            except OSError:
                 os.unlink(tmp_path)
                 raise
 
