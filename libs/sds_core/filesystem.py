@@ -24,7 +24,6 @@ class FileSystemInterface(ABC):
         Returns:
             bool: True if the path exists, False otherwise.
         """
-        pass
 
     @abstractmethod
     def is_dir(self, path: Path) -> bool:
@@ -36,7 +35,6 @@ class FileSystemInterface(ABC):
         Returns:
             bool: True if the path is a directory, False otherwise.
         """
-        pass
 
     @abstractmethod
     def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
@@ -47,7 +45,6 @@ class FileSystemInterface(ABC):
             parents: If True, create parent directories as needed.
             exist_ok: If True, don't raise an error if the directory exists.
         """
-        pass
 
     @abstractmethod
     def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
@@ -58,7 +55,6 @@ class FileSystemInterface(ABC):
             content: The text content to write.
             encoding: The text encoding to use.
         """
-        pass
 
     @abstractmethod
     def read_text(self, path: Path, encoding: str = "utf-8") -> str:
@@ -71,7 +67,6 @@ class FileSystemInterface(ABC):
         Returns:
             str: The file contents.
         """
-        pass
 
     @abstractmethod
     def chmod(self, path: Path, mode: int):
@@ -81,7 +76,6 @@ class FileSystemInterface(ABC):
             path: The file path.
             mode: The permission mode (e.g., 0o755).
         """
-        pass
 
     @abstractmethod
     def remove(self, path: Path):
@@ -90,7 +84,6 @@ class FileSystemInterface(ABC):
         Args:
             path: The file path to remove.
         """
-        pass
 
     @abstractmethod
     def remove_tree(self, path: Path):
@@ -99,7 +92,6 @@ class FileSystemInterface(ABC):
         Args:
             path: The directory path to remove.
         """
-        pass
 
     @abstractmethod
     def glob(self, path: Path, pattern: str) -> list[Path]:
@@ -112,7 +104,6 @@ class FileSystemInterface(ABC):
         Returns:
             list[Path]: List of matching paths.
         """
-        pass
 
     @abstractmethod
     def rglob(self, path: Path, pattern: str) -> list[Path]:
@@ -125,7 +116,6 @@ class FileSystemInterface(ABC):
         Returns:
             list[Path]: List of matching paths.
         """
-        pass
 
     @abstractmethod
     def is_file(self, path: Path) -> bool:
@@ -137,7 +127,6 @@ class FileSystemInterface(ABC):
         Returns:
             bool: True if the path is a file, False otherwise.
         """
-        pass
 
 
 class RealFilesystem(FileSystemInterface):
@@ -373,7 +362,7 @@ class InMemoryFilesystem(FileSystemInterface):
         for stored in list(self.files) + list(self.directories):
             if not stored.startswith(prefix):
                 continue
-            relative = stored[len(prefix):]
+            relative = stored[len(prefix) :]
             if fnmatch.fnmatch(relative, pattern):
                 results.append(Path(stored))
         return results
@@ -385,17 +374,16 @@ class InMemoryFilesystem(FileSystemInterface):
         for stored in list(self.files) + list(self.directories):
             if not stored.startswith(prefix):
                 continue
-            relative = stored[len(prefix):]
+            relative = stored[len(prefix) :]
             # rglob matches pattern against any suffix of the relative path
             # e.g. rglob("*") matches all files/dirs recursively
             parts = relative.split("/")
             # Match the pattern against the full relative path using **/ prefix
-            if fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(
-                relative, "**/" + pattern
+            if (
+                fnmatch.fnmatch(relative, pattern)
+                or fnmatch.fnmatch(relative, "**/" + pattern)
+                or fnmatch.fnmatch(parts[-1], pattern)
             ):
-                results.append(Path(stored))
-            # Also check if just the filename matches (like pathlib rglob)
-            elif fnmatch.fnmatch(parts[-1], pattern):
                 results.append(Path(stored))
         return results
 

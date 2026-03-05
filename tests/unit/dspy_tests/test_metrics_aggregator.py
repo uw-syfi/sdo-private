@@ -5,8 +5,9 @@ breakdown in compare_versions / _calculate_improvements.
 """
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app_operator.dspy_integration.metrics_aggregator import MetricsAggregator
 
@@ -15,8 +16,7 @@ from app_operator.dspy_integration.metrics_aggregator import MetricsAggregator
 # ---------------------------------------------------------------------------
 
 
-def _write_trajectory(path: Path, conversations: list, phase: str = "deployment",
-                      status: str = "completed") -> None:
+def _write_trajectory(path: Path, conversations: list, phase: str = "deployment", status: str = "completed") -> None:
     """Write a single trajectory JSON with the given phase conversations."""
     trajectory = {
         "metadata": {
@@ -52,6 +52,7 @@ def _conv(*, exit_code=0, duration=10.0, fallback=False, content_len=400):
         ],
     }
 
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ def optimized_dir(tmp_path):
     _write_trajectory(d / "trajectory_3.json", [_conv(exit_code=0, duration=6.0, fallback=False)])
     _write_trajectory(d / "trajectory_4.json", [_conv(exit_code=0, duration=6.0, fallback=True)])
     return d
+
 
 # ---------------------------------------------------------------------------
 # Fallback-rate comparison
@@ -143,6 +145,7 @@ class TestFallbackRateComparison:
         impr = agg.compare_versions(baseline_dir, o)["improvements"]
         assert impr["fallback_rate_reduction_pct"] == 0.0
 
+
 # ---------------------------------------------------------------------------
 # Per-phase comparison
 # ---------------------------------------------------------------------------
@@ -151,8 +154,7 @@ class TestFallbackRateComparison:
 class TestPerPhaseComparison:
     """compare_versions populates by_phase with per-phase improvements."""
 
-    def _multi_phase_dir(self, base: Path, name: str, deploy_dur: float,
-                         monitor_dur: float) -> Path:
+    def _multi_phase_dir(self, base: Path, name: str, deploy_dur: float, monitor_dur: float) -> Path:
         d = base / name
         d.mkdir()
         # Single trajectory with both phases
@@ -173,9 +175,11 @@ class TestPerPhaseComparison:
                     "messages": [
                         {"role": "system", "content": "monitor"},
                         {"role": "user", "content": "check health"},
-                        {"role": "assistant",
-                         "content": "<exec_summary>System is fully operational</exec_summary>",
-                         "duration_seconds": monitor_dur},
+                        {
+                            "role": "assistant",
+                            "content": "<exec_summary>System is fully operational</exec_summary>",
+                            "duration_seconds": monitor_dur,
+                        },
                     ],
                 }
             ],
@@ -208,18 +212,29 @@ class TestPerPhaseComparison:
         b = tmp_path / "b_uni"
         b.mkdir()
         trajectory = {
-            "metadata": {"repo_path": str(b), "start_time": "2024-01-01 00:00:00",
-                         "end_time": "2024-01-01 00:01:00", "agent_name": "t",
-                         "status": "completed", "run_id": "b_uni"},
+            "metadata": {
+                "repo_path": str(b),
+                "start_time": "2024-01-01 00:00:00",
+                "end_time": "2024-01-01 00:01:00",
+                "agent_name": "t",
+                "status": "completed",
+                "run_id": "b_uni",
+            },
             "deployment": [_conv()],
             "monitoring": [
-                {"call_id": 2, "fallback_occurred": False, "messages": [
-                    {"role": "system", "content": "m"},
-                    {"role": "user", "content": "check"},
-                    {"role": "assistant",
-                     "content": "<exec_summary>fully operational</exec_summary>",
-                     "duration_seconds": 5.0},
-                ]}
+                {
+                    "call_id": 2,
+                    "fallback_occurred": False,
+                    "messages": [
+                        {"role": "system", "content": "m"},
+                        {"role": "user", "content": "check"},
+                        {
+                            "role": "assistant",
+                            "content": "<exec_summary>fully operational</exec_summary>",
+                            "duration_seconds": 5.0,
+                        },
+                    ],
+                }
             ],
         }
         (b / "trajectory_bu.json").write_text(json.dumps(trajectory))
@@ -244,17 +259,28 @@ class TestPerPhaseComparison:
         o = tmp_path / "o_mon"
         o.mkdir()
         trajectory = {
-            "metadata": {"repo_path": str(o), "start_time": "2024-01-01 00:00:00",
-                         "end_time": "2024-01-01 00:01:00", "agent_name": "t",
-                         "status": "completed", "run_id": "o_mon"},
+            "metadata": {
+                "repo_path": str(o),
+                "start_time": "2024-01-01 00:00:00",
+                "end_time": "2024-01-01 00:01:00",
+                "agent_name": "t",
+                "status": "completed",
+                "run_id": "o_mon",
+            },
             "monitoring": [
-                {"call_id": 1, "fallback_occurred": False, "messages": [
-                    {"role": "system", "content": "m"},
-                    {"role": "user", "content": "check"},
-                    {"role": "assistant",
-                     "content": "<exec_summary>fully operational</exec_summary>",
-                     "duration_seconds": 5.0},
-                ]}
+                {
+                    "call_id": 1,
+                    "fallback_occurred": False,
+                    "messages": [
+                        {"role": "system", "content": "m"},
+                        {"role": "user", "content": "check"},
+                        {
+                            "role": "assistant",
+                            "content": "<exec_summary>fully operational</exec_summary>",
+                            "duration_seconds": 5.0,
+                        },
+                    ],
+                }
             ],
         }
         (o / "trajectory_om.json").write_text(json.dumps(trajectory))

@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .utils import truncate_params, truncate_content
+from .utils import truncate_content, truncate_params
 
 
 class ClaudeEvent(ABC):
@@ -12,10 +12,9 @@ class ClaudeEvent(ABC):
     @abstractmethod
     def render(self, log_prefix: str) -> str | None:
         """Render the event as a string for terminal output."""
-        pass
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "ClaudeEvent" | None:
+    def from_dict(data: dict[str, Any]) -> ClaudeEvent | None:
         """Factory method to create events from JSON data."""
         event_type = data.get("type")
 

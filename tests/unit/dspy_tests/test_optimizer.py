@@ -1,12 +1,13 @@
 """Tests for PromptOptimizer."""
 
 import json
-import pytest
 from unittest.mock import Mock, patch
 
-from app_operator.dspy_integration.optimizer import PromptOptimizer
+import pytest
+
 from app_operator.dspy_integration.config import DSPyConfig, DSPyOptimizationConfig
 from app_operator.dspy_integration.data_loader import TrajectoryExample
+from app_operator.dspy_integration.optimizer import PromptOptimizer
 
 
 @pytest.fixture
@@ -111,9 +112,7 @@ class TestPromptOptimizer:
             )
 
     @patch("app_operator.dspy_integration.optimizer.TrajectoryDataLoader")
-    def test_optimize_single_example_per_phase_not_skipped(
-        self, mock_loader, dspy_config, tmp_path
-    ):
+    def test_optimize_single_example_per_phase_not_skipped(self, mock_loader, dspy_config, tmp_path):
         """A phase with exactly one example must not be skipped.
 
         Previously int(1 * 0.8) == 0 put the sole example in val,
@@ -121,12 +120,21 @@ class TestPromptOptimizer:
         """
         examples = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=1, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=1,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={
-                    "repo_path": "/repo", "error_context": "err",
-                    "attempt": 1, "max_attempts": 20,
+                    "repo_path": "/repo",
+                    "error_context": "err",
+                    "attempt": 1,
+                    "max_attempts": 20,
                     "deploy_script": "/repo/.sds/deploy.sh",
                     "health_check_script": "/repo/.sds/health_check.sh",
                 },
@@ -136,9 +144,7 @@ class TestPromptOptimizer:
 
         optimizer = PromptOptimizer(dspy_config, tmp_path)
         optimizer._configure_dspy_lm = Mock()
-        optimizer._optimize_single_prompt = Mock(
-            return_value={"success": True, "optimized_module": Mock()}
-        )
+        optimizer._optimize_single_prompt = Mock(return_value={"success": True, "optimized_module": Mock()})
         optimizer._save_optimized_prompts = Mock()
 
         result = optimizer.optimize(
@@ -150,26 +156,33 @@ class TestPromptOptimizer:
         optimizer._optimize_single_prompt.assert_called_once()
         prompt_name, train, val, _ = optimizer._optimize_single_prompt.call_args[0]
         assert prompt_name == "deployer_fix_error"
-        assert len(train) == 1          # the single example goes to train
+        assert len(train) == 1  # the single example goes to train
         assert train[0].phase == "deployment"
-        assert len(val) == 0            # nothing left for val
+        assert len(val) == 0  # nothing left for val
         assert result["success"] is True
 
     @patch("app_operator.dspy_integration.optimizer.dspy")
     @patch("app_operator.dspy_integration.optimizer.TrajectoryDataLoader")
-    def test_optimize_all_prompts_failed_raises(
-        self, mock_loader, mock_dspy, dspy_config, tmp_path
-    ):
+    def test_optimize_all_prompts_failed_raises(self, mock_loader, mock_dspy, dspy_config, tmp_path):
         """optimize() raises RuntimeError and saves nothing when every prompt fails."""
         # Provide examples that will pass through to _optimize_single_prompt
         examples = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=i, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=i,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={
-                    "repo_path": "/repo", "error_context": "err",
-                    "attempt": 1, "max_attempts": 20,
+                    "repo_path": "/repo",
+                    "error_context": "err",
+                    "attempt": 1,
+                    "max_attempts": 20,
                     "deploy_script": "/repo/.sds/deploy.sh",
                     "health_check_script": "/repo/.sds/health_check.sh",
                 },
@@ -217,7 +230,7 @@ class TestPromptOptimizer:
         assert result["dry_run"] is True
         assert result["prompt_names"] == ["deployer_fix_error"]
         assert result["train_examples"] == 1  # 80% of 2 examples
-        assert result["val_examples"] == 1    # 20% of 2 examples
+        assert result["val_examples"] == 1  # 20% of 2 examples
         assert "config" in result
 
     def test_get_next_version_no_existing(self, dspy_config, tmp_path):
@@ -301,9 +314,7 @@ class TestPromptOptimizer:
         failed_file = output_dir / "deployer_summarize.dspy.json"
         assert not failed_file.exists()
 
-    def test_save_dspy_module_captures_optimized_instruction(
-        self, dspy_config, tmp_path
-    ):
+    def test_save_dspy_module_captures_optimized_instruction(self, dspy_config, tmp_path):
         """_save_dspy_module persists the instruction rewritten by COPRO."""
         optimizer = PromptOptimizer(dspy_config, tmp_path)
 
@@ -327,8 +338,9 @@ class TestPromptOptimizer:
 
     def test_create_optimizer_bootstrap(self, dspy_config, tmp_path):
         """Test creating BootstrapFewShot optimizer."""
-        from app_operator.dspy_integration.metrics import CompositeMetric
         import dspy
+
+        from app_operator.dspy_integration.metrics import CompositeMetric
 
         optimizer = PromptOptimizer(dspy_config, tmp_path)
         metric = CompositeMetric()
@@ -402,9 +414,7 @@ class TestPromptOptimizer:
         # Module must be callable with input kwargs and return a prediction
         mock_module = Mock(return_value="predicted output")
 
-        score = optimizer._evaluate(
-            mock_module, examples, metric, "deployer_fix_error"
-        )
+        score = optimizer._evaluate(mock_module, examples, metric, "deployer_fix_error")
 
         # Module was actually invoked for each example
         assert mock_module.call_count == len(examples)
@@ -452,9 +462,7 @@ class TestPromptOptimizer:
         # Output field is set from rendered_prompt (ground-truth instruction prompt)
         assert ex.rendered_prompt == "You are a DevOps agent. Fix the connection error."
 
-    def test_convert_to_dspy_examples_without_prompt_kwargs_skips(
-        self, dspy_config, tmp_path
-    ):
+    def test_convert_to_dspy_examples_without_prompt_kwargs_skips(self, dspy_config, tmp_path):
         """Examples without prompt_kwargs are skipped entirely."""
         optimizer = PromptOptimizer(dspy_config, tmp_path)
         examples = [
@@ -477,9 +485,7 @@ class TestPromptOptimizer:
 
         assert len(result) == 0
 
-    def test_convert_to_dspy_examples_mixed_kwargs_keeps_only_valid(
-        self, dspy_config, tmp_path
-    ):
+    def test_convert_to_dspy_examples_mixed_kwargs_keeps_only_valid(self, dspy_config, tmp_path):
         """Only examples with prompt_kwargs produce dspy.Examples; others are skipped."""
         optimizer = PromptOptimizer(dspy_config, tmp_path)
         examples = [
@@ -573,22 +579,37 @@ class TestPromptOptimizer:
 
         train = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=1, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=1,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={"health_check_output": "ok", "exit_code": 0, "iteration": 1},
             )
         ]
         val = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=2, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=2,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={"health_check_output": "ok", "exit_code": 0, "iteration": 1},
             )
         ]
 
         from app_operator.dspy_integration.metrics import CompositeMetric
+
         metric = CompositeMetric()
 
         optimizer._optimize_single_prompt("monitor_analyze_health", train, val, metric)
@@ -613,22 +634,37 @@ class TestPromptOptimizer:
 
         train = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=1, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=1,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={"health_check_output": "ok", "exit_code": 0, "iteration": 1},
             )
         ]
         val = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=2, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=2,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={"health_check_output": "ok", "exit_code": 0, "iteration": 1},
             )
         ]
 
         from app_operator.dspy_integration.metrics import CompositeMetric
+
         metric = CompositeMetric()
 
         optimizer._optimize_single_prompt("monitor_analyze_health", train, val, metric)
@@ -639,9 +675,7 @@ class TestPromptOptimizer:
         assert call_kwargs["eval_kwargs"] == {"num_threads": 4}
 
     @patch("app_operator.dspy_integration.optimizer.dspy")
-    def test_optimize_single_prompt_zero_traces_returns_failure(
-        self, mock_dspy, dspy_config, tmp_path
-    ):
+    def test_optimize_single_prompt_zero_traces_returns_failure(self, mock_dspy, dspy_config, tmp_path):
         """compile() that never invokes the metric is reported as failure.
 
         BootstrapFewShot populates demos from the training set even when the
@@ -660,27 +694,31 @@ class TestPromptOptimizer:
 
         train = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=1, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=1,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={"health_check_output": "ok", "exit_code": 0, "iteration": 1},
             )
         ]
 
         from app_operator.dspy_integration.metrics import CompositeMetric
+
         metric = CompositeMetric()
 
-        result = optimizer._optimize_single_prompt(
-            "monitor_analyze_health", train, [], metric
-        )
+        result = optimizer._optimize_single_prompt("monitor_analyze_health", train, [], metric)
 
         assert result["success"] is False
         assert "0 successful traces" in result["error"]
 
     @patch("app_operator.dspy_integration.optimizer.dspy")
-    def test_optimize_single_prompt_with_traces_returns_success(
-        self, mock_dspy, dspy_config, tmp_path
-    ):
+    def test_optimize_single_prompt_with_traces_returns_success(self, mock_dspy, dspy_config, tmp_path):
         """compile() that invokes the metric at least once reports success."""
         mock_optimizer_instance = Mock()
         compiled_module = Mock()
@@ -688,9 +726,12 @@ class TestPromptOptimizer:
         # Simulate compile calling the metric (teacher LM succeeded on one example)
         def fake_compile(*args, **kwargs):
             metric_fn = mock_dspy.BootstrapFewShot.call_args[1]["metric"]
-            example = Mock(success=True, iterations=1,
-                           token_usage={"input": 10, "output": 5, "total": 15},
-                           health_check_script=None)
+            example = Mock(
+                success=True,
+                iterations=1,
+                token_usage={"input": 10, "output": 5, "total": 15},
+                health_check_script=None,
+            )
             metric_fn(example, "prediction")  # one successful evaluation
             return compiled_module
 
@@ -704,19 +745,25 @@ class TestPromptOptimizer:
 
         train = [
             TrajectoryExample(
-                trajectory_file="/t.json", run_id="r", phase="deployment",
-                call_id=1, prompt="p", response="r", success=True,
-                iterations=1, tool_calls=[], duration_seconds=1.0,
+                trajectory_file="/t.json",
+                run_id="r",
+                phase="deployment",
+                call_id=1,
+                prompt="p",
+                response="r",
+                success=True,
+                iterations=1,
+                tool_calls=[],
+                duration_seconds=1.0,
                 prompt_kwargs={"health_check_output": "ok", "exit_code": 0, "iteration": 1},
             )
         ]
 
         from app_operator.dspy_integration.metrics import CompositeMetric
+
         metric = CompositeMetric()
 
-        result = optimizer._optimize_single_prompt(
-            "monitor_analyze_health", train, [], metric
-        )
+        result = optimizer._optimize_single_prompt("monitor_analyze_health", train, [], metric)
 
         assert result["success"] is True
         assert result["optimized_module"] is compiled_module
@@ -725,7 +772,7 @@ class TestPromptOptimizer:
     def test_configure_dspy_lm_with_provider_prefix(self, mock_dspy, tmp_path):
         """Test LM configuration preserves provider/model format."""
         test_cases = [
-            # (input_model, expected_model_str)
+            # input_model, expected_model_str
             ("vertex_ai/gemini-2.5-pro", "vertex_ai/gemini-2.5-pro"),
             ("anthropic/claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
             ("openai/gpt-4", "openai/gpt-4"),
@@ -755,7 +802,7 @@ class TestPromptOptimizer:
     def test_configure_dspy_lm_without_provider_prefix(self, mock_dspy, tmp_path):
         """Test LM configuration adds provider prefix when missing."""
         test_cases = [
-            # (input_model, expected_model_str)
+            # input_model, expected_model_str
             ("claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
             ("gpt-4", "openai/gpt-4"),
             ("o1-preview", "openai/o1-preview"),

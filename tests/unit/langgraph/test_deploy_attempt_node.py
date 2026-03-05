@@ -1,12 +1,13 @@
 """Tests for deploy_attempt node function."""
+
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app_operator.config import Config
 from app_operator.filesystem import InMemoryFilesystem
-from app_operator.trajectory import NullTrajectoryRecorder, Phase
-from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.nodes.deployer import deploy_attempt
+from app_operator.langgraph.state import OperatorState
+from app_operator.trajectory import NullTrajectoryRecorder, Phase
 
 
 class TestDeployAttempt:
@@ -21,7 +22,7 @@ class TestDeployAttempt:
             scripts_done=True,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -32,18 +33,12 @@ class TestDeployAttempt:
         recorder.start_phase = Mock()
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
-            mock_run.return_value = {"exit_code": 0,
-                                     "stdout": "Deployment successful"}
+            mock_run.return_value = {"exit_code": 0, "stdout": "Deployment successful"}
 
-            result_state = deploy_attempt(
-                state, repo_path, filesystem, config, check_shutdown, recorder
-            )
+            result_state = deploy_attempt(state, repo_path, filesystem, config, check_shutdown, recorder)
 
         assert result_state["deploy_result"]["exit_code"] == 0
-        recorder.start_phase.assert_called_once_with(
-            Phase.DEPLOYMENT,
-            {"attempt": 1, "max_attempts": 3}
-        )
+        recorder.start_phase.assert_called_once_with(Phase.DEPLOYMENT, {"attempt": 1, "max_attempts": 3})
 
     def test_deploy_attempt_with_failure(self):
         """Test deploy_attempt with failed deployment."""
@@ -54,7 +49,7 @@ class TestDeployAttempt:
             scripts_done=True,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -63,12 +58,9 @@ class TestDeployAttempt:
         check_shutdown = Mock(return_value=False)
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
-            mock_run.return_value = {
-                "exit_code": 1, "stderr": "Deployment failed"}
+            mock_run.return_value = {"exit_code": 1, "stderr": "Deployment failed"}
 
-            result_state = deploy_attempt(
-                state, repo_path, filesystem, config, check_shutdown
-            )
+            result_state = deploy_attempt(state, repo_path, filesystem, config, check_shutdown)
 
         assert result_state["deploy_result"]["exit_code"] == 1
 
@@ -81,7 +73,7 @@ class TestDeployAttempt:
             scripts_done=True,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -90,9 +82,7 @@ class TestDeployAttempt:
         check_shutdown = Mock(return_value=True)
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
-            result_state = deploy_attempt(
-                state, repo_path, filesystem, config, check_shutdown
-            )
+            result_state = deploy_attempt(state, repo_path, filesystem, config, check_shutdown)
 
         # Should not run script when shutdown is True
         mock_run.assert_not_called()
@@ -107,7 +97,7 @@ class TestDeployAttempt:
             scripts_done=True,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -117,9 +107,7 @@ class TestDeployAttempt:
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
             mock_run.return_value = {"exit_code": 0}
 
-            deploy_attempt(
-                state, repo_path, filesystem, config, check_shutdown=None
-            )
+            deploy_attempt(state, repo_path, filesystem, config, check_shutdown=None)
 
         # Should run script when shutdown check is None
         mock_run.assert_called_once()
@@ -133,7 +121,7 @@ class TestDeployAttempt:
             scripts_done=True,
             deploy_result=None,
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")

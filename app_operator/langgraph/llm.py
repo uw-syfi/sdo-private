@@ -1,7 +1,7 @@
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 from app_operator.config import Config
 from app_operator.logger import logger
@@ -67,14 +67,10 @@ def create_chat_model(
         except Exception as e:
             if "API key required" in str(e):
                 logger.info("Gemini API key not found, falling back to Vertex AI")
-                return ChatGoogleGenerativeAI(
-                    **_build_vertex_kwargs(model, location, thinking_budget)
-                )
+                return ChatGoogleGenerativeAI(**_build_vertex_kwargs(model, location, thinking_budget))
             raise
     if normalized == "vertex":
-        return ChatGoogleGenerativeAI(
-            **_build_vertex_kwargs(model, location, thinking_budget)
-        )
+        return ChatGoogleGenerativeAI(**_build_vertex_kwargs(model, location, thinking_budget))
 
     raise ValueError(f"Unsupported provider: {provider}")
 

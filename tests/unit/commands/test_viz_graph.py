@@ -1,7 +1,8 @@
 """Tests for viz_graph command."""
+
 import argparse
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch, mock_open
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
 from app_operator.langgraph.viz_graph import add_arguments, run_command
 
@@ -159,7 +160,7 @@ class TestRunCommand:
         mock_build_graph.return_value = mock_graph
 
         # Make file write raise an exception
-        mock_file.side_effect = IOError("Permission denied")
+        mock_file.side_effect = OSError("Permission denied")
 
         args = argparse.Namespace(output="graph.mermaid")
         exit_code = run_command(args)
@@ -280,11 +281,7 @@ class TestRunCommand:
         exit_code = run_command(args)
 
         assert exit_code == 0
-        mock_file.assert_called_once_with(
-            Path("output/subdir/graph.mermaid"),
-            "w",
-            encoding="utf-8"
-        )
+        mock_file.assert_called_once_with(Path("output/subdir/graph.mermaid"), "w", encoding="utf-8")
 
     @patch("app_operator.langgraph.viz_graph.build_graph")
     @patch("app_operator.langgraph.viz_graph.Config")

@@ -25,11 +25,11 @@ def add_arguments(parser):
         type=Path,
         nargs="+",
         help="One or more directories containing trajectory files "
-             "(default: .sds/trajectories in current dir). "
-             "Examples from all directories are merged before optimization. "
-             "Use shell glob expansion to select multiple baseline runs: "
-             "exp/hotelReservation/baseline-*/.sds/trajectories. "
-             "WARNING: Do not mix baseline and optimizee trajectories in training data.",
+        "(default: .sds/trajectories in current dir). "
+        "Examples from all directories are merged before optimization. "
+        "Use shell glob expansion to select multiple baseline runs: "
+        "exp/hotelReservation/baseline-*/.sds/trajectories. "
+        "WARNING: Do not mix baseline and optimizee trajectories in training data.",
     )
     parser.add_argument(
         "--output-dir",
@@ -70,7 +70,7 @@ def add_arguments(parser):
         "--use-seeds",
         action="store_true",
         help="Use minimal GEPA-style seed prompts instead of baseline templates "
-             "(start small and let optimizer discover effective patterns)",
+        "(start small and let optimizer discover effective patterns)",
     )
 
 
@@ -195,7 +195,7 @@ def run_command(args) -> int:
             print("To use optimized prompts, update sds.toml:")
             print("  [dspy]")
             print("  use_optimized = true")
-            print(f"  optimized_version = \"{Path(result['output_dir']).name}\"")
+            print(f'  optimized_version = "{Path(result["output_dir"]).name}"')
 
         return 0
 
@@ -208,5 +208,6 @@ def run_command(args) -> int:
     except Exception as e:
         print(f"\nUnexpected error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1

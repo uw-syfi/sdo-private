@@ -1,4 +1,5 @@
 import pytest
+
 from lego_agent.prompts import get_loader, reset_loader
 
 
@@ -31,9 +32,7 @@ def test_lego_agent_user_prompt(loader):
 
 
 def test_lego_agent_repair_prompt(loader):
-    rendered = loader.render(
-        "lego_agent/repair.jinja2", error="TEST_ERROR", raw_response="RAW_RESPONSE"
-    )
+    rendered = loader.render("lego_agent/repair.jinja2", error="TEST_ERROR", raw_response="RAW_RESPONSE")
     assert "TEST_ERROR" in rendered
     assert "RAW_RESPONSE" in rendered
     assert "yaml_config" in rendered

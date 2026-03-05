@@ -18,8 +18,7 @@ class LegoAgentStorage:
             current_timestamp = time.strftime("%Y%m%d-%H%M%S")
 
             # Create new directory if we don't have one or timestamp changed
-            if (self.current_run_dir is None or
-                    self.current_run_dir.name != current_timestamp):
+            if self.current_run_dir is None or self.current_run_dir.name != current_timestamp:
                 self.current_run_dir = self.base_dir / current_timestamp
                 self.current_run_dir.mkdir(parents=True, exist_ok=True)
         return self.current_run_dir
@@ -28,8 +27,7 @@ class LegoAgentStorage:
         """Synchronous fallback for non-async callers."""
         with self._thread_lock:
             current_timestamp = time.strftime("%Y%m%d-%H%M%S")
-            if (self.current_run_dir is None or
-                    self.current_run_dir.name != current_timestamp):
+            if self.current_run_dir is None or self.current_run_dir.name != current_timestamp:
                 self.current_run_dir = self.base_dir / current_timestamp
                 self.current_run_dir.mkdir(parents=True, exist_ok=True)
             return self.current_run_dir

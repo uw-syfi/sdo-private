@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .utils import truncate_params, truncate_content
+from .utils import truncate_content, truncate_params
 
 
 class GeminiEvent(ABC):
@@ -12,17 +12,14 @@ class GeminiEvent(ABC):
     @abstractmethod
     def render(self, log_prefix: str) -> str | None:
         """Render the event as a string for terminal output."""
-        pass
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "GeminiEvent" | None:
+    def from_dict(data: dict[str, Any]) -> GeminiEvent | None:
         """Factory method to create events from JSON data."""
         msg_type = data.get("type")
 
         if msg_type == "message":
-            return MessageEvent(
-                role=data.get("role", ""), content=data.get("content", "")
-            )
+            return MessageEvent(role=data.get("role", ""), content=data.get("content", ""))
         elif msg_type == "tool_use":
             return ToolUseEvent(
                 tool_name=data.get("tool_name", "Tool"),
@@ -30,9 +27,7 @@ class GeminiEvent(ABC):
                 parameters=data.get("parameters"),
             )
         elif msg_type == "tool_result":
-            return ToolResultEvent(
-                output=data.get("output", ""), tool_id=data.get("tool_id")
-            )
+            return ToolResultEvent(output=data.get("output", ""), tool_id=data.get("tool_id"))
         return None
 
 

@@ -1,17 +1,10 @@
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface
-from app_operator.prompts import PromptLoader
-from app_operator.prompts.deployment_context import create_system_prompt
-from app_operator.prompts.deployer import create_fix_prompt, prepare_error_context
-from app_operator.trajectory import (
-    Phase,
-    TrajectoryRecorderProtocol,
-    NullTrajectoryRecorder,
-)
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import (
     BLUE,
@@ -19,6 +12,14 @@ from app_operator.langgraph.utils import (
     invoke_agent,
     run_script,
     write_log_file,
+)
+from app_operator.prompts import PromptLoader
+from app_operator.prompts.deployer import create_fix_prompt, prepare_error_context
+from app_operator.prompts.deployment_context import create_system_prompt
+from app_operator.trajectory import (
+    NullTrajectoryRecorder,
+    Phase,
+    TrajectoryRecorderProtocol,
 )
 
 
@@ -74,18 +75,12 @@ def fix_errors(
     deploy_result = state.get("deploy_result") or {}
     health_result = state.get("health_result")
 
-    log_file_path = (
-        repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
-    )
+    log_file_path = repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
     health_check_log_path = None
     if health_result:
-        health_check_log_path = (
-            repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
-        )
+        health_check_log_path = repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
 
-    error_context = prepare_error_context(
-        deploy_result, health_result, log_file_path, health_check_log_path
-    )
+    error_context = prepare_error_context(deploy_result, health_result, log_file_path, health_check_log_path)  # type: ignore[reportArgumentType]
 
     system_prompt = create_system_prompt(operator_config.deployment.platform)
     prompt = create_fix_prompt(
@@ -112,12 +107,7 @@ def fix_errors(
     if match:
         summary_text = match.group(1)
         # Handle potential escaped characters
-        summary_text = (
-            summary_text.replace("\\n", "\n")
-            .replace("\\t", "\t")
-            .replace("\\r", "\r")
-            .strip()
-        )
+        summary_text = summary_text.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").strip()
         log_file = repo_path / ".sds" / "logs" / f"fix_summary_{state['attempt']}.log"
         write_log_file(filesystem, log_file, summary_text)
         state["last_fix_summary"] = summary_text

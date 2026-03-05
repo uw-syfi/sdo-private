@@ -2,12 +2,13 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-from datetime import datetime
 
 from langchain_core.tools import tool
 
@@ -46,8 +47,8 @@ class ToolContext:
         # Check if path escapes repository root
         try:
             candidate.relative_to(self.repo_root)
-        except ValueError:
-            raise ValueError(f"Path escapes repository root: {path}")
+        except ValueError as err:
+            raise ValueError(f"Path escapes repository root: {path}") from err
 
         return candidate
 
@@ -60,23 +61,21 @@ def _build_ls(context: ToolContext) -> Callable[[str], str]:
             target = context.resolve_path(path)
             if not context.filesystem.exists(target):
                 return f"Error: Path does not exist: {path}"
-            if context.filesystem.exists(target) and not context.filesystem.is_dir(
-                target
-            ):
+            if context.filesystem.exists(target) and not context.filesystem.is_dir(target):
                 result = target.name
                 return result
             entries = sorted(p.name for p in target.iterdir())
             result = "\n".join(entries)
             return result
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {e!s}"
 
-    return ls
+    return ls  # type: ignore[reportReturnType]
 
 
-def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
+def _build_glob(context: ToolContext) -> Callable[[str], list[str]]:
     @tool("Glob")
-    def glob(pattern: str) -> List[str]:
+    def glob(pattern: str) -> list[str]:
         """Find files matching the pattern."""
         try:
             if Path(pattern).is_absolute():
@@ -96,9 +95,9 @@ def _build_glob(context: ToolContext) -> Callable[[str], List[str]]:
             results = sorted(results)
             return results
         except Exception as e:
-            return [f"Error: {str(e)}"]
+            return [f"Error: {e!s}"]
 
-    return glob
+    return glob  # type: ignore[reportReturnType]
 
 
 def _build_read(context: ToolContext) -> Callable[[str], str]:
@@ -110,23 +109,21 @@ def _build_read(context: ToolContext) -> Callable[[str], str]:
             content = context.filesystem.read_text(target)
             return content
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {e!s}"
 
-    return read
+    return read  # type: ignore[reportReturnType]
 
 
-def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
+def _build_grep(context: ToolContext) -> Callable[[str, str], list[str]]:
     @tool("Grep")
-    def grep(pattern: str, path: str = ".") -> List[str]:
+    def grep(pattern: str, path: str = ".") -> list[str]:
         """Search for a regex pattern in files."""
         try:
             target = context.resolve_path(path)
             regex = re.compile(pattern)
-            matches: List[str] = []
+            matches: list[str] = []
 
-            if context.filesystem.exists(target) and not context.filesystem.is_dir(
-                target
-            ):
+            if context.filesystem.exists(target) and not context.filesystem.is_dir(target):
                 matches.extend(_grep_file(regex, target, context.repo_root))
                 return matches
 
@@ -135,12 +132,12 @@ def _build_grep(context: ToolContext) -> Callable[[str, str], List[str]]:
                     matches.extend(_grep_file(regex, file_path, context.repo_root))
             return matches
         except Exception as e:
-            return [f"Error: {str(e)}"]
+            return [f"Error: {e!s}"]
 
-    return grep
+    return grep  # type: ignore[reportReturnType]
 
 
-def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path) -> List[str]:
+def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path) -> list[str]:
     results = []
     try:
         content = file_path.read_text(errors="ignore")
@@ -168,14 +165,14 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
             result = f"Wrote {len(content)} bytes to {path}"
             return result
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {e!s}"
 
-    return write_file
+    return write_file  # type: ignore[reportReturnType]
 
 
-def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
+def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
     @tool("bash")
-    def bash(command: str, timeout: int = 120) -> Dict[str, Any]:
+    def bash(command: str, timeout: int = 120) -> dict[str, Any]:
         """Execute a bash command."""
         try:
             validate_command(command)
@@ -211,7 +208,7 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
                 "stderr": error_msg,
             }
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
+            error_msg = f"Error: {e!s}"
             return {
                 "success": False,
                 "exit_code": -1,
@@ -219,19 +216,19 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], Dict[str, Any]]:
                 "stderr": error_msg,
             }
 
-    return bash
+    return bash  # type: ignore[reportReturnType]
 
 
 def _build_make_change_on_remote_copy(
     context: ToolContext,
-) -> Callable[[str, str, str | None, str | None], Dict[str, Any]]:
+) -> Callable[[str, str, str | None, str | None], dict[str, Any]]:
     @tool("make_change_on_remote_copy")
     def make_change_on_remote_copy(
         branch_name: str,
         commit_message: str,
         mr_title: str | None = None,
         mr_description: str | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a branch, commit local changes, push to origin, and open a GitLab MR.
 
         This tool is intended to be called after the agent has made code changes locally.
@@ -266,7 +263,7 @@ def _build_make_change_on_remote_copy(
             base_name = "sds-change"
         branch_name = f"{base_name}-{timestamp}"
 
-        def _run_git(args: list[str]) -> Dict[str, Any]:
+        def _run_git(args: list[str]) -> dict[str, Any]:
             try:
                 result = subprocess.run(
                     ["git", *args],
@@ -442,7 +439,7 @@ def _build_make_change_on_remote_copy(
             except ValueError:
                 host = ""
                 path = ""
-        elif remote_url.startswith("http://") or remote_url.startswith("https://"):
+        elif remote_url.startswith(("http://", "https://")):
             try:
                 without_scheme = remote_url.split("://", 1)[1]
                 host, path = without_scheme.split("/", 1)
@@ -508,7 +505,7 @@ def _build_make_change_on_remote_copy(
         project_id_encoded = quote(project_path, safe="")
         api_url = f"{gitlab_base}/api/v4/projects/{project_id_encoded}/merge_requests"
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "source_branch": branch_name,
             "target_branch": target_branch,
             "title": mr_title or commit_message,
@@ -591,8 +588,7 @@ def _build_make_change_on_remote_copy(
                 "merge_request_url": None,
                 "git_log": "".join(git_outputs),
                 "error": (
-                    f"GitLab API response did not include 'web_url'. "
-                    f"Status: {status_code}, Response: {body[:500]}"
+                    f"GitLab API response did not include 'web_url'. Status: {status_code}, Response: {body[:500]}"
                 ),
             }
 
@@ -605,14 +601,14 @@ def _build_make_change_on_remote_copy(
             "error": None,
         }
 
-    return make_change_on_remote_copy
+    return make_change_on_remote_copy  # type: ignore[reportReturnType]
 
 
 def build_tools(
     repo_path: Path,
-    filesystem: FileSystemInterface = None,
+    filesystem: FileSystemInterface | None = None,
     git_integration: bool = False,
-) -> List[Callable[..., Any]]:
+) -> list[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 

@@ -1,26 +1,26 @@
 import functools
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Any
+from typing import Any
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.prompts import PromptLoader
-from app_operator.langgraph.state import OperatorState
-from app_operator.langgraph.tools import build_tools
 from app_operator.langgraph.models import get_model_context_limit
-from app_operator.trajectory import TrajectoryRecorderProtocol
-
 from app_operator.langgraph.nodes.analyzer import analyze_code
-from app_operator.langgraph.nodes.generator import generate_scripts
 from app_operator.langgraph.nodes.deployer import deploy_attempt, fix_errors
+from app_operator.langgraph.nodes.generator import generate_scripts
 from app_operator.langgraph.nodes.monitor import (
     health_check,
-    monitor_health,
     monitor_analyze,
+    monitor_health,
 )
+from app_operator.langgraph.state import OperatorState
+from app_operator.langgraph.tools import build_tools
+from app_operator.prompts import PromptLoader
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 def build_graph(

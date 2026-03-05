@@ -1,7 +1,8 @@
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from libs.sds_core.command_validation import DangerousCommandError, validate_command
 from libs.sds_core.filesystem import FileSystemInterface, RealFilesystem
@@ -38,8 +39,8 @@ class ToolContext:
         # Check if path escapes repository root
         try:
             candidate.relative_to(self.repo_root)
-        except ValueError:
-            raise ValueError(f"Path escapes repository root: {path}")
+        except ValueError as err:
+            raise ValueError(f"Path escapes repository root: {path}") from err
 
         return candidate
 
@@ -66,9 +67,7 @@ def _build_list_files(context: ToolContext) -> Callable[[str], dict[str, Any]]:
                     "error": f"Path does not exist: {path}",
                     "context": {"path": path},
                 }
-            if context.filesystem.exists(target) and not context.filesystem.is_dir(
-                target
-            ):
+            if context.filesystem.exists(target) and not context.filesystem.is_dir(target):
                 return {
                     "status": "success",
                     "output": target.name,
@@ -198,9 +197,7 @@ def _build_search_content(context: ToolContext) -> Callable[[str, str], dict[str
             regex = re.compile(pattern)
             matches: list[str] = []
 
-            if context.filesystem.exists(target) and not context.filesystem.is_dir(
-                target
-            ):
+            if context.filesystem.exists(target) and not context.filesystem.is_dir(target):
                 # We need to read content via filesystem interface
                 try:
                     content = context.filesystem.read_text(target)
@@ -366,7 +363,7 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], dict[str, A
                 },
             }
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
+            error_msg = f"Error: {e!s}"
             return {
                 "status": "error",
                 "error": error_msg,
@@ -381,9 +378,7 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], dict[str, A
     return run_command
 
 
-def build_tools(
-    repo_path: Path, filesystem: FileSystemInterface | None = None
-) -> list[Callable[..., Any]]:
+def build_tools(repo_path: Path, filesystem: FileSystemInterface | None = None) -> list[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 
@@ -398,9 +393,7 @@ def build_tools(
     ]
 
 
-def build_readonly_tools(
-    repo_path: Path, filesystem: FileSystemInterface | None = None
-) -> list[Callable[..., Any]]:
+def build_readonly_tools(repo_path: Path, filesystem: FileSystemInterface | None = None) -> list[Callable[..., Any]]:
     """Build read-only tools for external consumers (e.g. lego_agent).
 
     Returns tools for reading the repository without any write or execute access.

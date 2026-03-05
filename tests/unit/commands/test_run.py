@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app_operator.commands.run import add_arguments, run_command
-from app_operator.config import Config, AgentConfig, OperatorConfig, RuntimeConfig
+from app_operator.config import AgentConfig, Config, OperatorConfig, RuntimeConfig
 
 
 @pytest.fixture
@@ -31,6 +31,7 @@ def mock_config():
         ),
         runtime=RuntimeConfig(impl="cli_agent"),
     )
+
 
 # ============================================================================
 # add_arguments Tests
@@ -79,6 +80,7 @@ def test_add_arguments_config_is_optional():
     # Should work without --config
     args = parser.parse_args(["/path"])
     assert args.config is None
+
 
 # ============================================================================
 # run_command Tests - Error Cases
@@ -132,6 +134,7 @@ def test_run_command_returns_1_on_generic_exception(mock_args, mock_config):
 
     assert exit_code == 1
 
+
 # ============================================================================
 # run_command Tests - cli_agent Runtime
 # ============================================================================
@@ -166,9 +169,7 @@ def test_run_command_passes_custom_config_path(mock_config):
     mock_operator = MagicMock()
     mock_operator.run.return_value = 0
 
-    with patch(
-        "app_operator.commands.run.load_config", return_value=mock_config
-    ) as mock_load:
+    with patch("app_operator.commands.run.load_config", return_value=mock_config) as mock_load:
         with patch(
             "app_operator.commands.run.create_operator",
             return_value=mock_operator,
@@ -177,6 +178,7 @@ def test_run_command_passes_custom_config_path(mock_config):
 
     # Verify custom config path was passed
     mock_load.assert_called_once_with("/test/repo", "/custom/sds.toml")
+
 
 # ============================================================================
 # run_command Tests - langgraph Runtime
@@ -198,9 +200,7 @@ def test_run_command_runs_langgraph_operator(mock_args):
     mock_operator = MagicMock()
     mock_operator.run.return_value = 0
 
-    with patch(
-        "app_operator.commands.run.load_config", return_value=langgraph_config
-    ):
+    with patch("app_operator.commands.run.load_config", return_value=langgraph_config):
         with patch(
             "app_operator.commands.run.create_operator",
             return_value=mock_operator,
@@ -211,6 +211,7 @@ def test_run_command_runs_langgraph_operator(mock_args):
     mock_create.assert_called_once()
     mock_operator.run.assert_called_once()
     assert exit_code == 0
+
 
 # ============================================================================
 # run_command Tests - adk Runtime
@@ -243,6 +244,7 @@ def test_run_command_runs_adk_operator(mock_args):
     mock_create.assert_called_once()
     mock_operator.run.assert_called_once()
     assert exit_code == 0
+
 
 # ============================================================================
 # run_command Tests - TUI Mode
@@ -285,16 +287,12 @@ def test_run_command_disables_tui_for_non_cli_agent(mock_args):
     mock_operator = MagicMock()
     mock_operator.run.return_value = 0
 
-    with patch(
-        "app_operator.commands.run.load_config", return_value=langgraph_config
-    ):
+    with patch("app_operator.commands.run.load_config", return_value=langgraph_config):
         with patch(
             "app_operator.commands.run.create_operator",
             return_value=mock_operator,
         ):
-            with patch(
-                "app_operator.commands.run.create_tui_app"
-            ) as mock_tui:
+            with patch("app_operator.commands.run.create_tui_app") as mock_tui:
                 exit_code = run_command(mock_args)
 
     # TUI should NOT be invoked for non-cli_agent runtime
@@ -327,6 +325,7 @@ def test_run_command_tui_operator_factory(mock_config):
     assert shared_kwargs["health_check_interval"] == 30
     assert config_arg == mock_config
     assert exit_code == 0
+
 
 # ============================================================================
 # run_command Tests - Configuration Values

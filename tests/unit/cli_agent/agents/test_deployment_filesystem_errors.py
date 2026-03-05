@@ -5,6 +5,7 @@ errors such as permission denied, disk full, and other I/O failures.
 """
 
 import pytest
+
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures.agents import StubAgent
 
@@ -125,11 +126,7 @@ class TestScriptGenerationFilesystemErrors:
             try:
                 success, message = generate_scripts(str(repo), agent)
                 # If it returns, should indicate failure
-                assert (
-                    success is False
-                    or "Permission denied" in message
-                    or "Read-only" in message
-                )
+                assert success is False or "Permission denied" in message or "Read-only" in message
             except PermissionError:
                 # Also acceptable - permission error is raised
                 pass
@@ -210,10 +207,13 @@ class TestLogFileWriteErrors:
         # Either it works, or it fails with a clear error
         try:
             deployer = DeploymentAgent(current, agent)
-            assert deployer.repo_path == current
         except (OSError, ValueError) as e:
             # Valid to fail with OS error on extremely long paths
-            assert "path" in str(e).lower() or "name" in str(e).lower()
+            err_msg = str(e).lower()
+            if "path" not in err_msg and "name" not in err_msg:
+                raise AssertionError(f"Unexpected error message: {e}") from e
+        else:
+            assert deployer.repo_path == current
 
 
 class TestWorkingDirectoryErrors:

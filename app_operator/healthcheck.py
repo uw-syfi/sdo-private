@@ -1,16 +1,16 @@
+import contextlib
 import subprocess
 import time
 from pathlib import Path
 
-from app_operator.ui_protocol import OperatorUI
 from app_operator.logger import logger
 from app_operator.types import CommandResult
+from app_operator.ui_protocol import OperatorUI
 
 DEFAULT_HEALTH_CHECK_TIMEOUT = 120  # seconds
 
 
-def _write_to_log(log_file, header: str, stdout: str = "",
-                  stderr: str = "") -> None:
+def _write_to_log(log_file, header: str, stdout: str = "", stderr: str = "") -> None:
     """Write a structured entry to a health check log file.
 
     Args:
@@ -61,14 +61,14 @@ def run_health_check(
         ui.on_tool_call("health_check.sh", {})
 
     log_file = None
+    log_stack = contextlib.ExitStack()
     if log_file_path:
         try:
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
-            log_file = open(log_file_path, "w")
+            log_file = log_stack.enter_context(log_file_path.open("w"))
             logger.info(f"  Logging health check output to: {log_file_path}")
         except Exception as e:
-            logger.warning(
-                f"Could not open health check log file {log_file_path}: {e}")
+            logger.warning(f"Could not open health check log file {log_file_path}: {e}")
 
     start_time = time.time()
     try:
@@ -82,8 +82,7 @@ def run_health_check(
         duration = time.time() - start_time
 
         status = "PASSED" if result.returncode == 0 else "FAILED"
-        logger.info(
-            f"Health check finished: {status} (Exit Code: {result.returncode})")
+        logger.info(f"Health check finished: {status} (Exit Code: {result.returncode})")
 
         if ui:
             ui.on_tool_result(
@@ -96,11 +95,7 @@ def run_health_check(
 
         # Write outputs to log file if provided
         if log_file:
-            header = (
-                "=== Health Check Output ===\n"
-                f"Exit Code: {result.returncode}\n"
-                f"Status: {status}\n\n"
-            )
+            header = f"=== Health Check Output ===\nExit Code: {result.returncode}\nStatus: {status}\n\n"
             _write_to_log(log_file, header, result.stdout, result.stderr)
 
         return {
@@ -115,18 +110,10 @@ def run_health_check(
 
         # Capture partial output; e.stdout/e.stderr are bytes even when
         # text=True was passed to subprocess.run, so decode if needed.
-        stdout_output = (
-            e.stdout.decode(
-                "utf-8",
-                errors="replace") if isinstance(
-                e.stdout,
-                bytes) else e.stdout) or ""
+        stdout_output = (e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else e.stdout) or ""
         stderr_output = (
-            e.stderr.decode(
-                "utf-8",
-                errors="replace") if isinstance(
-                e.stderr,
-                bytes) else e.stderr) or error_msg
+            e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else e.stderr
+        ) or error_msg
 
         # Ensure outputs are strings (TimeoutExpired can return bytes sometimes
         # even with text=True depending on buffering/decoding state at timeout)
@@ -150,7 +137,8 @@ def run_health_check(
             # message
             timeout_stderr = stderr_output if stderr_output != error_msg else ""
             _write_to_log(
-                log_file, header,
+                log_file,
+                header,
                 stdout=stdout_output,
                 stderr=timeout_stderr,
             )
@@ -178,13 +166,11 @@ def run_health_check(
             header = f"=== Health Check Error ===\n{error_msg}\n"
             _write_to_log(log_file, header)
 
-        return {"success": False, "exit_code": -
-                1, "stdout": "", "stderr": error_msg}
+        return {"success": False, "exit_code": -1, "stdout": "", "stderr": error_msg}
     finally:
-        if log_file:
-            try:
-                log_file.close()
-            except Exception as e:
-                # Best-effort cleanup: swallow close errors so the caller
-                # receives the health check result unaffected.
-                logger.debug("Failed to close health check log file: %s", e)
+        try:
+            log_stack.close()
+        except Exception as e:
+            # Best-effort cleanup: swallow close errors so the caller
+            # receives the health check result unaffected.
+            logger.debug("Failed to close health check log file: %s", e)

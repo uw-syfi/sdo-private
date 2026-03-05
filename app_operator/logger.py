@@ -1,5 +1,6 @@
 import sys
 from typing import TYPE_CHECKING
+
 from loguru import logger
 
 if TYPE_CHECKING:

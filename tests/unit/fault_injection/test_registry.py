@@ -39,10 +39,7 @@ class TestFaultRegistry:
 
     def test_filter_by_multiple_categories(self, registry):
         result = registry.filter(categories=["security", "infrastructure"])
-        assert all(
-            f.category in (FaultCategory.SECURITY, FaultCategory.INFRASTRUCTURE)
-            for f in result
-        )
+        assert all(f.category in (FaultCategory.SECURITY, FaultCategory.INFRASTRUCTURE) for f in result)
 
     def test_filter_by_platform(self, registry):
         compose = registry.filter(platform="compose")

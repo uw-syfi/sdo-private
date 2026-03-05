@@ -1,17 +1,18 @@
-from typing import Callable
-from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static, RichLog
-from textual.containers import Container
-from textual.binding import Binding
-from textual import work
-from rich.text import Text
-from rich.panel import Panel
-
-from app_operator.ui.base import OperatorUI
+from collections.abc import Callable
 
 # We need to import AppOperator dynamically or via factory to avoid circular imports?
 # The factory is passed to run(), so we just need the type.
 from typing import TYPE_CHECKING
+
+from rich.panel import Panel
+from rich.text import Text
+from textual import work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Container
+from textual.widgets import Footer, Header, RichLog, Static
+
+from app_operator.ui.base import OperatorUI
 
 if TYPE_CHECKING:
     from app_operator.cli_agent.operator import AppOperator
@@ -23,9 +24,7 @@ class TextualOperatorUI(OperatorUI):
     def __init__(self, app: "OperatorTUI"):
         self.app = app
 
-    def set_stage(
-        self, stage: str, detail: str | None = None, status: str | None = None
-    ) -> None:
+    def set_stage(self, stage: str, detail: str | None = None, status: str | None = None) -> None:
         self.app.call_from_thread(self.app.update_stage, stage, detail)
 
     def log(self, message: str, level: str = "info") -> None:
@@ -45,18 +44,12 @@ class TextualOperatorUI(OperatorUI):
         exit_code: int | None = None,
         duration: float | None = None,
     ) -> None:
-        self.app.call_from_thread(
-            self.app.add_tool_result, tool, stdout, stderr, exit_code, duration
-        )
+        self.app.call_from_thread(self.app.add_tool_result, tool, stdout, stderr, exit_code, duration)
 
-    def close(
-        self, status: str | None = None, exit_code: int | None = None
-    ) -> None:
+    def close(self, status: str | None = None, exit_code: int | None = None) -> None:
         # We don't exit the app immediately on close, we just log it.
         msg = f"Operator finished with status: {status} (Exit Code: {exit_code})"
-        self.app.call_from_thread(
-            self.app.add_log_message, msg, "success" if exit_code == 0 else "error"
-        )
+        self.app.call_from_thread(self.app.add_log_message, msg, "success" if exit_code == 0 else "error")
 
 
 class OperatorTUI(App):

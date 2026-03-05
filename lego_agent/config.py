@@ -8,7 +8,7 @@ are silently ignored.
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    import tomli as tomllib  # type: ignore[reportMissingImports]
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,9 +31,7 @@ class AgentConfig:
         if self.model is not None and not isinstance(self.model, str):
             raise TypeError(f"model must be a str or None, got {type(self.model)}")
         if self.thinking_budget is not None and not isinstance(self.thinking_budget, int):
-            raise TypeError(
-                f"thinking_budget must be an int or None, got {type(self.thinking_budget)}"
-            )
+            raise TypeError(f"thinking_budget must be an int or None, got {type(self.thinking_budget)}")
 
 
 @dataclass
@@ -42,9 +40,7 @@ class OperatorConfig:
 
     def __post_init__(self):
         if not isinstance(self.agent_timeout, int):
-            raise TypeError(
-                f"agent_timeout must be an int, got {type(self.agent_timeout)}"
-            )
+            raise TypeError(f"agent_timeout must be an int, got {type(self.agent_timeout)}")
 
 
 @dataclass
@@ -64,8 +60,13 @@ class Config:
 
         # Only pass recognised fields to AgentConfig
         agent_field_names = {
-            "provider", "model", "location", "thinking_budget",
-            "max_retries", "retry_base_delay", "rate_limit_backoff",
+            "provider",
+            "model",
+            "location",
+            "thinking_budget",
+            "max_retries",
+            "retry_base_delay",
+            "rate_limit_backoff",
         }
         agent_kwargs = {k: v for k, v in agent_data.items() if k in agent_field_names}
 

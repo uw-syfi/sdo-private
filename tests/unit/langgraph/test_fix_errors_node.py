@@ -1,12 +1,13 @@
 """Tests for fix_errors node function."""
+
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app_operator.config import Config
 from app_operator.filesystem import InMemoryFilesystem
-from app_operator.trajectory import NullTrajectoryRecorder
-from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.nodes.deployer import fix_errors
+from app_operator.langgraph.state import OperatorState
+from app_operator.trajectory import NullTrajectoryRecorder
 
 
 class TestFixErrors:
@@ -21,7 +22,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1, "stderr": "Error occurred"},
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -34,15 +35,13 @@ class TestFixErrors:
         recorder.end_phase = Mock()
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = (
-                "<summary>Fixed the issue</summary>", [])
+            mock_invoke.return_value = ("<summary>Fixed the issue</summary>", [])
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {"error": "Error occurred"}
 
                 result_state = fix_errors(
-                    state, repo_path, filesystem, config, loader,
-                    agent, 10000, check_shutdown, recorder
+                    state, repo_path, filesystem, config, loader, agent, 10000, check_shutdown, recorder
                 )
 
         assert result_state["attempt"] == 2  # Incremented
@@ -58,7 +57,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -68,18 +67,12 @@ class TestFixErrors:
         agent = Mock()
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = (
-                "Some text\n<summary>This is the summary</summary>\nMore text",
-                []
-            )
+            mock_invoke.return_value = ("Some text\n<summary>This is the summary</summary>\nMore text", [])
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                result_state = fix_errors(
-                    state, repo_path, filesystem, config, loader,
-                    agent, 10000, None
-                )
+                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
 
         assert result_state["last_fix_summary"] == "This is the summary"
 
@@ -92,7 +85,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -102,18 +95,12 @@ class TestFixErrors:
         agent = Mock()
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = (
-                "<summary>Line1\\nLine2\\tTabbed</summary>",
-                []
-            )
+            mock_invoke.return_value = ("<summary>Line1\\nLine2\\tTabbed</summary>", [])
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                result_state = fix_errors(
-                    state, repo_path, filesystem, config, loader,
-                    agent, 10000, None
-                )
+                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
 
         assert result_state["last_fix_summary"] == "Line1\nLine2\tTabbed"
 
@@ -126,7 +113,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -141,10 +128,7 @@ class TestFixErrors:
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                result_state = fix_errors(
-                    state, repo_path, filesystem, config, loader,
-                    agent, 10000, None
-                )
+                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
 
         # last_fix_summary should remain None
         assert result_state["last_fix_summary"] is None
@@ -161,7 +145,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -171,10 +155,7 @@ class TestFixErrors:
         agent = Mock()
         check_shutdown = Mock(return_value=True)
 
-        result_state = fix_errors(
-            state, repo_path, filesystem, config, loader,
-            agent, 10000, check_shutdown
-        )
+        result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, check_shutdown)
 
         # Verify observable outcome: state should be unchanged
         assert result_state == state
@@ -195,7 +176,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -211,10 +192,7 @@ class TestFixErrors:
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                fix_errors(
-                    state, repo_path, filesystem, config, loader,
-                    agent, 10000, None
-                )
+                fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
 
                 # Verify observable outcome: log file exists with expected content
                 log_path = repo_path / ".sds" / "logs" / "fix_summary_1.log"
@@ -234,7 +212,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 0},
             health_result={"exit_code": 1, "stderr": "Health check failed"},
-            last_fix_summary=None
+            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -244,17 +222,12 @@ class TestFixErrors:
         agent = Mock()
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = (
-                "<summary>Fixed health check</summary>", [])
+            mock_invoke.return_value = ("<summary>Fixed health check</summary>", [])
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
-                mock_prepare.return_value = {
-                    "health_error": "Health check failed"}
+                mock_prepare.return_value = {"health_error": "Health check failed"}
 
-                result_state = fix_errors(
-                    state, repo_path, filesystem, config, loader,
-                    agent, 10000, None
-                )
+                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
 
                 # Verify observable outcomes:
                 # 1. Fix summary should be extracted and set

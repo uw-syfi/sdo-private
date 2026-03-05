@@ -56,9 +56,7 @@ def collect_gemini_sessions(
                 if file_mtime >= run_start_ts:
                     # Copy session file to our trajectory directory
                     gemini_sessions_dir.mkdir(parents=True, exist_ok=True)
-                    dest_file = (
-                        gemini_sessions_dir / f"{project_dir.name}_{session_file.name}"
-                    )
+                    dest_file = gemini_sessions_dir / f"{project_dir.name}_{session_file.name}"
                     shutil.copy2(session_file, dest_file)
                     sessions_copied.append(str(dest_file.relative_to(sds_dir)))
 

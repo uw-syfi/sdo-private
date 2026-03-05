@@ -1,8 +1,9 @@
-import subprocess
 import os
-import pytest
-from pathlib import Path
+import subprocess
 from argparse import Namespace
+from pathlib import Path
+
+import pytest
 
 try:
     from app_operator.commands import init_exp
@@ -27,12 +28,8 @@ def source_app(tmp_path):
 
     # Initialize git to simulate existing git history
     subprocess.run(["git", "init"], cwd=app_path, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "you@example.com"], cwd=app_path, check=True
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Your Name"], cwd=app_path, check=True
-    )
+    subprocess.run(["git", "config", "user.email", "you@example.com"], cwd=app_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Your Name"], cwd=app_path, check=True)
     (app_path / ".git" / "old_git_file").write_text("should be deleted")
 
     # Add .sds directory to be deleted
@@ -97,9 +94,7 @@ def test_init_exp_resets_git_history(source_app, execute_command):
     assert (target_path / ".git" / "HEAD").exists()
 
     # Check it's a valid repo and on branch 'main'
-    subprocess.run(
-        ["git", "status"], cwd=target_path, check=True, stdout=subprocess.DEVNULL
-    )
+    subprocess.run(["git", "status"], cwd=target_path, check=True, stdout=subprocess.DEVNULL)
 
     # Verify current branch is main
     result = subprocess.run(
@@ -179,6 +174,4 @@ def test_init_exp_handles_git_submodule_structure(tmp_path, execute_command):
     assert (target_path / ".git" / "HEAD").exists()
 
     # Check it's a valid repo
-    subprocess.run(
-        ["git", "status"], cwd=target_path, check=True, stdout=subprocess.DEVNULL
-    )
+    subprocess.run(["git", "status"], cwd=target_path, check=True, stdout=subprocess.DEVNULL)

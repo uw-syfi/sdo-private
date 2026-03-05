@@ -1,14 +1,16 @@
 from unittest.mock import MagicMock
+
+import pytest
+
 from lego_agent.runtime import (
-    fan_out,
-    summarize,
-    judge_loop,
-    _build_runnable,
+    DEFAULT_AGENT_TIMEOUT,
     RUNNABLE_TYPES,
     FanOut,
-    DEFAULT_AGENT_TIMEOUT,
+    _build_runnable,
+    fan_out,
+    judge_loop,
+    summarize,
 )
-import pytest
 
 
 def test_fan_out():
@@ -97,6 +99,7 @@ def test_judge_loop_refinement():
     refine_call = worker.run.call_args_list[1]
     assert "Fix it" in refine_call.args[0]
 
+
 # --- Registry pattern tests (issue 5) ---
 
 
@@ -135,6 +138,7 @@ def test_build_runnable_judge_loop_requires_judge():
 def test_build_runnable_judge_loop_requires_worker():
     with pytest.raises(ValueError, match="JudgeLoop must have 'worker'"):
         _build_runnable({"type": "judge_loop", "judge": {"type": "agent"}})
+
 
 # --- FanOut timeout configurability (issue 3) ---
 

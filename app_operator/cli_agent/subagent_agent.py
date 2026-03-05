@@ -14,21 +14,21 @@ import subprocess
 from pathlib import Path
 
 from loguru import logger
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
-from libs.agent_cli.base import CodingAgent, register_provider
-from libs.agent_cli.events import AgentEventHandler
-from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _FIX_ERROR_RE
-from libs.agent_cli import call_subagent, _litellm_call_with_retry
-from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
+from app_operator.cli_agent.rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
 from app_operator.prompts import DSPyConfigProtocol
 from app_operator.prompts.subagent import (
-    render_trajectory_analyst_prompt,
     render_error_log_analyst_prompt,
-    render_script_analyst_prompt,
     render_repo_analyst_prompt,
     render_root_synthesis_prompt,
+    render_script_analyst_prompt,
+    render_trajectory_analyst_prompt,
 )
+from libs.agent_cli import _litellm_call_with_retry, call_subagent
+from libs.agent_cli.base import CodingAgent, register_provider
+from libs.agent_cli.events import AgentEventHandler
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 
 @register_provider("subagent")
@@ -54,7 +54,7 @@ class SubagentCodingAgent(CodingAgent):
         dspy_config: DSPyConfigProtocol | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder = recorder
+        self.recorder: TrajectoryRecorderProtocol | None = recorder
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
@@ -72,10 +72,7 @@ class SubagentCodingAgent(CodingAgent):
         silent: bool = False,
     ) -> str:
         repo_path = Path(cwd) if cwd else Path.cwd()
-        call_tokens: dict = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0}
+        call_tokens: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         is_fix = _FIX_ERROR_RE.search(prompt)
         if not is_fix and _DIRECT_TEXT_RE.search(prompt):
@@ -89,14 +86,13 @@ class SubagentCodingAgent(CodingAgent):
             self._total_token_usage[k] += call_tokens[k]
 
         if self.recorder and hasattr(self.recorder, "record_token_usage"):
-            self.recorder.record_token_usage(self._total_token_usage.copy())
+            self.recorder.record_token_usage(self._total_token_usage.copy())  # type: ignore[reportArgumentType]
 
         return result
 
     # -- Direct / file-gen paths (same as RLMCodingAgent) ---------------------
 
-    def _generate_direct(self, prompt: str,
-                         token_acc: dict | None = None) -> str:
+    def _generate_direct(self, prompt: str, token_acc: dict | None = None) -> str:
         import os
 
         kwargs = {
@@ -109,17 +105,14 @@ class SubagentCodingAgent(CodingAgent):
             kwargs["vertex_location"] = loc
 
         try:
-            return _litellm_call_with_retry(
-                kwargs, label="direct text generation", token_acc=token_acc)
+            return _litellm_call_with_retry(kwargs, label="direct text generation", token_acc=token_acc)
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.error(
-                f"[Subagent] Direct text LLM call failed: {type(e).__name__}: {e}")
+            logger.error(f"[Subagent] Direct text LLM call failed: {type(e).__name__}: {e}")
             return f"LLM call failed: {type(e).__name__}: {e}"
 
-    def _generate_files(self, prompt: str, repo_path: Path,
-                        token_acc: dict | None = None) -> str:
+    def _generate_files(self, prompt: str, repo_path: Path, token_acc: dict | None = None) -> str:
         import os
 
         kwargs = {
@@ -135,13 +128,11 @@ class SubagentCodingAgent(CodingAgent):
             kwargs["vertex_location"] = loc
 
         try:
-            raw = _litellm_call_with_retry(
-                kwargs, label="file generation", token_acc=token_acc)
+            raw = _litellm_call_with_retry(kwargs, label="file generation", token_acc=token_acc)
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.error(
-                f"[Subagent] Direct LLM call failed: {type(e).__name__}: {e}")
+            logger.error(f"[Subagent] Direct LLM call failed: {type(e).__name__}: {e}")
             return f"LLM call failed: {type(e).__name__}: {e}"
 
         generate_and_write_files(raw, prompt, repo_path, "[Subagent]")
@@ -159,17 +150,12 @@ class SubagentCodingAgent(CodingAgent):
         sds = repo_path / ".sds"
 
         trajectory_text = self._read_trajectory(sds)
-        error_log = (
-            self._read(sds / "logs" / "deploy.log")
-            + "\n"
-            + self._read(sds / "logs" / "health_check.log")
-        )
+        error_log = self._read(sds / "logs" / "deploy.log") + "\n" + self._read(sds / "logs" / "health_check.log")
         deploy_script = self._read(sds / "deploy.sh")
         original_script = self._read(sds / "deploy.sh.bak")
         repo_context = self._gather_repo_context(repo_path, sds)
 
-        logger.info(
-            "[Subagent] Starting sequential subagent analysis (4 subagents)")
+        logger.info("[Subagent] Starting sequential subagent analysis (4 subagents)")
 
         # --- Step 1: Sequential subagent calls (each analyses one context slice) ---
         summaries: dict[str, str] = {}
@@ -189,8 +175,7 @@ class SubagentCodingAgent(CodingAgent):
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(
-                f"[Subagent] Trajectory analyst failed, skipping: {type(e).__name__}: {e}")
+            logger.warning(f"[Subagent] Trajectory analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["trajectory"] = "(trajectory analysis unavailable)"
         logger.info("[Subagent] Trajectory analyst complete")
 
@@ -209,8 +194,7 @@ class SubagentCodingAgent(CodingAgent):
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(
-                f"[Subagent] Error log analyst failed, skipping: {type(e).__name__}: {e}")
+            logger.warning(f"[Subagent] Error log analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["error_log"] = "(error log analysis unavailable)"
         logger.info("[Subagent] Error log analyst complete")
 
@@ -232,8 +216,7 @@ class SubagentCodingAgent(CodingAgent):
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(
-                f"[Subagent] Script analyst failed, skipping: {type(e).__name__}: {e}")
+            logger.warning(f"[Subagent] Script analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["script"] = "(script analysis unavailable)"
         logger.info("[Subagent] Script analyst complete")
 
@@ -252,21 +235,17 @@ class SubagentCodingAgent(CodingAgent):
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(
-                f"[Subagent] Repo analyst failed, skipping: {type(e).__name__}: {e}")
+            logger.warning(f"[Subagent] Repo analyst failed, skipping: {type(e).__name__}: {e}")
             summaries["repo"] = "(repository analysis unavailable)"
         logger.info("[Subagent] Repo analyst complete")
 
         if self.recorder and hasattr(self.recorder, "add_assistant_message"):
             for name, summary in summaries.items():
-                self.recorder.add_assistant_message(
-                    f"[Subagent {name} analyst]\n{summary[:500]}"
-                )
+                self.recorder.add_assistant_message(f"[Subagent {name} analyst]\n{summary[:500]}")
 
         # --- Step 2: Root LLM synthesis --------------------------------------
         logger.info("[Subagent] Starting root synthesis call")
-        result = self._root_synthesis(
-            prompt, summaries, deploy_script, token_acc)
+        result = self._root_synthesis(prompt, summaries, deploy_script, token_acc)
 
         # Write deploy.sh if the root call produced one
         self._write_deploy_sh_if_present(result, repo_path)
@@ -312,17 +291,14 @@ class SubagentCodingAgent(CodingAgent):
             kwargs["vertex_location"] = loc
 
         try:
-            return _litellm_call_with_retry(
-                kwargs, label="root synthesis", token_acc=token_acc)
+            return _litellm_call_with_retry(kwargs, label="root synthesis", token_acc=token_acc)
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.error(
-                f"[Subagent] Root synthesis failed: {type(e).__name__}: {e}")
+            logger.error(f"[Subagent] Root synthesis failed: {type(e).__name__}: {e}")
             return f"Root synthesis failed: {type(e).__name__}: {e}"
 
-    def _write_deploy_sh_if_present(
-            self, response: str, repo_path: Path) -> None:
+    def _write_deploy_sh_if_present(self, response: str, repo_path: Path) -> None:
         """Extract and write deploy.sh from the root synthesis response."""
         file_sections = re.findall(
             r"FILE:\s*(\.sds/deploy\.sh)\s*\n```[^\n]*\n(.*?)```",
@@ -347,8 +323,7 @@ class SubagentCodingAgent(CodingAgent):
             data = json.loads(traj_path.read_text())
             # Extract last N deployment conversations
             deployment = data.get("deployment", [])
-            last_convos = deployment[-5:] if len(
-                deployment) > 5 else deployment
+            last_convos = deployment[-5:] if len(deployment) > 5 else deployment
             return json.dumps(last_convos, indent=2)
         except KeyboardInterrupt:
             raise

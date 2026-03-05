@@ -1,10 +1,11 @@
-from .base import register_provider
 import json
 
-from .cli_agent import CLICodingAgent, CLIGenerationSession
-from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
-from .events import AgentEventHandler
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+
+from .base import register_provider
+from .cli_agent import CLICodingAgent, CLIGenerationSession
+from .events import AgentEventHandler
+from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
 
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
@@ -41,11 +42,7 @@ class OpencodeGenerationSession(CLIGenerationSession):
         elif isinstance(event, ToolUseEvent):
             # Record tool call if it has a completion status
             if event.status in ("success", "error"):
-                args = (
-                    event.input_data
-                    if isinstance(event.input_data, dict)
-                    else {"input": event.input_data}
-                )
+                args = event.input_data if isinstance(event.input_data, dict) else {"input": event.input_data}
                 stdout = str(event.output_data) if event.output_data is not None else ""
 
                 self.recorder.add_tool_call(

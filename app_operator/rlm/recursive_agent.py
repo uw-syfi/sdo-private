@@ -15,10 +15,10 @@ from app_operator.logger import logger
 from app_operator.prompts import DSPyConfigProtocol
 from app_operator.prompts.rlm import render_fix_error_task_prompt
 from app_operator.rlm.environment import (
-    RLMEnvironment,
-    RLMContext,
-    RLMCall,
     ActionType,
+    RLMCall,
+    RLMContext,
+    RLMEnvironment,
     _validate_file_refs,
 )
 from app_operator.trajectory import TrajectoryRecorderProtocol
@@ -133,7 +133,7 @@ class RecursiveDeploymentAgent:
             logger.warning(f"Failed to read some context files: {e}")
 
         # Get trajectory data
-        trajectory_data = self.trajectory.trajectory if self.trajectory else {}
+        trajectory_data = self.trajectory.trajectory if self.trajectory else {}  # type: ignore[reportAttributeAccessIssue]
 
         return RLMContext(
             error_log=error_log,
@@ -169,9 +169,7 @@ class RecursiveDeploymentAgent:
         """
         try:
             # Extract action with regex — avoids IndexError when ACTION: is missing
-            action_match = re.search(
-                r'^ACTION:\s*(\S+)', response, re.MULTILINE | re.IGNORECASE
-            )
+            action_match = re.search(r"^ACTION:\s*(\S+)", response, re.MULTILINE | re.IGNORECASE)
             if not action_match:
                 logger.warning("[RLM] No ACTION: line found, continuing loop as no-op")
                 return {
@@ -185,13 +183,13 @@ class RecursiveDeploymentAgent:
             if action == "execute_code":
                 # Extract code block — bounded by the next section keyword or EOF
                 code_match = re.search(
-                    r'^CODE:\s*\n(.*?)(?=\n(?:ACTION:|DESCRIPTION:|ANSWER:)\s|\Z)',
+                    r"^CODE:\s*\n(.*?)(?=\n(?:ACTION:|DESCRIPTION:|ANSWER:)\s|\Z)",
                     response,
                     re.MULTILINE | re.DOTALL,
                 )
                 code = code_match.group(1).strip() if code_match else ""
 
-                desc_match = re.search(r'^DESCRIPTION:\s*(.+)$', response, re.MULTILINE)
+                desc_match = re.search(r"^DESCRIPTION:\s*(.+)$", response, re.MULTILINE)
                 description = desc_match.group(1).strip() if desc_match else ""
 
                 return {
@@ -201,25 +199,21 @@ class RecursiveDeploymentAgent:
                 }
 
             elif action == "recursive_call":
-                subtask_match = re.search(r'^SUBTASK:\s*(.+)$', response, re.MULTILINE)
+                subtask_match = re.search(r"^SUBTASK:\s*(.+)$", response, re.MULTILINE)
                 subtask = subtask_match.group(1).strip() if subtask_match else ""
 
                 context_start = response.find("CONTEXT:")
                 filtered_context = None
                 if context_start != -1:
-                    context_str = response[context_start + 8:].strip()
+                    context_str = response[context_start + 8 :].strip()
                     try:
                         parsed_ctx = json.loads(context_str)
                         if isinstance(parsed_ctx, dict) and parsed_ctx:
                             filtered_context = parsed_ctx
                         else:
-                            logger.warning(
-                                "CONTEXT parsed but empty or not a dict, using full context"
-                            )
+                            logger.warning("CONTEXT parsed but empty or not a dict, using full context")
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "Failed to parse CONTEXT as JSON, using full context"
-                        )
+                        logger.warning("Failed to parse CONTEXT as JSON, using full context")
 
                 return {
                     "action": ActionType.RECURSIVE_CALL,
@@ -228,9 +222,7 @@ class RecursiveDeploymentAgent:
                 }
 
             elif action == "final_answer":
-                answer_match = re.search(
-                    r'^ANSWER:\s*(.*)', response, re.MULTILINE | re.DOTALL
-                )
+                answer_match = re.search(r"^ANSWER:\s*(.*)", response, re.MULTILINE | re.DOTALL)
                 if answer_match:
                     answer = answer_match.group(1).strip()
                 else:
@@ -265,7 +257,7 @@ class RecursiveDeploymentAgent:
         Returns:
             The assistant's response text.
         """
-        from libs.agent_cli import call_subagent  # noqa: PLC0415
+        from libs.agent_cli import call_subagent
 
         context_section = ""
         if filtered_context:
@@ -324,16 +316,18 @@ class RecursiveDeploymentAgent:
         Prevents the O(n²) token re-send problem over many iterations.
         Compaction tokens are tracked via ``_llm_client`` like all other calls.
         """
-        summary_messages = self._messages + [{
-            "role": "user",
-            "content": (
-                "Summarize your progress so far. Include: "
-                "(1) which exploration steps you completed and what they revealed, "
-                "(2) any concrete findings (error patterns, missing files, etc.), "
-                "(3) what your next action should be. "
-                "Be concise (1-3 paragraphs) but preserve all key findings."
-            ),
-        }]
+        summary_messages = self._messages + [
+            {
+                "role": "user",
+                "content": (
+                    "Summarize your progress so far. Include: "
+                    "(1) which exploration steps you completed and what they revealed, "
+                    "(2) any concrete findings (error patterns, missing files, etc.), "
+                    "(3) what your next action should be. "
+                    "Be concise (1-3 paragraphs) but preserve all key findings."
+                ),
+            }
+        ]
         try:
             summary = self._llm_client.complete(summary_messages, label="rlm compaction")
         except Exception as e:
@@ -432,20 +426,13 @@ class RecursiveDeploymentAgent:
 
             if action == ActionType.EXECUTE_CODE:
                 try:
-                    result = self.rlm_env.execute_code(
-                        parsed["code"], parsed.get("description", "")
-                    )
+                    result = self.rlm_env.execute_code(parsed["code"], parsed.get("description", ""))
                     consecutive_errors = 0
                 except RuntimeError as e:
                     result = f"Code execution error: {e}"
                     consecutive_errors += 1
-                    if (
-                        self.max_consecutive_errors is not None
-                        and consecutive_errors >= self.max_consecutive_errors
-                    ):
-                        logger.warning(
-                            f"[RLM] {consecutive_errors} consecutive errors, stopping loop"
-                        )
+                    if self.max_consecutive_errors is not None and consecutive_errors >= self.max_consecutive_errors:
+                        logger.warning(f"[RLM] {consecutive_errors} consecutive errors, stopping loop")
                         return result
                 current_prompt = f"Result:\n{result}\n\nContinue or provide FINAL_ANSWER."
 
@@ -454,11 +441,9 @@ class RecursiveDeploymentAgent:
                 result = self.rlm_env.recursive_call(
                     sub_prompt=parsed.get("subtask", ""),
                     filtered_context=filtered_ctx,
-                    llm_function=lambda p: self._call_llm_isolated(p, filtered_ctx),
+                    llm_function=lambda p, ctx=filtered_ctx: self._call_llm_isolated(p, ctx),
                 )
-                current_prompt = (
-                    f"Recursive result:\n{result}\n\nContinue or provide FINAL_ANSWER."
-                )
+                current_prompt = f"Recursive result:\n{result}\n\nContinue or provide FINAL_ANSWER."
 
             elif action == ActionType.FINAL_ANSWER:
                 # Auto-validate deploy.sh if it exists before accepting the answer
@@ -538,15 +523,10 @@ class RecursiveDeploymentAgent:
             script_content = deploy_sh.read_text()
             validation = _validate_file_refs(script_content, repo_path)
             if "MISSING" in validation:
-                warning = (
-                    f"\n[AUTO-VALIDATION WARNING] deploy.sh references missing paths:\n"
-                    f"{validation}"
-                )
+                warning = f"\n[AUTO-VALIDATION WARNING] deploy.sh references missing paths:\n{validation}"
                 logger.warning(f"[RLM]{warning}")
                 if self.trajectory:
-                    self.trajectory.add_assistant_message(
-                        f"[RLM Auto-Validation]{warning}", duration=0.0
-                    )
+                    self.trajectory.add_assistant_message(f"[RLM Auto-Validation]{warning}", duration=0.0)
                 return answer + warning
         except Exception as e:
             logger.warning(f"[RLM] Auto-validation of deploy.sh failed: {e}")

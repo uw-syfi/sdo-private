@@ -1,16 +1,18 @@
 import json
+
 import pytest
+
 from app_operator.trajectory import (
-    init_trajectory,
-    finalize_trajectory,
-    record_phase_start,
-    record_phase_end,
-    record_user_message,
-    record_assistant_message,
-    get_current_call_id,
-    get_run_id,
     Phase,
     TrajectoryRecorder,
+    finalize_trajectory,
+    get_current_call_id,
+    get_run_id,
+    init_trajectory,
+    record_assistant_message,
+    record_phase_end,
+    record_phase_start,
+    record_user_message,
 )
 
 
@@ -49,15 +51,11 @@ def test_trajectory_lifecycle_integration(temp_repo):
     # 2. Simulate Script Generation Phase
     with recorder.phase(Phase.SCRIPT_GENERATION) as r:
         r.add_user_message("Generate scripts for this repo")
-        r.add_tool_call(
-            tool="ls", args={"path": "."}, stdout="file1.txt\nfile2.txt", duration=0.1
-        )
+        r.add_tool_call(tool="ls", args={"path": "."}, stdout="file1.txt\nfile2.txt", duration=0.1)
         r.add_assistant_message("I see the files.")
 
     # 3. Simulate Deployment Phase
-    with recorder.phase(
-        Phase.DEPLOYMENT, context={"attempt": 1, "max_attempts": 3}
-    ) as r:
+    with recorder.phase(Phase.DEPLOYMENT, context={"attempt": 1, "max_attempts": 3}) as r:
         r.add_user_message("Deploy the app")
         # Simulate a failed tool call
         r.add_tool_call(
@@ -135,16 +133,13 @@ def test_trajectory_lifecycle_integration(temp_repo):
     deploy_messages = deploy_conversation["messages"]
     # Check context in system prompt
     system_msg = deploy_messages[0]
-    assert "role" in system_msg and system_msg["role"] == "system"
+    assert "role" in system_msg
+    assert system_msg["role"] == "system"
     assert "attempt 1 of 3" in system_msg["content"]
 
     # Check error capture
     err_tool = next(
-        (
-            m
-            for m in deploy_messages
-            if m["role"] == "tool_call" and m["tool"] == "bash"
-        ),
+        (m for m in deploy_messages if m["role"] == "tool_call" and m["tool"] == "bash"),
         None,
     )
     assert err_tool is not None

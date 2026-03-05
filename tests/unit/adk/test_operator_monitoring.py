@@ -1,4 +1,5 @@
 from unittest.mock import patch
+
 from app_operator.adk.operator import AdkOperator
 from app_operator.config import Config
 from app_operator.filesystem import InMemoryFilesystem
@@ -40,9 +41,7 @@ def test_monitoring_cycle_runs_n_times(tmp_path):
                 "stderr": "",
             }
 
-            operator = AdkOperator(
-                str(repo_path), filesystem=fs, config=config, health_check_max_count=2
-            )
+            operator = AdkOperator(str(repo_path), filesystem=fs, config=config, health_check_max_count=2)
 
             # Setup sds dir
             fs.mkdir(repo_path / ".sds", parents=True, exist_ok=True)
@@ -62,18 +61,9 @@ def test_monitoring_cycle_runs_n_times(tmp_path):
             assert fs.exists(monitor_logs / "analysis_1.log")
             assert fs.exists(monitor_logs / "analysis_2.log")
 
-            # Note: check_N.log is written by run_health_check if it supports it.
-            # But we mocked run_health_check.
-            # AdkOperator calls run_health_check(..., log_file_path=...)
-            # Since we mocked it, the file won't be created unless the mock does it
-            # or we assume logic is correct because arg was passed.
-            # But the test checks fs.exists.
-            # So the mock needs to create it? Or AdkOperator relies on run_health_check creating it?
-            # Code: run_health_check(..., log_file_path=log_file)
-            # We mocked run_health_check.
-            # So check_1.log won't exist in fs.
-            # But analysis_1.log is written by operator: self.filesystem.write_text(analysis_log, response)
-            # So analysis logs SHOULD exist.
+            # check_N.log is created by run_health_check, which is mocked here,
+            # so those files won't exist.  analysis_N.log is written directly by
+            # the operator via filesystem.write_text, so those SHOULD exist.
 
             # Verify max iters
             assert mock_health.call_count == 2

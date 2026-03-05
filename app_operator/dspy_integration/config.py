@@ -10,9 +10,9 @@ re-exports them so that existing callers of
 """
 
 from app_operator.config import (
+    DSPyAutoRollbackConfig,
     DSPyConfig,
     DSPyOptimizationConfig,
-    DSPyAutoRollbackConfig,
 )
 
 __all__ = [

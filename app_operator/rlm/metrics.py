@@ -6,8 +6,8 @@ These metrics evaluate how well RLM-based prompts utilize the RLM paradigm:
 - Token savings (comparing RLM vs direct context passing)
 """
 
-from typing import Any
 import json
+from typing import Any
 
 from app_operator.logger import logger
 
@@ -91,7 +91,7 @@ class RLMEfficiencyMetric:
             ratio_score = 1.0 if code_executions > 0 else 0.5
 
         # Weighted combination
-        efficiency_score = (calls_score * 0.4 + depth_score * 0.3 + ratio_score * 0.3)
+        efficiency_score = calls_score * 0.4 + depth_score * 0.3 + ratio_score * 0.3
 
         # Bonus: penalize if success=False
         if hasattr(example, "success") and not example.success:
@@ -179,13 +179,7 @@ class RLMCompositeMetric:
             *_metric: Optional metric instances (defaults created if None)
         """
         # Validate weights
-        total_weight = (
-            success_weight
-            + efficiency_weight
-            + token_weight
-            + rlm_efficiency_weight
-            + rlm_context_weight
-        )
+        total_weight = success_weight + efficiency_weight + token_weight + rlm_efficiency_weight + rlm_context_weight
 
         if abs(total_weight - 1.0) > 0.01:
             raise ValueError(f"Weights must sum to 1.0, got {total_weight:.3f}")

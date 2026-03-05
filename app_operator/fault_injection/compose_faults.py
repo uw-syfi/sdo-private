@@ -5,7 +5,8 @@ modifications to Docker Compose YAML data structures.
 """
 
 import random
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from app_operator.fault_injection.base import ComposeManipulator, FaultInjector
 from app_operator.fault_injection.models import (
@@ -248,9 +249,7 @@ class ComposeFaultInjector(FaultInjector):
 
         return handler(fault, compose_data, target_service)
 
-    def get_applicable_services(
-        self, fault: Fault, compose_data: dict[str, Any]
-    ) -> list[str]:
+    def get_applicable_services(self, fault: Fault, compose_data: dict[str, Any]) -> list[str]:
         services = ComposeManipulator.get_services(compose_data)
         if not services:
             return []
@@ -272,10 +271,7 @@ class ComposeFaultInjector(FaultInjector):
             return [s for s in services if services[s].get("environment")]
 
         if fault.fault_id == "SEC-001":
-            return [
-                s for s in services
-                if self._has_auth_env(services[s])
-            ]
+            return [s for s in services if self._has_auth_env(services[s])]
 
         if fault.fault_id == "CORR-001":
             return [s for s in services if services[s].get("depends_on")]
@@ -293,26 +289,21 @@ class ComposeFaultInjector(FaultInjector):
         """Check if a service has authentication-related env vars."""
         env = svc_cfg.get("environment", [])
         if isinstance(env, dict):
-            keys = [k.lower() for k in env.keys()]
+            keys = [k.lower() for k in env]
         else:
             keys = [str(e).split("=")[0].lower() for e in env]
 
-        return any(
-            pat in k for k in keys for pat in AUTH_ENV_PATTERNS
-        )
+        return any(pat in k for k in keys for pat in AUTH_ENV_PATTERNS)
 
     # ------------------------------------------------------------------
     # Misconfiguration faults
     # ------------------------------------------------------------------
 
-    def _inject_wrong_port_mapping(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_wrong_port_mapping(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         ports = svc.get("ports", [])
         if not ports:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="Service has no ports")
+            return FaultResult(fault=fault, target_service=service, success=False, error_message="Service has no ports")
 
         old_port = str(ports[0])
         new_host_port = self._rng.randint(40000, 49999)
@@ -323,95 +314,94 @@ class ComposeFaultInjector(FaultInjector):
             ports[0] = str(new_host_port)
 
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"ports[0]": {"old": old_port, "new": str(ports[0])}},
         )
 
-    def _inject_missing_env_var(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_missing_env_var(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         env = svc.get("environment", [])
 
         if isinstance(env, dict):
             if not env:
-                return FaultResult(fault=fault, target_service=service, success=False,
-                                   error_message="No environment variables")
+                return FaultResult(
+                    fault=fault, target_service=service, success=False, error_message="No environment variables"
+                )
             key = self._rng.choice(list(env.keys()))
             old_val = env.pop(key)
             return FaultResult(
-                fault=fault, target_service=service,
+                fault=fault,
+                target_service=service,
                 modified_fields={"environment": {"removed_key": key, "old_value": str(old_val)}},
             )
 
         if not env:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="No environment variables")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="No environment variables"
+            )
         idx = self._rng.randrange(len(env))
         removed = env.pop(idx)
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"environment": {"removed": str(removed)}},
         )
 
-    def _inject_wrong_image_tag(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_wrong_image_tag(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         old_image = svc.get("image", "")
         if not old_image:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="Service has no image field")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="Service has no image field"
+            )
 
         base = old_image.split(":")[0]
         new_image = f"{base}:nonexistent-v999.99.99"
         svc["image"] = new_image
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"image": {"old": old_image, "new": new_image}},
         )
 
-    def _inject_wrong_entrypoint(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_wrong_entrypoint(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         old_entrypoint = svc.get("entrypoint")
         svc["entrypoint"] = "/bin/nonexistent-cmd"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"entrypoint": {"old": old_entrypoint, "new": "/bin/nonexistent-cmd"}},
         )
 
-    def _inject_bad_volume_mount(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_bad_volume_mount(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         volumes = svc.setdefault("volumes", [])
         bad_mount = "/nonexistent/host/path/sds-fault:/data/fault-test"
         volumes.append(bad_mount)
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"volumes": {"added": bad_mount}},
         )
 
-    def _inject_duplicate_port_conflict(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_duplicate_port_conflict(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         services = data["services"]
         svc = services[service]
         ports = svc.get("ports", [])
         if not ports:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="Service has no ports")
+            return FaultResult(fault=fault, target_service=service, success=False, error_message="Service has no ports")
 
         # Find another service to conflict with
-        other_services = [
-            s for s in services
-            if s != service and services[s].get("ports")
-        ]
+        other_services = [s for s in services if s != service and services[s].get("ports")]
         if not other_services:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="No other service with ports to conflict with")
+            return FaultResult(
+                fault=fault,
+                target_service=service,
+                success=False,
+                error_message="No other service with ports to conflict with",
+            )
 
         other = self._rng.choice(other_services)
         other_ports = services[other]["ports"]
@@ -426,7 +416,8 @@ class ComposeFaultInjector(FaultInjector):
         old_other_port = str(other_ports[0])
         other_ports[0] = conflicting
         return FaultResult(
-            fault=fault, target_service=other,
+            fault=fault,
+            target_service=other,
             modified_fields={
                 "ports[0]": {"old": old_other_port, "new": conflicting},
                 "conflicts_with": service,
@@ -437,18 +428,13 @@ class ComposeFaultInjector(FaultInjector):
     # Security faults
     # ------------------------------------------------------------------
 
-    def _inject_removed_auth_config(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_removed_auth_config(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         env = svc.get("environment", [])
         removed = []
 
         if isinstance(env, dict):
-            keys_to_remove = [
-                k for k in env
-                if any(p in k.lower() for p in AUTH_ENV_PATTERNS)
-            ]
+            keys_to_remove = [k for k in env if any(p in k.lower() for p in AUTH_ENV_PATTERNS)]
             for k in keys_to_remove:
                 removed.append(f"{k}={env.pop(k)}")
         else:
@@ -462,34 +448,34 @@ class ComposeFaultInjector(FaultInjector):
             svc["environment"] = new_env
 
         if not removed:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="No auth env vars found")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="No auth env vars found"
+            )
 
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"environment": {"removed_auth_vars": removed}},
         )
 
-    def _inject_exposed_debug_port(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_exposed_debug_port(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         ports = svc.setdefault("ports", [])
         debug_port = f"{self._rng.randint(9000, 9999)}:9999"
         ports.append(debug_port)
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"ports": {"added_debug_port": debug_port}},
         )
 
-    def _inject_privileged_container(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_privileged_container(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         old_privileged = svc.get("privileged")
         svc["privileged"] = True
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"privileged": {"old": old_privileged, "new": True}},
         )
 
@@ -497,9 +483,7 @@ class ComposeFaultInjector(FaultInjector):
     # Metastable faults
     # ------------------------------------------------------------------
 
-    def _inject_resource_limit_cpu(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_resource_limit_cpu(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         deploy = svc.setdefault("deploy", {})
         resources = deploy.setdefault("resources", {})
@@ -507,13 +491,12 @@ class ComposeFaultInjector(FaultInjector):
         old_cpus = limits.get("cpus")
         limits["cpus"] = "0.01"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"deploy.resources.limits.cpus": {"old": old_cpus, "new": "0.01"}},
         )
 
-    def _inject_resource_limit_memory(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_resource_limit_memory(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         deploy = svc.setdefault("deploy", {})
         resources = deploy.setdefault("resources", {})
@@ -521,29 +504,27 @@ class ComposeFaultInjector(FaultInjector):
         old_mem = limits.get("memory")
         limits["memory"] = "4m"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"deploy.resources.limits.memory": {"old": old_mem, "new": "4m"}},
         )
 
-    def _inject_restart_loop_trigger(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_restart_loop_trigger(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         old_restart = svc.get("restart")
         old_command = svc.get("command")
         svc["restart"] = "always"
         svc["command"] = "sh -c 'exit 1'"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={
                 "restart": {"old": old_restart, "new": "always"},
                 "command": {"old": old_command, "new": "sh -c 'exit 1'"},
             },
         )
 
-    def _inject_failing_healthcheck(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_failing_healthcheck(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         old_healthcheck = svc.get("healthcheck")
         svc["healthcheck"] = {
@@ -554,18 +535,18 @@ class ComposeFaultInjector(FaultInjector):
             "start_period": "0s",
         }
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"healthcheck": {"old": old_healthcheck, "new": svc["healthcheck"]}},
         )
 
-    def _inject_tmpfs_too_small(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_tmpfs_too_small(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         tmpfs = svc.get("tmpfs")
         svc["tmpfs"] = "/tmp:size=1k"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"tmpfs": {"old": tmpfs, "new": "/tmp:size=1k"}},
         )
 
@@ -573,14 +554,13 @@ class ComposeFaultInjector(FaultInjector):
     # Correlated faults
     # ------------------------------------------------------------------
 
-    def _inject_remove_dependency(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_remove_dependency(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         deps = svc.get("depends_on")
         if not deps:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="Service has no depends_on")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="Service has no depends_on"
+            )
 
         if isinstance(deps, dict):
             key = self._rng.choice(list(deps.keys()))
@@ -589,17 +569,17 @@ class ComposeFaultInjector(FaultInjector):
             idx = self._rng.randrange(len(deps))
             removed = deps.pop(idx)
         else:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="Unexpected depends_on format")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="Unexpected depends_on format"
+            )
 
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"depends_on": {"removed": removed}},
         )
 
-    def _inject_break_shared_database(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_break_shared_database(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         env = svc.get("environment", [])
         db_patterns = ["database", "db_host", "db_url", "mongo", "mysql", "postgres", "redis"]
@@ -607,68 +587,63 @@ class ComposeFaultInjector(FaultInjector):
         if isinstance(env, dict):
             db_keys = [k for k in env if any(p in k.lower() for p in db_patterns)]
             if not db_keys:
-                return FaultResult(fault=fault, target_service=service, success=False,
-                                   error_message="No database env vars found")
+                return FaultResult(
+                    fault=fault, target_service=service, success=False, error_message="No database env vars found"
+                )
             key = self._rng.choice(db_keys)
             old_val = env[key]
             env[key] = "broken-host-sds-fault:65535"
             return FaultResult(
-                fault=fault, target_service=service,
-                modified_fields={
-                    "environment": {
-                        key: {
-                            "old": str(old_val),
-                            "new": "broken-host-sds-fault:65535"}}},
+                fault=fault,
+                target_service=service,
+                modified_fields={"environment": {key: {"old": str(old_val), "new": "broken-host-sds-fault:65535"}}},
             )
 
-        db_indices = [
-            i for i, e in enumerate(env)
-            if any(p in str(e).split("=")[0].lower() for p in db_patterns)
-        ]
+        db_indices = [i for i, e in enumerate(env) if any(p in str(e).split("=")[0].lower() for p in db_patterns)]
         if not db_indices:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="No database env vars found")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="No database env vars found"
+            )
         idx = self._rng.choice(db_indices)
         old_val = env[idx]
         var_name = str(old_val).split("=")[0]
         env[idx] = f"{var_name}=broken-host-sds-fault:65535"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"environment": {var_name: {"old": str(old_val), "new": env[idx]}}},
         )
 
-    def _inject_cascading_port_change(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_cascading_port_change(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         ports = svc.get("ports", [])
         if not ports:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="Service has no ports")
+            return FaultResult(fault=fault, target_service=service, success=False, error_message="Service has no ports")
 
         old_port = str(ports[0])
         parsed = ComposeManipulator.parse_port_mapping(old_port)
         if not parsed:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="Cannot parse port mapping")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="Cannot parse port mapping"
+            )
 
         new_container_port = parsed["container"] + 1000
         ports[0] = f"{parsed['host']}:{new_container_port}"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={
                 "ports[0]": {"old": old_port, "new": str(ports[0])},
                 "note": "Container port changed without updating consumers",
             },
         )
 
-    def _inject_remove_shared_network(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_remove_shared_network(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         networks = data.get("networks", {})
         if not networks:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="No top-level networks defined")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="No top-level networks defined"
+            )
 
         net_name = self._rng.choice(list(networks.keys()))
         removed_config = networks.pop(net_name)
@@ -685,20 +660,20 @@ class ComposeFaultInjector(FaultInjector):
                 affected_services.append(svc_name)
 
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={
                 "networks": {"removed": net_name, "config": str(removed_config)},
                 "affected_services": affected_services,
             },
         )
 
-    def _inject_remove_shared_volume(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_remove_shared_volume(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         volumes = data.get("volumes", {})
         if not volumes:
-            return FaultResult(fault=fault, target_service=service, success=False,
-                               error_message="No top-level volumes defined")
+            return FaultResult(
+                fault=fault, target_service=service, success=False, error_message="No top-level volumes defined"
+            )
 
         vol_name = self._rng.choice(list(volumes.keys()))
         removed_config = volumes.pop(vol_name)
@@ -714,7 +689,8 @@ class ComposeFaultInjector(FaultInjector):
                     affected_services.append(svc_name)
 
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={
                 "volumes": {"removed": vol_name, "config": str(removed_config)},
                 "affected_services": affected_services,
@@ -725,9 +701,7 @@ class ComposeFaultInjector(FaultInjector):
     # Infrastructure faults
     # ------------------------------------------------------------------
 
-    def _inject_dns_override(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_dns_override(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         extra_hosts = svc.setdefault("extra_hosts", [])
         # Pick another service to break DNS for
@@ -739,13 +713,12 @@ class ComposeFaultInjector(FaultInjector):
             dns_entry = f"{target}:127.0.0.1"
         extra_hosts.append(dns_entry)
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"extra_hosts": {"added": dns_entry}},
         )
 
-    def _inject_init_failure(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_init_failure(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         old_entrypoint = svc.get("entrypoint")
         old_command = svc.get("command")
@@ -754,20 +727,20 @@ class ComposeFaultInjector(FaultInjector):
         svc["entrypoint"] = "sh"
         svc["command"] = "-c 'echo SDS_FAULT: init failure && exit 1'"
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={
                 "entrypoint": {"old": old_entrypoint, "new": "sh"},
                 "command": {"old": old_command, "new": "-c 'echo SDS_FAULT: init failure && exit 1'"},
             },
         )
 
-    def _inject_read_only_rootfs(
-        self, fault: Fault, data: dict[str, Any], service: str
-    ) -> FaultResult:
+    def _inject_read_only_rootfs(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         old_read_only = svc.get("read_only")
         svc["read_only"] = True
         return FaultResult(
-            fault=fault, target_service=service,
+            fault=fault,
+            target_service=service,
             modified_fields={"read_only": {"old": old_read_only, "new": True}},
         )

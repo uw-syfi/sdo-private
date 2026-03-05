@@ -23,9 +23,7 @@ def mock_which():
 @pytest.fixture
 def gemini_agent(mock_which, mock_env):
     """Create a GeminiCodingAgent instance with mocked environment."""
-    with patch(
-        "libs.agent_cli.cli_agent._get_interactive_env", return_value=mock_env
-    ):
+    with patch("libs.agent_cli.cli_agent._get_interactive_env", return_value=mock_env):
         with patch("libs.agent_cli.cli_agent.CLICodingAgent._check_cli"):
             agent = GeminiCodingAgent()
             yield agent
@@ -51,7 +49,7 @@ def test_stderr_output_in_red(gemini_agent, mock_popen):
     # Mock stdout with normal output
     stdout_lines = [
         '{"type":"message","role":"assistant","content":"Hello world"}\n',
-        ""  # EOF marker
+        "",  # EOF marker
     ]
 
     # Mock the process
@@ -66,6 +64,7 @@ def test_stderr_output_in_red(gemini_agent, mock_popen):
     # Capture logger output to verify red coloring
     # Use the actual formatter from logger.py to get proper color codes
     from app_operator.logger import formatter
+
     captured_output = io.StringIO()
     handler_id = logger.add(captured_output, format=formatter, colorize=True)
 
@@ -101,10 +100,7 @@ def test_multiple_stderr_lines_in_red(gemini_agent, mock_popen):
         "Fatal: Unable to proceed\n",
     ]
 
-    stdout_lines = [
-        '{"type":"message","role":"assistant","content":"Processing..."}\n',
-        ""
-    ]
+    stdout_lines = ['{"type":"message","role":"assistant","content":"Processing..."}\n', ""]
 
     mock_process = MagicMock()
     mock_process.returncode = 0
@@ -116,6 +112,7 @@ def test_multiple_stderr_lines_in_red(gemini_agent, mock_popen):
 
     # Use the actual formatter from logger.py to get proper color codes
     from app_operator.logger import formatter
+
     captured_output = io.StringIO()
     handler_id = logger.add(captured_output, format=formatter, colorize=True)
 
@@ -140,10 +137,7 @@ def test_mixed_stdout_stderr_coloring(gemini_agent, mock_popen):
     """Test that stdout (normal) and stderr (red) have different colors."""
 
     stderr_lines = ["ERROR: Something went wrong\n", ""]
-    stdout_lines = [
-        '{"type":"message","role":"assistant","content":"Success message"}\n',
-        ""
-    ]
+    stdout_lines = ['{"type":"message","role":"assistant","content":"Success message"}\n', ""]
 
     mock_process = MagicMock()
     mock_process.returncode = 0
@@ -155,6 +149,7 @@ def test_mixed_stdout_stderr_coloring(gemini_agent, mock_popen):
 
     # Use the actual formatter from logger.py to get proper color codes
     from app_operator.logger import formatter
+
     captured_output = io.StringIO()
     handler_id = logger.add(captured_output, format=formatter, colorize=True)
 
@@ -173,6 +168,6 @@ def test_mixed_stdout_stderr_coloring(gemini_agent, mock_popen):
     assert "Success message" in result
 
     # Ensure the error line has red but the success message section doesn't
-    lines = output.split('\n')
+    lines = output.split("\n")
     error_lines = [line for line in lines if "Something went wrong" in line]
     assert any("\x1b[31m" in line for line in error_lines), "Error line should be red"

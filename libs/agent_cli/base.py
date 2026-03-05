@@ -38,9 +38,7 @@ class CodingAgent(ABC):
         Raises:
             NotImplementedError: If the provider does not support MCP injection.
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support MCP server injection"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} does not support MCP server injection")
 
     @abstractmethod
     def generate(
@@ -61,4 +59,3 @@ class CodingAgent(ABC):
         Returns:
             Generated text.
         """
-        pass

@@ -1,13 +1,15 @@
-import pytest
 from unittest.mock import MagicMock
-from app_operator.logger import logger
+
+import pytest
+
 from app_operator.filesystem import InMemoryFilesystem
+from app_operator.logger import logger
 from tests.fixtures.agents import (
-    StubAgent,
+    ConfigurableAgent,
     ErrorAgent,
+    StubAgent,
     TimeoutAgent,
     TrackingAgent,
-    ConfigurableAgent,
 )
 
 
@@ -99,23 +101,13 @@ def repo_with_scripts(tmp_path):
     # Create working deploy script
     deploy_script = sds_dir / "deploy.sh"
     deploy_script.write_text(
-        "#!/bin/bash\n"
-        "set -e\n"
-        "echo 'Starting deployment...'\n"
-        "echo 'Deployment successful'\n"
-        "exit 0\n"
+        "#!/bin/bash\nset -e\necho 'Starting deployment...'\necho 'Deployment successful'\nexit 0\n"
     )
     deploy_script.chmod(0o755)
 
     # Create working health check script
     health_script = sds_dir / "health_check.sh"
-    health_script.write_text(
-        "#!/bin/bash\n"
-        "set -e\n"
-        "echo 'Running health checks...'\n"
-        "echo 'All checks passed'\n"
-        "exit 0\n"
-    )
+    health_script.write_text("#!/bin/bash\nset -e\necho 'Running health checks...'\necho 'All checks passed'\nexit 0\n")
     health_script.chmod(0o755)
 
     return repo

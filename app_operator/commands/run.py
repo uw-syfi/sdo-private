@@ -33,11 +33,11 @@ def trigger_ai_remediation(max_retries: int):
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
             )
 
             full_output = ""
-            for line in process.stdout:
+            for line in process.stdout or []:
                 print(line, end="")
                 full_output += line
 
@@ -62,9 +62,7 @@ def trigger_ai_remediation(max_retries: int):
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments specific to the 'run' command."""
-    parser.add_argument(
-        "directory", metavar="DIR", help="Directory path of the repository to deploy"
-    )
+    parser.add_argument("directory", metavar="DIR", help="Directory path of the repository to deploy")
     parser.add_argument(
         "--config",
         metavar="FILE",
@@ -99,13 +97,13 @@ def run_command(args: argparse.Namespace) -> int:
         logger.warning("TUI is only supported for cli_agent; falling back to CLI.")
         use_tui = False
 
-    shared_kwargs = dict(
-        repo_path=args.directory,
-        health_check_interval=interval,
-        health_check_max_count=config.operator.monitoring_max_iters,
-        max_deployment_attempts=config.operator.deployment_max_iters,
-        config=config,
-    )
+    shared_kwargs = {
+        "repo_path": args.directory,
+        "health_check_interval": interval,
+        "health_check_max_count": config.operator.monitoring_max_iters,
+        "max_deployment_attempts": config.operator.deployment_max_iters,
+        "config": config,
+    }
 
     try:
         if use_tui:

@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from app_operator.adk import agent_factory
 
 
@@ -18,9 +19,7 @@ def test_build_adk_agent_wraps_async_tool():
         patch("app_operator.adk.agent_factory.FunctionTool", new=MockFunctionToolClass),
         patch("app_operator.adk.agent_factory.LlmAgent") as MockLlmAgent,
     ):
-        agent_factory.build_adk_agent(
-            "test_agent", "instruction", "model", [async_tool]
-        )
+        agent_factory.build_adk_agent("test_agent", "instruction", "model", [async_tool])
 
         # Verify FunctionTool was initialized with the async tool
         mock_init.assert_called_with(async_tool)
@@ -52,9 +51,7 @@ def test_build_adk_agent_wraps_sync_tool():
         patch("app_operator.adk.agent_factory.FunctionTool", new=MockFunctionToolClass),
         patch("app_operator.adk.agent_factory.LlmAgent"),
     ):
-        agent_factory.build_adk_agent(
-            "test_agent", "instruction", "model", [sync_tool]
-        )
+        agent_factory.build_adk_agent("test_agent", "instruction", "model", [sync_tool])
 
         # Verify FunctionTool was called with the sync tool
         mock_init.assert_called_with(sync_tool)
@@ -73,9 +70,7 @@ def test_build_adk_agent_preserves_existing_function_tools():
     ):
         existing_tool = FakeFunctionTool()
 
-        agent_factory.build_adk_agent(
-            "test_agent", "instruction", "model", [existing_tool]
-        )
+        agent_factory.build_adk_agent("test_agent", "instruction", "model", [existing_tool])
 
         # Verify LlmAgent received the existing tool exactly
         MockLlmAgent.assert_called_once()
@@ -103,9 +98,7 @@ def test_build_adk_agent_mixed_tools():
     ):
         existing_tool = MockToolClass()
 
-        agent_factory.build_adk_agent(
-            "agent", "inst", "model", [tool1, tool2, existing_tool]
-        )
+        agent_factory.build_adk_agent("agent", "inst", "model", [tool1, tool2, existing_tool])
 
         call_kwargs = MockLlmAgent.call_args[1]
         tools_arg = call_kwargs["tools"]

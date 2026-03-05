@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app_operator.prompts import get_loader, DSPyConfigProtocol
+from app_operator.prompts import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
     from app_operator.trajectory import TrajectoryRecorderProtocol
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 def render_trajectory_analyst_prompt(
     data_description: str = "",
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder: "TrajectoryRecorderProtocol | None" = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> str:
     """Render the trajectory analyst system prompt."""
     return get_loader(dspy_config).render(
@@ -32,7 +32,7 @@ def render_trajectory_analyst_prompt(
 def render_error_log_analyst_prompt(
     data_description: str = "",
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder: "TrajectoryRecorderProtocol | None" = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> str:
     """Render the error log analyst system prompt."""
     return get_loader(dspy_config).render(
@@ -45,7 +45,7 @@ def render_error_log_analyst_prompt(
 def render_script_analyst_prompt(
     has_original_script: str = "",
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder: "TrajectoryRecorderProtocol | None" = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> str:
     """Render the script analyst system prompt."""
     return get_loader(dspy_config).render(
@@ -58,7 +58,7 @@ def render_script_analyst_prompt(
 def render_repo_analyst_prompt(
     available_files: str = "",
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder: "TrajectoryRecorderProtocol | None" = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> str:
     """Render the repository analyst system prompt."""
     return get_loader(dspy_config).render(
@@ -71,7 +71,7 @@ def render_repo_analyst_prompt(
 def render_root_synthesis_prompt(
     num_analysts: str = "4",
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder: "TrajectoryRecorderProtocol | None" = None,
+    recorder: TrajectoryRecorderProtocol | None = None,
 ) -> str:
     """Render the root synthesis system prompt."""
     return get_loader(dspy_config).render(

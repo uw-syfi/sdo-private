@@ -1,9 +1,10 @@
 import time
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage, BaseMessage
-from app_operator.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+
 from app_operator.langgraph.message_utils import extract_text
+from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 
 class LangGraphTrajectoryHandler:

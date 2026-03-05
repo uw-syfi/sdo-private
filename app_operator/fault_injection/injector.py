@@ -48,16 +48,12 @@ class FaultInjectionOrchestrator:
             List of FaultResult describing injected faults.
         """
         if yaml is None:
-            raise ImportError(
-                "PyYAML is required for fault injection. Install with: pip install pyyaml"
-            )
+            raise ImportError("PyYAML is required for fault injection. Install with: pip install pyyaml")
 
         repo_path = Path(repo_path)
         compose_file = self._find_compose_file(repo_path)
         if compose_file is None:
-            raise FileNotFoundError(
-                f"No docker-compose.yml or docker-compose.yaml found in {repo_path}"
-            )
+            raise FileNotFoundError(f"No docker-compose.yml or docker-compose.yaml found in {repo_path}")
 
         # Back up original
         if self.config.backup_compose:
@@ -145,7 +141,7 @@ class FaultInjectionOrchestrator:
         restored = False
         for backup_file in backup_dir.iterdir():
             if backup_file.is_file():
-                if os.sep in backup_file.name or '/' in backup_file.name:
+                if os.sep in backup_file.name or "/" in backup_file.name:
                     continue
                 dest = repo_path / backup_file.name
                 if not dest.resolve().is_relative_to(repo_path.resolve()):

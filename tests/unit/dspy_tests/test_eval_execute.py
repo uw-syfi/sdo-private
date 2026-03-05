@@ -55,30 +55,22 @@ def test_build_recent_trajectory_context_uses_subagent_and_error_signals(tmp_pat
                     },
                     {
                         "role": "assistant",
+                        "content": ("[Subagent error_log analyst]\nPrimary failure is docker-compose.yml not found."),
+                    },
+                    {
+                        "role": "assistant",
+                        "content": ("[Subagent script analyst]\ndeploy.sh uses a stale relative path to compose file."),
+                    },
+                    {
+                        "role": "assistant",
                         "content": (
-                            "[Subagent error_log analyst]\n"
-                            "Primary failure is docker-compose.yml not found."
+                            "[Subagent repo analyst]\nRepository compose file lives under compose/docker-compose.yml."
                         ),
                     },
                     {
                         "role": "assistant",
                         "content": (
-                            "[Subagent script analyst]\n"
-                            "deploy.sh uses a stale relative path to compose file."
-                        ),
-                    },
-                    {
-                        "role": "assistant",
-                        "content": (
-                            "[Subagent repo analyst]\n"
-                            "Repository compose file lives under compose/docker-compose.yml."
-                        ),
-                    },
-                    {
-                        "role": "assistant",
-                        "content": (
-                            "[RLM Auto-Validation]\n"
-                            "[AUTO-VALIDATION WARNING] deploy.sh references missing paths."
+                            "[RLM Auto-Validation]\n[AUTO-VALIDATION WARNING] deploy.sh references missing paths."
                         ),
                     },
                     {
@@ -119,13 +111,7 @@ def test_generate_instruction_variants_includes_trajectory_context(monkeypatch, 
 
     def _fake_completion(**kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content='["variant a", "variant b"]')
-                )
-            ]
-        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='["variant a", "variant b"]'))])
 
     monkeypatch.setattr(
         "app_operator.dspy_integration.eval_execute.litellm.completion",
@@ -201,12 +187,8 @@ def test_build_recent_trajectory_context_prioritizes_failed_and_recent(monkeypat
         prompt_names=["subagent_trajectory_analyst"],
     )["subagent_trajectory_analyst"]
 
-    assert ctx.index("recent_fail via iter2_c2_recent_fail") < ctx.index(
-        "old_ok via iter1_c1_old_ok"
-    )
-    assert ctx.index("recent failure pattern should be first") < ctx.index(
-        "older successful run insight"
-    )
+    assert ctx.index("recent_fail via iter2_c2_recent_fail") < ctx.index("old_ok via iter1_c1_old_ok")
+    assert ctx.index("recent failure pattern should be first") < ctx.index("older successful run insight")
 
 
 def test_build_recent_trajectory_context_excludes_validation_runs(tmp_path):
@@ -229,9 +211,7 @@ def test_build_recent_trajectory_context_excludes_validation_runs(tmp_path):
             }
         ],
     }
-    (train_traj_dir / "trajectory_20260304-000001.json").write_text(
-        json.dumps(train_trajectory)
-    )
+    (train_traj_dir / "trajectory_20260304-000001.json").write_text(json.dumps(train_trajectory))
 
     val_traj_dir = work_dir / "fleetcast_iter1_val" / ".sds" / "trajectories"
     val_traj_dir.mkdir(parents=True, exist_ok=True)
@@ -248,9 +228,7 @@ def test_build_recent_trajectory_context_excludes_validation_runs(tmp_path):
             }
         ],
     }
-    (val_traj_dir / "trajectory_20260304-000002.json").write_text(
-        json.dumps(val_trajectory)
-    )
+    (val_traj_dir / "trajectory_20260304-000002.json").write_text(json.dumps(val_trajectory))
 
     ctx = optimizer._build_recent_trajectory_context(
         work_dir=work_dir,
@@ -262,9 +240,7 @@ def test_build_recent_trajectory_context_excludes_validation_runs(tmp_path):
     assert "VAL_ONLY_MARKER" not in ctx
 
 
-def test_cleanup_experiment_containers_handles_hyphenized_compose_labels(
-    monkeypatch, tmp_path
-):
+def test_cleanup_experiment_containers_handles_hyphenized_compose_labels(monkeypatch, tmp_path):
     """Cleanup should remove containers even when compose label uses hyphenized project names."""
     optimizer = _make_optimizer(tmp_path)
     calls: list[list[str]] = []
@@ -285,19 +261,13 @@ def test_cleanup_experiment_containers_handles_hyphenized_compose_labels(
 
     optimizer._cleanup_experiment_containers(Path("iter1_c1_socialNetwork"))
 
-    ps_filters = [
-        cmd[-1]
-        for cmd in calls
-        if cmd[:4] == ["docker", "ps", "-a", "-q"]
-    ]
+    ps_filters = [cmd[-1] for cmd in calls if cmd[:4] == ["docker", "ps", "-a", "-q"]]
     assert "label=com.docker.compose.project=iter1_c1_socialnetwork" in ps_filters
     assert "label=com.docker.compose.project=iter1-c1-socialnetwork" in ps_filters
     assert any(cmd[:3] == ["docker", "rm", "-f"] and "abc123" in cmd for cmd in calls)
 
 
-def test_cleanup_experiment_containers_runs_compose_down_when_compose_exists(
-    monkeypatch, tmp_path
-):
+def test_cleanup_experiment_containers_runs_compose_down_when_compose_exists(monkeypatch, tmp_path):
     """Cleanup should run docker compose down to free ports and remove orphans."""
     optimizer = _make_optimizer(tmp_path)
     calls: list[list[str]] = []
@@ -319,11 +289,9 @@ def test_cleanup_experiment_containers_runs_compose_down_when_compose_exists(
     optimizer._cleanup_experiment_containers(exp_dir)
 
     down_calls = [
-        cmd for cmd in calls
-        if len(cmd) >= 9
-        and cmd[:2] == ["docker", "compose"]
-        and "down" in cmd
-        and "--remove-orphans" in cmd
+        cmd
+        for cmd in calls
+        if len(cmd) >= 9 and cmd[:2] == ["docker", "compose"] and "down" in cmd and "--remove-orphans" in cmd
     ]
     assert down_calls, "Expected docker compose down --remove-orphans call"
     assert any(str(compose_file) in cmd for cmd in down_calls)
@@ -347,9 +315,7 @@ def test_optimize_normalizes_train_app_name_in_experiment_dir(monkeypatch, tmp_p
     monkeypatch.setattr(
         optimizer,
         "_generate_candidates",
-        lambda prompt_names, current_instructions, trajectory_context: [
-            {prompt_names[0]: "improved instruction"}
-        ],
+        lambda prompt_names, current_instructions, trajectory_context: [{prompt_names[0]: "improved instruction"}],
     )
     monkeypatch.setattr(
         optimizer,
@@ -397,7 +363,7 @@ def test_optimize_uses_seed_only_bootstrap_on_cold_start(monkeypatch, tmp_path):
     monkeypatch.setattr(
         optimizer,
         "_build_recent_trajectory_context",
-        lambda work_dir, iteration, prompt_names: {p: "" for p in prompt_names},
+        lambda work_dir, iteration, prompt_names: dict.fromkeys(prompt_names, ""),
     )
 
     def _should_not_generate(*args, **kwargs):
@@ -432,8 +398,7 @@ def test_optimize_uses_seed_only_bootstrap_on_cold_start(monkeypatch, tmp_path):
 
     state = json.loads((output_dir / "deployer_fix_error.dspy.json").read_text())
     assert (
-        state["optimized_instruction"]
-        == "A deployment has failed. Analyze the error and fix the deployment scripts."
+        state["optimized_instruction"] == "A deployment has failed. Analyze the error and fix the deployment scripts."
     )
 
     metadata = json.loads((output_dir / "metadata.json").read_text())
@@ -592,9 +557,7 @@ def test_optimize_hybrid_falls_back_to_score_when_judge_invalid(monkeypatch, tmp
     )
     monkeypatch.setattr(
         "app_operator.dspy_integration.eval_execute.litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))]
-        ),
+        lambda **kwargs: SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))]),
     )
 
     result = optimizer.optimize(

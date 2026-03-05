@@ -58,6 +58,6 @@ class LiteLLMClient:
         result = _litellm_call_with_retry(kwargs, label=label, token_acc=self._token_usage)
 
         if self.recorder and hasattr(self.recorder, "record_token_usage"):
-            self.recorder.record_token_usage(self._token_usage.copy())
+            self.recorder.record_token_usage(self._token_usage.copy())  # type: ignore[reportArgumentType]
 
         return result

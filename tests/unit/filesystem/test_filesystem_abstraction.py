@@ -5,8 +5,9 @@ InMemoryFilesystem, and that callsites that previously bypassed
 the abstraction now use it properly.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app_operator.filesystem import InMemoryFilesystem
 
@@ -247,9 +248,7 @@ class TestCreateGenerateScriptPromptIntegration:
         target = Path("/test/repo")
         fs.mkdir(target / ".sds", parents=True)
         fs.write_text(target / ".sds" / "code_analysis.md", "Analysis content here")
-        fs.write_text(
-            target / ".sds" / "deployment_issues.md", "Issues content here"
-        )
+        fs.write_text(target / ".sds" / "deployment_issues.md", "Issues content here")
 
         prompt = create_generate_script_prompt(
             system_prompt="System",

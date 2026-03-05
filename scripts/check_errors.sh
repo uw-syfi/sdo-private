@@ -18,9 +18,9 @@ cd "$PROJECT_ROOT"
 if command -v uv >/dev/null 2>&1; then
     if [ "$1" == "--fix" ]; then
         echo "Auto-fixing errors..."
-        uv tool run ruff check --fix --exclude apps/ .
+        uv run ruff check --fix .
     else
-        uv tool run ruff check --exclude apps/ .
+        uv run ruff check .
     fi
 else
     echo "Error: 'uv' is not installed. Please install uv to run this script."

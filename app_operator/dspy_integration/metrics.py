@@ -141,9 +141,7 @@ class TokenEfficiencyMetric:
         output_tokens = token_usage.get("output", 0)
 
         # Calculate weighted token usage
-        weighted_tokens = (
-            input_tokens * self.input_weight + output_tokens * self.output_weight
-        )
+        weighted_tokens = input_tokens * self.input_weight + output_tokens * self.output_weight
 
         # Normalize against baseline
         efficiency = max(0.0, 1.0 - (weighted_tokens / self.baseline_tokens))
@@ -170,10 +168,8 @@ class _PromptJudgeSignature(dspy.Signature):
     Respond with ONLY an integer from 0 to 10.
     """
 
-    error_context: str = dspy.InputField(
-        desc="The deployment error context including logs and exit codes")
-    generated_prompt: str = dspy.InputField(
-        desc="The generated prompt to evaluate")
+    error_context: str = dspy.InputField(desc="The deployment error context including logs and exit codes")
+    generated_prompt: str = dspy.InputField(desc="The generated prompt to evaluate")
 
     score: str = dspy.OutputField(desc="An integer score from 0 to 10")
 
@@ -332,22 +328,22 @@ class HealthCheckQualityMetric:
 
     # Keywords indicating real health checks
     VALID_CHECK_PATTERNS = [
-        "curl",          # HTTP endpoint checks
-        "nc -",          # Network/port checks
-        "docker",        # Container status checks
-        "redis-cli",     # Redis connectivity
-        "mongo ",        # MongoDB connectivity
-        "psql",          # PostgreSQL connectivity
-        "mysql",         # MySQL connectivity
-        "wget",          # Alternative HTTP checks
-        "telnet",        # Alternative network checks
-        "systemctl",     # Service status checks
-        "grep -",        # Log analysis
-        "ps aux",        # Process checks
+        "curl",  # HTTP endpoint checks
+        "nc -",  # Network/port checks
+        "docker",  # Container status checks
+        "redis-cli",  # Redis connectivity
+        "mongo ",  # MongoDB connectivity
+        "psql",  # PostgreSQL connectivity
+        "mysql",  # MySQL connectivity
+        "wget",  # Alternative HTTP checks
+        "telnet",  # Alternative network checks
+        "systemctl",  # Service status checks
+        "grep -",  # Log analysis
+        "ps aux",  # Process checks
     ]
 
     MIN_NON_TRIVIAL_LINES = 20  # Minimum lines of actual code
-    MIN_CHECK_COMMANDS = 2      # Minimum number of different check types
+    MIN_CHECK_COMMANDS = 2  # Minimum number of different check types
 
     def __call__(self, example: Any, prediction: Any, trace: Any = None) -> float:
         """Evaluate health check script quality.
@@ -386,11 +382,7 @@ class HealthCheckQualityMetric:
         # Check for trivial "exit 0" only scripts
         if non_trivial_lines <= 2:
             # Check if it's just "exit 0" or similar
-            code_lines = [
-                line.strip()
-                for line in lines
-                if line.strip() and not line.strip().startswith("#")
-            ]
+            code_lines = [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
             if any("exit 0" in line for line in code_lines) and len(code_lines) <= 2:
                 return 0.0  # Reward hacking detected
 

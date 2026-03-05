@@ -8,10 +8,11 @@ Tests for prepare_error_context and create_fix_prompt functions covering:
 """
 
 from pathlib import Path
+
 from app_operator.prompts.deployer import (
-    prepare_error_context,
     create_fix_prompt,
     create_generate_script_prompt,
+    prepare_error_context,
 )
 
 
@@ -75,9 +76,7 @@ class TestPrepareErrorContext:
         log_path = Path("/repo/.sds/logs/deploy.log")
         health_log_path = Path("/repo/.sds/logs/health.log")
 
-        context = prepare_error_context(
-            deploy_result, health_result, log_path, health_log_path
-        )
+        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)
 
         assert str(log_path) in context
         assert str(health_log_path) in context
@@ -90,9 +89,7 @@ class TestPrepareErrorContext:
         log_path = Path("/repo/logs/deploy 日本語 & test.log")
         health_log_path = Path("/repo/logs/health (1).log")
 
-        context = prepare_error_context(
-            deploy_result, health_result, log_path, health_log_path
-        )
+        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)
 
         assert str(log_path) in context
         assert str(health_log_path) in context
@@ -337,15 +334,14 @@ class TestCreateFixPrompt:
             health_check_script_path=sds / "health_check.sh",
         )
         assert "Architecture Reconciliation" not in prompt
-        assert isinstance(prompt, str) and len(prompt) > 0
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
 
     def test_fix_prompt_includes_todo_instructions_when_issues_file_exists(self, tmp_path):
         """When deployment_issues.md exists, prompt contains TODO tracking instructions."""
         sds = tmp_path / ".sds"
         sds.mkdir()
-        (sds / "deployment_issues.md").write_text(
-            "# Deployment Issues\n\n## TODO\n- [ ] #1 — cert path wrong\n"
-        )
+        (sds / "deployment_issues.md").write_text("# Deployment Issues\n\n## TODO\n- [ ] #1 — cert path wrong\n")
         prompt = create_fix_prompt(
             repo_path=tmp_path,
             attempt=1,
@@ -373,7 +369,8 @@ class TestCreateFixPrompt:
         )
         assert "TODO" not in prompt
         assert "[x]" not in prompt
-        assert isinstance(prompt, str) and len(prompt) > 0
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
 
     def test_max_attempts_boundary_values(self):
         """Test with boundary values for attempt/max_attempts."""

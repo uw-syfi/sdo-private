@@ -1,7 +1,8 @@
 from typing import Any
 
-from app_operator.trajectory import TrajectoryRecorderProtocol
 from google.adk.plugins import BasePlugin
+
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 class AdkTrajectoryPlugin(BasePlugin):
@@ -11,17 +12,12 @@ class AdkTrajectoryPlugin(BasePlugin):
         self.recorder = recorder
         self.name = "AdkTrajectoryPlugin"
 
-    async def before_model_callback(
-        self, *, callback_context: Any, llm_request: Any
-    ) -> None:
+    async def before_model_callback(self, *, callback_context: Any, llm_request: Any) -> None:
         """Called before sending a request to the model."""
         # We might record the prompt here, but SDS trajectory usually records
         # user messages separately.
-        pass
 
-    async def after_model_callback(
-        self, *, callback_context: Any, llm_response: Any
-    ) -> None:
+    async def after_model_callback(self, *, callback_context: Any, llm_response: Any) -> None:
         """Called after receiving a response from the model."""
         # Extract text from response. Response structure depends on ADK.
         # Assuming response has a text or content attribute.
@@ -38,18 +34,13 @@ class AdkTrajectoryPlugin(BasePlugin):
 
         self.recorder.add_assistant_message(content)
 
-    async def before_tool_callback(
-        self, *, tool: Any, tool_args: Any, tool_context: Any
-    ) -> None:
+    async def before_tool_callback(self, *, tool: Any, tool_args: Any, tool_context: Any) -> None:
         """Called before executing a tool."""
         # We record the tool call after it completes to include output,
         # or we could record start here. SDS trajectory usually records
         # tool calls with outputs in one entry.
-        pass
 
-    async def after_tool_callback(
-        self, *, tool: Any, tool_args: Any, tool_context: Any, result: Any
-    ) -> None:
+    async def after_tool_callback(self, *, tool: Any, tool_args: Any, tool_context: Any, result: Any) -> None:
         """Called after a tool execution completes."""
         tool_name = getattr(tool, "name", str(tool))
 
@@ -71,9 +62,7 @@ class AdkTrajectoryPlugin(BasePlugin):
             exit_code=exit_code,
         )
 
-    async def on_tool_error_callback(
-        self, *, tool: Any, tool_args: Any, tool_context: Any, error: Exception
-    ) -> None:
+    async def on_tool_error_callback(self, *, tool: Any, tool_args: Any, tool_context: Any, error: Exception) -> None:
         """Called when a tool execution fails."""
         tool_name = getattr(tool, "name", str(tool))
         self.recorder.add_tool_call(

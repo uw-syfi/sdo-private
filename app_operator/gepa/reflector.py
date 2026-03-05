@@ -46,10 +46,7 @@ class PromptReflector:
                 if self._llm is None:
                     model = self._gepa_config.reflection_model
                     if model is None:
-                        raise ValueError(
-                            "reflection_model must be set in GEPAConfig "
-                            "to use the reflection LLM"
-                        )
+                        raise ValueError("reflection_model must be set in GEPAConfig to use the reflection LLM")
                     self._llm = create_chat_model(
                         self._gepa_config.reflection_provider,
                         model,
@@ -67,9 +64,7 @@ class PromptReflector:
         Returns:
             Tuple of (mutated_prompt, rationale).
         """
-        reflection_prompt = self._build_reflection_prompt(
-            current_prompt, traces, template_name
-        )
+        reflection_prompt = self._build_reflection_prompt(current_prompt, traces, template_name)
         return self._call_reflection_lm(reflection_prompt)
 
     def crossover(
@@ -85,9 +80,7 @@ class PromptReflector:
         Returns:
             Tuple of (merged_prompt, rationale).
         """
-        crossover_prompt = self._build_crossover_prompt(
-            prompt_a, prompt_b, traces_a, traces_b, template_name
-        )
+        crossover_prompt = self._build_crossover_prompt(prompt_a, prompt_b, traces_a, traces_b, template_name)
         return self._call_reflection_lm(crossover_prompt)
 
     def _build_reflection_prompt(
@@ -210,17 +203,13 @@ The merged prompt text here.
 
         parts = []
         for i, trace in enumerate(traces):
-            parts.append(
-                f"### Trace {i + 1} ({trace.agent_type} / {trace.phase})"
-            )
+            parts.append(f"### Trace {i + 1} ({trace.agent_type} / {trace.phase})")
             parts.append(f"Success: {trace.success}")
             parts.append(f"Evaluation: {trace.evaluation_result}")
 
             messages = trace.messages
             if len(messages) > 20:
-                parts.append(
-                    f"(showing last 20 of {len(messages)} messages)"
-                )
+                parts.append(f"(showing last 20 of {len(messages)} messages)")
                 messages = messages[-20:]
             for msg in messages:
                 role = msg.get("role", "unknown")
@@ -311,27 +300,17 @@ The merged prompt text here.
                 args_str = str(msg.get("args", ""))
 
                 if exit_code == -1:
-                    patterns.append(
-                        "Script exited with code -1 "
-                        "(crashed before producing output)"
-                    )
+                    patterns.append("Script exited with code -1 (crashed before producing output)")
                 elif exit_code and exit_code != 0:
                     tool = msg.get("tool", "unknown")
-                    patterns.append(
-                        f"{tool} exited with code {exit_code}"
-                    )
+                    patterns.append(f"{tool} exited with code {exit_code}")
 
                 if "docker-compose" in args_str or "docker-compose" in stdout:
                     patterns.append(
-                        "Agent used `docker-compose` (hyphenated) but "
-                        "only `docker compose` (space) is available"
+                        "Agent used `docker-compose` (hyphenated) but only `docker compose` (space) is available"
                     )
-                if "mvn " in args_str or "mvn " in stdout:
-                    if "./mvnw" not in args_str and "./mvnw" not in stdout:
-                        patterns.append(
-                            "Agent used `mvn` but Maven may not be "
-                            "installed; should use `./mvnw`"
-                        )
+                if ("mvn " in args_str or "mvn " in stdout) and "./mvnw" not in args_str and "./mvnw" not in stdout:
+                    patterns.append("Agent used `mvn` but Maven may not be installed; should use `./mvnw`")
                 if "command not found" in stderr.lower():
                     patterns.append(f"Command not found: {stderr[:200]}")
 
@@ -376,19 +355,12 @@ and potential issues
         # of parts; extract text parts and join them.
         raw = response.content
         if isinstance(raw, list):
-            response_text = "\n".join(
-                part.get("text", "") if isinstance(part, dict) else str(part)
-                for part in raw
-            )
+            response_text = "\n".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in raw)
         else:
             response_text = raw
 
-        rationale_match = re.search(
-            r"<rationale>(.*?)</rationale>", response_text, re.DOTALL
-        )
-        rationale = (
-            rationale_match.group(1).strip() if rationale_match else ""
-        )
+        rationale_match = re.search(r"<rationale>(.*?)</rationale>", response_text, re.DOTALL)
+        rationale = rationale_match.group(1).strip() if rationale_match else ""
 
         prompt_match = re.search(
             r"<mutated_prompt>(.*?)</mutated_prompt>",
@@ -396,12 +368,8 @@ and potential issues
             re.DOTALL,
         )
         if not prompt_match:
-            logger.warning(
-                "Reflection LM did not produce <mutated_prompt> tags"
-            )
-            raise ValueError(
-                "Reflection LM response missing <mutated_prompt> tags"
-            )
+            logger.warning("Reflection LM did not produce <mutated_prompt> tags")
+            raise ValueError("Reflection LM response missing <mutated_prompt> tags")
 
         mutated_prompt = prompt_match.group(1).strip()
         return mutated_prompt, rationale

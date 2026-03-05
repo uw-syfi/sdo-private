@@ -7,16 +7,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
 
-from app_operator.ui_protocol import OperatorUI, NullOperatorUI
-from libs.agent_cli.base import CodingAgent
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.trajectory import (
+    NullTrajectoryRecorder,
     Phase,
     TrajectoryRecorderProtocol,
-    NullTrajectoryRecorder,
 )
+from app_operator.ui_protocol import NullOperatorUI, OperatorUI
+from libs.agent_cli.base import CodingAgent
 
 # Constants
 DEFAULT_ANALYSIS_TIMEOUT_SECS = 600  # 10 minutes
@@ -31,7 +31,7 @@ class CodeAnalyzerAgent:
         coding_agent: CodingAgent,
         filesystem: FileSystemInterface | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
-        dspy_config: "DSPyConfig" | None = None,
+        dspy_config: DSPyConfig | None = None,
         ui: OperatorUI | None = None,
     ):
         """Initialize the code analyzer agent.
@@ -81,9 +81,7 @@ class CodeAnalyzerAgent:
             bool: True if analysis completed successfully or was already done.
         """
         # Check if analysis already exists
-        if self.filesystem.exists(self.analysis_file) and self.filesystem.exists(
-            self.issues_file
-        ):
+        if self.filesystem.exists(self.analysis_file) and self.filesystem.exists(self.issues_file):
             logger.info("Code analysis files already exist. Skipping analysis.")
             return True
 
@@ -111,9 +109,7 @@ class CodeAnalyzerAgent:
                     recorder=self.recorder,
                 )
 
-                logger.info(
-                    f"Consulting {self.agent.__class__.__name__} to analyze the codebase..."
-                )
+                logger.info(f"Consulting {self.agent.__class__.__name__} to analyze the codebase...")
 
                 start_time = time.time()
 
@@ -128,9 +124,7 @@ class CodeAnalyzerAgent:
                 logger.info(f"Agent analysis took {duration / 60:.2f} minutes")
 
                 # Verify files were created
-                if self.filesystem.exists(
-                    self.analysis_file
-                ) and self.filesystem.exists(self.issues_file):
+                if self.filesystem.exists(self.analysis_file) and self.filesystem.exists(self.issues_file):
                     logger.success("Code analysis completed successfully")
                     r.add_assistant_message("Code analysis completed successfully")
                     return True
@@ -141,9 +135,7 @@ class CodeAnalyzerAgent:
                     if not self.filesystem.exists(self.issues_file):
                         missing.append(str(self.issues_file))
 
-                    error_msg = (
-                        f"Agent failed to create analysis files: {', '.join(missing)}"
-                    )
+                    error_msg = f"Agent failed to create analysis files: {', '.join(missing)}"
                     logger.error(error_msg)
                     r.set_phase_status("failed")
                     r.add_assistant_message(error_msg)

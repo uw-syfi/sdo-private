@@ -8,7 +8,7 @@ This shows:
 
 import json
 
-from app_operator.rlm.environment import RLMEnvironment, RLMContext
+from app_operator.rlm.environment import RLMContext, RLMEnvironment
 from app_operator.rlm.metrics import RLMCompositeMetric
 
 
@@ -30,7 +30,8 @@ def create_example_error_log() -> str:
 [2026-02-13 10:{i:02d}:19]  ---> abc456
 ... (many build steps) ...
 [2026-02-13 10:{i:02d}:45] Starting services...
-[2026-02-13 10:{i:02d}:46] Error: Cannot start service frontend: driver failed programming external connectivity on endpoint hotel-frontend-{i}
+[2026-02-13 10:{i:02d}:46] Error: Cannot start service frontend: driver failed programming
+  external connectivity on endpoint hotel-frontend-{i}
 [2026-02-13 10:{i:02d}:46] Error: Bind for 0.0.0.0:808{i % 10} failed: port is already allocated
 [2026-02-13 10:{i:02d}:47] ERROR: for frontend  Cannot start service frontend: driver failed
 [2026-02-13 10:{i:02d}:48] Encountered errors while bringing up the project.
@@ -190,17 +191,15 @@ result = f"Port conflict detected. Ports used: {set(ports)}"
     print("\n--- RLM Statistics ---")
     print(json.dumps(stats, indent=2))
 
-    baseline_tokens = stats['baseline_context_tokens']
+    baseline_tokens = stats["baseline_context_tokens"]
     estimated_tokens = len(error_log) // 4
     tokens_saved = baseline_tokens
 
     print("\nBenefits:")
+    print(f"  1. Tokens saved: ~{tokens_saved:,} ({tokens_saved / estimated_tokens * 100:.1f}% reduction)")
     print(
-        f"  1. Tokens saved: ~{tokens_saved:,} "
-        f"({tokens_saved / estimated_tokens * 100:.1f}% reduction)"
+        f"  2. Focused analysis: {stats['code_executions']} code queries + {stats['recursive_calls']} recursive calls"
     )
-    print(
-        f"  2. Focused analysis: {stats['code_executions']} code queries + {stats['recursive_calls']} recursive calls")
     print(f"  3. Max recursion depth: {stats['max_depth_reached']} (efficient)")
     print("  4. Pattern extraction via code (more reliable than LLM parsing)")
 

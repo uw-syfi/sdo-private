@@ -5,11 +5,14 @@ ensuring correctness for all combinations of present/absent optional fields.
 """
 
 import json
+
 import pytest
 
 # Try to import hypothesis, skip tests if not available
 try:
-    from hypothesis import given, strategies as st, assume, settings
+    from hypothesis import assume, given, settings
+    from hypothesis import strategies as st
+
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
@@ -34,8 +37,7 @@ except ImportError:
 from app_operator.trajectory import TrajectoryMessage
 
 pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
+    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
 )
 
 # ---------------------------------------------------------------------------
@@ -69,6 +71,7 @@ if HYPOTHESIS_AVAILABLE:
             duration_seconds=draw(_optional_float),
         )
 else:
+
     def trajectory_message_strategy():
         pass
 
@@ -76,6 +79,7 @@ else:
 # ---------------------------------------------------------------------------
 # TrajectoryMessage.to_dict() invariants
 # ---------------------------------------------------------------------------
+
 
 class TestTrajectoryMessageToDictProperties:
     """Property-based tests for TrajectoryMessage.to_dict()."""

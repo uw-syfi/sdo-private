@@ -1,11 +1,12 @@
 """Tests for DSPy signatures."""
 
 import pytest
+
 from app_operator.dspy_integration.signatures import (
-    get_signature,
     SIGNATURES,
-    DeployerFixErrorSignature,
     AgentflowUserSignature,
+    DeployerFixErrorSignature,
+    get_signature,
 )
 
 
@@ -19,8 +20,6 @@ class TestSignatures:
             "deployer_generate_deploy_script",
             "deployer_generate_health_check",
             "deployer_generate_script",
-            "deployer_generate_deploy_script",
-            "deployer_generate_health_check",
             "deployer_fix_error",
             "rlm_deployer_fix_error",
             "deployer_summarize",
@@ -56,11 +55,9 @@ class TestSignatures:
 
     def test_get_signature_error_message(self):
         """Test error message includes available prompts."""
-        try:
+        with pytest.raises(KeyError, match="Available prompts:") as exc_info:
             get_signature("invalid")
-        except KeyError as e:
-            assert "Available prompts:" in str(e)
-            assert "deployer_fix_error" in str(e)
+        assert "deployer_fix_error" in str(exc_info.value)
 
     def test_deployer_fix_error_signature_fields(self):
         """Test DeployerFixErrorSignature has expected fields."""

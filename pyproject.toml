@@ -34,7 +34,6 @@ plot = [
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "autopep8>=2.0.0",
     "ruff>=0.1.0",
     "hypothesis>=6.0.0",
     "pytest-xdist>=3.5.0",
@@ -54,6 +53,33 @@ members = ["libs/agent_cli", "libs/sds_core"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app_operator", "lego_agent", "libs"]
+
+[tool.ruff]
+line-length = 120
+exclude = ["apps/"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "PIE", "C4", "ERA", "B", "RUF010", "RUF013", "RUF100", "PT", "SIM"]
+ignore = ["SIM117", "SIM105", "SIM108", "PT009"]
+
+[tool.coverage.run]
+source = ["app_operator", "lego_agent", "libs"]
+omit = ["*/apps/*", "*/__main__.py", "*/ui/*"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

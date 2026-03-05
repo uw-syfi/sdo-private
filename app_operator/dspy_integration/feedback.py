@@ -3,8 +3,8 @@
 Collects feedback during operator runs for continuous improvement.
 """
 
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 
 class DSPyFeedbackCollector:
@@ -31,8 +31,7 @@ class DSPyFeedbackCollector:
             True if feedback should be collected
         """
         # Placeholder - to be implemented in Phase 5
-        raise NotImplementedError(
-            "DSPyFeedbackCollector.should_collect_feedback() not yet implemented")
+        raise NotImplementedError("DSPyFeedbackCollector.should_collect_feedback() not yet implemented")
 
     def collect_feedback(self, trajectory: Any, metadata: dict | None = None) -> None:
         """Collect feedback from a run.

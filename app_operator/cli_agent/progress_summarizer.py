@@ -2,7 +2,7 @@
 
 import re
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
@@ -128,7 +128,6 @@ class ProgressSummarizer:
         except Exception as e:
             # If summarization fails, log but don't interrupt the flow
             logger.warning(f"ProgressSummarizer: Failed to generate summary: {e}", exc_info=True)
-            pass
 
     def _extract_summary(self, response: str) -> str | None:
         """Extract the summary from the agent's response using XML markers.

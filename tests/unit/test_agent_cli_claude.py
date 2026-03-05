@@ -1,8 +1,10 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
+from app_operator.trajectory import NullTrajectoryRecorder
 from libs.agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
 from libs.agent_cli.cli_agent import CLICodingAgent
-from app_operator.trajectory import NullTrajectoryRecorder
 
 
 @pytest.fixture
@@ -120,8 +122,7 @@ class TestClaudeGenerationSession:
         session.tool_args["t1"] = {"cmd": "ls"}
 
         line = (
-            '{"type":"user","message":{"content":'
-            '[{"type":"tool_result","tool_use_id":"t1","content":"file1.txt"}]}}\n'
+            '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"file1.txt"}]}}\n'
         )
         session._process_stdout(line)
         # Tool result was processed (recorder recorded it via NullTrajectoryRecorder)

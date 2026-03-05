@@ -9,20 +9,19 @@ Register with ``provider = "rlm"`` in ``sds.toml``.
 """
 
 import re
+from pathlib import Path
 
 from loguru import logger
+
+from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _FIX_ERROR_RE
+from app_operator.prompts import DSPyConfigProtocol
 from app_operator.rlm.environment import RLMContext
 from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
-from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _FIX_ERROR_RE
-
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
 from libs.agent_cli.llm_client import LiteLLMClient
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
-from app_operator.prompts import DSPyConfigProtocol
-
-from pathlib import Path
 
 
 @register_provider("rlm")
@@ -61,7 +60,7 @@ class RLMCodingAgent(CodingAgent):
             dspy_config: Optional DSPy configuration for optimised prompts.
         """
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder = recorder
+        self.recorder: TrajectoryRecorderProtocol | None = recorder
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
@@ -146,6 +145,7 @@ class RLMCodingAgent(CodingAgent):
         # Create backup of deploy.sh on first build (before any fixes).
         if deploy_sh.exists() and not deploy_bak.exists():
             import shutil
+
             shutil.copy2(deploy_sh, deploy_bak)
 
         # original_script comes from the backup (immutable first version).
@@ -226,13 +226,9 @@ class RLMCodingAgent(CodingAgent):
             previous_attempts=previous_attempts,
             dockerfile=self._read(repo_path / "Dockerfile"),
             docker_compose=(
-                self._read(repo_path / "docker-compose.yml")
-                or self._read(repo_path / "docker-compose.yaml")
+                self._read(repo_path / "docker-compose.yml") or self._read(repo_path / "docker-compose.yaml")
             ),
-            readme=(
-                self._read(repo_path / "README.md")
-                or self._read(repo_path / "README.rst")
-            ),
+            readme=(self._read(repo_path / "README.md") or self._read(repo_path / "README.rst")),
             analysis_report=self._read(sds / "code_analysis.md"),
             original_script=original_script,
             attempt_number=attempt_number,

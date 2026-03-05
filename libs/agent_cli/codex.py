@@ -1,7 +1,5 @@
-
-from .cli_agent import CLICodingAgent
-
 from .base import register_provider
+from .cli_agent import CLICodingAgent
 
 
 @register_provider("openai", "codex")

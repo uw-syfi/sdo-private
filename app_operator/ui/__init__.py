@@ -1,3 +1,3 @@
-from .base import OperatorUI, NullOperatorUI
+from .base import NullOperatorUI, OperatorUI
 
 __all__ = ["OperatorUI", "NullOperatorUI"]

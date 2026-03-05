@@ -1,6 +1,7 @@
-import pytest
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from app_operator.cli_agent.operator import AppOperator
 from libs.agent_cli.base import CodingAgent
@@ -124,6 +125,7 @@ I have analyzed the logs and fixed the deployment script."""
         return """<exec_summary>System is healthy.</exec_summary>
 The system appears to be running smoothly.
 """
+
 
 # --- Tests ---
 

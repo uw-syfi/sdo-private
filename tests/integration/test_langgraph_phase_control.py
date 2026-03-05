@@ -23,17 +23,12 @@ class TestLangGraphPhaseControl:
 
     def test_initial_state_analysis_done_when_disabled(self, temp_repo):
         """Test that analysis_done=True in initial state when disabled."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
+        config = Config.from_dict(
+            {
+                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "operator": {"phase": {"code_analysis": False}},
             }
-        })
+        )
 
         # Directly test the state construction logic used in LangGraph operator
         # This matches the actual implementation in operator.py:100
@@ -58,17 +53,9 @@ class TestLangGraphPhaseControl:
 
     def test_initial_state_analysis_not_done_when_enabled(self, temp_repo):
         """Test that analysis_done=False in initial state when enabled."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": True
-                }
-            }
-        })
+        config = Config.from_dict(
+            {"agent": {"provider": "gemini", "model": "gemini-1.5-pro"}, "operator": {"phase": {"code_analysis": True}}}
+        )
 
         # Construct initial state as done in operator
         initial_state = {
@@ -92,12 +79,7 @@ class TestLangGraphPhaseControl:
 
     def test_initial_state_default_behavior(self, temp_repo):
         """Test that default config has analysis_done=False."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            }
-        })
+        config = Config.from_dict({"agent": {"provider": "gemini", "model": "gemini-1.5-pro"}})
 
         # Default should have code_analysis=True
         assert config.operator.phase.code_analysis is True
@@ -128,17 +110,12 @@ class TestLangGraphPhaseControl:
 
     def test_graph_proceeds_to_script_generation(self, temp_repo):
         """Test that graph proceeds correctly when analysis is skipped."""
-        config = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
+        config = Config.from_dict(
+            {
+                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "operator": {"phase": {"code_analysis": False}},
             }
-        })
+        )
 
         # The graph flow should be:
         # start -> analyzer (skips due to analysis_done=True) -> script_generator
@@ -163,38 +140,21 @@ class TestLangGraphPhaseControl:
     def test_different_runtimes_same_repo(self, temp_repo):
         """Test that config is respected independently per runtime."""
         # Config with analysis disabled
-        config_disabled = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
+        config_disabled = Config.from_dict(
+            {
+                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "operator": {"phase": {"code_analysis": False}},
             }
-        })
+        )
 
         # Config with analysis enabled
-        config_enabled = Config.from_dict({
-            "agent": {
-                "provider": "gemini",
-                "model": "gemini-1.5-pro"
-            },
-            "operator": {
-                "phase": {
-                    "code_analysis": True
-                }
-            }
-        })
+        config_enabled = Config.from_dict(
+            {"agent": {"provider": "gemini", "model": "gemini-1.5-pro"}, "operator": {"phase": {"code_analysis": True}}}
+        )
 
         # Each runtime independently respects its config
-        state_disabled = {
-            "analysis_done": not config_disabled.operator.phase.code_analysis
-        }
-        state_enabled = {
-            "analysis_done": not config_enabled.operator.phase.code_analysis
-        }
+        state_disabled = {"analysis_done": not config_disabled.operator.phase.code_analysis}
+        state_enabled = {"analysis_done": not config_enabled.operator.phase.code_analysis}
 
         assert state_disabled["analysis_done"] is True
         assert state_enabled["analysis_done"] is False

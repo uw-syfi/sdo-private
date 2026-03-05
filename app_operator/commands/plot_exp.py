@@ -84,26 +84,30 @@ def _load_experiment(name: str) -> ExperimentData | None:
         aggregated = []
         for entry in data["aggregated"]:
             success_rate = entry.get("success_rate", "0/0")
-            aggregated.append(AggregatedResult(
-                app=entry["app"],
-                success_rate=success_rate,
-                success_frac=_parse_success_frac(success_rate),
-                deploy_iterations_mean=entry.get("deploy_iterations_mean"),
-                deploy_iterations_min=entry.get("deploy_iterations_min"),
-                deploy_iterations_max=entry.get("deploy_iterations_max"),
-                elapsed_seconds_mean=entry.get("elapsed_seconds_mean"),
-            ))
+            aggregated.append(
+                AggregatedResult(
+                    app=entry["app"],
+                    success_rate=success_rate,
+                    success_frac=_parse_success_frac(success_rate),
+                    deploy_iterations_mean=entry.get("deploy_iterations_mean"),
+                    deploy_iterations_min=entry.get("deploy_iterations_min"),
+                    deploy_iterations_max=entry.get("deploy_iterations_max"),
+                    elapsed_seconds_mean=entry.get("elapsed_seconds_mean"),
+                )
+            )
         return ExperimentData(name=name, is_multi_repeat=True, aggregated=aggregated)
     else:
         single = []
         for entry in data.get("results", []):
-            single.append(SingleResult(
-                app=entry["app"],
-                success=entry.get("success", False),
-                status=entry.get("status", "unknown"),
-                deployment_iterations=entry.get("deployment_iterations"),
-                elapsed_seconds=entry.get("elapsed_seconds"),
-            ))
+            single.append(
+                SingleResult(
+                    app=entry["app"],
+                    success=entry.get("success", False),
+                    status=entry.get("status", "unknown"),
+                    deployment_iterations=entry.get("deployment_iterations"),
+                    elapsed_seconds=entry.get("elapsed_seconds"),
+                )
+            )
         return ExperimentData(name=name, is_multi_repeat=False, single=single)
 
 
@@ -117,15 +121,17 @@ def _normalize_to_aggregated(exp: ExperimentData) -> list[AggregatedResult]:
     for r in exp.single:
         success_rate = "1/1" if r.success else "0/1"
         iters = float(r.deployment_iterations) if r.deployment_iterations is not None else None
-        results.append(AggregatedResult(
-            app=r.app,
-            success_rate=success_rate,
-            success_frac=1.0 if r.success else 0.0,
-            deploy_iterations_mean=iters,
-            deploy_iterations_min=r.deployment_iterations,
-            deploy_iterations_max=r.deployment_iterations,
-            elapsed_seconds_mean=r.elapsed_seconds,
-        ))
+        results.append(
+            AggregatedResult(
+                app=r.app,
+                success_rate=success_rate,
+                success_frac=1.0 if r.success else 0.0,
+                deploy_iterations_mean=iters,
+                deploy_iterations_min=r.deployment_iterations,
+                deploy_iterations_max=r.deployment_iterations,
+                elapsed_seconds_mean=r.elapsed_seconds,
+            )
+        )
     return results
 
 
@@ -229,19 +235,21 @@ def _print_comparison_table(experiments: list[ExperimentData]) -> None:
                 cells.append("—")
             else:
                 succ_text = Text(r.success_rate)
-                if succ_colors[i]:
-                    succ_text.stylize(succ_colors[i])
+                succ_color = succ_colors[i]
+                if succ_color is not None:
+                    succ_text.stylize(succ_color)
 
                 if r.deploy_iterations_mean is not None:
                     iter_val = f"{r.deploy_iterations_mean:.1f}"
                 else:
                     iter_val = "N/A"
                 iter_text = Text(iter_val)
-                if iter_colors[i]:
-                    iter_text.stylize(iter_colors[i])
+                iter_color = iter_colors[i]
+                if iter_color is not None:
+                    iter_text.stylize(iter_color)
 
-                cells.append(succ_text)
-                cells.append(iter_text)
+                cells.append(succ_text)  # type: ignore[reportArgumentType]
+                cells.append(iter_text)  # type: ignore[reportArgumentType]
 
         table.add_row(*cells)
 
@@ -251,9 +259,10 @@ def _print_comparison_table(experiments: list[ExperimentData]) -> None:
 def _save_chart(experiments: list[ExperimentData], output_path: Path) -> None:
     """Save a grouped bar chart comparing experiments to output_path."""
     try:
-        import matplotlib
+        import matplotlib  # type: ignore[reportMissingImports]
+
         matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt  # type: ignore[reportMissingImports]
     except ImportError:
         logger.warning("matplotlib is not installed; skipping chart generation.")
         logger.warning("Install it with: pip install matplotlib")
@@ -275,6 +284,7 @@ def _save_chart(experiments: list[ExperimentData], output_path: Path) -> None:
     n_exps = len(experiments)
 
     import numpy as np
+
     x = np.arange(n_apps)
     width = 0.8 / n_exps
 
@@ -300,9 +310,14 @@ def _save_chart(experiments: list[ExperimentData], output_path: Path) -> None:
 
         offset = (i - (n_exps - 1) / 2) * width
         ax_succ.bar(x + offset, succ_vals, width, label=exp.name)
-        ax_iter.bar(x + offset, iter_vals, width, label=exp.name,
-                    yerr=[iter_err_low, iter_err_high],
-                    error_kw={"capsize": 4, "elinewidth": 1.2})
+        ax_iter.bar(
+            x + offset,
+            iter_vals,
+            width,
+            label=exp.name,
+            yerr=[iter_err_low, iter_err_high],
+            error_kw={"capsize": 4, "elinewidth": 1.2},
+        )
 
     ax_succ.set_title("Success Rate")
     ax_succ.set_ylabel("Success (%)")
@@ -325,9 +340,11 @@ def _save_chart(experiments: list[ExperimentData], output_path: Path) -> None:
 
 
 def run_command(args: argparse.Namespace) -> int:
-    experiments = [_load_experiment(n) for n in args.experiments]
-    if any(e is None for e in experiments):
+    loaded = [_load_experiment(n) for n in args.experiments]
+    if any(e is None for e in loaded):
         return 1
+
+    experiments: list[ExperimentData] = [e for e in loaded if e is not None]
 
     if len(experiments) == 1:
         _print_single_table(experiments[0])
