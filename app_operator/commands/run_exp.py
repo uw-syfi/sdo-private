@@ -349,7 +349,7 @@ def tail_file(file_path: Path, stop_event: threading.Event, callback):
                 callback(line.strip())
 
             # Read remaining
-            for line in f.readlines():
+            for line in f:
                 callback(line.strip())
     except Exception:
         pass

@@ -132,7 +132,7 @@ class LangGraphAgent:
                     name = event["name"]
                     inputs = event["data"].get("input")
                     if thinking_started:
-                        print("", flush=True)
+                        print(flush=True)
                         thinking_started = False
                     print(
                         f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}",
@@ -158,7 +158,7 @@ class LangGraphAgent:
                     )
 
             if thinking_started:
-                print("", flush=True)
+                print(flush=True)
 
         try:
             await asyncio.wait_for(run_stream(), timeout=timeout)

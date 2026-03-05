@@ -451,8 +451,7 @@ def _build_make_change_on_remote_copy(
             path = ""
 
         if host and path:
-            if path.endswith(".git"):
-                path = path[: -len(".git")]
+            path = path.removesuffix(".git")
             project_path = path
 
         # Determine GitLab base URL
