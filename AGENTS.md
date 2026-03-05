@@ -90,6 +90,7 @@ Use `glab` command (if available) to access the remote repo on GitLab, including
 - Keep this file concise — detailed docs live in `docs/`.
 - When code changes impact CLI, update README.md.
 - When removing code, delete it — do not comment it out.
+- When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `.claude/skills/analyze-experiment/references/`.
 
 ## Code Validation (after every code edit)
 
