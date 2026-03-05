@@ -131,6 +131,7 @@ class AppOperator(OperatorBase):
             recorder=self.recorder,
             dspy_config=self.config.dspy,
             ui=self.ui,
+            operator_config=self.config.operator,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,

@@ -6,12 +6,11 @@ from typing import Any
 from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import (
-    BLUE,
-    RESET,
     invoke_agent,
     run_script,
     write_log_file,
 )
+from app_operator.logger import logger
 from app_operator.prompts import PromptLoader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
@@ -38,8 +37,8 @@ def health_check(
 
     log_file = repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
 
-    print(f"\n{BLUE}Running health check script...{RESET}")
-    print(f"Logging output to: {log_file}")
+    logger.info("Running health check script...")
+    logger.info(f"Logging output to: {log_file}")
 
     result = run_script(
         repo_path,
