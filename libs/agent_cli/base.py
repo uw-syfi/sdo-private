@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 AGENT_REGISTRY = {}
 
@@ -25,7 +25,7 @@ def register_provider(*names: str):
 class CodingAgent(ABC):
     """Abstract base class for coding agents."""
 
-    recorder: TrajectoryRecorderProtocol
+    recorder: TrajectoryRecorderProtocol = NullTrajectoryRecorder()
     event_handler: Any | None = None
 
     def inject_mcp_server(self, repo_path: Path, sds_root: Path) -> None:

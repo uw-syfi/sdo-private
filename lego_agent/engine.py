@@ -231,7 +231,7 @@ class LegoAgentEngine:
             f"from lego_agent.runtime import run_yaml\n\n"
             f"MAX_ITERATIONS = {self.loop_bound}\n\n"
             f"if __name__ == '__main__':\n"
-            f"    config_path = '{config_path}'\n"
+            f"    config_path = Path(__file__).parent / {Path(config_path).name!r}\n"
             f"    run_yaml(config_path)\n"
         )
 
@@ -315,8 +315,6 @@ class LegoAgentEngine:
 
             elif response.status == "ready":
                 return self._handle_ready_response(response, qa_pairs)
-
-        raise AgentError("Max clarifications exceeded without reaching 'ready' state.")
 
     def _validate_config(self, yaml_text: str) -> None:
         """Validate the generated YAML config."""

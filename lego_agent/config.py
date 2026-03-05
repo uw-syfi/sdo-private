@@ -16,6 +16,20 @@ from pathlib import Path
 
 @dataclass
 class AgentConfig:
+    VALID_PROVIDERS = {
+        "codex",
+        "gemini",
+        "claude",
+        "claude-code",
+        "opencode",
+        "anthropic",
+        "vertex",
+        "openai",
+        "rlm",
+        "subagent",
+        "hybrid",
+    }
+
     provider: str = "codex"
     model: str | None = None
     location: str | None = None
@@ -28,6 +42,10 @@ class AgentConfig:
         if not isinstance(self.provider, str):
             raise TypeError(f"provider must be a str, got {type(self.provider)}")
         self.provider = self.provider.lower()
+        if self.provider not in self.VALID_PROVIDERS:
+            raise ValueError(
+                f"Invalid provider: '{self.provider}'. Valid providers: {', '.join(sorted(self.VALID_PROVIDERS))}"
+            )
         if self.model is not None and not isinstance(self.model, str):
             raise TypeError(f"model must be a str or None, got {type(self.model)}")
         if self.thinking_budget is not None and not isinstance(self.thinking_budget, int):
@@ -68,6 +86,9 @@ class Config:
             "retry_base_delay",
             "rate_limit_backoff",
         }
+        unknown_keys = set(agent_data.keys()) - agent_field_names
+        if unknown_keys:
+            raise ValueError(f"Unrecognised key(s) in [agent]: {', '.join(sorted(unknown_keys))}")
         agent_kwargs = {k: v for k, v in agent_data.items() if k in agent_field_names}
 
         return cls(

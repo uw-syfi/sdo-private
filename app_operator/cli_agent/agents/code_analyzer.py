@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from app_operator.dspy_integration.config import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
+from app_operator.config import OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
@@ -18,9 +19,6 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
-
-# Constants
-DEFAULT_ANALYSIS_TIMEOUT_SECS = 600  # 10 minutes
 
 
 class CodeAnalyzerAgent:
@@ -34,6 +32,7 @@ class CodeAnalyzerAgent:
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
         ui: OperatorUI | None = None,
+        operator_config: OperatorConfig | None = None,
     ):
         """Initialize the code analyzer agent.
 
@@ -51,6 +50,7 @@ class CodeAnalyzerAgent:
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
+        self.operator_config = operator_config or OperatorConfig()
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"
         self.issues_file = self.sds_dir / "deployment_issues.md"
@@ -118,7 +118,7 @@ class CodeAnalyzerAgent:
                 self.agent.generate(
                     f"{system_prompt}\n\n{user_prompt}",
                     cwd=str(self.repo_path),
-                    timeout=DEFAULT_ANALYSIS_TIMEOUT_SECS,
+                    timeout=self.operator_config.agent_timeout,
                 )
 
                 duration = time.time() - start_time

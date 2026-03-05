@@ -37,9 +37,10 @@ def test_invoke_agent_simple():
     mock_recorder.add_assistant_message.assert_called()
 
 
-def test_invoke_agent_with_tools(capsys):
+def test_invoke_agent_with_tools():
     state = {}
     mock_agent = MagicMock()
+    mock_ui = MagicMock()
 
     tool_call = {"name": "test_tool", "args": {"arg": "val"}, "id": "call_1"}
     ai_msg = AIMessage(content="", tool_calls=[tool_call])
@@ -50,13 +51,10 @@ def test_invoke_agent_with_tools(capsys):
         {"tools": {"messages": [tool_msg]}},
     ]
 
-    text, messages = invoke_agent(state, mock_agent, "", "User prompt")
+    text, messages = invoke_agent(state, mock_agent, "", "User prompt", ui=mock_ui)
 
     assert len(messages) == 3  # User, AI (tool call), Tool
-
-    captured = capsys.readouterr()
-    assert "[Tool Use] test_tool {'arg': 'val'}" in captured.out
-    assert "[Tool Result] Tool result" in captured.out
+    mock_ui.on_tool_call.assert_called_once_with("test_tool", "{'arg': 'val'}")
 
 
 def test_invoke_agent_anthropic_usage():
