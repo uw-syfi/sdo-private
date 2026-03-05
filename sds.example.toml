@@ -11,7 +11,9 @@ impl = "cli_agent" # or "langgraph", "adk"
 interval = 30
 monitoring_max_iters = 5 # Maximum number of health monitoring iterations
 deployment_max_iters = 20 # Maximum deployment attempts
+dynamic_observability_injection = false # enables dynamic port allocation for observability services and the AI-driven SRE remediation loop post-deployment
 
 [deployment]
 platform = "docker" # "docker" or "k8s"
 target = "local" # "local" or "remote"
+

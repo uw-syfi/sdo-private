@@ -2,9 +2,9 @@ import argparse
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 from dotenv import load_dotenv
+from pathlib import Path
 
 from app_operator.commands import (
     run,
