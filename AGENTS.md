@@ -36,7 +36,10 @@ impl = "cli_agent"  # cli_agent | langgraph | adk
 [operator.phase]  # optional — disable phases
 code_analysis = false          # default: true
 fix_summary_consolidation = false  # default: true
+git_integration = false        # default: false — see docs/feature-flags.md
 ```
+
+See [`docs/feature-flags.md`](docs/feature-flags.md) for all feature flags.
 
 ### Architecture Overview
 

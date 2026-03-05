@@ -205,7 +205,7 @@ def create_agent(
 
     repo_path_obj = Path(target_dir).resolve()
     filesystem = RealFilesystem()
-    all_tools = build_tools(repo_path_obj, filesystem)
+    all_tools = build_tools(repo_path_obj, filesystem, git_integration=config.operator.phase.git_integration)
 
     # Filter tools if requested
     if tools:

@@ -260,6 +260,8 @@ fix_summary_consolidation = true
 
 Any section valid in `sds.toml` (`[agent]`, `[operator]`, `[runtime]`, etc.) can be used as an override.
 
+See [`docs/feature-flags.md`](feature-flags.md) for the full list of `[operator.phase]` flags.
+
 ---
 
 ## DSPy Configuration: Canary Deployment and Auto-Rollback
