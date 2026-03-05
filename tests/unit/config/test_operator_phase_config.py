@@ -52,14 +52,20 @@ class TestOperatorPhaseConfigParsing:
 
     def test_nested_phase_section_parsing(self):
         """Test parsing nested [operator.phase] section."""
-        data = {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"interval": 60, "phase": {"code_analysis": False}}}
+        data = {
+            "agent": {"provider": "codex", "model": "test-model"},
+            "operator": {"interval": 60, "phase": {"code_analysis": False}},
+        }
         config = Config.from_dict(data)
         assert config.operator.interval == 60
         assert config.operator.phase.code_analysis is False
 
     def test_nested_phase_fix_summary_consolidation_parsing(self):
         """Test parsing fix_summary_consolidation from nested [operator.phase] section."""
-        data = {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"fix_summary_consolidation": False}}}
+        data = {
+            "agent": {"provider": "codex", "model": "test-model"},
+            "operator": {"phase": {"fix_summary_consolidation": False}},
+        }
         config = Config.from_dict(data)
         assert config.operator.phase.fix_summary_consolidation is False
         assert config.operator.phase.code_analysis is True  # Default
@@ -138,7 +144,7 @@ class TestOperatorPhaseConfigParsing:
                 "deploy_timeout": 1800,
                 "agent_timeout": 600,
                 "phase": {"code_analysis": False},
-            }
+            },
         }
         config = Config.from_dict(data)
         assert config.operator.interval == 60
@@ -165,7 +171,9 @@ class TestOperatorPhaseConfigParsing:
         assert config.operator.phase.git_integration is False
 
     def test_git_integration_enabled_via_config(self):
-        config = Config.from_dict({"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"git_integration": True}}})
+        config = Config.from_dict(
+            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"git_integration": True}}}
+        )
         assert config.operator.phase.git_integration is True
 
     def test_git_integration_rejects_non_bool(self):

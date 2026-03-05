@@ -26,6 +26,7 @@ except ImportError:
 
     class _DummyStrategy:
         """Placeholder that supports arbitrary chaining and operators."""
+
         def __getattr__(self, name):
             return lambda *args, **kwargs: self
 
@@ -236,7 +237,7 @@ class TestConfigIntegration:
                     "agent_fix_timeout": 3600,
                     "deploy_timeout": 1800,
                     "agent_timeout": 600,
-                }
+                },
             }
         )
         assert config.operator.agent_fix_timeout == 3600
@@ -457,7 +458,9 @@ class TestConfigFromDictRoundTripProperty:
     @settings(max_examples=50, deadline=1000)
     def test_valid_provider_and_interval_roundtrip(self, provider, interval):
         """Config built from a dict preserves provider and interval exactly."""
-        config = Config.from_dict({"agent": {"provider": provider, "model": "test-model"}, "operator": {"interval": interval}})
+        config = Config.from_dict(
+            {"agent": {"provider": provider, "model": "test-model"}, "operator": {"interval": interval}}
+        )
         assert config.agent.provider == provider
         assert config.operator.interval == interval
 

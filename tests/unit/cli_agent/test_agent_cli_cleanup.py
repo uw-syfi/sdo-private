@@ -578,7 +578,9 @@ def test_factory_creates_all_agent_types(mock_which):
             mock_run.return_value = MagicMock(returncode=0)
 
             for provider_name, expected_class in agents_to_test:
-                config = Config(agent=AgentConfig(provider=provider_name, model="test-model"), operator=OperatorConfig())
+                config = Config(
+                    agent=AgentConfig(provider=provider_name, model="test-model"), operator=OperatorConfig()
+                )
                 agent = create_agent_from_config("/tmp", config=config)
                 assert isinstance(agent, expected_class)
 

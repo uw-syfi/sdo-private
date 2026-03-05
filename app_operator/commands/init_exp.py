@@ -78,8 +78,7 @@ def run_command(args: argparse.Namespace) -> int:
             stdout=subprocess.DEVNULL,
         )
         subprocess.run(
-            ["git", "-c", "user.name=sds", "-c", "user.email=sds@localhost",
-             "commit", "-m", "Initial commit"],
+            ["git", "-c", "user.name=sds", "-c", "user.email=sds@localhost", "commit", "-m", "Initial commit"],
             cwd=target_path,
             check=True,
             stdout=subprocess.DEVNULL,

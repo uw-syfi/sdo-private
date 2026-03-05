@@ -36,7 +36,7 @@ class TestConfigIntegration:
                 "fallback_to_baseline": False,
                 "enable_online_learning": True,
                 "feedback_sample_rate": 0.2,
-            }
+            },
         }
         config = Config.from_dict(data)
         assert config.dspy.use_optimized is True
@@ -56,7 +56,7 @@ class TestConfigIntegration:
                     "num_examples": 50,
                     "validation_split": 0.3,
                 }
-            }
+            },
         }
         config = Config.from_dict(data)
         assert isinstance(config.dspy.optimization, DSPyOptimizationConfig)
@@ -75,7 +75,7 @@ class TestConfigIntegration:
                     "success_rate_threshold": 0.1,
                     "evaluation_window": 200,
                 }
-            }
+            },
         }
         config = Config.from_dict(data)
         assert isinstance(config.dspy.auto_rollback, DSPyAutoRollbackConfig)
@@ -95,7 +95,7 @@ class TestConfigIntegration:
                         "tokens": 0.2,
                     }
                 }
-            }
+            },
         }
         config = Config.from_dict(data)
         assert config.dspy.optimization.metric_weights == {

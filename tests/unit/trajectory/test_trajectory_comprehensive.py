@@ -39,6 +39,7 @@ except ImportError:
 
     class _DummyStrategy:
         """Placeholder that supports arbitrary chaining and operators."""
+
         def __getattr__(self, name):
             return lambda *args, **kwargs: self
 
