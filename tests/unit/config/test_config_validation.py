@@ -81,7 +81,7 @@ class TestOperatorConfigValidation:
         assert config.interval == 30
         assert config.monitoring_max_iters == 5
         assert config.deployment_max_iters == 20
-        assert config.agent_fix_timeout == 1800
+        assert config.agent_fix_timeout == 2700
         assert config.deploy_timeout == 900
         assert config.agent_timeout == 900
 
