@@ -1,11 +1,11 @@
 import argparse
 import subprocess
 import time
-from pathlib import Path
 
 from app_operator.config import load_config
 from app_operator.logger import logger
 from app_operator.operator_factory import create_operator, create_tui_app
+from app_operator.prompts import get_loader
 
 
 def trigger_ai_remediation(max_retries: int):
@@ -13,13 +13,11 @@ def trigger_ai_remediation(max_retries: int):
     Runs the Gemini SRE agent in a loop until the system is healthy
     or we run out of retries.
     """
-    playbook_path = Path(__file__).parent.parent / "prompts" / "sre_startup_playbook.md"
-
-    if not playbook_path.exists():
-        logger.warning(f"⚠️  Playbook not found at {playbook_path}")
+    try:
+        playbook_content = get_loader().render("sre/startup_playbook.jinja2")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to load SRE playbook: {e}")
         return False
-
-    playbook_content = playbook_path.read_text()
 
     print("\n" + "=" * 50)
     print(f"🤖 [SDS Operator] STARTING AUTO-HEALING LOOP (Max Retries: {max_retries})")
