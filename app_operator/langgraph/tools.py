@@ -176,7 +176,7 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
         """Execute a bash command."""
         try:
             validate_command(command)
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
                 command,
                 cwd=str(context.repo_root),
                 shell=True,

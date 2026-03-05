@@ -317,7 +317,7 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], dict[str, A
         try:
             validate_command(command)
             # subprocess uses real system
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
                 command,
                 cwd=str(context.repo_root),
                 shell=True,
