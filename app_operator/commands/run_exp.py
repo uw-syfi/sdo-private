@@ -476,7 +476,7 @@ def run_experiment_task(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})",
                         completed=40)
-                except BaseException:
+                except Exception:
                     progress.update(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Deployment",
@@ -490,7 +490,7 @@ def run_experiment_task(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Health-monitor (Attempt {cycle})",
                         completed=70)
-                except BaseException:
+                except Exception:
                     progress.update(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Monitoring",

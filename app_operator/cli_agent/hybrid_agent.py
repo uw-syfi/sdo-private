@@ -13,6 +13,7 @@ Combines pre-computed subagent analyses with the RLM REPL loop:
 Register with ``provider = "hybrid"`` in ``sds.toml``.
 """
 
+import subprocess
 from pathlib import Path
 
 from loguru import logger
@@ -136,7 +137,7 @@ class HybridCodingAgent(CodingAgent):
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Trajectory analyst failed, skipping: {e}")
             trajectory_summary = "(trajectory analysis unavailable)"
         logger.info("[Hybrid] Trajectory analyst complete")
@@ -153,7 +154,7 @@ class HybridCodingAgent(CodingAgent):
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Error log analyst failed, skipping: {e}")
             error_summary = "(error log analysis unavailable)"
         logger.info("[Hybrid] Error log analyst complete")
@@ -173,7 +174,7 @@ class HybridCodingAgent(CodingAgent):
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Script analyst failed, skipping: {e}")
             script_summary = "(script analysis unavailable)"
         logger.info("[Hybrid] Script analyst complete")
@@ -190,7 +191,7 @@ class HybridCodingAgent(CodingAgent):
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Repo analyst failed, skipping: {e}")
             repo_summary = "(repository analysis unavailable)"
         logger.info("[Hybrid] Repo analyst complete")

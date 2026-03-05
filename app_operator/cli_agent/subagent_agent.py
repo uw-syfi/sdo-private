@@ -30,34 +30,6 @@ from app_operator.prompts.subagent import (
     render_root_synthesis_prompt,
 )
 
-# Deprecated: use render functions from app_operator.prompts.subagent instead.
-TRAJECTORY_ANALYST_PROMPT = (
-    "You are a trajectory analyst. Summarise what deployment "
-    "fixes have been tried so far, which error patterns recur, "
-    "and what approaches have NOT been attempted yet. Be concise "
-    "(max 300 words)."
-)
-
-ERROR_LOG_ANALYST_PROMPT = (
-    "You are an error log analyst. Identify the key errors, "
-    "their root cause, and the most likely fix. Be concise "
-    "(max 300 words)."
-)
-
-SCRIPT_ANALYST_PROMPT = (
-    "You are a script analyst. Examine the deployment script and "
-    "identify what is likely wrong. If an original pre-fix version "
-    "is provided, note any regressions introduced by previous fixes. "
-    "Be concise (max 300 words)."
-)
-
-REPO_ANALYST_PROMPT = (
-    "You are a repository analyst. Based on the Dockerfile, "
-    "docker-compose file, README, and code analysis report, "
-    "summarise the deployment constraints and requirements. "
-    "Be concise (max 300 words)."
-)
-
 
 @register_provider("subagent")
 class SubagentCodingAgent(CodingAgent):

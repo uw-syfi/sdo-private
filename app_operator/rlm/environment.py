@@ -303,8 +303,9 @@ class RLMEnvironment:
 
         Security restrictions:
         - ``os`` is replaced with a restricted wrapper exposing only path
-          utilities (os.path.join, os.path.exists, etc.), os.listdir,
-          os.makedirs, os.getcwd, and os.environ (read-only).
+          utilities (os.path.join, os.path.exists, etc.), and restricted
+          versions of os.listdir, os.makedirs, and os.getcwd that only
+          allow access within the working directory.
         - ``open`` is replaced with a wrapper that validates the resolved
           path is within self.cwd before allowing file operations.
         - ``Path`` is available for path manipulation but not for arbitrary
@@ -326,14 +327,31 @@ class RLMEnvironment:
                 )
             return open(resolved, mode, *args, **kwargs)
 
+        def _safe_listdir(path="."):
+            """os.listdir() wrapper restricted to the working directory."""
+            resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
+            if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
+                raise PermissionError(
+                    f"Access denied: {path!r} resolves outside the working directory"
+                )
+            return os.listdir(resolved)
+
+        def _safe_makedirs(path, *args, **kwargs):
+            """os.makedirs() wrapper restricted to the working directory."""
+            resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
+            if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
+                raise PermissionError(
+                    f"Access denied: {path!r} resolves outside the working directory"
+                )
+            return os.makedirs(resolved, *args, **kwargs)
+
         # -- Restricted os: only safe path utilities, listdir, makedirs --
         _safe_os = SimpleNamespace(
             path=os.path,
-            listdir=os.listdir,
-            makedirs=os.makedirs,
+            listdir=_safe_listdir,
+            makedirs=_safe_makedirs,
             getcwd=lambda: _allowed_root,
             sep=os.sep,
-            environ=os.environ,
         )
 
         namespace = {
@@ -401,6 +419,39 @@ class RLMEnvironment:
             # in LLM-generated code should use ``cwd=cwd`` instead.
             exec_globals = self._namespace.copy()
             exec_globals["cwd"] = self.cwd  # ensure cwd is always current
+            _SAFE_MODULES = frozenset({
+                "re", "json", "math", "string", "textwrap",
+                "collections", "itertools", "functools",
+                "pathlib", "posixpath", "ntpath",
+                "datetime", "time", "copy", "hashlib",
+            })
+
+            def _safe_import(name, *args, **kwargs):
+                if name not in _SAFE_MODULES:
+                    raise ImportError(
+                        f"Import of {name!r} is not allowed in the sandbox"
+                    )
+                return __import__(name, *args, **kwargs)
+
+            exec_globals["__builtins__"] = {
+                "__import__": _safe_import,
+                "True": True, "False": False, "None": None,
+                "int": int, "float": float, "str": str, "bool": bool,
+                "list": list, "dict": dict, "tuple": tuple, "set": set,
+                "len": len, "range": range, "enumerate": enumerate,
+                "sorted": sorted, "filter": filter, "map": map,
+                "zip": zip, "min": min, "max": max, "sum": sum,
+                "abs": abs, "round": round, "any": any, "all": all,
+                "isinstance": isinstance, "type": type, "hasattr": hasattr,
+                "getattr": getattr, "setattr": setattr,
+                "ValueError": ValueError, "TypeError": TypeError,
+                "KeyError": KeyError, "IndexError": IndexError,
+                "RuntimeError": RuntimeError, "PermissionError": PermissionError,
+                "FileNotFoundError": FileNotFoundError, "OSError": OSError,
+                "Exception": Exception, "StopIteration": StopIteration,
+                "print": print, "repr": repr, "iter": iter, "next": next,
+                "reversed": reversed, "chr": chr, "ord": ord,
+            }
             exec(code, exec_globals)
             # Restore reserved names the LLM may have clobbered, then
             # write back only non-reserved keys so results persist.
