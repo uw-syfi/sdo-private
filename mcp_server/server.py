@@ -1,6 +1,8 @@
 # sds/mcp_server/server.py
 from mcp.server.fastmcp import FastMCP
 import subprocess
+import urllib.request
+import urllib.parse
 from pathlib import Path
 
 # Initialize the server
@@ -70,15 +72,10 @@ def read_prometheus_metric(query: str = "up") -> str:
     Args:
         query: The PromQL query to run (default: 'up' checks if instances are alive).
     """
-    # We use curl to avoid adding new python dependencies like 'requests'
-    prometheus_url = f"http://localhost:9090/api/v1/query?query={query}"
+    prometheus_url = f"http://localhost:9090/api/v1/query?query={urllib.parse.quote(query)}"
     try:
-        result = subprocess.run(
-            ["curl", "-s", prometheus_url],
-            capture_output=True,
-            text=True
-        )
-        return result.stdout
+        with urllib.request.urlopen(prometheus_url, timeout=10) as response:
+            return response.read().decode("utf-8")
     except Exception as e:
         return f"Failed to query Prometheus: {str(e)}"
 
