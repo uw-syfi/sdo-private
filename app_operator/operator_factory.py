@@ -38,25 +38,3 @@ def create_operator(shared_kwargs: dict, config: Config) -> OperatorBase:
     cli_mod = importlib.import_module("app_operator.cli_agent")
     agent = cli_mod.create_agent_from_config(shared_kwargs["repo_path"], config=config)
     return cli_mod.AppOperator(**shared_kwargs, agent=agent)
-
-
-def create_tui_app(shared_kwargs: dict, config: Config) -> int:
-    """Create and run a TUI application for the cli_agent runtime.
-
-    Args:
-        shared_kwargs: Keyword arguments for the AppOperator constructor.
-        config: The loaded operator configuration.
-
-    Returns:
-        Exit code from the TUI application.
-    """
-    ui_mod = importlib.import_module("app_operator.ui.textual_tui")
-    cli_mod = importlib.import_module("app_operator.cli_agent")
-
-    def op_factory(ui):
-        agent = cli_mod.create_agent_from_config(shared_kwargs["repo_path"], config=config)
-        return cli_mod.AppOperator(**shared_kwargs, agent=agent, ui=ui)
-
-    app = ui_mod.OperatorTUI(op_factory)
-    app.run()
-    return app._exit_code

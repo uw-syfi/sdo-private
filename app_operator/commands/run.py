@@ -4,7 +4,7 @@ import time
 
 from app_operator.config import load_config
 from app_operator.logger import logger
-from app_operator.operator_factory import create_operator, create_tui_app
+from app_operator.operator_factory import create_operator
 from app_operator.prompts import get_loader
 
 
@@ -67,13 +67,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="FILE",
         help="Path to configuration file (default: sds.toml in target dir)",
     )
-    parser.add_argument(
-        "--tui",
-        action="store_true",
-        dest="tui",
-        default=False,
-        help="Enable Textual TUI (cli_agent runtime only)",
-    )
 
 
 def run_command(args: argparse.Namespace) -> int:
@@ -91,11 +84,6 @@ def run_command(args: argparse.Namespace) -> int:
         logger.error("Error: interval must be at least 1 second")
         return 1
 
-    use_tui = args.tui
-    if use_tui and config.runtime.impl != "cli_agent":
-        logger.warning("TUI is only supported for cli_agent; falling back to CLI.")
-        use_tui = False
-
     shared_kwargs = {
         "repo_path": args.directory,
         "health_check_interval": interval,
@@ -105,10 +93,7 @@ def run_command(args: argparse.Namespace) -> int:
     }
 
     try:
-        if use_tui:
-            exit_code = create_tui_app(shared_kwargs, config)
-        else:
-            exit_code = create_operator(shared_kwargs, config).run()
+        exit_code = create_operator(shared_kwargs, config).run()
 
     except ValueError as e:
         logger.error(f"Error: {e}")
