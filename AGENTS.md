@@ -36,6 +36,8 @@ impl = "cli_agent"  # cli_agent | langgraph | adk
 [operator.phase]  # optional — disable phases
 code_analysis = false          # default: true
 fix_summary_consolidation = false  # default: true
+
+[features]
 git_integration = false        # default: false — see docs/feature-flags.md
 ```
 
@@ -91,6 +93,7 @@ Use `glab` command (if available) to access the remote repo on GitLab, including
 - When code changes impact CLI, update README.md.
 - When removing code, delete it — do not comment it out.
 - When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `.claude/skills/analyze-experiment/references/`.
+- When adding or moving feature flags in `app_operator/config.py`, update `docs/feature-flags.md` to match.
 
 ## Code Validation (after every code edit)
 

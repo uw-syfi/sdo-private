@@ -1,17 +1,22 @@
 # Feature Flags
 
-Feature flags live under `[operator.phase]` in `sds.toml`. They control optional operator capabilities and default to a safe, minimal-footprint baseline — opt in explicitly when needed.
+Feature flags are split across two `sds.toml` sections:
+
+- **`[operator.phase]`** — phase toggles that skip entire operator pipeline stages
+- **`[features]`** — cross-cutting capability flags that apply across runtimes
 
 ```toml
 [operator.phase]
 code_analysis = true              # default: true
 fix_summary_consolidation = true  # default: true
+
+[features]
 git_integration = false           # default: false
 ```
 
 ---
 
-## Flags
+## Phase Toggles (`[operator.phase]`)
 
 ### `code_analysis`
 
@@ -43,6 +48,8 @@ fix_summary_consolidation = false
 
 ---
 
+## Capability Flags (`[features]`)
+
 ### `git_integration`
 
 **Default:** `false`
@@ -52,6 +59,6 @@ Exposes the `make_change_on_remote_copy` tool to the agent. When enabled, the ag
 Requires GitLab credentials to be configured. **Opt-in only** — do not enable in local dev environments where pushing to a remote repository is undesirable.
 
 ```toml
-[operator.phase]
+[features]
 git_integration = true
 ```
