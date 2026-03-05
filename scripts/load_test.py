@@ -22,8 +22,6 @@ async def main():
     url = "http://localhost:5000/recommendations"
     rps = 500
     duration = 15
-    # total_requests = rps * duration
-    
     print(f"Starting load test: {rps} RPS for {duration}s to {url}")
     
     latencies = []
@@ -50,7 +48,6 @@ async def main():
     end_time = time.perf_counter()
     total_duration = end_time - start_time
     
-    # success_latencies = [l for l in latencies if l > 0] # simplified
     avg_latency = statistics.mean(latencies) * 1000
     p99_latency = statistics.quantiles(latencies, n=100)[98] * 1000
     
