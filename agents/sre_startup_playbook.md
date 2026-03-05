@@ -31,6 +31,3 @@ After performing any needed restarts, check the system one last time.
 - If a container remains `Exited` after a restart, report: **SYSTEM UNHEALTHY**
 - **CRITICAL ERROR RULE:** If you receive an "MCP server error", tool execution failure, or cannot connect to Docker/Prometheus, you MUST report: **SYSTEM UNHEALTHY**
 
-
-
-
