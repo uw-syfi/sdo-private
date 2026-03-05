@@ -38,10 +38,7 @@ INSTALL_HINTS = {
 
 def check_dependencies():
     """Check if required system dependencies are installed."""
-    missing = []
-    for tool in REQUIRED_DEPENDENCIES:
-        if not shutil.which(tool):
-            missing.append(tool)
+    missing = [tool for tool in REQUIRED_DEPENDENCIES if not shutil.which(tool)]
 
     if missing:
         for tool in missing:

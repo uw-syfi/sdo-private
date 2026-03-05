@@ -436,7 +436,7 @@ class ComposeFaultInjector(FaultInjector):
         if isinstance(env, dict):
             keys_to_remove = [k for k in env if any(p in k.lower() for p in AUTH_ENV_PATTERNS)]
             for k in keys_to_remove:
-                removed.append(f"{k}={env.pop(k)}")
+                removed.append(f"{k}={env.pop(k)}")  # noqa: PERF401
         else:
             new_env = []
             for e in env:

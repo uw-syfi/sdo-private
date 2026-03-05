@@ -164,20 +164,19 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
     try:
         with open(results_path) as f:
             data = json.load(f)
-        results = []
-        for entry in data.get("results", []):
-            results.append(
-                AppResult(
-                    app=entry["app"],
-                    success=entry.get("success", entry.get("status") == "success"),
-                    status=entry["status"],
-                    deployment_iterations=entry.get("deployment_iterations"),
-                    repeat=entry.get("repeat"),
-                    elapsed_seconds=entry.get("elapsed_seconds"),
-                    phase_durations=entry.get("phase_durations"),
-                    total_tokens=entry.get("total_tokens"),
-                )
+        results = [
+            AppResult(
+                app=entry["app"],
+                success=entry.get("success", entry.get("status") == "success"),
+                status=entry["status"],
+                deployment_iterations=entry.get("deployment_iterations"),
+                repeat=entry.get("repeat"),
+                elapsed_seconds=entry.get("elapsed_seconds"),
+                phase_durations=entry.get("phase_durations"),
+                total_tokens=entry.get("total_tokens"),
             )
+            for entry in data.get("results", [])
+        ]
         return results
     except (json.JSONDecodeError, KeyError, OSError):
         return []

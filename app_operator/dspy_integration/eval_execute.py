@@ -478,8 +478,7 @@ class EvalExecuteOptimizer:
             ]
             if failures:
                 section_lines.append("- key_failures:")
-                for failure in failures:
-                    section_lines.append(f"  - {failure}")
+                section_lines.extend(f"  - {failure}" for failure in failures)
             else:
                 section_lines.append("- key_failures: none")
             sections.append("\n".join(section_lines))

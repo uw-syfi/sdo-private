@@ -276,8 +276,7 @@ The merged prompt text here.
             return ""
 
         parts = ["## Key Failure Patterns Detected"]
-        for pattern in patterns:
-            parts.append(f"- {pattern}")
+        parts.extend(f"- {pattern}" for pattern in patterns)
         return "\n".join(parts)
 
     @staticmethod

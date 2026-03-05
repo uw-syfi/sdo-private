@@ -58,12 +58,13 @@ class CodeAnalyzerAgent:
         """Generate a simple file tree of the repository."""
         try:
             # Get list of files, excluding hidden ones and common ignore patterns
-            files = []
-            for path in self.filesystem.rglob(self.repo_path, "*"):
+            files = [
+                str(path.relative_to(self.repo_path))
+                for path in self.filesystem.rglob(self.repo_path, "*")
                 if self.filesystem.is_file(path) and not any(
                     p.startswith(".") for p in path.relative_to(self.repo_path).parts
-                ):
-                    files.append(str(path.relative_to(self.repo_path)))
+                )
+            ]
 
             # Sort and limit to prevent context overflow
             files.sort()
