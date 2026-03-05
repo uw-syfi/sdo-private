@@ -3,13 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.prompts import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
     from app_operator.types import CommandResult
-
-FIX_SUMMARY_FILENAME = "fix_summary.md"
 
 
 def prepare_error_context(
