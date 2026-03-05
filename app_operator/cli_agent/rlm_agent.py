@@ -8,7 +8,6 @@ token usage ~50–75% on large logs.
 Register with ``provider = "rlm"`` in ``sds.toml``.
 """
 
-import litellm
 import re
 
 from loguru import logger
@@ -19,6 +18,7 @@ from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _FIX_ERROR_RE
 
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
+from libs.agent_cli.llm_client import LiteLLMClient
 from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 from app_operator.prompts import DSPyConfigProtocol
 
@@ -65,6 +65,7 @@ class RLMCodingAgent(CodingAgent):
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
+        self._client = LiteLLMClient(self.model, self.location, recorder)
 
     def generate(
         self,
@@ -111,24 +112,16 @@ class RLMCodingAgent(CodingAgent):
 
         Asks the LLM to return the file content, then writes it to the expected
         output path so the operator's post-call existence check succeeds.
+        Token tracking happens automatically via ``self._client``.
         """
-        import os
-
-        kwargs = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            "cache": {"no-cache": True},
-        }
-        location = self.location or os.environ.get("VERTEX_LOCATION")
-        if location:
-            kwargs["vertex_location"] = location
-
         try:
-            response = litellm.completion(**kwargs)
-            raw = response.choices[0].message.content or ""
+            raw = self._client.complete(
+                [
+                    {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                label="rlm file gen",
+            )
         except Exception as e:
             logger.error(f"[RLM] Direct LLM call failed: {e}")
             return f"LLM call failed: {e}"
