@@ -42,9 +42,8 @@ CADVISOR_CONFIG = {
     'devices': ['/dev/kmsg']
 }
 
-# UPDATED: Now includes prometheus_data volume and command arguments
 PROMETHEUS_CONFIG = {
-    'image': 'prom/prometheus:latest',
+    'image': 'prom/prometheus:v2.53.0',
     'platform': 'linux/amd64',
     'container_name': 'sds-prometheus',
     'ports': ['9090:9090'],
@@ -70,7 +69,6 @@ def is_dynamic_injection_enabled(sds_root):
     try:
         with open(toml_path, "rb") as f:
             config = tomllib.load(f)
-            # UPDATED: Look inside the 'operator' block instead of 'features'
             return config.get('operator', {}).get('dynamic_observability_injection', False)
     except Exception as e:
         print(f"⚠️ Could not read sds.toml: {e}")
@@ -106,7 +104,7 @@ def generate_prometheus_config(service_names):
 
     return config
 
-def inject_observability(app_dir, sds_root): # FIX 1: Passed sds_root as a parameter
+def inject_observability(app_dir, sds_root):
     compose_path = os.path.join(app_dir, 'docker-compose.yml')
     
     if not os.path.exists(compose_path):
@@ -131,7 +129,6 @@ def inject_observability(app_dir, sds_root): # FIX 1: Passed sds_root as a param
     # Check the feature flag
     use_dynamic_features = is_dynamic_injection_enabled(sds_root)
 
-    # FIX 2 & 3: Consolidated logic so we only map and assign ports once based on the flag
     if use_dynamic_features:
         print("💉 Feature Flag ON: Injecting DYNAMIC cAdvisor and Prometheus...")
         cadvisor_host_port = get_free_port(8082)
@@ -145,13 +142,16 @@ def inject_observability(app_dir, sds_root): # FIX 1: Passed sds_root as a param
         
     else:
         print("💉 Feature Flag OFF: Injecting LEGACY cAdvisor and Prometheus...")
+        cadvisor_host_port = get_free_port(8080)
+        prometheus_host_port = get_free_port(9090)
+
         app_cadvisor_config = copy.deepcopy(CADVISOR_CONFIG)
-        app_cadvisor_config['ports'] = ["8080:8080"] 
-        app_cadvisor_config.pop('platform', None) # Remove ARM fix
+        app_cadvisor_config['ports'] = [f"{cadvisor_host_port}:8080"]
+        app_cadvisor_config.pop('platform', None)
 
         app_prometheus_config = copy.deepcopy(PROMETHEUS_CONFIG)
-        app_prometheus_config['ports'] = ["9090:9090"]
-        app_prometheus_config.pop('platform', None) # Remove ARM fix for Prometheus too!
+        app_prometheus_config['ports'] = [f"{prometheus_host_port}:9090"]
+        app_prometheus_config.pop('platform', None)
 
     # Actually assign our modified configs to the services dictionary
     services['cadvisor'] = app_cadvisor_config
@@ -192,13 +192,13 @@ if __name__ == "__main__":
     apps_root = os.path.join(sds_root, 'apps')
 
     if args.target:
-        inject_observability(args.target, sds_root) # FIX 1: Pass sds_root
+        inject_observability(args.target, sds_root)
     elif args.all:
         print(f"🚀 Starting Fleet Injection in {apps_root}")
         for root, dirs, files in os.walk(apps_root):
             if 'docker-compose.yml' in files:
                 if '.sds' not in root:
-                    inject_observability(root, sds_root) # FIX 1: Pass sds_root
+                    inject_observability(root, sds_root)
     else:
         print("Please specify --target <path> or --all")
 
