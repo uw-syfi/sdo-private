@@ -238,31 +238,16 @@ class AppOperator(OperatorBase):
         if not self._deployed:
             return
 
-        # Check the feature flag from sds.toml
-        use_dynamic_features = False
+        logger.info("Shutting Down Application")
+        logger.info("Running deployment script stop command...")
+
         try:
-            import tomllib
-            with open("sds.toml", "rb") as f:
-                config_data = tomllib.load(f)
-                # UPDATED: Look inside the 'operator' block
-                use_dynamic_features = config_data.get('operator', {}).get('dynamic_observability_injection', False)
+            result = self.deployer.run_deploy_command("stop", timeout=120)
+            if result["success"]:
+                logger.success("Application stopped successfully")
+            else:
+                logger.warning(f"Stop command exited with code {result['exit_code']}")
         except Exception as e:
-            logger.debug(f"Could not read feature flag for shutdown: {e}")
+            logger.error(f"Error during shutdown: {e}")
 
-        if use_dynamic_features:
-            # FLAG IS TRUE (AI Remediation): Skip shutdown so the agent can inspect containers
-            logger.info("Shutting Down Application (DISABLED FOR AI AGENT)")
-            logger.info("Shutdown Skipped to allow AI Remediation")
-        else:
-            # FLAG IS FALSE (Original mode): Execute normal clean up for the rest of the team
-            logger.info("Feature Flag OFF: Executing graceful shutdown...")
-            try:
-                # Use deployer to stop
-                result = self.deployer.run_deploy_command("stop", timeout=120)
-
-                if result["success"]:
-                    logger.success("Application stopped successfully")
-                else:
-                    logger.warning(f"Stop command exited with code {result['exit_code']}")
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
+        logger.info("Shutdown Complete")
