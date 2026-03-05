@@ -132,4 +132,4 @@ class LangGraphOperator(OperatorBase):
             signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
             logger.info(f"Received {signal_name} signal. Initiating graceful shutdown...")
             if signum == signal.SIGINT:
-                raise KeyboardInterrupt()
+                raise KeyboardInterrupt
