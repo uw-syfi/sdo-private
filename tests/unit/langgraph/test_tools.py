@@ -1,4 +1,5 @@
 """Unit tests for the helper functions extracted from make_change_on_remote_copy."""
+
 import subprocess
 import unittest
 from pathlib import Path
@@ -94,16 +95,12 @@ class TestParseRemoteUrl(unittest.TestCase):
 
 class TestGetGitlabInfo(unittest.TestCase):
     def test_inferred_from_ssh_url(self):
-        gitlab_base, project_path = _get_gitlab_info(
-            "git@gitlab.com:group/project.git", None
-        )
+        gitlab_base, project_path = _get_gitlab_info("git@gitlab.com:group/project.git", None)
         self.assertEqual(gitlab_base, "https://gitlab.com")
         self.assertEqual(project_path, "group/project")
 
     def test_env_override(self):
-        gitlab_base, project_path = _get_gitlab_info(
-            "git@gitlab.com:group/project.git", "https://my.gitlab.instance/"
-        )
+        gitlab_base, project_path = _get_gitlab_info("git@gitlab.com:group/project.git", "https://my.gitlab.instance/")
         self.assertEqual(gitlab_base, "https://my.gitlab.instance")
         self.assertEqual(project_path, "group/project")
 
@@ -202,9 +199,7 @@ class TestStageAndCommit(unittest.TestCase):
 
         mock_run_git.side_effect = side_effect
         git_outputs: list[str] = []
-        result = _stage_and_commit(
-            "/tmp/repo", Path("/tmp/repo"), "msg", "branch", git_outputs
-        )
+        result = _stage_and_commit("/tmp/repo", Path("/tmp/repo"), "msg", "branch", git_outputs)
         self.assertIsNotNone(result)
         self.assertFalse(result["success"])  # type: ignore[index]
         self.assertIn("No staged changes", result["error"])  # type: ignore[index]
@@ -213,9 +208,7 @@ class TestStageAndCommit(unittest.TestCase):
     def test_add_failure(self, mock_run_git):
         mock_run_git.return_value = {"success": False, "stdout": "", "stderr": "error"}
         git_outputs: list[str] = []
-        result = _stage_and_commit(
-            "/tmp/repo", Path("/tmp/repo"), "msg", "branch", git_outputs
-        )
+        result = _stage_and_commit("/tmp/repo", Path("/tmp/repo"), "msg", "branch", git_outputs)
         self.assertIsNotNone(result)
         self.assertFalse(result["success"])  # type: ignore[index]
         self.assertIn("Failed to stage", result["error"])  # type: ignore[index]
@@ -236,9 +229,7 @@ class TestStageAndCommit(unittest.TestCase):
 
         mock_run_git.side_effect = side_effect
         git_outputs: list[str] = []
-        result = _stage_and_commit(
-            "/tmp/repo", Path("/tmp/repo"), "commit msg", "branch", git_outputs
-        )
+        result = _stage_and_commit("/tmp/repo", Path("/tmp/repo"), "commit msg", "branch", git_outputs)
         # None means success
         self.assertIsNone(result)
 

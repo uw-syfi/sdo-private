@@ -456,10 +456,7 @@ def _create_gitlab_mr(
         return {
             "success": False,
             "mr_url": None,
-            "error": (
-                f"GitLab API response did not include 'web_url'. "
-                f"Status: {status_code}, Response: {body[:500]}"
-            ),
+            "error": (f"GitLab API response did not include 'web_url'. Status: {status_code}, Response: {body[:500]}"),
         }
 
     return {"success": True, "mr_url": mr_url, "error": None}
@@ -530,9 +527,7 @@ def _build_make_change_on_remote_copy(
             }
 
         # Stage and commit all changes
-        commit_error = _stage_and_commit(
-            cwd, context.repo_root, commit_message, branch_name, git_outputs
-        )
+        commit_error = _stage_and_commit(cwd, context.repo_root, commit_message, branch_name, git_outputs)
         if commit_error is not None:
             return commit_error
 
