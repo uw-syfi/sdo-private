@@ -47,6 +47,7 @@ class AppResult:
     repeat: int | None = None
     elapsed_seconds: float | None = None
     phase_durations: dict | None = None
+    total_tokens: int | None = None
 
 
 def _write_toml_simple(data: dict) -> str:
@@ -129,23 +130,30 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _extract_results(exp_dir: Path) -> dict:
-    """Extract deployment iterations and status from trajectory files."""
+    """Extract deployment iterations, status, and token usage from trajectory files."""
     traj_dir = exp_dir / ".sds" / "trajectories"
     if not traj_dir.exists():
-        return {"status": "unknown", "deployment_iterations": None}
+        return {"status": "unknown", "deployment_iterations": None, "total_tokens": None}
 
     traj_files = sorted(traj_dir.glob("trajectory_*.json"))
     if not traj_files:
-        return {"status": "unknown", "deployment_iterations": None}
+        return {"status": "unknown", "deployment_iterations": None, "total_tokens": None}
 
     try:
         with open(traj_files[-1], "r") as f:
             traj = json.load(f)
-        status = traj.get("metadata", {}).get("status", "unknown")
+        metadata = traj.get("metadata", {})
+        status = metadata.get("status", "unknown")
         deployment_iterations = len(traj.get("deployment", []))
-        return {"status": status, "deployment_iterations": deployment_iterations}
+        token_usage = metadata.get("token_usage", {})
+        total_tokens = token_usage.get("total_tokens") if token_usage else None
+        return {
+            "status": status,
+            "deployment_iterations": deployment_iterations,
+            "total_tokens": total_tokens,
+        }
     except (json.JSONDecodeError, KeyError, OSError):
-        return {"status": "unknown", "deployment_iterations": None}
+        return {"status": "unknown", "deployment_iterations": None, "total_tokens": None}
 
 
 def _load_existing_results(log_dir: Path) -> list[AppResult]:
@@ -166,6 +174,7 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
                 repeat=entry.get("repeat"),
                 elapsed_seconds=entry.get("elapsed_seconds"),
                 phase_durations=entry.get("phase_durations"),
+                total_tokens=entry.get("total_tokens"),
             ))
         return results
     except (json.JSONDecodeError, KeyError, OSError):
@@ -185,6 +194,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
             "deployment_iterations": r.deployment_iterations,
             "elapsed_seconds": r.elapsed_seconds,
             "phase_durations": r.phase_durations,
+            "total_tokens": r.total_tokens,
         }
         if has_repeats:
             entry["repeat"] = r.repeat
@@ -203,6 +213,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
             successes = sum(1 for r in app_results if r.success)
             iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
             elapsed = [r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None]
+            tokens = [r.total_tokens for r in app_results if r.total_tokens is not None]
             agg: dict = {
                 "app": app_name,
                 "success_rate": f"{successes}/{total}",
@@ -215,6 +226,10 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
                 agg["elapsed_seconds_min"] = min(elapsed)
                 agg["elapsed_seconds_max"] = max(elapsed)
                 agg["elapsed_seconds_mean"] = round(sum(elapsed) / len(elapsed), 1)
+            if tokens:
+                agg["total_tokens_min"] = min(tokens)
+                agg["total_tokens_max"] = max(tokens)
+                agg["total_tokens_mean"] = round(sum(tokens) / len(tokens))
             aggregated.append(agg)
         output["aggregated"] = aggregated
 
@@ -264,6 +279,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
         table.add_column("Success Rate")
         table.add_column("Deploy Iterations (min–max / mean / median)")
         table.add_column("Elapsed (min–max / mean)")
+        table.add_column("Tokens (min–max / mean)")
 
         apps_seen: dict[str, list[AppResult]] = {}
         for r in results:
@@ -274,6 +290,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
             successes = sum(1 for r in app_results if r.success)
             iters = sorted(r.deployment_iterations for r in app_results if r.deployment_iterations is not None)
             elapsed = sorted(r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None)
+            tokens = sorted(r.total_tokens for r in app_results if r.total_tokens is not None)
             success_str = f"{successes}/{total}"
             if iters:
                 mean = sum(iters) / len(iters)
@@ -286,20 +303,27 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
                 elapsed_str = f"{_fmt_seconds(elapsed[0])}–{_fmt_seconds(elapsed[-1])} / {_fmt_seconds(sum(elapsed) / len(elapsed))}"
             else:
                 elapsed_str = "N/A"
-            table.add_row(app_name, success_str, iter_str, elapsed_str)
+            if tokens:
+                tok_mean = sum(tokens) // len(tokens)
+                tokens_str = f"{tokens[0]:,}–{tokens[-1]:,} / {tok_mean:,}"
+            else:
+                tokens_str = "N/A"
+            table.add_row(app_name, success_str, iter_str, elapsed_str, tokens_str)
     else:
         table = Table()
         table.add_column("App")
         table.add_column("Status")
         table.add_column("Deploy Iterations")
         table.add_column("Elapsed")
+        table.add_column("Total Tokens")
         table.add_column("Phase Durations")
 
         for r in results:
             iterations = str(r.deployment_iterations) if r.deployment_iterations is not None else "N/A"
             elapsed = _fmt_seconds(r.elapsed_seconds) if r.elapsed_seconds is not None else "N/A"
+            tok_str = f"{r.total_tokens:,}" if r.total_tokens is not None else "N/A"
             phases = _fmt_phase_durations(r.phase_durations) if r.phase_durations else "N/A"
-            table.add_row(r.app, r.status, iterations, elapsed, phases)
+            table.add_row(r.app, r.status, iterations, elapsed, tok_str, phases)
 
     console.print(table)
 
@@ -462,7 +486,7 @@ def run_experiment_task(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})",
                         completed=40)
-                except BaseException:
+                except Exception:
                     progress.update(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Deployment",
@@ -476,7 +500,7 @@ def run_experiment_task(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Health-monitor (Attempt {cycle})",
                         completed=70)
-                except BaseException:
+                except Exception:
                     progress.update(
                         task_id,
                         description=f"[yellow]{display_name}[/]: Monitoring",

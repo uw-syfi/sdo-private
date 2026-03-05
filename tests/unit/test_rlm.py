@@ -388,6 +388,45 @@ class TestRLMAgentBackup:
         assert not (sds / "deploy.sh.bak").exists()
         assert ctx.original_script == ""
 
+    def test_build_context_uses_latest_attempt_logs_and_attempt_metadata(self, tmp_path):
+        from app_operator.cli_agent.rlm_agent import RLMCodingAgent
+
+        sds = tmp_path / ".sds"
+        logs = sds / "logs"
+        logs.mkdir(parents=True)
+        (sds / "deploy.sh").write_text("echo deploy\n")
+        (logs / "deploy.log").write_text("stale deploy log\n")
+        (logs / "deploy_attempt_1.log").write_text("deploy attempt one\n")
+        (logs / "deploy_attempt_2.log").write_text("deploy attempt two\n")
+        (logs / "fix_summary_1.log").write_text("summary one\n")
+        (logs / "fix_summary_2.log").write_text("summary two\n")
+
+        agent = RLMCodingAgent()
+        ctx = agent._build_context(tmp_path)
+
+        assert ctx.error_log == "deploy attempt two\n"
+        assert ctx.attempt_number == 3
+        assert len(ctx.previous_attempts) == 2
+        assert ctx.previous_attempts[0]["attempt"] == 1
+        assert ctx.previous_attempts[1]["attempt"] == 2
+        assert ctx.previous_attempts[1]["fix_summary"] == "summary two\n"
+
+    def test_build_context_uses_latest_health_attempt_log(self, tmp_path):
+        from app_operator.cli_agent.rlm_agent import RLMCodingAgent
+
+        sds = tmp_path / ".sds"
+        logs = sds / "logs"
+        logs.mkdir(parents=True)
+        (sds / "deploy.sh").write_text("echo deploy\n")
+        (logs / "health_check.log").write_text("stale health log\n")
+        (logs / "health_check_attempt_1.log").write_text("health attempt one\n")
+        (logs / "health_recheck_attempt_1.log").write_text("health recheck one\n")
+
+        agent = RLMCodingAgent()
+        ctx = agent._build_context(tmp_path)
+
+        assert ctx.health_check_output == "health recheck one\n"
+
 
 class TestRLMMetrics:
     """Tests for RLM metrics."""
@@ -1205,6 +1244,78 @@ class TestEstimateTokensTiktoken:
             # builtins.__import__ will raise ImportError for tiktoken
             result = _estimate_tokens("hello world " * 50)
         assert result > 0
+
+
+class TestRunTaskUsesRenderFunction:
+    """Verify RecursiveDeploymentAgent.run_task() calls the render function."""
+
+    def test_run_task_calls_render_fix_error_task_prompt(self):
+        """run_task should call render_fix_error_task_prompt to build its initial prompt."""
+        import unittest.mock as mock
+
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            content = "ACTION: final_answer\nANSWER: done"
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext(error_log="some error", attempt_number=2)
+
+        with (
+            mock.patch("litellm.completion", side_effect=fake_completion),
+            mock.patch(
+                "app_operator.rlm.recursive_agent.render_fix_error_task_prompt",
+                return_value="MANDATORY FIRST STEPS mock prompt",
+            ) as mock_render,
+        ):
+            agent.run_task("test task", context, "/tmp")
+
+        mock_render.assert_called_once()
+        kwargs = mock_render.call_args
+        assert kwargs.kwargs["error_log_size"] == str(len("some error"))
+        assert kwargs.kwargs["attempt"] == "2"
+
+    def test_run_task_prompt_includes_task_and_rendered_wrapper(self):
+        """The initial prompt sent to the LLM should contain both the task and rendered wrapper."""
+        import unittest.mock as mock
+
+        captured_prompts = []
+
+        def fake_completion(**kwargs):
+            msgs = kwargs["messages"]
+            user_msgs = [m for m in msgs if m["role"] == "user"]
+            if user_msgs:
+                captured_prompts.append(user_msgs[0]["content"])
+            content = "ACTION: final_answer\nANSWER: done"
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext()
+
+        with (
+            mock.patch("litellm.completion", side_effect=fake_completion),
+            mock.patch(
+                "app_operator.rlm.recursive_agent.render_fix_error_task_prompt",
+                return_value="RENDERED_WRAPPER_CONTENT",
+            ),
+        ):
+            agent.run_task("my deployment task", context, "/tmp")
+
+        assert len(captured_prompts) >= 1
+        first_prompt = captured_prompts[0]
+        assert "my deployment task" in first_prompt
+        assert "RENDERED_WRAPPER_CONTENT" in first_prompt
 
 
 if __name__ == "__main__":

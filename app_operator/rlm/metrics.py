@@ -83,7 +83,7 @@ class RLMEfficiencyMetric:
 
         # 3. Balance of code vs recursive calls
         # We want more code executions (filtering) than recursive calls
-        if recursive_calls > 0:
+        if recursive_calls > 0 and self.code_to_recursive_ratio_target > 0:
             actual_ratio = code_executions / recursive_calls
             ratio_score = min(1.0, actual_ratio / self.code_to_recursive_ratio_target)
         else:

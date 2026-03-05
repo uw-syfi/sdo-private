@@ -274,6 +274,36 @@ class TestHybridRegistration:
         agent = create_agent_from_config("/tmp", config=config)
         assert agent.location == "us-west1"
 
+    def test_factory_forwards_dspy_config(self):
+        from app_operator.config import Config, AgentConfig, DSPyConfig
+        from app_operator.cli_agent.factory import create_agent_from_config
+        dspy_cfg = DSPyConfig()
+        config = Config(
+            agent=AgentConfig(provider="hybrid"),
+            dspy=dspy_cfg,
+        )
+        agent = create_agent_from_config("/tmp", config=config)
+        assert isinstance(agent, HybridCodingAgent)
+        assert agent.dspy_config is dspy_cfg
+
+
+# ---------------------------------------------------------------------------
+# dspy_config storage
+# ---------------------------------------------------------------------------
+
+
+class TestHybridDspyConfig:
+    """Tests that HybridCodingAgent stores dspy_config."""
+
+    def test_stores_dspy_config(self):
+        cfg = mock.MagicMock()
+        agent = HybridCodingAgent(model="test-model", dspy_config=cfg)
+        assert agent.dspy_config is cfg
+
+    def test_default_dspy_config_is_none(self):
+        agent = HybridCodingAgent(model="test-model")
+        assert agent.dspy_config is None
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

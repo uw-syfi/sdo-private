@@ -1,0 +1,6 @@
+MANDATORY FIRST STEPS (do these before any other actions):
+1. Run validate_file_refs(deployment_script, cwd) to find paths that do not exist on disk. Remove every line that references a MISSING path.
+2. If original_script is non-empty, compare it to deployment_script. Lines present in deployment_script but not in original_script that reference MISSING paths are regressions from a previous fix — revert those lines to restore the working baseline.
+Only after completing steps 1 and 2, analyse the error and apply a fix.
+
+Use the context variables as needed via EXECUTE_CODE, then provide FINAL_ANSWER.

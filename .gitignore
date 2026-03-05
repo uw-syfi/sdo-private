@@ -74,7 +74,6 @@ agentflow_runs/
 
 # DSPy optimization artifacts
 app_operator/prompts/optimized/
-exp_config/
 lego_agent_runs/
 !lego_agent/ui/lib/
 
@@ -88,6 +87,9 @@ rlm_results/
 rlm_output/
 rlm[0-9]*/
 *_results*.png
+exp_config/*/workdir/
+exp_config/*.log
+exp_config/*/*.log
 
 # macOS
 .DS_Store

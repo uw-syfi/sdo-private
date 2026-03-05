@@ -56,6 +56,12 @@ PROMPT_PHASE_MAP: dict[str, str] = {
     "agentflow_system": "script_generation",
     "agentflow_user": "script_generation",
     "agentflow_repair": "script_generation",
+    "subagent_trajectory_analyst": "deployment",
+    "subagent_error_log_analyst": "deployment",
+    "subagent_script_analyst": "deployment",
+    "subagent_repo_analyst": "deployment",
+    "subagent_root_synthesis": "deployment",
+    "rlm_deployer_fix_error": "deployment",
 }
 
 # Reverse map: prompt name → Jinja2 template path.
@@ -74,6 +80,12 @@ PROMPT_TO_TEMPLATE: dict[str, str] = {
     "agentflow_system": "agentflow/system.jinja2",
     "agentflow_user": "agentflow/user.jinja2",
     "agentflow_repair": "agentflow/repair.jinja2",
+    "subagent_trajectory_analyst": "subagent/trajectory_analyst.jinja2",
+    "subagent_error_log_analyst": "subagent/error_log_analyst.jinja2",
+    "subagent_script_analyst": "subagent/script_analyst.jinja2",
+    "subagent_repo_analyst": "subagent/repo_analyst.jinja2",
+    "subagent_root_synthesis": "subagent/root_synthesis.jinja2",
+    "rlm_deployer_fix_error": "rlm/deployer_fix_error.jinja2",
 }
 
 _ENSURE_SERIALIZABLE_MAX_DEPTH = 50

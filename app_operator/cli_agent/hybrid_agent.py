@@ -13,24 +13,26 @@ Combines pre-computed subagent analyses with the RLM REPL loop:
 Register with ``provider = "hybrid"`` in ``sds.toml``.
 """
 
+import subprocess
 from pathlib import Path
 
 from loguru import logger
 from app_operator.rlm.environment import RLMContext
 from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
-from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE
+from app_operator.cli_agent.rlm_utils import _FILE_GEN_RE, _DIRECT_TEXT_RE, _FIX_ERROR_RE
 
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
 from libs.agent_cli import call_subagent
-from app_operator.cli_agent.subagent_agent import (
-    SubagentCodingAgent,
-    TRAJECTORY_ANALYST_PROMPT,
-    ERROR_LOG_ANALYST_PROMPT,
-    SCRIPT_ANALYST_PROMPT,
-    REPO_ANALYST_PROMPT,
+from app_operator.prompts import DSPyConfigProtocol
+from app_operator.prompts.subagent import (
+    render_trajectory_analyst_prompt,
+    render_error_log_analyst_prompt,
+    render_script_analyst_prompt,
+    render_repo_analyst_prompt,
 )
+from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 
 
 @register_provider("hybrid")
@@ -55,11 +57,13 @@ class HybridCodingAgent(CodingAgent):
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
         location: str | None = None,
+        dspy_config: DSPyConfigProtocol | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder = recorder
         self.event_handler = event_handler
         self.location = location
+        self.dspy_config = dspy_config
         self._total_token_usage: dict = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -76,12 +80,17 @@ class HybridCodingAgent(CodingAgent):
         repo_path = Path(cwd) if cwd else Path.cwd()
         call_tokens: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-        if _DIRECT_TEXT_RE.search(prompt):
+        is_fix = _FIX_ERROR_RE.search(prompt)
+        if not is_fix and _DIRECT_TEXT_RE.search(prompt):
             # Reuse SubagentCodingAgent's direct-text path (same implementation)
-            helper = SubagentCodingAgent(model=self.model, location=self.location)
+            helper = SubagentCodingAgent(
+                model=self.model, location=self.location,
+                dspy_config=self.dspy_config)
             result = helper._generate_direct(prompt, call_tokens)
-        elif _FILE_GEN_RE.search(prompt):
-            helper = SubagentCodingAgent(model=self.model, location=self.location)
+        elif not is_fix and _FILE_GEN_RE.search(prompt):
+            helper = SubagentCodingAgent(
+                model=self.model, location=self.location,
+                dspy_config=self.dspy_config)
             result = helper._generate_files(prompt, repo_path, call_tokens)
         else:
             result = self._generate_fix(prompt, repo_path, call_tokens)
@@ -101,7 +110,9 @@ class HybridCodingAgent(CodingAgent):
         token_acc: dict | None = None,
     ) -> str:
         """Pre-run 4 subagent analyses, then hand off to the RLM loop."""
-        helper = SubagentCodingAgent(model=self.model, location=self.location)
+        helper = SubagentCodingAgent(
+            model=self.model, location=self.location,
+            dspy_config=self.dspy_config)
         sds = repo_path / ".sds"
 
         trajectory_text = helper._read_trajectory(sds)
@@ -117,12 +128,16 @@ class HybridCodingAgent(CodingAgent):
         try:
             trajectory_summary = call_subagent(
                 model=self.model,
-                system_prompt=TRAJECTORY_ANALYST_PROMPT,
+                system_prompt=render_trajectory_analyst_prompt(
+                    data_description="deployment trajectory JSON",
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=trajectory_text or "(no trajectory data available)",
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Trajectory analyst failed, skipping: {e}")
             trajectory_summary = "(trajectory analysis unavailable)"
         logger.info("[Hybrid] Trajectory analyst complete")
@@ -130,12 +145,16 @@ class HybridCodingAgent(CodingAgent):
         try:
             error_summary = call_subagent(
                 model=self.model,
-                system_prompt=ERROR_LOG_ANALYST_PROMPT,
+                system_prompt=render_error_log_analyst_prompt(
+                    data_description="deploy.log and health_check.log",
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=error_log or "(no error log available)",
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Error log analyst failed, skipping: {e}")
             error_summary = "(error log analysis unavailable)"
         logger.info("[Hybrid] Error log analyst complete")
@@ -146,12 +165,16 @@ class HybridCodingAgent(CodingAgent):
         try:
             script_summary = call_subagent(
                 model=self.model,
-                system_prompt=SCRIPT_ANALYST_PROMPT,
+                system_prompt=render_script_analyst_prompt(
+                    has_original_script=str(bool(original_script)),
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=script_input or "(no deploy script available)",
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Script analyst failed, skipping: {e}")
             script_summary = "(script analysis unavailable)"
         logger.info("[Hybrid] Script analyst complete")
@@ -159,12 +182,16 @@ class HybridCodingAgent(CodingAgent):
         try:
             repo_summary = call_subagent(
                 model=self.model,
-                system_prompt=REPO_ANALYST_PROMPT,
+                system_prompt=render_repo_analyst_prompt(
+                    available_files="Dockerfile, docker-compose, README, code_analysis",
+                    dspy_config=self.dspy_config,
+                    recorder=self.recorder,
+                ),
                 user_prompt=repo_context or "(no repository context available)",
                 location=self.location,
                 token_acc=token_acc,
             )
-        except Exception as e:
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
             logger.warning(f"[Hybrid] Repo analyst failed, skipping: {e}")
             repo_summary = "(repository analysis unavailable)"
         logger.info("[Hybrid] Repo analyst complete")
@@ -220,6 +247,7 @@ class HybridCodingAgent(CodingAgent):
             max_recursion_depth=5,
             llm_provider=self.model,
             vertex_location=self.location,
+            dspy_config=self.dspy_config,
         )
         result = agent.run_task(task=prompt, context=context, repo_path=str(repo_path))
 

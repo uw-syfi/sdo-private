@@ -18,12 +18,30 @@ class TestDSPyOptimizationConfig:
         assert config.teacher_model == "claude-sonnet-4-5"
         assert config.num_examples == 30
         assert config.validation_split == 0.2
+        assert config.selection_mode == "hybrid"
+        assert config.selection_top_k == 3
         assert config.metric_weights == {
             "success": 0.5,
             "efficiency": 0.25,
             "tokens": 0.15,
             "health_check": 0.1,
         }
+
+    def test_valid_selection_mode(self):
+        """Test valid selection modes."""
+        for mode in ["score", "hybrid", "llm"]:
+            config = DSPyOptimizationConfig(selection_mode=mode)
+            assert config.selection_mode == mode
+
+    def test_invalid_selection_mode(self):
+        """Test invalid selection mode raises ValueError."""
+        with pytest.raises(ValueError, match="selection_mode must be one of"):
+            DSPyOptimizationConfig(selection_mode="invalid")
+
+    def test_invalid_selection_top_k(self):
+        """Test invalid selection_top_k raises ValueError."""
+        with pytest.raises(ValueError, match="selection_top_k must be >= 1"):
+            DSPyOptimizationConfig(selection_top_k=0)
 
     def test_valid_optimizer(self):
         """Test valid optimizer configurations."""

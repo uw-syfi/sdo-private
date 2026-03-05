@@ -5,16 +5,15 @@ and iteration history efficiently.
 """
 
 import json
-import os
 import re
-import time
 from pathlib import Path
 from typing import Any
 
 import litellm
 
 from app_operator.logger import logger
-from app_operator.rate_limit_handler import detect_rate_limit_error
+from app_operator.prompts import DSPyConfigProtocol
+from app_operator.prompts.rlm import render_fix_error_task_prompt
 from app_operator.rlm.environment import (
     RLMEnvironment,
     RLMContext,
@@ -23,6 +22,7 @@ from app_operator.rlm.environment import (
     _validate_file_refs,
 )
 from app_operator.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.llm_client import LiteLLMClient
 
 
 class RecursiveDeploymentAgent:
@@ -47,6 +47,7 @@ class RecursiveDeploymentAgent:
         compaction: bool = False,
         compaction_threshold: float = 0.85,
         model_context_tokens: int = 32_768,
+        dspy_config: DSPyConfigProtocol | None = None,
     ):
         """Initialize RLM deployment agent.
 
@@ -79,14 +80,11 @@ class RecursiveDeploymentAgent:
         self.compaction = compaction
         self.compaction_threshold = compaction_threshold
         self.model_context_tokens = model_context_tokens
+        self.dspy_config = dspy_config
         self.rlm_env: RLMEnvironment | None = None
         self._system_prompt: str = ""
         self._messages: list[dict[str, str]] = []
-        self._token_usage: dict[str, int] = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
+        self._llm_client = LiteLLMClient(llm_provider, vertex_location, trajectory)
 
     def _record_rlm_call(self, call: RLMCall) -> None:
         """Callback to record RLM calls in trajectory."""
@@ -289,68 +287,24 @@ class RecursiveDeploymentAgent:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             location=self.vertex_location,
-            token_acc=self._token_usage,
+            token_acc=self._llm_client._token_usage,
         )
 
     def _call_llm(self, prompt: str) -> str:
-        """Call the LLM via litellm, accumulating conversation history.
+        """Call the LLM, accumulating conversation history.
 
         Appends ``prompt`` as a user message to ``self._messages``, calls
-        litellm with the full conversation, then appends the assistant
-        response.  This gives the LLM memory of prior turns (code results,
-        recursive call outputs, etc.) across the RLM loop.
-
-        ``self._messages`` must be initialised (at least with the system
-        message) before calling this method — ``run_task()`` does this
-        automatically.
-
-        Vertex AI auth is handled automatically by litellm via
-        ``GOOGLE_APPLICATION_CREDENTIALS`` or ``VERTEX_PROJECT`` /
-        ``VERTEX_LOCATION`` environment variables.
-
-        ``vertex_location`` is forwarded to litellm when set, either from the
-        constructor argument or from the ``VERTEX_LOCATION`` environment variable.
+        litellm with the full conversation via ``_llm_client``, then appends
+        the assistant response.  Token tracking and recorder updates happen
+        automatically inside ``_llm_client.complete()``.
         """
         logger.info(f"[RLM] LLM call to {self.llm_provider}, prompt length: {len(prompt)} chars")
-
         self._messages.append({"role": "user", "content": prompt})
-
-        kwargs: dict[str, Any] = {
-            "model": self.llm_provider,
-            "messages": self._messages,
-            "cache": {"no-cache": True},
-        }
-        location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
-        if location:
-            kwargs["vertex_location"] = location
-
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                response = litellm.completion(**kwargs)
-                usage = getattr(response, "usage", None)
-                if usage:
-                    self._token_usage["prompt_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
-                    self._token_usage["completion_tokens"] += getattr(usage, "completion_tokens", 0) or 0
-                    self._token_usage["total_tokens"] += getattr(usage, "total_tokens", 0) or 0
-                content = response.choices[0].message.content or ""
-                self._messages.append({"role": "assistant", "content": content})
-                return content
-            except Exception as e:
-                rate_err = detect_rate_limit_error(str(e), -1, self.llm_provider)
-                if rate_err and attempt < max_attempts - 1:
-                    delay = (rate_err.retry_after or 15) * (2 ** attempt)
-                    logger.warning(
-                        f"[RLM] Transient network error (attempt {attempt + 1}/{max_attempts}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    time.sleep(delay)
-                else:
-                    logger.error(f"[RLM] LLM call failed: {e}")
-                    content = f"ACTION: final_answer\nANSWER: LLM call failed: {e}"
-                    self._messages.append({"role": "assistant", "content": content})
-                    return content
-        content = f"ACTION: final_answer\nANSWER: LLM call failed after {max_attempts} attempts"
+        try:
+            content = self._llm_client.complete(self._messages, label="rlm main loop")
+        except Exception as e:
+            logger.error(f"[RLM] LLM call failed: {e}")
+            content = f"ACTION: final_answer\nANSWER: LLM call failed: {e}"
         self._messages.append({"role": "assistant", "content": content})
         return content
 
@@ -368,6 +322,7 @@ class RecursiveDeploymentAgent:
         """Summarize conversation history and reset to system + summary.
 
         Prevents the O(n²) token re-send problem over many iterations.
+        Compaction tokens are tracked via ``_llm_client`` like all other calls.
         """
         summary_messages = self._messages + [{
             "role": "user",
@@ -379,17 +334,8 @@ class RecursiveDeploymentAgent:
                 "Be concise (1-3 paragraphs) but preserve all key findings."
             ),
         }]
-        kwargs: dict[str, Any] = {
-            "model": self.llm_provider,
-            "messages": summary_messages,
-            "cache": {"no-cache": True},
-        }
-        location = self.vertex_location or os.environ.get("VERTEX_LOCATION")
-        if location:
-            kwargs["vertex_location"] = location
         try:
-            response = litellm.completion(**kwargs)
-            summary = response.choices[0].message.content or ""
+            summary = self._llm_client.complete(summary_messages, label="rlm compaction")
         except Exception as e:
             logger.warning(f"[RLM] Compaction failed: {e}, keeping full history")
             return
@@ -439,18 +385,17 @@ class RecursiveDeploymentAgent:
         if self.trajectory:
             self.trajectory.add_user_message(self._system_prompt)
 
-        current_prompt = (
-            f"Task:\n{task}\n\n"
-            "MANDATORY FIRST STEPS (do these before any other actions):\n"
-            "1. Run validate_file_refs(deployment_script, cwd) to find paths that do "
-            "not exist on disk. Remove every line that references a MISSING path.\n"
-            "2. If original_script is non-empty, compare it to deployment_script. "
-            "Lines present in deployment_script but not in original_script that "
-            "reference MISSING paths are regressions from a previous fix — revert "
-            "those lines to restore the working baseline.\n"
-            "Only after completing steps 1 and 2, analyse the error and apply a fix.\n\n"
-            "Use the context variables as needed via EXECUTE_CODE, then provide FINAL_ANSWER."
+        rendered_wrapper = render_fix_error_task_prompt(
+            repo_path=repo_path,
+            available_variables=", ".join(sorted(context.to_dict().keys())),
+            error_log_size=str(len(context.error_log)),
+            attempt=str(context.attempt_number),
+            max_attempts=str(self.max_iterations),
+            has_original_script=str(bool(context.original_script)),
+            dspy_config=self.dspy_config,
+            recorder=self.trajectory if hasattr(self.trajectory, "record_prompt_kwargs") else None,
         )
+        current_prompt = f"Task:\n{task}\n\n{rendered_wrapper}"
 
         consecutive_explore_count = 0
         consecutive_errors = 0
@@ -617,9 +562,10 @@ class RecursiveDeploymentAgent:
         than a single call would have, which is expected for short tasks.
         """
         stats = self.rlm_env.get_statistics() if self.rlm_env else {}
-        actual_prompt_tokens = self._token_usage.get("prompt_tokens", 0)
+        token_usage = self._llm_client._token_usage
+        actual_prompt_tokens = token_usage.get("prompt_tokens", 0)
         baseline_context_tokens = stats.get("baseline_context_tokens", 0)
         stats["actual_prompt_tokens"] = actual_prompt_tokens
         stats["total_tokens_saved"] = baseline_context_tokens - actual_prompt_tokens
-        stats["token_usage"] = self._token_usage.copy()
+        stats["token_usage"] = token_usage.copy()
         return stats

@@ -30,6 +30,11 @@ class TestSignatures:
             "agentflow_system",
             "agentflow_user",
             "agentflow_repair",
+            "subagent_trajectory_analyst",
+            "subagent_error_log_analyst",
+            "subagent_script_analyst",
+            "subagent_repo_analyst",
+            "subagent_root_synthesis",
         }
         assert set(SIGNATURES.keys()) == expected_prompts
 
@@ -85,4 +90,4 @@ class TestSignatures:
 
     def test_signature_count(self):
         """Test expected number of signatures."""
-        assert len(SIGNATURES) == 13
+        assert len(SIGNATURES) == 18

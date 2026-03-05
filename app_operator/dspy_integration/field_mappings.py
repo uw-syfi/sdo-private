@@ -101,6 +101,12 @@ def get_output_field_name(prompt_name: str) -> str:
         "agentflow_system": "system_prompt",
         "agentflow_user": "script_code",  # Note: also has status, questions
         "agentflow_repair": "repaired_response",
+        "subagent_trajectory_analyst": "system_prompt",
+        "subagent_error_log_analyst": "system_prompt",
+        "subagent_script_analyst": "system_prompt",
+        "subagent_repo_analyst": "system_prompt",
+        "subagent_root_synthesis": "system_prompt",
+        "rlm_deployer_fix_error": "rendered_prompt",
     }
 
     if prompt_name not in OUTPUT_FIELDS:

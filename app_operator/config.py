@@ -56,12 +56,19 @@ class DSPyOptimizationConfig:
         "MIPROv2",
         "COPRO",
     ]
+    VALID_SELECTION_MODES = [
+        "score",
+        "hybrid",
+        "llm",
+    ]
 
     optimizer: str = "BootstrapFewShot"
     teacher_model: str = "claude-sonnet-4-5"
     num_examples: int = 30
     validation_split: float = 0.2
     n_candidates: int = 4
+    selection_mode: str = "hybrid"
+    selection_top_k: int = 3
     metric_weights: dict[str, float] = field(
         default_factory=lambda: {
             "success": 0.5,
@@ -86,6 +93,13 @@ class DSPyOptimizationConfig:
 
         validate_field(self.num_examples, "num_examples", int, positive=True)
         validate_field(self.n_candidates, "n_candidates", int, min_val=1)
+        validate_field(self.selection_mode, "selection_mode", str)
+        if self.selection_mode not in self.VALID_SELECTION_MODES:
+            raise ValueError(
+                f"selection_mode must be one of {self.VALID_SELECTION_MODES}, "
+                f"got '{self.selection_mode}'"
+            )
+        validate_field(self.selection_top_k, "selection_top_k", int, min_val=1)
 
         # validation_split: numeric in [0.0, 1.0)
         validate_type(

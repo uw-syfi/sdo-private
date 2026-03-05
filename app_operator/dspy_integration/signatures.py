@@ -250,6 +250,87 @@ class AgentflowRepairSignature(dspy.Signature):
     repaired_response = dspy.OutputField(desc="Corrected JSON-parseable response")
 
 
+class SubagentTrajectoryAnalystSignature(dspy.Signature):
+    """System prompt for the trajectory analyst subagent.
+
+    Instructs the analyst to summarise deployment trajectory data.
+    """
+
+    data_description = dspy.InputField(
+        desc="Brief description of the trajectory data available"
+    )
+
+    system_prompt = dspy.OutputField(
+        desc="System prompt instructing the analyst to summarise deployment "
+        "trajectory, recurring error patterns, and untried approaches"
+    )
+
+
+class SubagentErrorLogAnalystSignature(dspy.Signature):
+    """System prompt for the error log analyst subagent.
+
+    Instructs the analyst to identify key errors and root causes.
+    """
+
+    data_description = dspy.InputField(
+        desc="Brief description of the error log data available"
+    )
+
+    system_prompt = dspy.OutputField(
+        desc="System prompt instructing the analyst to identify key errors, "
+        "root causes, and most likely fixes"
+    )
+
+
+class SubagentScriptAnalystSignature(dspy.Signature):
+    """System prompt for the script analyst subagent.
+
+    Instructs the analyst to examine the deployment script for issues.
+    """
+
+    has_original_script = dspy.InputField(
+        desc="Whether an original pre-fix script backup is available"
+    )
+
+    system_prompt = dspy.OutputField(
+        desc="System prompt instructing the analyst to examine the deployment "
+        "script and identify regressions from previous fixes"
+    )
+
+
+class SubagentRepoAnalystSignature(dspy.Signature):
+    """System prompt for the repository analyst subagent.
+
+    Instructs the analyst to summarise deployment constraints from repo files.
+    """
+
+    available_files = dspy.InputField(
+        desc="Comma-separated list of repository context files available "
+        "(e.g. Dockerfile, docker-compose.yml, README)"
+    )
+
+    system_prompt = dspy.OutputField(
+        desc="System prompt instructing the analyst to summarise deployment "
+        "constraints and requirements from repository files"
+    )
+
+
+class SubagentRootSynthesisSignature(dspy.Signature):
+    """System prompt for the root synthesis call.
+
+    Instructs the agent to produce a deployment fix using analyst summaries.
+    """
+
+    num_analysts = dspy.InputField(
+        desc="Number of independent analyst summaries provided"
+    )
+
+    system_prompt = dspy.OutputField(
+        desc="System prompt instructing the agent to synthesise analyst "
+        "summaries into a corrected deploy.sh file"
+    )
+
+
 # Signature registry for easy lookup
 SIGNATURES = {
     "deployer_system": DeployerSystemSignature,
@@ -265,6 +346,11 @@ SIGNATURES = {
     "agentflow_system": AgentflowSystemSignature,
     "agentflow_user": AgentflowUserSignature,
     "agentflow_repair": AgentflowRepairSignature,
+    "subagent_trajectory_analyst": SubagentTrajectoryAnalystSignature,
+    "subagent_error_log_analyst": SubagentErrorLogAnalystSignature,
+    "subagent_script_analyst": SubagentScriptAnalystSignature,
+    "subagent_repo_analyst": SubagentRepoAnalystSignature,
+    "subagent_root_synthesis": SubagentRootSynthesisSignature,
 }
 
 
