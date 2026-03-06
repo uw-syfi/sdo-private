@@ -1,4 +1,5 @@
 """Concrete AgentRunner implementations backed by cli_agent agents."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
