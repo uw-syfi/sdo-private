@@ -18,6 +18,12 @@ libs/agent_cli/          provider abstraction (CodingAgent ABC, AGENT_REGISTRY)
      └── lego_agent/     sds_lego_agent — agent workflow generation
 ```
 
+### Module Dependency Graph
+
+The graph below is generated from `tach.toml` by `scripts/generate_tach_graph.sh`. Arrows point from a module to its dependency.
+
+![Module dependency graph](assets/tach_module_graph.png)
+
 Both `sds_operator` and `lego_agent` share `libs/agent_cli/` for provider access and read from `sds.toml`, but do not share business logic.
 
 ---
