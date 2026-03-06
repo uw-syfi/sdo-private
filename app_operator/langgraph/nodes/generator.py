@@ -4,10 +4,10 @@ from typing import Any
 from app_operator.config import Config
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import invoke_agent
-from app_operator.prompts import PromptLoader
-from app_operator.prompts.deployer import create_generate_script_prompt
-from app_operator.prompts.deployment_context import (
+from app_operator.prompts import (
+    PromptLoader,
     analyze_repository,
+    create_generate_script_prompt,
     create_system_prompt,
 )
 from app_operator.trajectory import (

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app_operator.prompts import DSPyConfigProtocol, get_loader
+from app_operator.prompts._core import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
     from app_operator.trajectory import TrajectoryRecorderProtocol

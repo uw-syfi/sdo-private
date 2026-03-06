@@ -21,15 +21,13 @@ from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
-from app_operator.prompts.deployer import (
+from app_operator.prompts import (
+    analyze_repository,
     create_consolidation_prompt,
     create_fix_prompt,
     create_generate_script_prompt,
-    prepare_error_context,
-)
-from app_operator.prompts.deployment_context import (
-    analyze_repository,
     create_system_prompt,
+    prepare_error_context,
 )
 from app_operator.subprocess_runner import SubprocessRunner
 from app_operator.trajectory import (

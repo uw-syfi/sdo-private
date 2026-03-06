@@ -48,55 +48,6 @@ _SUBPACKAGES: frozenset[str] = frozenset(
 
 _FACADE_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
     {
-        # ── prompts.* submodules ──────────────────────────────────────────────
-        # prompts submodules (deployer.py, deployment_context.py, subagent.py,
-        # rlm.py) each import `from app_operator.prompts import get_loader`.
-        # Re-exporting those submodules from prompts/__init__.py would create a
-        # circular import.  Direct submodule access is therefore intentional.
-        (
-            "app_operator/adk/operator.py",
-            "app_operator.prompts.deployer",
-        ),
-        (
-            "app_operator/adk/operator.py",
-            "app_operator.prompts.deployment_context",
-        ),
-        (
-            "app_operator/cli_agent/agents/deployer.py",
-            "app_operator.prompts.deployer",
-        ),
-        (
-            "app_operator/cli_agent/agents/deployer.py",
-            "app_operator.prompts.deployment_context",
-        ),
-        (
-            "app_operator/cli_agent/hybrid_agent.py",
-            "app_operator.prompts.subagent",
-        ),
-        (
-            "app_operator/cli_agent/rlm/recursive_agent.py",
-            "app_operator.prompts.rlm",
-        ),
-        (
-            "app_operator/cli_agent/subagent_agent.py",
-            "app_operator.prompts.subagent",
-        ),
-        (
-            "app_operator/langgraph/nodes/deployer.py",
-            "app_operator.prompts.deployer",
-        ),
-        (
-            "app_operator/langgraph/nodes/deployer.py",
-            "app_operator.prompts.deployment_context",
-        ),
-        (
-            "app_operator/langgraph/nodes/generator.py",
-            "app_operator.prompts.deployer",
-        ),
-        (
-            "app_operator/langgraph/nodes/generator.py",
-            "app_operator.prompts.deployment_context",
-        ),
         # ── dspy_integration heavy classes ────────────────────────────────────
         # optimizer.py, signatures.py, metrics_aggregator.py, eval_execute.py
         # all import `dspy` at module level.  Re-exporting them from
