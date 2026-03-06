@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
+from app_operator.dspy_integration._data_loader import TrajectoryDataLoader
 
 
 @pytest.fixture

@@ -341,9 +341,9 @@ class PromptLoader:
         Raises:
             Exception: If DSPy rendering fails
         """
-        _loader_mod = importlib.import_module("app_operator.dspy_integration.loader")
+        _loader_mod = importlib.import_module("app_operator.dspy_integration._loader")
         load_optimized_module = _loader_mod.load_optimized_module
-        _field_mod = importlib.import_module("app_operator.dspy_integration.field_mappings")
+        _field_mod = importlib.import_module("app_operator.dspy_integration._field_mappings")
         map_kwargs_to_fields = _field_mod.map_kwargs_to_fields
         get_output_field_name = _field_mod.get_output_field_name
 

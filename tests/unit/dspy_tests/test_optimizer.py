@@ -5,8 +5,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from app_operator.dspy_integration._data_loader import TrajectoryExample
 from app_operator.dspy_integration.config import DSPyConfig, DSPyOptimizationConfig
-from app_operator.dspy_integration.data_loader import TrajectoryExample
 from app_operator.dspy_integration.optimizer import PromptOptimizer
 
 

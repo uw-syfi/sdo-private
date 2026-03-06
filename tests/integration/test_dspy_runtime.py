@@ -16,7 +16,7 @@ import pytest
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config, DSPyConfig
-from app_operator.dspy_integration.loader import reset_cache
+from app_operator.dspy_integration._loader import reset_cache
 from libs.agent_cli.base import CodingAgent
 
 # --- Fake Agent for DSPy Testing ---
@@ -438,7 +438,7 @@ def test_dspy_fallback_recorded_in_trajectory(temp_repo, dspy_config_enabled):
     assert "script_generation" in trajectory or "deployment" in trajectory
 
 
-@patch("app_operator.dspy_integration.loader.load_optimized_module")
+@patch("app_operator.dspy_integration._loader.load_optimized_module")
 def test_dspy_module_invocation_error_falls_back(mock_load, temp_repo, dspy_config_enabled):
     """
     Test that errors during DSPy module invocation trigger fallback.
@@ -483,7 +483,7 @@ def test_dspy_version_resolution(temp_repo):
     2. Specific versions (e.g., "v1") are used directly
     3. Non-existent versions return None
     """
-    from app_operator.dspy_integration.loader import resolve_version
+    from app_operator.dspy_integration._loader import resolve_version
 
     # Create mock version directories
     optimized_dir = temp_repo / "optimized"

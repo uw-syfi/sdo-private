@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.dspy_integration.field_mappings import get_output_field_name
+from app_operator.dspy_integration._field_mappings import get_output_field_name
 from app_operator.dspy_integration.optimizer import PROMPT_PHASE_MAP, PROMPT_TO_TEMPLATE
 from app_operator.dspy_integration.signatures import SIGNATURES
 from app_operator.prompts import SEED_TEMPLATE_MAP, PromptLoader, reset_loader

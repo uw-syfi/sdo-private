@@ -251,7 +251,7 @@ class TestTrajectoryIntegration:
 
         mock_recorder.record_rendered_prompt.assert_called_once_with("Hello World!")
 
-    @patch("app_operator.dspy_integration.loader.load_optimized_module")
+    @patch("app_operator.dspy_integration._loader.load_optimized_module")
     def test_record_fallback(self, mock_load, tmp_path):
         """Should record fallback when DSPy module exists but invocation fails."""
         templates_dir = tmp_path / "templates"

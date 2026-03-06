@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from app_operator.fault_injection.base import ComposeManipulator, FaultInjector
+from app_operator.fault_injection._base import ComposeManipulator, FaultInjector
 from app_operator.fault_injection.models import (
     Fault,
     FaultCategory,

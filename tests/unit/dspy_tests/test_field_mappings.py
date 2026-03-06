@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app_operator.dspy_integration.field_mappings import (
+from app_operator.dspy_integration._field_mappings import (
     convert_type,
     get_all_output_fields,
     get_output_field_name,

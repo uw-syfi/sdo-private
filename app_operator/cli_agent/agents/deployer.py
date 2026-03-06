@@ -13,8 +13,8 @@ if TYPE_CHECKING:
     from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
 
+from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
 from app_operator.cli_agent.factory import create_agent_from_config
-from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError

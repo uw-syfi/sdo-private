@@ -370,7 +370,7 @@ class EvalExecuteOptimizer:
 
     def _load_optimized_instruction(self, prompt_name: str, current_version: str) -> str | None:
         """Load a previously saved optimized instruction, or return None."""
-        from app_operator.dspy_integration.loader import resolve_version
+        from app_operator.dspy_integration._loader import resolve_version
 
         resolved = resolve_version(self.optimized_dir, current_version)
         if not resolved:

@@ -11,12 +11,12 @@ from typing import Any
 
 import dspy
 
-from app_operator.dspy_integration.config import DSPyConfig
-from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
-from app_operator.dspy_integration.field_mappings import (
+from app_operator.dspy_integration._data_loader import TrajectoryDataLoader
+from app_operator.dspy_integration._field_mappings import (
     get_output_field_name,
     map_kwargs_to_fields,
 )
+from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.metrics import (
     CompositeMetric,
 )

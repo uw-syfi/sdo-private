@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from app_operator.adk import agent_factory
+from app_operator.adk import _agent_factory as agent_factory
 
 
 def test_build_adk_agent_wraps_async_tool():
@@ -16,8 +16,8 @@ def test_build_adk_agent_wraps_async_tool():
             mock_init(*args, **kwargs)
 
     with (
-        patch("app_operator.adk.agent_factory.FunctionTool", new=MockFunctionToolClass),
-        patch("app_operator.adk.agent_factory.LlmAgent") as MockLlmAgent,
+        patch("app_operator.adk._agent_factory.FunctionTool", new=MockFunctionToolClass),
+        patch("app_operator.adk._agent_factory.LlmAgent") as MockLlmAgent,
     ):
         agent_factory.build_adk_agent("test_agent", "instruction", "model", [async_tool])
 
@@ -48,8 +48,8 @@ def test_build_adk_agent_wraps_sync_tool():
             mock_init(*args, **kwargs)
 
     with (
-        patch("app_operator.adk.agent_factory.FunctionTool", new=MockFunctionToolClass),
-        patch("app_operator.adk.agent_factory.LlmAgent"),
+        patch("app_operator.adk._agent_factory.FunctionTool", new=MockFunctionToolClass),
+        patch("app_operator.adk._agent_factory.LlmAgent"),
     ):
         agent_factory.build_adk_agent("test_agent", "instruction", "model", [sync_tool])
 
@@ -65,8 +65,8 @@ def test_build_adk_agent_preserves_existing_function_tools():
         pass
 
     with (
-        patch("app_operator.adk.agent_factory.FunctionTool", new=FakeFunctionTool),
-        patch("app_operator.adk.agent_factory.LlmAgent") as MockLlmAgent,
+        patch("app_operator.adk._agent_factory.FunctionTool", new=FakeFunctionTool),
+        patch("app_operator.adk._agent_factory.LlmAgent") as MockLlmAgent,
     ):
         existing_tool = FakeFunctionTool()
 
@@ -93,8 +93,8 @@ def test_build_adk_agent_mixed_tools():
             self.called_with = fn
 
     with (
-        patch("app_operator.adk.agent_factory.FunctionTool", new=MockToolClass),
-        patch("app_operator.adk.agent_factory.LlmAgent") as MockLlmAgent,
+        patch("app_operator.adk._agent_factory.FunctionTool", new=MockToolClass),
+        patch("app_operator.adk._agent_factory.LlmAgent") as MockLlmAgent,
     ):
         existing_tool = MockToolClass()
 

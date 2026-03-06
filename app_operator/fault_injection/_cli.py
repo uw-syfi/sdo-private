@@ -3,9 +3,9 @@
 Provides inject, revert, and list subcommands for shell script integration.
 
 Usage:
-    python -m app_operator.fault_injection.cli list
-    python -m app_operator.fault_injection.cli inject --repo-path /path/to/app
-    python -m app_operator.fault_injection.cli revert --repo-path /path/to/app
+    python -m app_operator.fault_injection._cli list
+    python -m app_operator.fault_injection._cli inject --repo-path /path/to/app
+    python -m app_operator.fault_injection._cli revert --repo-path /path/to/app
 """
 
 import argparse
@@ -85,7 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
         description="SDS Fault Injection CLI",
-        prog="python -m app_operator.fault_injection.cli",
+        prog="python -m app_operator.fault_injection._cli",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

@@ -2,7 +2,7 @@
 
 import json
 
-from app_operator.dspy_integration.loader import (
+from app_operator.dspy_integration._loader import (
     DSPyModuleCache,
     get_cache,
     load_optimized_module,
