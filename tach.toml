@@ -7,158 +7,28 @@ source_roots = [
 ]
 ignore_type_checking_imports = true
 
-# --- Layer 0: foundational modules (no internal deps except each other) ---
-# These are marked as utility so any module can depend on them.
+# --- Layer 0: libs (no internal deps) ---
 
 [[modules]]
-path = "app_operator.config"
-depends_on = [
-    "app_operator.exceptions",
-    "app_operator.logger",
-    "app_operator.validation",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.types"
-depends_on = [
-    "libs.agent_cli",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.exceptions"
+path = "libs.sds_core"
 depends_on = []
-utility = true
 
 [[modules]]
-path = "app_operator.constants"
-depends_on = []
-utility = true
-
-[[modules]]
-path = "app_operator.logger"
-depends_on = []
-utility = true
-
-[[modules]]
-path = "app_operator.validation"
-depends_on = [
-    "app_operator.config",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.filesystem"
+path = "libs.agent_cli"
 depends_on = [
     "libs.sds_core",
 ]
-utility = true
-
-[[modules]]
-path = "app_operator.llm"
-depends_on = [
-    "app_operator.logger",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.ui_protocol"
-depends_on = []
-utility = true
-
-[[modules]]
-path = "app_operator.subprocess_runner"
-depends_on = [
-    "app_operator.logger",
-    "app_operator.types",
-    "app_operator.ui_protocol",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.healthcheck"
-depends_on = [
-    "app_operator.logger",
-    "app_operator.types",
-    "app_operator.ui_protocol",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.experiment_naming"
-depends_on = []
-utility = true
-
-[[modules]]
-path = "app_operator.rate_limit_handler"
-depends_on = [
-    "app_operator.exceptions",
-    "app_operator.logger",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.command_validation"
-depends_on = [
-    "libs.sds_core",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.trajectory_collectors"
-depends_on = [
-    "app_operator.logger",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.trajectory_utils"
-depends_on = [
-    "app_operator.logger",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.agent_runner"
-depends_on = [
-    "app_operator.config",
-    "app_operator.operator_base",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.operator_base"
-depends_on = [
-    "app_operator.config",
-    "app_operator.filesystem",
-    "app_operator.logger",
-]
-utility = true
-
-[[modules]]
-path = "app_operator.operator_factory"
-depends_on = [
-    "app_operator.config",
-    "app_operator.operator_base",
-]
-utility = true
 
 # --- Layer 1: shared infrastructure ---
 
 [[modules]]
 path = "app_operator.prompts"
-depends_on = [
-    "app_operator.constants",
-    "app_operator.filesystem",
-]
+depends_on = []
 
 [[modules]]
 path = "app_operator.trajectory"
 depends_on = [
-    "app_operator.logger",
     "app_operator.prompts",
-    "app_operator.trajectory_collectors",
     "libs.agent_cli",
 ]
 
@@ -167,71 +37,36 @@ depends_on = [
 [[modules]]
 path = "app_operator.dspy_integration"
 depends_on = [
-    "app_operator.config",
-    "app_operator.experiment_naming",
-    "app_operator.logger",
     "app_operator.prompts",
-    "app_operator.rate_limit_handler",
     "app_operator.trajectory",
-    "app_operator.trajectory_utils",
-    "app_operator.types",
 ]
 
 [[modules]]
 path = "app_operator.fault_injection"
-depends_on = [
-    "app_operator.config",
-    "app_operator.types",
-]
+depends_on = []
 
 # --- Layer 3: runtimes (independent of each other) ---
 
 [[modules]]
 path = "app_operator.cli_agent"
 depends_on = [
-    "app_operator.config",
-    "app_operator.constants",
-    "app_operator.exceptions",
-    "app_operator.filesystem",
-    "app_operator.healthcheck",
-    "app_operator.logger",
-    "app_operator.operator_base",
     "app_operator.prompts",
-    "app_operator.subprocess_runner",
     "app_operator.trajectory",
-    "app_operator.trajectory_utils",
-    "app_operator.ui_protocol",
     "libs.agent_cli",
 ]
 
 [[modules]]
 path = "app_operator.langgraph"
 depends_on = [
-    "app_operator.command_validation",
-    "app_operator.config",
-    "app_operator.exceptions",
-    "app_operator.filesystem",
-    "app_operator.llm",
-    "app_operator.logger",
-    "app_operator.operator_base",
     "app_operator.prompts",
     "app_operator.trajectory",
-    "app_operator.ui_protocol",
 ]
 
 [[modules]]
 path = "app_operator.adk"
 depends_on = [
-    "app_operator.config",
-    "app_operator.exceptions",
-    "app_operator.filesystem",
-    "app_operator.healthcheck",
-    "app_operator.logger",
-    "app_operator.operator_base",
     "app_operator.prompts",
-    "app_operator.subprocess_runner",
     "app_operator.trajectory",
-    "app_operator.types",
     "libs.sds_core",
 ]
 
@@ -239,10 +74,6 @@ depends_on = [
 path = "app_operator.gepa"
 depends_on = [
     "app_operator.cli_agent",
-    "app_operator.config",
-    "app_operator.filesystem",
-    "app_operator.llm",
-    "app_operator.logger",
     "app_operator.prompts",
     "app_operator.trajectory",
 ]
@@ -251,21 +82,14 @@ depends_on = [
 
 [[modules]]
 path = "app_operator.ui"
-depends_on = [
-    "app_operator.ui_protocol",
-]
+depends_on = []
 
 # --- Layer 4: commands ---
 
 [[modules]]
 path = "app_operator.commands"
 depends_on = [
-    "app_operator.config",
     "app_operator.dspy_integration",
-    "app_operator.experiment_naming",
-    "app_operator.logger",
-    "app_operator.operator_factory",
-    "app_operator.rate_limit_handler",
 ]
 
 # --- Layer 5: entry point ---
@@ -275,16 +99,6 @@ path = "app_operator.__main__"
 depends_on = [
     "app_operator.commands",
     "app_operator.langgraph",
-    "app_operator.logger",
-]
-
-# --- app_operator.rlm ---
-
-[[modules]]
-path = "app_operator.rlm"
-depends_on = [
-    "app_operator.config",
-    "app_operator.logger",
 ]
 
 # --- lego_agent (independent of app_operator) ---
@@ -294,15 +108,3 @@ path = "lego_agent"
 depends_on = [
     "libs.sds_core",
 ]
-
-# --- libs ---
-
-[[modules]]
-path = "libs.agent_cli"
-depends_on = [
-    "libs.sds_core",
-]
-
-[[modules]]
-path = "libs.sds_core"
-depends_on = []
