@@ -15,6 +15,8 @@ from langchain_core.tools import tool
 from app_operator.command_validation import DangerousCommandError, validate_command
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 
+SUBPROCESS_TIMEOUT_SECS = 120  # seconds before a subprocess command times out
+
 
 class ToolContext:
     def __init__(self, repo_root: Path, filesystem: FileSystemInterface):
@@ -172,7 +174,7 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
 
 def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
     @tool("bash")
-    def bash(command: str, timeout: int = 120) -> dict[str, Any]:
+    def bash(command: str, timeout: int = SUBPROCESS_TIMEOUT_SECS) -> dict[str, Any]:
         """Execute a bash command."""
         try:
             validate_command(command)
@@ -270,14 +272,14 @@ def _build_make_change_on_remote_copy(
                     cwd=str(context.repo_root),
                     capture_output=True,
                     text=True,
-                    timeout=120,
+                    timeout=SUBPROCESS_TIMEOUT_SECS,
                 )
             except subprocess.TimeoutExpired:
                 return {
                     "success": False,
                     "exit_code": -1,
                     "stdout": "",
-                    "stderr": f"git {' '.join(args)} timed out after 120 seconds",
+                    "stderr": f"git {' '.join(args)} timed out after {SUBPROCESS_TIMEOUT_SECS} seconds",
                 }
             except Exception as e:  # pragma: no cover - unexpected system errors
                 return {

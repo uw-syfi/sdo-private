@@ -42,6 +42,8 @@ FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 FIX_SUMMARY_FILENAME = "fix_summary.md"
 FIX_SUMMARY_MAX_LENGTH = 2000  # characters before truncating agent response summary
 FIX_SUMMARY_TRUNCATE_AT = 1900  # characters to keep when truncating summary
+MONITOR_INITIAL_DELAY_SECS = 15.0  # seconds before first progress summary
+MONITOR_SUMMARY_INTERVAL_SECS = 30.0  # seconds between subsequent progress summaries
 
 
 def get_fix_summary_path(sds_dir: Path) -> Path:
@@ -614,8 +616,8 @@ class DeploymentAgent:
             agent_generate_fn=lambda prompt, silent, timeout: self.agent.generate(
                 prompt, silent=silent, timeout=timeout
             ),
-            initial_delay=15.0,
-            summary_interval=30.0,
+            initial_delay=MONITOR_INITIAL_DELAY_SECS,
+            summary_interval=MONITOR_SUMMARY_INTERVAL_SECS,
             time_func=self._get_time,
             recorder=self.recorder,
         )
