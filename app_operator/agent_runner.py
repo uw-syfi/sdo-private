@@ -1,4 +1,5 @@
 """Protocol for running a single SDS agent phase on a repository."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
