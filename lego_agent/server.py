@@ -36,6 +36,11 @@ class WebIO:
         task.add_done_callback(self._pending_tasks.discard)
         return task
 
+    @property
+    def pending_task_count(self) -> int:
+        """Return the number of currently tracked pending tasks."""
+        return len(self._pending_tasks)
+
     async def cleanup(self) -> None:
         """Await all pending tasks, suppressing exceptions."""
         if self._pending_tasks:
