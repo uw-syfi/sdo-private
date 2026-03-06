@@ -8,8 +8,7 @@ import sys
 from pathlib import Path
 
 from app_operator.config import load_config
-from app_operator.dspy_integration.optimizer import PromptOptimizer
-from app_operator.dspy_integration.signatures import SIGNATURES
+from app_operator.dspy_integration import SIGNATURES, PromptOptimizer
 
 
 def add_arguments(parser):

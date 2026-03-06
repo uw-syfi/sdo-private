@@ -85,7 +85,7 @@ Two complementary mechanisms run in CI via `scripts/check_errors.sh`:
 | Private module rule | `_`-prefixed submodules cannot be imported from outside their package |
 | `__all__` rule | Every non-trivial subpackage `__init__.py` declares `__all__` |
 
-To add a justified exception, append a `(relative_path, module_prefix)` tuple to `_FACADE_ALLOWLIST` in that file with a comment explaining why.
+Heavy symbols (those that transitively pull in `dspy` or `litellm`) are lazy-loaded via `__getattr__` in their package `__init__.py`, so the façade rule is satisfied without import-time overhead.
 
 ---
 

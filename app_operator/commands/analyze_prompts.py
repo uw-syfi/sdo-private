@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tabulate import tabulate
 
-from app_operator.dspy_integration.metrics_aggregator import MetricsAggregator
+from app_operator.dspy_integration import MetricsAggregator
 
 
 def add_arguments(parser):

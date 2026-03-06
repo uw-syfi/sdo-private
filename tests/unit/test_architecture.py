@@ -16,9 +16,6 @@ These tests enforce three rules using static analysis of import statements:
 Layer-ordering rules (which package may import from which) are enforced
 separately by import-linter contracts in pyproject.toml.
 
-HOW TO ADD AN ALLOWLIST ENTRY
-  Add a (relative_path, imported_module_prefix) tuple to _FACADE_ALLOWLIST.
-  Always include a comment explaining WHY the exception is needed.
 """
 
 import ast
@@ -36,47 +33,6 @@ _LIBS = _REPO_ROOT / "libs"
 # Top-level subpackages (directories with __init__.py) inside app_operator.
 _SUBPACKAGES: frozenset[str] = frozenset(
     p.name for p in _APP_OPERATOR.iterdir() if p.is_dir() and (p / "__init__.py").exists()
-)
-
-# ---------------------------------------------------------------------------
-# Allowlist for Rule 1 (façade rule)
-#
-# Each entry is a 2-tuple: relative file path and imported module prefix.
-#
-# Entries here are accepted deviations; every entry must have a comment.
-# ---------------------------------------------------------------------------
-
-_FACADE_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
-    {
-        # ── dspy_integration heavy classes ────────────────────────────────────
-        # optimizer.py, signatures.py, metrics_aggregator.py, eval_execute.py
-        # all import `dspy` at module level.  Re-exporting them from
-        # dspy_integration/__init__.py would cause `import dspy` to fire
-        # whenever any code touches the package (e.g. cli_agent loading
-        # DSPyConfig).  Direct submodule imports in commands/ preserve the
-        # lazy-load behaviour: dspy is only imported when an optimise command
-        # actually runs.
-        (
-            "app_operator/commands/analyze_prompts.py",
-            "app_operator.dspy_integration.metrics_aggregator",
-        ),
-        (
-            "app_operator/commands/e2e_optimize.py",
-            "app_operator.dspy_integration.eval_execute",
-        ),
-        (
-            "app_operator/commands/e2e_optimize.py",
-            "app_operator.dspy_integration.config",
-        ),
-        (
-            "app_operator/commands/optimize_prompts.py",
-            "app_operator.dspy_integration.optimizer",
-        ),
-        (
-            "app_operator/commands/optimize_prompts.py",
-            "app_operator.dspy_integration.signatures",
-        ),
-    }
 )
 
 # ---------------------------------------------------------------------------
@@ -124,13 +80,11 @@ def test_cross_package_imports_go_through_init():
     """
     From outside package X, import app_operator.X — not app_operator.X.submodule.
     The public API lives in __init__.py; internal submodules are an impl detail.
-    Exceptions are documented in _FACADE_ALLOWLIST.
     """
     violations: list[str] = []
 
     for filepath in _iter_py_files(_APP_OPERATOR, _LEGO_AGENT, _LIBS):
         home = _home_package(filepath)
-        rel_str = str(filepath.relative_to(_REPO_ROOT))
 
         for module, lineno in _from_imports(filepath):
             parts = module.split(".")
@@ -144,18 +98,14 @@ def test_cross_package_imports_go_through_init():
             if target_pkg == home:
                 continue
 
-            key = (rel_str, module)
-            if key not in _FACADE_ALLOWLIST:
-                violations.append(
-                    _fmt(
-                        filepath,
-                        lineno,
-                        module,
-                        f"bypass of {target_pkg}/__init__.py; "
-                        f"use 'from app_operator.{target_pkg} import ...' instead, "
-                        f"or add to _FACADE_ALLOWLIST with a justification comment",
-                    )
+            violations.append(
+                _fmt(
+                    filepath,
+                    lineno,
+                    module,
+                    f"bypass of {target_pkg}/__init__.py; use 'from app_operator.{target_pkg} import ...' instead",
                 )
+            )
 
     assert not violations, f"{len(violations)} façade violation(s) found:\n" + "\n".join(violations)
 
