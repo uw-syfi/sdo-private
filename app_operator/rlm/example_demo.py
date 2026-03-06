@@ -8,6 +8,11 @@ This shows:
 
 import json
 
+from app_operator.dspy_integration.metrics import (
+    DeploymentSuccessMetric,
+    IterationEfficiencyMetric,
+    TokenEfficiencyMetric,
+)
 from app_operator.rlm.environment import RLMContext, RLMEnvironment
 from app_operator.rlm.metrics import RLMCompositeMetric
 
@@ -258,7 +263,11 @@ def demonstrate_dspy_optimization():
     print("  4. Pattern: code -> filter -> recurse -> answer")
 
     # Create example metric
-    metric = RLMCompositeMetric()
+    metric = RLMCompositeMetric(
+        success_metric=DeploymentSuccessMetric(),
+        efficiency_metric=IterationEfficiencyMetric(),
+        token_metric=TokenEfficiencyMetric(),
+    )
 
     # Simulate example and prediction
     class MockExample:
