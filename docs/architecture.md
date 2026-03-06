@@ -69,7 +69,7 @@ Two categories of accepted exceptions (documented in `tests/unit/test_architectu
 
 Two complementary mechanisms run in CI via `scripts/check_errors.sh`:
 
-**1. `lint-imports` (import-linter)** — `pyproject.toml [tool.importlinter]` defines 19 contracts covering layer ordering, runtime isolation, and provider abstraction. Run with `uv run lint-imports`.
+**1. `tach check`** — `tach.toml` defines module boundaries with explicit `depends_on` allowlists covering layer ordering, runtime isolation, and provider abstraction. Run with `uv run tach check`.
 
 **2. AST tests** — `tests/unit/test_architecture.py` uses Python's `ast` module to enforce three rules across every `.py` file at test time:
 

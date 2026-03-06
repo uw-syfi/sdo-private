@@ -1,7 +1,7 @@
 #!/bin/bash
 # Check for static errors.  Covers:
-#   ruff        — syntax, undefined names, unused imports, style
-#   lint-imports — architectural layer contracts (pyproject.toml [tool.importlinter])
+#   ruff  — syntax, undefined names, unused imports, style
+#   tach  — architectural module boundary contracts (tach.toml)
 
 set -e
 
@@ -21,5 +21,5 @@ else
     uv run ruff check .
 fi
 
-echo "==> import-linter (layer contracts)"
-uv run lint-imports
+echo "==> tach (module boundaries)"
+uv run tach check
