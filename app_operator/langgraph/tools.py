@@ -221,6 +221,247 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
     return bash  # type: ignore[reportReturnType]
 
 
+def _run_git(args: list[str], cwd: str) -> dict[str, Any]:
+    """Run a git subprocess and return a result dict."""
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"git {' '.join(args)} timed out after 120 seconds",
+        }
+    except Exception as e:  # pragma: no cover - unexpected system errors
+        return {
+            "success": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"Error running git {' '.join(args)}: {e}",
+        }
+    return {
+        "success": result.returncode == 0,
+        "exit_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+
+
+def _sanitize_branch_name(branch_name: str) -> str:
+    """Sanitize a branch name and append a timestamp to make it unique."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base_name = re.sub(r"[^A-Za-z0-9._/-]", "-", branch_name.strip())
+    base_name = re.sub(r"-+", "-", base_name).strip("-")
+    if not base_name:
+        base_name = "sds-change"
+    return f"{base_name}-{timestamp}"
+
+
+def _stage_and_commit(
+    cwd: str,
+    repo_root: Path,
+    commit_message: str,
+    branch_name: str,
+    git_outputs: list[str],
+) -> dict[str, Any] | None:
+    """Stage all changes and commit them. Returns an error dict on failure, None on success."""
+    add_result = _run_git(["add", "-A"], cwd)
+    git_outputs.append(add_result["stdout"] + add_result["stderr"])
+    if not add_result["success"]:
+        return {
+            "success": False,
+            "branch": branch_name,
+            "target_branch": None,
+            "merge_request_url": None,
+            "git_log": "".join(git_outputs),
+            "error": "Failed to stage changes.",
+        }
+
+    # Force-add .sds directory (ignored by .gitignore) so generated scripts are captured
+    sds_dir = repo_root / ".sds"
+    if sds_dir.exists():
+        add_sds = _run_git(["add", "-f", str(sds_dir)], cwd)
+        git_outputs.append(add_sds["stdout"] + add_sds["stderr"])
+        if not add_sds["success"]:
+            return {
+                "success": False,
+                "branch": branch_name,
+                "target_branch": None,
+                "merge_request_url": None,
+                "git_log": "".join(git_outputs),
+                "error": "Failed to stage .sds directory.",
+            }
+
+    staged = _run_git(["diff", "--cached", "--name-only"], cwd)
+    git_outputs.append(staged["stdout"] + staged["stderr"])
+    if not staged["success"]:
+        return {
+            "success": False,
+            "branch": branch_name,
+            "target_branch": None,
+            "merge_request_url": None,
+            "git_log": "".join(git_outputs),
+            "error": "Failed to inspect staged changes.",
+        }
+
+    if not staged["stdout"].strip():
+        return {
+            "success": False,
+            "branch": branch_name,
+            "target_branch": None,
+            "merge_request_url": None,
+            "git_log": "".join(git_outputs),
+            "error": (
+                "No staged changes to commit. "
+                "Note: files under .sds are normally ignored by git; "
+                "ensure you expect them to be committed."
+            ),
+        }
+
+    commit_result = _run_git(["commit", "-m", commit_message], cwd)
+    git_outputs.append(commit_result["stdout"] + commit_result["stderr"])
+    if not commit_result["success"]:
+        return {
+            "success": False,
+            "branch": branch_name,
+            "target_branch": None,
+            "merge_request_url": None,
+            "git_log": "".join(git_outputs),
+            "error": "Failed to commit changes.",
+        }
+
+    return None
+
+
+def _parse_remote_url(remote_url: str) -> tuple[str, str]:
+    """Parse a git remote URL into (host, project_path). Returns ('', '') on failure."""
+    host = ""
+    path = ""
+    if remote_url.startswith("git@"):
+        # e.g. git@gitlab.com:group/project.git
+        try:
+            _, host_and_path = remote_url.split("@", 1)
+            host, path = host_and_path.split(":", 1)
+        except ValueError:
+            host = ""
+            path = ""
+    elif remote_url.startswith(("http://", "https://")):
+        try:
+            without_scheme = remote_url.split("://", 1)[1]
+            host, path = without_scheme.split("/", 1)
+        except ValueError:
+            host = ""
+            path = ""
+
+    if host and path:
+        path = path.removesuffix(".git")
+
+    return host, path
+
+
+def _get_gitlab_info(remote_url: str, gitlab_url_env: str | None) -> tuple[str, str]:
+    """Derive (gitlab_base_url, project_path) from a remote URL and optional env override."""
+    host, path = _parse_remote_url(remote_url)
+    project_path = path if (host and path) else ""
+
+    if gitlab_url_env:
+        gitlab_base = gitlab_url_env.rstrip("/")
+    elif host:
+        gitlab_base = f"https://{host}".rstrip("/")
+    else:
+        gitlab_base = "https://gitlab.com"
+
+    return gitlab_base, project_path
+
+
+def _create_gitlab_mr(
+    gitlab_base: str,
+    project_path: str,
+    branch_name: str,
+    target_branch: str,
+    token: str,
+    title: str,
+    description: str | None,
+) -> dict[str, Any]:
+    """Call the GitLab API to create a merge request. Returns result dict."""
+    project_id_encoded = quote(project_path, safe="")
+    api_url = f"{gitlab_base}/api/v4/projects/{project_id_encoded}/merge_requests"
+
+    payload: dict[str, Any] = {
+        "source_branch": branch_name,
+        "target_branch": target_branch,
+        "title": title,
+    }
+    if description:
+        payload["description"] = description
+
+    data_bytes = json.dumps(payload).encode("utf-8")
+    headers = {"PRIVATE-TOKEN": token, "Content-Type": "application/json"}
+
+    try:
+        request = Request(api_url, data=data_bytes, headers=headers, method="POST")
+        with urlopen(request, timeout=30) as response:
+            status_code = response.getcode()
+            body = response.read().decode("utf-8")
+    except HTTPError as e:
+        error_body = ""
+        try:
+            error_body = e.read().decode("utf-8")
+        except Exception:
+            error_body = str(e)
+        return {
+            "success": False,
+            "mr_url": None,
+            "error": (
+                f"GitLab API error (HTTP {e.code}): {error_body[:500]}. "
+                f"API URL: {api_url}. Project path: {project_path}"
+            ),
+        }
+    except URLError as e:
+        return {
+            "success": False,
+            "mr_url": None,
+            "error": f"Network error talking to GitLab ({api_url}): {e}",
+        }
+    except Exception as e:  # pragma: no cover - unexpected network errors
+        return {
+            "success": False,
+            "mr_url": None,
+            "error": f"Unexpected error talking to GitLab ({api_url}): {e}",
+        }
+
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        parsed = {}
+
+    if not (200 <= status_code < 300):
+        return {
+            "success": False,
+            "mr_url": None,
+            "error": (
+                f"GitLab API returned status {status_code}: {body[:500]}. "
+                f"API URL: {api_url}. Project path: {project_path}"
+            ),
+        }
+
+    mr_url = parsed.get("web_url")
+    if not mr_url:
+        return {
+            "success": False,
+            "mr_url": None,
+            "error": (f"GitLab API response did not include 'web_url'. Status: {status_code}, Response: {body[:500]}"),
+        }
+
+    return {"success": True, "mr_url": mr_url, "error": None}
+
+
 def _build_make_change_on_remote_copy(
     context: ToolContext,
 ) -> Callable[[str, str, str | None, str | None], dict[str, Any]]:
@@ -255,51 +496,12 @@ def _build_make_change_on_remote_copy(
             - Requires GitLab access token in GITLAB_TOKEN.
             - Optionally uses GITLAB_URL; if not set, inferred from 'origin' remote.
         """
-        # Ensure branch name is unique per run and valid for git
-        # - Append a timestamp (no ':' characters, which git disallows)
-        # - Sanitize any remaining invalid characters to '-'
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        base_name = re.sub(r"[^A-Za-z0-9._/-]", "-", branch_name.strip())
-        base_name = re.sub(r"-+", "-", base_name).strip("-")
-        if not base_name:
-            base_name = "sds-change"
-        branch_name = f"{base_name}-{timestamp}"
-
-        def _run_git(args: list[str]) -> dict[str, Any]:
-            try:
-                result = subprocess.run(
-                    ["git", *args],
-                    cwd=str(context.repo_root),
-                    capture_output=True,
-                    text=True,
-                    timeout=SUBPROCESS_TIMEOUT_SECS,
-                )
-            except subprocess.TimeoutExpired:
-                return {
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "",
-                    "stderr": f"git {' '.join(args)} timed out after {SUBPROCESS_TIMEOUT_SECS} seconds",
-                }
-            except Exception as e:  # pragma: no cover - unexpected system errors
-                return {
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "",
-                    "stderr": f"Error running git {' '.join(args)}: {e}",
-                }
-
-            return {
-                "success": result.returncode == 0,
-                "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            }
-
+        cwd = str(context.repo_root)
+        branch_name = _sanitize_branch_name(branch_name)
         git_outputs: list[str] = []
 
         # Ensure we are in a git repository
-        status = _run_git(["rev-parse", "--is-inside-work-tree"])
+        status = _run_git(["rev-parse", "--is-inside-work-tree"], cwd)
         git_outputs.append(status["stdout"] + status["stderr"])
         if not status["success"]:
             return {
@@ -312,7 +514,7 @@ def _build_make_change_on_remote_copy(
             }
 
         # Create and switch to the new branch
-        checkout = _run_git(["checkout", "-b", branch_name])
+        checkout = _run_git(["checkout", "-b", branch_name], cwd)
         git_outputs.append(checkout["stdout"] + checkout["stderr"])
         if not checkout["success"]:
             return {
@@ -324,75 +526,13 @@ def _build_make_change_on_remote_copy(
                 "error": f"Failed to create/switch to branch '{branch_name}'.",
             }
 
-        # Stage and commit changes
-        add_result = _run_git(["add", "-A"])
-        git_outputs.append(add_result["stdout"] + add_result["stderr"])
-        if not add_result["success"]:
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": None,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": "Failed to stage changes.",
-            }
-
-        # Force-add .sds directory (ignored by .gitignore) so generated scripts are captured
-        sds_dir = context.repo_root / ".sds"
-        if sds_dir.exists():
-            add_sds = _run_git(["add", "-f", str(sds_dir)])
-            git_outputs.append(add_sds["stdout"] + add_sds["stderr"])
-            if not add_sds["success"]:
-                return {
-                    "success": False,
-                    "branch": branch_name,
-                    "target_branch": None,
-                    "merge_request_url": None,
-                    "git_log": "".join(git_outputs),
-                    "error": "Failed to stage .sds directory.",
-                }
-
-        # Ensure there is something staged to commit
-        staged = _run_git(["diff", "--cached", "--name-only"])
-        git_outputs.append(staged["stdout"] + staged["stderr"])
-        if not staged["success"]:
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": None,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": "Failed to inspect staged changes.",
-            }
-
-        if not staged["stdout"].strip():
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": None,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": (
-                    "No staged changes to commit. "
-                    "Note: files under .sds are normally ignored by git; "
-                    "ensure you expect them to be committed."
-                ),
-            }
-
-        commit_result = _run_git(["commit", "-m", commit_message])
-        git_outputs.append(commit_result["stdout"] + commit_result["stderr"])
-        if not commit_result["success"]:
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": None,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": "Failed to commit changes.",
-            }
+        # Stage and commit all changes
+        commit_error = _stage_and_commit(cwd, context.repo_root, commit_message, branch_name, git_outputs)
+        if commit_error is not None:
+            return commit_error
 
         # Push branch to origin
-        push_result = _run_git(["push", "-u", "origin", branch_name])
+        push_result = _run_git(["push", "-u", "origin", branch_name], cwd)
         git_outputs.append(push_result["stdout"] + push_result["stderr"])
         if not push_result["success"]:
             return {
@@ -405,7 +545,7 @@ def _build_make_change_on_remote_copy(
             }
 
         # Detect GitLab project and target branch
-        remote_result = _run_git(["remote", "get-url", "origin"])
+        remote_result = _run_git(["remote", "get-url", "origin"], cwd)
         git_outputs.append(remote_result["stdout"] + remote_result["stderr"])
         if not remote_result["success"]:
             return {
@@ -428,44 +568,10 @@ def _build_make_change_on_remote_copy(
                 "error": "Origin remote URL is empty.",
             }
 
-        # Infer host and project path from remote URL
-        gitlab_url_env = os.getenv("GITLAB_URL")
-        host = ""
-        project_path = ""
+        gitlab_base, project_path = _get_gitlab_info(remote_url, os.getenv("GITLAB_URL"))
 
-        if remote_url.startswith("git@"):
-            # e.g. git@gitlab.com:group/project.git
-            try:
-                _, host_and_path = remote_url.split("@", 1)
-                host, path = host_and_path.split(":", 1)
-            except ValueError:
-                host = ""
-                path = ""
-        elif remote_url.startswith(("http://", "https://")):
-            try:
-                without_scheme = remote_url.split("://", 1)[1]
-                host, path = without_scheme.split("/", 1)
-            except ValueError:
-                host = ""
-                path = ""
-        else:
-            host = ""
-            path = ""
-
-        if host and path:
-            path = path.removesuffix(".git")
-            project_path = path
-
-        # Determine GitLab base URL
-        if gitlab_url_env:
-            gitlab_base = gitlab_url_env.rstrip("/")
-        elif host:
-            gitlab_base = f"https://{host}".rstrip("/")
-        else:
-            gitlab_base = "https://gitlab.com"
-
-        # Validate that we have a project path
         if not project_path:
+            host, path = _parse_remote_url(remote_url)
             return {
                 "success": False,
                 "branch": branch_name,
@@ -475,14 +581,13 @@ def _build_make_change_on_remote_copy(
                 "error": (
                     f"Unable to infer GitLab project path from origin URL '{remote_url}'. "
                     f"Parsed host='{host}', path='{path}'. "
-                    "Ensure origin points to a GitLab repo with format: git@host:group/project.git or https://host/group/project.git"
+                    "Ensure origin points to a GitLab repo with format: "
+                    "git@host:group/project.git or https://host/group/project.git"
                 ),
             }
 
         # Determine default target branch (origin HEAD -> refs/remotes/origin/<branch>)
-        target_branch_result = _run_git(
-            ["symbolic-ref", "refs/remotes/origin/HEAD"],
-        )
+        target_branch_result = _run_git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
         git_outputs.append(target_branch_result["stdout"] + target_branch_result["stderr"])
         if target_branch_result["success"]:
             ref = target_branch_result["stdout"].strip()
@@ -501,103 +606,31 @@ def _build_make_change_on_remote_copy(
                 "error": "GITLAB_TOKEN environment variable is not set.",
             }
 
-        # Create merge request via GitLab API
-        # URL-encode the project path (GitLab API requires group%2Fproject format)
-        project_id_encoded = quote(project_path, safe="")
-        api_url = f"{gitlab_base}/api/v4/projects/{project_id_encoded}/merge_requests"
+        mr_result = _create_gitlab_mr(
+            gitlab_base,
+            project_path,
+            branch_name,
+            target_branch,
+            gitlab_token,
+            mr_title or commit_message,
+            mr_description,
+        )
 
-        payload: dict[str, Any] = {
-            "source_branch": branch_name,
-            "target_branch": target_branch,
-            "title": mr_title or commit_message,
-        }
-        if mr_description:
-            payload["description"] = mr_description
-
-        data_bytes = json.dumps(payload).encode("utf-8")
-        headers = {
-            "PRIVATE-TOKEN": gitlab_token,
-            "Content-Type": "application/json",
-        }
-
-        try:
-            request = Request(api_url, data=data_bytes, headers=headers, method="POST")
-            with urlopen(request, timeout=30) as response:
-                status_code = response.getcode()
-                body = response.read().decode("utf-8")
-        except HTTPError as e:
-            error_body = ""
-            try:
-                error_body = e.read().decode("utf-8")
-            except Exception:
-                error_body = str(e)
-            # Include more context in error message
+        if not mr_result["success"]:
             return {
                 "success": False,
                 "branch": branch_name,
                 "target_branch": target_branch,
                 "merge_request_url": None,
                 "git_log": "".join(git_outputs),
-                "error": (
-                    f"GitLab API error (HTTP {e.code}): {error_body[:500]}. "
-                    f"API URL: {api_url}. Project path: {project_path}"
-                ),
-            }
-        except URLError as e:
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": target_branch,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": f"Network error talking to GitLab ({api_url}): {e}",
-            }
-        except Exception as e:  # pragma: no cover - unexpected network errors
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": target_branch,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": f"Unexpected error talking to GitLab ({api_url}): {e}",
-            }
-
-        try:
-            parsed = json.loads(body)
-        except json.JSONDecodeError:
-            parsed = {}
-
-        if not (200 <= status_code < 300):
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": target_branch,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": (
-                    f"GitLab API returned status {status_code}: {body[:500]}. "
-                    f"API URL: {api_url}. Project path: {project_path}"
-                ),
-            }
-
-        mr_url = parsed.get("web_url")
-        if not mr_url:
-            return {
-                "success": False,
-                "branch": branch_name,
-                "target_branch": target_branch,
-                "merge_request_url": None,
-                "git_log": "".join(git_outputs),
-                "error": (
-                    f"GitLab API response did not include 'web_url'. Status: {status_code}, Response: {body[:500]}"
-                ),
+                "error": mr_result["error"],
             }
 
         return {
             "success": True,
             "branch": branch_name,
             "target_branch": target_branch,
-            "merge_request_url": mr_url,
+            "merge_request_url": mr_result["mr_url"],
             "git_log": "".join(git_outputs),
             "error": None,
         }
