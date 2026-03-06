@@ -11,16 +11,16 @@ from typing import Any
 
 import litellm
 
-from app_operator.logger import logger
-from app_operator.prompts import DSPyConfigProtocol
-from app_operator.prompts.rlm import render_fix_error_task_prompt
-from app_operator.rlm.environment import (
+from app_operator.cli_agent.rlm.environment import (
     ActionType,
     RLMCall,
     RLMContext,
     RLMEnvironment,
     _validate_file_refs,
 )
+from app_operator.logger import logger
+from app_operator.prompts import DSPyConfigProtocol
+from app_operator.prompts.rlm import render_fix_error_task_prompt
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from libs.agent_cli.llm_client import LiteLLMClient
 

@@ -272,7 +272,7 @@ class TestLiteLLMClient:
 
     def test_compact_history_tokens_tracked(self):
         """_compact_history() tokens are tracked via _llm_client, not lost."""
-        from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
+        from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 
         recorder = mock.MagicMock()
         agent = RecursiveDeploymentAgent(
