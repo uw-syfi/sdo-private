@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from app_operator.prompts.trajectory_prompts import get_system_prompt
+
 if TYPE_CHECKING:
     from app_operator.trajectory import TrajectoryRecorderProtocol
 
@@ -481,3 +483,13 @@ def reset_loader() -> None:
     """
     global _loader
     _loader = None
+
+
+__all__ = [
+    "DSPyConfigProtocol",
+    "PromptLoader",
+    "SEED_TEMPLATE_MAP",
+    "get_loader",
+    "get_system_prompt",
+    "reset_loader",
+]

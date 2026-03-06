@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from app_operator.dspy_integration.config import DSPyConfig
+    from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.config import OperatorConfig

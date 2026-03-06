@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from app_operator.dspy_integration.config import DSPyConfig
+    from app_operator.dspy_integration import DSPyConfig
     from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
 
