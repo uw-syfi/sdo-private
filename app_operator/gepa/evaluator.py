@@ -115,6 +115,7 @@ class SDSEvaluator:
         metrics: dict[str, Callable],
         agent_factory: Callable,
         templates_dir: Path,
+        runners: dict[str, Any] | None = None,
     ) -> None:
         """
         Args:
@@ -122,10 +123,14 @@ class SDSEvaluator:
                 Each takes (example, trajectory_data) -> float.
             agent_factory: Callable that creates a CodingAgent instance.
             templates_dir: Path to templates (for injecting candidate prompts).
+            runners: Optional mapping of agent_type -> AgentRunner. When
+                provided, ``_run_agent`` dispatches through these runners
+                instead of importing cli_agent agents directly.
         """
         self.metrics = metrics
         self.agent_factory = agent_factory
         self.templates_dir = templates_dir
+        self.runners = runners or {}
 
     @staticmethod
     def _check_repos_clean(examples: list[EvaluationExample]) -> None:
@@ -294,7 +299,7 @@ class SDSEvaluator:
                 prompts_module._loader = prompts_module.PromptLoader(templates_dir=templates_dir)
 
         try:
-            self._run_agent(example, repo_path, agent, filesystem, recorder)
+            self._run_agent(example, repo_path, agent, filesystem, recorder, self.runners)
         finally:
             if saved_loader is not None:
                 with prompts_module._loader_lock:
@@ -309,44 +314,13 @@ class SDSEvaluator:
             return {}
 
     @staticmethod
-    def _run_agent(example, repo_path, agent, filesystem, recorder):
+    def _run_agent(example, repo_path, agent, filesystem, recorder, runners):
         """Dispatch to the appropriate agent based on example type."""
-        if example.agent_type == "deployer":
-            from app_operator.cli_agent.agents.deployer import (
-                DeploymentAgent,
-            )
-
-            deployer = DeploymentAgent(
-                repo_path=repo_path,
-                coding_agent=agent,
-                filesystem=filesystem,
-                recorder=recorder,
-            )
-            deployer.run(max_attempts=2)
-
-        elif example.agent_type == "monitor":
-            from app_operator.cli_agent.agents.app_monitor import AppMonitor
-
-            monitor = AppMonitor(
-                repo_path=repo_path,
-                agent=agent,
-                filesystem=filesystem,
-                recorder=recorder,
-            )
-            monitor.run(interval=5, max_checks=1)
-
-        elif example.agent_type == "code_analyzer":
-            from app_operator.cli_agent.agents.code_analyzer import (
-                CodeAnalyzerAgent,
-            )
-
-            analyzer = CodeAnalyzerAgent(
-                repo_path=repo_path,
-                coding_agent=agent,
-                filesystem=filesystem,
-                recorder=recorder,
-            )
-            analyzer.run()
+        runner = runners.get(example.agent_type)
+        if runner is None:
+            logger.warning(f"No runner registered for agent_type={example.agent_type!r}; skipping.")
+            return
+        runner.run(repo_path, agent, filesystem, recorder)
 
     @staticmethod
     def _agent_type_to_phase(agent_type: str) -> str:

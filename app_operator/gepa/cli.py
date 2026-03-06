@@ -18,6 +18,8 @@ from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
+from app_operator.cli_agent.factory import create_agent_from_config
+from app_operator.cli_agent.runners import CodeAnalyzerRunner, DeployerRunner, MonitorRunner
 from app_operator.config import GEPAConfig, load_config
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.evaluator import (
@@ -258,6 +260,11 @@ def _build_optimizer(args, adapter: SDSPromptAdapter) -> GEPAOptimizer:
     """Build a fully assembled GEPAOptimizer from CLI args and adapter."""
     config = _build_config(args)
     agent_type = args.agent_type or "deployer"
+    runners = {
+        "deployer": DeployerRunner(),
+        "monitor": MonitorRunner(),
+        "code_analyzer": CodeAnalyzerRunner(),
+    }
     return GEPAOptimizer(
         config=config,
         adapter=adapter,
@@ -266,6 +273,7 @@ def _build_optimizer(args, adapter: SDSPromptAdapter) -> GEPAOptimizer:
             metrics=_get_metrics_for_agent(agent_type),
             agent_factory=_create_agent_factory(),
             templates_dir=adapter.templates_dir,
+            runners=runners,
         ),
     )
 
@@ -292,7 +300,6 @@ def _build_examples(repo_paths: list[str], agent_type: str) -> list[EvaluationEx
 
 def _create_agent_factory() -> Callable:
     """Create a factory for CodingAgent instances."""
-    from app_operator.cli_agent.factory import create_agent_from_config
 
     def factory():
         config = load_config(".")
