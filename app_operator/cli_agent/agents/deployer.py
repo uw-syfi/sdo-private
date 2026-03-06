@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
 from app_operator.config import DeploymentConfig, OperatorConfig
+from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.healthcheck import run_health_check
@@ -39,7 +40,6 @@ from app_operator.trajectory import (
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
 FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
-FIX_SUMMARY_FILENAME = "fix_summary.md"
 FIX_SUMMARY_MAX_LENGTH = 2000  # characters before truncating agent response summary
 FIX_SUMMARY_TRUNCATE_AT = 1900  # characters to keep when truncating summary
 MONITOR_INITIAL_DELAY_SECS = 15.0  # seconds before first progress summary
