@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.config import OperatorConfig
+from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
@@ -142,7 +143,7 @@ class HealthCheckTask(MonitoringTask):
 
             # End the monitoring phase (handled by context manager exit, defaulting to success)
 
-        except Exception as e:
+        except (AgentError, OSError, RuntimeError) as e:
             logger.error(f"Agent analysis failed: {e}")
             monitor.recorder.add_assistant_message(f"Analysis failed: {e}")
             # Ensure we mark phase as failed

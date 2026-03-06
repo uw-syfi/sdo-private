@@ -56,6 +56,6 @@ def run_command(args: argparse.Namespace) -> int:
 
         return 0
 
-    except Exception as e:
+    except (ImportError, OSError, ValueError, RuntimeError) as e:
         logger.error(f"Error visualizing graph: {e}")
         return 1

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from jinja2 import Environment, meta
+from jinja2 import Environment, TemplateSyntaxError, meta
 
 from app_operator.logger import logger
 
@@ -104,7 +104,7 @@ class SDSPromptAdapter:
 
         try:
             new_vars = self._extract_variables(content)
-        except Exception as e:
+        except (ValueError, RuntimeError, TemplateSyntaxError) as e:
             logger.warning(f"Template parse failed for {template_name}: {e}")
             return False
 

@@ -443,7 +443,7 @@ class TrajectoryRecorder:
 
             # Update symlink to latest trajectory
             self._update_latest_link()
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             # Log error but don't crash
             logger.warning(f"Failed to write trajectory file: {e}")
 
@@ -520,7 +520,7 @@ class TrajectoryRecorder:
         self.start_phase(phase, context)
         try:
             yield self
-        except Exception:
+        except BaseException:
             self.end_phase("failed")
             raise
         else:

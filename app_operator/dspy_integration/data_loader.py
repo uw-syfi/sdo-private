@@ -344,7 +344,7 @@ class TrajectoryDataLoader:
         try:
             if health_check_path.exists():
                 return health_check_path.read_text()
-        except Exception as e:
+        except OSError as e:
             logger.debug(f"Could not read health check: {e}")
 
         return None

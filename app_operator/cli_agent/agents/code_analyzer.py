@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.config import OperatorConfig
+from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
@@ -72,7 +73,7 @@ class CodeAnalyzerAgent:
                 files = files[:100] + ["... (truncated)"]
 
             return "\n".join(files)
-        except Exception:
+        except OSError:
             return "Unable to generate file tree"
 
     def run(self) -> bool:
@@ -141,7 +142,7 @@ class CodeAnalyzerAgent:
                 r.add_assistant_message(error_msg)
                 return False
 
-            except Exception as e:
+            except (AgentError, OSError, RuntimeError) as e:
                 logger.error(f"Code analysis failed: {e}")
                 # The context manager catches exception and ends phase with "failed"
                 r.add_assistant_message(f"Code analysis failed: {e}")

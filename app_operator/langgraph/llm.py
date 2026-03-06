@@ -64,7 +64,7 @@ def create_chat_model(
                 kwargs["thinking_budget"] = thinking_budget
                 kwargs["include_thoughts"] = True
             return ChatGoogleGenerativeAI(**kwargs)
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             if "API key required" in str(e):
                 logger.info("Gemini API key not found, falling back to Vertex AI")
                 return ChatGoogleGenerativeAI(**_build_vertex_kwargs(model, location, thinking_budget))

@@ -133,7 +133,7 @@ class EnrichedTrajectoryDataLoader:
         for traj_file in traj_files:
             try:
                 examples.extend(self._load_from_file(traj_file, success_only, phase))
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, ValueError, KeyError) as e:
                 print(f"Warning: Failed to load {traj_file}: {e}")
 
         return examples

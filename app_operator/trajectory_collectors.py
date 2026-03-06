@@ -60,7 +60,7 @@ def collect_gemini_sessions(
                     shutil.copy2(session_file, dest_file)
                     sessions_copied.append(str(dest_file.relative_to(sds_dir)))
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.warning(f"Failed to collect Gemini sessions: {e}")
 
     return sessions_copied

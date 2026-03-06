@@ -170,9 +170,9 @@ def generate_scripts(
         except (AgentError, DeploymentError, FileSystemError) as e:
             r.set_phase_status("failed")
             return False, f"Failed to generate scripts: {e}"
-        except Exception as e:
-            # Catch any unexpected errors and log them
-            logger.error("Unexpected error during script generation: %s", e)
+        except (OSError, RuntimeError, ValueError) as e:
+            # Top-level catch to prevent uncaught exception — specific types are too numerous
+            logger.error("Unexpected error during script generation: %s", e, exc_info=True)
             r.set_phase_status("failed")
             return False, f"Unexpected error during script generation: {e}"
 
@@ -245,7 +245,7 @@ def _generate_script(
     except AgentError as e:
         recorder.add_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
-    except Exception as e:
+    except (OSError, RuntimeError, ValueError) as e:
         logger.warning("Unexpected error in _generate_script: %s", e)
         recorder.add_assistant_message(f"Script generation failed: {e}")
         return False, str(e)
@@ -684,7 +684,7 @@ class DeploymentAgent:
             self.filesystem.write_text(summary_file, consolidated_summary)
             logger.info(f"Updated consolidated summary at {summary_file}")
 
-        except Exception as e:
+        except (AgentError, OSError, RuntimeError) as e:
             logger.warning(f"Failed to consolidate summary: {e}")
             # Fallback: append, but cap to prevent unbounded growth
             _max_fallback = 20_000  # characters
@@ -739,7 +739,7 @@ class DeploymentAgent:
                 recorder=self.recorder,
                 fix_summary_consolidation=self.operator_config.phase.fix_summary_consolidation,
             )
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.error(f"Failed to prepare fix prompt: {e}")
             self.recorder.add_assistant_message(f"Failed to prepare fix prompt: {e}")
             return False
@@ -803,7 +803,7 @@ class DeploymentAgent:
             logger.error(f"Agent failed to provide fix: {e}")
             self.recorder.add_assistant_message(f"Failed to provide fix: {e}")
             return False
-        except Exception as e:
-            logger.error(f"Unexpected error while getting fix from agent: {e}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error(f"Unexpected error while getting fix from agent: {e}", exc_info=True)
             self.recorder.add_assistant_message(f"Unexpected error during fix attempt: {e}")
             return False

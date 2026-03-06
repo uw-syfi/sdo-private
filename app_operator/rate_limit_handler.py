@@ -154,7 +154,7 @@ def run_with_rate_limit_handling(
                 )
                 logger.error(error_msg)
                 return None, False, error_msg
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
             error_msg = f"{operation_name} failed with error: {e!s}"
             logger.error(error_msg)
             return None, False, error_msg
@@ -223,7 +223,7 @@ def run_subprocess_with_rate_limit_handling(
                 logger.info(f"{operation_name} succeeded after {attempt} retry(ies)")
             return result, True, None
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             error_msg = f"{operation_name} raised exception: {e!s}"
             logger.error(error_msg)
             return None, False, error_msg

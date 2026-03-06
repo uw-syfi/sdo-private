@@ -185,7 +185,7 @@ class SubprocessRunner:
                     exit_code=-1,
                 )
             return result
-        except Exception as e:
+        except RuntimeError as e:
             result: CommandResult = {
                 "success": False,
                 "exit_code": -1,
@@ -332,10 +332,10 @@ class SubprocessRunner:
             try:
                 self.process.terminate()
                 self.process.wait(timeout=2)
-            except (subprocess.TimeoutExpired, Exception):
+            except (subprocess.TimeoutExpired, OSError):
                 try:
                     self.process.kill()
-                except Exception:
+                except OSError:
                     pass
 
     def get_recent_output(self, num_lines: int = 20) -> str:

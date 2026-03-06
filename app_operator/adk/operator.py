@@ -105,8 +105,9 @@ class AdkOperator(OperatorBase):
             self.recorder.finalize("completed")
             return 0
 
-        except Exception as e:
-            logger.error(f"Operator run failed: {e}")
+        except (OSError, RuntimeError, ValueError) as e:
+            # Top-level catch to prevent uncaught exception — specific types are too numerous
+            logger.error(f"Operator run failed: {e}", exc_info=True)
             self.recorder.finalize("failed")
             return 1
         finally:
@@ -261,8 +262,8 @@ class AdkOperator(OperatorBase):
                 r.add_assistant_message("Deployment Loop failed.")
                 return False
 
-            except Exception as e:
-                logger.error(f"Deployment Loop failed: {e}")
+            except (OSError, RuntimeError, ValueError) as e:
+                logger.error(f"Deployment Loop failed: {e}", exc_info=True)
                 r.add_assistant_message(f"Deployment Loop failed: {e}")
                 return False
 
@@ -380,7 +381,7 @@ class AdkOperator(OperatorBase):
                             max_attempt = num
                 except ValueError:
                     continue
-        except Exception:
+        except OSError:
             pass
 
         return max_attempt + 1

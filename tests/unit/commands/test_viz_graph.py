@@ -140,7 +140,7 @@ class TestRunCommand:
     @patch("app_operator.langgraph.viz_graph.Config")
     def test_run_command_build_graph_exception(self, mock_config, mock_build_graph):
         """Test run_command handles exception from build_graph."""
-        mock_build_graph.side_effect = Exception("Graph build failed")
+        mock_build_graph.side_effect = RuntimeError("Graph build failed")
 
         args = argparse.Namespace(output=None)
         exit_code = run_command(args)
@@ -175,7 +175,7 @@ class TestRunCommand:
         # Setup mocks
         mock_graph = MagicMock()
         mock_compiled = MagicMock()
-        mock_compiled.draw_mermaid_png.side_effect = Exception("PNG generation failed")
+        mock_compiled.draw_mermaid_png.side_effect = RuntimeError("PNG generation failed")
         mock_graph.get_graph.return_value = mock_compiled
         mock_build_graph.return_value = mock_graph
 
@@ -289,7 +289,7 @@ class TestRunCommand:
         """Test run_command handles exception from get_graph."""
         # Setup mocks
         mock_graph = MagicMock()
-        mock_graph.get_graph.side_effect = Exception("Get graph failed")
+        mock_graph.get_graph.side_effect = RuntimeError("Get graph failed")
         mock_build_graph.return_value = mock_graph
 
         args = argparse.Namespace(output=None)

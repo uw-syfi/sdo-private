@@ -73,7 +73,7 @@ def test_init_llm_failure(repo_path, mock_config, memory_fs):
     with (
         patch(
             "app_operator.langgraph.operator.build_llm",
-            side_effect=Exception("LLM Error"),
+            side_effect=ValueError("LLM Error"),
         ),
         patch("app_operator.langgraph.operator.TrajectoryRecorder"),
     ):
@@ -145,7 +145,7 @@ def test_run_exception(repo_path, mock_config, memory_fs):
     memory_fs.mkdir(repo_path)
 
     mock_graph = MagicMock()
-    mock_graph.invoke.side_effect = Exception("Unexpected")
+    mock_graph.invoke.side_effect = RuntimeError("Unexpected")
 
     mock_recorder = MagicMock()
 

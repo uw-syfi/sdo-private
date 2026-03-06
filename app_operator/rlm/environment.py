@@ -33,7 +33,7 @@ def _estimate_tokens(text: str) -> int:
 
         enc = tiktoken.get_encoding("cl100k_base")
         return len(enc.encode(text))
-    except Exception:
+    except (ImportError, ValueError):
         pass
 
     # Fallback: character-ratio heuristic
@@ -549,6 +549,7 @@ class RLMEnvironment:
             return output
 
         except Exception as e:
+            # Broad catch required: exec() runs LLM-generated code that may raise any exception type
             error_msg = f"Code execution failed: {e!s}"
             logger.error(error_msg)
 

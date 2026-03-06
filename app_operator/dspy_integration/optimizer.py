@@ -423,7 +423,7 @@ class PromptOptimizer:
 
             loader = PromptLoader(templates_dir=self.prompts_dir / "templates")
             return loader.render_template(template_name, prompt_kwargs)
-        except Exception as e:
+        except (ImportError, OSError, RuntimeError, ValueError) as e:
             logger.warning(
                 "Failed to re-render prompt '%s' from kwargs (template=%s): %s",
                 prompt_name,
@@ -537,7 +537,7 @@ class PromptOptimizer:
                 "optimized_module": optimized_module,
             }
 
-        except Exception as e:
+        except (RuntimeError, ValueError, AttributeError) as e:
             logger.error("Optimization failed: %s", e)
             return {
                 "success": False,
@@ -605,7 +605,7 @@ class PromptOptimizer:
                 prediction = module(**dict(dspy_ex.inputs()))
                 score = metric(traj_ex, prediction)
                 scores.append(score)
-            except Exception:
+            except (RuntimeError, ValueError, AttributeError):
                 pass
 
         return sum(scores) / len(scores) if scores else None
@@ -674,7 +674,7 @@ class PromptOptimizer:
                         "optimized": True,
                         "module_file": f"{prompt_name}.dspy.json",
                     }
-                except Exception as e:
+                except (OSError, RuntimeError, TypeError, ValueError) as e:
                     logger.error("Failed to save module %s: %s", prompt_name, e)
                     metadata["prompts"][prompt_name] = {
                         "optimized": False,
@@ -775,5 +775,5 @@ class PromptOptimizer:
             with open(output_file, "w") as f:
                 json.dump(module_state, f, indent=2)
 
-        except Exception as e:
+        except (OSError, TypeError, ValueError, AttributeError) as e:
             raise RuntimeError(f"Failed to save DSPy module: {e}") from e

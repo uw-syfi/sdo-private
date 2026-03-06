@@ -174,7 +174,7 @@ def run_script(
         stderr = f"Command timed out after {timeout} seconds"
         exit_code = -1
 
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         success = False
         stdout = ""
         stderr = f"Error: {e!s}"

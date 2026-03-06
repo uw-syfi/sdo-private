@@ -69,7 +69,7 @@ def _build_ls(context: ToolContext) -> Callable[[str], str]:
             entries = sorted(p.name for p in target.iterdir())
             result = "\n".join(entries)
             return result
-        except Exception as e:
+        except (ValueError, OSError) as e:
             return f"Error: {e!s}"
 
     return ls  # type: ignore[reportReturnType]
@@ -96,7 +96,7 @@ def _build_glob(context: ToolContext) -> Callable[[str], list[str]]:
                         continue
             results = sorted(results)
             return results
-        except Exception as e:
+        except (ValueError, OSError) as e:
             return [f"Error: {e!s}"]
 
     return glob  # type: ignore[reportReturnType]
@@ -110,7 +110,7 @@ def _build_read(context: ToolContext) -> Callable[[str], str]:
             target = context.resolve_path(path)
             content = context.filesystem.read_text(target)
             return content
-        except Exception as e:
+        except (ValueError, OSError) as e:
             return f"Error: {e!s}"
 
     return read  # type: ignore[reportReturnType]
@@ -133,7 +133,7 @@ def _build_grep(context: ToolContext) -> Callable[[str, str], list[str]]:
                 if file_path.is_file():
                     matches.extend(_grep_file(regex, file_path, context.repo_root))
             return matches
-        except Exception as e:
+        except (ValueError, OSError, re.error) as e:
             return [f"Error: {e!s}"]
 
     return grep  # type: ignore[reportReturnType]
@@ -143,7 +143,7 @@ def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path) -> list[str]
     results = []
     try:
         content = file_path.read_text(errors="ignore")
-    except Exception:
+    except OSError:
         return results
 
     for idx, line in enumerate(content.splitlines(), start=1):
@@ -166,7 +166,7 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
             context.filesystem.write_text(target, content)
             result = f"Wrote {len(content)} bytes to {path}"
             return result
-        except Exception as e:
+        except (ValueError, OSError) as e:
             return f"Error: {e!s}"
 
     return write_file  # type: ignore[reportReturnType]
@@ -209,7 +209,7 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
                 "stdout": "",
                 "stderr": error_msg,
             }
-        except Exception as e:
+        except OSError as e:
             error_msg = f"Error: {e!s}"
             return {
                 "success": False,
@@ -238,7 +238,7 @@ def _run_git(args: list[str], cwd: str) -> dict[str, Any]:
             "stdout": "",
             "stderr": f"git {' '.join(args)} timed out after 120 seconds",
         }
-    except Exception as e:  # pragma: no cover - unexpected system errors
+    except OSError as e:  # pragma: no cover - unexpected system errors
         return {
             "success": False,
             "exit_code": -1,
@@ -413,7 +413,7 @@ def _create_gitlab_mr(
         error_body = ""
         try:
             error_body = e.read().decode("utf-8")
-        except Exception:
+        except OSError:
             error_body = str(e)
         return {
             "success": False,
@@ -429,7 +429,7 @@ def _create_gitlab_mr(
             "mr_url": None,
             "error": f"Network error talking to GitLab ({api_url}): {e}",
         }
-    except Exception as e:  # pragma: no cover - unexpected network errors
+    except (OSError, ValueError) as e:  # pragma: no cover - unexpected network errors
         return {
             "success": False,
             "mr_url": None,
@@ -498,6 +498,7 @@ def _build_make_change_on_remote_copy(
         """
         cwd = str(context.repo_root)
         branch_name = _sanitize_branch_name(branch_name)
+
         git_outputs: list[str] = []
 
         # Ensure we are in a git repository

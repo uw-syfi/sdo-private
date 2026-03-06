@@ -98,7 +98,7 @@ def create_generate_script_prompt(
             code_analysis = filesystem.read_text(ca_path)
         if filesystem.exists(di_path):
             deployment_issues = filesystem.read_text(di_path)
-    except Exception:
+    except OSError:
         # Ignore filesystem errors during prompt generation
         pass
 

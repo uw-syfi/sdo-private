@@ -45,8 +45,9 @@ def run_command(args: argparse.Namespace) -> int:
         logger.error(f"Error: {e}")
         return 1
 
-    except Exception as e:
-        logger.error(f"✗ Unexpected error: {e}")
+    except (OSError, RuntimeError) as e:
+        # Top-level catch to prevent uncaught exception — specific types are too numerous
+        logger.error(f"✗ Unexpected error: {e}", exc_info=True)
         return 1
 
     return exit_code

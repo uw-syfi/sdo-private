@@ -30,7 +30,7 @@ def _write_to_log(log_file, header: str, stdout: str = "", stderr: str = "") -> 
             log_file.write(stderr)
             log_file.write("\n")
         log_file.flush()
-    except Exception as e:
+    except OSError as e:
         # Best-effort logging: swallow write errors so they don't mask the
         # health check result that is about to be returned to the caller.
         logger.debug("Failed to write health check log entry: %s", e)
@@ -67,7 +67,7 @@ def run_health_check(
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
             log_file = log_stack.enter_context(log_file_path.open("w"))
             logger.info(f"  Logging health check output to: {log_file_path}")
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"Could not open health check log file {log_file_path}: {e}")
 
     start_time = time.time()
@@ -149,7 +149,7 @@ def run_health_check(
             "stdout": stdout_output,
             "stderr": stderr_output,
         }
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         duration = time.time() - start_time
         error_msg = f"Failed to run health check: {e}"
 
@@ -170,7 +170,7 @@ def run_health_check(
     finally:
         try:
             log_stack.close()
-        except Exception as e:
+        except OSError as e:
             # Best-effort cleanup: swallow close errors so the caller
             # receives the health check result unaffected.
             logger.debug("Failed to close health check log file: %s", e)
