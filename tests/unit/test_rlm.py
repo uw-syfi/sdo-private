@@ -2,12 +2,7 @@
 
 import pytest
 
-from app_operator.dspy_integration.metrics import (
-    DeploymentSuccessMetric,
-    IterationEfficiencyMetric,
-    TokenEfficiencyMetric,
-)
-from app_operator.rlm.environment import (
+from app_operator.cli_agent.rlm.environment import (
     ActionType,
     RLMCall,
     RLMContext,
@@ -15,12 +10,17 @@ from app_operator.rlm.environment import (
     _estimate_tokens,
     _validate_file_refs,
 )
-from app_operator.rlm.metrics import (
+from app_operator.cli_agent.rlm.metrics import (
     RLMCompositeMetric,
     RLMContextUtilizationMetric,
     RLMEfficiencyMetric,
 )
-from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
+from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
+from app_operator.dspy_integration.metrics import (
+    DeploymentSuccessMetric,
+    IterationEfficiencyMetric,
+    TokenEfficiencyMetric,
+)
 from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
 
 
@@ -1213,7 +1213,7 @@ class TestEstimateTokensTiktoken:
         text = "Hello, world! This is a test."
         enc = tk.get_encoding("cl100k_base")
         expected = len(enc.encode(text))
-        from app_operator.rlm.environment import _estimate_tokens
+        from app_operator.cli_agent.rlm.environment import _estimate_tokens
 
         assert _estimate_tokens(text) == expected
 
@@ -1221,7 +1221,7 @@ class TestEstimateTokensTiktoken:
         """Without tiktoken, falls back to heuristic (no exception)."""
         import unittest.mock as mock
 
-        from app_operator.rlm.environment import _estimate_tokens
+        from app_operator.cli_agent.rlm.environment import _estimate_tokens
 
         with mock.patch.dict("sys.modules", {"tiktoken": None}):
             # builtins.__import__ will raise ImportError for tiktoken
@@ -1254,7 +1254,7 @@ class TestRunTaskUsesRenderFunction:
         with (
             mock.patch("litellm.completion", side_effect=fake_completion),
             mock.patch(
-                "app_operator.rlm.recursive_agent.render_fix_error_task_prompt",
+                "app_operator.cli_agent.rlm.recursive_agent.render_fix_error_task_prompt",
                 return_value="MANDATORY FIRST STEPS mock prompt",
             ) as mock_render,
         ):
@@ -1289,7 +1289,7 @@ class TestRunTaskUsesRenderFunction:
         with (
             mock.patch("litellm.completion", side_effect=fake_completion),
             mock.patch(
-                "app_operator.rlm.recursive_agent.render_fix_error_task_prompt",
+                "app_operator.cli_agent.rlm.recursive_agent.render_fix_error_task_prompt",
                 return_value="RENDERED_WRAPPER_CONTENT",
             ),
         ):

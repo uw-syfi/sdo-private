@@ -5,7 +5,7 @@ import unittest.mock as mock
 import pytest
 
 from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
-from app_operator.rlm.environment import RLMContext, RLMEnvironment
+from app_operator.cli_agent.rlm.environment import RLMContext, RLMEnvironment
 
 # ---------------------------------------------------------------------------
 # Helpers

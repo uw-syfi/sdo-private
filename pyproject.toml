@@ -203,11 +203,10 @@ source_modules = [
 forbidden_modules = ["app_operator.ui"]
 
 [[tool.importlinter.contracts]]
-name = "rlm must not import from operator runtimes"
+name = "cli_agent.rlm must not import from operator runtimes"
 type = "forbidden"
-source_modules = ["app_operator.rlm"]
+source_modules = ["app_operator.cli_agent.rlm"]
 forbidden_modules = [
-    "app_operator.cli_agent",
     "app_operator.langgraph",
     "app_operator.adk",
 ]
@@ -292,6 +291,6 @@ forbidden_modules = [
     "app_operator.adk",
     "app_operator.dspy_integration",
     "app_operator.fault_injection",
-    "app_operator.rlm",
     "app_operator.ui",
 ]
+
