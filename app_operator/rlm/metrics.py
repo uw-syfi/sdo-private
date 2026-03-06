@@ -6,10 +6,10 @@ These metrics evaluate how well RLM-based prompts utilize the RLM paradigm:
 - Token savings (comparing RLM vs direct context passing)
 """
 
-import json
 from typing import Any
 
 from app_operator.logger import logger
+from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
 
 
 class RLMEfficiencyMetric:
@@ -190,17 +190,27 @@ class RLMCompositeMetric:
         self.rlm_efficiency_weight = rlm_efficiency_weight
         self.rlm_context_weight = rlm_context_weight
 
-        # Import standard metrics
-        from app_operator.dspy_integration.metrics import (
-            DeploymentSuccessMetric,
-            IterationEfficiencyMetric,
-            TokenEfficiencyMetric,
-        )
+        # Callers must inject standard metrics — rlm must not import dspy_integration.
+        if success_metric is None:
+            raise ValueError(
+                "success_metric is required. Pass an instance of DeploymentSuccessMetric "
+                "from app_operator.dspy_integration.metrics."
+            )
+        if efficiency_metric is None:
+            raise ValueError(
+                "efficiency_metric is required. Pass an instance of IterationEfficiencyMetric "
+                "from app_operator.dspy_integration.metrics."
+            )
+        if token_metric is None:
+            raise ValueError(
+                "token_metric is required. Pass an instance of TokenEfficiencyMetric "
+                "from app_operator.dspy_integration.metrics."
+            )
 
         # Initialize metrics
-        self.success_metric = success_metric or DeploymentSuccessMetric()
-        self.efficiency_metric = efficiency_metric or IterationEfficiencyMetric()
-        self.token_metric = token_metric or TokenEfficiencyMetric()
+        self.success_metric = success_metric
+        self.efficiency_metric = efficiency_metric
+        self.token_metric = token_metric
         self.rlm_efficiency_metric = rlm_efficiency_metric or RLMEfficiencyMetric()
         self.rlm_context_metric = rlm_context_metric or RLMContextUtilizationMetric()
 
@@ -250,53 +260,10 @@ class RLMCompositeMetric:
         return composite
 
 
-def extract_rlm_statistics_from_trajectory(trajectory_dict: dict[str, Any]) -> dict[str, Any]:
-    """Extract RLM statistics from a trajectory dictionary.
-
-    Args:
-        trajectory_dict: Trajectory JSON loaded as dict
-
-    Returns:
-        Dictionary of RLM statistics
-    """
-    stats = {
-        "total_calls": 0,
-        "code_executions": 0,
-        "recursive_calls": 0,
-        "total_tokens_saved": 0,
-        "max_depth_reached": 0,
-    }
-
-    # Look for RLM-specific messages in deployment phase
-    deployment_convos = trajectory_dict.get("deployment", [])
-
-    found_json_stats = False
-
-    for convo in deployment_convos:
-        messages = convo.get("messages", [])
-
-        for msg in messages:
-            content = msg.get("content", "")
-
-            # Check if it's an RLM statistics message
-            if "RLM Statistics:" in content:
-                try:
-                    # Extract JSON from message
-                    json_start = content.find("{")
-                    json_str = content[json_start:]
-                    extracted_stats = json.loads(json_str)
-                    stats.update(extracted_stats)
-                    found_json_stats = True
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"Failed to parse RLM statistics: {e}")
-
-            # Count RLM action messages only if no JSON stats were found
-            elif not found_json_stats:
-                if "[RLM execute_code" in content:
-                    stats["code_executions"] += 1
-                    stats["total_calls"] += 1
-                elif "[RLM recursive_call" in content:
-                    stats["recursive_calls"] += 1
-                    stats["total_calls"] += 1
-
-    return stats
+# Re-exported for backwards compatibility — canonical definition is in trajectory_utils.
+__all__ = [
+    "RLMEfficiencyMetric",
+    "RLMContextUtilizationMetric",
+    "RLMCompositeMetric",
+    "extract_rlm_statistics_from_trajectory",
+]

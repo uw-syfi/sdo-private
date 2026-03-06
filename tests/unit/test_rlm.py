@@ -2,6 +2,11 @@
 
 import pytest
 
+from app_operator.dspy_integration.metrics import (
+    DeploymentSuccessMetric,
+    IterationEfficiencyMetric,
+    TokenEfficiencyMetric,
+)
 from app_operator.rlm.environment import (
     ActionType,
     RLMCall,
@@ -14,9 +19,9 @@ from app_operator.rlm.metrics import (
     RLMCompositeMetric,
     RLMContextUtilizationMetric,
     RLMEfficiencyMetric,
-    extract_rlm_statistics_from_trajectory,
 )
 from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
+from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
 
 
 class TestRLMContext:
@@ -518,6 +523,9 @@ class TestRLMMetrics:
             token_weight=0.15,
             rlm_efficiency_weight=0.15,
             rlm_context_weight=0.15,
+            success_metric=DeploymentSuccessMetric(),
+            efficiency_metric=IterationEfficiencyMetric(),
+            token_metric=TokenEfficiencyMetric(),
         )
 
         class MockExample:
@@ -555,7 +563,11 @@ class TestRLMMetrics:
 
     def test_rlm_composite_metric_none_prediction(self):
         """Test composite metric with None prediction."""
-        metric = RLMCompositeMetric()
+        metric = RLMCompositeMetric(
+            success_metric=DeploymentSuccessMetric(),
+            efficiency_metric=IterationEfficiencyMetric(),
+            token_metric=TokenEfficiencyMetric(),
+        )
 
         class MockExample:
             pass

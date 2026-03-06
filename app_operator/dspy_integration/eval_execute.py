@@ -24,7 +24,7 @@ from app_operator.dspy_integration.signatures import SIGNATURES, get_signature
 from app_operator.experiment_naming import normalize_experiment_token
 from app_operator.logger import logger
 from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
-from app_operator.rlm.metrics import extract_rlm_statistics_from_trajectory
+from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
 
 _TRAIN_RUN_RE = re.compile(r"^iter(\d+)_c\d+_(.+)$")
 _VAL_RUN_RE = re.compile(r"^(.+)_iter(\d+)_val$")
