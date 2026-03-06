@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app_operator.config import GEPAConfig
-from app_operator.langgraph.llm import create_chat_model
+from app_operator.llm import create_chat_model
 from app_operator.logger import logger
 
 
