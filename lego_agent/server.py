@@ -36,14 +36,19 @@ class WebIO:
         task.add_done_callback(self._pending_tasks.discard)
         return task
 
+    @property
+    def pending_task_count(self) -> int:
+        """Return the number of currently tracked pending tasks."""
+        return len(self._pending_tasks)
+
     async def cleanup(self) -> None:
         """Await all pending tasks, suppressing exceptions."""
         if self._pending_tasks:
             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
 
-    async def _send_event(self, type: str, data: dict[str, Any]) -> None:
+    async def _send_event(self, event_type: str, data: dict[str, Any]) -> None:
         if self.websocket.client_state == WebSocketState.CONNECTED:
-            await self.websocket.send_json({"type": type, **data})
+            await self.websocket.send_json({"type": event_type, **data})
 
     async def _flush_thinking(self) -> None:
         if self._thinking_buffer:

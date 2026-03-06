@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Protocol,
     runtime_checkable,
@@ -10,8 +12,12 @@ from typing import (
 
 import yaml
 from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool, tool
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 from loguru import logger
 
@@ -132,7 +138,7 @@ class LangGraphAgent:
                     name = event["name"]
                     inputs = event["data"].get("input")
                     if thinking_started:
-                        print("", flush=True)
+                        print(flush=True)
                         thinking_started = False
                     print(
                         f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}",
@@ -158,7 +164,7 @@ class LangGraphAgent:
                     )
 
             if thinking_started:
-                print("", flush=True)
+                print(flush=True)
 
         try:
             await asyncio.wait_for(run_stream(), timeout=timeout)
@@ -273,8 +279,7 @@ class FanOut(Runnable):
                 async with semaphore:
                     if isinstance(self.agent, AsyncRunnable):
                         return await self.agent.generate_async(p, timeout=self.timeout)
-                    else:
-                        return await asyncio.to_thread(self.agent.run, p)
+                    return await asyncio.to_thread(self.agent.run, p)
 
             tasks = [_run_one(p) for p in prompts_to_run]
             return await asyncio.gather(*tasks)

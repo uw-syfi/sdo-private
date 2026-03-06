@@ -436,17 +436,25 @@ class DeploymentConfig:
 
 
 @dataclass
+class FeaturesConfig:
+    """Configuration for cross-cutting capability flags."""
+
+    git_integration: bool = False
+
+    def __post_init__(self):
+        validate_field(self.git_integration, "git_integration", bool)
+
+
+@dataclass
 class OperatorPhaseConfig:
     """Configuration for operator phase control."""
 
     code_analysis: bool = True
     fix_summary_consolidation: bool = True
-    git_integration: bool = False
 
     def __post_init__(self):
         validate_field(self.code_analysis, "code_analysis", bool)
         validate_field(self.fix_summary_consolidation, "fix_summary_consolidation", bool)
-        validate_field(self.git_integration, "git_integration", bool)
 
 
 @dataclass
@@ -456,7 +464,7 @@ class OperatorConfig:
     deployment_max_iters: int = 20
     agent_fix_timeout: int = 2700
     deploy_timeout: int = 900
-    dynamic_observability_injection: bool = False
+    prometheus_integration: bool = False
     agent_timeout: int = 900
     phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
 
@@ -561,6 +569,7 @@ class Config:
     operator: OperatorConfig = field(default_factory=OperatorConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    features: FeaturesConfig = field(default_factory=FeaturesConfig)
     gepa: GEPAConfig = field(default_factory=GEPAConfig)
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
@@ -594,6 +603,7 @@ class Config:
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
+        features_data = data.get("features", {})
         gepa_data = data.get("gepa", {})
         dspy_data = data.get("dspy", {})
         fault_injection_data = data.get("fault_injection", {})
@@ -603,6 +613,7 @@ class Config:
         cls._validate_operator_phase_fields(operator_data)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
+        cls._validate_fields(features_data, "features", FeaturesConfig)
         cls._validate_fields(gepa_data, "gepa", GEPAConfig)
         cls._validate_dspy_fields(dspy_data)
         cls._validate_fields(fault_injection_data, "fault_injection", FaultInjectionConfig)
@@ -618,6 +629,7 @@ class Config:
             operator=cls._parse_operator_config(operator_data),
             deployment=DeploymentConfig(**deployment_data),
             runtime=RuntimeConfig(**runtime_data),
+            features=FeaturesConfig(**features_data),
             gepa=GEPAConfig(**gepa_data),
             dspy=dspy_config,
             fault_injection=FaultInjectionConfig(**fault_injection_data),

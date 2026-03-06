@@ -560,19 +560,18 @@ class PromptOptimizer:
 
         if optimizer_name == "BootstrapFewShot":
             return dspy.BootstrapFewShot(metric=metric)
-        elif optimizer_name == "BootstrapFewShotWithRandomSearch":
+        if optimizer_name == "BootstrapFewShotWithRandomSearch":
             return dspy.BootstrapFewShotWithRandomSearch(metric=metric)
-        elif optimizer_name == "MIPROv2":
+        if optimizer_name == "MIPROv2":
             return dspy.MIPROv2(metric=metric)
-        elif optimizer_name == "COPRO":
+        if optimizer_name == "COPRO":
             # Vertex AI caps candidateCount at 8; COPRO passes n=breadth
             # at depth > 0, so breadth must stay <= 8.
             # Use shallow depth when the training set is small to avoid
             # burning LM calls on refinement rounds that have no signal.
             depth = 2 if num_train_examples <= 10 else 3
             return dspy.COPRO(metric=metric, breadth=8, depth=depth)
-        else:
-            raise ValueError(f"Unknown optimizer: {optimizer_name}")
+        raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
     def _evaluate(
         self,

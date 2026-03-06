@@ -27,13 +27,13 @@ def get_system_prompt(
             f"You are an AI operator ({agent_name}) responsible for exploring "
             f"the codebase and identifying potential deployment issues."
         )
-    elif phase == "script_generation":
+    if phase == "script_generation":
         return (
             f"You are an AI operator ({agent_name}) responsible for analyzing "
             f"the repository and generating deployment scripts (deploy.sh) and "
             f"health check scripts (health_check.sh)."
         )
-    elif phase == "deployment":
+    if phase == "deployment":
         attempt = context.get("attempt", 1)
         max_attempts = context.get("max_attempts", 5)
         return (
@@ -41,7 +41,7 @@ def get_system_prompt(
             f"the application and fixing any deployment errors. "
             f"Deployment attempt {attempt} of {max_attempts}."
         )
-    elif phase == "monitoring":
+    if phase == "monitoring":
         cycle = context.get("cycle", 1)
         return (
             f"You are an AI operator ({agent_name}) responsible for analyzing "

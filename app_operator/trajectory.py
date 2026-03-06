@@ -17,13 +17,17 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
 )
 
 from app_operator.logger import logger
 from app_operator.prompts.trajectory_prompts import get_system_prompt
 from app_operator.trajectory_collectors import collect_gemini_sessions
-from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
+
+if TYPE_CHECKING:
+    from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
+
 from libs.agent_cli.trajectory import (
     NullTrajectoryRecorder,  # noqa: F401
     TrajectoryRecorderProtocol,  # noqa: F401

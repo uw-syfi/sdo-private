@@ -7,12 +7,11 @@ from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import (
-    BLUE,
-    RESET,
     invoke_agent,
     run_script,
     write_log_file,
 )
+from app_operator.logger import logger
 from app_operator.prompts import PromptLoader
 from app_operator.prompts.deployer import create_fix_prompt, prepare_error_context
 from app_operator.prompts.deployment_context import create_system_prompt
@@ -42,8 +41,8 @@ def deploy_attempt(
 
     log_file = repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
 
-    print(f"\n{BLUE}Running deployment script...{RESET}")
-    print(f"Logging output to: {log_file}")
+    logger.info("Running deployment script...")
+    logger.info(f"Logging output to: {log_file}")
 
     result = run_script(
         repo_path,

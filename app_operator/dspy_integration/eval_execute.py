@@ -180,54 +180,25 @@ class EvalExecuteOptimizer:
             rlm_scores: list[float] = []
             run_outcomes: list[dict[str, Any]] = []
             for app_path in train_apps:
-                app_name = normalize_experiment_token(app_path.name)
-                exp_dir = work_dir / f"iter{iteration}_c{c_idx + 1}_{app_name}"
-
-                self._cleanup_experiment_containers(exp_dir)
-                if exp_dir.exists():
-                    shutil.rmtree(exp_dir)
-                shutil.copytree(app_path, exp_dir)
-                self._clean_exp_dir(exp_dir)
-                self._write_sds_toml(
-                    exp_dir,
-                    candidate_version,
-                    provider_override=provider_override,
-                    model_override=model_override,
-                )
-
-                logger.info(f"[EvalExecute] Running operator on {exp_dir.name}...")
-                cmd = [sys.executable, "-m", "app_operator", "run", str(exp_dir)]
-                _result, success, error_msg = run_subprocess_with_rate_limit_handling(
-                    cmd=cmd,
+                outcome = self._run_candidate_on_app(
+                    app_path=app_path,
+                    work_dir=work_dir,
+                    iteration=iteration,
+                    c_idx=c_idx,
+                    candidate_version=candidate_version,
                     provider=provider,
                     max_retries=max_retries,
                     rate_limit_backoff=rate_limit_backoff,
-                    operation_name=f"candidate_{c_idx + 1}_{app_name}",
+                    provider_override=provider_override,
+                    model_override=model_override,
+                    inter_run_delay=inter_run_delay,
                 )
                 total_runs += 1
-                if success:
+                if outcome["success"]:
                     successful_runs += 1
-                else:
-                    logger.warning(f"[EvalExecute] Run failed for {exp_dir.name}: {error_msg}")
-
-                # Collect RLM efficiency score from trajectory if available
-                rlm_score = self._score_rlm_trajectory(exp_dir)
-                if rlm_score is not None:
-                    rlm_scores.append(rlm_score)
-                run_outcomes.append(
-                    {
-                        "app_name": app_name,
-                        "success": success,
-                        "error": error_msg or "",
-                        "rlm_score": rlm_score,
-                    }
-                )
-
-                # Stop containers immediately so they don't hold ports
-                self._cleanup_experiment_containers(exp_dir)
-
-                if inter_run_delay > 0:
-                    time.sleep(inter_run_delay)
+                if outcome["rlm_score"] is not None:
+                    rlm_scores.append(outcome["rlm_score"])
+                run_outcomes.append(outcome)
 
             success_rate = successful_runs / total_runs if total_runs > 0 else 0.0
             # Blend RLM efficiency into the score when available (10% weight)
@@ -331,20 +302,84 @@ class EvalExecuteOptimizer:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _run_candidate_on_app(
+        self,
+        *,
+        app_path: Path,
+        work_dir: Path,
+        iteration: int,
+        c_idx: int,
+        candidate_version: str,
+        provider: str,
+        max_retries: int,
+        rate_limit_backoff: int,
+        provider_override: str | None,
+        model_override: str | None,
+        inter_run_delay: int,
+    ) -> dict[str, Any]:
+        """Deploy one candidate against one training app and return the outcome dict."""
+        app_name = normalize_experiment_token(app_path.name)
+        exp_dir = work_dir / f"iter{iteration}_c{c_idx + 1}_{app_name}"
+
+        self._cleanup_experiment_containers(exp_dir)
+        if exp_dir.exists():
+            shutil.rmtree(exp_dir)
+        shutil.copytree(app_path, exp_dir)
+        self._clean_exp_dir(exp_dir)
+        self._write_sds_toml(
+            exp_dir,
+            candidate_version,
+            provider_override=provider_override,
+            model_override=model_override,
+        )
+
+        logger.info(f"[EvalExecute] Running operator on {exp_dir.name}...")
+        cmd = [sys.executable, "-m", "app_operator", "run", str(exp_dir)]
+        _result, success, error_msg = run_subprocess_with_rate_limit_handling(
+            cmd=cmd,
+            provider=provider,
+            max_retries=max_retries,
+            rate_limit_backoff=rate_limit_backoff,
+            operation_name=f"candidate_{c_idx + 1}_{app_name}",
+        )
+        if not success:
+            logger.warning(f"[EvalExecute] Run failed for {exp_dir.name}: {error_msg}")
+
+        rlm_score = self._score_rlm_trajectory(exp_dir)
+
+        # Stop containers immediately so they don't hold ports
+        self._cleanup_experiment_containers(exp_dir)
+
+        if inter_run_delay > 0:
+            time.sleep(inter_run_delay)
+
+        return {
+            "app_name": app_name,
+            "success": success,
+            "error": error_msg or "",
+            "rlm_score": rlm_score,
+        }
+
     def _load_current_instruction(self, prompt_name: str, current_version: str | None) -> str:
         """Return the instruction string currently used for *prompt_name*."""
         if current_version:
-            from app_operator.dspy_integration.loader import resolve_version
-
-            resolved = resolve_version(self.optimized_dir, current_version)
-            if resolved:
-                module_file = self.optimized_dir / resolved / f"{prompt_name}.dspy.json"
-                if module_file.exists():
-                    state = json.loads(module_file.read_text())
-                    if state.get("optimized_instruction"):
-                        return state["optimized_instruction"]
-
+            optimized = self._load_optimized_instruction(prompt_name, current_version)
+            if optimized:
+                return optimized
         return self._seed_instruction(prompt_name)
+
+    def _load_optimized_instruction(self, prompt_name: str, current_version: str) -> str | None:
+        """Load a previously saved optimized instruction, or return None."""
+        from app_operator.dspy_integration.loader import resolve_version
+
+        resolved = resolve_version(self.optimized_dir, current_version)
+        if not resolved:
+            return None
+        module_file = self.optimized_dir / resolved / f"{prompt_name}.dspy.json"
+        if not module_file.exists():
+            return None
+        state = json.loads(module_file.read_text())
+        return state.get("optimized_instruction") or None
 
     def _seed_instruction(self, prompt_name: str) -> str:
         """Return a minimal seed instruction for *prompt_name*."""
@@ -478,8 +513,7 @@ class EvalExecuteOptimizer:
             ]
             if failures:
                 section_lines.append("- key_failures:")
-                for failure in failures:
-                    section_lines.append(f"  - {failure}")
+                section_lines.extend(f"  - {failure}" for failure in failures)
             else:
                 section_lines.append("- key_failures: none")
             sections.append("\n".join(section_lines))
@@ -616,16 +650,22 @@ class EvalExecuteOptimizer:
             raw = response.choices[0].message.content or ""  # type: ignore[reportAttributeAccessIssue]
             json_match = re.search(r"\[.*?\]", raw, re.DOTALL)
             if json_match:
-                variants = json.loads(json_match.group())
-                if isinstance(variants, list) and variants:
-                    while len(variants) < n:
-                        variants.append(current_instruction)
-                    return [str(v) for v in variants[:n]]
+                parsed = json.loads(json_match.group())
+                if isinstance(parsed, list) and parsed:
+                    return self._pad_variants(parsed, n, current_instruction)
         except Exception as e:
             logger.warning(f"[EvalExecute] Failed to generate variants for {prompt_name}: {e}")
 
         # Fallback: repeat the current instruction
         return [current_instruction] * n
+
+    @staticmethod
+    def _pad_variants(variants: list, n: int, fallback: str) -> list[str]:
+        """Pad *variants* with *fallback* until it has exactly *n* entries."""
+        result = [str(v) for v in variants]
+        while len(result) < n:
+            result.append(fallback)
+        return result[:n]
 
     def _build_recent_trajectory_context(
         self,
@@ -658,56 +698,15 @@ class EvalExecuteOptimizer:
 
         context_by_prompt: dict[str, str] = {}
         for prompt_name in prompt_names:
-            if prompt_name == "subagent_trajectory_analyst":
-                context = self._format_context_sections(
-                    [
-                        ("Recent run outcomes", run_summaries),
-                        ("Trajectory analyst findings", trajectory_notes),
-                        ("Recurring error patterns", error_notes),
-                    ]
-                )
-            elif prompt_name == "subagent_error_log_analyst":
-                context = self._format_context_sections(
-                    [
-                        ("Recent run outcomes", run_summaries),
-                        ("Error-log analyst findings", error_notes),
-                    ]
-                )
-            elif prompt_name == "subagent_script_analyst":
-                context = self._format_context_sections(
-                    [
-                        ("Recent run outcomes", run_summaries),
-                        ("Script analyst findings", script_notes),
-                        ("Recurring error patterns", error_notes),
-                    ]
-                )
-            elif prompt_name == "subagent_repo_analyst":
-                context = self._format_context_sections(
-                    [
-                        ("Recent run outcomes", run_summaries),
-                        ("Repository analyst findings", repo_notes),
-                        ("Recurring error patterns", error_notes),
-                    ]
-                )
-            elif prompt_name == "subagent_root_synthesis":
-                context = self._format_context_sections(
-                    [
-                        ("Recent run outcomes", run_summaries),
-                        ("Trajectory findings", trajectory_notes),
-                        ("Error findings", error_notes),
-                        ("Script findings", script_notes),
-                        ("Repository findings", repo_notes),
-                    ]
-                )
-            else:
-                context = self._format_context_sections(
-                    [
-                        ("Recent run outcomes", run_summaries),
-                        ("Recurring error patterns", error_notes),
-                        ("Script findings", script_notes),
-                    ]
-                )
-
+            sections = self._context_sections_for_prompt(
+                prompt_name,
+                run_summaries=run_summaries,
+                trajectory_notes=trajectory_notes,
+                error_notes=error_notes,
+                script_notes=script_notes,
+                repo_notes=repo_notes,
+            )
+            context = self._format_context_sections(sections)
             if context:
                 logger.info(
                     "[EvalExecute] Using {} chars of trajectory context for {}",
@@ -717,6 +716,55 @@ class EvalExecuteOptimizer:
             context_by_prompt[prompt_name] = context
 
         return context_by_prompt
+
+    @staticmethod
+    def _context_sections_for_prompt(
+        prompt_name: str,
+        *,
+        run_summaries: list[str],
+        trajectory_notes: list[str],
+        error_notes: list[str],
+        script_notes: list[str],
+        repo_notes: list[str],
+    ) -> list[tuple[str, list[str]]]:
+        """Return the ordered evidence sections to include for *prompt_name*."""
+        if prompt_name == "subagent_trajectory_analyst":
+            return [
+                ("Recent run outcomes", run_summaries),
+                ("Trajectory analyst findings", trajectory_notes),
+                ("Recurring error patterns", error_notes),
+            ]
+        if prompt_name == "subagent_error_log_analyst":
+            return [
+                ("Recent run outcomes", run_summaries),
+                ("Error-log analyst findings", error_notes),
+            ]
+        if prompt_name == "subagent_script_analyst":
+            return [
+                ("Recent run outcomes", run_summaries),
+                ("Script analyst findings", script_notes),
+                ("Recurring error patterns", error_notes),
+            ]
+        if prompt_name == "subagent_repo_analyst":
+            return [
+                ("Recent run outcomes", run_summaries),
+                ("Repository analyst findings", repo_notes),
+                ("Recurring error patterns", error_notes),
+            ]
+        if prompt_name == "subagent_root_synthesis":
+            return [
+                ("Recent run outcomes", run_summaries),
+                ("Trajectory findings", trajectory_notes),
+                ("Error findings", error_notes),
+                ("Script findings", script_notes),
+                ("Repository findings", repo_notes),
+            ]
+        # Default: general prompts get run outcomes, errors, and script context.
+        return [
+            ("Recent run outcomes", run_summaries),
+            ("Recurring error patterns", error_notes),
+            ("Script findings", script_notes),
+        ]
 
     def _collect_recent_trajectory_evidence(
         self,
@@ -792,33 +840,48 @@ class EvalExecuteOptimizer:
 
         for convo in deployment:
             for msg in convo.get("messages", []):
-                role = msg.get("role")
-                content = str(msg.get("content") or "")
-
-                if role == "assistant" and content:
-                    lower = content.lower()
-                    snippet = self._extract_analysis_snippet(content)
-                    if not snippet:
-                        continue
-
-                    if "[subagent trajectory analyst]" in lower or "[hybrid pre-analysis: trajectory]" in lower:
-                        evidence.trajectory_insights.append(snippet)
-                    elif "[subagent error_log analyst]" in lower or "[hybrid pre-analysis: error_log]" in lower:
-                        evidence.error_insights.append(snippet)
-                    elif (
-                        "[subagent script analyst]" in lower
-                        or "[hybrid pre-analysis: script]" in lower
-                        or "auto-validation warning" in lower
-                    ):
-                        evidence.script_insights.append(snippet)
-                    elif "[subagent repo analyst]" in lower or "[hybrid pre-analysis: repo]" in lower:
-                        evidence.repo_insights.append(snippet)
-
-                if role == "tool_call":
-                    for field in ("stderr", "stdout"):
-                        evidence.error_signals.extend(self._extract_error_signal_lines(str(msg.get(field) or "")))
+                self._process_trajectory_message(msg, evidence)
 
         return evidence
+
+    def _process_trajectory_message(
+        self,
+        msg: dict,
+        evidence: _TrajectoryEvidence,
+    ) -> None:
+        """Classify one trajectory message and append insights to *evidence*."""
+        role = msg.get("role")
+        content = str(msg.get("content") or "")
+
+        if role == "assistant" and content:
+            lower = content.lower()
+            snippet = self._extract_analysis_snippet(content)
+            if snippet:
+                self._classify_assistant_snippet(snippet, lower, evidence)
+
+        if role == "tool_call":
+            for field in ("stderr", "stdout"):
+                evidence.error_signals.extend(self._extract_error_signal_lines(str(msg.get(field) or "")))
+
+    @staticmethod
+    def _classify_assistant_snippet(
+        snippet: str,
+        lower: str,
+        evidence: _TrajectoryEvidence,
+    ) -> None:
+        """Route *snippet* into the appropriate evidence insight list."""
+        if "[subagent trajectory analyst]" in lower or "[hybrid pre-analysis: trajectory]" in lower:
+            evidence.trajectory_insights.append(snippet)
+        elif "[subagent error_log analyst]" in lower or "[hybrid pre-analysis: error_log]" in lower:
+            evidence.error_insights.append(snippet)
+        elif (
+            "[subagent script analyst]" in lower
+            or "[hybrid pre-analysis: script]" in lower
+            or "auto-validation warning" in lower
+        ):
+            evidence.script_insights.append(snippet)
+        elif "[subagent repo analyst]" in lower or "[hybrid pre-analysis: repo]" in lower:
+            evidence.repo_insights.append(snippet)
 
     @staticmethod
     def _evidence_weight(status: str, recency_index: int) -> float:
@@ -985,40 +1048,12 @@ class EvalExecuteOptimizer:
             compose_file = self._find_compose_file(exp_dir)
             if compose_file:
                 for project_name in project_names:
-                    subprocess.run(
-                        [
-                            "docker",
-                            "compose",
-                            "--project-name",
-                            project_name,
-                            "-f",
-                            str(compose_file),
-                            "down",
-                            "--remove-orphans",
-                            "--timeout",
-                            "0",
-                        ],
-                        capture_output=True,
-                        text=True,
-                    )
+                    self._run_compose_down(project_name, compose_file)
 
             container_ids: set[str] = set()
             for project_name in project_names:
-                result = subprocess.run(
-                    [
-                        "docker",
-                        "ps",
-                        "-a",
-                        "-q",
-                        "--filter",
-                        f"label=com.docker.compose.project={project_name}",
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                for container_id in result.stdout.strip().splitlines():
-                    if container_id:
-                        container_ids.add(container_id)
+                ids = self._list_compose_container_ids(project_name)
+                container_ids.update(ids)
 
             if container_ids:
                 logger.info(
@@ -1032,6 +1067,37 @@ class EvalExecuteOptimizer:
                 logger.info(f"[EvalExecute] Cleaned up containers for {project_names}")
         except Exception as e:
             logger.warning(f"[EvalExecute] Could not clean up containers for {project_names}: {e}")
+
+    @staticmethod
+    def _run_compose_down(project_name: str, compose_file: Path) -> None:
+        """Run ``docker compose down`` for a given project and compose file."""
+        cmd = [
+            "docker",
+            "compose",
+            "--project-name",
+            project_name,
+            "-f",
+            str(compose_file),
+            "down",
+            "--remove-orphans",
+            "--timeout",
+            "0",
+        ]
+        subprocess.run(cmd, capture_output=True, text=True)
+
+    @staticmethod
+    def _list_compose_container_ids(project_name: str) -> list[str]:
+        """Return container IDs belonging to *project_name* via docker ps filter."""
+        cmd = [
+            "docker",
+            "ps",
+            "-a",
+            "-q",
+            "--filter",
+            f"label=com.docker.compose.project={project_name}",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return [cid for cid in result.stdout.strip().splitlines() if cid]
 
     @staticmethod
     def _candidate_project_names(exp_dir_name: str) -> list[str]:

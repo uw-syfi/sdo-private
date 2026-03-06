@@ -15,11 +15,9 @@ from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph.message_utils import extract_text
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.trajectory_handler import LangGraphTrajectoryHandler
+from app_operator.logger import logger
 from app_operator.trajectory import TrajectoryRecorderProtocol
-
-BLUE = "\033[34m"
-GREEN = "\033[32m"
-RESET = "\033[0m"
+from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
 MAX_DISPLAY_CONTENT = 100
 
@@ -70,7 +68,10 @@ def invoke_agent(
     agent_name: str = "Agent",
     context_limit: int = 128000,
     recorder: TrajectoryRecorderProtocol | None = None,
+    ui: OperatorUI | None = None,
 ) -> tuple[str, list[BaseMessage]]:
+    if ui is None:
+        ui = NullOperatorUI()
     handler = LangGraphTrajectoryHandler(recorder)
 
     if system_prompt:
@@ -87,9 +88,9 @@ def invoke_agent(
     response_messages = list(messages)
     total_usage = {"input": 0, "output": 0, "total": 0}
 
-    print("\n" + "=" * 50)
-    print(f"Executing {agent_name}...")
-    print("=" * 50 + "\n")
+    logger.info("=" * 50)
+    logger.info(f"Executing {agent_name}...")
+    logger.info("=" * 50)
 
     for chunk in agent.stream({"messages": messages}, stream_mode="updates"):
         for _node_name, updates in chunk.items():
@@ -113,26 +114,24 @@ def invoke_agent(
                             args_str = str(tool_call["args"])
                             if len(args_str) > MAX_DISPLAY_CONTENT:
                                 args_str = f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
-                            print(f"{BLUE}[Tool Use] {tool_call['name']} {args_str}{RESET}")
+                            ui.on_tool_call(tool_call["name"], args_str)
 
                     content_text = extract_text(msg.content)
                     if content_text:
-                        # Print thought/response in default color (usually white/gray)
-                        # similar to CLI agent text stream
-                        print(f"{content_text}")
+                        logger.info(content_text)
 
                     if usage.get("total", 0) > 0:
                         pct = round((usage["total"] / context_limit) * 100, 1)
-                        print(f"\nToken Usage: {pct}% ({usage['total']}/{context_limit})")
+                        logger.info(f"Token Usage: {pct}% ({usage['total']}/{context_limit})")
 
                 elif isinstance(msg, ToolMessage):
                     content = extract_text(msg.content)
                     if len(content) > MAX_DISPLAY_CONTENT:
                         content = f"{content[:MAX_DISPLAY_CONTENT]}... (truncated)"
 
-                    print(f"{GREEN}[Tool Result] {content}{RESET}")
+                    logger.info(f"[Tool Result] {content}")
 
-    print("\n" + "=" * 50 + "\n")
+    logger.info("=" * 50)
 
     _update_usage(state, total_usage)
 
@@ -156,7 +155,7 @@ def run_script(
 ) -> dict[str, Any]:
     start_time = time.time()
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
             command,
             cwd=str(repo_path),
             shell=True,

@@ -791,7 +791,7 @@ def monitoring_coverage_metric(
 
     if health_executed:
         score += 0.25
-    aspect_count = bin(multiple_aspects).count("1")
+    aspect_count = multiple_aspects.bit_count()
     if aspect_count >= 2:
         score += 0.25
     elif aspect_count == 1:

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app_operator.dspy_integration.config import DSPyConfig
+    from pathlib import Path
 
+    from app_operator.dspy_integration.config import DSPyConfig
+    from libs.agent_cli.base import CodingAgent
+
+from app_operator.config import OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
@@ -16,10 +19,6 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
-from libs.agent_cli.base import CodingAgent
-
-# Constants
-DEFAULT_ANALYSIS_TIMEOUT_SECS = 600  # 10 minutes
 
 
 class CodeAnalyzerAgent:
@@ -33,6 +32,7 @@ class CodeAnalyzerAgent:
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
         ui: OperatorUI | None = None,
+        operator_config: OperatorConfig | None = None,
     ):
         """Initialize the code analyzer agent.
 
@@ -50,6 +50,7 @@ class CodeAnalyzerAgent:
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
+        self.operator_config = operator_config or OperatorConfig()
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"
         self.issues_file = self.sds_dir / "deployment_issues.md"
@@ -58,12 +59,12 @@ class CodeAnalyzerAgent:
         """Generate a simple file tree of the repository."""
         try:
             # Get list of files, excluding hidden ones and common ignore patterns
-            files = []
-            for path in self.filesystem.rglob(self.repo_path, "*"):
-                if self.filesystem.is_file(path) and not any(
-                    p.startswith(".") for p in path.relative_to(self.repo_path).parts
-                ):
-                    files.append(str(path.relative_to(self.repo_path)))
+            files = [
+                str(path.relative_to(self.repo_path))
+                for path in self.filesystem.rglob(self.repo_path, "*")
+                if self.filesystem.is_file(path)
+                and not any(p.startswith(".") for p in path.relative_to(self.repo_path).parts)
+            ]
 
             # Sort and limit to prevent context overflow
             files.sort()
@@ -117,7 +118,7 @@ class CodeAnalyzerAgent:
                 self.agent.generate(
                     f"{system_prompt}\n\n{user_prompt}",
                     cwd=str(self.repo_path),
-                    timeout=DEFAULT_ANALYSIS_TIMEOUT_SECS,
+                    timeout=self.operator_config.agent_timeout,
                 )
 
                 duration = time.time() - start_time
@@ -128,18 +129,17 @@ class CodeAnalyzerAgent:
                     logger.success("Code analysis completed successfully")
                     r.add_assistant_message("Code analysis completed successfully")
                     return True
-                else:
-                    missing = []
-                    if not self.filesystem.exists(self.analysis_file):
-                        missing.append(str(self.analysis_file))
-                    if not self.filesystem.exists(self.issues_file):
-                        missing.append(str(self.issues_file))
+                missing = []
+                if not self.filesystem.exists(self.analysis_file):
+                    missing.append(str(self.analysis_file))
+                if not self.filesystem.exists(self.issues_file):
+                    missing.append(str(self.issues_file))
 
-                    error_msg = f"Agent failed to create analysis files: {', '.join(missing)}"
-                    logger.error(error_msg)
-                    r.set_phase_status("failed")
-                    r.add_assistant_message(error_msg)
-                    return False
+                error_msg = f"Agent failed to create analysis files: {', '.join(missing)}"
+                logger.error(error_msg)
+                r.set_phase_status("failed")
+                r.add_assistant_message(error_msg)
+                return False
 
             except Exception as e:
                 logger.error(f"Code analysis failed: {e}")

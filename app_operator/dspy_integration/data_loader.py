@@ -190,26 +190,22 @@ class TrajectoryDataLoader:
 
     def _extract_response(self, messages: list[dict[str, Any]]) -> str:
         """Extract assistant response (concatenate all assistant messages)."""
-        responses = []
-        for msg in messages:
-            if msg.get("role") == "assistant" and msg.get("content"):
-                responses.append(msg["content"])
+        responses = [msg["content"] for msg in messages if msg.get("role") == "assistant" and msg.get("content")]
         return "\n".join(responses)
 
     def _extract_tool_calls(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Extract all tool calls from messages."""
-        tool_calls = []
-        for msg in messages:
-            if msg.get("role") == "tool_call":
-                tool_calls.append(
-                    {
-                        "tool": msg.get("tool"),
-                        "args": msg.get("args"),
-                        "exit_code": msg.get("exit_code"),
-                        "stdout": msg.get("stdout", ""),
-                        "stderr": msg.get("stderr", ""),
-                    }
-                )
+        tool_calls = [
+            {
+                "tool": msg.get("tool"),
+                "args": msg.get("args"),
+                "exit_code": msg.get("exit_code"),
+                "stdout": msg.get("stdout", ""),
+                "stderr": msg.get("stderr", ""),
+            }
+            for msg in messages
+            if msg.get("role") == "tool_call"
+        ]
         return tool_calls
 
     def _determine_success(self, messages: list[dict[str, Any]], phase: str, overall_success: bool) -> bool:

@@ -96,19 +96,17 @@ def _load_experiment(name: str) -> ExperimentData | None:
                 )
             )
         return ExperimentData(name=name, is_multi_repeat=True, aggregated=aggregated)
-    else:
-        single = []
-        for entry in data.get("results", []):
-            single.append(
-                SingleResult(
-                    app=entry["app"],
-                    success=entry.get("success", False),
-                    status=entry.get("status", "unknown"),
-                    deployment_iterations=entry.get("deployment_iterations"),
-                    elapsed_seconds=entry.get("elapsed_seconds"),
-                )
-            )
-        return ExperimentData(name=name, is_multi_repeat=False, single=single)
+    single = [
+        SingleResult(
+            app=entry["app"],
+            success=entry.get("success", False),
+            status=entry.get("status", "unknown"),
+            deployment_iterations=entry.get("deployment_iterations"),
+            elapsed_seconds=entry.get("elapsed_seconds"),
+        )
+        for entry in data.get("results", [])
+    ]
+    return ExperimentData(name=name, is_multi_repeat=False, single=single)
 
 
 def _normalize_to_aggregated(exp: ExperimentData) -> list[AggregatedResult]:
