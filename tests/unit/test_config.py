@@ -48,12 +48,20 @@ deployment_max_iters = 3
     assert config.operator.deployment_max_iters == 3
 
 
-def test_load_config_defaults(tmp_path):
+def test_load_config_defaults(tmp_path, monkeypatch):
     """Test loading config with defaults when no file exists.
 
     cli_agent runtime (the default) requires a model, so we use a
     non-cli_agent runtime to test the remaining defaults.
     """
+    # Point repo root to a dir with no sds.toml so only dataclass defaults apply.
+    empty_root = tmp_path / "empty_root"
+    empty_root.mkdir()
+    fake_config_py = empty_root / "app_operator" / "config.py"
+    fake_config_py.parent.mkdir()
+    fake_config_py.touch()
+    monkeypatch.setattr(_config_module, "__file__", str(fake_config_py))
+
     config_file = tmp_path / "sds.toml"
     config_file.write_text('[runtime]\nimpl = "langgraph"\n')
     config = load_config(str(tmp_path))
