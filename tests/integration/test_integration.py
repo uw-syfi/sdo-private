@@ -47,7 +47,12 @@ class FakeCodingAgent(CodingAgent):
         if "fix the deployment scripts" in prompt or "analyze the error" in prompt:
             return self._handle_fix()
 
-        # 3. Handle Monitoring Analysis
+        # 3. Handle Health Assessment (AppHealthJudge)
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return self._handle_health_assessment()
+
+        # 4. Handle Monitoring Analysis
         if "analyze the following health check results" in prompt:
             return self._handle_analysis()
 
@@ -121,6 +126,14 @@ fi
 2) Fix: I rewrote the script to be valid.
 </summary>
 I have analyzed the logs and fixed the deployment script."""
+
+    def _handle_health_assessment(self) -> str:
+        return (
+            "<health_verdict>healthy</health_verdict>\n"
+            "<health_assessment>All services healthy.</health_assessment>\n"
+            "<diagnosis></diagnosis>\n"
+            "<script_fixed>false</script_fixed>"
+        )
 
     def _handle_analysis(self) -> str:
         return """<exec_summary>System is healthy.</exec_summary>

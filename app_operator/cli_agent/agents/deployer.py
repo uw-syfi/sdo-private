@@ -14,12 +14,12 @@ if TYPE_CHECKING:
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
+from app_operator.cli_agent.agents.health_judge import AppHealthJudge, HealthVerdict
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
 from app_operator.prompts import (
     analyze_repository,
@@ -469,6 +469,16 @@ class DeploymentAgent:
 
         return None
 
+    @staticmethod
+    def _verdict_to_health_result(verdict: HealthVerdict) -> CommandResult:
+        """Convert a HealthVerdict to a CommandResult for prepare_error_context()."""
+        return {
+            "success": verdict.healthy,
+            "exit_code": 0 if verdict.healthy else 1,
+            "stdout": verdict.diagnosis,
+            "stderr": verdict.assessment,
+        }
+
     def _run_health_check_with_retry(
         self,
         deploy_result: CommandResult,
@@ -477,7 +487,7 @@ class DeploymentAgent:
         log_file_path: Path,
         r: TrajectoryRecorderProtocol,
     ) -> bool | None:
-        """Run health check and, on failure, attempt agent fix with recheck.
+        """Run agent-based health assessment and, on failure, attempt fix.
 
         Args:
             deploy_result: Result from the deployment script.
@@ -490,73 +500,39 @@ class DeploymentAgent:
             True if health check passed, False if permanently failed,
             None if another attempt should be made.
         """
-        # Setup log file for health check
-        health_check_log_path = self.sds_dir / "logs" / f"health_check_attempt_{attempt}.log"
-        self.filesystem.mkdir(health_check_log_path.parent, parents=True, exist_ok=True)
-
-        # Verify with health check
-        health_start = time.time()
-        health_result = run_health_check(
-            self.repo_path,
-            self.health_check_script,
-            log_file_path=health_check_log_path,
-        )
-        health_duration = time.time() - health_start
-
-        # Record health check tool call
-        health_ec = health_result.get("exit_code")
-        r.add_tool_call(
-            tool="bash",
-            args={"script": ".sds/health_check.sh"},
-            stdout=health_result.get("stdout", ""),
-            stderr=health_result.get("stderr", ""),
-            exit_code=int(health_ec) if health_ec is not None else -1,
-            duration=health_duration,
+        judge = AppHealthJudge(
+            repo_path=self.repo_path,
+            coding_agent=self.agent,
+            health_check_script=self.health_check_script,
+            filesystem=self.filesystem,
+            operator_config=self.operator_config,
+            recorder=self.recorder,
+            dspy_config=self.dspy_config,
+            ui=self.ui,
+            deployment_config=self.deployment_config,
         )
 
-        if health_result["success"]:
-            logger.success("Health check passed (exit code: 0)")
+        verdict = judge.assess()
+
+        if verdict.healthy:
+            logger.success("Health assessment: healthy")
             logger.success("Deployment Successful!")
-            r.add_assistant_message("Health check passed. Deployment successful!")
+            r.add_assistant_message("Health assessment passed. Deployment successful!")
             return True
 
-        res = health_result["exit_code"]
-        logger.warning(f"Health check failed (exit code: {res})")
-        r.add_assistant_message(f"Health check failed (exit code: {res}). Analyzing errors...")
+        logger.warning(f"Health assessment: unhealthy — {verdict.diagnosis}")
+        r.add_assistant_message(f"Health assessment: unhealthy. {verdict.assessment}")
 
-        # Health check failed - ask agent to analyze and fix
+        # Convert verdict to CommandResult for _fix_with_agent compatibility
+        health_result = self._verdict_to_health_result(verdict)
+
         if self._fix_with_agent(
             deploy_result,
             health_result,
             attempt,
             absolute_max_attempts,
             log_file_path,
-            health_check_log_path,
         ):
-            # Re-run health check before committing to a full
-            # re-deploy.  If the agent only fixed health_check.sh
-            # (e.g. wrong service names) the containers are already
-            # healthy and a restart would be wasteful.
-            recheck_log = self.sds_dir / "logs" / f"health_recheck_attempt_{attempt}.log"
-            recheck = run_health_check(
-                self.repo_path,
-                self.health_check_script,
-                log_file_path=recheck_log,
-            )
-            recheck_ec = recheck.get("exit_code")
-            r.add_tool_call(
-                tool="bash",
-                args={"script": ".sds/health_check.sh (post-fix recheck)"},
-                stdout=recheck.get("stdout", ""),
-                stderr=recheck.get("stderr", ""),
-                exit_code=int(recheck_ec) if recheck_ec is not None else -1,
-            )
-
-            if recheck["success"]:
-                logger.success("Health check passed after agent fix. Deployment successful!")
-                r.add_assistant_message("Health check passed after agent fix. Deployment successful!")
-                return True
-
             r.set_phase_status("needs_retry")
         else:
             if attempt < absolute_max_attempts:

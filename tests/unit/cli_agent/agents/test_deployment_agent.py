@@ -68,11 +68,7 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
     ):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
-    def fake_run_health(repo, script, timeout=120, log_file_path=None):
-        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
-
     monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
-    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     bind_method(agent, "run_deploy_command", fake_run_deploy)
 
     assert agent.run(max_attempts=1) is True
@@ -108,15 +104,10 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
 def test_run_succeeds_without_fix(agent, monkeypatch):
     """Test successful deployment without needing any fixes.
 
-    Verifies that when both deployment and health check succeed on first attempt,
+    Verifies that when both deployment and health assessment succeed on first attempt,
     the agent does not invoke any fix attempts.
     """
     deploy_results = iter(
-        [
-            {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""},
-        ]
-    )
-    health_results = iter(
         [
             {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""},
         ]
@@ -131,14 +122,10 @@ def test_run_succeeds_without_fix(agent, monkeypatch):
     ):
         return next(deploy_results)
 
-    def fake_run_health(repo, script, timeout=120, log_file_path=None):
-        return next(health_results)
-
     def unexpected_fix(self, *args, **kwargs):
         raise AssertionError("fix should not be invoked on success")
 
     bind_method(agent, "run_deploy_command", fake_run_deploy)
-    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     bind_method(agent, "_fix_with_agent", unexpected_fix)
 
     assert agent.run(max_attempts=1) is True
@@ -156,11 +143,6 @@ def test_run_retries_after_failure(agent, monkeypatch):
             {"success": True, "exit_code": 0, "stdout": "", "stderr": ""},
         ]
     )
-    health_results = iter(
-        [
-            {"success": True, "exit_code": 0, "stdout": "", "stderr": ""},
-        ]
-    )
     fix_calls: list[tuple[int, int, int]] = []
 
     def fake_run_deploy(
@@ -171,9 +153,6 @@ def test_run_retries_after_failure(agent, monkeypatch):
         **kwargs,
     ):
         return next(deploy_results)
-
-    def fake_run_health(repo, script, timeout=120, log_file_path=None):
-        return next(health_results)
 
     def fake_fix(
         self,
@@ -188,7 +167,6 @@ def test_run_retries_after_failure(agent, monkeypatch):
         return True
 
     bind_method(agent, "run_deploy_command", fake_run_deploy)
-    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     bind_method(agent, "_fix_with_agent", fake_fix)
 
     assert agent.run(max_attempts=3) is True
@@ -460,10 +438,12 @@ def test_create_fix_prompt_includes_repo_and_scripts(agent):
     assert "2 of 5" in prompt
 
 
-def test_run_health_recheck_after_fix_succeeds(agent, monkeypatch):
-    """Agent fixes health_check.sh → recheck passes → no full re-deploy needed."""
-    health_call_count = {"n": 0}
+def test_run_health_unhealthy_triggers_fix(agent, monkeypatch):
+    """Unhealthy assessment triggers fix agent and retry."""
+    from app_operator.cli_agent.agents.health_judge import HealthVerdict
+
     deploy_call_count = {"n": 0}
+    assess_call_count = {"n": 0}
 
     def fake_run_deploy(
         self,
@@ -475,82 +455,72 @@ def test_run_health_recheck_after_fix_succeeds(agent, monkeypatch):
         deploy_call_count["n"] += 1
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
-    def fake_run_health(repo, script, timeout=120, log_file_path=None):
-        health_call_count["n"] += 1
-        if health_call_count["n"] == 1:
-            return {
-                "success": False,
-                "exit_code": 1,
-                "stdout": "8 failed",
-                "stderr": "",
-            }
-        # Post-fix recheck passes
-        return {"success": True, "exit_code": 0, "stdout": "healthy", "stderr": ""}
+    def fake_assess(self, max_retries=2):
+        assess_call_count["n"] += 1
+        if assess_call_count["n"] == 1:
+            return HealthVerdict(
+                healthy=False,
+                assessment="mongodb crashing",
+                diagnosis="mongodb: OOMKill",
+                script_was_fixed=False,
+                raw_response="",
+            )
+        return HealthVerdict(
+            healthy=True,
+            assessment="All good",
+            diagnosis="",
+            script_was_fixed=False,
+            raw_response="",
+        )
 
-    def fake_fix(
-        self,
-        deploy_result,
-        health_result,
-        attempt,
-        max_attempts,
-        log_file_path=None,
-        health_check_log_path=None,
-    ):
+    def fake_fix(self, *args, **kwargs):
         return True
 
     bind_method(agent, "run_deploy_command", fake_run_deploy)
-    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
     bind_method(agent, "_fix_with_agent", fake_fix)
 
-    assert agent.run(max_attempts=3) is True
-    # Only one deploy; health called twice (initial + recheck)
-    assert deploy_call_count["n"] == 1
-    assert health_call_count["n"] == 2
+    from app_operator.cli_agent.agents import health_judge as hj_module
 
-
-def test_run_health_recheck_after_fix_still_fails_retries(agent, monkeypatch):
-    """Recheck after agent fix still fails → falls through to full re-deploy."""
-    deploy_call_count = {"n": 0}
-    health_call_count = {"n": 0}
-
-    def fake_run_deploy(
-        self,
-        command="start",
-        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
-        log_file_path=None,
-        **kwargs,
-    ):
-        deploy_call_count["n"] += 1
-        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
-
-    def fake_run_health(repo, script, timeout=120, log_file_path=None):
-        health_call_count["n"] += 1
-        if health_call_count["n"] <= 2:
-            # Attempt-1 initial + recheck both fail
-            return {"success": False, "exit_code": 1, "stdout": "broken", "stderr": ""}
-        # Attempt-2 initial health check passes
-        return {"success": True, "exit_code": 0, "stdout": "healthy", "stderr": ""}
-
-    def fake_fix(
-        self,
-        deploy_result,
-        health_result,
-        attempt,
-        max_attempts,
-        log_file_path=None,
-        health_check_log_path=None,
-    ):
-        return True
-
-    bind_method(agent, "run_deploy_command", fake_run_deploy)
-    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
-    bind_method(agent, "_fix_with_agent", fake_fix)
+    monkeypatch.setattr(hj_module.AppHealthJudge, "assess", fake_assess)
 
     assert agent.run(max_attempts=3) is True
-    # Two deploys (attempt 1 + retry attempt 2)
     assert deploy_call_count["n"] == 2
-    # Three health checks: attempt1-initial, attempt1-recheck, attempt2-initial
-    assert health_call_count["n"] == 3
+    assert assess_call_count["n"] == 2
+
+
+def test_run_health_unhealthy_exhausts_retries(agent, monkeypatch):
+    """All health assessments unhealthy + fix fails → deployment fails."""
+    from app_operator.cli_agent.agents.health_judge import HealthVerdict
+
+    def fake_run_deploy(
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
+    ):
+        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
+
+    def fake_assess(self, max_retries=2):
+        return HealthVerdict(
+            healthy=False,
+            assessment="mongodb crashing",
+            diagnosis="mongodb: OOMKill",
+            script_was_fixed=False,
+            raw_response="",
+        )
+
+    def fake_fix(self, *args, **kwargs):
+        return True
+
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+    bind_method(agent, "_fix_with_agent", fake_fix)
+
+    from app_operator.cli_agent.agents import health_judge as hj_module
+
+    monkeypatch.setattr(hj_module.AppHealthJudge, "assess", fake_assess)
+
+    assert agent.run(max_attempts=2) is False
 
 
 def test_exit_code_zero_recorded_correctly(repo_path, stub_agent, monkeypatch):
@@ -619,18 +589,14 @@ def test_exit_code_zero_recorded_correctly(repo_path, stub_agent, monkeypatch):
     ):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
-    def fake_run_health(repo, script, timeout=120, log_file_path=None):
-        return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
-
     recorder = RecordingRecorder()
     agent = DeploymentAgent(repo_path, stub_agent, recorder=recorder)
 
     bind_method(agent, "run_deploy_command", fake_run_deploy)
-    monkeypatch.setattr(deployer_module, "run_health_check", fake_run_health)
 
     assert agent.run(max_attempts=1) is True
-    # Both deploy and health_check exit_code=0 must be recorded as 0, not -1
-    assert recorded_exit_codes == [0, 0]
+    # Deploy exit_code=0 must be recorded as 0, not -1
+    assert recorded_exit_codes == [0]
 
 
 def test_run_retries_if_fix_fails(agent):

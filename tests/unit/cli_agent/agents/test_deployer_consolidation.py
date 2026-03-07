@@ -106,12 +106,6 @@ def test_run_cleans_summary_on_fresh_start(repo_path, monkeypatch):
     # Mock run_deploy_command to just return success to stop loop
     agent.run_deploy_command = MagicMock(return_value={"success": True, "exit_code": 0})
 
-    # We also need to mock run_health_check in the module if it's imported
-    monkeypatch.setattr(
-        "app_operator.cli_agent.agents.deployer.run_health_check",
-        lambda *args, **kwargs: {"success": True, "exit_code": 0},
-    )
-
     agent.run(max_attempts=1)
 
     # Should be removed
@@ -127,10 +121,6 @@ def test_run_keeps_summary_on_resume(repo_path, monkeypatch):
     monkeypatch.setattr(agent, "_get_next_attempt_number", lambda: 2)
 
     agent.run_deploy_command = MagicMock(return_value={"success": True, "exit_code": 0})
-    monkeypatch.setattr(
-        "app_operator.cli_agent.agents.deployer.run_health_check",
-        lambda *args, **kwargs: {"success": True, "exit_code": 0},
-    )
 
     agent.run(max_attempts=1)
 
@@ -177,10 +167,6 @@ def test_run_skips_summary_cleanup_when_disabled(repo_path, monkeypatch):
 
     monkeypatch.setattr(deployer, "_get_next_attempt_number", lambda: 1)
     deployer.run_deploy_command = MagicMock(return_value={"success": True, "exit_code": 0})
-    monkeypatch.setattr(
-        "app_operator.cli_agent.agents.deployer.run_health_check",
-        lambda *args, **kwargs: {"success": True, "exit_code": 0},
-    )
 
     deployer.run(max_attempts=1)
 

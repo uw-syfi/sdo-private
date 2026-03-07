@@ -45,6 +45,11 @@ class DSPyFakeCodingAgent(CodingAgent):
         if "Generate a comprehensive health_check.sh bash script" in prompt:
             return self._handle_health_generation()
 
+        # Handle Health Assessment (AppHealthJudge)
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return self._handle_health_assessment()
+
         # Handle Monitoring Analysis
         if "analyze the following health check results" in prompt:
             return self._handle_analysis()
@@ -96,6 +101,14 @@ fi
         script.write_text(content)
         script.chmod(0o755)
         return "I have generated .sds/health_check.sh"
+
+    def _handle_health_assessment(self) -> str:
+        return (
+            "<health_verdict>healthy</health_verdict>\n"
+            "<health_assessment>All services healthy.</health_assessment>\n"
+            "<diagnosis></diagnosis>\n"
+            "<script_fixed>false</script_fixed>"
+        )
 
     def _handle_analysis(self) -> str:
         return """<exec_summary>System is healthy.</exec_summary>

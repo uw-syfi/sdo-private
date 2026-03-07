@@ -9,6 +9,13 @@ from typing import Any
 
 from libs.agent_cli.base import CodingAgent
 
+HEALTH_VERDICT_HEALTHY = (
+    "<health_verdict>healthy</health_verdict>\n"
+    "<health_assessment>All services healthy.</health_assessment>\n"
+    "<diagnosis></diagnosis>\n"
+    "<script_fixed>false</script_fixed>"
+)
+
 
 class StubAgent(CodingAgent):
     """Minimal agent that returns stub responses.
@@ -16,6 +23,10 @@ class StubAgent(CodingAgent):
     Use this for tests that need an agent but don't care about its behavior.
     Supports optional model, recorder, and response attributes used by
     various test scenarios (e.g. operator persistence, cleanup tests).
+
+    When the prompt contains "assess" and "health" (i.e. health assessment),
+    returns a well-formed health verdict XML so the deployer/monitor flow
+    succeeds without extra mocking.
     """
 
     def __init__(self, response: str = "stub response", model=None):
@@ -34,6 +45,10 @@ class StubAgent(CodingAgent):
     def generate(self, prompt: str, cwd=None, timeout=300, silent=False, **kwargs) -> str:
         """Return a stub response and record the call.
 
+        When the prompt looks like a health assessment request, returns a
+        well-formed health verdict XML so the deployer/monitor flow succeeds
+        without extra mocking.
+
         Args:
             prompt: The prompt (recorded but otherwise ignored).
             cwd: Optional working directory.
@@ -48,6 +63,9 @@ class StubAgent(CodingAgent):
         call.update(kwargs)
         self.calls.append(call)
         self.generate_calls.append(call)
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return HEALTH_VERDICT_HEALTHY
         return self.response
 
     def run(self, *args, **kwargs):
@@ -147,6 +165,9 @@ class TrackingAgent(CodingAgent):
         if "fix" in prompt.lower():
             self.fix_request_count += 1
 
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return HEALTH_VERDICT_HEALTHY
         return self.response
 
     def reset(self):
