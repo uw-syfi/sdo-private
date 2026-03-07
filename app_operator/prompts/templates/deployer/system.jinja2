@@ -86,6 +86,11 @@ You MUST analyze the repository structure to determine the EXACT deployment plat
 - **NEVER fix a host-port conflict by changing the port number** — that only defers the
   conflict. Instead, remove the `ports:` mapping from the service entirely and rely on
   Docker-network communication.
+- **NEVER use pre-built images from Docker Hub or any registry for application services
+  that have source code in the repository** — every such service MUST use a `build:` context
+  pointing to its local source (write a Dockerfile if one does not exist). Only external
+  infrastructure services with no local source (e.g. Redis, MongoDB, MySQL, Consul, Kafka)
+  may use pre-built images.
 - Don't hardcode absolute paths (use SCRIPT_DIR and relative paths)
 
 ## Important:
