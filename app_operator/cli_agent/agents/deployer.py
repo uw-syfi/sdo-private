@@ -120,21 +120,9 @@ class DeploymentAgent:
         Returns:
             bool: True if deployment succeeded.
         """
-        # Step 1: Ensure scripts exist
-        if not (self.filesystem.exists(self.deploy_script) and self.filesystem.exists(self.health_check_script)):
-            self.ui.set_stage("Script Generation")
-            logger.info("Generating Deployment Scripts")
-            logger.info(f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
-
-            success, message = self._script_gen.generate_scripts()
-
-            if success:
-                logger.success(message)
-            else:
-                logger.error(message)
-                return False
-        else:
-            logger.success(f"Found existing scripts in {self.sds_dir}")
+        # Step 1: Generate deploy.sh and health_check.sh
+        if not self._ensure_scripts_exist():
+            return False
 
         # Determine start attempt based on existing logs
         start_attempt = self._get_next_attempt_number()
@@ -147,7 +135,9 @@ class DeploymentAgent:
         end_of_range = start_attempt + max_attempts
         absolute_max_attempts = end_of_range - 1
 
-        # Step 2: Deploy with fixing
+        # Step 2: Deploy → health-check → repair loop
+        #   Each iteration: run deploy.sh, assess health, repair if needed.
+        #   Repair modifies scripts; next iteration re-deploys with fixes.
         logger.info("Deploying Application with Error Fixing")
         logger.info(f"Max attempts: {max_attempts} (Starting from #{start_attempt}, up to #{absolute_max_attempts})")
 
@@ -165,6 +155,28 @@ class DeploymentAgent:
 
         return False
 
+    def _ensure_scripts_exist(self) -> bool:
+        """Check for deploy.sh and health_check.sh; generate them if missing.
+
+        Returns True if scripts are available, False on generation failure.
+        """
+        if self.filesystem.exists(self.deploy_script) and self.filesystem.exists(self.health_check_script):
+            logger.success(f"Found existing scripts in {self.sds_dir}")
+            return True
+
+        self.ui.set_stage("Script Generation")
+        logger.info("Generating Deployment Scripts")
+        logger.info(f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
+
+        success, message = self._script_gen.generate_scripts()
+
+        if success:
+            logger.success(message)
+            return True
+
+        logger.error(message)
+        return False
+
     def _run_single_attempt(
         self,
         attempt: int,
@@ -172,62 +184,109 @@ class DeploymentAgent:
         absolute_max_attempts: int,
         check_shutdown: Callable[[], bool] | None,
     ) -> bool | None:
-        """Execute a single deployment attempt.
+        """Single iteration of the deploy → health-check → repair loop.
 
-        Returns:
-            True if deployment succeeded, False if failed permanently,
-            None if another attempt should be made.
+        Returns True (success), False (give up), or None (retry next attempt).
         """
         with self.recorder.phase(Phase.DEPLOYMENT, {"attempt": attempt, "max_attempts": max_attempts}) as r:
-            log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
-            self.filesystem.mkdir(log_file_path.parent, parents=True, exist_ok=True)
-
-            start_time = time.time()
-            deploy_result = self.run_deploy_command("start", log_file_path=log_file_path, check_shutdown=check_shutdown)
-            deploy_duration = time.time() - start_time
-
+            # 1. Run deploy.sh
+            deploy_result = self._execute_deploy(attempt, r, check_shutdown)
             if check_shutdown and check_shutdown():
                 logger.info("Shutdown requested, aborting deployment")
                 return False
 
-            deploy_ec = deploy_result.get("exit_code")
-            r.add_tool_call(
-                tool="bash",
-                args={"script": ".sds/deploy.sh start"},
-                stdout=deploy_result.get("stdout", ""),
-                stderr=deploy_result.get("stderr", ""),
-                exit_code=int(deploy_ec) if deploy_ec is not None else -1,
-                duration=deploy_duration,
+            # 2. If deploy succeeded, check health
+            if deploy_result["success"]:
+                verdict = self._assess_health(r)
+                if verdict.healthy:
+                    return True
+                health_result = self._verdict_to_health_result(verdict)
+            else:
+                health_result = None
+
+            # 3. Repair: agent fixes scripts for next attempt
+            return self._attempt_repair(
+                deploy_result,
+                health_result,
+                attempt,
+                absolute_max_attempts,
+                r,
             )
 
-            if deploy_result["success"]:
-                logger.success("Deployment script succeeded (exit code: 0)")
-                r.add_assistant_message(
-                    "Deployment script executed successfully (exit code: 0)",
-                    duration=deploy_duration,
-                )
+    def _execute_deploy(
+        self,
+        attempt: int,
+        r: TrajectoryRecorderProtocol,
+        check_shutdown: Callable[[], bool] | None,
+    ) -> CommandResult:
+        """Run deploy.sh and record the result in the trajectory."""
+        log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
+        self.filesystem.mkdir(log_file_path.parent, parents=True, exist_ok=True)
 
-                return self._run_health_check_with_retry(
-                    deploy_result,
-                    attempt,
-                    absolute_max_attempts,
-                    log_file_path,
-                    r,
-                )
+        start_time = time.time()
+        deploy_result = self.run_deploy_command("start", log_file_path=log_file_path, check_shutdown=check_shutdown)
+        deploy_duration = time.time() - start_time
 
+        deploy_ec = deploy_result.get("exit_code")
+        r.add_tool_call(
+            tool="bash",
+            args={"script": ".sds/deploy.sh start"},
+            stdout=deploy_result.get("stdout", ""),
+            stderr=deploy_result.get("stderr", ""),
+            exit_code=int(deploy_ec) if deploy_ec is not None else -1,
+            duration=deploy_duration,
+        )
+
+        if deploy_result["success"]:
+            logger.success("Deployment script succeeded (exit code: 0)")
+            r.add_assistant_message(
+                "Deployment script executed successfully (exit code: 0)",
+                duration=deploy_duration,
+            )
+        else:
             res = deploy_result["exit_code"]
             logger.error(f"Deployment script failed (exit code: {res})")
             r.add_assistant_message(f"Deployment script failed (exit code: {res}). Analyzing errors...")
 
-            if self._fix_with_agent(deploy_result, None, attempt, absolute_max_attempts, log_file_path):
+        return deploy_result
+
+    def _assess_health(self, r: TrajectoryRecorderProtocol) -> HealthVerdict:
+        """Run the health judge and log/record the verdict."""
+        judge = AppHealthJudge.from_context(self._ctx, deployment_config=self.deployment_config)
+        verdict = judge.assess()
+
+        if verdict.healthy:
+            logger.success("Health assessment: healthy")
+            logger.success("Deployment Successful!")
+            r.add_assistant_message("Health assessment passed. Deployment successful!")
+        else:
+            logger.warning(f"Health assessment: unhealthy — {verdict.diagnosis}")
+            r.add_assistant_message(f"Health assessment: unhealthy. {verdict.assessment}")
+
+        return verdict
+
+    def _attempt_repair(
+        self,
+        deploy_result: CommandResult,
+        health_result: CommandResult | None,
+        attempt: int,
+        absolute_max_attempts: int,
+        r: TrajectoryRecorderProtocol,
+    ) -> bool | None:
+        """Ask the repair agent to fix scripts; decide retry vs give up.
+
+        Returns None (retry next attempt) or False (give up).
+        """
+        log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
+        if self._fix_with_agent(deploy_result, health_result, attempt, absolute_max_attempts, log_file_path):
+            r.set_phase_status("needs_retry")
+        else:
+            if attempt < absolute_max_attempts:
+                logger.warning("Agent failed to fix (or crashed), but retrying...")
                 r.set_phase_status("needs_retry")
             else:
-                if attempt < absolute_max_attempts:
-                    logger.warning("Agent failed to fix (or crashed), but retrying...")
-                    r.set_phase_status("needs_retry")
-                else:
-                    r.set_phase_status("failed")
-                    return False
+                r.set_phase_status("failed")
+                return False
 
         return None
 
@@ -240,41 +299,6 @@ class DeploymentAgent:
             "stdout": verdict.diagnosis,
             "stderr": verdict.assessment,
         }
-
-    def _run_health_check_with_retry(
-        self,
-        deploy_result: CommandResult,
-        attempt: int,
-        absolute_max_attempts: int,
-        log_file_path: Path,
-        r: TrajectoryRecorderProtocol,
-    ) -> bool | None:
-        """Run agent-based health assessment and, on failure, attempt fix."""
-        judge = AppHealthJudge.from_context(self._ctx, deployment_config=self.deployment_config)
-        verdict = judge.assess()
-
-        if verdict.healthy:
-            logger.success("Health assessment: healthy")
-            logger.success("Deployment Successful!")
-            r.add_assistant_message("Health assessment passed. Deployment successful!")
-            return True
-
-        logger.warning(f"Health assessment: unhealthy — {verdict.diagnosis}")
-        r.add_assistant_message(f"Health assessment: unhealthy. {verdict.assessment}")
-
-        health_result = self._verdict_to_health_result(verdict)
-
-        if self._fix_with_agent(deploy_result, health_result, attempt, absolute_max_attempts, log_file_path):
-            r.set_phase_status("needs_retry")
-        else:
-            if attempt < absolute_max_attempts:
-                logger.warning("Agent failed to fix (or crashed), but retrying...")
-                r.set_phase_status("needs_retry")
-            else:
-                r.set_phase_status("failed")
-                return False
-
-        return None
 
     def _fix_with_agent(
         self,
