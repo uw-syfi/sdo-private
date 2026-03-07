@@ -53,11 +53,13 @@ def test_run_success_flow_updates_ui_stages(app_operator_with_ui):
 
     assert exit_code == 0
 
-    # Verify agents were initialized with ui
-    # We check that ui kwarg was passed
-    assert mock_analyzer_cls.call_args[1]["ui"] == mock_ui
-    assert mock_deployer_cls.call_args[1]["ui"] == mock_ui
-    assert mock_monitor_cls.call_args[1]["ui"] == mock_ui
+    # Verify agents were initialized with ui via AgentContext
+    ctx = mock_analyzer_cls.call_args[1]["ctx"]
+    assert ctx.ui == mock_ui
+    ctx = mock_deployer_cls.call_args[1]["ctx"]
+    assert ctx.ui == mock_ui
+    ctx = mock_monitor_cls.call_args[1]["ctx"]
+    assert ctx.ui == mock_ui
 
     # Verify agent event handler attached
     assert op.agent.event_handler == mock_ui

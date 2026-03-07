@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
+from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import Config, load_config
@@ -123,34 +124,33 @@ class AppOperator(OperatorBase):
         # Attach recorder to agent
         self.agent.recorder = self.recorder
 
-        # Initialize agents
-        self.analyzer = CodeAnalyzerAgent(
-            self.repo_path,
-            self.agent,
-            self.filesystem,
+        # Construct shared context for all agents
+        self._ctx = AgentContext(
+            repo_path=self.repo_path,
+            coding_agent=self.agent,
+            filesystem=self.filesystem,
+            operator_config=self.config.operator,
             recorder=self.recorder,
             dspy_config=self.config.dspy,
             ui=self.ui,
-            operator_config=self.config.operator,
+        )
+
+        # Initialize agents with shared context
+        self.analyzer = CodeAnalyzerAgent(
+            self.repo_path,
+            self.agent,
+            ctx=self._ctx,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,
             self.agent,
-            self.filesystem,
-            self.config.deployment,
-            self.config.operator,
-            recorder=self.recorder,
-            dspy_config=self.config.dspy,
-            ui=self.ui,
+            deployment_config=self.config.deployment,
+            ctx=self._ctx,
         )
         self.monitor = AppMonitor(
             self.repo_path,
             self.agent,
-            self.filesystem,
-            operator_config=self.config.operator,
-            recorder=self.recorder,
-            dspy_config=self.config.dspy,
-            ui=self.ui,
+            ctx=self._ctx,
         )
 
     def run(self) -> int:

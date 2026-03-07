@@ -1,35 +1,27 @@
 from __future__ import annotations
 
-import re
-import subprocess
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from app_operator.dspy_integration import DSPyConfig
     from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
 
-from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
+from app_operator.cli_agent.agents.context import AgentContext
+from app_operator.cli_agent.agents.deploy_executor import DeployExecutor
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge, HealthVerdict
-from app_operator.cli_agent.factory import create_agent_from_config
+from app_operator.cli_agent.agents.repair_agent import RepairAgent, get_fix_summary_path
+from app_operator.cli_agent.agents.script_generator_agent import (
+    ScriptGeneratorAgent,
+    generate_scripts,  # noqa: F401 — re-exported for backward compat
+)
 from app_operator.config import DeploymentConfig, OperatorConfig
-from app_operator.constants import FIX_SUMMARY_FILENAME
-from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
-from app_operator.prompts import (
-    analyze_repository,
-    create_consolidation_prompt,
-    create_fix_prompt,
-    create_generate_script_prompt,
-    create_system_prompt,
-    prepare_error_context,
-)
-from app_operator.subprocess_runner import SubprocessRunner
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
@@ -37,220 +29,9 @@ from app_operator.trajectory import (
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
-FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
-FIX_SUMMARY_MAX_LENGTH = 2000  # characters before truncating agent response summary
-FIX_SUMMARY_TRUNCATE_AT = 1900  # characters to keep when truncating summary
-MONITOR_INITIAL_DELAY_SECS = 15.0  # seconds before first progress summary
-MONITOR_SUMMARY_INTERVAL_SECS = 30.0  # seconds between subsequent progress summaries
-
-
-def get_fix_summary_path(sds_dir: Path) -> Path:
-    """Return the path to the consolidated fix summary file."""
-    return sds_dir / FIX_SUMMARY_FILENAME
-
-
-def generate_scripts(
-    target_dir: str,
-    agent: CodingAgent | None = None,
-    filesystem: FileSystemInterface | None = None,
-    deployment_config: DeploymentConfig | None = None,
-    operator_config: OperatorConfig | None = None,
-    recorder: TrajectoryRecorderProtocol | None = None,
-    dspy_config: DSPyConfig | None = None,
-) -> tuple[bool, str]:
-    """Generate deploy.sh and health_check.sh scripts using a coding agent.
-
-    This function runs the coding agent in the target directory with read/write access,
-    analyzing the repository structure and generating appropriate deployment
-    and health check scripts.
-
-    Args:
-        target_dir: The directory path where scripts should be generated.
-        agent: Optional CodingAgent instance. If None, creates one from config.
-        filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
-        deployment_config: Optional deployment configuration. If None, uses default.
-        operator_config: Optional operator configuration for timeouts. If None, uses default.
-        recorder: Optional trajectory recorder.
-        dspy_config: Optional DSPy configuration for optimized prompts.
-
-    Returns:
-        Tuple of (success: bool, message: str).
-    """
-    if filesystem is None:
-        filesystem = RealFilesystem()
-
-    if deployment_config is None:
-        deployment_config = DeploymentConfig()
-
-    if operator_config is None:
-        operator_config = OperatorConfig()
-
-    recorder = recorder or NullTrajectoryRecorder()
-
-    target_path = Path(target_dir).resolve()
-
-    # Validate target directory exists
-    if not filesystem.exists(target_path):
-        return False, f"Target directory does not exist: {target_dir}"
-
-    if not filesystem.is_dir(target_path):
-        return False, f"Target path is not a directory: {target_dir}"
-
-    # Initialize coding agent if not provided
-    if agent is None:
-        try:
-            agent = create_agent_from_config(str(target_path))
-        except (RuntimeError, AgentError) as e:
-            return False, str(e)
-
-    agent.recorder = recorder
-
-    # Create .sds directory if it doesn't exist
-    sds_dir = target_path / ".sds"
-    filesystem.mkdir(sds_dir, exist_ok=True)
-
-    # Get absolute path for context
-    abs_target_dir = str(target_path)
-
-    # Start script generation phase in trajectory
-    with recorder.phase(Phase.SCRIPT_GENERATION) as r:
-        try:
-            # Create system prompt based on deployment platform
-            system_prompt = create_system_prompt(deployment_config.platform)
-
-            # Analyze the repository structure
-            repo_context = analyze_repository(target_path, filesystem=filesystem)
-
-            # Generate deploy.sh using coding agent
-            deploy_success, deploy_msg = _generate_script(
-                agent,
-                system_prompt,
-                repo_context,
-                abs_target_dir,
-                filesystem,
-                "deploy.sh",
-                deployment_config,
-                operator_config,
-                recorder=r,
-                dspy_config=dspy_config,
-            )
-
-            if not deploy_success:
-                r.set_phase_status("failed")
-                return False, f"Failed to generate deploy.sh: {deploy_msg}"
-
-            # Generate health_check.sh using coding agent
-            health_check_success, health_check_msg = _generate_script(
-                agent,
-                system_prompt,
-                repo_context,
-                abs_target_dir,
-                filesystem,
-                "health_check.sh",
-                deployment_config,
-                operator_config,
-                recorder=r,
-                dspy_config=dspy_config,
-            )
-
-            # Make scripts executable
-            deploy_script_path = sds_dir / "deploy.sh"
-            health_check_script_path = sds_dir / "health_check.sh"
-
-            if filesystem.exists(deploy_script_path):
-                filesystem.chmod(deploy_script_path, 0o755)
-
-            if filesystem.exists(health_check_script_path):
-                filesystem.chmod(health_check_script_path, 0o755)
-
-            return True, f"Successfully generated scripts in {sds_dir}"
-
-        except (AgentError, DeploymentError, FileSystemError) as e:
-            r.set_phase_status("failed")
-            return False, f"Failed to generate scripts: {e}"
-        except (OSError, RuntimeError, ValueError) as e:
-            # Top-level catch to prevent uncaught exception — specific types are too numerous
-            logger.error("Unexpected error during script generation: %s", e, exc_info=True)
-            r.set_phase_status("failed")
-            return False, f"Unexpected error during script generation: {e}"
-
-
-def _generate_script(
-    agent: CodingAgent,
-    system_prompt: str,
-    repo_context: str,
-    target_dir: str,
-    filesystem: FileSystemInterface,
-    script_name: str,
-    deployment_config: DeploymentConfig | None = None,
-    operator_config: OperatorConfig | None = None,
-    recorder: TrajectoryRecorderProtocol | None = None,
-    dspy_config: DSPyConfig | None = None,
-) -> tuple[bool, str]:
-    """Generate a script (deploy.sh or health_check.sh) using a coding agent.
-
-    Args:
-        agent: The coding agent to use for generation.
-        system_prompt: System prompt for the agent.
-        repo_context: Repository analysis context.
-        target_dir: Target directory path.
-        filesystem: Filesystem abstraction.
-        script_name: Name of the script to generate (e.g. "deploy.sh").
-        deployment_config: Optional deployment configuration.
-        operator_config: Optional operator configuration for timeouts.
-        recorder: Optional trajectory recorder.
-        dspy_config: Optional DSPy configuration for optimized prompts.
-
-    Returns:
-        Tuple of (success: bool, message: str).
-    """
-    if operator_config is None:
-        operator_config = OperatorConfig()
-
-    recorder = recorder or NullTrajectoryRecorder()
-
-    platform = deployment_config.platform if deployment_config else "auto"
-    full_prompt = create_generate_script_prompt(
-        system_prompt=system_prompt,
-        script_name=script_name,
-        repo_context=repo_context,
-        target_dir=target_dir,
-        platform=platform,
-        dspy_config=dspy_config,
-        recorder=recorder,
-        filesystem=filesystem,
-    )
-
-    try:
-        start_time = time.time()
-        agent.generate(full_prompt, cwd=target_dir, timeout=operator_config.agent_timeout)
-
-        duration = time.time() - start_time
-        logger.info(f"Agent generation took {duration / 60:.2f} minutes")
-
-        script_path = Path(target_dir) / ".sds" / script_name
-        if filesystem.exists(script_path):
-            return True, f"Successfully generated {script_name}"
-        return False, f"Agent failed to create .sds/{script_name}"
-
-    except subprocess.TimeoutExpired:
-        timeout = operator_config.agent_timeout // 60
-        recorder.add_assistant_message(f"Script generation timed out after {timeout} minutes")
-        return (
-            False,
-            f"agent command timed out after {timeout} minutes",
-        )
-    except AgentError as e:
-        recorder.add_assistant_message(f"Script generation failed: {e}")
-        return False, str(e)
-    except (OSError, RuntimeError, ValueError) as e:
-        logger.warning("Unexpected error in _generate_script: %s", e)
-        recorder.add_assistant_message(f"Script generation failed: {e}")
-        return False, str(e)
-
 
 class DeploymentAgent:
-    """Agent responsible for deploying applications and fixing deployment errors."""
+    """Orchestrates the deploy-check-fix loop by composing focused agents."""
 
     def __init__(
         self,
@@ -262,38 +43,48 @@ class DeploymentAgent:
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
         ui: OperatorUI | None = None,
+        *,
+        ctx: AgentContext | None = None,
     ):
-        """Initialize the deployment agent.
+        if ctx is not None:
+            self._ctx = ctx
+        else:
+            self._ctx = AgentContext(
+                repo_path=repo_path,
+                coding_agent=coding_agent,
+                filesystem=filesystem if filesystem is not None else RealFilesystem(),
+                operator_config=operator_config or OperatorConfig(),
+                recorder=recorder or NullTrajectoryRecorder(),
+                dspy_config=dspy_config,
+                ui=ui or NullOperatorUI(),
+            )
 
-        Args:
-            repo_path: Path to the repository to deploy.
-            coding_agent: The coding agent to use for generating/fixing scripts.
-            filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
-            deployment_config: Optional deployment configuration.
-            operator_config: Optional operator configuration for timeouts.
-            recorder: Optional trajectory recorder.
-            dspy_config: Optional DSPy configuration for optimized prompts.
-            ui: Optional UI interface.
-        """
-        self.repo_path = repo_path
-        self.agent = coding_agent
-        self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.deployment_config = deployment_config or DeploymentConfig()
-        self.operator_config = operator_config or OperatorConfig()
-        self.recorder = recorder or NullTrajectoryRecorder()
-        self.dspy_config = dspy_config
-        self.ui = ui or NullOperatorUI()
-        self.sds_dir = self.repo_path / ".sds"
+
+        # Convenience aliases for backward compat and internal use
+        self.repo_path = self._ctx.repo_path
+        self.agent = self._ctx.coding_agent
+        self.filesystem = self._ctx.filesystem
+        self.operator_config = self._ctx.operator_config
+        self.recorder = self._ctx.recorder
+        self.dspy_config = self._ctx.dspy_config
+        self.ui = self._ctx.ui
+        self.sds_dir = self._ctx.sds_dir
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
 
+        # Composed agents
+        self._executor = DeployExecutor(self._ctx)
+        self._repair = RepairAgent(self._ctx, deployment_config=self.deployment_config)
+        self._script_gen = ScriptGeneratorAgent(self._ctx, deployment_config=self.deployment_config)
+
     def _get_time(self) -> float:
         """Get current time. Separate method to allow mocking in tests."""
-        return time.time()
+        return self._executor._get_time()
 
     def _sleep(self, seconds: float) -> None:
         """Sleep for given seconds. Separate method to allow mocking in tests."""
-        time.sleep(seconds)
+        self._executor._sleep(seconds)
 
     def _get_next_attempt_number(self) -> int:
         """Determine the next attempt number based on existing logs."""
@@ -301,17 +92,14 @@ class DeploymentAgent:
         if not self.filesystem.exists(logs_dir):
             return 1
 
-        # Find all deploy logs using filesystem abstraction
         log_files = self.filesystem.glob(logs_dir, "deploy_attempt_*.log")
         if not log_files:
             return 1
 
-        # Extract numbers
         max_attempt = 0
         for log_file in log_files:
             try:
-                # filename format: deploy_attempt_{n}.log
-                name = log_file.stem  # deploy_attempt_{n}
+                name = log_file.stem
                 parts = name.split("_")
                 if len(parts) >= 3 and parts[-1].isdigit():
                     num = int(parts[-1])
@@ -323,8 +111,7 @@ class DeploymentAgent:
         return max_attempt + 1
 
     def run(self, max_attempts: int = 5, check_shutdown: Callable[[], bool] | None = None) -> bool:
-        """Attempt deployment with automatic error fixing using a coding agent.
-        Ensures scripts exist before deployment.
+        """Attempt deployment with automatic error fixing.
 
         Args:
             max_attempts: Maximum number of deployment attempts (default: 5).
@@ -339,15 +126,7 @@ class DeploymentAgent:
             logger.info("Generating Deployment Scripts")
             logger.info(f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
 
-            success, message = generate_scripts(
-                str(self.repo_path),
-                self.agent,
-                self.filesystem,
-                self.deployment_config,
-                self.operator_config,
-                recorder=self.recorder,
-                dspy_config=self.dspy_config,
-            )
+            success, message = self._script_gen.generate_scripts()
 
             if success:
                 logger.success(message)
@@ -360,7 +139,6 @@ class DeploymentAgent:
         # Determine start attempt based on existing logs
         start_attempt = self._get_next_attempt_number()
 
-        # If starting fresh, ensure clean slate for summary
         if start_attempt == 1 and self.operator_config.phase.fix_summary_consolidation:
             summary_file = get_fix_summary_path(self.sds_dir)
             if self.filesystem.exists(summary_file):
@@ -396,22 +174,14 @@ class DeploymentAgent:
     ) -> bool | None:
         """Execute a single deployment attempt.
 
-        Args:
-            attempt: Current attempt number.
-            max_attempts: Maximum number of attempts (for trajectory metadata).
-            absolute_max_attempts: Absolute max attempt number (for fix logic).
-            check_shutdown: Optional callable that returns True if shutdown is requested.
-
         Returns:
-            True if deployment succeeded, False if deployment failed permanently,
+            True if deployment succeeded, False if failed permanently,
             None if another attempt should be made.
         """
         with self.recorder.phase(Phase.DEPLOYMENT, {"attempt": attempt, "max_attempts": max_attempts}) as r:
-            # Setup log file for this attempt
             log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
             self.filesystem.mkdir(log_file_path.parent, parents=True, exist_ok=True)
 
-            # Run deployment script
             start_time = time.time()
             deploy_result = self.run_deploy_command("start", log_file_path=log_file_path, check_shutdown=check_shutdown)
             deploy_duration = time.time() - start_time
@@ -420,7 +190,6 @@ class DeploymentAgent:
                 logger.info("Shutdown requested, aborting deployment")
                 return False
 
-            # Record the deployment tool call
             deploy_ec = deploy_result.get("exit_code")
             r.add_tool_call(
                 tool="bash",
@@ -431,7 +200,6 @@ class DeploymentAgent:
                 duration=deploy_duration,
             )
 
-            # Check if deployment succeeded
             if deploy_result["success"]:
                 logger.success("Deployment script succeeded (exit code: 0)")
                 r.add_assistant_message(
@@ -446,18 +214,12 @@ class DeploymentAgent:
                     log_file_path,
                     r,
                 )
+
             res = deploy_result["exit_code"]
             logger.error(f"Deployment script failed (exit code: {res})")
             r.add_assistant_message(f"Deployment script failed (exit code: {res}). Analyzing errors...")
 
-            # Deployment failed - ask agent to analyze and fix
-            if self._fix_with_agent(
-                deploy_result,
-                None,
-                attempt,
-                absolute_max_attempts,
-                log_file_path,
-            ):
+            if self._fix_with_agent(deploy_result, None, attempt, absolute_max_attempts, log_file_path):
                 r.set_phase_status("needs_retry")
             else:
                 if attempt < absolute_max_attempts:
@@ -487,31 +249,8 @@ class DeploymentAgent:
         log_file_path: Path,
         r: TrajectoryRecorderProtocol,
     ) -> bool | None:
-        """Run agent-based health assessment and, on failure, attempt fix.
-
-        Args:
-            deploy_result: Result from the deployment script.
-            attempt: Current attempt number.
-            absolute_max_attempts: Absolute max attempt number.
-            log_file_path: Path to the deployment log file.
-            r: Trajectory recorder for the current phase.
-
-        Returns:
-            True if health check passed, False if permanently failed,
-            None if another attempt should be made.
-        """
-        judge = AppHealthJudge(
-            repo_path=self.repo_path,
-            coding_agent=self.agent,
-            health_check_script=self.health_check_script,
-            filesystem=self.filesystem,
-            operator_config=self.operator_config,
-            recorder=self.recorder,
-            dspy_config=self.dspy_config,
-            ui=self.ui,
-            deployment_config=self.deployment_config,
-        )
-
+        """Run agent-based health assessment and, on failure, attempt fix."""
+        judge = AppHealthJudge.from_context(self._ctx, deployment_config=self.deployment_config)
         verdict = judge.assess()
 
         if verdict.healthy:
@@ -523,16 +262,9 @@ class DeploymentAgent:
         logger.warning(f"Health assessment: unhealthy — {verdict.diagnosis}")
         r.add_assistant_message(f"Health assessment: unhealthy. {verdict.assessment}")
 
-        # Convert verdict to CommandResult for _fix_with_agent compatibility
         health_result = self._verdict_to_health_result(verdict)
 
-        if self._fix_with_agent(
-            deploy_result,
-            health_result,
-            attempt,
-            absolute_max_attempts,
-            log_file_path,
-        ):
+        if self._fix_with_agent(deploy_result, health_result, attempt, absolute_max_attempts, log_file_path):
             r.set_phase_status("needs_retry")
         else:
             if attempt < absolute_max_attempts:
@@ -544,132 +276,6 @@ class DeploymentAgent:
 
         return None
 
-    def run_deploy_command(
-        self,
-        command: str = "start",
-        timeout: int | None = None,
-        log_file_path: Path | None = None,
-        check_shutdown: Callable[[], bool] | None = None,
-    ) -> CommandResult:
-        """Run the deployment script with a specific command.
-
-        Args:
-            command: The command to pass to the script (e.g., "start", "stop").
-            timeout: Timeout in seconds. If None, uses operator_config.deploy_timeout.
-            log_file_path: Optional path to write output logs to.
-            check_shutdown: Optional callable returning True if shutdown requested.
-
-        Returns:
-            dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
-        """
-        if timeout is None:
-            timeout = self.operator_config.deploy_timeout
-        logger.info(f"Running deployment script: {self.deploy_script} {command}")
-
-        if log_file_path:
-            logger.info(f"Logging output to: {log_file_path}")
-
-        # Create subprocess runner
-        # Pass subprocess.Popen from this module so tests can patch it
-        runner = SubprocessRunner(
-            command=[str(self.deploy_script), command],
-            cwd=str(self.repo_path),
-            timeout=timeout,
-            log_file_path=log_file_path,
-            check_shutdown=check_shutdown,
-            time_func=self._get_time,
-            sleep_func=self._sleep,
-            popen_func=subprocess.Popen,
-            ui=self.ui,
-            tool_name="deploy.sh",
-            tool_args={"command": command},
-        )
-
-        # Create progress summarizer
-        summarizer = ProgressSummarizer(
-            agent_generate_fn=lambda prompt, silent, timeout: self.agent.generate(
-                prompt, silent=silent, timeout=timeout
-            ),
-            initial_delay=MONITOR_INITIAL_DELAY_SECS,
-            summary_interval=MONITOR_SUMMARY_INTERVAL_SECS,
-            time_func=self._get_time,
-            recorder=self.recorder,
-        )
-
-        # Start the subprocess with progress monitoring
-        result = runner.run_with_progress_monitoring(summarizer)
-
-        # Log completion
-        status = "SUCCESS" if result.get("success") else "FAILED"
-        exit_code = result.get("exit_code", -1)
-        logger.info(f"Deployment command '{command}' finished: {status} (Exit Code: {exit_code})")
-
-        return result
-
-    def _update_consolidated_summary(self, current_attempt: int, current_summary: str) -> None:
-        """Consolidate fix summaries into a markdown file using the agent."""
-        if current_attempt % FIX_SUMMARY_CONSOLIDATION_INTERVAL != 0:
-            return
-
-        summary_file = get_fix_summary_path(self.sds_dir)
-
-        # Read existing content if file exists
-        existing_content = ""
-        if self.filesystem.exists(summary_file):
-            existing_content = self.filesystem.read_text(summary_file)
-
-        # Determine range of attempts to consolidate
-        start_index = current_attempt - FIX_SUMMARY_CONSOLIDATION_INTERVAL + 1
-
-        # Collect new attempts text
-        new_attempts_list = []
-        for i in range(start_index, current_attempt + 1):
-            if i == current_attempt:
-                content = current_summary
-            else:
-                # Read from log file
-                log_path = self.sds_dir / "logs" / f"fix_summary_{i}.log"
-                if self.filesystem.exists(log_path):
-                    content = self.filesystem.read_text(log_path)
-                else:
-                    content = "No summary available."
-
-            new_attempts_list.append(f"## Attempt {i}\n{content}\n")
-
-        new_attempts_text = "\n".join(new_attempts_list)
-
-        prompt = create_consolidation_prompt(existing_content, new_attempts_text)
-
-        logger.info("Consolidating fix summaries with agent...")
-        try:
-            # Use a shorter timeout for summarization
-            consolidated_summary_raw = self.agent.generate(
-                prompt, cwd=str(self.repo_path), timeout=self.operator_config.agent_timeout, silent=True
-            )
-
-            # Extract from <summary> tags
-            match = re.search(r"<summary>(.*?)</summary>", consolidated_summary_raw, re.DOTALL)
-            if match:
-                consolidated_summary = match.group(1).strip()
-            else:
-                # Fallback to raw output if no tags found
-                consolidated_summary = consolidated_summary_raw.strip()
-
-            self.filesystem.write_text(summary_file, consolidated_summary)
-            logger.info(f"Updated consolidated summary at {summary_file}")
-
-        except (AgentError, OSError, RuntimeError) as e:
-            logger.warning(f"Failed to consolidate summary: {e}")
-            # Fallback: append, but cap to prevent unbounded growth
-            _max_fallback = 20_000  # characters
-            if existing_content:
-                if len(existing_content) > _max_fallback:
-                    existing_content = existing_content[-_max_fallback:]
-                fallback_content = existing_content + "\n\n" + new_attempts_text
-            else:
-                fallback_content = new_attempts_text
-            self.filesystem.write_text(summary_file, fallback_content)
-
     def _fix_with_agent(
         self,
         deploy_result: CommandResult,
@@ -679,105 +285,34 @@ class DeploymentAgent:
         log_file_path: Path | None = None,
         health_check_log_path: Path | None = None,
     ) -> bool:
-        """Use a coding agent to analyze errors and fix the scripts.
+        """Delegate to RepairAgent for backward compatibility."""
+        return self._repair.fix_with_agent(
+            deploy_result,
+            health_result,
+            attempt,
+            max_attempts,
+            log_file_path,
+            health_check_log_path,
+        )
 
-        Args:
-            deploy_result: Deployment script result.
-            health_result: Health check result (None if deployment failed before health check).
-            attempt: Current attempt number.
-            max_attempts: Maximum number of attempts.
-            log_file_path: Path to the deployment log file.
-            health_check_log_path: Path to the health check log file.
+    def _update_consolidated_summary(self, current_attempt: int, current_summary: str) -> None:
+        """Delegate to RepairAgent for backward compatibility."""
+        self._repair._update_consolidated_summary(current_attempt, current_summary)
 
-        Returns:
-            bool: True if agent suggested a fix and applied it.
+    def run_deploy_command(
+        self,
+        command: str = "start",
+        timeout: int | None = None,
+        log_file_path: Path | None = None,
+        check_shutdown: Callable[[], bool] | None = None,
+    ) -> CommandResult:
+        """Run the deployment script with a specific command.
+
+        Delegates to DeployExecutor for backward compatibility.
         """
-        if attempt >= max_attempts:
-            logger.error(f"Reached maximum attempts ({max_attempts}), giving up")
-            return False
-
-        self.ui.set_stage("Fixing Deployment Issues", detail=f"Attempt {attempt}/{max_attempts}")
-        logger.info(f"Asking {self.agent.__class__.__name__} to Fix Deployment Issues")
-
-        try:
-            error_context = prepare_error_context(deploy_result, health_result, log_file_path, health_check_log_path)
-            prompt = create_fix_prompt(
-                self.repo_path,
-                attempt,
-                max_attempts,
-                error_context,
-                self.deploy_script,
-                self.health_check_script,
-                platform=self.deployment_config.platform,
-                dspy_config=self.dspy_config,
-                recorder=self.recorder,
-                fix_summary_consolidation=self.operator_config.phase.fix_summary_consolidation,
-            )
-        except (OSError, RuntimeError, ValueError) as e:
-            logger.error(f"Failed to prepare fix prompt: {e}")
-            self.recorder.add_assistant_message(f"Failed to prepare fix prompt: {e}")
-            return False
-
-        try:
-            logger.info(f"Consulting {self.agent.__class__.__name__} to analyze and fix the issue...")
-
-            # Run agent to get fix suggestions
-            # Note: The agent is expected to modify files directly
-            start_time = time.time()
-            response = self.agent.generate(
-                prompt,
-                cwd=str(self.repo_path),
-                timeout=self.operator_config.agent_fix_timeout,
-            )
-            duration = time.time() - start_time
-            logger.info(f"Agent generation (fix) took {duration / 60:.2f} minutes")
-
-            # Extract summary and save to log
-            match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)
-            if match:
-                summary_text = match.group(1).strip()
-            else:
-                # Fallback: use the full response or a truncated version as
-                # summary
-                logger.warning(f"Agent did not provide summary in expected format for attempt {attempt}")
-                summary_text = (
-                    "Agent attempted to fix deployment issues "
-                    "(no structured summary provided).\n\n"
-                    f"Full response:\n{response}"
-                )
-                # Optionally truncate if too long
-                if len(summary_text) > FIX_SUMMARY_MAX_LENGTH:
-                    summary_text = summary_text[:FIX_SUMMARY_TRUNCATE_AT] + "...\n[Response truncated]"
-
-            # Always save some summary
-            log_file = self.sds_dir / "logs" / f"fix_summary_{attempt}.log"
-            self.filesystem.mkdir(log_file.parent, parents=True, exist_ok=True)
-            self.filesystem.write_text(log_file, summary_text)
-            logger.info(f"Saved fix summary to {log_file}")
-
-            # Update consolidated summary if enabled
-            if self.operator_config.phase.fix_summary_consolidation:
-                self._update_consolidated_summary(attempt, summary_text)
-
-            logger.info("Agent response received")
-
-            # Agent should have modified the scripts directly
-            # Just notify user and continue to next attempt
-            logger.success("Agent has analyzed the issue and may have modified the scripts")
-            logger.info("Proceeding to next deployment attempt...")
-
-            return True
-
-        except subprocess.TimeoutExpired:
-            timeout_min = self.operator_config.agent_fix_timeout // 60
-            logger.error(f"Agent fix timed out after {timeout_min} minutes")
-            self.recorder.add_assistant_message(f"Agent fix timed out after {timeout_min} minutes")
-            return False
-        except AgentError as e:
-            logger.error(f"Agent failed to provide fix: {e}")
-            self.recorder.add_assistant_message(f"Failed to provide fix: {e}")
-            return False
-        except (OSError, RuntimeError, ValueError) as e:
-            logger.error(f"Unexpected error while getting fix from agent: {e}", exc_info=True)
-            self.recorder.add_assistant_message(f"Unexpected error during fix attempt: {e}")
-            return False
+        return self._executor.run_deploy_command(
+            command=command,
+            timeout=timeout,
+            log_file_path=log_file_path,
+            check_shutdown=check_shutdown,
+        )

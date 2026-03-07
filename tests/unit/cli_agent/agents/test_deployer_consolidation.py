@@ -71,7 +71,7 @@ def test_update_consolidated_summary_appends(repo_path):
 
 def test_update_consolidated_summary_respects_interval(repo_path, monkeypatch):
     # Set interval to 2
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.FIX_SUMMARY_CONSOLIDATION_INTERVAL", 2)
+    monkeypatch.setattr("app_operator.cli_agent.agents.repair_agent.FIX_SUMMARY_CONSOLIDATION_INTERVAL", 2)
 
     agent_mock = ConfigurableAgent()
     expected_content = "## Attempt 1\nsummary 1\n## Attempt 2\nsummary 2"

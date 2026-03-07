@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app_operator.cli_agent.agents.deployer as deployer_module
+import app_operator.cli_agent.agents.deploy_executor as executor_module
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.prompts.deployer import (
     create_fix_prompt,
@@ -41,18 +41,10 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
     repo.mkdir()
     agent = DeploymentAgent(repo, stub_agent)
 
-    generated = {}
+    generated = {"called": False}
 
-    def fake_generate_scripts(
-        directory,
-        agent,
-        filesystem=None,
-        deployment_config=None,
-        operator_config=None,
-        recorder=None,
-        dspy_config=None,
-    ):
-        generated["args"] = (directory, agent)
+    def fake_generate_scripts():
+        generated["called"] = True
         sds_dir = repo / ".sds"
         sds_dir.mkdir(exist_ok=True)
         (sds_dir / "deploy.sh").write_text("#!/bin/bash\n")
@@ -68,11 +60,11 @@ def test_run_generates_scripts_when_missing(tmp_path, stub_agent, monkeypatch):
     ):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
-    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
+    monkeypatch.setattr(agent._script_gen, "generate_scripts", fake_generate_scripts)
     bind_method(agent, "run_deploy_command", fake_run_deploy)
 
     assert agent.run(max_attempts=1) is True
-    assert generated["args"] == (str(repo), stub_agent)
+    assert generated["called"] is True
 
 
 def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch):
@@ -85,18 +77,7 @@ def test_run_fails_if_script_generation_fails(tmp_path, stub_agent, monkeypatch)
     repo.mkdir()
     agent = DeploymentAgent(repo, stub_agent)
 
-    def fake_generate_scripts(
-        directory,
-        agent,
-        filesystem=None,
-        deployment_config=None,
-        operator_config=None,
-        recorder=None,
-        dspy_config=None,
-    ):
-        return False, "boom"
-
-    monkeypatch.setattr(deployer_module, "generate_scripts", fake_generate_scripts)
+    monkeypatch.setattr(agent._script_gen, "generate_scripts", lambda: (False, "boom"))
 
     assert agent.run() is False
 
@@ -241,7 +222,7 @@ def test_run_deploy_command_handles_subprocess_results(agent, monkeypatch):
         assert kwargs["cwd"] == str(agent.repo_path)
         return MockProcess()
 
-    monkeypatch.setattr(deployer_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(executor_module.subprocess, "Popen", fake_popen)
 
     result = agent.run_deploy_command("start")
     assert result["success"] is True
@@ -269,7 +250,7 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
 
         def wait(self, timeout=None):
             if timeout:
-                raise deployer_module.subprocess.TimeoutExpired(cmd=[], timeout=timeout)
+                raise executor_module.subprocess.TimeoutExpired(cmd=[], timeout=timeout)
             return 0
 
         def terminate(self):
@@ -278,7 +259,7 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
         def kill(self):
             pass
 
-    monkeypatch.setattr(deployer_module.subprocess, "Popen", lambda *args, **kwargs: MockProcess())
+    monkeypatch.setattr(executor_module.subprocess, "Popen", lambda *args, **kwargs: MockProcess())
 
     # Mock time to simulate timeout
     # Initial call: start_time
@@ -295,8 +276,8 @@ def test_run_deploy_command_handles_timeouts(agent, monkeypatch):
         DEFAULT_DEPLOY_TIMEOUT_SECS + 4,
         DEFAULT_DEPLOY_TIMEOUT_SECS + 5,
     ]
-    monkeypatch.setattr(deployer_module.time, "time", lambda: times.pop(0))
-    monkeypatch.setattr(deployer_module.time, "sleep", lambda x: None)
+    monkeypatch.setattr(executor_module.time, "time", lambda: times.pop(0))
+    monkeypatch.setattr(executor_module.time, "sleep", lambda x: None)
 
     result = agent.run_deploy_command("start", timeout=DEFAULT_DEPLOY_TIMEOUT_SECS)
     assert result["success"] is False

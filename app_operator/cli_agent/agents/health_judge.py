@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from app_operator.cli_agent.agents.context import AgentContext
     from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
@@ -108,6 +109,25 @@ class AppHealthJudge:
         self.dspy_config = dspy_config
         self.ui = ui or NullOperatorUI()
         self.deployment_config = deployment_config or DeploymentConfig()
+
+    @classmethod
+    def from_context(
+        cls,
+        ctx: AgentContext,
+        deployment_config: DeploymentConfig | None = None,
+    ) -> AppHealthJudge:
+        """Create an AppHealthJudge from an AgentContext."""
+        return cls(
+            repo_path=ctx.repo_path,
+            coding_agent=ctx.coding_agent,
+            health_check_script=ctx.sds_dir / "health_check.sh",
+            filesystem=ctx.filesystem,
+            operator_config=ctx.operator_config,
+            recorder=ctx.recorder,
+            dspy_config=ctx.dspy_config,
+            ui=ctx.ui,
+            deployment_config=deployment_config,
+        )
 
     def assess(self, max_retries: int = 2) -> HealthVerdict:
         """Run the agent-based health assessment.
