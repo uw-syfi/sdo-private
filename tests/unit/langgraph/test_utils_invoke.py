@@ -6,7 +6,7 @@ from app_operator.langgraph.utils import invoke_agent
 
 
 def test_invoke_agent_simple():
-    state = {"token_usage": {"input": 0, "output": 0, "total": 0}}
+    state = {"agent_token_usage": []}
     mock_agent = MagicMock()
 
     # Mock stream output
@@ -24,11 +24,20 @@ def test_invoke_agent_simple():
 
     mock_recorder = MagicMock()
 
-    text, messages = invoke_agent(state, mock_agent, "System prompt", "User prompt", recorder=mock_recorder)
+    text, messages = invoke_agent(
+        state,
+        mock_agent,
+        "System prompt",
+        "User prompt",
+        agent_name="Test Agent",
+        recorder=mock_recorder,
+    )
 
     assert text == "Hello world"
     assert len(messages) == 3  # System, User, AI
-    assert state["token_usage"] == {"input": 10, "output": 5, "total": 15}
+    assert state["agent_token_usage"] == [
+        {"agent": "Test Agent", "input": 10, "output": 5, "total": 15},
+    ]
 
     # Check recorder calls
     mock_recorder.add_user_message.assert_called_with("User prompt")
@@ -58,7 +67,7 @@ def test_invoke_agent_with_tools():
 
 
 def test_invoke_agent_anthropic_usage():
-    state = {"token_usage": {"input": 0, "output": 0, "total": 0}}
+    state = {"agent_token_usage": []}
     mock_agent = MagicMock()
 
     # Mock stream output for Anthropic style usage
@@ -68,6 +77,8 @@ def test_invoke_agent_anthropic_usage():
     )
     mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
 
-    invoke_agent(state, mock_agent, "", "User prompt")
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Anthropic Agent")
 
-    assert state["token_usage"] == {"input": 20, "output": 10, "total": 30}
+    assert state["agent_token_usage"] == [
+        {"agent": "Anthropic Agent", "input": 20, "output": 10, "total": 30},
+    ]

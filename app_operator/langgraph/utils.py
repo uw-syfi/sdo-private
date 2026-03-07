@@ -43,13 +43,32 @@ def _extract_token_usage(message: BaseMessage) -> dict[str, int]:
     return usage
 
 
-def _update_usage(state: OperatorState, new_usage: dict[str, int]) -> None:
-    current = state.get("token_usage") or {"input": 0, "output": 0, "total": 0}
-    state["token_usage"] = {
-        "input": current.get("input", 0) + new_usage.get("input", 0),
-        "output": current.get("output", 0) + new_usage.get("output", 0),
-        "total": current.get("total", 0) + new_usage.get("total", 0),
-    }
+def _record_session_usage(
+    state: OperatorState,
+    agent_name: str,
+    usage: dict[str, int],
+    recorder: TrajectoryRecorderProtocol | None = None,
+) -> None:
+    sessions = state.get("agent_token_usage")
+    if sessions is None:
+        sessions = []
+        state["agent_token_usage"] = sessions
+    sessions.append(
+        {
+            "agent": agent_name,
+            "input": usage.get("input", 0),
+            "output": usage.get("output", 0),
+            "total": usage.get("total", 0),
+        }
+    )
+    if recorder is not None:
+        totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        for s in sessions:
+            totals["prompt_tokens"] += s.get("input", 0)
+            totals["completion_tokens"] += s.get("output", 0)
+            totals["total_tokens"] += s.get("total", 0)
+        recorder.record_token_usage(totals)
+        recorder.trajectory["metadata"]["agent_token_usage"] = sessions
 
 
 def _last_assistant_text(messages: list[BaseMessage]) -> str:
@@ -134,7 +153,7 @@ def invoke_agent(
 
     logger.info("=" * 50)
 
-    _update_usage(state, total_usage)
+    _record_session_usage(state, agent_name, total_usage, recorder)
 
     assistant_text = _last_assistant_text(response_messages)
     return assistant_text, response_messages
@@ -222,7 +241,7 @@ def invoke_agent_structured(
 
     logger.info("=" * 50)
 
-    _update_usage(state, total_usage)
+    _record_session_usage(state, agent_name, total_usage, recorder)
 
     assistant_text = _last_assistant_text(response_messages)
     return assistant_text, response_messages, structured_response

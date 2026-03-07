@@ -98,15 +98,22 @@ class LangGraphOperator(OperatorBase):
                 "monitor_max": self.health_check_max_count,
                 "analysis_summary": None,
                 "last_fix_summary": None,
-                "token_usage": {"input": 0, "output": 0, "total": 0},
+                "agent_token_usage": [],
             }
 
             thread_id = str(int(time.time()))
             final_state = self.graph.invoke(initial_state, config={"configurable": {"thread_id": thread_id}})  # type: ignore[reportArgumentType]
 
             if final_state:
-                usage = final_state.get("token_usage", {})
-                logger.info(f"Total Token Usage: {usage}")
+                sessions = final_state.get("agent_token_usage", [])
+                totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                for s in sessions:
+                    totals["prompt_tokens"] += s.get("input", 0)
+                    totals["completion_tokens"] += s.get("output", 0)
+                    totals["total_tokens"] += s.get("total", 0)
+                logger.info(f"Total Token Usage: {totals}")
+                for s in sessions:
+                    logger.info(f"  {s['agent']}: {s['total']} tokens (in={s['input']}, out={s['output']})")
 
             health_verdict = final_state.get("health_verdict") if final_state else None
             self._deployed = bool(health_verdict and health_verdict.get("healthy"))

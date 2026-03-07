@@ -17,4 +17,4 @@ class OperatorState(TypedDict):
     monitor_max: int | None
     analysis_summary: str | None
     last_fix_summary: str | None
-    token_usage: dict  # {"input": int, "output": int, "total": int}
+    agent_token_usage: list  # [{"agent": str, "input": int, "output": int, "total": int}, ...]
