@@ -114,6 +114,7 @@ def invoke_agent(
                             args_str = str(tool_call["args"])
                             if len(args_str) > MAX_DISPLAY_CONTENT:
                                 args_str = f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
+                            logger.info(f"[Tool Call] {tool_call['name']}({args_str})")
                             ui.on_tool_call(tool_call["name"], args_str)
 
                     content_text = extract_text(msg.content)
@@ -201,6 +202,7 @@ def invoke_agent_structured(
                             args_str = str(tool_call["args"])
                             if len(args_str) > MAX_DISPLAY_CONTENT:
                                 args_str = f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
+                            logger.info(f"[Tool Call] {tool_call['name']}({args_str})")
                             ui.on_tool_call(tool_call["name"], args_str)
 
                     content_text = extract_text(msg.content)
