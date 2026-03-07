@@ -20,7 +20,6 @@ from app_operator.prompts import (
     PromptLoader,
     create_consolidation_prompt,
     create_fix_prompt,
-    create_system_prompt,
     prepare_error_context,
 )
 from app_operator.trajectory import (
@@ -106,7 +105,6 @@ def fix_errors(
     platform = operator_config.deployment.platform
     fix_summary_consolidation = operator_config.operator.phase.fix_summary_consolidation
 
-    system_prompt = create_system_prompt(platform)
     prompt = create_fix_prompt(
         repo_path=repo_path,
         attempt=state["attempt"],
@@ -121,7 +119,7 @@ def fix_errors(
     response, messages = invoke_agent(
         state,
         agent,
-        system_prompt,
+        "",
         prompt,
         agent_name="Error Fixer",
         context_limit=context_limit,
