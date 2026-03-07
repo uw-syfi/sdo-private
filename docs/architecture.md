@@ -18,7 +18,74 @@ libs/agent_cli/          provider abstraction (CodingAgent ABC, AGENT_REGISTRY)
      └── lego_agent/     sds_lego_agent — agent workflow generation
 ```
 
+### Module Dependency Graph
+
+The graph below is generated from `tach.toml` by `scripts/generate_tach_graph.sh`. Arrows point from a module to its dependency.
+
+![Module dependency graph](assets/tach_module_graph.png)
+
 Both `sds_operator` and `lego_agent` share `libs/agent_cli/` for provider access and read from `sds.toml`, but do not share business logic.
+
+---
+
+## Package Boundaries and Import Rules
+
+### Layer ordering
+
+`app_operator` is divided into layers. Code in a higher layer may import from lower layers, but not the reverse.
+
+```
+Layer 5  __main__          entry points only
+Layer 4  commands/         CLI command orchestration
+Layer 3  cli_agent/        runtime implementations
+         langgraph/
+         adk/
+Layer 2  dspy_integration/ prompt optimisation tools
+         fault_injection/
+         gepa/
+Layer 1  prompts/          Jinja2 + DSPy templates
+         trajectory.py     recording
+Layer 0  config, types,    foundational (no internal deps)
+         exceptions,
+         constants, …
+```
+
+`libs/` sits below everything: `libs.sds_core` is the foundation of `libs`; `libs.agent_cli` is the provider abstraction. Neither may import from `app_operator` or `lego_agent`.
+
+### Façade rule
+
+Each subpackage exposes its public API through `__init__.py` only. Code outside a package must import from the package root, not from internal submodules:
+
+```python
+# correct
+from app_operator.dspy_integration import DSPyConfig
+
+# violation — bypasses the façade
+from app_operator.dspy_integration.config import DSPyConfig
+```
+
+Every subpackage `__init__.py` declares `__all__` to make the public surface explicit.
+
+Two categories of accepted exceptions (documented in `tests/unit/test_architecture.py`):
+
+- **`prompts.*` submodules** — `deployer.py`, `deployment_context.py`, `subagent.py`, `rlm.py` each import back from `app_operator.prompts`, so re-exporting them from `prompts/__init__.py` would create a circular import. Direct submodule access is allowlisted.
+- **`dspy_integration` heavy classes from `commands/`** — `optimizer.py`, `signatures.py`, `metrics_aggregator.py`, `eval_execute.py` import `dspy` at module level. Keeping them out of `dspy_integration/__init__.py` prevents `import dspy` from firing whenever any code touches the package (e.g. loading `DSPyConfig` at agent startup). Direct imports in `commands/` preserve lazy-load behaviour.
+
+### How boundaries are enforced
+
+Two complementary mechanisms run in CI via `scripts/check_errors.sh`:
+
+**1. `tach check`** — `tach.toml` defines module boundaries with explicit `depends_on` allowlists covering layer ordering, runtime isolation, and provider abstraction. Run with `uv run tach check`.
+
+**2. AST tests** — `tests/unit/test_architecture.py` uses Python's `ast` module to enforce three rules across every `.py` file at test time:
+
+| Rule | What it checks |
+|---|---|
+| Façade rule | Cross-package imports go through `__init__.py`, not internal submodules |
+| Private module rule | `_`-prefixed submodules cannot be imported from outside their package |
+| `__all__` rule | Every non-trivial subpackage `__init__.py` declares `__all__` |
+
+Heavy symbols (those that transitively pull in `dspy` or `litellm`) are lazy-loaded via `__getattr__` in their package `__init__.py`, so the façade rule is satisfied without import-time overhead.
 
 ---
 

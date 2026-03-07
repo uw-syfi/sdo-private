@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.prompts import get_loader
+from app_operator.prompts._core import get_loader
 
 
 def create_system_prompt(platform: str) -> str:

@@ -41,7 +41,7 @@ except ImportError:
     settings = DummySettings()
     st = DummyStrategies()
 
-from app_operator.fault_injection.base import ComposeManipulator
+from app_operator.fault_injection._base import ComposeManipulator
 
 pytestmark = pytest.mark.skipif(
     not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"

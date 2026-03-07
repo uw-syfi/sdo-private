@@ -87,6 +87,7 @@ rlm_results/
 rlm_output/
 rlm[0-9]*/
 *_results*.png
+exp_config/
 exp_config/*/workdir/
 exp_config/*.log
 exp_config/*/*.log
@@ -96,3 +97,6 @@ exp_config/*/*.log
 
 .mcp.json
 .claude/worktrees/
+
+# tach cache
+.tach/

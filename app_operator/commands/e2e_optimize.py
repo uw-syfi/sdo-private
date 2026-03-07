@@ -24,7 +24,7 @@ except ImportError:
     import tomli as tomllib  # type: ignore[reportMissingImports]
 
 from app_operator.config import load_config as load_app_config
-from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
+from app_operator.dspy_integration import EvalExecuteOptimizer
 from app_operator.experiment_naming import normalize_experiment_token
 from app_operator.logger import logger
 from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
@@ -488,7 +488,7 @@ def run_command(args: argparse.Namespace) -> int:
                 app_location = app_config.agent.location
             except (OSError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to load project config, using defaults: {e}")
-                from app_operator.dspy_integration.config import DSPyConfig
+                from app_operator.dspy_integration import DSPyConfig
 
                 dspy_config = DSPyConfig()
 

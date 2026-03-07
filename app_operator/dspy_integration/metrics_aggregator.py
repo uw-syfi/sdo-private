@@ -8,8 +8,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from app_operator.dspy_integration.cost import calculate_cost
-from app_operator.dspy_integration.data_loader import TrajectoryDataLoader, TrajectoryExample
+from app_operator.dspy_integration._cost import calculate_cost
+from app_operator.dspy_integration._data_loader import TrajectoryDataLoader, TrajectoryExample
 
 
 class MetricsAggregator:

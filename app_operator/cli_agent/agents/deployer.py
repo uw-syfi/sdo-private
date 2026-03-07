@@ -9,27 +9,25 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from app_operator.dspy_integration.config import DSPyConfig
+    from app_operator.dspy_integration import DSPyConfig
     from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
 
+from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
 from app_operator.cli_agent.factory import create_agent_from_config
-from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.exceptions import AgentError, DeploymentError, FileSystemError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
-from app_operator.prompts.deployer import (
+from app_operator.prompts import (
+    analyze_repository,
     create_consolidation_prompt,
     create_fix_prompt,
     create_generate_script_prompt,
-    prepare_error_context,
-)
-from app_operator.prompts.deployment_context import (
-    analyze_repository,
     create_system_prompt,
+    prepare_error_context,
 )
 from app_operator.subprocess_runner import SubprocessRunner
 from app_operator.trajectory import (

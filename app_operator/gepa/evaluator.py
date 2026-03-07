@@ -283,8 +283,10 @@ class SDSEvaluator:
         during ``_run_agent`` execution.  Do not call ``evaluate()`` from
         multiple threads concurrently.
         """
-        import app_operator.prompts as prompts_module
+        from contextlib import nullcontext
+
         from app_operator.filesystem import RealFilesystem
+        from app_operator.prompts import override_loader
         from app_operator.trajectory import TrajectoryRecorder
 
         repo_path = Path(example.repo_path)
@@ -292,18 +294,10 @@ class SDSEvaluator:
         agent = self.agent_factory()
         filesystem = RealFilesystem()
 
-        saved_loader = None
-        if templates_dir is not None:
-            with prompts_module._loader_lock:
-                saved_loader = prompts_module._loader
-                prompts_module._loader = prompts_module.PromptLoader(templates_dir=templates_dir)
+        ctx = override_loader(templates_dir) if templates_dir is not None else nullcontext()
 
-        try:
+        with ctx:
             self._run_agent(example, repo_path, agent, filesystem, recorder, self.runners)
-        finally:
-            if saved_loader is not None:
-                with prompts_module._loader_lock:
-                    prompts_module._loader = saved_loader
 
         trajectory_path = recorder.finalize()
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.dspy_integration.cost import (
+from app_operator.dspy_integration._cost import (
     MODEL_PRICING,
     calculate_cost,
     get_model_pricing,

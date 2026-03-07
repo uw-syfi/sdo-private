@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app_operator.dspy_integration.data_loader import TrajectoryDataLoader, TrajectoryExample
+from app_operator.dspy_integration._data_loader import TrajectoryDataLoader, TrajectoryExample
 
 
 @pytest.fixture

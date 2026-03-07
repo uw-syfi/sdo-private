@@ -2,7 +2,7 @@
 
 from unittest.mock import Mock
 
-from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
+from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
 
 
 class TestProgressSummarizer:

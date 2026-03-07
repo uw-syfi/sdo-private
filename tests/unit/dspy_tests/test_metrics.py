@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app_operator.dspy_integration.data_loader import TrajectoryExample
+from app_operator.dspy_integration._data_loader import TrajectoryExample
 from app_operator.dspy_integration.metrics import (
     CompositeMetric,
     DeploymentSuccessMetric,

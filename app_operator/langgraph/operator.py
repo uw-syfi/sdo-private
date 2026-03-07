@@ -6,8 +6,8 @@ from pathlib import Path
 from app_operator.config import Config, load_config
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.langgraph._llm import build_llm
 from app_operator.langgraph.graph import build_graph
-from app_operator.langgraph.llm import build_llm
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
 from app_operator.trajectory import TrajectoryRecorder

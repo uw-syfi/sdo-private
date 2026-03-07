@@ -18,8 +18,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
-from app_operator.cli_agent.factory import create_agent_from_config
-from app_operator.cli_agent.runners import CodeAnalyzerRunner, DeployerRunner, MonitorRunner
+from app_operator.cli_agent import CodeAnalyzerRunner, DeployerRunner, MonitorRunner, create_agent_from_config
 from app_operator.config import GEPAConfig, load_config
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.evaluator import (

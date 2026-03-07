@@ -18,12 +18,12 @@ from pathlib import Path
 
 from loguru import logger
 
+from app_operator.cli_agent._rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
-from app_operator.cli_agent.rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
-from app_operator.prompts import DSPyConfigProtocol
-from app_operator.prompts.subagent import (
+from app_operator.prompts import (
+    DSPyConfigProtocol,
     render_error_log_analyst_prompt,
     render_repo_analyst_prompt,
     render_script_analyst_prompt,

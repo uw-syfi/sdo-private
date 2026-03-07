@@ -1,0 +1,26 @@
+digraph tach_modules {
+    rankdir=TB;
+    node [shape=box, style=filled, fillcolor="#e8f4f8", fontname="Helvetica"];
+    edge [color="#666666"];
+
+    "libs.agent_cli" -> "libs.sds_core";
+    "app_operator.trajectory" -> "app_operator.prompts";
+    "app_operator.trajectory" -> "libs.agent_cli";
+    "app_operator.dspy_integration" -> "app_operator.prompts";
+    "app_operator.dspy_integration" -> "app_operator.trajectory";
+    "app_operator.cli_agent" -> "app_operator.prompts";
+    "app_operator.cli_agent" -> "app_operator.trajectory";
+    "app_operator.cli_agent" -> "libs.agent_cli";
+    "app_operator.langgraph" -> "app_operator.prompts";
+    "app_operator.langgraph" -> "app_operator.trajectory";
+    "app_operator.adk" -> "app_operator.prompts";
+    "app_operator.adk" -> "app_operator.trajectory";
+    "app_operator.adk" -> "libs.sds_core";
+    "app_operator.gepa" -> "app_operator.cli_agent";
+    "app_operator.gepa" -> "app_operator.prompts";
+    "app_operator.gepa" -> "app_operator.trajectory";
+    "app_operator.commands" -> "app_operator.dspy_integration";
+    "app_operator.__main__" -> "app_operator.commands";
+    "app_operator.__main__" -> "app_operator.langgraph";
+    "lego_agent" -> "libs.sds_core";
+}

@@ -12,9 +12,9 @@ from langchain_core.messages import (
 )
 
 from app_operator.filesystem import FileSystemInterface
+from app_operator.langgraph._trajectory_handler import LangGraphTrajectoryHandler
 from app_operator.langgraph.message_utils import extract_text
 from app_operator.langgraph.state import OperatorState
-from app_operator.langgraph.trajectory_handler import LangGraphTrajectoryHandler
 from app_operator.logger import logger
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI

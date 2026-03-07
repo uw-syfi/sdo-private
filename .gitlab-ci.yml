@@ -80,3 +80,13 @@ architecture_check:
   script:
     - echo "Checking architecture rules..."
     - ./scripts/check_arch.sh
+
+tach_graph_freshness:
+  extends: .test_job_template
+  script:
+    - apt-get update -qq && apt-get install -y -qq graphviz >/dev/null
+    - echo "Regenerating tach module graph..."
+    - ./scripts/generate_tach_graph.sh
+    - >-
+      git diff --exit-code docs/assets/tach_module_graph.dot ||
+      (echo "ERROR: docs/assets/tach_module_graph.dot is out of date. Run scripts/generate_tach_graph.sh and commit the result." && exit 1)

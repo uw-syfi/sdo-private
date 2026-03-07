@@ -15,9 +15,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from app_operator.cli_agent.rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
-from app_operator.prompts import DSPyConfigProtocol
-from app_operator.prompts.subagent import (
+from app_operator.cli_agent._rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
+from app_operator.prompts import (
+    DSPyConfigProtocol,
     render_error_log_analyst_prompt,
     render_repo_analyst_prompt,
     render_root_synthesis_prompt,

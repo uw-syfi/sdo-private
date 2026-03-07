@@ -4,8 +4,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from app_operator.adk.agent_factory import build_adk_agent, build_loop_agent
-from app_operator.adk.models import build_adk_model
+from app_operator.adk._agent_factory import build_adk_agent, build_loop_agent
+from app_operator.adk._models import build_adk_model
 from app_operator.adk.runner import AdkAgentRunner
 from app_operator.adk.tools import build_tools
 from app_operator.config import Config
@@ -14,13 +14,11 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
-from app_operator.prompts import get_loader
-from app_operator.prompts.deployer import (
-    create_generate_script_prompt,
-)
-from app_operator.prompts.deployment_context import (
+from app_operator.prompts import (
     analyze_repository,
+    create_generate_script_prompt,
     create_system_prompt,
+    get_loader,
 )
 from app_operator.subprocess_runner import SubprocessRunner
 from app_operator.trajectory import (

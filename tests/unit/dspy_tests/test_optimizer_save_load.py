@@ -3,8 +3,8 @@
 import json
 from unittest.mock import Mock
 
+from app_operator.dspy_integration._loader import load_optimized_module, reset_cache
 from app_operator.dspy_integration.config import DSPyConfig
-from app_operator.dspy_integration.loader import load_optimized_module, reset_cache
 from app_operator.dspy_integration.optimizer import PromptOptimizer
 
 
