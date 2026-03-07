@@ -12,6 +12,7 @@ class OperatorState(TypedDict):
     scripts_done: bool
     deploy_result: dict | None
     health_result: dict | None
+    health_verdict: dict | None
     monitor_count: int
     monitor_max: int | None
     analysis_summary: str | None

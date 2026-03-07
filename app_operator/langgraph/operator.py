@@ -93,6 +93,7 @@ class LangGraphOperator(OperatorBase):
                 "scripts_done": False,
                 "deploy_result": None,
                 "health_result": None,
+                "health_verdict": None,
                 "monitor_count": 0,
                 "monitor_max": self.health_check_max_count,
                 "analysis_summary": None,
@@ -107,8 +108,8 @@ class LangGraphOperator(OperatorBase):
                 usage = final_state.get("token_usage", {})
                 logger.info(f"Total Token Usage: {usage}")
 
-            health_result = final_state.get("health_result") if final_state else None
-            self._deployed = bool(health_result and health_result.get("success"))
+            health_verdict = final_state.get("health_verdict") if final_state else None
+            self._deployed = bool(health_verdict and health_verdict.get("healthy"))
             _status = "completed" if self._deployed else "failed"
             return 0
 
