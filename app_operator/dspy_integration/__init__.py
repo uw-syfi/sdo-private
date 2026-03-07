@@ -10,11 +10,19 @@ Public API (lazy — imports dspy/litellm on first access):
     - MetricsAggregator, PromptOptimizer, SIGNATURES, EvalExecuteOptimizer
 """
 
+from typing import TYPE_CHECKING
+
 from app_operator.dspy_integration.config import (
     DSPyAutoRollbackConfig,
     DSPyConfig,
     DSPyOptimizationConfig,
 )
+
+if TYPE_CHECKING:
+    from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
+    from app_operator.dspy_integration.metrics_aggregator import MetricsAggregator
+    from app_operator.dspy_integration.optimizer import PromptOptimizer
+    from app_operator.dspy_integration.signatures import SIGNATURES
 
 __all__ = [
     "DSPyConfig",

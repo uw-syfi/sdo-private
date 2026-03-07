@@ -3,6 +3,7 @@ from app_operator.prompts._core import (
     DSPyConfigProtocol,
     PromptLoader,
     get_loader,
+    override_loader,
     reset_loader,
 )
 from app_operator.prompts.deployer import (
@@ -36,6 +37,7 @@ __all__ = [
     "create_system_prompt",
     "get_loader",
     "get_system_prompt",
+    "override_loader",
     "prepare_error_context",
     "render_error_log_analyst_prompt",
     "render_fix_error_task_prompt",

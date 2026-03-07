@@ -8,6 +8,7 @@ these symbols without creating a circular dependency through __init__.py.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import logging
@@ -488,3 +489,20 @@ def reset_loader() -> None:
     """
     global _loader
     _loader = None
+
+
+@contextlib.contextmanager
+def override_loader(templates_dir: Path):
+    """Temporarily replace the global PromptLoader with one using *templates_dir*.
+
+    The original loader is restored when the context manager exits.
+    """
+    global _loader
+    with _loader_lock:
+        saved = _loader
+        _loader = PromptLoader(templates_dir=templates_dir)
+    try:
+        yield
+    finally:
+        with _loader_lock:
+            _loader = saved
