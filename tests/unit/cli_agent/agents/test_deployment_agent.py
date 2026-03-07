@@ -8,6 +8,7 @@ from app_operator.prompts.deployer import (
     create_fix_prompt,
     prepare_error_context,
 )
+from app_operator.types import HealthVerdict
 from tests.fixtures import bind_method
 from tests.fixtures.agents import TrackingAgent
 
@@ -368,36 +369,28 @@ def test_deployment_handles_agent_errors_gracefully(tmp_path, error_agent):
 
 
 def test_prepare_error_context_truncates_long_outputs(agent):
-    """Test that prepare_error_context returns basic error context.
-
-    Note: The current implementation no longer includes stdout/stderr in the context
-    (they are commented out). This test verifies the function works with long outputs
-    without crashing, even though the outputs are not included in the returned context.
-    """
-    long_stdout = "a" * 3500
-    long_stderr = "b" * 3500
-    health_stdout = "c" * 4000
-    health_stderr = "d" * 2500
+    """Test that prepare_error_context handles long assessment text without crashing."""
     deploy_result = {
         "exit_code": 1,
         "success": False,
-        "stdout": long_stdout,
-        "stderr": long_stderr,
+        "stdout": "a" * 3500,
+        "stderr": "b" * 3500,
     }
-    health_result = {
-        "exit_code": 1,
-        "success": False,
-        "stdout": health_stdout,
-        "stderr": health_stderr,
-    }
+    health_verdict = HealthVerdict(
+        healthy=False,
+        assessment="d" * 2500,
+        diagnosis="c" * 4000,
+        script_was_fixed=False,
+        raw_response="",
+    )
 
-    # Call the standalone function
-    context = prepare_error_context(deploy_result, health_result)
+    context = prepare_error_context(deploy_result, health_verdict)
 
-    # The current implementation only includes basic status info, not stdout/stderr
     assert "## Deployment Script Result" in context
     assert "Exit Code: 1" in context
     assert "Status: FAILED" in context
+    assert "## Health Assessment" in context
+    assert "Status: UNHEALTHY" in context
 
 
 def test_create_fix_prompt_includes_repo_and_scripts(agent):
@@ -421,7 +414,7 @@ def test_create_fix_prompt_includes_repo_and_scripts(agent):
 
 def test_run_health_unhealthy_triggers_fix(agent, monkeypatch):
     """Unhealthy assessment triggers fix agent and retry."""
-    from app_operator.cli_agent.agents.health_judge import HealthVerdict
+    from app_operator.types import HealthVerdict
 
     deploy_call_count = {"n": 0}
     assess_call_count = {"n": 0}
@@ -471,7 +464,7 @@ def test_run_health_unhealthy_triggers_fix(agent, monkeypatch):
 
 def test_run_health_unhealthy_exhausts_retries(agent, monkeypatch):
     """All health assessments unhealthy + fix fails → deployment fails."""
-    from app_operator.cli_agent.agents.health_judge import HealthVerdict
+    from app_operator.types import HealthVerdict
 
     def fake_run_deploy(
         self,

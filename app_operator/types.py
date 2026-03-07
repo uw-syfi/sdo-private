@@ -1,16 +1,29 @@
 """Shared type definitions for the app_operator package."""
 
+from dataclasses import dataclass
 from typing import TypedDict
 
 from libs.agent_cli.trajectory import FaultInjectionMetadata, TokenUsage
 
 __all__ = [
     "CommandResult",
+    "HealthVerdict",
     "TokenUsage",
     "FaultInjectionMetadata",
     "TrajectoryCallRecord",
     "ConversationEntry",
 ]
+
+
+@dataclass
+class HealthVerdict:
+    """Result of an agent-based health assessment."""
+
+    healthy: bool
+    assessment: str
+    diagnosis: str
+    script_was_fixed: bool
+    raw_response: str
 
 
 class CommandResult(TypedDict):

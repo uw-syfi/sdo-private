@@ -200,14 +200,13 @@ class DeploymentAgent:
                 verdict = self._assess_health(r)
                 if verdict.healthy:
                     return True
-                health_result = self._verdict_to_health_result(verdict)
             else:
-                health_result = None
+                verdict = None
 
             # 3. Repair: agent fixes scripts for next attempt
             return self._attempt_repair(
                 deploy_result,
-                health_result,
+                verdict,
                 attempt,
                 absolute_max_attempts,
                 r,
@@ -268,7 +267,7 @@ class DeploymentAgent:
     def _attempt_repair(
         self,
         deploy_result: CommandResult,
-        health_result: CommandResult | None,
+        health_verdict: HealthVerdict | None,
         attempt: int,
         absolute_max_attempts: int,
         r: TrajectoryRecorderProtocol,
@@ -278,7 +277,7 @@ class DeploymentAgent:
         Returns None (retry next attempt) or False (give up).
         """
         log_file_path = self.sds_dir / "logs" / f"deploy_attempt_{attempt}.log"
-        if self._fix_with_agent(deploy_result, health_result, attempt, absolute_max_attempts, log_file_path):
+        if self._fix_with_agent(deploy_result, health_verdict, attempt, absolute_max_attempts, log_file_path):
             r.set_phase_status("needs_retry")
         else:
             if attempt < absolute_max_attempts:
@@ -290,20 +289,10 @@ class DeploymentAgent:
 
         return None
 
-    @staticmethod
-    def _verdict_to_health_result(verdict: HealthVerdict) -> CommandResult:
-        """Convert a HealthVerdict to a CommandResult for prepare_error_context()."""
-        return {
-            "success": verdict.healthy,
-            "exit_code": 0 if verdict.healthy else 1,
-            "stdout": verdict.diagnosis,
-            "stderr": verdict.assessment,
-        }
-
     def _fix_with_agent(
         self,
         deploy_result: CommandResult,
-        health_result: CommandResult | None,
+        health_verdict: HealthVerdict | None,
         attempt: int,
         max_attempts: int,
         log_file_path: Path | None = None,
@@ -312,7 +301,7 @@ class DeploymentAgent:
         """Delegate to RepairAgent for backward compatibility."""
         return self._repair.fix_with_agent(
             deploy_result,
-            health_result,
+            health_verdict,
             attempt,
             max_attempts,
             log_file_path,

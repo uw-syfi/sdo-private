@@ -8,12 +8,12 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.prompts._core import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
-    from app_operator.types import CommandResult
+    from app_operator.types import CommandResult, HealthVerdict
 
 
 def prepare_error_context(
     deploy_result: CommandResult,
-    health_result: CommandResult | None,
+    health_verdict: HealthVerdict | None,
     log_file_path: Path | None = None,
     health_check_log_path: Path | None = None,
 ) -> str:
@@ -21,7 +21,7 @@ def prepare_error_context(
 
     Args:
         deploy_result: Deployment script result.
-        health_result: Health check result (None if deployment failed).
+        health_verdict: Health verdict (None if deployment failed before health check).
         log_file_path: Path to the deployment log file.
         health_check_log_path: Path to the health check log file.
 
@@ -41,10 +41,13 @@ def prepare_error_context(
     context_parts.append(f"Exit Code: {deploy_result['exit_code']}")
     context_parts.append(f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}")
 
-    if health_result is not None:
-        context_parts.append("\n## Health Check Result")
-        context_parts.append(f"Exit Code: {health_result['exit_code']}")
-        context_parts.append(f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}")
+    if health_verdict is not None:
+        context_parts.append("\n## Health Assessment")
+        context_parts.append(f"Status: {'HEALTHY' if health_verdict.healthy else 'UNHEALTHY'}")
+        if health_verdict.diagnosis:
+            context_parts.append(f"Diagnosis: {health_verdict.diagnosis}")
+        if health_verdict.assessment:
+            context_parts.append(f"Assessment: {health_verdict.assessment}")
 
     return "\n".join(context_parts)
 

@@ -23,6 +23,7 @@ from app_operator.trajectory import (
     Phase,
     TrajectoryRecorderProtocol,
 )
+from app_operator.types import HealthVerdict
 
 
 def deploy_attempt(
@@ -79,10 +80,18 @@ def fix_errors(
 
     log_file_path = repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
     health_check_log_path = None
+    health_verdict = None
     if health_result:
         health_check_log_path = repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
+        health_verdict = HealthVerdict(
+            healthy=health_result.get("success", False),
+            assessment=health_result.get("stderr", ""),
+            diagnosis=health_result.get("stdout", ""),
+            script_was_fixed=False,
+            raw_response="",
+        )
 
-    error_context = prepare_error_context(deploy_result, health_result, log_file_path, health_check_log_path)  # type: ignore[reportArgumentType]
+    error_context = prepare_error_context(deploy_result, health_verdict, log_file_path, health_check_log_path)
 
     system_prompt = create_system_prompt(operator_config.deployment.platform)
     prompt = create_fix_prompt(

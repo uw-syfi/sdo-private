@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -19,18 +18,8 @@ from app_operator.trajectory import (
     NullTrajectoryRecorder,
     TrajectoryRecorderProtocol,
 )
+from app_operator.types import HealthVerdict
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
-
-
-@dataclass
-class HealthVerdict:
-    """Result of an agent-based health assessment."""
-
-    healthy: bool
-    assessment: str
-    diagnosis: str
-    script_was_fixed: bool
-    raw_response: str
 
 
 def _parse_verdict(response: str) -> HealthVerdict | None:

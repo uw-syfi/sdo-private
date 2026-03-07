@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app_operator.cli_agent.agents.context import AgentContext
-    from app_operator.types import CommandResult
+    from app_operator.types import CommandResult, HealthVerdict
 
 from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.exceptions import AgentError
@@ -42,7 +42,7 @@ class RepairAgent:
     def fix_with_agent(
         self,
         deploy_result: CommandResult,
-        health_result: CommandResult | None,
+        health_verdict: HealthVerdict | None,
         attempt: int,
         max_attempts: int,
         log_file_path: Path | None = None,
@@ -52,7 +52,7 @@ class RepairAgent:
 
         Args:
             deploy_result: Deployment script result.
-            health_result: Health check result (None if deployment failed before health check).
+            health_verdict: Health verdict (None if deployment failed before health check).
             attempt: Current attempt number.
             max_attempts: Maximum number of attempts.
             log_file_path: Path to the deployment log file.
@@ -74,7 +74,7 @@ class RepairAgent:
         logger.info(f"Asking {agent.__class__.__name__} to Fix Deployment Issues")
 
         try:
-            error_context = prepare_error_context(deploy_result, health_result, log_file_path, health_check_log_path)
+            error_context = prepare_error_context(deploy_result, health_verdict, log_file_path, health_check_log_path)
             prompt = create_fix_prompt(
                 self.ctx.repo_path,
                 attempt,
