@@ -11,12 +11,12 @@ from app_operator_dspy.signatures import (
     GenerateDeployScript,
     GenerateHealthCheckScript,
 )
-from app_operator_dspy.tools.filesystem import read_file, write_file
+from app_operator_dspy.tools.filesystem import write_file
 from app_operator_dspy.tools.shell import run_shell
 
-_COMPOSE_FILENAMES = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
-
 DEFAULT_MAX_ATTEMPTS = 5
+DEFAULT_DEPLOY_TIMEOUT = 300
+DEFAULT_HEALTH_CHECK_TIMEOUT = 300
 
 _CODE_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n(.*?)```\s*$", re.DOTALL)
 
@@ -46,7 +46,10 @@ class DeploymentAgent(dspy.Module):
         repo_path: str,
         code_analysis: str,
         deployment_issues: str,
+        raw_context: str = "",
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        deploy_timeout: int = DEFAULT_DEPLOY_TIMEOUT,
+        health_check_timeout: int = DEFAULT_HEALTH_CHECK_TIMEOUT,
     ) -> dspy.Prediction:
         sds_dir = os.path.join(repo_path, ".sds")
         deploy_path = os.path.join(sds_dir, "deploy.sh")
@@ -54,15 +57,16 @@ class DeploymentAgent(dspy.Module):
 
         current_issues = deployment_issues
 
-        # Include docker-compose.yml so the LLM knows exact port mappings
-        enriched_analysis = self._enrich_analysis(repo_path, code_analysis)
+        # Combine LLM analysis with raw file contents so the LLM
+        # has exact port mappings, service names, etc.
+        full_analysis = code_analysis
+        if raw_context:
+            full_analysis += "\n\n--- Raw File Contents ---\n" + raw_context
 
         for attempt in range(1, max_attempts + 1):
-            # Generate and write scripts
-            self._generate_scripts(repo_path, enriched_analysis, current_issues, deploy_path, health_path)
+            self._generate_scripts(repo_path, full_analysis, current_issues, deploy_path, health_path)
 
-            # Run deploy
-            deploy_output = run_shell(f"{deploy_path} start", cwd=repo_path)
+            deploy_output = run_shell(f"{deploy_path} start", cwd=repo_path, timeout=deploy_timeout)
             if not deploy_output.startswith("Exit code: 0"):
                 if attempt == max_attempts:
                     return dspy.Prediction(success=False, attempts=attempt, error=deploy_output)
@@ -75,8 +79,7 @@ class DeploymentAgent(dspy.Module):
                 )
                 continue
 
-            # Run health check
-            health_output = run_shell(health_path, cwd=repo_path)
+            health_output = run_shell(health_path, cwd=repo_path, timeout=health_check_timeout)
             if health_output.startswith("Exit code: 0"):
                 return dspy.Prediction(success=True, attempts=attempt)
 
@@ -136,13 +139,3 @@ class DeploymentAgent(dspy.Module):
             f"Diagnosis: {diag.diagnosis}\nFix plan: {diag.fix_plan}"
         )
 
-    @staticmethod
-    def _enrich_analysis(repo_path: str, code_analysis: str) -> str:
-        """Append docker-compose.yml content so the LLM knows exact port mappings."""
-        for name in _COMPOSE_FILENAMES:
-            fpath = os.path.join(repo_path, name)
-            if os.path.isfile(fpath):
-                content = read_file(fpath)
-                if not content.startswith("Error"):
-                    return f"{code_analysis}\n\n--- {name} (raw) ---\n{content}"
-        return code_analysis

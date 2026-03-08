@@ -31,9 +31,9 @@ class DSPyOperator(dspy.Module):
     a single end-to-end pipeline.
     """
 
-    def __init__(self):
+    def __init__(self, max_file_size: int = 100_000):
         super().__init__()
-        self.analyzer = CodeAnalyzerAgent()
+        self.analyzer = CodeAnalyzerAgent(max_file_size=max_file_size)
         self.deployer = DeploymentAgent()
         self.monitor = MonitorAgent()
 
@@ -42,6 +42,8 @@ class DSPyOperator(dspy.Module):
         repo_path: str,
         max_deploy_attempts: int = 5,
         monitor_checks: int = 5,
+        deploy_timeout: int = 300,
+        health_check_timeout: int = 300,
     ) -> dspy.Prediction:
         # Step 1: Analyze codebase
         analysis = self.analyzer(repo_path=repo_path)
@@ -51,7 +53,10 @@ class DSPyOperator(dspy.Module):
             repo_path=repo_path,
             code_analysis=analysis.analysis,
             deployment_issues=analysis.issues,
+            raw_context=getattr(analysis, "raw_context", ""),
             max_attempts=max_deploy_attempts,
+            deploy_timeout=deploy_timeout,
+            health_check_timeout=health_check_timeout,
         )
 
         if not deploy_result.success:
@@ -64,7 +69,11 @@ class DSPyOperator(dspy.Module):
         # Step 3: Monitor
         statuses = []
         for i in range(1, monitor_checks + 1):
-            check = self.monitor(repo_path=repo_path, check_number=i)
+            check = self.monitor(
+                repo_path=repo_path,
+                check_number=i,
+                health_check_timeout=health_check_timeout,
+            )
             statuses.append(check.status)
             if check.status == "unhealthy":
                 break
