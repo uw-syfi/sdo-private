@@ -27,6 +27,16 @@ def _extract_token_usage(message: BaseMessage) -> dict[str, int]:
         return {}
 
     usage = {"input": 0, "output": 0, "total": 0}
+
+    # Prefer the standardized usage_metadata on the message (works across all providers)
+    um = getattr(message, "usage_metadata", None)
+    if um:
+        usage["input"] = um.get("input_tokens", 0)
+        usage["output"] = um.get("output_tokens", 0)
+        usage["total"] = um.get("total_tokens", 0) or (usage["input"] + usage["output"])
+        return usage
+
+    # Fall back to provider-specific response_metadata
     metadata = message.response_metadata or {}
 
     if "token_usage" in metadata:  # OpenAI

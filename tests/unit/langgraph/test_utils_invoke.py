@@ -82,3 +82,40 @@ def test_invoke_agent_anthropic_usage():
     assert state["agent_token_usage"] == [
         {"agent": "Anthropic Agent", "input": 20, "output": 10, "total": 30},
     ]
+
+
+def test_invoke_agent_usage_metadata():
+    """Token usage is extracted from usage_metadata (standardized LangChain attribute)."""
+    state = {"agent_token_usage": []}
+    mock_agent = MagicMock()
+
+    ai_msg = AIMessage(
+        content="Hello",
+        usage_metadata={"input_tokens": 30, "output_tokens": 15, "total_tokens": 45},
+    )
+    mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
+
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Gemini Agent")
+
+    assert state["agent_token_usage"] == [
+        {"agent": "Gemini Agent", "input": 30, "output": 15, "total": 45},
+    ]
+
+
+def test_invoke_agent_usage_metadata_preferred_over_response_metadata():
+    """usage_metadata takes precedence over response_metadata."""
+    state = {"agent_token_usage": []}
+    mock_agent = MagicMock()
+
+    ai_msg = AIMessage(
+        content="Hello",
+        usage_metadata={"input_tokens": 30, "output_tokens": 15, "total_tokens": 45},
+        response_metadata={"token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+    )
+    mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
+
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Test Agent")
+
+    assert state["agent_token_usage"] == [
+        {"agent": "Test Agent", "input": 30, "output": 15, "total": 45},
+    ]
