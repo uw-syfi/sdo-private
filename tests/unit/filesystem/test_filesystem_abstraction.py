@@ -232,50 +232,44 @@ class TestAnalyzeRepositoryIntegration:
 
 
 class TestCreateGenerateScriptPromptIntegration:
-    """Test that create_generate_script_prompt uses filesystem abstraction."""
+    """Test that create_generate_script_prompt checks file existence."""
 
-    def test_does_not_crash_with_inmemory_fs(self):
-        """Verify that passing an InMemoryFilesystem does not raise.
-
-        The code_analysis/deployment_issues content is read for DSPy
-        signature matching but may not appear verbatim in the Jinja2
-        template output.  The key property is that the function uses the
-        filesystem argument instead of raw pathlib calls.
-        """
+    def test_with_analysis_files(self, tmp_path):
+        """Verify prompt includes reconciliation when analysis files exist."""
         from app_operator.prompts.deployer import create_generate_script_prompt
 
-        fs = InMemoryFilesystem()
-        target = Path("/test/repo")
-        fs.mkdir(target / ".sds", parents=True)
-        fs.write_text(target / ".sds" / "code_analysis.md", "Analysis content here")
-        fs.write_text(target / ".sds" / "deployment_issues.md", "Issues content here")
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        (sds / "code_analysis.md").write_text("Analysis content here")
+        (sds / "deployment_issues.md").write_text("Issues content here")
 
         prompt = create_generate_script_prompt(
             system_prompt="System",
             script_name="deploy.sh",
             repo_context="Context",
-            target_dir=str(target),
+            target_dir=str(tmp_path),
             platform="docker",
-            filesystem=fs,
         )
 
         assert isinstance(prompt, str)
         assert "deploy.sh" in prompt
+        assert "Architecture Reconciliation" in prompt
+        assert "Deployment Issues" in prompt
 
-    def test_works_without_analysis_files(self):
+    def test_works_without_analysis_files(self, tmp_path):
         from app_operator.prompts.deployer import create_generate_script_prompt
 
-        fs = InMemoryFilesystem()
-        target = Path("/test/repo")
-        fs.mkdir(target / ".sds", parents=True)
+        sds = tmp_path / ".sds"
+        sds.mkdir()
 
         prompt = create_generate_script_prompt(
             system_prompt="System",
             script_name="deploy.sh",
             repo_context="Context",
-            target_dir=str(target),
+            target_dir=str(tmp_path),
             platform="docker",
-            filesystem=fs,
         )
 
         assert "deploy.sh" in prompt
+        assert "Architecture Reconciliation" not in prompt
+        assert "Deployment Issues" not in prompt

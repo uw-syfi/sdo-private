@@ -40,7 +40,7 @@ CRITICAL REQUIREMENTS:
    - The script should work when executed from the .sds directory
    - Check for correct prerequisites
 
-{% if code_analysis %}
+{% if has_code_analysis %}
 ## Architecture Reconciliation
 
 `.sds/code_analysis.md` describes the application's intended architecture: its services, databases, ports, inter-service dependencies, and recommended startup order. Before writing deploy.sh, read it and use it to inform your script.
@@ -53,6 +53,12 @@ The following is a recommended (non-exhaustive) list of things to check:
 - **Port mismatches**: a service's declared port in the architecture differs from what the deployment config uses — correct the config
 - **Broken dependency wiring**: the architecture's dependency graph shows service A depends on service B, but the deployment manifest has no `depends_on` (or equivalent) reflecting that — add the missing dependency
 - **Startup order violations**: the architecture specifies an infrastructure-first startup order (e.g. databases → service discovery → core services → gateway) that the deploy script does not honour — fix the ordering
+{% endif %}
+
+{% if has_deployment_issues %}
+## Known Deployment Issues
+
+`.sds/deployment_issues.md` lists known potential deployment issues. Read it before writing deploy.sh and address any relevant issues in your script.
 {% endif %}
 
 You must use the write_file tool to create the file .sds/deploy.sh directly. Do not just print the content.

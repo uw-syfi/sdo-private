@@ -26,8 +26,8 @@ class DeployerGenerateDeployScriptSignature(dspy.Signature):
     """
 
     repo_path = dspy.InputField(desc="Path to the repository")
-    code_analysis = dspy.InputField(desc="Code analysis summary")
-    deployment_issues = dspy.InputField(desc="Identified deployment issues")
+    has_code_analysis = dspy.InputField(desc="Whether .sds/code_analysis.md exists")
+    has_deployment_issues = dspy.InputField(desc="Whether .sds/deployment_issues.md exists")
 
     deployment_script = dspy.OutputField(
         desc="Generated deploy.sh script. The start command must use "
@@ -43,8 +43,8 @@ class DeployerGenerateHealthCheckSignature(dspy.Signature):
     """
 
     repo_path = dspy.InputField(desc="Path to the repository")
-    code_analysis = dspy.InputField(desc="Code analysis summary")
-    deployment_issues = dspy.InputField(desc="Identified deployment issues")
+    has_code_analysis = dspy.InputField(desc="Whether .sds/code_analysis.md exists")
+    has_deployment_issues = dspy.InputField(desc="Whether .sds/deployment_issues.md exists")
 
     health_check_script = dspy.OutputField(desc="Generated health_check.sh script")
 
@@ -56,8 +56,8 @@ class DeployerGenerateScriptSignature(dspy.Signature):
     """
 
     repo_path = dspy.InputField(desc="Path to the repository")
-    code_analysis = dspy.InputField(desc="Code analysis summary")
-    deployment_issues = dspy.InputField(desc="Identified deployment issues")
+    has_code_analysis = dspy.InputField(desc="Whether .sds/code_analysis.md exists")
+    has_deployment_issues = dspy.InputField(desc="Whether .sds/deployment_issues.md exists")
 
     deployment_script = dspy.OutputField(
         desc="Generated deploy.sh script. The start command must use "

@@ -118,7 +118,6 @@ class ScriptGeneratorAgent:
             platform=platform,
             dspy_config=self.ctx.dspy_config,
             recorder=recorder,
-            filesystem=self.ctx.filesystem,
         )
 
         try:
