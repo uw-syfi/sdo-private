@@ -409,12 +409,21 @@ def run_experiment_task(
         deploy_sh = exp_dir / ".sds" / "deploy.sh"
         if deploy_sh.exists():
             progress.update(task_id, description=f"[cyan]{display_name}[/]: Teardown", completed=0)
-            subprocess.run(
-                ["bash", str(deploy_sh), "cleanup"],
-                cwd=exp_dir,
-                capture_output=True,
-                timeout=120,
-            )
+            try:
+                result = subprocess.run(
+                    ["bash", str(deploy_sh), "cleanup"],
+                    cwd=exp_dir,
+                    capture_output=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        f"Teardown for {display_name} exited with code {result.returncode}; continuing anyway"
+                    )
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Teardown for {display_name} timed out; continuing anyway")
+            except OSError as e:
+                logger.warning(f"Teardown for {display_name} failed: {e}; continuing anyway")
         # Remove existing exp dir to ensure fresh init
         if exp_dir.is_dir():
             shutil.rmtree(exp_dir)
