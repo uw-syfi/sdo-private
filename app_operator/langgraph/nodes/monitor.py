@@ -21,6 +21,8 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 
+logger = logger.bind(node="monitor")
+
 
 class HealthVerdictResponse(BaseModel):
     healthy: bool = Field(description="Whether the application is healthy")

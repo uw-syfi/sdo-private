@@ -30,6 +30,8 @@ from app_operator.trajectory import (
 )
 from app_operator.types import HealthVerdict
 
+logger = logger.bind(node="deployer")
+
 
 class ConsolidatedSummaryResponse(BaseModel):
     summary: str = Field(description="The consolidated summary of all fix attempts")

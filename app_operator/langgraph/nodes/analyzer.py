@@ -13,6 +13,8 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 
+logger = logger.bind(node="analyzer")
+
 
 def analyze_code(
     state: OperatorState,
