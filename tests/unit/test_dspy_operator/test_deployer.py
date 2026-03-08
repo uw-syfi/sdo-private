@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import dspy
 
-from app_operator_dspy.agents.deployer import DeploymentAgent
+from app_operator_dspy.agents.deployer import DeploymentAgent, strip_code_fences
 
 
 def _mock_agent(deploy_script="#!/bin/bash\nexit 0", health_script="#!/bin/bash\nexit 0"):
@@ -83,3 +83,21 @@ class TestDeploymentAgent:
 
         assert (tmp_path / ".sds" / "deploy.sh").read_text() == "#!/bin/bash\ndeploy"
         assert (tmp_path / ".sds" / "health_check.sh").read_text() == "#!/bin/bash\ncheck"
+
+
+class TestStripCodeFences:
+    def test_strips_bash_fences(self):
+        text = "```bash\n#!/bin/bash\necho hello\n```"
+        assert strip_code_fences(text) == "#!/bin/bash\necho hello"
+
+    def test_strips_generic_fences(self):
+        text = "```\nsome code\n```"
+        assert strip_code_fences(text) == "some code"
+
+    def test_no_fences_passthrough(self):
+        text = "#!/bin/bash\necho hello"
+        assert strip_code_fences(text) == "#!/bin/bash\necho hello"
+
+    def test_strips_surrounding_whitespace(self):
+        text = "  ```sh\n#!/bin/bash\nexit 0\n```  "
+        assert strip_code_fences(text) == "#!/bin/bash\nexit 0"

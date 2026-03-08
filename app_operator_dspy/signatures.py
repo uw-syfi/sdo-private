@@ -36,30 +36,48 @@ class AnalyzeCodebase(dspy.Signature):
 class GenerateDeployScript(dspy.Signature):
     """Generate a deploy.sh script for a repository.
 
-    The script must support ``start`` and ``stop`` commands.
+    The script will be saved to ``<repo>/.sds/deploy.sh`` and invoked as
+    ``<repo>/.sds/deploy.sh start`` with working directory set to the
+    repository root. It MUST NOT cd to its own directory — docker compose
+    files live in the repo root.
+
     The ``start`` command must use ``docker compose up --build -d``
     to ensure images are always rebuilt from source.
+    The ``stop`` command must use ``docker compose down``.
+    Output ONLY the raw script — no markdown formatting or code fences.
     """
 
     repo_path: str = dspy.InputField(desc="Path to the repository")
     code_analysis: str = dspy.InputField(desc="Code analysis summary")
     deployment_issues: str = dspy.InputField(desc="Identified deployment issues")
 
-    deploy_script: str = dspy.OutputField(desc="Complete deploy.sh bash script content with start/stop commands")
+    deploy_script: str = dspy.OutputField(
+        desc="Raw bash script content (no markdown fences) with start/stop commands using docker compose"
+    )
 
 
 class GenerateHealthCheckScript(dspy.Signature):
-    """Generate a health_check.sh script for a deployed application.
+    """Generate a health_check.sh script for a Docker Compose deployed application.
 
-    The script should verify that all services are running and responding
-    correctly, exiting with code 0 on success and non-zero on failure.
+    The script will be saved to ``<repo>/.sds/health_check.sh`` and invoked
+    with working directory set to the repository root.
+
+    Services are deployed with ``docker compose``, so use ``docker compose ps``,
+    ``curl --fail``, or ``nc`` to verify containers are running and endpoints respond.
+    Do NOT use kubectl or Helm — this is a local Docker Compose deployment.
+    Use ``curl --fail`` to check HTTP status codes — do NOT grep for specific
+    HTML content (pages may use ``<!doctype html>`` or other markup).
+    Exit with code 0 on success and non-zero on failure.
+    Output ONLY the raw script — no markdown formatting or code fences.
     """
 
     repo_path: str = dspy.InputField(desc="Path to the repository")
     code_analysis: str = dspy.InputField(desc="Code analysis summary")
     deployment_issues: str = dspy.InputField(desc="Identified deployment issues")
 
-    health_check_script: str = dspy.OutputField(desc="Complete health_check.sh bash script that validates all services")
+    health_check_script: str = dspy.OutputField(
+        desc="Raw bash script (no markdown fences) that validates all Docker Compose services using curl/docker"
+    )
 
 
 # ---------------------------------------------------------------------------
