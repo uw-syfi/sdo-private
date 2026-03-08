@@ -1,7 +1,7 @@
 import time
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app_operator.langgraph.message_utils import extract_text
 from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
@@ -15,14 +15,20 @@ class LangGraphTrajectoryHandler:
         self._pending_tool_calls: dict[str, dict[str, Any]] = {}
         self._tool_start_times: dict[str, float] = {}
 
-    def on_user_message(self, content: str):
-        """Record a user message."""
-        self.recorder.add_user_message(content)
+    def record_message(self, message: BaseMessage):
+        """Record any LangChain message to the trajectory."""
 
-    def process_message(self, message: BaseMessage):
-        """Process a message from the LangGraph stream."""
+        if isinstance(message, SystemMessage):
+            content = extract_text(message.content)
+            if content:
+                self.recorder.add_system_message(content)
 
-        if isinstance(message, AIMessage):
+        elif isinstance(message, HumanMessage):
+            content = extract_text(message.content)
+            if content:
+                self.recorder.add_user_message(content)
+
+        elif isinstance(message, AIMessage):
             # Record thought content if present
             content = extract_text(message.content)
             if content:

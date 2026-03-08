@@ -39,10 +39,9 @@ def test_invoke_agent_simple():
         {"agent": "Test Agent", "input": 10, "output": 5, "total": 15},
     ]
 
-    # Check recorder calls
+    # Check recorder calls — system and user prompts recorded via record_message
+    mock_recorder.add_system_message.assert_called_with("System prompt")
     mock_recorder.add_user_message.assert_called_with("User prompt")
-    # LangGraphTrajectoryHandler processes messages.
-    # For AIMessage, it calls add_assistant_message or add_tool_call
     mock_recorder.add_assistant_message.assert_called()
 
 

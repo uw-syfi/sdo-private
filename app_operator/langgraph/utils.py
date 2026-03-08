@@ -108,11 +108,11 @@ def invoke_agent(
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
-        # We record the user part of the prompt
-        handler.on_user_message(user_prompt)
     else:
         messages: list[BaseMessage] = [HumanMessage(content=user_prompt)]
-        handler.on_user_message(user_prompt)
+
+    for msg in messages:
+        handler.record_message(msg)
 
     response_messages = list(messages)
     total_usage = {"input": 0, "output": 0, "total": 0}
@@ -130,7 +130,7 @@ def invoke_agent(
             response_messages.extend(new_messages)
 
             for msg in new_messages:
-                handler.process_message(msg)
+                handler.record_message(msg)
 
                 if isinstance(msg, AIMessage):
                     usage = _extract_token_usage(msg)
@@ -193,10 +193,11 @@ def invoke_agent_structured(
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
-        handler.on_user_message(user_prompt)
     else:
         messages: list[BaseMessage] = [HumanMessage(content=user_prompt)]
-        handler.on_user_message(user_prompt)
+
+    for msg in messages:
+        handler.record_message(msg)
 
     response_messages = list(messages)
     total_usage = {"input": 0, "output": 0, "total": 0}
@@ -218,7 +219,7 @@ def invoke_agent_structured(
             response_messages.extend(new_messages)
 
             for msg in new_messages:
-                handler.process_message(msg)
+                handler.record_message(msg)
 
                 if isinstance(msg, AIMessage):
                     usage = _extract_token_usage(msg)

@@ -43,6 +43,7 @@ class TrajectoryRecorderProtocol(Protocol):
 
     def start_phase(self, phase: Any, context: dict[str, Any] | None = None) -> None: ...
     def end_phase(self, status: str | None = None) -> None: ...
+    def add_system_message(self, content: str) -> None: ...
     def add_user_message(self, content: str) -> None: ...
 
     def add_assistant_message(self, content: str, duration: float | None = None) -> None: ...
@@ -80,6 +81,9 @@ class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
         pass
 
     def end_phase(self, status: str | None = None) -> None:
+        pass
+
+    def add_system_message(self, content: str) -> None:
         pass
 
     def add_user_message(self, content: str) -> None:

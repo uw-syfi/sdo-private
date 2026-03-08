@@ -43,6 +43,9 @@ class TestTrajectoryRecorderProtocol:
             def end_phase(self, status=None):
                 pass
 
+            def add_system_message(self, content):
+                pass
+
             def add_user_message(self, content):
                 pass
 
