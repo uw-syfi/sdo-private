@@ -128,6 +128,7 @@ def fix_errors(
         agent_name="Error Fixer",
         context_limit=context_limit,
         recorder=recorder,
+        logger=logger,
     )
     state["messages"] = messages
 
@@ -187,6 +188,7 @@ def _update_consolidated_summary(
             agent_name="Summary Consolidator",
             context_limit=context_limit,
             recorder=recorder,
+            logger=logger,
         )
 
         if structured is not None:

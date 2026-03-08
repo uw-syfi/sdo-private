@@ -52,6 +52,7 @@ def analyze_code(
             agent_name="Code Analyzer",
             context_limit=context_limit,
             recorder=recorder,
+            logger=logger,
         )
 
         state["analysis_done"] = True

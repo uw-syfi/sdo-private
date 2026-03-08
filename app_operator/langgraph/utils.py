@@ -98,7 +98,16 @@ def invoke_agent(
     context_limit: int = 128000,
     recorder: TrajectoryRecorderProtocol | None = None,
     ui: OperatorUI | None = None,
+    logger=logger,
 ) -> tuple[str, list[BaseMessage]]:
+    """Invoke a LangGraph agent and stream its output.
+
+    The `logger` parameter accepts a loguru-bound logger so that callers (e.g.
+    individual langgraph nodes) can propagate their node-name binding into all
+    log lines emitted here.  Without this, every log line from this shared
+    utility would use the module-level unbound logger, losing the [node] prefix
+    that the formatter adds when the 'node' extra is present.
+    """
     if ui is None:
         ui = NullOperatorUI()
     handler = LangGraphTrajectoryHandler(recorder)
@@ -178,6 +187,7 @@ def invoke_agent_structured(
     context_limit: int = 128000,
     recorder: TrajectoryRecorderProtocol | None = None,
     ui: OperatorUI | None = None,
+    logger=logger,
 ) -> tuple[str, list[BaseMessage], Any | None]:
     """Invoke a LangGraph agent that has response_format set.
 

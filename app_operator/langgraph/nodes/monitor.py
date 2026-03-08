@@ -61,6 +61,7 @@ def _run_health_agent(
         agent_name="Health Judge",
         context_limit=context_limit,
         recorder=recorder,
+        logger=logger,
     )
 
     if structured is not None:
