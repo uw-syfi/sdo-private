@@ -15,6 +15,7 @@ from app_operator.exceptions import AgentError, SdsOperatorError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
+from app_operator.progress import emit_progress
 from app_operator.prompts import get_loader
 from app_operator.trajectory import TrajectoryRecorder
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
@@ -245,6 +246,7 @@ class AppOperator(OperatorBase):
         if not self._deployed:
             return
 
+        emit_progress("finishing")
         logger.info("Shutting Down Application")
         logger.info("Running deployment script stop command...")
 

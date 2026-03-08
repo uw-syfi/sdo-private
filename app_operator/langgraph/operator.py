@@ -10,6 +10,7 @@ from app_operator.langgraph._llm import build_llm
 from app_operator.langgraph.graph import build_graph
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
+from app_operator.progress import emit_progress
 from app_operator.trajectory import TrajectoryRecorder
 
 
@@ -118,6 +119,7 @@ class LangGraphOperator(OperatorBase):
             health_verdict = final_state.get("health_verdict") if final_state else None
             self._deployed = bool(health_verdict and health_verdict.get("healthy"))
             _status = "completed" if self._deployed else "failed"
+            emit_progress("finishing")
             return 0
 
         except KeyboardInterrupt:

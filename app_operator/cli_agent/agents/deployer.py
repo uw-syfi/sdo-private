@@ -22,6 +22,7 @@ from app_operator.cli_agent.agents.script_generator_agent import (
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
+from app_operator.progress import emit_progress
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
@@ -146,6 +147,7 @@ class DeploymentAgent:
                 logger.info("Shutdown requested, aborting deployment")
                 return False
 
+            emit_progress("deployment", attempt=attempt)
             self.ui.set_stage("Deployment", detail=f"Attempt {attempt}/{absolute_max_attempts}")
             logger.info(f"--- Deployment Attempt #{attempt} ---")
 
@@ -164,6 +166,7 @@ class DeploymentAgent:
             logger.success(f"Found existing scripts in {self.sds_dir}")
             return True
 
+        emit_progress("script_generation")
         self.ui.set_stage("Script Generation")
         logger.info("Generating Deployment Scripts")
         logger.info(f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")

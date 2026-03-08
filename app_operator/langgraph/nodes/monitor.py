@@ -13,6 +13,7 @@ from app_operator.langgraph.utils import (
     write_log_file,
 )
 from app_operator.logger import logger
+from app_operator.progress import emit_progress
 from app_operator.prompts import PromptLoader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
@@ -162,6 +163,7 @@ def monitor_health(
 
     state["monitor_count"] += 1
 
+    emit_progress("monitoring", cycle=state["monitor_count"])
     logger.info(f"Running agent-based health assessment (monitor cycle {state['monitor_count']})...")
 
     verdict_dict = _run_health_agent(

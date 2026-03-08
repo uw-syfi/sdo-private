@@ -16,6 +16,7 @@ from app_operator.langgraph.utils import (
     write_log_file,
 )
 from app_operator.logger import logger
+from app_operator.progress import emit_progress
 from app_operator.prompts import (
     PromptLoader,
     create_consolidation_prompt,
@@ -46,6 +47,7 @@ def deploy_attempt(
     if check_shutdown and check_shutdown():
         return state
 
+    emit_progress("deployment", attempt=state["attempt"])
     recorder.start_phase(
         Phase.DEPLOYMENT,
         {"attempt": state["attempt"], "max_attempts": state["max_attempts"]},

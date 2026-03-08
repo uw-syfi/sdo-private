@@ -28,6 +28,7 @@ from rich.table import Table
 from rich.text import Text
 
 from app_operator.logger import logger
+from app_operator.progress import parse_progress
 
 
 class _ActiveSpinnerColumn(SpinnerColumn):
@@ -140,6 +141,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Rerun experiments: 'failed' reruns only non-successful apps, 'all' reruns everything",
     )
 
+
 def _extract_results(exp_dir: Path) -> dict:
     """Extract deployment iterations, status, and token usage from trajectory files."""
     traj_dir = exp_dir / ".sds" / "trajectories"
@@ -181,15 +183,17 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
                 status = AppStatus(entry.get("status", "unknown"))
             except ValueError:
                 status = AppStatus.UNKNOWN
-            results.append(AppResult(
-                app=entry["app"],
-                status=status,
-                deployment_iterations=entry.get("deployment_iterations"),
-                repeat=entry.get("repeat"),
-                elapsed_seconds=entry.get("elapsed_seconds"),
-                phase_durations=entry.get("phase_durations"),
-                total_tokens=entry.get("total_tokens"),
-            ))
+            results.append(
+                AppResult(
+                    app=entry["app"],
+                    status=status,
+                    deployment_iterations=entry.get("deployment_iterations"),
+                    repeat=entry.get("repeat"),
+                    elapsed_seconds=entry.get("elapsed_seconds"),
+                    phase_durations=entry.get("phase_durations"),
+                    total_tokens=entry.get("total_tokens"),
+                )
+            )
         return results
     except (json.JSONDecodeError, KeyError, OSError):
         return []
@@ -469,37 +473,37 @@ def run_experiment_task(
         stop_tail = threading.Event()
 
         def check_status(line):
-            lower_line = line.lower()
-            if "code analysis" in lower_line and "step 1" in lower_line:
+            marker = parse_progress(line)
+            if marker is None:
+                return
+            phase = marker["phase"]
+            if phase == "code_analysis":
                 _transition_phase("code_analysis")
                 progress.update(task_id, description=f"[yellow]{display_name}[/]: Code Analysis", completed=20)
-            elif "generating deployment scripts" in lower_line:
+            elif phase == "script_generation":
                 _transition_phase("script_generation")
                 progress.update(task_id, description=f"[yellow]{display_name}[/]: Script Generation", completed=30)
-            elif "deployment attempt" in lower_line:
+            elif phase == "deployment":
                 _transition_phase("deployment")
-                # Extract attempt number if possible "Deployment Attempt #1"
-                try:
-                    parts = line.split("#")
-                    attempt = parts[-1].split()[0]
+                attempt = marker.get("attempt")
+                if attempt is not None:
                     progress.update(
                         task_id, description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})", completed=40
                     )
-                except (IndexError, ValueError):
+                else:
                     progress.update(task_id, description=f"[yellow]{display_name}[/]: Deployment", completed=40)
-            elif "monitoring cycle" in lower_line:
+            elif phase == "monitoring":
                 _transition_phase("monitoring")
-                try:
-                    parts = line.split("#")
-                    cycle = parts[-1].split()[0]
+                cycle = marker.get("cycle")
+                if cycle is not None:
                     progress.update(
                         task_id,
-                        description=f"[yellow]{display_name}[/]: Health-monitor (Attempt {cycle})",
+                        description=f"[yellow]{display_name}[/]: Health-monitor (Cycle {cycle})",
                         completed=70,
                     )
-                except (IndexError, ValueError):
+                else:
                     progress.update(task_id, description=f"[yellow]{display_name}[/]: Monitoring", completed=70)
-            elif "shutting down" in lower_line:
+            elif phase == "finishing":
                 _transition_phase("finishing")
                 progress.update(task_id, description=f"[green]{display_name}[/]: Finishing", completed=90)
 

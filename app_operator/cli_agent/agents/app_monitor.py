@@ -16,6 +16,7 @@ from app_operator.cli_agent.agents.health_judge import AppHealthJudge
 from app_operator.config import OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
+from app_operator.progress import emit_progress
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
@@ -190,6 +191,7 @@ class AppMonitor:
 
             self.check_count += 1
 
+            emit_progress("monitoring", cycle=self.check_count)
             self.ui.set_stage("Monitoring", detail=f"Cycle {self.check_count}")
             logger.info(f"Monitoring Cycle #{self.check_count}")
 

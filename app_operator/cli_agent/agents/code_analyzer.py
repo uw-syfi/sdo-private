@@ -14,6 +14,7 @@ from app_operator.config import OperatorConfig
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
+from app_operator.progress import emit_progress
 from app_operator.prompts import get_loader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
@@ -91,6 +92,7 @@ class CodeAnalyzerAgent:
             logger.info("Code analysis files already exist. Skipping analysis.")
             return True
 
+        emit_progress("code_analysis")
         logger.info("Starting Code Analysis Phase")
 
         with self.recorder.phase(Phase.EXPLORATION) as r:
