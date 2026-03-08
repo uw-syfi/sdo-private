@@ -26,7 +26,6 @@ class AggregatedResult:
 @dataclass
 class SingleResult:
     app: str
-    success: bool
     status: str
     deployment_iterations: int | None
     elapsed_seconds: float | None
@@ -99,7 +98,6 @@ def _load_experiment(name: str) -> ExperimentData | None:
     single = [
         SingleResult(
             app=entry["app"],
-            success=entry.get("success", False),
             status=entry.get("status", "unknown"),
             deployment_iterations=entry.get("deployment_iterations"),
             elapsed_seconds=entry.get("elapsed_seconds"),
@@ -117,13 +115,14 @@ def _normalize_to_aggregated(exp: ExperimentData) -> list[AggregatedResult]:
     # Normalize single-repeat into AggregatedResult
     results = []
     for r in exp.single:
-        success_rate = "1/1" if r.success else "0/1"
+        is_success = r.status == "completed"
+        success_rate = "1/1" if is_success else "0/1"
         iters = float(r.deployment_iterations) if r.deployment_iterations is not None else None
         results.append(
             AggregatedResult(
                 app=r.app,
                 success_rate=success_rate,
-                success_frac=1.0 if r.success else 0.0,
+                success_frac=1.0 if is_success else 0.0,
                 deploy_iterations_mean=iters,
                 deploy_iterations_min=r.deployment_iterations,
                 deploy_iterations_max=r.deployment_iterations,

@@ -7,6 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 try:
@@ -38,11 +39,16 @@ class _ActiveSpinnerColumn(SpinnerColumn):
         return super().render(task)
 
 
+class AppStatus(str, Enum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
 @dataclass
 class AppResult:
     app: str
-    success: bool
-    status: str
+    status: AppStatus
     deployment_iterations: int | None
     repeat: int | None = None
     elapsed_seconds: float | None = None
@@ -164,19 +170,21 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
     try:
         with open(results_path) as f:
             data = json.load(f)
-        results = [
-            AppResult(
+        results = []
+        for entry in data.get("results", []):
+            try:
+                status = AppStatus(entry.get("status", "unknown"))
+            except ValueError:
+                status = AppStatus.UNKNOWN
+            results.append(AppResult(
                 app=entry["app"],
-                success=entry.get("success", entry.get("status") == "success"),
-                status=entry["status"],
+                status=status,
                 deployment_iterations=entry.get("deployment_iterations"),
                 repeat=entry.get("repeat"),
                 elapsed_seconds=entry.get("elapsed_seconds"),
                 phase_durations=entry.get("phase_durations"),
                 total_tokens=entry.get("total_tokens"),
-            )
-            for entry in data.get("results", [])
-        ]
+            ))
         return results
     except (json.JSONDecodeError, KeyError, OSError):
         return []
@@ -190,8 +198,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
     for r in results:
         entry: dict = {
             "app": r.app,
-            "success": r.success,
-            "status": r.status,
+            "status": r.status.value,
             "deployment_iterations": r.deployment_iterations,
             "elapsed_seconds": r.elapsed_seconds,
             "phase_durations": r.phase_durations,
@@ -211,7 +218,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
         aggregated = []
         for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
-            successes = sum(1 for r in app_results if r.success)
+            successes = sum(1 for r in app_results if r.status == AppStatus.COMPLETED)
             iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
             elapsed = [r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None]
             tokens = [r.total_tokens for r in app_results if r.total_tokens is not None]
@@ -288,7 +295,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
 
         for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
-            successes = sum(1 for r in app_results if r.success)
+            successes = sum(1 for r in app_results if r.status == AppStatus.COMPLETED)
             iters = sorted(r.deployment_iterations for r in app_results if r.deployment_iterations is not None)
             elapsed = sorted(r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None)
             tokens = sorted(r.total_tokens for r in app_results if r.total_tokens is not None)
@@ -424,8 +431,7 @@ def run_experiment_task(
             progress.advance(overall_task_id)
             return AppResult(
                 app=app_name,
-                success=False,
-                status="unknown",
+                status=AppStatus.FAILED,
                 deployment_iterations=None,
                 repeat=repeat_idx + 1 if total_repeats > 1 else None,
             )
@@ -531,29 +537,27 @@ def run_experiment_task(
         repeat = repeat_idx + 1 if total_repeats > 1 else None
 
         if proc.returncode == 0:
-            progress.update(task_id, description=f"[green]{display_name}[/]: Done", completed=100)
-            time.sleep(1)
-            progress.update(task_id, visible=False)
-            progress.advance(overall_task_id)
-            return AppResult(
-                app=app_name,
-                success=True,
-                repeat=repeat,
-                elapsed_seconds=elapsed_seconds,
-                phase_durations=phase_durations,
-                **extracted,
-            )
-        progress.update(task_id, description=f"[red]{display_name}[/]: Failed", completed=100)
+            try:
+                app_status = AppStatus(extracted["status"])
+            except ValueError:
+                app_status = AppStatus.UNKNOWN
+        else:
+            app_status = AppStatus.FAILED
+
+        color = "green" if app_status == AppStatus.COMPLETED else "red"
+        label = "Done" if app_status == AppStatus.COMPLETED else "Failed"
+        progress.update(task_id, description=f"[{color}]{display_name}[/]: {label}", completed=100)
         time.sleep(1)
         progress.update(task_id, visible=False)
         progress.advance(overall_task_id)
         return AppResult(
             app=app_name,
-            success=False,
+            status=app_status,
+            deployment_iterations=extracted["deployment_iterations"],
+            total_tokens=extracted["total_tokens"],
             repeat=repeat,
             elapsed_seconds=elapsed_seconds,
             phase_durations=phase_durations,
-            **extracted,
         )
 
 
@@ -754,8 +758,7 @@ def run_command(args: argparse.Namespace) -> int:
                                 results_by_exp[exp_name].append(
                                     AppResult(
                                         app=Path(app).name,
-                                        success=False,
-                                        status="unknown",
+                                        status=AppStatus.FAILED,
                                         deployment_iterations=None,
                                         repeat=repeat,
                                     )
