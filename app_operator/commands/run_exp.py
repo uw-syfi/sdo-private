@@ -133,7 +133,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=1,
         help="Maximum number of applications to run in parallel",
     )
-
+    parser.add_argument(
+        "--rerun",
+        choices=["failed", "all"],
+        default=None,
+        help="Rerun experiments: 'failed' reruns only non-successful apps, 'all' reruns everything",
+    )
 
 def _extract_results(exp_dir: Path) -> dict:
     """Extract deployment iterations, status, and token usage from trajectory files."""
@@ -664,15 +669,21 @@ def run_command(args: argparse.Namespace) -> int:
     console.print(f"Parallelism: {args.parallel}")
 
     # Prepare log directories and load any existing results (for resume support)
+    rerun = args.rerun
     results_by_exp: dict[str, list[AppResult]] = {}
     completed_keys_by_exp: dict[str, set[tuple[str, int | None]]] = {}
     for exp_name, _config_path, _config, log_dir in resolved:
         log_dir.mkdir(parents=True, exist_ok=True)
         existing = _load_existing_results(log_dir)
+        if rerun == "all":
+            existing = []
+        elif rerun == "failed":
+            existing = [r for r in existing if r.status == AppStatus.COMPLETED]
         results_by_exp[exp_name] = list(existing)
         completed_keys_by_exp[exp_name] = {(r.app, r.repeat) for r in existing}
         if existing:
-            console.print(f"  Resuming: {len(existing)} run(s) already complete, skipping.")
+            rerun_msg = f" (rerun={rerun})" if rerun else ""
+            console.print(f"  Resuming{rerun_msg}: {len(existing)} run(s) already complete, skipping.")
 
     exp_locks = {exp_name: threading.Lock() for exp_name, _, _, _ in resolved}
 
