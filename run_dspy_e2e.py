@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test of the DSPy-native operator against fleetcast."""
+"""End-to-end test of the DSPy-native operator against a target app."""
 
 import os
 import shutil
@@ -10,26 +10,24 @@ import traceback
 
 from app_operator_dspy.operator import DSPyOperator, configure_lm
 
+DEFAULT_APP = "pitstop"
+
 
 def main():
-    # --- Configuration ---
-    source_app = os.path.join(os.path.dirname(__file__), "apps", "fleetcast")
+    app_name = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_APP
+    source_app = os.path.join(os.path.dirname(__file__), "apps", app_name)
+    if not os.path.isdir(source_app):
+        print(f"[error] App not found: {source_app}")
+        return 1
+
     project = os.environ.get("GOOGLE_CLOUD_PROJECT", "allmos-487905")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 
     # Copy app to a temp dir so we don't pollute the repo
     work_dir = tempfile.mkdtemp(prefix="sds_dspy_e2e_")
-    shutil.copytree(source_app, os.path.join(work_dir, "fleetcast"), dirs_exist_ok=False)
-    repo_path = os.path.join(work_dir, "fleetcast")
-
-    # Remap port 5000 → 5050 to avoid macOS AirPlay conflict
-    compose_file = os.path.join(repo_path, "docker-compose.yml")
-    with open(compose_file) as fh:
-        content = fh.read()
-    content = content.replace('"5000:5000"', '"5050:5000"')
-    with open(compose_file, "w") as fh:
-        fh.write(content)
-
+    shutil.copytree(source_app, os.path.join(work_dir, app_name))
+    repo_path = os.path.join(work_dir, app_name)
+    print(f"[setup] App: {app_name}")
     print(f"[setup] Working directory: {repo_path}")
 
     # --- Configure LM ---
