@@ -451,10 +451,12 @@ class OperatorPhaseConfig:
 
     code_analysis: bool = True
     fix_summary_consolidation: bool = True
+    health_monitoring: bool = True
 
     def __post_init__(self):
         validate_field(self.code_analysis, "code_analysis", bool)
         validate_field(self.fix_summary_consolidation, "fix_summary_consolidation", bool)
+        validate_field(self.health_monitoring, "health_monitoring", bool)
 
 
 @dataclass

@@ -124,6 +124,8 @@ def build_graph(
     def should_fix(state: OperatorState) -> str:
         health_verdict = state.get("health_verdict") or {}
         if health_verdict.get("healthy"):
+            if not state.get("health_monitoring", True):
+                return "end"
             return "monitor"
         if state["attempt"] < state["max_attempts"]:
             return "fix"

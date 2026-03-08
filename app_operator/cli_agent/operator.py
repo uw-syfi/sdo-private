@@ -195,12 +195,15 @@ class AppOperator(OperatorBase):
             self._deployed = True
 
             # Step 3: Monitor health and provide analysis
-            self.ui.set_stage("Monitoring")
-            self.monitor.run(
-                interval=self.health_check_interval,
-                max_checks=self.health_check_max_count,
-                check_shutdown=lambda: self._shutdown_requested,
-            )
+            if self.config.operator.phase.health_monitoring:
+                self.ui.set_stage("Monitoring")
+                self.monitor.run(
+                    interval=self.health_check_interval,
+                    max_checks=self.health_check_max_count,
+                    check_shutdown=lambda: self._shutdown_requested,
+                )
+            else:
+                logger.info("Health monitoring disabled by configuration, skipping")
 
             run_succeeded = True
             if self.config.operator.prometheus_integration:

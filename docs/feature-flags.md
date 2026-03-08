@@ -9,6 +9,7 @@ Feature flags are split across two `sds.toml` sections:
 [operator.phase]
 code_analysis = true              # default: true
 fix_summary_consolidation = true  # default: true
+health_monitoring = true          # default: true
 
 [features]
 git_integration = false           # default: false
@@ -44,6 +45,19 @@ Disable if you only care about raw trajectories and want to skip the summary ste
 ```toml
 [operator.phase]
 fix_summary_consolidation = false
+```
+
+---
+
+### `health_monitoring`
+
+**Default:** `true`
+
+Runs periodic health checks after successful deployment. Disable to skip all post-deployment monitoring:
+
+```toml
+[operator.phase]
+health_monitoring = false
 ```
 
 ---
