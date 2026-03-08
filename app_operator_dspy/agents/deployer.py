@@ -7,16 +7,21 @@ import stat
 import dspy
 
 from app_operator_dspy.signatures import (
-    DiagnoseDeploymentFailure,
+    ConsolidateFixSummary,
+    FixDeploymentError,
     GenerateDeployScript,
     GenerateHealthCheckScript,
 )
-from app_operator_dspy.tools.filesystem import write_file
+from app_operator_dspy.tools.filesystem import read_file, write_file
 from app_operator_dspy.tools.shell import run_shell
 
 DEFAULT_MAX_ATTEMPTS = 5
 DEFAULT_DEPLOY_TIMEOUT = 300
 DEFAULT_HEALTH_CHECK_TIMEOUT = 300
+
+# Truncation limits to keep LLM context manageable
+_MAX_ERROR_CHARS = 5000
+_MAX_FIX_HISTORY_CHARS = 20_000
 
 _CODE_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n(.*?)```\s*$", re.DOTALL)
 
@@ -27,19 +32,29 @@ def strip_code_fences(text: str) -> str:
     return m.group(1).strip() if m else text.strip()
 
 
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n... ({len(text) - limit} chars truncated)"
+
+
 class DeploymentAgent(dspy.Module):
     """Generates deployment scripts and self-heals on failure.
 
-    Uses ChainOfThought for script generation and failure diagnosis.
-    On each failure, the diagnosis is fed back as additional context
-    for the next script generation attempt.
+    Flow:
+    1. Generate deploy.sh and health_check.sh once
+    2. Run deploy — if fail — fix scripts — retry
+    3. Run health check — if fail — fix scripts — re-run health check
+       WITHOUT re-deploying (post-fix recheck) — if still fails, full retry
+    4. Consolidate fix history to avoid repeating failed approaches
     """
 
     def __init__(self):
         super().__init__()
         self.gen_deploy = dspy.ChainOfThought(GenerateDeployScript)
         self.gen_health = dspy.ChainOfThought(GenerateHealthCheckScript)
-        self.diagnose = dspy.ChainOfThought(DiagnoseDeploymentFailure)
+        self.fix_error = dspy.ChainOfThought(FixDeploymentError)
+        self.consolidate = dspy.ChainOfThought(ConsolidateFixSummary)
 
     def forward(
         self,
@@ -55,47 +70,73 @@ class DeploymentAgent(dspy.Module):
         deploy_path = os.path.join(sds_dir, "deploy.sh")
         health_path = os.path.join(sds_dir, "health_check.sh")
 
-        current_issues = deployment_issues
-
-        # Combine LLM analysis with raw file contents so the LLM
-        # has exact port mappings, service names, etc.
+        # Combine LLM analysis with raw file contents
         full_analysis = code_analysis
         if raw_context:
             full_analysis += "\n\n--- Raw File Contents ---\n" + raw_context
 
-        for attempt in range(1, max_attempts + 1):
-            self._generate_scripts(repo_path, full_analysis, current_issues, deploy_path, health_path)
+        # Step 1: Generate scripts once
+        self._generate_scripts(
+            repo_path, full_analysis, deployment_issues,
+            deploy_path, health_path,
+        )
 
-            deploy_output = run_shell(f"{deploy_path} start", cwd=repo_path, timeout=deploy_timeout)
+        fix_history = ""
+        fix_summaries: list[str] = []
+
+        for attempt in range(1, max_attempts + 1):
+            # Step 2: Run deploy
+            deploy_output = run_shell(
+                f"{deploy_path} start", cwd=repo_path,
+                timeout=deploy_timeout,
+            )
             if not deploy_output.startswith("Exit code: 0"):
                 if attempt == max_attempts:
-                    return dspy.Prediction(success=False, attempts=attempt, error=deploy_output)
-                current_issues = self._diagnose_and_update(
-                    repo_path,
-                    deploy_output,
-                    attempt,
-                    max_attempts,
-                    deployment_issues,
+                    return dspy.Prediction(
+                        success=False, attempts=attempt, error=deploy_output,
+                    )
+                fix_history, fix_summaries = self._fix_and_track(
+                    deploy_path, health_path, deploy_output,
+                    fix_history, fix_summaries, attempt, max_attempts,
                 )
                 continue
 
-            health_output = run_shell(health_path, cwd=repo_path, timeout=health_check_timeout)
+            # Step 3: Run health check
+            health_output = run_shell(
+                health_path, cwd=repo_path, timeout=health_check_timeout,
+            )
             if health_output.startswith("Exit code: 0"):
                 return dspy.Prediction(success=True, attempts=attempt)
 
-            if attempt == max_attempts:
-                return dspy.Prediction(success=False, attempts=attempt, error=health_output)
-
-            error_context = f"Deploy output:\n{deploy_output}\n\nHealth check output:\n{health_output}"
-            current_issues = self._diagnose_and_update(
-                repo_path,
-                error_context,
-                attempt,
-                max_attempts,
-                deployment_issues,
+            # Step 4: Post-fix recheck — fix health check, re-run WITHOUT
+            # re-deploying. If the issue was just in the health check script
+            # (wrong endpoints, wrong grep pattern), we avoid restarting
+            # all containers.
+            error_context = (
+                f"Deploy output:\n{deploy_output}\n\n"
+                f"Health check output:\n{health_output}"
+            )
+            fix_history, fix_summaries = self._fix_and_track(
+                deploy_path, health_path, error_context,
+                fix_history, fix_summaries, attempt, max_attempts,
             )
 
-        return dspy.Prediction(success=False, attempts=max_attempts, error="max attempts reached")
+            # Re-run health check with the fixed script
+            recheck_output = run_shell(
+                health_path, cwd=repo_path, timeout=health_check_timeout,
+            )
+            if recheck_output.startswith("Exit code: 0"):
+                return dspy.Prediction(success=True, attempts=attempt)
+
+            if attempt == max_attempts:
+                return dspy.Prediction(
+                    success=False, attempts=attempt, error=recheck_output,
+                )
+
+        return dspy.Prediction(
+            success=False, attempts=max_attempts,
+            error="max attempts reached",
+        )
 
     def _generate_scripts(
         self,
@@ -115,27 +156,64 @@ class DeploymentAgent(dspy.Module):
             code_analysis=code_analysis,
             deployment_issues=issues,
         )
-        write_file(deploy_path, strip_code_fences(deploy_result.deploy_script))
-        write_file(health_path, strip_code_fences(health_result.health_check_script))
-        os.chmod(deploy_path, os.stat(deploy_path).st_mode | stat.S_IEXEC)
-        os.chmod(health_path, os.stat(health_path).st_mode | stat.S_IEXEC)
+        self._write_script(deploy_path, deploy_result.deploy_script)
+        self._write_script(health_path, health_result.health_check_script)
 
-    def _diagnose_and_update(
+    def _fix_and_track(
         self,
-        repo_path: str,
+        deploy_path: str,
+        health_path: str,
         error_output: str,
+        fix_history: str,
+        fix_summaries: list[str],
         attempt: int,
         max_attempts: int,
-        base_issues: str,
-    ) -> str:
-        diag = self.diagnose(
-            repo_path=repo_path,
-            error_output=error_output,
+    ) -> tuple[str, list[str]]:
+        """Fix scripts based on error output and update fix history."""
+        current_deploy = read_file(deploy_path)
+        current_health = read_file(health_path)
+
+        fix_result = self.fix_error(
+            deploy_script=current_deploy,
+            health_check_script=current_health,
+            error_output=_truncate(error_output, _MAX_ERROR_CHARS),
+            fix_history=_truncate(fix_history, _MAX_FIX_HISTORY_CHARS),
             attempt=str(attempt),
             max_attempts=str(max_attempts),
         )
-        return (
-            f"{base_issues}\n\n--- Attempt {attempt} failure ---\n"
-            f"Diagnosis: {diag.diagnosis}\nFix plan: {diag.fix_plan}"
-        )
 
+        # Write fixed scripts (only if changed)
+        fixed_deploy = strip_code_fences(fix_result.fixed_deploy_script)
+        fixed_health = strip_code_fences(fix_result.fixed_health_check_script)
+
+        if fixed_deploy != current_deploy:
+            self._write_script(deploy_path, fixed_deploy)
+        if fixed_health != current_health:
+            self._write_script(health_path, fixed_health)
+
+        # Track fix summary
+        summary = f"Attempt {attempt}: {fix_result.fix_summary}"
+        fix_summaries = [*fix_summaries, summary]
+
+        # Consolidate fix history
+        fix_history = self._consolidate_history(fix_history, fix_summaries)
+
+        return fix_history, []
+
+    def _consolidate_history(
+        self,
+        existing: str,
+        new_summaries: list[str],
+    ) -> str:
+        if not new_summaries:
+            return existing
+        result = self.consolidate(
+            existing_summary=existing,
+            new_attempts="\n".join(new_summaries),
+        )
+        return result.consolidated_summary
+
+    @staticmethod
+    def _write_script(path: str, content: str) -> None:
+        write_file(path, strip_code_fences(content))
+        os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)

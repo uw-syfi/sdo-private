@@ -5,7 +5,8 @@ import dspy
 from app_operator_dspy.signatures import (
     AnalyzeCodebase,
     AnalyzeHealthCheck,
-    DiagnoseDeploymentFailure,
+    ConsolidateFixSummary,
+    FixDeploymentError,
     GenerateDeployScript,
     GenerateHealthCheckScript,
 )
@@ -14,7 +15,8 @@ ALL_SIGNATURES = [
     AnalyzeCodebase,
     GenerateDeployScript,
     GenerateHealthCheckScript,
-    DiagnoseDeploymentFailure,
+    FixDeploymentError,
+    ConsolidateFixSummary,
     AnalyzeHealthCheck,
 ]
 
@@ -35,10 +37,18 @@ class TestSignatureStructure:
         assert "analysis" in AnalyzeCodebase.output_fields
         assert "issues" in AnalyzeCodebase.output_fields
 
-    def test_diagnose_failure_fields(self):
-        assert "error_output" in DiagnoseDeploymentFailure.input_fields
-        assert "diagnosis" in DiagnoseDeploymentFailure.output_fields
-        assert "fix_plan" in DiagnoseDeploymentFailure.output_fields
+    def test_fix_deployment_error_fields(self):
+        assert "deploy_script" in FixDeploymentError.input_fields
+        assert "error_output" in FixDeploymentError.input_fields
+        assert "fix_history" in FixDeploymentError.input_fields
+        assert "fixed_deploy_script" in FixDeploymentError.output_fields
+        assert "fixed_health_check_script" in FixDeploymentError.output_fields
+        assert "fix_summary" in FixDeploymentError.output_fields
+
+    def test_consolidate_fix_summary_fields(self):
+        assert "existing_summary" in ConsolidateFixSummary.input_fields
+        assert "new_attempts" in ConsolidateFixSummary.input_fields
+        assert "consolidated_summary" in ConsolidateFixSummary.output_fields
 
     def test_analyze_health_check_fields(self):
         assert "health_output" in AnalyzeHealthCheck.input_fields
