@@ -68,6 +68,7 @@ class TestHealthCheckNode:
         loader.render.assert_called_once()
         call_args = loader.render.call_args
         assert call_args[0][0] == "deployer/assess_health.jinja2"
+        assert call_args[1]["structured_output"] is True
         mock_invoke.assert_called_once()
 
     def test_structured_response_stored_as_dict(self):

@@ -47,6 +47,7 @@ def _run_health_agent(
         repo_path=repo_path,
         health_check_script=health_check_script,
         platform=platform,
+        structured_output=True,
         recorder=recorder,
     )
 

@@ -74,6 +74,13 @@ Delegate context-heavy tasks to subagents if available.
 
 ## REQUIRED Output Format
 
+{% if structured_output %}
+Return a structured response with these fields:
+- **healthy** (bool): Whether the application is healthy
+- **assessment** (str): What the script reported vs what you independently observed, any discrepancies, what you fixed
+- **diagnosis** (str): If unhealthy — concise summary of which components are unhealthy and what symptoms. If healthy — empty string
+- **script_was_fixed** (bool): Whether you modified health_check.sh
+{% else %}
 You MUST end your response with these EXACT XML tags:
 
 <health_verdict>healthy|unhealthy</health_verdict>
@@ -102,3 +109,4 @@ Unhealthy example:
 <health_assessment>Health check script initially reported healthy (exit 0), but docker compose ps showed mongodb in CrashLoopBackOff. Script was checking wrong container name. Fixed script to use correct service name, re-ran, now correctly reports unhealthy.</health_assessment>
 <diagnosis>mongodb: CrashLoopBackOff, exit 137 (OOMKill); frontend: connection refused on port 8080</diagnosis>
 <script_fixed>true</script_fixed>
+{% endif %}

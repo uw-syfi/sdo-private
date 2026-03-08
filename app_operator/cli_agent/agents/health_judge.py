@@ -196,6 +196,7 @@ class AppHealthJudge:
             repo_path=self.repo_path,
             health_check_script=self.health_check_script,
             platform=platform,
+            structured_output=False,
             recorder=self.recorder,
         )
 

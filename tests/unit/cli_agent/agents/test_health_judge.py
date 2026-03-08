@@ -5,6 +5,7 @@ import pytest
 
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge
 from app_operator.exceptions import AgentError
+from app_operator.prompts import PromptLoader
 from libs.agent_cli.base import CodingAgent
 
 
@@ -222,6 +223,40 @@ def test_assess_renders_correct_template(repo_path, health_check_script, monkeyp
     assert kwargs["repo_path"] == repo_path
     assert kwargs["health_check_script"] == health_check_script
     assert "platform" in kwargs
+    assert kwargs["structured_output"] is False
+
+
+# --- Template content tests ---
+
+
+def test_assess_health_template_xml_when_structured_output_false(repo_path, health_check_script):
+    loader = PromptLoader()
+    rendered = loader.render(
+        "deployer/assess_health.jinja2",
+        repo_path=repo_path,
+        health_check_script=health_check_script,
+        platform="docker",
+        structured_output=False,
+    )
+    assert "<health_verdict>" in rendered
+    assert "<health_assessment>" in rendered
+    assert "<script_fixed>" in rendered
+    assert "structured response" not in rendered
+
+
+def test_assess_health_template_no_xml_when_structured_output_true(repo_path, health_check_script):
+    loader = PromptLoader()
+    rendered = loader.render(
+        "deployer/assess_health.jinja2",
+        repo_path=repo_path,
+        health_check_script=health_check_script,
+        platform="docker",
+        structured_output=True,
+    )
+    assert "<health_verdict>" not in rendered
+    assert "structured response" in rendered
+    assert "**healthy**" in rendered
+    assert "**script_was_fixed**" in rendered
 
 
 # --- Robustness tests ---
