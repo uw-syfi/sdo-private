@@ -5,18 +5,19 @@ from app_operator_dspy.tools.shell import run_shell
 DEFAULT_TAIL = 50
 
 
-def docker_compose_up(cwd: str, build: bool = True) -> str:
+def docker_compose_up(cwd: str, build: bool = True, timeout: int = 300) -> str:
     """Start services with Docker Compose in detached mode.
 
     Args:
         cwd: Directory containing the docker-compose file.
         build: Whether to rebuild images before starting.
+        timeout: Maximum seconds to wait.
 
     Returns:
         Combined stdout/stderr output from the command.
     """
     build_flag = " --build" if build else ""
-    return run_shell(f"docker compose up{build_flag} -d", cwd=cwd, timeout=300)
+    return run_shell(f"docker compose up{build_flag} -d", cwd=cwd, timeout=timeout)
 
 
 def docker_ps(cwd: str = ".") -> str:

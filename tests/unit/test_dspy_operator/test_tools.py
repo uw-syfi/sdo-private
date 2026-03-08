@@ -84,5 +84,10 @@ class TestHealthCheck:
     @patch("app_operator_dspy.tools.health_check.run_shell", return_value="Exit code: 0\nStdout:\nAll services healthy")
     def test_runs_health_check_script(self, mock_shell):
         result = run_health_check("/myapp")
-        mock_shell.assert_called_once_with("/myapp/.sds/health_check.sh", cwd="/myapp")
+        mock_shell.assert_called_once_with("/myapp/.sds/health_check.sh", cwd="/myapp", timeout=120)
         assert "healthy" in result
+
+    @patch("app_operator_dspy.tools.health_check.run_shell", return_value="Exit code: 0\nStdout:\nhealthy")
+    def test_custom_timeout(self, mock_shell):
+        run_health_check("/myapp", timeout=600)
+        mock_shell.assert_called_once_with("/myapp/.sds/health_check.sh", cwd="/myapp", timeout=600)
