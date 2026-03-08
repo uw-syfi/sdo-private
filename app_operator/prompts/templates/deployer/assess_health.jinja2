@@ -70,6 +70,7 @@ Delegate context-heavy tasks to subagents if available.
 - **NEVER use `sudo`** — assume all tools are already installed and accessible
 - **NEVER expose ports to the host**; use platform-internal networking
 - **NEVER drop or change the `--project-name` flag** from `docker compose` commands
+- **NEVER remove a check merely because it is failing.** Only remove a check if the corresponding service or component is no longer part of the application (e.g., it was removed from the deployment). If a check fails for a fixable reason (wrong port, wrong service name, flawed logic), fix the check — do not delete it.
 
 ## REQUIRED Output Format
 
