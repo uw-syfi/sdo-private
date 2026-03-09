@@ -1,3 +1,5 @@
+from typing import Any
+
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
 from app_operator.progress import emit_progress
@@ -9,7 +11,7 @@ from app_operator.prompts import (
 from app_operator.trajectory import Phase
 
 
-def generate_scripts(state: OperatorState, ctx: NodeContext) -> OperatorState:
+def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> OperatorState:
     if state["scripts_done"]:
         return state
 
@@ -33,8 +35,8 @@ def generate_scripts(state: OperatorState, ctx: NodeContext) -> OperatorState:
             platform=ctx.config.deployment.platform,
         )
 
-        ctx.invoke(state, ctx.script_agent, "", deploy_prompt, agent_name="Script Generator")
-        ctx.invoke(state, ctx.script_agent, "", health_prompt, agent_name="Script Generator")
+        ctx.invoke(state, agent, "", deploy_prompt, agent_name="Script Generator")
+        ctx.invoke(state, agent, "", health_prompt, agent_name="Script Generator")
 
         state["scripts_done"] = True
         return state

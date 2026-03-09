@@ -31,7 +31,6 @@ def _make_ctx(
     filesystem,
     config: Config,
     loader=None,
-    agent=None,
     check_shutdown=None,
     recorder=None,
 ) -> NodeContext:
@@ -42,9 +41,7 @@ def _make_ctx(
         config=config,
         context_limit=10000,
         recorder=recorder or NullTrajectoryRecorder(),
-        health_check_interval=0,
         check_shutdown=check_shutdown,
-        health_agent=agent,
     )
 
 
@@ -65,7 +62,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, recorder=recorder)
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=True,
@@ -77,7 +74,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(state, ctx)
+            health_check(state, ctx, agent)
 
         loader.render.assert_called_once()
         call_args = loader.render.call_args
@@ -99,7 +96,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, recorder=recorder)
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=False,
@@ -111,7 +108,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            result = health_check(state, ctx)
+            result = health_check(state, ctx, agent)
 
         assert result["health_verdict"] == {
             "healthy": False,
@@ -134,7 +131,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, recorder=recorder)
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=True,
@@ -146,7 +143,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(state, ctx)
+            health_check(state, ctx, agent)
 
         recorder.end_phase.assert_called_once_with("success")
 
@@ -158,9 +155,9 @@ class TestHealthCheckNode:
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent)
+        ctx = _make_ctx(repo_path, filesystem, config, loader)
 
-        result = health_check(state, ctx)
+        result = health_check(state, ctx, agent)
 
         assert result["health_verdict"] is None
         agent.stream.assert_not_called()
@@ -173,9 +170,9 @@ class TestHealthCheckNode:
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, check_shutdown=Mock(return_value=True))
+        ctx = _make_ctx(repo_path, filesystem, config, loader, check_shutdown=Mock(return_value=True))
 
-        result = health_check(state, ctx)
+        result = health_check(state, ctx, agent)
 
         assert result is state
         agent.stream.assert_not_called()
@@ -194,12 +191,12 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, recorder=recorder)
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=None)
 
-            result = health_check(state, ctx)
+            result = health_check(state, ctx, agent)
 
         assert result["health_verdict"] == {
             "healthy": False,
@@ -222,7 +219,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, recorder=recorder)
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=True,
@@ -234,7 +231,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(state, ctx)
+            health_check(state, ctx, agent)
 
         log_path = repo_path / ".sds" / "logs" / "health_check_attempt_1.log"
         assert filesystem.exists(log_path)

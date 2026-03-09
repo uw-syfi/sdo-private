@@ -1,5 +1,6 @@
 import time
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -20,7 +21,7 @@ class HealthVerdictResponse(BaseModel):
     script_was_fixed: bool = Field(description="Whether the health_check.sh script was modified")
 
 
-def _run_health_agent(state: OperatorState, ctx: NodeContext) -> dict | None:
+def _run_health_agent(state: OperatorState, ctx: NodeContext, health_agent: Any) -> dict | None:
     """Invoke the health assessment agent and return the verdict as a dict."""
     health_check_script = ctx.repo_path / ".sds" / "health_check.sh"
     platform = ctx.config.deployment.platform
@@ -34,7 +35,7 @@ def _run_health_agent(state: OperatorState, ctx: NodeContext) -> dict | None:
         recorder=ctx.recorder,
     )
 
-    result = ctx.invoke(state, ctx.health_agent, "", prompt, agent_name="Health Judge", logger=logger)
+    result = ctx.invoke(state, health_agent, "", prompt, agent_name="Health Judge", logger=logger)
 
     if result.structured is not None:
         return result.structured.model_dump()
@@ -48,9 +49,9 @@ def _run_health_agent(state: OperatorState, ctx: NodeContext) -> dict | None:
     }
 
 
-def _record_health_verdict(state: OperatorState, ctx: NodeContext, log_file: Path) -> dict | None:
+def _record_health_verdict(state: OperatorState, ctx: NodeContext, health_agent: Any, log_file: Path) -> dict | None:
     """Run health agent, update state, and save assessment log."""
-    verdict_dict = _run_health_agent(state, ctx)
+    verdict_dict = _run_health_agent(state, ctx, health_agent)
     state["health_verdict"] = verdict_dict
     if verdict_dict:
         _save_assessment_log(ctx.filesystem, log_file, verdict_dict)
@@ -73,7 +74,7 @@ def _save_assessment_log(filesystem, log_file, verdict_dict: dict) -> None:
     write_log_file(filesystem, log_file, content)
 
 
-def health_check(state: OperatorState, ctx: NodeContext) -> OperatorState:
+def health_check(state: OperatorState, ctx: NodeContext, health_agent: Any) -> OperatorState:
     if ctx.should_shutdown():
         return state
 
@@ -85,7 +86,7 @@ def health_check(state: OperatorState, ctx: NodeContext) -> OperatorState:
     logger.info("Running agent-based health assessment...")
 
     log_file = ctx.repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
-    verdict_dict = _record_health_verdict(state, ctx, log_file)
+    verdict_dict = _record_health_verdict(state, ctx, health_agent, log_file)
 
     if verdict_dict and verdict_dict.get("healthy"):
         ctx.recorder.end_phase("success")
@@ -93,14 +94,16 @@ def health_check(state: OperatorState, ctx: NodeContext) -> OperatorState:
     return state
 
 
-def monitor_health(state: OperatorState, ctx: NodeContext) -> OperatorState:
+def monitor_health(
+    state: OperatorState, ctx: NodeContext, health_agent: Any, health_check_interval: int
+) -> OperatorState:
     if ctx.should_shutdown():
         return state
 
     # Start monitoring phase
     ctx.recorder.start_phase(Phase.MONITORING, {"cycle": state["monitor_count"]})
 
-    interval = ctx.health_check_interval
+    interval = health_check_interval
     if interval > 0:
         time.sleep(interval)
 
@@ -116,7 +119,7 @@ def monitor_health(state: OperatorState, ctx: NodeContext) -> OperatorState:
         / "monitor"
         / f"check_{state['monitor_count']}_{time.strftime('%Y%m%d-%H%M%S')}.log"
     )
-    _record_health_verdict(state, ctx, log_file)
+    _record_health_verdict(state, ctx, health_agent, log_file)
 
     # End the monitoring phase
     ctx.recorder.end_phase("completed")

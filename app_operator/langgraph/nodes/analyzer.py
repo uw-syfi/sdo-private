@@ -1,3 +1,5 @@
+from typing import Any
+
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
 from app_operator.logger import logger
@@ -7,7 +9,7 @@ from app_operator.trajectory import Phase
 logger = logger.bind(node="analyzer")
 
 
-def analyze_code(state: OperatorState, ctx: NodeContext) -> OperatorState:
+def analyze_code(state: OperatorState, ctx: NodeContext, agent: Any) -> OperatorState:
     if state["analysis_done"]:
         return state
 
@@ -28,7 +30,7 @@ def analyze_code(state: OperatorState, ctx: NodeContext) -> OperatorState:
 
         result = ctx.invoke(
             state,
-            ctx.analyze_agent,
+            agent,
             system_prompt,
             user_prompt,
             agent_name="Code Analyzer",

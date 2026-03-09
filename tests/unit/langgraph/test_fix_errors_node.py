@@ -17,7 +17,6 @@ def _make_ctx(
     filesystem,
     config: Config,
     loader=None,
-    agent=None,
     check_shutdown=None,
     recorder=None,
 ) -> NodeContext:
@@ -28,9 +27,7 @@ def _make_ctx(
         config=config,
         context_limit=10000,
         recorder=recorder or NullTrajectoryRecorder(),
-        health_check_interval=0,
         check_shutdown=check_shutdown,
-        fix_agent=agent,
     )
 
 
@@ -57,7 +54,7 @@ class TestFixErrors:
         check_shutdown = Mock(return_value=False)
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
-        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, check_shutdown, recorder)
+        ctx = _make_ctx(repo_path, filesystem, config, loader, check_shutdown, recorder)
         ctx.invoke = Mock(
             return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="Fixed the issue"))
         )
@@ -65,7 +62,7 @@ class TestFixErrors:
         with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
             mock_prepare.return_value = {"error": "Error occurred"}
 
-            result_state = fix_errors(state, ctx)
+            result_state = fix_errors(state, ctx, agent, None)
 
         assert result_state["attempt"] == 2  # Incremented
         assert result_state["last_fix_summary"] == "Fixed the issue"
@@ -94,7 +91,7 @@ class TestFixErrors:
         with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
             mock_prepare.return_value = {}
 
-            result_state = fix_errors(state, ctx)
+            result_state = fix_errors(state, ctx, None, None)
 
         assert result_state["last_fix_summary"] == "This is the summary"
 
@@ -119,7 +116,7 @@ class TestFixErrors:
         with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
             mock_prepare.return_value = {}
 
-            result_state = fix_errors(state, ctx)
+            result_state = fix_errors(state, ctx, None, None)
 
         # last_fix_summary should remain None
         assert result_state["last_fix_summary"] is None
@@ -144,7 +141,7 @@ class TestFixErrors:
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         ctx = _make_ctx(repo_path, filesystem, config, check_shutdown=Mock(return_value=True))
 
-        result_state = fix_errors(state, ctx)
+        result_state = fix_errors(state, ctx, None, None)
 
         # Verify observable outcome: state should be unchanged
         assert result_state == state
@@ -180,7 +177,7 @@ class TestFixErrors:
         with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
             mock_prepare.return_value = {}
 
-            fix_errors(state, ctx)
+            fix_errors(state, ctx, None, None)
 
             # Verify observable outcome: log file exists with expected content
             log_path = repo_path / ".sds" / "logs" / "fix_summary_1.log"
@@ -219,7 +216,7 @@ class TestFixErrors:
         with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
             mock_prepare.return_value = {"health_error": "Health check failed"}
 
-            result_state = fix_errors(state, ctx)
+            result_state = fix_errors(state, ctx, None, None)
 
             # Verify observable outcomes:
             # 1. Fix summary should be extracted and set

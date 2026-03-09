@@ -25,7 +25,6 @@ def _make_ctx(
         config=config,
         context_limit=128000,
         recorder=recorder or NullTrajectoryRecorder(),
-        health_check_interval=0,
         check_shutdown=check_shutdown,
     )
 

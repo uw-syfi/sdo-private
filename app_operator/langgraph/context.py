@@ -21,13 +21,7 @@ class NodeContext:
     config: Config
     context_limit: int
     recorder: TrajectoryRecorderProtocol
-    health_check_interval: int
     check_shutdown: Callable[[], bool] | None = None
-    analyze_agent: Any = None
-    script_agent: Any = None
-    fix_agent: Any = None
-    health_agent: Any = None
-    consolidation_agent: Any = None
 
     def __post_init__(self) -> None:
         if self.recorder is None:

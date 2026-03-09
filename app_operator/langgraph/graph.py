@@ -49,6 +49,12 @@ def build_graph(
     model_name = config.agent.model or "gpt-4o"
     context_limit = get_model_context_limit(model_name)
 
+    analyze_agent = create_react_agent(llm, tools=tools)
+    script_agent = create_react_agent(llm, tools=tools)
+    fix_agent = create_react_agent(llm, tools=tools, response_format=FixSummaryResponse)
+    health_agent = create_react_agent(llm, tools=tools, response_format=HealthVerdictResponse)
+    consolidation_agent = create_react_agent(llm, tools=tools, response_format=ConsolidatedSummaryResponse)
+
     ctx = NodeContext(
         repo_path=repo_path,
         filesystem=filesystem,
@@ -56,13 +62,7 @@ def build_graph(
         config=config,
         context_limit=context_limit,
         recorder=recorder or NullTrajectoryRecorder(),
-        health_check_interval=health_check_interval,
         check_shutdown=check_shutdown,
-        analyze_agent=create_react_agent(llm, tools=tools),
-        script_agent=create_react_agent(llm, tools=tools),
-        fix_agent=create_react_agent(llm, tools=tools, response_format=FixSummaryResponse),
-        health_agent=create_react_agent(llm, tools=tools, response_format=HealthVerdictResponse),
-        consolidation_agent=create_react_agent(llm, tools=tools, response_format=ConsolidatedSummaryResponse),
     )
 
     def should_fix(state: OperatorState) -> str:
@@ -86,12 +86,12 @@ def build_graph(
         return "end"
 
     graph = StateGraph(OperatorState)
-    graph.add_node("analyze_code", lambda s: analyze_code(s, ctx))
-    graph.add_node("generate_scripts", lambda s: generate_scripts(s, ctx))
+    graph.add_node("analyze_code", lambda s: analyze_code(s, ctx, analyze_agent))
+    graph.add_node("generate_scripts", lambda s: generate_scripts(s, ctx, script_agent))
     graph.add_node("deploy_attempt", lambda s: deploy_attempt(s, ctx))
-    graph.add_node("health_check", lambda s: health_check(s, ctx))
-    graph.add_node("fix_errors", lambda s: fix_errors(s, ctx))
-    graph.add_node("monitor_health", lambda s: monitor_health(s, ctx))
+    graph.add_node("health_check", lambda s: health_check(s, ctx, health_agent))
+    graph.add_node("fix_errors", lambda s: fix_errors(s, ctx, fix_agent, consolidation_agent))
+    graph.add_node("monitor_health", lambda s: monitor_health(s, ctx, health_agent, health_check_interval))
 
     graph.set_entry_point("analyze_code")
     graph.add_edge("analyze_code", "generate_scripts")

@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app_operator.constants import FIX_SUMMARY_FILENAME
@@ -62,7 +64,7 @@ def _health_verdict_from_dict(d: dict) -> HealthVerdict:
     )
 
 
-def fix_errors(state: OperatorState, ctx: NodeContext) -> OperatorState:
+def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any, consolidation_agent: Any) -> OperatorState:
     if ctx.should_shutdown():
         return state
 
@@ -93,7 +95,7 @@ def fix_errors(state: OperatorState, ctx: NodeContext) -> OperatorState:
         structured_output=True,
     )
 
-    result = ctx.invoke(state, ctx.fix_agent, "", prompt, agent_name="Error Fixer", logger=logger)
+    result = ctx.invoke(state, fix_agent, "", prompt, agent_name="Error Fixer", logger=logger)
     state["messages"] = result.messages
 
     if result.structured is not None:
@@ -107,8 +109,8 @@ def fix_errors(state: OperatorState, ctx: NodeContext) -> OperatorState:
         write_log_file(ctx.filesystem, log_file, summary_text)
         state["last_fix_summary"] = summary_text
 
-        if fix_summary_consolidation and ctx.consolidation_agent is not None:
-            _update_consolidated_summary(state, ctx, summary_text)
+        if fix_summary_consolidation and consolidation_agent is not None:
+            _update_consolidated_summary(state, ctx, consolidation_agent, summary_text)
 
     ctx.recorder.end_phase("needs_retry")
 
@@ -119,6 +121,7 @@ def fix_errors(state: OperatorState, ctx: NodeContext) -> OperatorState:
 def _update_consolidated_summary(
     state: OperatorState,
     ctx: NodeContext,
+    consolidation_agent: Any,
     current_summary: str,
 ) -> None:
     """Consolidate fix summaries into a markdown file using a structured agent."""
@@ -136,7 +139,7 @@ def _update_consolidated_summary(
 
     try:
         result = ctx.invoke(
-            state, ctx.consolidation_agent, "", prompt, agent_name="Summary Consolidator", logger=logger
+            state, consolidation_agent, "", prompt, agent_name="Summary Consolidator", logger=logger
         )
 
         if result.structured is not None:
