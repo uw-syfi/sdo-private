@@ -1,7 +1,7 @@
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,7 @@ from app_operator.trajectory import (
     Phase,
     TrajectoryRecorderProtocol,
 )
-from app_operator.types import HealthVerdict
+from app_operator.types import CommandResult, HealthVerdict
 
 logger = logger.bind(node="deployer")
 
@@ -88,7 +88,7 @@ def fix_errors(
     if check_shutdown and check_shutdown():
         return state
 
-    deploy_result = state.get("deploy_result") or {}
+    deploy_result = cast("CommandResult", state.get("deploy_result") or {})
     health_verdict_dict = state.get("health_verdict")
 
     log_file_path = repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
