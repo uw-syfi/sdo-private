@@ -39,4 +39,6 @@ CRITICAL REQUIREMENTS:
    - Track total checks, passed checks, failed checks, warnings
    - The script should work when executed from the .sds directory
 
+**IMPORTANT**: All health check logic must be self-contained in this script. Do NOT add `healthcheck:` blocks to any Docker Compose file — `.sds/health_check.sh` is the single source of truth for health verification.
+
 You must use the write_file tool to create the file .sds/health_check.sh directly. Do not just print the content.

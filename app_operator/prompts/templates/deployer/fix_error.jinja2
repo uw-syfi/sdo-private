@@ -35,6 +35,7 @@ Before making any fixes, identify the deployment platform:
   `$(basename "$APP_DIR")`). Do not replace it with a service name, image name, or hardcoded
   string, and do not omit it.
 - **NEVER expose ports to the host; use platform-internal networking (e.g., docker network, kubernetes namespace).
+- **NEVER add `healthcheck:` blocks to Docker Compose files** — all health check logic must live in `.sds/health_check.sh`. Use `depends_on: condition: service_started` (not `service_healthy`) for startup ordering.
 - **NEVER use pre-built images from Docker Hub or any registry for application services
   that have source code in the repository** — every such service MUST use a `build:` context
   pointing to its local source (write a Dockerfile if one does not exist). Only external
@@ -75,7 +76,7 @@ Example signals to scan for (not exhaustive — use these as pattern-matching hi
 - Repeated identical lines → spin loop / retry storm
 - `panic:`/`fatal:` (Go), uncaught exception at startup → application bug or missing dependency
 - `address already in use` → port conflict with host or sibling container
-- `connection refused` to DB/cache at startup → startup ordering race; add `depends_on: condition: service_healthy`
+- `connection refused` to DB/cache at startup → startup ordering race; add `depends_on: condition: service_started` (never `service_healthy` — do not add compose healthcheck blocks)
 - DNS failure / `no such host` → service not on shared network, or hostname typo in config
 - `KeyError` / `required` / `undefined` env var → incomplete environment config
 - High CPU throttle → startup timeouts; disk full (`df -h`) → silent build/pull failures
