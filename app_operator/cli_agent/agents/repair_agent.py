@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app_operator.cli_agent.agents.context import AgentContext
     from app_operator.types import CommandResult, HealthVerdict
 
+from app_operator.config import DeploymentConfig
 from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.exceptions import AgentError
 from app_operator.logger import logger
@@ -35,8 +36,6 @@ class RepairAgent:
 
     def __init__(self, ctx: AgentContext, deployment_config=None):
         self.ctx = ctx
-        from app_operator.config import DeploymentConfig
-
         self.deployment_config = deployment_config or DeploymentConfig()
 
     def fix_with_agent(

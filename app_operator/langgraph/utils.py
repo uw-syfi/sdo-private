@@ -89,113 +89,18 @@ def _last_assistant_text(messages: list[BaseMessage]) -> str:
     return ""
 
 
-def invoke_agent(
+def _invoke_agent_core(
     state: OperatorState,
     agent: Any,
     system_prompt: str,
     user_prompt: str,
-    agent_name: str = "Agent",
-    context_limit: int = 128000,
-    recorder: TrajectoryRecorderProtocol | None = None,
-    ui: OperatorUI | None = None,
-    logger=logger,
-) -> tuple[str, list[BaseMessage]]:
-    """Invoke a LangGraph agent and stream its output.
-
-    The `logger` parameter accepts a loguru-bound logger so that callers (e.g.
-    individual langgraph nodes) can propagate their node-name binding into all
-    log lines emitted here.  Without this, every log line from this shared
-    utility would use the module-level unbound logger, losing the [node] prefix
-    that the formatter adds when the 'node' extra is present.
-    """
-    if ui is None:
-        ui = NullOperatorUI()
-    handler = LangGraphTrajectoryHandler(recorder)
-
-    if system_prompt:
-        messages: list[BaseMessage] = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
-    else:
-        messages: list[BaseMessage] = [HumanMessage(content=user_prompt)]
-
-    for msg in messages:
-        handler.record_message(msg)
-
-    response_messages = list(messages)
-    total_usage = {"input": 0, "output": 0, "total": 0}
-
-    logger.info("=" * 50)
-    logger.info(f"Executing {agent_name}...")
-    logger.info("=" * 50)
-
-    for chunk in agent.stream({"messages": messages}, stream_mode="updates"):
-        for _node_name, updates in chunk.items():
-            new_messages = updates.get("messages", [])
-            if not new_messages:
-                continue
-
-            response_messages.extend(new_messages)
-
-            for msg in new_messages:
-                handler.record_message(msg)
-
-                if isinstance(msg, AIMessage):
-                    usage = _extract_token_usage(msg)
-                    total_usage["input"] += usage.get("input", 0)
-                    total_usage["output"] += usage.get("output", 0)
-                    total_usage["total"] += usage.get("total", 0)
-
-                    if msg.tool_calls:
-                        for tool_call in msg.tool_calls:
-                            args_str = str(tool_call["args"])
-                            if len(args_str) > MAX_DISPLAY_CONTENT:
-                                args_str = f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
-                            logger.info(f"[Tool Call] {tool_call['name']}({args_str})")
-                            ui.on_tool_call(tool_call["name"], args_str)
-
-                    content_text = extract_text(msg.content)
-                    if content_text:
-                        logger.info(content_text)
-
-                    if usage.get("total", 0) > 0:
-                        pct = round((usage["total"] / context_limit) * 100, 1)
-                        logger.info(f"Token Usage: {pct}% ({usage['total']}/{context_limit})")
-
-                elif isinstance(msg, ToolMessage):
-                    content = extract_text(msg.content)
-                    if len(content) > MAX_DISPLAY_CONTENT:
-                        content = f"{content[:MAX_DISPLAY_CONTENT]}... (truncated)"
-
-                    logger.info(f"[Tool Result] {content}")
-
-    logger.info("=" * 50)
-
-    _record_session_usage(state, agent_name, total_usage, recorder)
-
-    assistant_text = _last_assistant_text(response_messages)
-    return assistant_text, response_messages
-
-
-def invoke_agent_structured(
-    state: OperatorState,
-    agent: Any,
-    system_prompt: str,
-    user_prompt: str,
-    agent_name: str = "Agent",
-    context_limit: int = 128000,
-    recorder: TrajectoryRecorderProtocol | None = None,
-    ui: OperatorUI | None = None,
-    logger=logger,
+    agent_name: str,
+    context_limit: int,
+    recorder: TrajectoryRecorderProtocol | None,
+    ui: OperatorUI,
+    logger,
 ) -> tuple[str, list[BaseMessage], Any | None]:
-    """Invoke a LangGraph agent that has response_format set.
-
-    Works like invoke_agent() but also captures structured_response from
-    the streamed state updates and returns it as a third element.
-    """
-    if ui is None:
-        ui = NullOperatorUI()
+    """Shared streaming loop for invoke_agent and invoke_agent_structured."""
     handler = LangGraphTrajectoryHandler(recorder)
 
     if system_prompt:
@@ -268,9 +173,70 @@ def invoke_agent_structured(
     return assistant_text, response_messages, structured_response
 
 
+def invoke_agent(
+    state: OperatorState,
+    agent: Any,
+    system_prompt: str,
+    user_prompt: str,
+    agent_name: str = "Agent",
+    context_limit: int = 128000,
+    recorder: TrajectoryRecorderProtocol | None = None,
+    ui: OperatorUI | None = None,
+    logger=logger,
+) -> tuple[str, list[BaseMessage]]:
+    """Invoke a LangGraph agent and stream its output.
+
+    The `logger` parameter accepts a loguru-bound logger so that callers (e.g.
+    individual langgraph nodes) can propagate their node-name binding into all
+    log lines emitted here.  Without this, every log line from this shared
+    utility would use the module-level unbound logger, losing the [node] prefix
+    that the formatter adds when the 'node' extra is present.
+    """
+    text, messages, _ = _invoke_agent_core(
+        state,
+        agent,
+        system_prompt,
+        user_prompt,
+        agent_name,
+        context_limit,
+        recorder,
+        ui or NullOperatorUI(),
+        logger,
+    )
+    return text, messages
+
+
+def invoke_agent_structured(
+    state: OperatorState,
+    agent: Any,
+    system_prompt: str,
+    user_prompt: str,
+    agent_name: str = "Agent",
+    context_limit: int = 128000,
+    recorder: TrajectoryRecorderProtocol | None = None,
+    ui: OperatorUI | None = None,
+    logger=logger,
+) -> tuple[str, list[BaseMessage], Any | None]:
+    """Invoke a LangGraph agent that has response_format set.
+
+    Works like invoke_agent() but also captures structured_response from
+    the streamed state updates and returns it as a third element.
+    """
+    return _invoke_agent_core(
+        state,
+        agent,
+        system_prompt,
+        user_prompt,
+        agent_name,
+        context_limit,
+        recorder,
+        ui or NullOperatorUI(),
+        logger,
+    )
+
+
 def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:
-    if not filesystem.exists(path.parent):
-        filesystem.mkdir(path.parent, parents=True, exist_ok=True)
+    filesystem.mkdir(path.parent, parents=True, exist_ok=True)
     filesystem.write_text(path, content)
 
 

@@ -79,14 +79,6 @@ class DeploymentAgent:
         self._repair = RepairAgent(self._ctx, deployment_config=self.deployment_config)
         self._script_gen = ScriptGeneratorAgent(self._ctx, deployment_config=self.deployment_config)
 
-    def _get_time(self) -> float:
-        """Get current time. Separate method to allow mocking in tests."""
-        return self._executor._get_time()
-
-    def _sleep(self, seconds: float) -> None:
-        """Sleep for given seconds. Separate method to allow mocking in tests."""
-        self._executor._sleep(seconds)
-
     def _get_next_attempt_number(self) -> int:
         """Determine the next attempt number based on existing logs."""
         logs_dir = self.sds_dir / "logs"

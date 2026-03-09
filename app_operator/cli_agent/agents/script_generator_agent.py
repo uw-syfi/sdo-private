@@ -32,9 +32,7 @@ class ScriptGeneratorAgent:
 
     def __init__(self, ctx: AgentContext, deployment_config: DeploymentConfig | None = None):
         self.ctx = ctx
-        from app_operator.config import DeploymentConfig as DC
-
-        self.deployment_config = deployment_config or DC()
+        self.deployment_config = deployment_config or DeploymentConfig()
 
     def generate_scripts(self) -> tuple[bool, str]:
         """Generate deploy.sh and health_check.sh.

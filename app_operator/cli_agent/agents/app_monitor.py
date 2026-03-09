@@ -53,6 +53,20 @@ class MonitoringTask(ABC):
         """Use a coding agent to analyze results and provide suggestions."""
 
 
+def _format_assessment_content(verdict: Any) -> str:
+    """Format a HealthVerdict into assessment log text."""
+    status = "healthy" if verdict.healthy else "unhealthy"
+    content = (
+        f"=== Health Assessment ===\n"
+        f"Status: {status}\n"
+        f"Script fixed: {verdict.script_was_fixed}\n\n"
+        f"Assessment: {verdict.assessment}\n"
+    )
+    if verdict.diagnosis:
+        content += f"\nDiagnosis: {verdict.diagnosis}\n"
+    return content
+
+
 class HealthCheckTask(MonitoringTask):
     """A monitoring task specifically for running health checks. Kept for backward compatibility."""
 
@@ -87,20 +101,8 @@ class HealthCheckTask(MonitoringTask):
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             monitor.filesystem.mkdir(monitor.log_dir, parents=True, exist_ok=True)
             log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
-
-            status = "healthy" if verdict.healthy else "unhealthy"
-            content = (
-                f"=== Health Assessment ===\n"
-                f"Status: {status}\n"
-                f"Script fixed: {verdict.script_was_fixed}\n\n"
-                f"Assessment: {verdict.assessment}\n"
-            )
-            if verdict.diagnosis:
-                content += f"\nDiagnosis: {verdict.diagnosis}\n"
-
             with open(log_file, "w") as f:
-                f.write(content)
-
+                f.write(_format_assessment_content(verdict))
             logger.info(f"Assessment saved to: {log_file}")
         except (OSError, RuntimeError) as e:
             logger.warning(f"Failed to save assessment log: {e}")
@@ -215,20 +217,8 @@ class AppMonitor:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             self.filesystem.mkdir(self.log_dir, parents=True, exist_ok=True)
             log_file = self.log_dir / f"check_{self.check_count}_{timestamp}.log"
-
-            status = "healthy" if verdict.healthy else "unhealthy"
-            content = (
-                f"=== Health Assessment ===\n"
-                f"Status: {status}\n"
-                f"Script fixed: {verdict.script_was_fixed}\n\n"
-                f"Assessment: {verdict.assessment}\n"
-            )
-            if verdict.diagnosis:
-                content += f"\nDiagnosis: {verdict.diagnosis}\n"
-
             with open(log_file, "w") as f:
-                f.write(content)
-
+                f.write(_format_assessment_content(verdict))
             logger.info(f"Assessment saved to: {log_file}")
         except (OSError, RuntimeError) as e:
             logger.warning(f"Failed to save assessment log: {e}")
