@@ -14,7 +14,7 @@ def read_file(path: str) -> str:
     """
     try:
         return Path(path).read_text()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return f"Error reading {path}: {exc}"
 
 

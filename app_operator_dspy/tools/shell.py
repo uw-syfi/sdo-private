@@ -32,6 +32,6 @@ def run_shell(command: str, cwd: str = ".", timeout: int = DEFAULT_TIMEOUT) -> s
             parts.append(f"Stderr:\n{result.stderr}")
         return "\n".join(parts)
     except subprocess.TimeoutExpired:
-        return f"Error: command timed out after {timeout} seconds"
+        return f"Exit code: 124\nStderr:\nCommand timed out after {timeout} seconds"
     except OSError as exc:
-        return f"Error: {exc}"
+        return f"Exit code: 1\nStderr:\n{exc}"

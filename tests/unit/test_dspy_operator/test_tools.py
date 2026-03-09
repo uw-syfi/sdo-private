@@ -19,15 +19,17 @@ class TestRunShell:
         result = run_shell("exit 1")
         assert "Exit code: 1" in result
 
-    def test_timeout_returns_error(self):
+    def test_timeout_returns_exit_code_format(self):
         with patch("app_operator_dspy.tools.shell.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 1)):
             result = run_shell("sleep 100", timeout=1)
+        assert result.startswith("Exit code: 124")
         assert "timed out" in result
 
-    def test_oserror_returns_error(self):
+    def test_oserror_returns_exit_code_format(self):
         with patch("app_operator_dspy.tools.shell.subprocess.run", side_effect=OSError("no such file")):
             result = run_shell("nonexistent")
-        assert "Error:" in result
+        assert result.startswith("Exit code: 1")
+        assert "no such file" in result
 
 
 class TestFilesystem:
