@@ -7,6 +7,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.langgraph.compaction import make_compaction_hook
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.models import get_model_context_limit
 from app_operator.langgraph.nodes.analyzer import analyze_code
@@ -48,12 +49,17 @@ def build_graph(
     # Determine model context limit
     model_name = config.agent.model or "gpt-4o"
     context_limit = get_model_context_limit(model_name)
+    compaction_hook = make_compaction_hook(llm, context_limit)
 
-    analyze_agent = create_react_agent(llm, tools=tools)
-    script_agent = create_react_agent(llm, tools=tools)
-    fix_agent = create_react_agent(llm, tools=tools, response_format=FixSummaryResponse)
-    health_agent = create_react_agent(llm, tools=tools, response_format=HealthVerdictResponse)
-    consolidation_agent = create_react_agent(llm, tools=tools, response_format=ConsolidatedSummaryResponse)
+    analyze_agent = create_react_agent(llm, tools=tools, pre_model_hook=compaction_hook)
+    script_agent = create_react_agent(llm, tools=tools, pre_model_hook=compaction_hook)
+    fix_agent = create_react_agent(llm, tools=tools, response_format=FixSummaryResponse, pre_model_hook=compaction_hook)
+    health_agent = create_react_agent(
+        llm, tools=tools, response_format=HealthVerdictResponse, pre_model_hook=compaction_hook
+    )
+    consolidation_agent = create_react_agent(
+        llm, tools=tools, response_format=ConsolidatedSummaryResponse, pre_model_hook=compaction_hook
+    )
 
     ctx = NodeContext(
         repo_path=repo_path,
