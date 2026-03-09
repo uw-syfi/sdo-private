@@ -32,6 +32,7 @@ def _truncate_for_display(text: str) -> str:
     omitted = len(text) - total
     return f"{text[:_DISPLAY_HEAD]}\n... ({omitted} chars omitted) ...\n{text[-_DISPLAY_TAIL:]}"
 
+
 T = TypeVar("T")
 
 
@@ -89,6 +90,10 @@ def _record_session_usage(
             "input": usage.get("input", 0),
             "output": usage.get("output", 0),
             "total": usage.get("total", 0),
+            "own_input": usage.get("input", 0),
+            "own_output": usage.get("output", 0),
+            "own_total": usage.get("total", 0),
+            "subagents": [],
         }
     )
     if recorder is not None:

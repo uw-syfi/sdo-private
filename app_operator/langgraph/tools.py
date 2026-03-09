@@ -695,10 +695,11 @@ def _build_spawn_subagent(
         if current_depth >= max_depth:
             return f"[Error: Maximum subagent depth ({max_depth}) reached]"
 
+        child_sink: list = []
         child_tools = list(base_tools)
         if current_depth + 1 < max_depth:
             child_tools.append(
-                _build_spawn_subagent(llm, base_tools, compaction_hook, current_depth + 1, max_depth, token_sink)
+                _build_spawn_subagent(llm, base_tools, compaction_hook, current_depth + 1, max_depth, child_sink)
             )
 
         child_agent = create_react_agent(llm, tools=child_tools, pre_model_hook=compaction_hook)
@@ -736,15 +737,21 @@ def _build_spawn_subagent(
             partial = f" Partial result: {result_text}" if result_text else ""
             return f"[Subagent hit recursion or execution limit: {e}.{partial}]"
 
-        if total_usage["total"] > 0 or total_usage["input"] > 0:
-            token_sink.append(
-                {
-                    "agent": f"subagent_d{current_depth}",
-                    "input": total_usage["input"],
-                    "output": total_usage["output"],
-                    "total": total_usage["total"],
-                }
-            )
+        own_input = total_usage["input"]
+        own_output = total_usage["output"]
+        own_total = total_usage["total"]
+        record = {
+            "agent": f"subagent_d{current_depth}",
+            "own_input": own_input,
+            "own_output": own_output,
+            "own_total": own_total,
+            "input": own_input + sum(r.get("input", 0) for r in child_sink),
+            "output": own_output + sum(r.get("output", 0) for r in child_sink),
+            "total": own_total + sum(r.get("total", 0) for r in child_sink),
+            "subagents": child_sink,
+        }
+        if record["total"] > 0 or record["input"] > 0:
+            token_sink.append(record)
 
         return result_text or "[No response from subagent]"
 

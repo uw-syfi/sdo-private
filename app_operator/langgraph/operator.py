@@ -118,8 +118,18 @@ class LangGraphOperator(OperatorBase):
                     totals["completion_tokens"] += s.get("output", 0)
                     totals["total_tokens"] += s.get("total", 0)
                 logger.info(f"Total Token Usage: {totals}")
+
+                def _log_usage(entry: dict, indent: str = "  ") -> None:
+                    own = f", own: in={entry['own_input']}, out={entry['own_output']}" if entry.get("subagents") else ""
+                    logger.info(
+                        f"{indent}{entry['agent']}: {entry['total']} tokens "
+                        f"(in={entry['input']}, out={entry['output']}{own})"
+                    )
+                    for sub in entry.get("subagents", []):
+                        _log_usage(sub, indent + "  ")
+
                 for s in sessions:
-                    logger.info(f"  {s['agent']}: {s['total']} tokens (in={s['input']}, out={s['output']})")
+                    _log_usage(s)
 
             health_verdict = final_state.get("health_verdict") if final_state else None
             self._deployed = bool(health_verdict and health_verdict.get("healthy"))

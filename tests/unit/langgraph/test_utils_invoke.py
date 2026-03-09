@@ -50,7 +50,16 @@ def test_invoke_agent_simple():
     assert len(result.messages) == 3  # System, User, AI
     assert result.structured is None
     assert state["agent_token_usage"] == [
-        {"agent": "Test Agent", "input": 10, "output": 5, "total": 15},
+        {
+            "agent": "Test Agent",
+            "input": 10,
+            "output": 5,
+            "total": 15,
+            "own_input": 10,
+            "own_output": 5,
+            "own_total": 15,
+            "subagents": [],
+        },
     ]
 
     # Check recorder calls — system and user prompts recorded via record_message
@@ -93,7 +102,16 @@ def test_invoke_agent_anthropic_usage():
     invoke_agent(state, mock_agent, "", "User prompt", agent_name="Anthropic Agent")
 
     assert state["agent_token_usage"] == [
-        {"agent": "Anthropic Agent", "input": 20, "output": 10, "total": 30},
+        {
+            "agent": "Anthropic Agent",
+            "input": 20,
+            "output": 10,
+            "total": 30,
+            "own_input": 20,
+            "own_output": 10,
+            "own_total": 30,
+            "subagents": [],
+        },
     ]
 
 
@@ -111,7 +129,16 @@ def test_invoke_agent_usage_metadata():
     invoke_agent(state, mock_agent, "", "User prompt", agent_name="Gemini Agent")
 
     assert state["agent_token_usage"] == [
-        {"agent": "Gemini Agent", "input": 30, "output": 15, "total": 45},
+        {
+            "agent": "Gemini Agent",
+            "input": 30,
+            "output": 15,
+            "total": 45,
+            "own_input": 30,
+            "own_output": 15,
+            "own_total": 45,
+            "subagents": [],
+        },
     ]
 
 
@@ -165,8 +192,8 @@ def test_tool_result_long_content_truncated_with_head_and_tail():
     state = {}
     mock_agent = MagicMock()
 
-    head = "HEAD" * 200   # 800 chars
-    tail = "TAIL" * 200   # 800 chars
+    head = "HEAD" * 200  # 800 chars
+    tail = "TAIL" * 200  # 800 chars
     middle = "MIDDLE" * 100
     long_content = head + middle + tail
 
@@ -202,5 +229,14 @@ def test_invoke_agent_usage_metadata_preferred_over_response_metadata():
     invoke_agent(state, mock_agent, "", "User prompt", agent_name="Test Agent")
 
     assert state["agent_token_usage"] == [
-        {"agent": "Test Agent", "input": 30, "output": 15, "total": 45},
+        {
+            "agent": "Test Agent",
+            "input": 30,
+            "output": 15,
+            "total": 45,
+            "own_input": 30,
+            "own_output": 15,
+            "own_total": 45,
+            "subagents": [],
+        },
     ]

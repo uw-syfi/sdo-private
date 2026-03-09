@@ -42,7 +42,7 @@ class NodeContext:
         prior_messages: "list | None" = None,
     ) -> "AgentResult":
         """Invoke an agent with context_limit and recorder pre-filled from this NodeContext."""
-        from app_operator.langgraph.utils import _record_session_usage, invoke_agent
+        from app_operator.langgraph.utils import invoke_agent
         from app_operator.langgraph.utils import logger as default_logger
 
         result = invoke_agent(
@@ -56,7 +56,21 @@ class NodeContext:
             logger=logger if logger is not None else default_logger,
             prior_messages=prior_messages,
         )
-        for record in self.subagent_token_sink:
-            _record_session_usage(state, record["agent"], record, self.recorder)
+        if self.subagent_token_sink:
+            sessions = state.get("agent_token_usage")
+            if sessions:
+                parent = sessions[-1]
+                parent["subagents"] = list(self.subagent_token_sink)
+                for sub in self.subagent_token_sink:
+                    parent["input"] += sub.get("input", 0)
+                    parent["output"] += sub.get("output", 0)
+                    parent["total"] += sub.get("total", 0)
+                totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                for s in sessions:
+                    totals["prompt_tokens"] += s.get("input", 0)
+                    totals["completion_tokens"] += s.get("output", 0)
+                    totals["total_tokens"] += s.get("total", 0)
+                self.recorder.record_token_usage(totals)
+                self.recorder.trajectory["metadata"]["agent_token_usage"] = sessions
         self.subagent_token_sink.clear()
         return result

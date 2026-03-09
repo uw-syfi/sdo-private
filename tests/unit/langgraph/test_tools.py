@@ -234,5 +234,185 @@ class TestStageAndCommit(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestBuildSpawnSubagentTokenTracking(unittest.TestCase):
+    """Tests for nested subagent token usage tracking."""
+
+    def _make_ai_message(self, input_tokens: int, output_tokens: int) -> MagicMock:
+        msg = MagicMock()
+        msg.__class__ = __import__(
+            "langchain_core.messages", fromlist=["AIMessage"]
+        ).AIMessage
+        msg.usage_metadata = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
+        msg.content = "done"
+        return msg
+
+    def test_nested_subagent_token_structure(self):
+        """Depth-0 spawning depth-1: parent record includes own + child tokens."""
+        from unittest.mock import MagicMock, patch
+
+        from langchain_core.messages import AIMessage
+
+        # Build mocked stream chunks: one AIMessage per level
+        depth1_msg = MagicMock(spec=AIMessage)
+        depth1_msg.usage_metadata = {
+            "input_tokens": 3,
+            "output_tokens": 4,
+            "total_tokens": 7,
+        }
+        depth1_msg.content = "child done"
+
+        depth0_msg = MagicMock(spec=AIMessage)
+        depth0_msg.usage_metadata = {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+        }
+        depth0_msg.content = "parent done"
+
+        def make_stream(messages):
+            for msg in messages:
+                yield {"agent": {"messages": [msg]}}
+
+        parent_sink: list = []
+
+        # Patch create_react_agent so depth-1 subagent uses depth1 messages
+        # and depth-0 subagent uses depth-0 messages (after calling its child tool)
+        call_count = [0]
+
+        def fake_create_react_agent(llm, tools, pre_model_hook=None):
+            agent = MagicMock()
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 0:
+                # depth-0 agent: stream depth0_msg, but also call its child tool first
+                def stream_depth0(state, stream_mode, config):
+                    # Invoke the spawn_subagent tool (depth-1) before yielding own msg
+                    spawn = next(t for t in tools if getattr(t, "name", None) == "spawn_subagent")
+                    spawn.invoke({"prompt": "do subtask"})
+                    return make_stream([depth0_msg])
+                agent.stream = stream_depth0
+            else:
+                # depth-1 agent: just stream depth1_msg
+                agent.stream = lambda state, stream_mode, config: make_stream([depth1_msg])
+            return agent
+
+        from app_operator.langgraph import tools as tools_module
+
+        with patch.object(tools_module, "create_react_agent", side_effect=fake_create_react_agent):
+            spawn = tools_module._build_spawn_subagent(
+                llm=MagicMock(),
+                base_tools=[],
+                compaction_hook=None,
+                current_depth=0,
+                max_depth=2,
+                token_sink=parent_sink,
+            )
+            spawn.invoke({"prompt": "top task"})
+
+        self.assertEqual(len(parent_sink), 1)
+        record = parent_sink[0]
+
+        # own tokens = depth-0 LLM only
+        self.assertEqual(record["own_input"], 10)
+        self.assertEqual(record["own_output"], 5)
+        self.assertEqual(record["own_total"], 15)
+
+        # total includes child
+        self.assertEqual(record["input"], 10 + 3)
+        self.assertEqual(record["output"], 5 + 4)
+        self.assertEqual(record["total"], 15 + 7)
+
+        # nested subagents list
+        self.assertEqual(len(record["subagents"]), 1)
+        child = record["subagents"][0]
+        self.assertEqual(child["agent"], "subagent_d1")
+        self.assertEqual(child["own_total"], 7)
+        self.assertEqual(child["total"], 7)
+        self.assertEqual(child["subagents"], [])
+
+    def test_three_level_nesting(self):
+        """Depth-0 → depth-1 → depth-2: tokens bubble up through all levels."""
+        from langchain_core.messages import AIMessage
+
+        # Token values per level
+        # d0_own=100, d1_own=20, d2_own=5
+        # Expected: d2.total=5, d1.total=25, d0.total=125
+        def make_ai_msg(n: int) -> MagicMock:
+            msg = MagicMock(spec=AIMessage)
+            msg.usage_metadata = {
+                "input_tokens": n,
+                "output_tokens": 0,
+                "total_tokens": n,
+            }
+            msg.content = f"done-{n}"
+            return msg
+
+        def make_stream(msg):
+            yield {"agent": {"messages": [msg]}}
+
+        parent_sink: list = []
+        call_count = [0]
+
+        def fake_create_react_agent(llm, tools, pre_model_hook=None):
+            agent = MagicMock()
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 0:
+                # depth-0: spawns depth-1, then reports 100 own tokens
+                def stream_d0(state, stream_mode, config):
+                    spawn = next(t for t in tools if getattr(t, "name", None) == "spawn_subagent")
+                    spawn.invoke({"prompt": "d1 task"})
+                    return make_stream(make_ai_msg(100))
+                agent.stream = stream_d0
+            elif idx == 1:
+                # depth-1: spawns depth-2, then reports 20 own tokens
+                def stream_d1(state, stream_mode, config):
+                    spawn = next(t for t in tools if getattr(t, "name", None) == "spawn_subagent")
+                    spawn.invoke({"prompt": "d2 task"})
+                    return make_stream(make_ai_msg(20))
+                agent.stream = stream_d1
+            else:
+                # depth-2: leaf, reports 5 own tokens
+                agent.stream = lambda state, stream_mode, config: make_stream(make_ai_msg(5))
+            return agent
+
+        from app_operator.langgraph import tools as tools_module
+
+        with patch.object(tools_module, "create_react_agent", side_effect=fake_create_react_agent):
+            spawn = tools_module._build_spawn_subagent(
+                llm=MagicMock(),
+                base_tools=[],
+                compaction_hook=None,
+                current_depth=0,
+                max_depth=3,
+                token_sink=parent_sink,
+            )
+            spawn.invoke({"prompt": "top task"})
+
+        # Only one top-level entry
+        self.assertEqual(len(parent_sink), 1)
+        d0 = parent_sink[0]
+        self.assertEqual(d0["agent"], "subagent_d0")
+        self.assertEqual(d0["own_total"], 100)
+        self.assertEqual(d0["total"], 125)  # 100 + 20 + 5
+
+        self.assertEqual(len(d0["subagents"]), 1)
+        d1 = d0["subagents"][0]
+        self.assertEqual(d1["agent"], "subagent_d1")
+        self.assertEqual(d1["own_total"], 20)
+        self.assertEqual(d1["total"], 25)  # 20 + 5
+
+        self.assertEqual(len(d1["subagents"]), 1)
+        d2 = d1["subagents"][0]
+        self.assertEqual(d2["agent"], "subagent_d2")
+        self.assertEqual(d2["own_total"], 5)
+        self.assertEqual(d2["total"], 5)
+        self.assertEqual(d2["subagents"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
