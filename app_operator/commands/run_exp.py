@@ -418,6 +418,10 @@ def run_experiment_task(
     # Update status to initializing
     progress.update(task_id, description=f"[cyan]{display_name}[/]: Initializing", completed=0)
 
+    # Truncate the log file immediately so watchers see fresh content from the start
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("")
+
     # 1. Init Experiment
     # Teardown any existing Docker stack before wiping the directory
     if exp_dir.exists():
