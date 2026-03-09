@@ -102,14 +102,22 @@ def _build_glob(context: ToolContext) -> Callable[[str], list[str]]:
     return glob  # type: ignore[reportReturnType]
 
 
-def _build_read(context: ToolContext) -> Callable[[str], str]:
+def _build_read(context: ToolContext) -> Callable[[str, int, int], str]:
     @tool("Read")
-    def read(path: str) -> str:
-        """Read the content of a file."""
+    def read(path: str, start_line: int, end_line: int) -> str:
+        """Read a range of lines from a file (1-based, inclusive).
+
+        Args:
+            path: Path to the file.
+            start_line: First line to return (1-based).
+            end_line: Last line to return (1-based, inclusive).
+        """
         try:
             target = context.resolve_path(path)
             content = context.filesystem.read_text(target)
-            return content
+            lines = content.splitlines(keepends=True)
+            selected = lines[start_line - 1:end_line]
+            return "".join(selected)
         except (ValueError, OSError) as e:
             return f"Error: {e!s}"
 

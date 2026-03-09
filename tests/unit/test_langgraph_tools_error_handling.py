@@ -60,13 +60,13 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         read_tool = _build_read(self.context)
 
         # Test file not found (via filesystem)
-        result = read_tool.invoke({"path": "missing.txt"})
+        result = read_tool.invoke({"path": "missing.txt", "start_line": 1, "end_line": 10})
         self.assertTrue(result.startswith("Error: No such file"))
 
         # Test read permission error (simulated)
         self.fs.write_text(self.repo_root / "secret.txt", "content")
         self.fs.simulate_permission_error(self.repo_root / "secret.txt")
-        result = read_tool.invoke({"path": "secret.txt"})
+        result = read_tool.invoke({"path": "secret.txt", "start_line": 1, "end_line": 10})
         self.assertTrue(result.startswith("Error: Permission denied"))
 
     def test_write_file_error(self):
