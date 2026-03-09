@@ -21,7 +21,16 @@ from app_operator.logger import logger
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
-MAX_DISPLAY_CONTENT = 100
+_DISPLAY_HEAD = 500
+_DISPLAY_TAIL = 300
+
+
+def _truncate_for_display(text: str) -> str:
+    total = _DISPLAY_HEAD + _DISPLAY_TAIL
+    if len(text) <= total:
+        return text
+    omitted = len(text) - total
+    return f"{text[:_DISPLAY_HEAD]}\n... ({omitted} chars omitted) ...\n{text[-_DISPLAY_TAIL:]}"
 
 T = TypeVar("T")
 
@@ -156,11 +165,8 @@ def _invoke_agent_core(
 
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
-                            args_str = str(tool_call["args"])
-                            if len(args_str) > MAX_DISPLAY_CONTENT:
-                                args_str = f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
-                            logger.info(f"[Tool Call] {tool_call['name']}({args_str})")
-                            ui.on_tool_call(tool_call["name"], args_str)
+                            logger.info(f"[Tool Call] {tool_call['name']}({tool_call['args']})")
+                            ui.on_tool_call(tool_call["name"], str(tool_call["args"]))
 
                     content_text = extract_text(msg.content)
                     if content_text:
@@ -171,10 +177,7 @@ def _invoke_agent_core(
                         logger.info(f"Token Usage: {pct}% ({usage['total']}/{context_limit})")
 
                 elif isinstance(msg, ToolMessage):
-                    content = extract_text(msg.content)
-                    if len(content) > MAX_DISPLAY_CONTENT:
-                        content = f"{content[:MAX_DISPLAY_CONTENT]}... (truncated)"
-
+                    content = _truncate_for_display(extract_text(msg.content))
                     logger.info(f"[Tool Result] {content}")
 
     logger.info("=" * 50)
