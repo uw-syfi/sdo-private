@@ -5,9 +5,33 @@ from unittest.mock import Mock, patch
 
 from app_operator.config import AgentConfig, Config
 from app_operator.filesystem import InMemoryFilesystem
+from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.nodes.deployer import fix_errors
 from app_operator.langgraph.state import OperatorState
+from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder
+
+
+def _make_ctx(
+    repo_path: Path,
+    filesystem,
+    config: Config,
+    loader=None,
+    agent=None,
+    check_shutdown=None,
+    recorder=None,
+) -> NodeContext:
+    return NodeContext(
+        repo_path=repo_path,
+        filesystem=filesystem,
+        loader=loader or Mock(),
+        config=config,
+        context_limit=10000,
+        recorder=recorder or NullTrajectoryRecorder(),
+        health_check_interval=0,
+        check_shutdown=check_shutdown,
+        fix_agent=agent,
+    )
 
 
 class TestFixErrors:
@@ -34,16 +58,17 @@ class TestFixErrors:
         check_shutdown = Mock(return_value=False)
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, agent, check_shutdown, recorder)
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("<summary>Fixed the issue</summary>", [])
+            mock_invoke.return_value = AgentResult(
+                text="<summary>Fixed the issue</summary>", messages=[], structured=None
+            )
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {"error": "Error occurred"}
 
-                result_state = fix_errors(
-                    state, repo_path, filesystem, config, loader, agent, 10000, check_shutdown, recorder
-                )
+                result_state = fix_errors(state, ctx)
 
         assert result_state["attempt"] == 2  # Incremented
         assert result_state["last_fix_summary"] == "Fixed the issue"
@@ -65,16 +90,19 @@ class TestFixErrors:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config)
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("Some text\n<summary>This is the summary</summary>\nMore text", [])
+            mock_invoke.return_value = AgentResult(
+                text="Some text\n<summary>This is the summary</summary>\nMore text",
+                messages=[],
+                structured=None,
+            )
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
+                result_state = fix_errors(state, ctx)
 
         assert result_state["last_fix_summary"] == "This is the summary"
 
@@ -94,16 +122,17 @@ class TestFixErrors:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config)
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("<summary>Line1\\nLine2\\tTabbed</summary>", [])
+            mock_invoke.return_value = AgentResult(
+                text="<summary>Line1\\nLine2\\tTabbed</summary>", messages=[], structured=None
+            )
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
+                result_state = fix_errors(state, ctx)
 
         assert result_state["last_fix_summary"] == "Line1\nLine2\tTabbed"
 
@@ -123,16 +152,15 @@ class TestFixErrors:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config)
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("No summary here", [])
+            mock_invoke.return_value = AgentResult(text="No summary here", messages=[], structured=None)
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
+                result_state = fix_errors(state, ctx)
 
         # last_fix_summary should remain None
         assert result_state["last_fix_summary"] is None
@@ -156,11 +184,9 @@ class TestFixErrors:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
-        check_shutdown = Mock(return_value=True)
+        ctx = _make_ctx(repo_path, filesystem, config, check_shutdown=Mock(return_value=True))
 
-        result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, check_shutdown)
+        result_state = fix_errors(state, ctx)
 
         # Verify observable outcome: state should be unchanged
         assert result_state == state
@@ -189,16 +215,15 @@ class TestFixErrors:
         filesystem = InMemoryFilesystem()
         filesystem.mkdir(repo_path / ".sds" / "logs", parents=True)
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config)
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("<summary>Summary text</summary>", [])
+            mock_invoke.return_value = AgentResult(text="<summary>Summary text</summary>", messages=[], structured=None)
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {}
 
-                fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
+                fix_errors(state, ctx)
 
                 # Verify observable outcome: log file exists with expected content
                 log_path = repo_path / ".sds" / "logs" / "fix_summary_1.log"
@@ -230,16 +255,17 @@ class TestFixErrors:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config)
 
         with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("<summary>Fixed health check</summary>", [])
+            mock_invoke.return_value = AgentResult(
+                text="<summary>Fixed health check</summary>", messages=[], structured=None
+            )
 
             with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
                 mock_prepare.return_value = {"health_error": "Health check failed"}
 
-                result_state = fix_errors(state, repo_path, filesystem, config, loader, agent, 10000, None)
+                result_state = fix_errors(state, ctx)
 
                 # Verify observable outcomes:
                 # 1. Fix summary should be extracted and set

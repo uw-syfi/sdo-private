@@ -24,7 +24,7 @@ def test_invoke_agent_simple():
 
     mock_recorder = MagicMock()
 
-    text, messages = invoke_agent(
+    result = invoke_agent(
         state,
         mock_agent,
         "System prompt",
@@ -33,8 +33,9 @@ def test_invoke_agent_simple():
         recorder=mock_recorder,
     )
 
-    assert text == "Hello world"
-    assert len(messages) == 3  # System, User, AI
+    assert result.text == "Hello world"
+    assert len(result.messages) == 3  # System, User, AI
+    assert result.structured is None
     assert state["agent_token_usage"] == [
         {"agent": "Test Agent", "input": 10, "output": 5, "total": 15},
     ]
@@ -59,9 +60,9 @@ def test_invoke_agent_with_tools():
         {"tools": {"messages": [tool_msg]}},
     ]
 
-    text, messages = invoke_agent(state, mock_agent, "", "User prompt", ui=mock_ui)
+    result = invoke_agent(state, mock_agent, "", "User prompt", ui=mock_ui)
 
-    assert len(messages) == 3  # User, AI (tool call), Tool
+    assert len(result.messages) == 3  # User, AI (tool call), Tool
     mock_ui.on_tool_call.assert_called_once_with("test_tool", "{'arg': 'val'}")
 
 

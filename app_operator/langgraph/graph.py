@@ -1,4 +1,3 @@
-import functools
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.models import get_model_context_limit
 from app_operator.langgraph.nodes.analyzer import analyze_code
 from app_operator.langgraph.nodes.deployer import (
@@ -24,7 +24,7 @@ from app_operator.langgraph.nodes.monitor import (
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.tools import build_tools
 from app_operator.prompts import PromptLoader
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 
 def build_graph(
@@ -40,11 +40,6 @@ def build_graph(
         filesystem = RealFilesystem()
 
     tools = build_tools(repo_path, filesystem, git_integration=config.features.git_integration)
-    analyze_agent = create_react_agent(llm, tools=tools)
-    script_agent = create_react_agent(llm, tools=tools)
-    fix_agent = create_react_agent(llm, tools=tools)
-    health_agent = create_react_agent(llm, tools=tools, response_format=HealthVerdictResponse)
-    consolidation_agent = create_react_agent(llm, tools=tools, response_format=ConsolidatedSummaryResponse)
 
     # Create a loader instance with DSPy config (no global singleton needed)
     loader = PromptLoader(dspy_config=config.dspy)
@@ -53,72 +48,20 @@ def build_graph(
     model_name = config.agent.model or "gpt-4o"
     context_limit = get_model_context_limit(model_name)
 
-    # Bind dependencies to nodes
-    analyze_node = functools.partial(
-        analyze_code,
+    ctx = NodeContext(
         repo_path=repo_path,
         filesystem=filesystem,
         loader=loader,
-        agent=analyze_agent,
+        config=config,
         context_limit=context_limit,
-        recorder=recorder,
-    )
-
-    generate_node = functools.partial(
-        generate_scripts,
-        operator_config=config,
-        repo_path=repo_path,
-        loader=loader,
-        agent=script_agent,
-        context_limit=context_limit,
-        recorder=recorder,
-    )
-
-    deploy_node = functools.partial(
-        deploy_attempt,
-        repo_path=repo_path,
-        filesystem=filesystem,
-        operator_config=config,
-        check_shutdown=check_shutdown,
-        recorder=recorder,
-    )
-
-    health_node = functools.partial(
-        health_check,
-        repo_path=repo_path,
-        filesystem=filesystem,
-        agent=health_agent,
-        loader=loader,
-        operator_config=config,
-        context_limit=context_limit,
-        check_shutdown=check_shutdown,
-        recorder=recorder,
-    )
-
-    fix_node = functools.partial(
-        fix_errors,
-        repo_path=repo_path,
-        filesystem=filesystem,
-        operator_config=config,
-        loader=loader,
-        agent=fix_agent,
-        context_limit=context_limit,
-        check_shutdown=check_shutdown,
-        recorder=recorder,
-        consolidation_agent=consolidation_agent,
-    )
-
-    monitor_health_node_bound = functools.partial(
-        monitor_health,
-        repo_path=repo_path,
-        filesystem=filesystem,
-        agent=health_agent,
-        loader=loader,
-        operator_config=config,
-        context_limit=context_limit,
+        recorder=recorder or NullTrajectoryRecorder(),
         health_check_interval=health_check_interval,
         check_shutdown=check_shutdown,
-        recorder=recorder,
+        analyze_agent=create_react_agent(llm, tools=tools),
+        script_agent=create_react_agent(llm, tools=tools),
+        fix_agent=create_react_agent(llm, tools=tools),
+        health_agent=create_react_agent(llm, tools=tools, response_format=HealthVerdictResponse),
+        consolidation_agent=create_react_agent(llm, tools=tools, response_format=ConsolidatedSummaryResponse),
     )
 
     def should_fix(state: OperatorState) -> str:
@@ -132,7 +75,7 @@ def build_graph(
         return "end"
 
     def should_monitor(state: OperatorState) -> str:
-        if check_shutdown and check_shutdown():
+        if ctx.should_shutdown():
             return "end"
         monitor_max = state.get("monitor_max")
         if monitor_max is None:
@@ -142,12 +85,12 @@ def build_graph(
         return "end"
 
     graph = StateGraph(OperatorState)
-    graph.add_node("analyze_code", analyze_node)
-    graph.add_node("generate_scripts", generate_node)
-    graph.add_node("deploy_attempt", deploy_node)
-    graph.add_node("health_check", health_node)
-    graph.add_node("fix_errors", fix_node)
-    graph.add_node("monitor_health", monitor_health_node_bound)
+    graph.add_node("analyze_code", lambda s: analyze_code(s, ctx))
+    graph.add_node("generate_scripts", lambda s: generate_scripts(s, ctx))
+    graph.add_node("deploy_attempt", lambda s: deploy_attempt(s, ctx))
+    graph.add_node("health_check", lambda s: health_check(s, ctx))
+    graph.add_node("fix_errors", lambda s: fix_errors(s, ctx))
+    graph.add_node("monitor_health", lambda s: monitor_health(s, ctx))
 
     graph.set_entry_point("analyze_code")
     graph.add_edge("analyze_code", "generate_scripts")

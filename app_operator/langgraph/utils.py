@@ -1,7 +1,8 @@
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from langchain_core.messages import (
     AIMessage,
@@ -20,6 +21,15 @@ from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
 MAX_DISPLAY_CONTENT = 100
+
+T = TypeVar("T")
+
+
+@dataclass
+class AgentResult(Generic[T]):
+    text: str
+    messages: list[BaseMessage]
+    structured: T | None
 
 
 def _extract_token_usage(message: BaseMessage) -> dict[str, int]:
@@ -183,7 +193,7 @@ def invoke_agent(
     recorder: TrajectoryRecorderProtocol | None = None,
     ui: OperatorUI | None = None,
     logger=logger,
-) -> tuple[str, list[BaseMessage]]:
+) -> AgentResult:
     """Invoke a LangGraph agent and stream its output.
 
     The `logger` parameter accepts a loguru-bound logger so that callers (e.g.
@@ -191,8 +201,11 @@ def invoke_agent(
     log lines emitted here.  Without this, every log line from this shared
     utility would use the module-level unbound logger, losing the [node] prefix
     that the formatter adds when the 'node' extra is present.
+
+    Returns an AgentResult with .text, .messages, and .structured fields.
+    .structured is populated when the agent was created with response_format=.
     """
-    text, messages, _ = _invoke_agent_core(
+    text, messages, structured = _invoke_agent_core(
         state,
         agent,
         system_prompt,
@@ -203,36 +216,7 @@ def invoke_agent(
         ui or NullOperatorUI(),
         logger,
     )
-    return text, messages
-
-
-def invoke_agent_structured(
-    state: OperatorState,
-    agent: Any,
-    system_prompt: str,
-    user_prompt: str,
-    agent_name: str = "Agent",
-    context_limit: int = 128000,
-    recorder: TrajectoryRecorderProtocol | None = None,
-    ui: OperatorUI | None = None,
-    logger=logger,
-) -> tuple[str, list[BaseMessage], Any | None]:
-    """Invoke a LangGraph agent that has response_format set.
-
-    Works like invoke_agent() but also captures structured_response from
-    the streamed state updates and returns it as a third element.
-    """
-    return _invoke_agent_core(
-        state,
-        agent,
-        system_prompt,
-        user_prompt,
-        agent_name,
-        context_limit,
-        recorder,
-        ui or NullOperatorUI(),
-        logger,
-    )
+    return AgentResult(text=text, messages=messages, structured=structured)
 
 
 def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:

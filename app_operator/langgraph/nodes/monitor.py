@@ -1,25 +1,16 @@
 import time
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app_operator.config import Config
-from app_operator.filesystem import FileSystemInterface
+from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import (
-    invoke_agent_structured,
+    invoke_agent,
     write_log_file,
 )
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
-from app_operator.prompts import PromptLoader
-from app_operator.trajectory import (
-    NullTrajectoryRecorder,
-    Phase,
-    TrajectoryRecorderProtocol,
-)
+from app_operator.trajectory import Phase
 
 logger = logger.bind(node="monitor")
 
@@ -31,41 +22,33 @@ class HealthVerdictResponse(BaseModel):
     script_was_fixed: bool = Field(description="Whether the health_check.sh script was modified")
 
 
-def _run_health_agent(
-    state: OperatorState,
-    agent: Any,
-    loader: PromptLoader,
-    operator_config: Config,
-    repo_path: Path,
-    context_limit: int,
-    recorder: TrajectoryRecorderProtocol,
-) -> dict | None:
+def _run_health_agent(state: OperatorState, ctx: NodeContext) -> dict | None:
     """Invoke the health assessment agent and return the verdict as a dict."""
-    health_check_script = repo_path / ".sds" / "health_check.sh"
-    platform = operator_config.deployment.platform
+    health_check_script = ctx.repo_path / ".sds" / "health_check.sh"
+    platform = ctx.config.deployment.platform
 
-    prompt = loader.render(
+    prompt = ctx.loader.render(
         "deployer/assess_health.jinja2",
-        repo_path=repo_path,
+        repo_path=ctx.repo_path,
         health_check_script=health_check_script,
         platform=platform,
         structured_output=True,
-        recorder=recorder,
+        recorder=ctx.recorder,
     )
 
-    _response, _messages, structured = invoke_agent_structured(
+    result = invoke_agent(
         state,
-        agent,
+        ctx.health_agent,
         "",
         prompt,
         agent_name="Health Judge",
-        context_limit=context_limit,
-        recorder=recorder,
+        context_limit=ctx.context_limit,
+        recorder=ctx.recorder,
         logger=logger,
     )
 
-    if structured is not None:
-        return structured.model_dump()
+    if result.structured is not None:
+        return result.structured.model_dump()
 
     logger.warning("Health agent did not return structured response, defaulting to unhealthy")
     return {
@@ -76,11 +59,7 @@ def _run_health_agent(
     }
 
 
-def _save_assessment_log(
-    filesystem: FileSystemInterface,
-    log_file: Path,
-    verdict_dict: dict,
-) -> None:
+def _save_assessment_log(filesystem, log_file, verdict_dict: dict) -> None:
     """Write verdict to a log file matching AppMonitor format."""
     status = "healthy" if verdict_dict.get("healthy") else "unhealthy"
     content = (
@@ -96,19 +75,8 @@ def _save_assessment_log(
     write_log_file(filesystem, log_file, content)
 
 
-def health_check(
-    state: OperatorState,
-    repo_path: Path,
-    filesystem: FileSystemInterface,
-    agent: Any,
-    loader: PromptLoader,
-    operator_config: Config,
-    context_limit: int,
-    check_shutdown: Callable[[], bool] | None,
-    recorder: TrajectoryRecorderProtocol | None = None,
-) -> OperatorState:
-    recorder = recorder or NullTrajectoryRecorder()
-    if check_shutdown and check_shutdown():
+def health_check(state: OperatorState, ctx: NodeContext) -> OperatorState:
+    if ctx.should_shutdown():
         return state
 
     deploy_result = state.get("deploy_result") or {}
@@ -119,49 +87,29 @@ def health_check(
 
     logger.info("Running agent-based health assessment...")
 
-    verdict_dict = _run_health_agent(
-        state,
-        agent,
-        loader,
-        operator_config,
-        repo_path,
-        context_limit,
-        recorder,
-    )
+    verdict_dict = _run_health_agent(state, ctx)
     state["health_verdict"] = verdict_dict
     # Keep health_result for backward compat with graph edges
     state["health_result"] = {"success": verdict_dict.get("healthy", False)} if verdict_dict else None
 
     if verdict_dict and verdict_dict.get("healthy"):
-        recorder.end_phase("success")
+        ctx.recorder.end_phase("success")
 
-    log_file = repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
+    log_file = ctx.repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
     if verdict_dict:
-        _save_assessment_log(filesystem, log_file, verdict_dict)
+        _save_assessment_log(ctx.filesystem, log_file, verdict_dict)
 
     return state
 
 
-def monitor_health(
-    state: OperatorState,
-    repo_path: Path,
-    filesystem: FileSystemInterface,
-    agent: Any,
-    loader: PromptLoader,
-    operator_config: Config,
-    context_limit: int,
-    health_check_interval: int,
-    check_shutdown: Callable[[], bool] | None,
-    recorder: TrajectoryRecorderProtocol | None = None,
-) -> OperatorState:
-    recorder = recorder or NullTrajectoryRecorder()
-    if check_shutdown and check_shutdown():
+def monitor_health(state: OperatorState, ctx: NodeContext) -> OperatorState:
+    if ctx.should_shutdown():
         return state
 
     # Start monitoring phase
-    recorder.start_phase(Phase.MONITORING, {"cycle": state["monitor_count"]})
+    ctx.recorder.start_phase(Phase.MONITORING, {"cycle": state["monitor_count"]})
 
-    interval = health_check_interval
+    interval = ctx.health_check_interval
     if interval > 0:
         time.sleep(interval)
 
@@ -170,26 +118,22 @@ def monitor_health(
     emit_progress("monitoring", cycle=state["monitor_count"])
     logger.info(f"Running agent-based health assessment (monitor cycle {state['monitor_count']})...")
 
-    verdict_dict = _run_health_agent(
-        state,
-        agent,
-        loader,
-        operator_config,
-        repo_path,
-        context_limit,
-        recorder,
-    )
+    verdict_dict = _run_health_agent(state, ctx)
     state["health_verdict"] = verdict_dict
     state["health_result"] = {"success": verdict_dict.get("healthy", False)} if verdict_dict else None
 
     # Save assessment log
     log_file = (
-        repo_path / ".sds" / "logs" / "monitor" / f"check_{state['monitor_count']}_{time.strftime('%Y%m%d-%H%M%S')}.log"
+        ctx.repo_path
+        / ".sds"
+        / "logs"
+        / "monitor"
+        / f"check_{state['monitor_count']}_{time.strftime('%Y%m%d-%H%M%S')}.log"
     )
     if verdict_dict:
-        _save_assessment_log(filesystem, log_file, verdict_dict)
+        _save_assessment_log(ctx.filesystem, log_file, verdict_dict)
 
     # End the monitoring phase
-    recorder.end_phase("completed")
+    ctx.recorder.end_phase("completed")
 
     return state
