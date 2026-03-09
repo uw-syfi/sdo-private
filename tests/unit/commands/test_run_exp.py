@@ -14,6 +14,7 @@ from app_operator.commands.run_exp import (
     AppResult,
     AppStatus,
     _extract_results,
+    _normalize_single_repeats,
     _resolve_experiment,
     _write_experiment_sds_config,
     _write_toml_simple,
@@ -516,3 +517,83 @@ class TestRunCommandMultiExperiment:
 
         assert rc == 0
         assert mock_task.call_count == 0, "hotel should be skipped without --rerun"
+
+
+class TestNormalizeSingleRepeats:
+    def test_no_change_when_repeats_is_1(self):
+        results = [AppResult(app="myapp", status=AppStatus.COMPLETED, deployment_iterations=1, repeat=None)]
+        changed = _normalize_single_repeats(results, repeats=1)
+        assert not changed
+        assert results[0].repeat is None
+
+    def test_normalizes_none_to_1_when_repeats_gt_1(self):
+        results = [AppResult(app="myapp", status=AppStatus.COMPLETED, deployment_iterations=1, repeat=None)]
+        changed = _normalize_single_repeats(results, repeats=3)
+        assert changed
+        assert results[0].repeat == 1
+
+    def test_does_not_change_already_numbered(self):
+        results = [
+            AppResult(app="myapp", status=AppStatus.COMPLETED, deployment_iterations=1, repeat=1),
+            AppResult(app="myapp", status=AppStatus.FAILED, deployment_iterations=2, repeat=2),
+        ]
+        changed = _normalize_single_repeats(results, repeats=3)
+        assert not changed
+        assert results[0].repeat == 1
+        assert results[1].repeat == 2
+
+    def test_mixed_none_and_numbered(self):
+        """Should not happen in practice, but handles gracefully."""
+        results = [
+            AppResult(app="app1", status=AppStatus.COMPLETED, deployment_iterations=1, repeat=None),
+            AppResult(app="app2", status=AppStatus.COMPLETED, deployment_iterations=1, repeat=2),
+        ]
+        changed = _normalize_single_repeats(results, repeats=3)
+        assert changed
+        assert results[0].repeat == 1
+        assert results[1].repeat == 2  # unchanged
+
+
+class TestExtendRepeatsAcrossInvocations:
+    """Integration-level tests for extending repeats=1 runs to repeats>1."""
+
+    def _make_config(self, path: Path, apps: list[str], repeats: int = 1) -> None:
+        lines = [f"repeats = {repeats}\n", "apps = [\n"]
+        for app in apps:
+            escaped = app.replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f'  "{escaped}",\n')
+        lines.append("]\n")
+        path.write_text("".join(lines))
+
+    def _write_results_json(self, log_dir: Path, exp_name: str, results: list[dict]) -> None:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        data = {"experiment": exp_name, "results": results}
+        (log_dir / "results.json").write_text(json.dumps(data))
+
+    def test_single_run_counts_as_repeat_1_when_extending(self, tmp_path, monkeypatch):
+        """Existing repeat=None result is treated as repeat=1 when config has repeats=2."""
+        monkeypatch.chdir(tmp_path)
+
+        exp_dir = tmp_path / "exp_config" / "exp-a"
+        exp_dir.mkdir(parents=True)
+        self._make_config(exp_dir / "config.toml", ["/app/hotel"], repeats=2)
+
+        # Pre-populate with a single run (repeat=None)
+        self._write_results_json(
+            exp_dir / "logs",
+            "exp-a",
+            [{"app": "hotel", "status": "completed", "deployment_iterations": 1}],
+        )
+
+        fake_result = AppResult(app="hotel", status=AppStatus.COMPLETED, deployment_iterations=1, repeat=2)
+        args = argparse.Namespace(experiments=["exp-a"], parallel=1, rerun=None)
+
+        with patch("app_operator.commands.run_exp.run_experiment_task", return_value=fake_result) as mock_task:
+            rc = run_command(args)
+
+        assert rc == 0
+        # Only repeat=2 should be run; repeat=1 was already covered by the None result
+        assert mock_task.call_count == 1, "Only repeat=2 should be executed"
+        # repeat_idx is the 8th positional arg (0-based index 7); repeat=2 → repeat_idx=1
+        called_args = mock_task.call_args_list[0].args
+        assert called_args[7] == 1, "repeat_idx should be 1 (for repeat=2)"
