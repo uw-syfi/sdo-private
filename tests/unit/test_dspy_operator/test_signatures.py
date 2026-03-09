@@ -43,6 +43,7 @@ class TestSignatureStructure:
         assert "fix_history" in FixDeploymentError.input_fields
         assert "fixed_deploy_script" in FixDeploymentError.output_fields
         assert "fixed_health_check_script" in FixDeploymentError.output_fields
+        assert "compose_override" in FixDeploymentError.output_fields
         assert "fix_summary" in FixDeploymentError.output_fields
 
     def test_consolidate_fix_summary_fields(self):

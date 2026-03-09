@@ -43,9 +43,7 @@ class AnalyzeCodebase(dspy.Signature):
     """
 
     repo_path: str = dspy.InputField(desc="Path to the repository")
-    file_tree: str = dspy.InputField(
-        desc="Repository file tree listing followed by raw file contents"
-    )
+    file_tree: str = dspy.InputField(desc="Repository file tree listing followed by raw file contents")
 
     analysis: str = dspy.OutputField(
         desc="Structured markdown analysis with services inventory table, "
@@ -69,16 +67,22 @@ class GenerateDeployScript(dspy.Signature):
     The script is saved to ``<repo>/.sds/deploy.sh`` and invoked as
     ``deploy.sh <command>`` with working directory set to the repo root.
 
+    CRITICAL path setup — the script lives at ``<repo>/.sds/deploy.sh``:
+    - ``APP_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)`` to get
+      the repo root (one level UP from .sds/). Then ``cd "$APP_DIR"``.
+    - NEVER resolve APP_DIR to the script's own directory (.sds/).
+    - ``PROJECT_NAME=$(basename "$APP_DIR")``
+
     CLI interface:
     - Invocation: ``deploy.sh <command>`` — parse $1 in a case statement.
       Do NOT use flags or getopts.
     - Required commands: start, stop, restart, status, logs, build, cleanup
     - Exit codes: 0 on success, non-zero on failure
+    - NEVER use interactive prompts (read -p, select, etc.)
 
     CRITICAL Docker Compose rules:
-    - Set ``PROJECT_NAME=$(basename "$APP_DIR")`` near the top where APP_DIR
-      is the working directory. Pass ``--project-name "$PROJECT_NAME"`` to
-      EVERY ``docker compose`` command.
+    - Pass ``--project-name "$PROJECT_NAME"`` to EVERY ``docker compose``
+      command.
     - The ``start`` command MUST use ``docker compose --project-name
       "$PROJECT_NAME" up --build -d``. Without --build, Docker reuses
       cached images and never compiles current source.
@@ -87,8 +91,17 @@ class GenerateDeployScript(dspy.Signature):
       ``docker compose`` (v2 plugin, space-separated).
     - NEVER use ``sudo``.
     - Create one named Docker network shared by all services.
-    - If no docker-compose file exists, generate one from the Dockerfiles
-      and application structure before creating deploy.sh.
+
+    CRITICAL — when NO docker-compose file exists in the repository:
+    - The deploy.sh MUST contain a shell function (e.g. generate_compose)
+      that programmatically generates a docker-compose.yml from the
+      Dockerfiles, code analysis, and application structure.
+    - The ``start`` command must call this function before
+      ``docker compose up``.
+    - Use the code analysis to determine all services, their build
+      contexts, ports, environment variables, dependencies, and databases.
+    - Include healthchecks and depends_on with condition: service_healthy
+      where possible.
 
     Architecture reconciliation:
     - Use the code analysis to verify services, ports, dependencies, and
@@ -104,9 +117,7 @@ class GenerateDeployScript(dspy.Signature):
         desc="Structured code analysis with services inventory, ports, "
         "dependencies, and raw file contents including docker-compose"
     )
-    deployment_issues: str = dspy.InputField(
-        desc="Known deployment issues with severity and confidence"
-    )
+    deployment_issues: str = dspy.InputField(desc="Known deployment issues with severity and confidence")
 
     deploy_script: str = dspy.OutputField(
         desc="Raw bash script (no markdown fences) with case-statement CLI, "
@@ -125,10 +136,14 @@ class GenerateHealthCheckScript(dspy.Signature):
     - Runs readiness checks, prints summary report with health score
     - Exit codes: 0 if all checks pass, non-zero if any critical check fails
 
+    CRITICAL path setup — working directory is the repo root:
+    - ``APP_DIR=$(pwd)`` — the working directory IS the repo root.
+    - ``PROJECT_NAME=$(basename "$APP_DIR")``
+    - Do NOT cd to the script's own directory.
+
     CRITICAL Docker Compose rules:
-    - Set ``PROJECT_NAME=$(basename "$APP_DIR")`` near the top where APP_DIR
-      is the working directory. Pass ``--project-name "$PROJECT_NAME"`` to
-      EVERY ``docker compose`` command.
+    - Pass ``--project-name "$PROJECT_NAME"`` to EVERY ``docker compose``
+      command.
     - Use ``docker compose --project-name "$PROJECT_NAME" ps`` to check
       container status. NEVER use plain ``docker ps``.
     - NEVER use the old ``docker-compose`` (hyphen form).
@@ -156,9 +171,7 @@ class GenerateHealthCheckScript(dspy.Signature):
         desc="Structured code analysis with services inventory, ports, "
         "health endpoints, and raw file contents including docker-compose"
     )
-    deployment_issues: str = dspy.InputField(
-        desc="Known deployment issues with severity and confidence"
-    )
+    deployment_issues: str = dspy.InputField(desc="Known deployment issues with severity and confidence")
 
     health_check_script: str = dspy.OutputField(
         desc="Raw bash script (no markdown fences) that validates all "
@@ -176,7 +189,8 @@ class FixDeploymentError(dspy.Signature):
 
     Analyze the error output and fix the deployment and/or health check
     scripts. You receive the current scripts and must output corrected
-    versions.
+    versions. You can also output a docker-compose.override.yml to patch
+    compose-level issues like port conflicts or image tags.
 
     CRITICAL platform awareness:
     - Read the deploy script to identify the platform (Docker Compose or K8s)
@@ -184,7 +198,10 @@ class FixDeploymentError(dspy.Signature):
     - NEVER switch between Docker Compose and Kubernetes
     - NEVER drop or change --project-name from docker compose commands
     - NEVER use sudo
-    - NEVER expose new host ports to fix conflicts — use Docker networking
+    - For port conflicts ("address already in use"), remap the host port
+      in docker-compose.override.yml — do NOT remove the port mapping
+    - This runs on macOS. Use POSIX-compatible sed syntax: ``[[:space:]]``
+      not ``\\s``, extended regex with ``sed -E`` not ``\\(`` escapes.
 
     Analysis methodology:
     1. Form a hypothesis about the root cause
@@ -192,24 +209,31 @@ class FixDeploymentError(dspy.Signature):
     3. If not validated, form a new hypothesis
     4. Make targeted fixes — do not rewrite scripts from scratch
 
-    Common error patterns:
+    Common error patterns and required fixes:
     - Restarting/CrashLoopBackOff → entrypoint failing, check logs
-    - address already in use → port conflict, remove host port mapping
+    - address already in use → port conflict, remap in override yml
+    - image not found / pull access denied / "not found" → try
+      alternative image tags in compose_override: ``:latest``, minor
+      version variants (e.g. ``7.0.0`` instead of ``7.0``), or add a
+      build step if Dockerfile exists
     - connection refused → startup ordering race, add depends_on
     - DNS failure / no such host → wrong hostname or missing network
+    - "no configuration file provided" → deploy.sh MUST generate a
+      docker-compose.yml before running docker compose commands; embed
+      a generate_compose() function in the script
+    - "failed to initialize Lua VM" or architecture crash → add
+      ``platform: linux/amd64`` in compose_override for affected services
     - Health check wrong endpoint → check only ports in docker-compose
     - Health check grep mismatch → use curl status codes, not body parsing
+
+    CRITICAL rules:
+    - NEVER use interactive prompts (read -p, select, etc.)
+    - APP_DIR must resolve to the repo root, NOT to .sds/
     """
 
-    deploy_script: str = dspy.InputField(
-        desc="Current content of deploy.sh"
-    )
-    health_check_script: str = dspy.InputField(
-        desc="Current content of health_check.sh"
-    )
-    error_output: str = dspy.InputField(
-        desc="Truncated stdout/stderr from the failed deploy or health check"
-    )
+    deploy_script: str = dspy.InputField(desc="Current content of deploy.sh")
+    health_check_script: str = dspy.InputField(desc="Current content of health_check.sh")
+    error_output: str = dspy.InputField(desc="Truncated stdout/stderr from the failed deploy or health check")
     fix_history: str = dspy.InputField(
         desc="History of previous fix attempts and their outcomes, "
         "grouped by failure pattern. Empty string on first attempt."
@@ -225,9 +249,12 @@ class FixDeploymentError(dspy.Signature):
         desc="Corrected health_check.sh content (full script, no markdown "
         "fences). Return the original unchanged if the health check is fine."
     )
-    fix_summary: str = dspy.OutputField(
-        desc="Brief summary: what issue(s) were found and what fix(es) applied"
+    compose_override: str = dspy.OutputField(
+        desc="Content for docker-compose.override.yml to patch compose-level "
+        "issues (port remapping, image tag fixes, env vars). Return empty "
+        "string if no compose changes needed."
     )
+    fix_summary: str = dspy.OutputField(desc="Brief summary: what issue(s) were found and what fix(es) applied")
 
 
 class ConsolidateFixSummary(dspy.Signature):
@@ -255,16 +282,11 @@ class ConsolidateFixSummary(dspy.Signature):
     * **Attempt 2**: [summary]
     """
 
-    existing_summary: str = dspy.InputField(
-        desc="Current consolidated fix summary, or empty string if first"
-    )
-    new_attempts: str = dspy.InputField(
-        desc="New fix attempt summaries to incorporate"
-    )
+    existing_summary: str = dspy.InputField(desc="Current consolidated fix summary, or empty string if first")
+    new_attempts: str = dspy.InputField(desc="New fix attempt summaries to incorporate")
 
     consolidated_summary: str = dspy.OutputField(
-        desc="Updated fix history with new attempts merged in, grouped "
-        "by failure pattern, with chronological timeline"
+        desc="Updated fix history with new attempts merged in, grouped by failure pattern, with chronological timeline"
     )
 
 
@@ -290,19 +312,9 @@ class AnalyzeHealthCheck(dspy.Signature):
     Be specific about what to check or fix. Consider trends across checks.
     """
 
-    health_output: str = dspy.InputField(
-        desc="Output from the health check script including exit code"
-    )
-    check_number: str = dspy.InputField(
-        desc="Current monitoring cycle number"
-    )
+    health_output: str = dspy.InputField(desc="Output from the health check script including exit code")
+    check_number: str = dspy.InputField(desc="Current monitoring cycle number")
 
-    status: str = dspy.OutputField(
-        desc="One of: healthy, degraded, unhealthy"
-    )
-    summary: str = dspy.OutputField(
-        desc="Executive summary of health status (2 lines max)"
-    )
-    remediation: str = dspy.OutputField(
-        desc="Prioritized remediation steps if unhealthy, empty if healthy"
-    )
+    status: str = dspy.OutputField(desc="One of: healthy, degraded, unhealthy")
+    summary: str = dspy.OutputField(desc="Executive summary of health status (2 lines max)")
+    remediation: str = dspy.OutputField(desc="Prioritized remediation steps if unhealthy, empty if healthy")
