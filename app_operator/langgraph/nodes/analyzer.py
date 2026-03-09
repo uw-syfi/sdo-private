@@ -45,7 +45,7 @@ def analyze_code(state: OperatorState, ctx: NodeContext, agent: Any) -> Operator
             missing = guardrail.missing(ctx.repo_path, ctx.filesystem)
             if not missing:
                 break
-            logger.warning("Guardrail: missing %s (retry %d/%d)", missing, retry + 1, guardrail.max_retries)
+            logger.warning("Guardrail: missing {} (retry {}/{})", missing, retry + 1, guardrail.max_retries)
             result = ctx.invoke(
                 state,
                 agent,
@@ -53,12 +53,13 @@ def analyze_code(state: OperatorState, ctx: NodeContext, agent: Any) -> Operator
                 guardrail.reminder(missing),
                 agent_name="Code Analyzer",
                 logger=logger,
+                prior_messages=result.messages,
             )
             state["messages"] = result.messages
         else:
             missing = guardrail.missing(ctx.repo_path, ctx.filesystem)
             if missing:
-                logger.warning("Guardrail: artifacts still missing after max retries: %s", missing)
+                logger.warning("Guardrail: artifacts still missing after max retries: {}", missing)
 
         state["analysis_done"] = True
         return state

@@ -39,6 +39,7 @@ class NodeContext:
         user_prompt: str,
         agent_name: str = "Agent",
         logger: Any = None,
+        prior_messages: "list | None" = None,
     ) -> "AgentResult":
         """Invoke an agent with context_limit and recorder pre-filled from this NodeContext."""
         from app_operator.langgraph.utils import _record_session_usage, invoke_agent
@@ -53,6 +54,7 @@ class NodeContext:
             context_limit=self.context_limit,
             recorder=self.recorder,
             logger=logger if logger is not None else default_logger,
+            prior_messages=prior_messages,
         )
         for record in self.subagent_token_sink:
             _record_session_usage(state, record["agent"], record, self.recorder)

@@ -42,21 +42,23 @@ def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> Oper
         deploy_guardrail = ArtifactGuardrail([".sds/deploy.sh"])
         health_guardrail = ArtifactGuardrail([".sds/health_check.sh"])
 
-        ctx.invoke(state, agent, "", deploy_prompt, agent_name="Script Generator")
+        result = ctx.invoke(state, agent, "", deploy_prompt, agent_name="Script Generator")
         for retry in range(deploy_guardrail.max_retries):
             missing = deploy_guardrail.missing(ctx.repo_path, ctx.filesystem)
             if not missing:
                 break
-            logger.warning("Guardrail: %s missing (retry %d/%d)", missing, retry + 1, deploy_guardrail.max_retries)
-            ctx.invoke(state, agent, "", deploy_guardrail.reminder(missing), agent_name="Script Generator")
+            logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, deploy_guardrail.max_retries)
+            result = ctx.invoke(state, agent, "", deploy_guardrail.reminder(missing), agent_name="Script Generator",
+                                prior_messages=result.messages)
 
-        ctx.invoke(state, agent, "", health_prompt, agent_name="Script Generator")
+        result = ctx.invoke(state, agent, "", health_prompt, agent_name="Script Generator")
         for retry in range(health_guardrail.max_retries):
             missing = health_guardrail.missing(ctx.repo_path, ctx.filesystem)
             if not missing:
                 break
-            logger.warning("Guardrail: %s missing (retry %d/%d)", missing, retry + 1, health_guardrail.max_retries)
-            ctx.invoke(state, agent, "", health_guardrail.reminder(missing), agent_name="Script Generator")
+            logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, health_guardrail.max_retries)
+            result = ctx.invoke(state, agent, "", health_guardrail.reminder(missing), agent_name="Script Generator",
+                                prior_messages=result.messages)
 
         state["scripts_done"] = True
         return state

@@ -119,11 +119,14 @@ def _invoke_agent_core(
     recorder: TrajectoryRecorderProtocol | None,
     ui: OperatorUI,
     logger,
+    prior_messages: list[BaseMessage] | None = None,
 ) -> tuple[str, list[BaseMessage], Any | None]:
     """Shared streaming loop for invoke_agent and invoke_agent_structured."""
     handler = LangGraphTrajectoryHandler(recorder)
 
-    if system_prompt:
+    if prior_messages is not None:
+        messages: list[BaseMessage] = list(prior_messages) + [HumanMessage(content=user_prompt)]
+    elif system_prompt:
         messages: list[BaseMessage] = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -198,6 +201,7 @@ def invoke_agent(
     recorder: TrajectoryRecorderProtocol | None = None,
     ui: OperatorUI | None = None,
     logger=logger,
+    prior_messages: list[BaseMessage] | None = None,
 ) -> AgentResult:
     """Invoke a LangGraph agent and stream its output.
 
@@ -206,6 +210,9 @@ def invoke_agent(
     log lines emitted here.  Without this, every log line from this shared
     utility would use the module-level unbound logger, losing the [node] prefix
     that the formatter adds when the 'node' extra is present.
+
+    If `prior_messages` is provided, the new user_prompt is appended to that
+    history, continuing the conversation rather than starting fresh.
 
     Returns an AgentResult with .text, .messages, and .structured fields.
     .structured is populated when the agent was created with response_format=.
@@ -220,6 +227,7 @@ def invoke_agent(
         recorder,
         ui or NullOperatorUI(),
         logger,
+        prior_messages=prior_messages,
     )
     return AgentResult(text=text, messages=messages, structured=structured)
 
