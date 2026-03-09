@@ -93,7 +93,6 @@ class LangGraphOperator(OperatorBase):
                 "analysis_done": not self.config.operator.phase.code_analysis,
                 "scripts_done": False,
                 "deploy_result": None,
-                "health_result": None,
                 "health_verdict": None,
                 "monitor_count": 0,
                 "monitor_max": self.health_check_max_count,

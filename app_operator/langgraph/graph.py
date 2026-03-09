@@ -12,6 +12,7 @@ from app_operator.langgraph.models import get_model_context_limit
 from app_operator.langgraph.nodes.analyzer import analyze_code
 from app_operator.langgraph.nodes.deployer import (
     ConsolidatedSummaryResponse,
+    FixSummaryResponse,
     deploy_attempt,
     fix_errors,
 )
@@ -59,7 +60,7 @@ def build_graph(
         check_shutdown=check_shutdown,
         analyze_agent=create_react_agent(llm, tools=tools),
         script_agent=create_react_agent(llm, tools=tools),
-        fix_agent=create_react_agent(llm, tools=tools),
+        fix_agent=create_react_agent(llm, tools=tools, response_format=FixSummaryResponse),
         health_agent=create_react_agent(llm, tools=tools, response_format=HealthVerdictResponse),
         consolidation_agent=create_react_agent(llm, tools=tools, response_format=ConsolidatedSummaryResponse),
     )

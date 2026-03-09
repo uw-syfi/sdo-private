@@ -87,7 +87,6 @@ def test_run_success(repo_path, mock_config, memory_fs):
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
-        "health_result": {"success": True},
         "health_verdict": {"healthy": True},
         "agent_token_usage": [{"agent": "Test", "input": 50, "output": 50, "total": 100}],
     }
@@ -118,7 +117,6 @@ def test_run_failure(repo_path, mock_config, memory_fs):
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
-        "health_result": {"success": False},
         "health_verdict": {"healthy": False},
         "agent_token_usage": [{"agent": "Test", "input": 50, "output": 50, "total": 100}],
     }

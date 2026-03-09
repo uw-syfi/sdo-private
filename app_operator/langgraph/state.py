@@ -11,7 +11,6 @@ class OperatorState(TypedDict):
     analysis_done: bool
     scripts_done: bool
     deploy_result: dict | None
-    health_result: dict | None
     health_verdict: dict | None
     monitor_count: int
     monitor_max: int | None

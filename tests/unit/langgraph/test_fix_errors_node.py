@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 from app_operator.config import AgentConfig, Config
 from app_operator.filesystem import InMemoryFilesystem
 from app_operator.langgraph.context import NodeContext
-from app_operator.langgraph.nodes.deployer import fix_errors
+from app_operator.langgraph.nodes.deployer import FixSummaryResponse, fix_errors
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder
@@ -45,7 +45,6 @@ class TestFixErrors:
             messages=[],
             scripts_done=True,
             deploy_result={"exit_code": 1, "stderr": "Error occurred"},
-            health_result=None,
             health_verdict=None,
             last_fix_summary=None,
         )
@@ -59,30 +58,27 @@ class TestFixErrors:
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
         ctx = _make_ctx(repo_path, filesystem, config, loader, agent, check_shutdown, recorder)
+        ctx.invoke = Mock(
+            return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="Fixed the issue"))
+        )
 
-        with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = AgentResult(
-                text="<summary>Fixed the issue</summary>", messages=[], structured=None
-            )
+        with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
+            mock_prepare.return_value = {"error": "Error occurred"}
 
-            with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
-                mock_prepare.return_value = {"error": "Error occurred"}
-
-                result_state = fix_errors(state, ctx)
+            result_state = fix_errors(state, ctx)
 
         assert result_state["attempt"] == 2  # Incremented
         assert result_state["last_fix_summary"] == "Fixed the issue"
         recorder.end_phase.assert_called_once_with("needs_retry")
 
     def test_fix_errors_extracts_summary(self):
-        """Test fix_errors extracts summary from response."""
+        """Test fix_errors extracts summary from structured response."""
         state = OperatorState(
             attempt=1,
             max_attempts=3,
             messages=[],
             scripts_done=True,
             deploy_result={"exit_code": 1},
-            health_result=None,
             health_verdict=None,
             last_fix_summary=None,
         )
@@ -91,30 +87,25 @@ class TestFixErrors:
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         ctx = _make_ctx(repo_path, filesystem, config)
+        ctx.invoke = Mock(
+            return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="This is the summary"))
+        )
 
-        with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = AgentResult(
-                text="Some text\n<summary>This is the summary</summary>\nMore text",
-                messages=[],
-                structured=None,
-            )
+        with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
+            mock_prepare.return_value = {}
 
-            with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
-                mock_prepare.return_value = {}
-
-                result_state = fix_errors(state, ctx)
+            result_state = fix_errors(state, ctx)
 
         assert result_state["last_fix_summary"] == "This is the summary"
 
-    def test_fix_errors_handles_escaped_characters(self):
-        """Test fix_errors handles escaped characters in summary."""
+    def test_fix_errors_no_structured_response(self):
+        """Test fix_errors when agent returns no structured response."""
         state = OperatorState(
             attempt=1,
             max_attempts=3,
             messages=[],
             scripts_done=True,
             deploy_result={"exit_code": 1},
-            health_result=None,
             health_verdict=None,
             last_fix_summary=None,
         )
@@ -123,44 +114,12 @@ class TestFixErrors:
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         ctx = _make_ctx(repo_path, filesystem, config)
+        ctx.invoke = Mock(return_value=AgentResult(text="No summary here", messages=[], structured=None))
 
-        with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = AgentResult(
-                text="<summary>Line1\\nLine2\\tTabbed</summary>", messages=[], structured=None
-            )
+        with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
+            mock_prepare.return_value = {}
 
-            with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
-                mock_prepare.return_value = {}
-
-                result_state = fix_errors(state, ctx)
-
-        assert result_state["last_fix_summary"] == "Line1\nLine2\tTabbed"
-
-    def test_fix_errors_no_summary_in_response(self):
-        """Test fix_errors when no summary tag in response."""
-        state = OperatorState(
-            attempt=1,
-            max_attempts=3,
-            messages=[],
-            scripts_done=True,
-            deploy_result={"exit_code": 1},
-            health_result=None,
-            health_verdict=None,
-            last_fix_summary=None,
-        )
-
-        repo_path = Path("/test/repo")
-        filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        ctx = _make_ctx(repo_path, filesystem, config)
-
-        with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = AgentResult(text="No summary here", messages=[], structured=None)
-
-            with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
-                mock_prepare.return_value = {}
-
-                result_state = fix_errors(state, ctx)
+            result_state = fix_errors(state, ctx)
 
         # last_fix_summary should remain None
         assert result_state["last_fix_summary"] is None
@@ -176,7 +135,6 @@ class TestFixErrors:
             messages=[],
             scripts_done=True,
             deploy_result={"exit_code": 1},
-            health_result=None,
             health_verdict=None,
             last_fix_summary=None,
         )
@@ -206,7 +164,6 @@ class TestFixErrors:
             messages=[],
             scripts_done=True,
             deploy_result={"exit_code": 1},
-            health_result=None,
             health_verdict=None,
             last_fix_summary=None,
         )
@@ -216,20 +173,20 @@ class TestFixErrors:
         filesystem.mkdir(repo_path / ".sds" / "logs", parents=True)
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         ctx = _make_ctx(repo_path, filesystem, config)
+        ctx.invoke = Mock(
+            return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="Summary text"))
+        )
 
-        with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = AgentResult(text="<summary>Summary text</summary>", messages=[], structured=None)
+        with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
+            mock_prepare.return_value = {}
 
-            with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
-                mock_prepare.return_value = {}
+            fix_errors(state, ctx)
 
-                fix_errors(state, ctx)
-
-                # Verify observable outcome: log file exists with expected content
-                log_path = repo_path / ".sds" / "logs" / "fix_summary_1.log"
-                assert filesystem.exists(log_path)
-                log_content = filesystem.read_text(log_path)
-                assert "Summary text" in log_content
+            # Verify observable outcome: log file exists with expected content
+            log_path = repo_path / ".sds" / "logs" / "fix_summary_1.log"
+            assert filesystem.exists(log_path)
+            log_content = filesystem.read_text(log_path)
+            assert "Summary text" in log_content
 
     def test_fix_errors_includes_health_result_context(self):
         """Test fix_errors properly handles health check failures.
@@ -242,7 +199,6 @@ class TestFixErrors:
             messages=[],
             scripts_done=True,
             deploy_result={"exit_code": 0},
-            health_result=None,
             health_verdict={
                 "healthy": False,
                 "assessment": "Health check failed",
@@ -256,19 +212,17 @@ class TestFixErrors:
         filesystem = InMemoryFilesystem()
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         ctx = _make_ctx(repo_path, filesystem, config)
+        ctx.invoke = Mock(
+            return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="Fixed health check"))
+        )
 
-        with patch("app_operator.langgraph.nodes.deployer.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = AgentResult(
-                text="<summary>Fixed health check</summary>", messages=[], structured=None
-            )
+        with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
+            mock_prepare.return_value = {"health_error": "Health check failed"}
 
-            with patch("app_operator.langgraph.nodes.deployer.prepare_error_context") as mock_prepare:
-                mock_prepare.return_value = {"health_error": "Health check failed"}
+            result_state = fix_errors(state, ctx)
 
-                result_state = fix_errors(state, ctx)
-
-                # Verify observable outcomes:
-                # 1. Fix summary should be extracted and set
-                assert result_state["last_fix_summary"] == "Fixed health check"
-                # 2. Attempt should be incremented
-                assert result_state["attempt"] == 2
+            # Verify observable outcomes:
+            # 1. Fix summary should be extracted and set
+            assert result_state["last_fix_summary"] == "Fixed health check"
+            # 2. Attempt should be incremented
+            assert result_state["attempt"] == 2

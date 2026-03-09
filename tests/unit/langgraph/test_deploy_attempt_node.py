@@ -41,7 +41,6 @@ class TestDeployAttempt:
             messages=[],
             scripts_done=True,
             deploy_result=None,
-            health_result=None,
             last_fix_summary=None,
             health_verdict=None,
         )
@@ -70,7 +69,6 @@ class TestDeployAttempt:
             messages=[],
             scripts_done=True,
             deploy_result=None,
-            health_result=None,
             last_fix_summary=None,
             health_verdict=None,
         )
@@ -95,7 +93,6 @@ class TestDeployAttempt:
             messages=[],
             scripts_done=True,
             deploy_result=None,
-            health_result=None,
             last_fix_summary=None,
             health_verdict=None,
         )
@@ -120,7 +117,6 @@ class TestDeployAttempt:
             messages=[],
             scripts_done=True,
             deploy_result=None,
-            health_result=None,
             last_fix_summary=None,
             health_verdict=None,
         )
@@ -146,7 +142,6 @@ class TestDeployAttempt:
             messages=[],
             scripts_done=True,
             deploy_result=None,
-            health_result=None,
             last_fix_summary=None,
             health_verdict=None,
         )

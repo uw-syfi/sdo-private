@@ -1,6 +1,5 @@
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
-from app_operator.langgraph.utils import invoke_agent
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.trajectory import Phase
@@ -27,14 +26,12 @@ def analyze_code(state: OperatorState, ctx: NodeContext) -> OperatorState:
         system_prompt = ctx.loader.render("code_analyzer/system.jinja2")
         user_prompt = ctx.loader.render("code_analyzer/user.jinja2", repo_path=ctx.repo_path)
 
-        result = invoke_agent(
+        result = ctx.invoke(
             state,
             ctx.analyze_agent,
             system_prompt,
             user_prompt,
             agent_name="Code Analyzer",
-            context_limit=ctx.context_limit,
-            recorder=ctx.recorder,
             logger=logger,
         )
 

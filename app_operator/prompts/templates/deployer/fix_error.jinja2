@@ -150,10 +150,15 @@ You can ask a subagent to fix the task and another subagent to verify the fix if
 
 ## Expected Output:
 
+{% if structured_output | default(false) %}
+Return a structured response with these fields:
+- **summary** (str): Brief summary of issues found and fixes applied. Must state: 1) what the issue(s) were, 2) what the fix(es) were. Be concise but thorough.
+{% else %}
 Output a brief summary of the fix wrapped in <summary></summary> tags.
 
 The summary must explicitly state:
 1) what were the issue(s) found
 2) what were your fix(es)
 
-Be concise but thorough in in your analysis summary.
+Be concise but thorough in your analysis summary.
+{% endif %}

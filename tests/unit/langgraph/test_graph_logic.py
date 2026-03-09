@@ -71,7 +71,6 @@ def test_analyze_code_skips_if_files_exist():
             "analysis_done": False,
             "scripts_done": False,
             "deploy_result": None,
-            "health_result": None,
             "monitor_count": 0,
             "monitor_max": 5,
             "analysis_summary": None,
@@ -119,7 +118,7 @@ def test_analyze_code_runs_if_files_missing():
     with (
         patch("app_operator.langgraph.graph.create_react_agent") as mock_create_agent,
         patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run_script,
-        patch("app_operator.langgraph.nodes.analyzer.invoke_agent") as mock_invoke_agent,
+        patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke_agent,
     ):
         analyze_agent_mock = MagicMock()
         script_agent_mock = MagicMock()
@@ -136,10 +135,12 @@ def test_analyze_code_runs_if_files_missing():
         ]
 
         # Simulate analyzer creating files by having invoke_agent write them
+        from app_operator.langgraph.utils import AgentResult
+
         def create_analysis_files(*args, **kwargs):
             fs.write_text(repo_path / ".sds" / "code_analysis.md", "generated analysis")
             fs.write_text(repo_path / ".sds" / "deployment_issues.md", "generated issues")
-            return "Analysis complete", []
+            return AgentResult(text="Analysis complete", messages=[], structured=None)
 
         mock_invoke_agent.side_effect = create_analysis_files
         analyze_agent_mock.stream.return_value = []
@@ -156,7 +157,6 @@ def test_analyze_code_runs_if_files_missing():
             "analysis_done": False,
             "scripts_done": False,
             "deploy_result": None,
-            "health_result": None,
             "monitor_count": 0,
             "monitor_max": 5,
             "analysis_summary": None,

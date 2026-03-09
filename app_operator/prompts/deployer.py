@@ -111,6 +111,7 @@ def create_fix_prompt(
     dspy_config: DSPyConfigProtocol | None = None,
     recorder=None,
     fix_summary_consolidation: bool = True,
+    structured_output: bool = False,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.
 
@@ -125,6 +126,7 @@ def create_fix_prompt(
         dspy_config: Optional DSPy configuration for optimized prompts.
         recorder: Optional trajectory recorder for kwargs capture.
         fix_summary_consolidation: Whether consolidated fix summary is enabled.
+        structured_output: If True, instruct the agent to use structured output instead of XML tags.
 
     Returns:
         str: The rendered prompt.
@@ -166,6 +168,7 @@ def create_fix_prompt(
         recorder=recorder,
         has_deployment_issues=has_deployment_issues,
         has_code_analysis=has_code_analysis,
+        structured_output=structured_output,
     )
 
 

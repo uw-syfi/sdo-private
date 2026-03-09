@@ -1,6 +1,5 @@
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
-from app_operator.langgraph.utils import invoke_agent
 from app_operator.progress import emit_progress
 from app_operator.prompts import (
     analyze_repository,
@@ -34,24 +33,8 @@ def generate_scripts(state: OperatorState, ctx: NodeContext) -> OperatorState:
             platform=ctx.config.deployment.platform,
         )
 
-        invoke_agent(
-            state,
-            ctx.script_agent,
-            "",
-            deploy_prompt,
-            agent_name="Script Generator",
-            context_limit=ctx.context_limit,
-            recorder=ctx.recorder,
-        )
-        invoke_agent(
-            state,
-            ctx.script_agent,
-            "",
-            health_prompt,
-            agent_name="Script Generator",
-            context_limit=ctx.context_limit,
-            recorder=ctx.recorder,
-        )
+        ctx.invoke(state, ctx.script_agent, "", deploy_prompt, agent_name="Script Generator")
+        ctx.invoke(state, ctx.script_agent, "", health_prompt, agent_name="Script Generator")
 
         state["scripts_done"] = True
         return state

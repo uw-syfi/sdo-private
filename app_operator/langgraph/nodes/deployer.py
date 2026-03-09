@@ -1,15 +1,9 @@
-import re
-
 from pydantic import BaseModel, Field
 
 from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
-from app_operator.langgraph.utils import (
-    invoke_agent,
-    run_script,
-    write_log_file,
-)
+from app_operator.langgraph.utils import run_script, write_log_file
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.prompts import (
@@ -21,6 +15,10 @@ from app_operator.trajectory import Phase
 from app_operator.types import HealthVerdict
 
 logger = logger.bind(node="deployer")
+
+
+class FixSummaryResponse(BaseModel):
+    summary: str = Field(description="Brief summary of issues found and fixes applied")
 
 
 class ConsolidatedSummaryResponse(BaseModel):
@@ -54,6 +52,16 @@ def deploy_attempt(state: OperatorState, ctx: NodeContext) -> OperatorState:
     return state
 
 
+def _health_verdict_from_dict(d: dict) -> HealthVerdict:
+    return HealthVerdict(
+        healthy=d.get("healthy", False),
+        assessment=d.get("assessment", ""),
+        diagnosis=d.get("diagnosis", ""),
+        script_was_fixed=d.get("script_was_fixed", False),
+        raw_response="",
+    )
+
+
 def fix_errors(state: OperatorState, ctx: NodeContext) -> OperatorState:
     if ctx.should_shutdown():
         return state
@@ -66,13 +74,7 @@ def fix_errors(state: OperatorState, ctx: NodeContext) -> OperatorState:
     health_verdict = None
     if health_verdict_dict:
         health_check_log_path = ctx.repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
-        health_verdict = HealthVerdict(
-            healthy=health_verdict_dict.get("healthy", False),
-            assessment=health_verdict_dict.get("assessment", ""),
-            diagnosis=health_verdict_dict.get("diagnosis", ""),
-            script_was_fixed=health_verdict_dict.get("script_was_fixed", False),
-            raw_response="",
-        )
+        health_verdict = _health_verdict_from_dict(health_verdict_dict)
 
     error_context = prepare_error_context(deploy_result, health_verdict, log_file_path, health_check_log_path)
 
@@ -88,24 +90,19 @@ def fix_errors(state: OperatorState, ctx: NodeContext) -> OperatorState:
         health_check_script_path=ctx.repo_path / ".sds" / "health_check.sh",
         platform=platform,
         fix_summary_consolidation=fix_summary_consolidation,
+        structured_output=True,
     )
 
-    result = invoke_agent(
-        state,
-        ctx.fix_agent,
-        "",
-        prompt,
-        agent_name="Error Fixer",
-        context_limit=ctx.context_limit,
-        recorder=ctx.recorder,
-        logger=logger,
-    )
+    result = ctx.invoke(state, ctx.fix_agent, "", prompt, agent_name="Error Fixer", logger=logger)
     state["messages"] = result.messages
 
-    match = re.search(r"<summary>(.*?)</summary>", result.text, re.DOTALL)
-    if match:
-        summary_text = match.group(1)
-        summary_text = summary_text.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").strip()
+    if result.structured is not None:
+        summary_text = result.structured.summary.strip()
+    else:
+        logger.warning("Fix agent did not return structured response, skipping summary")
+        summary_text = None
+
+    if summary_text:
         log_file = ctx.repo_path / ".sds" / "logs" / f"fix_summary_{state['attempt']}.log"
         write_log_file(ctx.filesystem, log_file, summary_text)
         state["last_fix_summary"] = summary_text
@@ -138,15 +135,8 @@ def _update_consolidated_summary(
     prompt = create_consolidation_prompt(existing_content, new_attempts_text)
 
     try:
-        result = invoke_agent(
-            state,
-            ctx.consolidation_agent,
-            "",
-            prompt,
-            agent_name="Summary Consolidator",
-            context_limit=ctx.context_limit,
-            recorder=ctx.recorder,
-            logger=logger,
+        result = ctx.invoke(
+            state, ctx.consolidation_agent, "", prompt, agent_name="Summary Consolidator", logger=logger
         )
 
         if result.structured is not None:

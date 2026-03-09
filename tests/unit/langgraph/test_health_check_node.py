@@ -18,7 +18,6 @@ def _make_state(**overrides):
         "messages": [],
         "scripts_done": True,
         "deploy_result": {"success": True, "exit_code": 0, "stdout": "", "stderr": ""},
-        "health_result": None,
         "health_verdict": None,
         "last_fix_summary": None,
         "agent_token_usage": [],
@@ -75,7 +74,7 @@ class TestHealthCheckNode:
             script_was_fixed=False,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent") as mock_invoke:
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
             health_check(state, ctx)
@@ -109,7 +108,7 @@ class TestHealthCheckNode:
             script_was_fixed=True,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent") as mock_invoke:
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
             result = health_check(state, ctx)
@@ -120,7 +119,6 @@ class TestHealthCheckNode:
             "diagnosis": "CrashLoopBackOff",
             "script_was_fixed": True,
         }
-        assert result["health_result"] == {"success": False}
 
     def test_healthy_verdict_ends_phase_success(self):
         """Test that a healthy verdict calls end_phase with success."""
@@ -145,7 +143,7 @@ class TestHealthCheckNode:
             script_was_fixed=False,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent") as mock_invoke:
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
             health_check(state, ctx)
@@ -164,7 +162,6 @@ class TestHealthCheckNode:
 
         result = health_check(state, ctx)
 
-        assert result["health_result"] is None
         assert result["health_verdict"] is None
         agent.stream.assert_not_called()
 
@@ -199,7 +196,7 @@ class TestHealthCheckNode:
         recorder.end_phase = Mock()
         ctx = _make_ctx(repo_path, filesystem, config, loader, agent, recorder=recorder)
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent") as mock_invoke:
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=None)
 
             result = health_check(state, ctx)
@@ -210,7 +207,6 @@ class TestHealthCheckNode:
             "diagnosis": "",
             "script_was_fixed": False,
         }
-        assert result["health_result"] == {"success": False}
 
     def test_saves_assessment_log(self):
         """Test health_check saves assessment log file."""
@@ -235,7 +231,7 @@ class TestHealthCheckNode:
             script_was_fixed=False,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent") as mock_invoke:
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
             health_check(state, ctx)
