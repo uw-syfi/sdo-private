@@ -1,7 +1,9 @@
 from typing import Any
 
 from app_operator.langgraph.context import NodeContext
+from app_operator.langgraph.guardrails import ArtifactGuardrail
 from app_operator.langgraph.state import OperatorState
+from app_operator.logger import logger as _logger
 from app_operator.progress import emit_progress
 from app_operator.prompts import (
     analyze_repository,
@@ -9,6 +11,8 @@ from app_operator.prompts import (
     create_system_prompt,
 )
 from app_operator.trajectory import Phase
+
+logger = _logger.bind(node="generator")
 
 
 def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> OperatorState:
@@ -35,8 +39,24 @@ def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> Oper
             platform=ctx.config.deployment.platform,
         )
 
+        deploy_guardrail = ArtifactGuardrail([".sds/deploy.sh"])
+        health_guardrail = ArtifactGuardrail([".sds/health_check.sh"])
+
         ctx.invoke(state, agent, "", deploy_prompt, agent_name="Script Generator")
+        for retry in range(deploy_guardrail.max_retries):
+            missing = deploy_guardrail.missing(ctx.repo_path, ctx.filesystem)
+            if not missing:
+                break
+            logger.warning("Guardrail: %s missing (retry %d/%d)", missing, retry + 1, deploy_guardrail.max_retries)
+            ctx.invoke(state, agent, "", deploy_guardrail.reminder(missing), agent_name="Script Generator")
+
         ctx.invoke(state, agent, "", health_prompt, agent_name="Script Generator")
+        for retry in range(health_guardrail.max_retries):
+            missing = health_guardrail.missing(ctx.repo_path, ctx.filesystem)
+            if not missing:
+                break
+            logger.warning("Guardrail: %s missing (retry %d/%d)", missing, retry + 1, health_guardrail.max_retries)
+            ctx.invoke(state, agent, "", health_guardrail.reminder(missing), agent_name="Script Generator")
 
         state["scripts_done"] = True
         return state

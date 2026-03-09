@@ -1,6 +1,7 @@
 from typing import Any
 
 from app_operator.langgraph.context import NodeContext
+from app_operator.langgraph.guardrails import ArtifactGuardrail
 from app_operator.langgraph.state import OperatorState
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
@@ -28,6 +29,8 @@ def analyze_code(state: OperatorState, ctx: NodeContext, agent: Any) -> Operator
         system_prompt = ctx.loader.render("code_analyzer/system.jinja2")
         user_prompt = ctx.loader.render("code_analyzer/user.jinja2", repo_path=ctx.repo_path)
 
+        guardrail = ArtifactGuardrail([".sds/code_analysis.md", ".sds/deployment_issues.md"])
+
         result = ctx.invoke(
             state,
             agent,
@@ -36,7 +39,26 @@ def analyze_code(state: OperatorState, ctx: NodeContext, agent: Any) -> Operator
             agent_name="Code Analyzer",
             logger=logger,
         )
+        state["messages"] = result.messages
+
+        for retry in range(guardrail.max_retries):
+            missing = guardrail.missing(ctx.repo_path, ctx.filesystem)
+            if not missing:
+                break
+            logger.warning("Guardrail: missing %s (retry %d/%d)", missing, retry + 1, guardrail.max_retries)
+            result = ctx.invoke(
+                state,
+                agent,
+                "",
+                guardrail.reminder(missing),
+                agent_name="Code Analyzer",
+                logger=logger,
+            )
+            state["messages"] = result.messages
+        else:
+            missing = guardrail.missing(ctx.repo_path, ctx.filesystem)
+            if missing:
+                logger.warning("Guardrail: artifacts still missing after max retries: %s", missing)
 
         state["analysis_done"] = True
-        state["messages"] = result.messages
         return state

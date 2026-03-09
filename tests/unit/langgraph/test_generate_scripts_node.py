@@ -58,8 +58,9 @@ class TestGenerateScripts:
             result_state = generate_scripts(state, ctx, agent)
 
         assert result_state["scripts_done"] is True
-        # Should invoke agent twice: once for deploy.sh, once for health_check.sh
-        assert ctx.invoke.call_count == 2
+        # 2 initial invocations + up to 3 guardrail retries each = up to 8 total
+        # (files are never created in the mock, so all retries fire)
+        assert ctx.invoke.call_count == 2 + 3 + 3
 
     def test_generate_scripts_when_already_done(self):
         """Test generate_scripts skips when already done."""
