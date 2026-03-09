@@ -31,9 +31,16 @@ class DSPyOperator(dspy.Module):
     a single end-to-end pipeline.
     """
 
-    def __init__(self, max_file_size: int = 100_000):
+    def __init__(
+        self,
+        max_file_size: int = 100_000,
+        max_context_chars: int = 500_000,
+    ):
         super().__init__()
-        self.analyzer = CodeAnalyzerAgent(max_file_size=max_file_size)
+        self.analyzer = CodeAnalyzerAgent(
+            max_file_size=max_file_size,
+            max_context_chars=max_context_chars,
+        )
         self.deployer = DeploymentAgent()
         self.monitor = MonitorAgent()
 
@@ -46,27 +53,33 @@ class DSPyOperator(dspy.Module):
         health_check_timeout: int = 300,
     ) -> dspy.Prediction:
         # Step 1: Analyze codebase
+        print("[phase] code_analysis — analyzing repository...")
         analysis = self.analyzer(repo_path=repo_path)
+        print("[phase] code_analysis — done")
 
         # Step 2: Deploy
+        print(f"[phase] deployment — up to {max_deploy_attempts} attempts")
         deploy_result = self.deployer(
             repo_path=repo_path,
             code_analysis=analysis.analysis,
             deployment_issues=analysis.issues,
-            raw_context=getattr(analysis, "raw_context", ""),
             max_attempts=max_deploy_attempts,
             deploy_timeout=deploy_timeout,
             health_check_timeout=health_check_timeout,
         )
 
         if not deploy_result.success:
+            print(f"[phase] deployment — failed after {deploy_result.attempts} attempts")
             return dspy.Prediction(
                 success=False,
                 phase="deployment",
                 error=deploy_result.error,
             )
 
+        print(f"[phase] deployment — succeeded on attempt {deploy_result.attempts}")
+
         # Step 3: Monitor
+        print(f"[phase] monitoring — {monitor_checks} checks")
         statuses = []
         for i in range(1, monitor_checks + 1):
             check = self.monitor(
@@ -75,6 +88,7 @@ class DSPyOperator(dspy.Module):
                 health_check_timeout=health_check_timeout,
             )
             statuses.append(check.status)
+            print(f"[phase] monitor check {i}/{monitor_checks}: {check.status}")
             if check.status == "unhealthy":
                 break
 
