@@ -16,6 +16,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
 from app_operator.command_validation import DangerousCommandError, validate_command
+from app_operator.constants import LANGGRAPH_AGENT_RECURSION_LIMIT
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.langgraph.message_utils import extract_text
 
@@ -710,20 +711,30 @@ def _build_spawn_subagent(
         result_text = ""
         total_usage: dict[str, int] = {"input": 0, "output": 0, "total": 0}
 
-        for chunk in child_agent.stream({"messages": messages}, stream_mode="updates"):
-            for _node_name, updates in chunk.items():
-                for msg in updates.get("messages", []):
-                    if isinstance(msg, AIMessage):
-                        um = getattr(msg, "usage_metadata", None)
-                        if um:
-                            total_usage["input"] += um.get("input_tokens", 0)
-                            total_usage["output"] += um.get("output_tokens", 0)
-                            total_usage["total"] += um.get("total_tokens", 0) or (
-                                um.get("input_tokens", 0) + um.get("output_tokens", 0)
-                            )
-                        text = extract_text(msg.content)
-                        if text:
-                            result_text = text
+        try:
+            agent_config = {"recursion_limit": LANGGRAPH_AGENT_RECURSION_LIMIT}
+            stream = child_agent.stream({"messages": messages}, stream_mode="updates", config=agent_config)
+        except Exception as e:
+            return f"[Subagent failed to start: {e}]"
+
+        try:
+            for chunk in stream:
+                for _node_name, updates in chunk.items():
+                    for msg in updates.get("messages", []):
+                        if isinstance(msg, AIMessage):
+                            um = getattr(msg, "usage_metadata", None)
+                            if um:
+                                total_usage["input"] += um.get("input_tokens", 0)
+                                total_usage["output"] += um.get("output_tokens", 0)
+                                total_usage["total"] += um.get("total_tokens", 0) or (
+                                    um.get("input_tokens", 0) + um.get("output_tokens", 0)
+                                )
+                            text = extract_text(msg.content)
+                            if text:
+                                result_text = text
+        except Exception as e:
+            partial = f" Partial result: {result_text}" if result_text else ""
+            return f"[Subagent hit recursion or execution limit: {e}.{partial}]"
 
         if total_usage["total"] > 0 or total_usage["input"] > 0:
             token_sink.append(

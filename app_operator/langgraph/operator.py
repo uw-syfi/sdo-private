@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from app_operator.config import Config, load_config
+from app_operator.constants import LANGGRAPH_OUTER_RECURSION_LIMIT
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.langgraph._llm import build_llm
@@ -103,7 +104,11 @@ class LangGraphOperator(OperatorBase):
             }
 
             thread_id = str(int(time.time()))
-            final_state = self.graph.invoke(initial_state, config={"configurable": {"thread_id": thread_id}})  # type: ignore[reportArgumentType]
+            invoke_config = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": LANGGRAPH_OUTER_RECURSION_LIMIT,
+            }
+            final_state = self.graph.invoke(initial_state, config=invoke_config)  # type: ignore[reportArgumentType]
 
             if final_state:
                 sessions = final_state.get("agent_token_usage", [])

@@ -12,6 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from app_operator.constants import LANGGRAPH_AGENT_RECURSION_LIMIT
 from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph._trajectory_handler import LangGraphTrajectoryHandler
 from app_operator.langgraph.message_utils import extract_text
@@ -132,7 +133,8 @@ def _invoke_agent_core(
     logger.info(f"Executing {agent_name}...")
     logger.info("=" * 50)
 
-    for chunk in agent.stream({"messages": messages}, stream_mode="updates"):
+    agent_config = {"recursion_limit": LANGGRAPH_AGENT_RECURSION_LIMIT}
+    for chunk in agent.stream({"messages": messages}, stream_mode="updates", config=agent_config):
         for _node_name, updates in chunk.items():
             if "structured_response" in updates:
                 structured_response = updates["structured_response"]
