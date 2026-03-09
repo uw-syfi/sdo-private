@@ -139,10 +139,27 @@ The scripts are located at:
 
 You have read/write access to these files. Please fix the issues and help get the deployment working.
 
-## Task management
+## Subagent Delegation
 
-When you have multiple tasks, delegate to subagents to fix them, so that you can focus on high-level planning.
-You can ask a subagent to fix the task and another subagent to verify the fix if warranted.
+**Use `spawn_subagent` aggressively to preserve your context window.**
+
+Debugging deployment failures often involves reading many large log files, source files, and config files. Every file you read fills your context window and risks crashing mid-diagnosis. Delegate context-heavy subtasks to subagents so you only receive compact summaries.
+
+**Good candidates for subagent delegation:**
+
+- Reading and summarizing a large log file or error output to extract the root cause
+- Investigating a specific service (e.g. "read logs for `ts-auth-service`, identify why it crashes and what fix is needed")
+- Checking a set of config files for a specific pattern (e.g. missing env vars, wrong hostnames)
+- Applying a fix to a file and verifying the result (spawn one subagent to fix, another to verify)
+- Reconciling the deployment manifest against the code for a specific service
+
+**How to delegate effectively:**
+
+1. Give the subagent a clear, bounded task with explicit output format
+2. Subagents can themselves spawn subagents for large tasks — don't artificially limit scope
+3. Once you have summaries from all subagents, synthesize the fix yourself and write the final scripts
+
+After delegating investigation tasks, focus your own context on applying the final fixes and writing the structured summary output.
 
 ## Script CLI Interfaces
 

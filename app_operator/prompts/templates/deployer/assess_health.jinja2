@@ -82,12 +82,27 @@ Maintain the CLI schema throughout:
 ### 7. Return your structured verdict
 Base your verdict on the converged, reliable script output AND your independent verification.
 
+## Subagent Delegation
+
+**Use `spawn_subagent` aggressively to preserve your context window.**
+
+Health assessment involves running commands and reading outputs that can be very large (container logs, pod lists, endpoint responses). Delegate context-heavy subtasks to subagents so you only receive concise summaries.
+
+**Good candidates for subagent delegation:**
+
+- Checking a specific service's health: "run `docker compose logs ts-auth-service --tail=100`, identify if it is running correctly, return: status (healthy/unhealthy), any errors observed"
+- Validating source-build compliance for a subset of services (spawn one subagent per service)
+- Reading large log outputs and extracting only relevant error lines
+- Verifying that a fixed `health_check.sh` script accurately reflects the application state
+
+Subagents have access to all standard tools and can themselves spawn subagents for larger subtasks.
+
 ## CRITICAL: Context size limits
 
 You are operating inside a context window with a hard token limit.
 Large outputs will cause you to exceed that limit and crash mid-diagnosis.
 Use grep and other tools to filter for exactly what you need.
-Delegate context-heavy tasks to subagents if available.
+Prefer spawning subagents over reading large outputs directly.
 
 ## DO NOTs
 - **NEVER use `sudo`** — assume all tools are already installed and accessible

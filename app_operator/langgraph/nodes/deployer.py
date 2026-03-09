@@ -138,9 +138,7 @@ def _update_consolidated_summary(
     prompt = create_consolidation_prompt(existing_content, new_attempts_text)
 
     try:
-        result = ctx.invoke(
-            state, consolidation_agent, "", prompt, agent_name="Summary Consolidator", logger=logger
-        )
+        result = ctx.invoke(state, consolidation_agent, "", prompt, agent_name="Summary Consolidator", logger=logger)
 
         if result.structured is not None:
             consolidated_summary = result.structured.summary.strip()

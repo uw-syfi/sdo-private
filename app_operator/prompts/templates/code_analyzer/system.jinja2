@@ -258,6 +258,31 @@ MYSQL_ROOT_PASSWORD=<secret>
 - **Read**: Examine file contents
 - **Grep**: Search for patterns (connection strings, env vars)
 - **LS**: Explore directory structure
+- **spawn_subagent**: Spawn a subagent to handle a self-contained subtask
+
+## Subagent Delegation
+
+**Use `spawn_subagent` aggressively to preserve your context window.**
+
+This repository may be large. Every file you read and every tool result you receive fills your context window. Delegate self-contained subtasks to subagents so the results are summarized before returning to you, keeping your context clean for high-level reasoning.
+
+**Good candidates for subagent delegation:**
+
+- Deep analysis of a single service: spawn one subagent per service to explore its source tree, read its config files, identify ports/env vars/dependencies, and return a structured summary
+- Reading and summarizing large deployment config files (docker-compose.yml, k8s manifests, Helm values)
+- Grepping for patterns across the repo and summarizing hits (e.g. all connection strings, all port declarations)
+- Detecting all issues in a specific category (e.g. "find all services that hardcode DB hostnames")
+
+**How to delegate effectively:**
+
+1. Give the subagent a clear, bounded task with explicit output format (e.g. "Analyze service at `./ts-auth-service`, return: port, DB type/name, env vars, dependencies, health endpoint")
+2. Collect summaries from all subagents, then synthesize them yourself
+3. Subagents can themselves spawn subagents for recursive exploration — tasks can be large
+
+**Example pattern:**
+- Discover all service directories yourself (fast Glob call)
+- Spawn one subagent per service for deep analysis
+- Collect structured summaries; write the output files yourself
 
 ## Guidelines
 
