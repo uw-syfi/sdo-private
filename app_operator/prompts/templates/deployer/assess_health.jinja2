@@ -42,10 +42,33 @@ Look for these signals (not exhaustive):
 - DNS failure / `no such host` → networking misconfiguration
 - No logs after start → crash before logging initialized
 
-### 4. Compare script output to reality
+### 4. Validate deploy strategy (source-build compliance)
+
+The deployment must build application services from source. A repair agent that bypasses local builds by using prebuilt external images is "cheating" and must be rejected even if the app appears healthy at runtime.
+
+**Check procedure:**
+
+1. Read `.sds/deploy.sh`.
+2. Find all `Dockerfile`s in the repository (e.g. `find {{ repo_path }} -name Dockerfile`). Each one represents a service that must be built from source.
+3. For each such service, verify that `.sds/deploy.sh` contains a build step for it — e.g. `docker build`, `docker compose ... --build`, `docker buildx build`, or an equivalent. If the script skips building a service that has a `Dockerfile` and instead relies on a prebuilt external image, that is a violation.
+
+**Exempt services** — these are legitimate third-party infrastructure components that are never built from source. Do NOT flag them even if no build step exists for them:
+- Databases: `mongo`, `mysql`, `postgres`, `mariadb`
+- Caches: `redis`, `memcached`
+- Message queues: `rabbitmq`, `kafka`, `zookeeper`
+- Observability: `jaeger`, `prometheus`, `grafana`, `zipkin`, `elasticsearch`, `kibana`, `logstash`, `fluentd`
+- Proxies / gateways: `nginx`, `haproxy`, `traefik`, `envoy`
+- Service discovery: `consul`, `etcd`
+- Other infra: `nats`, `openresty`
+
+**Verdict rule:** If any non-exempt service has a `Dockerfile` in the repo but `.sds/deploy.sh` contains no build step for it, mark the deployment **unhealthy** and include this in the diagnosis, e.g.:
+`"frontend: Dockerfile exists at src/frontend/Dockerfile but deploy.sh contains no build step for it (source-build required)"`
+
+
+### 5. Compare script output to reality
 If the script says healthy but your independent checks show problems (or vice versa), the script is unreliable.
 
-### 5. Iteratively fix the script until it is reliable
+### 6. Iteratively fix the script until it is reliable
 If the script's results don't match your independent observations:
 - Diagnose WHY the script is wrong (wrong service names, incorrect ports, missing checks, flawed logic)
 - Revise the script to fix the root cause
@@ -56,7 +79,7 @@ If the script's results don't match your independent observations:
 Maintain the CLI schema throughout:
 {% include "deployer/_health_check_schema.jinja2" %}
 
-### 6. Return your structured verdict
+### 7. Return your structured verdict
 Base your verdict on the converged, reliable script output AND your independent verification.
 
 ## CRITICAL: Context size limits
