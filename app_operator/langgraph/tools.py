@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -16,12 +17,20 @@ from app_operator.command_validation import DangerousCommandError, validate_comm
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 
 SUBPROCESS_TIMEOUT_SECS = 120  # seconds before a subprocess command times out
+OUTPUT_SPILL_THRESHOLD = 10_000  # chars; total stdout+stderr above this triggers file spill
 
 
 class ToolContext:
     def __init__(self, repo_root: Path, filesystem: FileSystemInterface):
         self.repo_root = repo_root
         self.filesystem = filesystem
+        self._tool_call_counter = 0
+        self._counter_lock = threading.Lock()
+
+    def next_tool_call_id(self) -> int:
+        with self._counter_lock:
+            self._tool_call_counter += 1
+            return self._tool_call_counter
 
     def resolve_path(self, path: str) -> Path:
         # Construct path without checking filesystem (for InMemoryFilesystem support)
@@ -116,7 +125,7 @@ def _build_read(context: ToolContext) -> Callable[[str, int, int], str]:
             target = context.resolve_path(path)
             content = context.filesystem.read_text(target)
             lines = content.splitlines(keepends=True)
-            selected = lines[start_line - 1:end_line]
+            selected = lines[start_line - 1 : end_line]
             return "".join(selected)
         except (ValueError, OSError) as e:
             return f"Error: {e!s}"
@@ -195,11 +204,28 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
                 timeout=timeout,
             )
 
+            stdout = result.stdout
+            stderr = result.stderr
+
+            if len(stdout) + len(stderr) > OUTPUT_SPILL_THRESHOLD:
+                call_id = context.next_tool_call_id()
+                spill_dir = context.repo_root / ".sds" / "logs" / "tools" / f"{call_id:04d}"
+                context.filesystem.mkdir(spill_dir, parents=True, exist_ok=True)
+
+                stdout_path = f".sds/logs/tools/{call_id:04d}/stdout.txt"
+                context.filesystem.write_text(spill_dir / "stdout.txt", stdout)
+                stdout = f"(output too large for context; use Read tool: {stdout_path})"
+
+                if stderr:
+                    stderr_path = f".sds/logs/tools/{call_id:04d}/stderr.txt"
+                    context.filesystem.write_text(spill_dir / "stderr.txt", stderr)
+                    stderr = f"(output too large for context; use Read tool: {stderr_path})"
+
             return {
                 "success": result.returncode == 0,
                 "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "stdout": stdout,
+                "stderr": stderr,
             }
         except DangerousCommandError as e:
             error_msg = str(e)

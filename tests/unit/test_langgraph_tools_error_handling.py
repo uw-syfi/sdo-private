@@ -90,6 +90,38 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         self.assertTrue(result[0].startswith("Error: "))
 
     @patch("subprocess.run")
+    def test_bash_small_output_inline(self, mock_run):
+        """Small output is returned inline."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="hello", stderr="")
+        bash_tool = _build_bash(self.context)
+        result = bash_tool.invoke({"command": "echo hello"})
+        self.assertEqual(result["stdout"], "hello")
+        self.assertEqual(result["stderr"], "")
+
+    @patch("subprocess.run")
+    def test_bash_large_output_spilled_to_file(self, mock_run):
+        """Large output is written to .sds/logs/tools/ and paths returned."""
+        big_stdout = "x" * 11_000
+        mock_run.return_value = MagicMock(returncode=0, stdout=big_stdout, stderr="")
+        bash_tool = _build_bash(self.context)
+        result = bash_tool.invoke({"command": "echo big"})
+        self.assertIn(".sds/logs/tools/", result["stdout"])
+        self.assertIn("Read tool", result["stdout"])
+        spill_path = self.repo_root / ".sds" / "logs" / "tools" / "0001" / "stdout.txt"
+        self.assertEqual(self.fs.read_text(spill_path), big_stdout)
+
+    @patch("subprocess.run")
+    def test_bash_large_stderr_spilled(self, mock_run):
+        """Large stderr is also spilled when combined output exceeds threshold."""
+        big_stderr = "e" * 11_000
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr=big_stderr)
+        bash_tool = _build_bash(self.context)
+        result = bash_tool.invoke({"command": "fail"})
+        self.assertIn(".sds/logs/tools/", result["stderr"])
+        spill_path = self.repo_root / ".sds" / "logs" / "tools" / "0001" / "stderr.txt"
+        self.assertEqual(self.fs.read_text(spill_path), big_stderr)
+
+    @patch("subprocess.run")
     def test_bash_error(self, mock_run):
         bash_tool = _build_bash(self.context)
 
