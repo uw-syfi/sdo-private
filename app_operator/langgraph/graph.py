@@ -10,11 +10,15 @@ from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.langgraph.models import get_model_context_limit
 from app_operator.langgraph.nodes.analyzer import analyze_code
-from app_operator.langgraph.nodes.deployer import deploy_attempt, fix_errors
+from app_operator.langgraph.nodes.deployer import (
+    ConsolidatedSummaryResponse,
+    deploy_attempt,
+    fix_errors,
+)
 from app_operator.langgraph.nodes.generator import generate_scripts
 from app_operator.langgraph.nodes.monitor import (
+    HealthVerdictResponse,
     health_check,
-    monitor_analyze,
     monitor_health,
 )
 from app_operator.langgraph.state import OperatorState
@@ -39,7 +43,8 @@ def build_graph(
     analyze_agent = create_react_agent(llm, tools=tools)
     script_agent = create_react_agent(llm, tools=tools)
     fix_agent = create_react_agent(llm, tools=tools)
-    monitor_agent = create_react_agent(llm, tools=tools)
+    health_agent = create_react_agent(llm, tools=tools, response_format=HealthVerdictResponse)
+    consolidation_agent = create_react_agent(llm, tools=tools, response_format=ConsolidatedSummaryResponse)
 
     # Create a loader instance with DSPy config (no global singleton needed)
     loader = PromptLoader(dspy_config=config.dspy)
@@ -82,6 +87,10 @@ def build_graph(
         health_check,
         repo_path=repo_path,
         filesystem=filesystem,
+        agent=health_agent,
+        loader=loader,
+        operator_config=config,
+        context_limit=context_limit,
         check_shutdown=check_shutdown,
         recorder=recorder,
     )
@@ -96,29 +105,27 @@ def build_graph(
         context_limit=context_limit,
         check_shutdown=check_shutdown,
         recorder=recorder,
+        consolidation_agent=consolidation_agent,
     )
 
     monitor_health_node_bound = functools.partial(
         monitor_health,
         repo_path=repo_path,
         filesystem=filesystem,
+        agent=health_agent,
+        loader=loader,
+        operator_config=config,
+        context_limit=context_limit,
         health_check_interval=health_check_interval,
         check_shutdown=check_shutdown,
         recorder=recorder,
     )
 
-    monitor_analyze_node_bound = functools.partial(
-        monitor_analyze,
-        repo_path=repo_path,
-        filesystem=filesystem,
-        loader=loader,
-        agent=monitor_agent,
-        context_limit=context_limit,
-        recorder=recorder,
-    )
-
     def should_fix(state: OperatorState) -> str:
-        if (state.get("health_result") or {}).get("success"):
+        health_verdict = state.get("health_verdict") or {}
+        if health_verdict.get("healthy"):
+            if not state.get("health_monitoring", True):
+                return "end"
             return "monitor"
         if state["attempt"] < state["max_attempts"]:
             return "fix"
@@ -141,7 +148,6 @@ def build_graph(
     graph.add_node("health_check", health_node)
     graph.add_node("fix_errors", fix_node)
     graph.add_node("monitor_health", monitor_health_node_bound)
-    graph.add_node("monitor_analyze", monitor_analyze_node_bound)
 
     graph.set_entry_point("analyze_code")
     graph.add_edge("analyze_code", "generate_scripts")
@@ -159,9 +165,8 @@ def build_graph(
     )
 
     graph.add_edge("fix_errors", "deploy_attempt")
-    graph.add_edge("monitor_health", "monitor_analyze")
     graph.add_conditional_edges(
-        "monitor_analyze",
+        "monitor_health",
         should_monitor,
         {
             "monitor": "monitor_health",

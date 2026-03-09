@@ -23,6 +23,7 @@ class TestDeployAttempt:
             deploy_result=None,
             health_result=None,
             last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
@@ -50,6 +51,7 @@ class TestDeployAttempt:
             deploy_result=None,
             health_result=None,
             last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
@@ -74,6 +76,7 @@ class TestDeployAttempt:
             deploy_result=None,
             health_result=None,
             last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
@@ -98,6 +101,7 @@ class TestDeployAttempt:
             deploy_result=None,
             health_result=None,
             last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
@@ -122,6 +126,7 @@ class TestDeployAttempt:
             deploy_result=None,
             health_result=None,
             last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")

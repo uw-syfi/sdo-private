@@ -35,6 +35,11 @@ Before making any fixes, identify the deployment platform:
   `$(basename "$APP_DIR")`). Do not replace it with a service name, image name, or hardcoded
   string, and do not omit it.
 - **NEVER expose ports to the host; use platform-internal networking (e.g., docker network, kubernetes namespace).
+- **NEVER use pre-built images from Docker Hub or any registry for application services
+  that have source code in the repository** — every such service MUST use a `build:` context
+  pointing to its local source (write a Dockerfile if one does not exist). Only external
+  infrastructure services with no local source (e.g. Redis, MongoDB, MySQL, Consul, Kafka)
+  may use pre-built images.
 - Don't remove error handling or safety checks
 - Don't assume - verify your assumptions against the error logs
 - Don't redeploy the application; propose the fix and let the user redeploy.

@@ -45,7 +45,8 @@ class TestLangGraphPhaseControl:
             "monitor_max": config.operator.monitoring_max_iters,
             "analysis_summary": None,
             "last_fix_summary": None,
-            "token_usage": {"input": 0, "output": 0, "total": 0},
+            "agent_token_usage": [],
+            "health_verdict": None,
         }
 
         # Verify analysis_done is True (skipping analysis)
@@ -71,7 +72,8 @@ class TestLangGraphPhaseControl:
             "monitor_max": config.operator.monitoring_max_iters,
             "analysis_summary": None,
             "last_fix_summary": None,
-            "token_usage": {"input": 0, "output": 0, "total": 0},
+            "agent_token_usage": [],
+            "health_verdict": None,
         }
 
         # Verify analysis_done is False (analysis should run)
@@ -86,6 +88,7 @@ class TestLangGraphPhaseControl:
 
         initial_state = {
             "analysis_done": not config.operator.phase.code_analysis,
+            "health_verdict": None,
         }
 
         # Verify analysis_done is False by default
@@ -127,6 +130,7 @@ class TestLangGraphPhaseControl:
             "max_attempts": 5,
             "analysis_done": not config.operator.phase.code_analysis,
             "scripts_done": False,
+            "health_verdict": None,
         }
 
         # With analysis_done=True, the analyzer should skip

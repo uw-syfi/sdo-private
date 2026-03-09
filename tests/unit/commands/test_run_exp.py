@@ -12,6 +12,7 @@ import pytest
 
 from app_operator.commands.run_exp import (
     AppResult,
+    AppStatus,
     _extract_results,
     _resolve_experiment,
     _write_experiment_sds_config,
@@ -249,6 +250,27 @@ class TestAddArguments:
         args = parser.parse_args(["exp-a", "--parallel", "4"])
         assert args.parallel == 4
 
+    def test_rerun_default_is_none(self):
+        """--rerun defaults to None."""
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        args = parser.parse_args(["exp-a"])
+        assert args.rerun is None
+
+    def test_rerun_failed(self):
+        """--rerun failed sets rerun to 'failed'."""
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        args = parser.parse_args(["exp-a", "--rerun", "failed"])
+        assert args.rerun == "failed"
+
+    def test_rerun_all(self):
+        """--rerun all sets rerun to 'all'."""
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        args = parser.parse_args(["exp-a", "--rerun", "all"])
+        assert args.rerun == "all"
+
 
 class TestResolveExperiment:
     def test_resolve_by_name(self, tmp_path, monkeypatch):
@@ -315,9 +337,9 @@ class TestRunCommandMultiExperiment:
         exp_dir.mkdir(parents=True)
         self._make_config(exp_dir / "config.toml", ["/app/hotel"])
 
-        args = argparse.Namespace(experiments=["exp-a"], parallel=1)
+        args = argparse.Namespace(experiments=["exp-a"], parallel=1, rerun=None)
 
-        fake_result = AppResult(app="hotel", success=True, status="completed", deployment_iterations=2)
+        fake_result = AppResult(app="hotel", status=AppStatus.COMPLETED, deployment_iterations=2)
 
         with patch("app_operator.commands.run_exp.run_experiment_task", return_value=fake_result):
             rc = run_command(args)
@@ -337,11 +359,11 @@ class TestRunCommandMultiExperiment:
             d.mkdir(parents=True)
             self._make_config(d / "config.toml", [f"/app/{name}-svc"])
 
-        args = argparse.Namespace(experiments=["exp-a", "exp-b"], parallel=2)
+        args = argparse.Namespace(experiments=["exp-a", "exp-b"], parallel=2, rerun=None)
 
         def fake_task(app_path_str, exp_name, progress, task_id, log_dir, *a, **kw):
             progress.start_task(task_id)
-            return AppResult(app=Path(app_path_str).name, success=True, status="completed", deployment_iterations=1)
+            return AppResult(app=Path(app_path_str).name, status=AppStatus.COMPLETED, deployment_iterations=1)
 
         with patch("app_operator.commands.run_exp.run_experiment_task", side_effect=fake_task):
             rc = run_command(args)
@@ -362,7 +384,7 @@ class TestRunCommandMultiExperiment:
         d.mkdir(parents=True)
         self._make_config(d / "config.toml", ["/app/svc"])
 
-        args = argparse.Namespace(experiments=["exp-a", "exp-missing"], parallel=1)
+        args = argparse.Namespace(experiments=["exp-a", "exp-missing"], parallel=1, rerun=None)
 
         rc = run_command(args)
 
@@ -376,8 +398,121 @@ class TestRunCommandMultiExperiment:
         d.mkdir(parents=True)
         (d / "config.toml").write_text('apps = ["/app/svc"]\nrepeats = 0\n')
 
-        args = argparse.Namespace(experiments=["exp-bad"], parallel=1)
+        args = argparse.Namespace(experiments=["exp-bad"], parallel=1, rerun=None)
 
         rc = run_command(args)
 
         assert rc == 1
+
+    def _write_results_json(self, log_dir: Path, exp_name: str, results: list[dict]) -> None:
+        """Write a minimal results.json to simulate a previous run."""
+        log_dir.mkdir(parents=True, exist_ok=True)
+        data = {"experiment": exp_name, "results": results}
+        (log_dir / "results.json").write_text(json.dumps(data))
+
+    def test_rerun_all_ignores_existing_results(self, tmp_path, monkeypatch):
+        """--rerun all reruns apps even if they already have results."""
+        monkeypatch.chdir(tmp_path)
+
+        exp_dir = tmp_path / "exp_config" / "exp-a"
+        exp_dir.mkdir(parents=True)
+        self._make_config(exp_dir / "config.toml", ["/app/hotel"])
+
+        # Pre-populate results.json with a successful run
+        self._write_results_json(
+            exp_dir / "logs",
+            "exp-a",
+            [{"app": "hotel", "status": "completed", "deployment_iterations": 1}],
+        )
+
+        fake_result = AppResult(app="hotel", status=AppStatus.COMPLETED, deployment_iterations=1)
+        args = argparse.Namespace(experiments=["exp-a"], parallel=1, rerun="all")
+
+        with patch("app_operator.commands.run_exp.run_experiment_task", return_value=fake_result) as mock_task:
+            rc = run_command(args)
+
+        assert rc == 0
+        called_apps = [call.args[0] for call in mock_task.call_args_list]
+        assert any("hotel" in a for a in called_apps), "Expected hotel to be rerun with --rerun all"
+
+    def test_rerun_failed_reruns_failed_skips_successful(self, tmp_path, monkeypatch):
+        """--rerun failed reruns only failed apps, skips successful ones."""
+        monkeypatch.chdir(tmp_path)
+
+        exp_dir = tmp_path / "exp_config" / "exp-a"
+        exp_dir.mkdir(parents=True)
+        self._make_config(exp_dir / "config.toml", ["/app/hotel", "/app/social"])
+
+        # Pre-populate results: hotel=success, social=failed
+        self._write_results_json(
+            exp_dir / "logs",
+            "exp-a",
+            [
+                {"app": "hotel", "status": "completed", "deployment_iterations": 1},
+                {"app": "social", "status": "failed", "deployment_iterations": 2},
+            ],
+        )
+
+        fake_result = AppResult(app="social", status=AppStatus.COMPLETED, deployment_iterations=1)
+        args = argparse.Namespace(experiments=["exp-a"], parallel=1, rerun="failed")
+
+        with patch("app_operator.commands.run_exp.run_experiment_task", return_value=fake_result) as mock_task:
+            rc = run_command(args)
+
+        assert rc == 0
+        called_apps = [call.args[0] for call in mock_task.call_args_list]
+        assert not any("hotel" in a for a in called_apps), "hotel (successful) should be skipped"
+        assert any("social" in a for a in called_apps), "social (failed) should be rerun"
+
+    def test_rerun_failed_reruns_when_status_failed(self, tmp_path, monkeypatch):
+        """--rerun failed reruns a single failed app (status='failed').
+
+        Also covers backward compat: old results.json files may have had a
+        'success' key that disagreed with 'status'. Now only 'status' is
+        authoritative so even legacy files with success=True + status=failed
+        are treated as failed.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        exp_dir = tmp_path / "exp_config" / "exp-a"
+        exp_dir.mkdir(parents=True)
+        self._make_config(exp_dir / "config.toml", ["/app/hotel"])
+
+        self._write_results_json(
+            exp_dir / "logs",
+            "exp-a",
+            [{"app": "hotel", "status": "failed", "deployment_iterations": 15}],
+        )
+
+        fake_result = AppResult(app="hotel", status=AppStatus.COMPLETED, deployment_iterations=1)
+        args = argparse.Namespace(experiments=["exp-a"], parallel=1, rerun="failed")
+
+        with patch("app_operator.commands.run_exp.run_experiment_task", return_value=fake_result) as mock_task:
+            rc = run_command(args)
+
+        assert rc == 0
+        called_apps = [call.args[0] for call in mock_task.call_args_list]
+        assert any("hotel" in a for a in called_apps), "hotel (status=failed) should be rerun"
+
+    def test_no_rerun_skips_all_existing(self, tmp_path, monkeypatch):
+        """Default behavior (no --rerun) skips all apps already in results.json."""
+        monkeypatch.chdir(tmp_path)
+
+        exp_dir = tmp_path / "exp_config" / "exp-a"
+        exp_dir.mkdir(parents=True)
+        self._make_config(exp_dir / "config.toml", ["/app/hotel"])
+
+        # Pre-populate with a completed result
+        self._write_results_json(
+            exp_dir / "logs",
+            "exp-a",
+            [{"app": "hotel", "status": "completed", "deployment_iterations": 1}],
+        )
+
+        args = argparse.Namespace(experiments=["exp-a"], parallel=1, rerun=None)
+
+        with patch("app_operator.commands.run_exp.run_experiment_task") as mock_task:
+            rc = run_command(args)
+
+        assert rc == 0
+        assert mock_task.call_count == 0, "hotel should be skipped without --rerun"

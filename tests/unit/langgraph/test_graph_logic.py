@@ -38,12 +38,14 @@ def test_analyze_code_skips_if_files_exist():
         script_agent_mock = MagicMock()
         fix_agent_mock = MagicMock()
         monitor_agent_mock = MagicMock()
+        health_agent_mock = MagicMock()
 
         mock_create_agent.side_effect = [
             analyze_agent_mock,
             script_agent_mock,
             fix_agent_mock,
             monitor_agent_mock,
+            health_agent_mock,
         ]
 
         # Script agent returns empty stream
@@ -74,7 +76,8 @@ def test_analyze_code_skips_if_files_exist():
             "monitor_max": 5,
             "analysis_summary": None,
             "last_fix_summary": None,
-            "token_usage": {"input": 0, "output": 0, "total": 0},
+            "health_verdict": None,
+            "agent_token_usage": [],
         }
 
         # Run - we expect it to eventually fail or finish depending on mocks
@@ -122,12 +125,14 @@ def test_analyze_code_runs_if_files_missing():
         script_agent_mock = MagicMock()
         fix_agent_mock = MagicMock()
         monitor_agent_mock = MagicMock()
+        health_agent_mock = MagicMock()
 
         mock_create_agent.side_effect = [
             analyze_agent_mock,
             script_agent_mock,
             fix_agent_mock,
             monitor_agent_mock,
+            health_agent_mock,
         ]
 
         # Simulate analyzer creating files by having invoke_agent write them
@@ -156,7 +161,8 @@ def test_analyze_code_runs_if_files_missing():
             "monitor_max": 5,
             "analysis_summary": None,
             "last_fix_summary": None,
-            "token_usage": {"input": 0, "output": 0, "total": 0},
+            "health_verdict": None,
+            "agent_token_usage": [],
         }
 
         try:

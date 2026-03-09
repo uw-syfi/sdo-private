@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
+from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import Config, load_config
@@ -14,6 +15,7 @@ from app_operator.exceptions import AgentError, SdsOperatorError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
+from app_operator.progress import emit_progress
 from app_operator.prompts import get_loader
 from app_operator.trajectory import TrajectoryRecorder
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
@@ -123,34 +125,33 @@ class AppOperator(OperatorBase):
         # Attach recorder to agent
         self.agent.recorder = self.recorder
 
-        # Initialize agents
-        self.analyzer = CodeAnalyzerAgent(
-            self.repo_path,
-            self.agent,
-            self.filesystem,
+        # Construct shared context for all agents
+        self._ctx = AgentContext(
+            repo_path=self.repo_path,
+            coding_agent=self.agent,
+            filesystem=self.filesystem,
+            operator_config=self.config.operator,
             recorder=self.recorder,
             dspy_config=self.config.dspy,
             ui=self.ui,
-            operator_config=self.config.operator,
+        )
+
+        # Initialize agents with shared context
+        self.analyzer = CodeAnalyzerAgent(
+            self.repo_path,
+            self.agent,
+            ctx=self._ctx,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,
             self.agent,
-            self.filesystem,
-            self.config.deployment,
-            self.config.operator,
-            recorder=self.recorder,
-            dspy_config=self.config.dspy,
-            ui=self.ui,
+            deployment_config=self.config.deployment,
+            ctx=self._ctx,
         )
         self.monitor = AppMonitor(
             self.repo_path,
             self.agent,
-            self.filesystem,
-            operator_config=self.config.operator,
-            recorder=self.recorder,
-            dspy_config=self.config.dspy,
-            ui=self.ui,
+            ctx=self._ctx,
         )
 
     def run(self) -> int:
@@ -194,12 +195,15 @@ class AppOperator(OperatorBase):
             self._deployed = True
 
             # Step 3: Monitor health and provide analysis
-            self.ui.set_stage("Monitoring")
-            self.monitor.run(
-                interval=self.health_check_interval,
-                max_checks=self.health_check_max_count,
-                check_shutdown=lambda: self._shutdown_requested,
-            )
+            if self.config.operator.phase.health_monitoring:
+                self.ui.set_stage("Monitoring")
+                self.monitor.run(
+                    interval=self.health_check_interval,
+                    max_checks=self.health_check_max_count,
+                    check_shutdown=lambda: self._shutdown_requested,
+                )
+            else:
+                logger.info("Health monitoring disabled by configuration, skipping")
 
             run_succeeded = True
             if self.config.operator.prometheus_integration:
@@ -245,6 +249,7 @@ class AppOperator(OperatorBase):
         if not self._deployed:
             return
 
+        emit_progress("finishing")
         logger.info("Shutting Down Application")
         logger.info("Running deployment script stop command...")
 

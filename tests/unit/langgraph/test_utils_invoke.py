@@ -6,7 +6,7 @@ from app_operator.langgraph.utils import invoke_agent
 
 
 def test_invoke_agent_simple():
-    state = {"token_usage": {"input": 0, "output": 0, "total": 0}}
+    state = {"agent_token_usage": []}
     mock_agent = MagicMock()
 
     # Mock stream output
@@ -24,16 +24,24 @@ def test_invoke_agent_simple():
 
     mock_recorder = MagicMock()
 
-    text, messages = invoke_agent(state, mock_agent, "System prompt", "User prompt", recorder=mock_recorder)
+    text, messages = invoke_agent(
+        state,
+        mock_agent,
+        "System prompt",
+        "User prompt",
+        agent_name="Test Agent",
+        recorder=mock_recorder,
+    )
 
     assert text == "Hello world"
     assert len(messages) == 3  # System, User, AI
-    assert state["token_usage"] == {"input": 10, "output": 5, "total": 15}
+    assert state["agent_token_usage"] == [
+        {"agent": "Test Agent", "input": 10, "output": 5, "total": 15},
+    ]
 
-    # Check recorder calls
+    # Check recorder calls — system and user prompts recorded via record_message
+    mock_recorder.add_system_message.assert_called_with("System prompt")
     mock_recorder.add_user_message.assert_called_with("User prompt")
-    # LangGraphTrajectoryHandler processes messages.
-    # For AIMessage, it calls add_assistant_message or add_tool_call
     mock_recorder.add_assistant_message.assert_called()
 
 
@@ -58,7 +66,7 @@ def test_invoke_agent_with_tools():
 
 
 def test_invoke_agent_anthropic_usage():
-    state = {"token_usage": {"input": 0, "output": 0, "total": 0}}
+    state = {"agent_token_usage": []}
     mock_agent = MagicMock()
 
     # Mock stream output for Anthropic style usage
@@ -68,6 +76,45 @@ def test_invoke_agent_anthropic_usage():
     )
     mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
 
-    invoke_agent(state, mock_agent, "", "User prompt")
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Anthropic Agent")
 
-    assert state["token_usage"] == {"input": 20, "output": 10, "total": 30}
+    assert state["agent_token_usage"] == [
+        {"agent": "Anthropic Agent", "input": 20, "output": 10, "total": 30},
+    ]
+
+
+def test_invoke_agent_usage_metadata():
+    """Token usage is extracted from usage_metadata (standardized LangChain attribute)."""
+    state = {"agent_token_usage": []}
+    mock_agent = MagicMock()
+
+    ai_msg = AIMessage(
+        content="Hello",
+        usage_metadata={"input_tokens": 30, "output_tokens": 15, "total_tokens": 45},
+    )
+    mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
+
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Gemini Agent")
+
+    assert state["agent_token_usage"] == [
+        {"agent": "Gemini Agent", "input": 30, "output": 15, "total": 45},
+    ]
+
+
+def test_invoke_agent_usage_metadata_preferred_over_response_metadata():
+    """usage_metadata takes precedence over response_metadata."""
+    state = {"agent_token_usage": []}
+    mock_agent = MagicMock()
+
+    ai_msg = AIMessage(
+        content="Hello",
+        usage_metadata={"input_tokens": 30, "output_tokens": 15, "total_tokens": 45},
+        response_metadata={"token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+    )
+    mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
+
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Test Agent")
+
+    assert state["agent_token_usage"] == [
+        {"agent": "Test Agent", "input": 30, "output": 15, "total": 45},
+    ]

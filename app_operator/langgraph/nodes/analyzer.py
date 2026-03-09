@@ -5,12 +5,15 @@ from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import invoke_agent
 from app_operator.logger import logger
+from app_operator.progress import emit_progress
 from app_operator.prompts import PromptLoader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
     TrajectoryRecorderProtocol,
 )
+
+logger = logger.bind(node="analyzer")
 
 
 def analyze_code(
@@ -37,6 +40,7 @@ def analyze_code(
             state["analysis_done"] = True
             return state
 
+        emit_progress("code_analysis")
         system_prompt = loader.render("code_analyzer/system.jinja2")
         user_prompt = loader.render("code_analyzer/user.jinja2", repo_path=repo_path)
 
@@ -48,6 +52,7 @@ def analyze_code(
             agent_name="Code Analyzer",
             context_limit=context_limit,
             recorder=recorder,
+            logger=logger,
         )
 
         state["analysis_done"] = True

@@ -22,6 +22,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1, "stderr": "Error occurred"},
             health_result=None,
+            health_verdict=None,
             last_fix_summary=None,
         )
 
@@ -57,6 +58,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
+            health_verdict=None,
             last_fix_summary=None,
         )
 
@@ -85,6 +87,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
+            health_verdict=None,
             last_fix_summary=None,
         )
 
@@ -113,6 +116,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
+            health_verdict=None,
             last_fix_summary=None,
         )
 
@@ -145,6 +149,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
+            health_verdict=None,
             last_fix_summary=None,
         )
 
@@ -176,6 +181,7 @@ class TestFixErrors:
             scripts_done=True,
             deploy_result={"exit_code": 1},
             health_result=None,
+            health_verdict=None,
             last_fix_summary=None,
         )
 
@@ -211,7 +217,13 @@ class TestFixErrors:
             messages=[],
             scripts_done=True,
             deploy_result={"exit_code": 0},
-            health_result={"exit_code": 1, "stderr": "Health check failed"},
+            health_result=None,
+            health_verdict={
+                "healthy": False,
+                "assessment": "Health check failed",
+                "diagnosis": "service down",
+                "script_was_fixed": False,
+            },
             last_fix_summary=None,
         )
 

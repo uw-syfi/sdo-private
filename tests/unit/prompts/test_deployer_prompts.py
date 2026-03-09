@@ -14,6 +14,7 @@ from app_operator.prompts.deployer import (
     create_generate_script_prompt,
     prepare_error_context,
 )
+from app_operator.types import HealthVerdict
 
 
 class TestPrepareErrorContext:
@@ -22,9 +23,8 @@ class TestPrepareErrorContext:
     def test_basic_deployment_error(self):
         """Test basic deployment error context."""
         deploy_result = {"exit_code": 1, "success": False}
-        health_result = None
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, None)
 
         assert "Deployment Script Result" in context
         assert "Exit Code: 1" in context
@@ -33,36 +33,44 @@ class TestPrepareErrorContext:
     def test_deployment_success_health_failure(self):
         """Test context when deployment succeeds but health check fails."""
         deploy_result = {"exit_code": 0, "success": True}
-        health_result = {"exit_code": 1, "success": False}
+        health_verdict = HealthVerdict(
+            healthy=False,
+            assessment="mongodb keeps crashing",
+            diagnosis="mongodb: OOMKill",
+            script_was_fixed=False,
+            raw_response="",
+        )
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, health_verdict)
 
         assert "Deployment Script Result" in context
         assert "Status: SUCCESS" in context
-        assert "Health Check Result" in context
-        assert "Status: FAILED" in context
+        assert "Health Assessment" in context
+        assert "Status: UNHEALTHY" in context
+        assert "mongodb: OOMKill" in context
+        assert "mongodb keeps crashing" in context
 
     def test_extremely_long_error_messages(self):
-        """Test handling of extremely long error messages.
+        """Test handling of extremely long assessment text.
 
-        Even though current implementation doesn't include stdout/stderr,
-        we verify it doesn't crash with very long outputs.
+        Verify it doesn't crash with very long outputs.
         """
         deploy_result = {
             "exit_code": 1,
             "success": False,
-            "stdout": "a" * 100000,  # 100KB
+            "stdout": "a" * 100000,
             "stderr": "b" * 100000,
         }
-        health_result = {
-            "exit_code": 1,
-            "success": False,
-            "stdout": "c" * 100000,
-            "stderr": "d" * 100000,
-        }
+        health_verdict = HealthVerdict(
+            healthy=False,
+            assessment="d" * 100000,
+            diagnosis="c" * 100000,
+            script_was_fixed=False,
+            raw_response="",
+        )
 
         # Should not crash
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, health_verdict)
 
         # Should still produce valid context
         assert isinstance(context, str)
@@ -97,10 +105,16 @@ class TestPrepareErrorContext:
     def test_none_log_paths(self):
         """Test with None log paths (optional parameters)."""
         deploy_result = {"exit_code": 1, "success": False}
-        health_result = {"exit_code": 1, "success": False}
+        health_verdict = HealthVerdict(
+            healthy=False,
+            assessment="unhealthy",
+            diagnosis="crash",
+            script_was_fixed=False,
+            raw_response="",
+        )
 
         # Should work with None log paths
-        context = prepare_error_context(deploy_result, health_result, None, None)
+        context = prepare_error_context(deploy_result, health_verdict, None, None)
 
         assert isinstance(context, str)
         assert "Deployment Script Result" in context
@@ -110,28 +124,33 @@ class TestPrepareErrorContext:
     def test_exit_code_zero_success_true(self):
         """Test with successful exit codes."""
         deploy_result = {"exit_code": 0, "success": True}
-        health_result = {"exit_code": 0, "success": True}
+        health_verdict = HealthVerdict(
+            healthy=True,
+            assessment="all good",
+            diagnosis="",
+            script_was_fixed=False,
+            raw_response="",
+        )
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, health_verdict)
 
         assert "Exit Code: 0" in context
         assert "Status: SUCCESS" in context
+        assert "Status: HEALTHY" in context
 
     def test_negative_exit_codes(self):
         """Test with negative exit codes (e.g., timeout = -1)."""
         deploy_result = {"exit_code": -1, "success": False}
-        health_result = {"exit_code": -1, "success": False}
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, None)
 
         assert "Exit Code: -1" in context
 
     def test_very_large_exit_codes(self):
         """Test with very large exit codes."""
         deploy_result = {"exit_code": 999999, "success": False}
-        health_result = None
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, None)
 
         assert "Exit Code: 999999" in context
 

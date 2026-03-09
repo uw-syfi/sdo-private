@@ -65,11 +65,11 @@ uv run -m lego_agent --no-tui --prompt "task"  # CLI mode
 
 ## Development Conventions
 
+- **Test-driven**: begin designing your work (feature, refactor, bug fix, etc.) by thinking about how to test it. Write testable code.
 - **Python**: type hints, `autopep8` formatting, `ruff` linting, `pytest` tests
 - **Structured data**: use dataclasses instead of raw `dict` when a data shape is constructed in multiple places or consumed with field access — this prevents `KeyError` and missing-field bugs at the type level
 - **Config**: dataclasses with `__post_init__` validation (`TypeError`/`ValueError`)
 - **Exceptions**: custom hierarchy in `app_operator/exceptions.py`
-- **Microservices**: docker-compose, Go modules, Consul service discovery
 
 ## Usage Guide for LLM Agents
 

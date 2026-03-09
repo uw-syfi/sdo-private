@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Protocol
@@ -12,12 +11,12 @@ if TYPE_CHECKING:
     from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
+from app_operator.cli_agent.agents.context import AgentContext
+from app_operator.cli_agent.agents.health_judge import AppHealthJudge
 from app_operator.config import OperatorConfig
-from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
-from app_operator.prompts import get_loader
+from app_operator.progress import emit_progress
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
@@ -25,10 +24,8 @@ from app_operator.trajectory import (
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
-HEALTH_OUTPUT_MAX_LENGTH = 5000  # characters before truncating health check stdout
-HEALTH_OUTPUT_TRUNCATE_AT = 2000  # characters to keep when truncating health check stderr
 
-
+# Kept importable for backward compatibility
 class MonitorLike(Protocol):
     """Protocol describing the monitor interface used by MonitoringTask."""
 
@@ -45,175 +42,70 @@ class MonitorLike(Protocol):
 
 
 class MonitoringTask(ABC):
-    """Abstract base class for monitoring tasks."""
+    """Abstract base class for monitoring tasks. Kept for backward compatibility."""
 
     @abstractmethod
     def run(self, operator: MonitorLike) -> None:
-        """Execute the monitoring task.
-
-        Args:
-            operator: The AppOperator/AppMonitor instance running this task.
-        """
+        """Execute the monitoring task."""
 
     @abstractmethod
     def analyze(self, operator: MonitorLike, result: Any) -> None:
         """Use a coding agent to analyze results and provide suggestions."""
 
 
+def _format_assessment_content(verdict: Any) -> str:
+    """Format a HealthVerdict into assessment log text."""
+    status = "healthy" if verdict.healthy else "unhealthy"
+    content = (
+        f"=== Health Assessment ===\n"
+        f"Status: {status}\n"
+        f"Script fixed: {verdict.script_was_fixed}\n\n"
+        f"Assessment: {verdict.assessment}\n"
+    )
+    if verdict.diagnosis:
+        content += f"\nDiagnosis: {verdict.diagnosis}\n"
+    return content
+
+
 class HealthCheckTask(MonitoringTask):
-    """A monitoring task specifically for running health checks."""
+    """A monitoring task specifically for running health checks. Kept for backward compatibility."""
 
     def run(self, operator: MonitorLike) -> None:
-        """Run the health check task.
-
-        Args:
-            operator: The AppMonitor instance.
-        """
         monitor = operator
-        # Start monitoring phase in trajectory
         with monitor.recorder.phase(Phase.MONITORING, {"cycle": monitor.check_count}) as r:
-            # Run health check
-            start_time = time.time()
-            health_result = run_health_check(
-                monitor.repo_path,
-                monitor.health_check_script,
+            judge = AppHealthJudge(
+                repo_path=monitor.repo_path,
+                coding_agent=monitor.agent,
+                health_check_script=monitor.health_check_script,
+                filesystem=monitor.filesystem,
+                operator_config=monitor.operator_config,
+                recorder=monitor.recorder,
+                dspy_config=monitor.dspy_config,
                 ui=monitor.ui,
             )
-            duration = time.time() - start_time
 
-            # Record health check tool call
-            r.add_tool_call(
-                tool="bash",
-                args={"script": ".sds/health_check.sh"},
-                stdout=health_result.get("stdout", ""),
-                stderr=health_result.get("stderr", ""),
-                exit_code=int(health_result.get("exit_code", -1) or -1),
-                duration=duration,
-            )
+            verdict = judge.assess()
 
-            self.analyze(monitor, health_result)
+            status = "healthy" if verdict.healthy else "unhealthy"
+            logger.info(f"Health assessment: {status}")
+            r.add_assistant_message(f"Health assessment: {status}. {verdict.assessment}")
+
+            self._save_assessment_log(monitor, verdict)
 
     def analyze(self, operator: MonitorLike, result: Any) -> None:
-        """Analyze health check results using the agent."""
-        monitor = operator
-        health_result = result
-        logger.info(f"Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results")
+        """No-op — analysis is now part of the agent-based assessment in run()."""
 
-        # Prepare health check context
-        context = self._prepare_health_context(health_result, monitor.check_count)
-
-        # Create analysis prompt
-        prompt = self._create_analysis_prompt(
-            context,
-            monitor.repo_path,
-            health_result,
-            monitor.check_count,
-            monitor.dspy_config,
-            recorder=monitor.recorder,
-        )
-
+    def _save_assessment_log(self, monitor: MonitorLike, verdict: Any) -> None:
+        """Write verdict to a log file."""
         try:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
-            # Ensure log directory exists
             monitor.filesystem.mkdir(monitor.log_dir, parents=True, exist_ok=True)
             log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
-
-            logger.info(f"Consulting {monitor.agent.__class__.__name__} for health analysis...")
-
-            response = monitor.agent.generate(
-                prompt,
-                cwd=str(monitor.repo_path),
-                timeout=monitor.operator_config.agent_timeout,
-            )
-
-            # Write the response to the log file
             with open(log_file, "w") as f:
-                f.write("=== Agent Analysis ===\n")
-                f.write(response)
-
-            # Extract executive summary
-            match = re.search(r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
-            if match:
-                summary = match.group(1).strip()
-                logger.info(f"Summary: {summary}")
-            else:
-                logger.warning("Summary not found in expected XML format. See log for full analysis.")
-
-            logger.info(f"Full analysis saved to: {log_file}")
-
-            # End the monitoring phase (handled by context manager exit, defaulting to success)
-
-        except (AgentError, OSError, RuntimeError) as e:
-            logger.error(f"Agent analysis failed: {e}")
-            monitor.recorder.add_assistant_message(f"Analysis failed: {e}")
-            # Ensure we mark phase as failed
-            monitor.recorder.set_phase_status("failed")
-
-    def _prepare_health_context(self, health_result: dict, check_count: int) -> str:
-        """Prepare health check context for analysis."""
-        context_parts = []
-
-        context_parts.append(f"## Health Check #{check_count}")
-        context_parts.append(f"Exit Code: {health_result['exit_code']}")
-        context_parts.append(f"Status: {'PASSED' if health_result['success'] else 'FAILED'}")
-        context_parts.append(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-
-        if health_result["stdout"]:
-            context_parts.append("\n### Output:")
-            stdout = health_result["stdout"]
-            # For health checks, include more output (up to HEALTH_OUTPUT_MAX_LENGTH chars)
-            if len(stdout) > HEALTH_OUTPUT_MAX_LENGTH:
-                stdout = stdout[-HEALTH_OUTPUT_MAX_LENGTH:]
-                context_parts.append(f"... (truncated, showing last {HEALTH_OUTPUT_MAX_LENGTH} chars)")
-            context_parts.append(stdout)
-
-        if health_result["stderr"]:
-            context_parts.append("\n### Errors:")
-            stderr = health_result["stderr"]
-            if len(stderr) > HEALTH_OUTPUT_TRUNCATE_AT:
-                stderr = stderr[-HEALTH_OUTPUT_TRUNCATE_AT:]
-                context_parts.append(f"... (truncated, showing last {HEALTH_OUTPUT_TRUNCATE_AT} chars)")
-            context_parts.append(stderr)
-
-        return "\n".join(context_parts)
-
-    def _create_analysis_prompt(
-        self,
-        context: str,
-        repo_path: Path,
-        health_result: dict,
-        check_count: int,
-        dspy_config: DSPyConfig | None = None,
-        recorder=None,
-    ) -> str:
-        """Create a prompt for the coding agent to analyze health check results.
-
-        Args:
-            context: Formatted health check context (for Jinja2)
-            repo_path: Repository path
-            health_result: Raw health check result dict
-            check_count: Current monitoring iteration
-            dspy_config: Optional DSPy configuration
-            recorder: Optional trajectory recorder for kwargs capture
-
-        Returns:
-            Rendered prompt string
-        """
-        # Pass both Jinja2 fields (context, repo_path) and DSPy fields
-        # (health_check_output, exit_code, iteration) to support both renderers
-        prompt = get_loader(dspy_config).render(
-            "monitor/analyze_health.jinja2",
-            # Jinja2 fields (for backward compatibility)
-            repo_path=repo_path,
-            context=context,
-            # DSPy fields (for DSPy signature)
-            health_check_output=health_result.get("stdout", ""),
-            exit_code=health_result.get("exit_code", -1),
-            iteration=check_count,
-            recorder=recorder,
-        )
-
-        return prompt
+                f.write(_format_assessment_content(verdict))
+            logger.info(f"Assessment saved to: {log_file}")
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"Failed to save assessment log: {e}")
 
 
 class AppMonitor:
@@ -228,29 +120,35 @@ class AppMonitor:
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
         ui: OperatorUI | None = None,
+        *,
+        ctx: AgentContext | None = None,
     ):
-        """Initialize the monitor agent.
+        if ctx is not None:
+            self._ctx = ctx
+        else:
+            self._ctx = AgentContext(
+                repo_path=repo_path,
+                coding_agent=agent,
+                filesystem=filesystem if filesystem is not None else RealFilesystem(),
+                operator_config=operator_config or OperatorConfig(),
+                recorder=recorder or NullTrajectoryRecorder(),
+                dspy_config=dspy_config,
+                ui=ui or NullOperatorUI(),
+            )
 
-        Args:
-            repo_path: Path to the repository.
-            agent: The coding agent to use for analysis.
-            filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
-            operator_config: Optional operator configuration for timeouts.
-            recorder: Trajectory recorder instance.
-            dspy_config: Optional DSPy configuration for optimized prompts.
-            ui: Optional UI interface.
-        """
-        self.repo_path = repo_path
-        self.agent = agent
-        self.filesystem = filesystem if filesystem is not None else RealFilesystem()
-        self.operator_config = operator_config or OperatorConfig()
-        self.recorder = recorder or NullTrajectoryRecorder()
-        self.dspy_config = dspy_config
-        self.ui = ui or NullOperatorUI()
-        self.monitoring_tasks: list[MonitoringTask] = [HealthCheckTask()]
+        # Convenience aliases
+        self.repo_path = self._ctx.repo_path
+        self.agent = self._ctx.coding_agent
+        self.filesystem = self._ctx.filesystem
+        self.operator_config = self._ctx.operator_config
+        self.recorder = self._ctx.recorder
+        self.dspy_config = self._ctx.dspy_config
+        self.ui = self._ctx.ui
         self.check_count = 0
-        self.health_check_script = self.repo_path / ".sds" / "health_check.sh"
-        self.log_dir = self.repo_path / ".sds" / "logs" / "monitor"
+        self.health_check_script = self._ctx.sds_dir / "health_check.sh"
+        self.log_dir = self._ctx.sds_dir / "logs" / "monitor"
+        # Keep monitoring_tasks for backward compat
+        self.monitoring_tasks: list[MonitoringTask] = [HealthCheckTask()]
 
     def run(
         self,
@@ -258,7 +156,7 @@ class AppMonitor:
         max_checks: int | None = None,
         check_shutdown: Callable[[], bool] | None = None,
     ):
-        """Monitor application health and provide agent analysis every interval.
+        """Monitor application health every interval.
 
         Args:
             interval: Seconds between checks.
@@ -270,7 +168,6 @@ class AppMonitor:
             f"{max_checks if max_checks else 'unlimited'})..."
         )
 
-        # Clear log directory on startup
         if self.filesystem.exists(self.log_dir):
             self.filesystem.remove_tree(self.log_dir)
         self.filesystem.mkdir(self.log_dir, parents=True, exist_ok=True)
@@ -282,7 +179,6 @@ class AppMonitor:
                 logger.info(f"Reached maximum number of checks ({max_checks}). Stopping monitor.")
                 break
 
-            # Wait for interval
             waited = 0.0
             step = 1.0
             while waited < interval:
@@ -297,9 +193,32 @@ class AppMonitor:
 
             self.check_count += 1
 
+            emit_progress("monitoring", cycle=self.check_count)
             self.ui.set_stage("Monitoring", detail=f"Cycle {self.check_count}")
             logger.info(f"Monitoring Cycle #{self.check_count}")
 
-            # Run all registered monitoring tasks
-            for task in self.monitoring_tasks:
-                task.run(self)
+            self._run_health_check()
+
+    def _run_health_check(self) -> None:
+        """Run a single health check cycle using AppHealthJudge."""
+        with self.recorder.phase(Phase.MONITORING, {"cycle": self.check_count}) as r:
+            judge = AppHealthJudge.from_context(self._ctx)
+            verdict = judge.assess()
+
+            status = "healthy" if verdict.healthy else "unhealthy"
+            logger.info(f"Health assessment: {status}")
+            r.add_assistant_message(f"Health assessment: {status}. {verdict.assessment}")
+
+            self._save_assessment_log(verdict)
+
+    def _save_assessment_log(self, verdict) -> None:
+        """Write verdict to a log file."""
+        try:
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            self.filesystem.mkdir(self.log_dir, parents=True, exist_ok=True)
+            log_file = self.log_dir / f"check_{self.check_count}_{timestamp}.log"
+            with open(log_file, "w") as f:
+                f.write(_format_assessment_content(verdict))
+            logger.info(f"Assessment saved to: {log_file}")
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"Failed to save assessment log: {e}")

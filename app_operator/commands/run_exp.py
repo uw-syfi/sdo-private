@@ -7,6 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 try:
@@ -27,6 +28,7 @@ from rich.table import Table
 from rich.text import Text
 
 from app_operator.logger import logger
+from app_operator.progress import parse_progress
 
 
 class _ActiveSpinnerColumn(SpinnerColumn):
@@ -38,11 +40,16 @@ class _ActiveSpinnerColumn(SpinnerColumn):
         return super().render(task)
 
 
+class AppStatus(str, Enum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
 @dataclass
 class AppResult:
     app: str
-    success: bool
-    status: str
+    status: AppStatus
     deployment_iterations: int | None
     repeat: int | None = None
     elapsed_seconds: float | None = None
@@ -127,6 +134,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=1,
         help="Maximum number of applications to run in parallel",
     )
+    parser.add_argument(
+        "--rerun",
+        choices=["failed", "all"],
+        default=None,
+        help="Rerun experiments: 'failed' reruns only non-successful apps, 'all' reruns everything",
+    )
 
 
 def _extract_results(exp_dir: Path) -> dict:
@@ -164,19 +177,23 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
     try:
         with open(results_path) as f:
             data = json.load(f)
-        results = [
-            AppResult(
-                app=entry["app"],
-                success=entry.get("success", entry.get("status") == "success"),
-                status=entry["status"],
-                deployment_iterations=entry.get("deployment_iterations"),
-                repeat=entry.get("repeat"),
-                elapsed_seconds=entry.get("elapsed_seconds"),
-                phase_durations=entry.get("phase_durations"),
-                total_tokens=entry.get("total_tokens"),
+        results = []
+        for entry in data.get("results", []):
+            try:
+                status = AppStatus(entry.get("status", "unknown"))
+            except ValueError:
+                status = AppStatus.UNKNOWN
+            results.append(
+                AppResult(
+                    app=entry["app"],
+                    status=status,
+                    deployment_iterations=entry.get("deployment_iterations"),
+                    repeat=entry.get("repeat"),
+                    elapsed_seconds=entry.get("elapsed_seconds"),
+                    phase_durations=entry.get("phase_durations"),
+                    total_tokens=entry.get("total_tokens"),
+                )
             )
-            for entry in data.get("results", [])
-        ]
         return results
     except (json.JSONDecodeError, KeyError, OSError):
         return []
@@ -190,8 +207,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
     for r in results:
         entry: dict = {
             "app": r.app,
-            "success": r.success,
-            "status": r.status,
+            "status": r.status.value,
             "deployment_iterations": r.deployment_iterations,
             "elapsed_seconds": r.elapsed_seconds,
             "phase_durations": r.phase_durations,
@@ -211,7 +227,7 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
         aggregated = []
         for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
-            successes = sum(1 for r in app_results if r.success)
+            successes = sum(1 for r in app_results if r.status == AppStatus.COMPLETED)
             iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
             elapsed = [r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None]
             tokens = [r.total_tokens for r in app_results if r.total_tokens is not None]
@@ -288,7 +304,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
 
         for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
-            successes = sum(1 for r in app_results if r.success)
+            successes = sum(1 for r in app_results if r.status == AppStatus.COMPLETED)
             iters = sorted(r.deployment_iterations for r in app_results if r.deployment_iterations is not None)
             elapsed = sorted(r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None)
             tokens = sorted(r.total_tokens for r in app_results if r.total_tokens is not None)
@@ -393,12 +409,21 @@ def run_experiment_task(
         deploy_sh = exp_dir / ".sds" / "deploy.sh"
         if deploy_sh.exists():
             progress.update(task_id, description=f"[cyan]{display_name}[/]: Teardown", completed=0)
-            subprocess.run(
-                ["bash", str(deploy_sh), "cleanup"],
-                cwd=exp_dir,
-                capture_output=True,
-                timeout=120,
-            )
+            try:
+                result = subprocess.run(
+                    ["bash", str(deploy_sh), "cleanup"],
+                    cwd=exp_dir,
+                    capture_output=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        f"Teardown for {display_name} exited with code {result.returncode}; continuing anyway"
+                    )
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Teardown for {display_name} timed out; continuing anyway")
+            except OSError as e:
+                logger.warning(f"Teardown for {display_name} failed: {e}; continuing anyway")
         # Remove existing exp dir to ensure fresh init
         if exp_dir.is_dir():
             shutil.rmtree(exp_dir)
@@ -424,8 +449,7 @@ def run_experiment_task(
             progress.advance(overall_task_id)
             return AppResult(
                 app=app_name,
-                success=False,
-                status="unknown",
+                status=AppStatus.FAILED,
                 deployment_iterations=None,
                 repeat=repeat_idx + 1 if total_repeats > 1 else None,
             )
@@ -458,37 +482,37 @@ def run_experiment_task(
         stop_tail = threading.Event()
 
         def check_status(line):
-            lower_line = line.lower()
-            if "code analysis" in lower_line and "step 1" in lower_line:
+            marker = parse_progress(line)
+            if marker is None:
+                return
+            phase = marker["phase"]
+            if phase == "code_analysis":
                 _transition_phase("code_analysis")
                 progress.update(task_id, description=f"[yellow]{display_name}[/]: Code Analysis", completed=20)
-            elif "generating deployment scripts" in lower_line:
+            elif phase == "script_generation":
                 _transition_phase("script_generation")
                 progress.update(task_id, description=f"[yellow]{display_name}[/]: Script Generation", completed=30)
-            elif "deployment attempt" in lower_line:
+            elif phase == "deployment":
                 _transition_phase("deployment")
-                # Extract attempt number if possible "Deployment Attempt #1"
-                try:
-                    parts = line.split("#")
-                    attempt = parts[-1].split()[0]
+                attempt = marker.get("attempt")
+                if attempt is not None:
                     progress.update(
                         task_id, description=f"[yellow]{display_name}[/]: Deploy-loop (Attempt {attempt})", completed=40
                     )
-                except (IndexError, ValueError):
+                else:
                     progress.update(task_id, description=f"[yellow]{display_name}[/]: Deployment", completed=40)
-            elif "monitoring cycle" in lower_line:
+            elif phase == "monitoring":
                 _transition_phase("monitoring")
-                try:
-                    parts = line.split("#")
-                    cycle = parts[-1].split()[0]
+                cycle = marker.get("cycle")
+                if cycle is not None:
                     progress.update(
                         task_id,
-                        description=f"[yellow]{display_name}[/]: Health-monitor (Attempt {cycle})",
+                        description=f"[yellow]{display_name}[/]: Health-monitor (Cycle {cycle})",
                         completed=70,
                     )
-                except (IndexError, ValueError):
+                else:
                     progress.update(task_id, description=f"[yellow]{display_name}[/]: Monitoring", completed=70)
-            elif "shutting down" in lower_line:
+            elif phase == "finishing":
                 _transition_phase("finishing")
                 progress.update(task_id, description=f"[green]{display_name}[/]: Finishing", completed=90)
 
@@ -531,29 +555,27 @@ def run_experiment_task(
         repeat = repeat_idx + 1 if total_repeats > 1 else None
 
         if proc.returncode == 0:
-            progress.update(task_id, description=f"[green]{display_name}[/]: Done", completed=100)
-            time.sleep(1)
-            progress.update(task_id, visible=False)
-            progress.advance(overall_task_id)
-            return AppResult(
-                app=app_name,
-                success=True,
-                repeat=repeat,
-                elapsed_seconds=elapsed_seconds,
-                phase_durations=phase_durations,
-                **extracted,
-            )
-        progress.update(task_id, description=f"[red]{display_name}[/]: Failed", completed=100)
+            try:
+                app_status = AppStatus(extracted["status"])
+            except ValueError:
+                app_status = AppStatus.UNKNOWN
+        else:
+            app_status = AppStatus.FAILED
+
+        color = "green" if app_status == AppStatus.COMPLETED else "red"
+        label = "Done" if app_status == AppStatus.COMPLETED else "Failed"
+        progress.update(task_id, description=f"[{color}]{display_name}[/]: {label}", completed=100)
         time.sleep(1)
         progress.update(task_id, visible=False)
         progress.advance(overall_task_id)
         return AppResult(
             app=app_name,
-            success=False,
+            status=app_status,
+            deployment_iterations=extracted["deployment_iterations"],
+            total_tokens=extracted["total_tokens"],
             repeat=repeat,
             elapsed_seconds=elapsed_seconds,
             phase_durations=phase_durations,
-            **extracted,
         )
 
 
@@ -660,15 +682,21 @@ def run_command(args: argparse.Namespace) -> int:
     console.print(f"Parallelism: {args.parallel}")
 
     # Prepare log directories and load any existing results (for resume support)
+    rerun = args.rerun
     results_by_exp: dict[str, list[AppResult]] = {}
     completed_keys_by_exp: dict[str, set[tuple[str, int | None]]] = {}
     for exp_name, _config_path, _config, log_dir in resolved:
         log_dir.mkdir(parents=True, exist_ok=True)
         existing = _load_existing_results(log_dir)
+        if rerun == "all":
+            existing = []
+        elif rerun == "failed":
+            existing = [r for r in existing if r.status == AppStatus.COMPLETED]
         results_by_exp[exp_name] = list(existing)
         completed_keys_by_exp[exp_name] = {(r.app, r.repeat) for r in existing}
         if existing:
-            console.print(f"  Resuming: {len(existing)} run(s) already complete, skipping.")
+            rerun_msg = f" (rerun={rerun})" if rerun else ""
+            console.print(f"  Resuming{rerun_msg}: {len(existing)} run(s) already complete, skipping.")
 
     exp_locks = {exp_name: threading.Lock() for exp_name, _, _, _ in resolved}
 
@@ -754,8 +782,7 @@ def run_command(args: argparse.Namespace) -> int:
                                 results_by_exp[exp_name].append(
                                     AppResult(
                                         app=Path(app).name,
-                                        success=False,
-                                        status="unknown",
+                                        status=AppStatus.FAILED,
                                         deployment_iterations=None,
                                         repeat=repeat,
                                     )

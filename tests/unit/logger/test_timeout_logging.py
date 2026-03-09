@@ -87,10 +87,10 @@ echo "Line 3: Finished"
             pass
 
     monkeypatch.setattr(
-        "app_operator.cli_agent.agents.deployer.subprocess.Popen", lambda *args, **kwargs: MockProcess()
+        "app_operator.cli_agent.agents.deploy_executor.subprocess.Popen", lambda *args, **kwargs: MockProcess()
     )
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.time.time", lambda: next(mock_times))
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.time.sleep", lambda x: None)
+    monkeypatch.setattr("app_operator.cli_agent.agents.deploy_executor.time.time", lambda: next(mock_times))
+    monkeypatch.setattr("app_operator.cli_agent.agents.deploy_executor.time.sleep", lambda x: None)
 
     # Run with short timeout (2 seconds) - but no actual waiting
     result = agent.run_deploy_command("start", timeout=2, log_file_path=log_file_path)

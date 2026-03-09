@@ -98,7 +98,10 @@ class AdkOperator(OperatorBase):
                 return 1
 
             # 4. Monitoring
-            await self._monitor()
+            if self.config.operator.phase.health_monitoring:
+                await self._monitor()
+            else:
+                logger.info("Health monitoring disabled by configuration, skipping")
 
             self.recorder.finalize("completed")
             return 0

@@ -106,13 +106,10 @@ def test_trajectory_lifecycle_integration(temp_repo):
     assert "messages" in conversation
 
     messages = conversation["messages"]
-    # Expect: System, User, Tool, Assistant
-    # Note: Phase start adds a system message automatically
-    # Context manager add a status message at the end
-    assert len(messages) >= 5
-    assert messages[0]["role"] == "system"
-    assert messages[1]["role"] == "user"
-    assert messages[1]["content"] == "Generate scripts for this repo"
+    # Expect: User, Tool, Assistant + status message at end (no auto system stub)
+    assert len(messages) >= 4
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "Generate scripts for this repo"
 
     # Find tool call
     tool_msg = next((m for m in messages if m["role"] == "tool_call"), None)
@@ -131,12 +128,6 @@ def test_trajectory_lifecycle_integration(temp_repo):
     assert "messages" in deploy_conversation
 
     deploy_messages = deploy_conversation["messages"]
-    # Check context in system prompt
-    system_msg = deploy_messages[0]
-    assert "role" in system_msg
-    assert system_msg["role"] == "system"
-    assert "attempt 1 of 3" in system_msg["content"]
-
     # Check error capture
     err_tool = next(
         (m for m in deploy_messages if m["role"] == "tool_call" and m["tool"] == "bash"),
@@ -165,7 +156,7 @@ def test_trajectory_robustness_large_output(temp_repo):
     # Access messages through the new structure
     conversation = data["script_generation"][0]
     messages = conversation["messages"]
-    tool_msg = messages[1]  # 0 is system, 1 is tool (no user msg here)
+    tool_msg = messages[0]  # no auto system stub; first message is the tool call
     assert tool_msg["role"] == "tool_call"
 
     # Check truncation happened (max is 10000 in implementation)

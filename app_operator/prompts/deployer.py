@@ -4,16 +4,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app_operator.constants import FIX_SUMMARY_FILENAME
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.prompts._core import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
-    from app_operator.types import CommandResult
+    from app_operator.types import CommandResult, HealthVerdict
 
 
 def prepare_error_context(
     deploy_result: CommandResult,
-    health_result: CommandResult | None,
+    health_verdict: HealthVerdict | None,
     log_file_path: Path | None = None,
     health_check_log_path: Path | None = None,
 ) -> str:
@@ -21,7 +20,7 @@ def prepare_error_context(
 
     Args:
         deploy_result: Deployment script result.
-        health_result: Health check result (None if deployment failed).
+        health_verdict: Health verdict (None if deployment failed before health check).
         log_file_path: Path to the deployment log file.
         health_check_log_path: Path to the health check log file.
 
@@ -41,10 +40,13 @@ def prepare_error_context(
     context_parts.append(f"Exit Code: {deploy_result['exit_code']}")
     context_parts.append(f"Status: {'SUCCESS' if deploy_result['success'] else 'FAILED'}")
 
-    if health_result is not None:
-        context_parts.append("\n## Health Check Result")
-        context_parts.append(f"Exit Code: {health_result['exit_code']}")
-        context_parts.append(f"Status: {'SUCCESS' if health_result['success'] else 'FAILED'}")
+    if health_verdict is not None:
+        context_parts.append("\n## Health Assessment")
+        context_parts.append(f"Status: {'HEALTHY' if health_verdict.healthy else 'UNHEALTHY'}")
+        if health_verdict.diagnosis:
+            context_parts.append(f"Diagnosis: {health_verdict.diagnosis}")
+        if health_verdict.assessment:
+            context_parts.append(f"Assessment: {health_verdict.assessment}")
 
     return "\n".join(context_parts)
 
@@ -57,7 +59,6 @@ def create_generate_script_prompt(
     platform: str,
     dspy_config: DSPyConfigProtocol | None = None,
     recorder=None,
-    filesystem: FileSystemInterface | None = None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
 
@@ -69,14 +70,10 @@ def create_generate_script_prompt(
         platform: The deployment platform (e.g., 'docker', 'kubernetes').
         dspy_config: Optional DSPy configuration for optimized prompts.
         recorder: Optional trajectory recorder for kwargs capture.
-        filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
 
     Returns:
         str: The rendered prompt.
     """
-    if filesystem is None:
-        filesystem = RealFilesystem()
-
     if script_name == "deploy.sh":
         template_name = "deployer/generate_deploy_script.jinja2"
     elif script_name == "health_check.sh":
@@ -85,22 +82,9 @@ def create_generate_script_prompt(
         # Fallback for other scripts or backward compatibility
         template_name = "deployer/generate_script.jinja2"
 
-    # Read code analysis and deployment issues if available
-    # This ensures kwargs match the DSPy signatures for optimization
-    code_analysis = ""
-    deployment_issues = ""
-    try:
-        sds_dir = Path(target_dir) / ".sds"
-        ca_path = sds_dir / "code_analysis.md"
-        di_path = sds_dir / "deployment_issues.md"
-
-        if filesystem.exists(ca_path):
-            code_analysis = filesystem.read_text(ca_path)
-        if filesystem.exists(di_path):
-            deployment_issues = filesystem.read_text(di_path)
-    except OSError:
-        # Ignore filesystem errors during prompt generation
-        pass
+    sds_dir = Path(target_dir) / ".sds"
+    has_code_analysis = (sds_dir / "code_analysis.md").exists()
+    has_deployment_issues = (sds_dir / "deployment_issues.md").exists()
 
     return get_loader(dspy_config).render(
         template_name,
@@ -109,8 +93,8 @@ def create_generate_script_prompt(
         repo_context=repo_context,
         target_dir=target_dir,
         repo_path=target_dir,  # Map target_dir to repo_path for signature
-        code_analysis=code_analysis,
-        deployment_issues=deployment_issues,
+        has_code_analysis=has_code_analysis,
+        has_deployment_issues=has_deployment_issues,
         platform=platform,
         recorder=recorder,
     )

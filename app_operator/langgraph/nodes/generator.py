@@ -4,6 +4,7 @@ from typing import Any
 from app_operator.config import Config
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import invoke_agent
+from app_operator.progress import emit_progress
 from app_operator.prompts import (
     PromptLoader,
     analyze_repository,
@@ -30,6 +31,7 @@ def generate_scripts(
     if state["scripts_done"]:
         return state
 
+    emit_progress("script_generation")
     with recorder.phase(Phase.SCRIPT_GENERATION):
         system_prompt = create_system_prompt(operator_config.deployment.platform)
         repo_context = analyze_repository(repo_path)
