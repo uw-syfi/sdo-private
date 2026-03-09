@@ -11,10 +11,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
 
 from app_operator.command_validation import DangerousCommandError, validate_command
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.langgraph.message_utils import extract_text
 
 SUBPROCESS_TIMEOUT_SECS = 120  # seconds before a subprocess command times out
 OUTPUT_SPILL_THRESHOLD = 10_000  # chars; total stdout+stderr above this triggers file spill
@@ -673,16 +676,84 @@ def _build_make_change_on_remote_copy(
     return make_change_on_remote_copy  # type: ignore[reportReturnType]
 
 
+MAX_SUBAGENT_DEPTH = 3
+
+
+def _build_spawn_subagent(
+    llm: Any,
+    base_tools: list,
+    compaction_hook: Any,
+    current_depth: int,
+    max_depth: int,
+    token_sink: list,
+) -> Callable[..., Any]:
+    @tool()
+    def spawn_subagent(prompt: str, system_prompt: str = "") -> str:
+        """Spawn a subagent to handle a subtask. The subagent has access to all
+        standard tools. Returns the subagent's text response."""
+        if current_depth >= max_depth:
+            return f"[Error: Maximum subagent depth ({max_depth}) reached]"
+
+        child_tools = list(base_tools)
+        if current_depth + 1 < max_depth:
+            child_tools.append(
+                _build_spawn_subagent(llm, base_tools, compaction_hook, current_depth + 1, max_depth, token_sink)
+            )
+
+        child_agent = create_react_agent(llm, tools=child_tools, pre_model_hook=compaction_hook)
+
+        messages: list = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=prompt))
+
+        result_text = ""
+        total_usage: dict[str, int] = {"input": 0, "output": 0, "total": 0}
+
+        for chunk in child_agent.stream({"messages": messages}, stream_mode="updates"):
+            for _node_name, updates in chunk.items():
+                for msg in updates.get("messages", []):
+                    if isinstance(msg, AIMessage):
+                        um = getattr(msg, "usage_metadata", None)
+                        if um:
+                            total_usage["input"] += um.get("input_tokens", 0)
+                            total_usage["output"] += um.get("output_tokens", 0)
+                            total_usage["total"] += um.get("total_tokens", 0) or (
+                                um.get("input_tokens", 0) + um.get("output_tokens", 0)
+                            )
+                        text = extract_text(msg.content)
+                        if text:
+                            result_text = text
+
+        if total_usage["total"] > 0 or total_usage["input"] > 0:
+            token_sink.append(
+                {
+                    "agent": f"subagent_d{current_depth}",
+                    "input": total_usage["input"],
+                    "output": total_usage["output"],
+                    "total": total_usage["total"],
+                }
+            )
+
+        return result_text or "[No response from subagent]"
+
+    return spawn_subagent
+
+
 def build_tools(
     repo_path: Path,
     filesystem: FileSystemInterface | None = None,
     git_integration: bool = False,
+    llm: Any = None,
+    compaction_hook: Any = None,
+    max_subagent_depth: int = MAX_SUBAGENT_DEPTH,
+    token_sink: list | None = None,
 ) -> list[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 
     context = ToolContext(repo_root=repo_path.resolve(), filesystem=filesystem)
-    tools = [
+    tools: list[Callable[..., Any]] = [
         _build_ls(context),
         _build_glob(context),
         _build_read(context),
@@ -692,4 +763,15 @@ def build_tools(
     ]
     if git_integration:
         tools.append(_build_make_change_on_remote_copy(context))
+    if llm is not None:
+        tools.append(
+            _build_spawn_subagent(
+                llm,
+                list(tools),
+                compaction_hook,
+                0,
+                max_subagent_depth,
+                token_sink if token_sink is not None else [],
+            )
+        )
     return tools

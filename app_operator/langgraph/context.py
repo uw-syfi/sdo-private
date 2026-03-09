@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +22,7 @@ class NodeContext:
     context_limit: int
     recorder: TrajectoryRecorderProtocol
     check_shutdown: Callable[[], bool] | None = None
+    subagent_token_sink: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.recorder is None:
@@ -40,10 +41,10 @@ class NodeContext:
         logger: Any = None,
     ) -> "AgentResult":
         """Invoke an agent with context_limit and recorder pre-filled from this NodeContext."""
-        from app_operator.langgraph.utils import invoke_agent
+        from app_operator.langgraph.utils import _record_session_usage, invoke_agent
         from app_operator.langgraph.utils import logger as default_logger
 
-        return invoke_agent(
+        result = invoke_agent(
             state,
             agent,
             system_prompt,
@@ -53,3 +54,7 @@ class NodeContext:
             recorder=self.recorder,
             logger=logger if logger is not None else default_logger,
         )
+        for record in self.subagent_token_sink:
+            _record_session_usage(state, record["agent"], record, self.recorder)
+        self.subagent_token_sink.clear()
+        return result

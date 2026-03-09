@@ -41,15 +41,33 @@ def build_graph(
     if filesystem is None:
         filesystem = RealFilesystem()
 
-    tools = build_tools(repo_path, filesystem, git_integration=config.features.git_integration)
-
     # Create a loader instance with DSPy config (no global singleton needed)
     loader = PromptLoader(dspy_config=config.dspy)
 
-    # Determine model context limit
+    # Determine model context limit and compaction hook before building tools
     model_name = config.agent.model or "gpt-4o"
     context_limit = get_model_context_limit(model_name)
     compaction_hook = make_compaction_hook(llm, context_limit)
+
+    # NodeContext must exist before tools so the token sink can be shared
+    ctx = NodeContext(
+        repo_path=repo_path,
+        filesystem=filesystem,
+        loader=loader,
+        config=config,
+        context_limit=context_limit,
+        recorder=recorder or NullTrajectoryRecorder(),
+        check_shutdown=check_shutdown,
+    )
+
+    tools = build_tools(
+        repo_path,
+        filesystem,
+        git_integration=config.features.git_integration,
+        llm=llm,
+        compaction_hook=compaction_hook,
+        token_sink=ctx.subagent_token_sink,
+    )
 
     analyze_agent = create_react_agent(llm, tools=tools, pre_model_hook=compaction_hook)
     script_agent = create_react_agent(llm, tools=tools, pre_model_hook=compaction_hook)
@@ -59,16 +77,6 @@ def build_graph(
     )
     consolidation_agent = create_react_agent(
         llm, tools=tools, response_format=ConsolidatedSummaryResponse, pre_model_hook=compaction_hook
-    )
-
-    ctx = NodeContext(
-        repo_path=repo_path,
-        filesystem=filesystem,
-        loader=loader,
-        config=config,
-        context_limit=context_limit,
-        recorder=recorder or NullTrajectoryRecorder(),
-        check_shutdown=check_shutdown,
     )
 
     def should_fix(state: OperatorState) -> str:
