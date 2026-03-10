@@ -189,8 +189,8 @@ class DeploymentAgent(dspy.Module):
             code_analysis=code_analysis,
             deployment_issues=issues,
         )
-        self._write_script(deploy_path, self._validate(deploy_result.deploy_script))
-        self._write_script(health_path, self._validate(health_result.health_check_script))
+        self._write_script(deploy_path, strip_code_fences(self._validate(deploy_result.deploy_script)))
+        self._write_script(health_path, strip_code_fences(self._validate(health_result.health_check_script)))
 
     def _fix_and_track(
         self,
@@ -268,7 +268,7 @@ class DeploymentAgent(dspy.Module):
 
     @staticmethod
     def _write_script(path: str, content: str) -> None:
-        write_file(path, strip_code_fences(content))
+        write_file(path, content)
         os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
 
     @staticmethod
