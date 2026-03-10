@@ -6,14 +6,11 @@ from app_operator_dspy.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator_dspy.agents.deployer import DeploymentAgent
 from app_operator_dspy.agents.monitor import MonitorAgent
 
-DEFAULT_MODEL = "gemini/gemini-2.5-pro"
-
-
-def configure_lm(model: str = DEFAULT_MODEL, **kwargs) -> dspy.LM:
+def configure_lm(model: str, **kwargs) -> dspy.LM:
     """Configure the DSPy language model globally.
 
     Args:
-        model: LiteLLM model identifier (default: Gemini 2.5 Pro).
+        model: LiteLLM model identifier.
         **kwargs: Additional arguments passed to ``dspy.LM``.
 
     Returns:
