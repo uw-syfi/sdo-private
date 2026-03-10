@@ -14,6 +14,15 @@ from app_operator_dspy.operator import DSPyOperator, configure_lm
 DEFAULT_MODEL = "vertex_ai/gemini-2.5-pro"
 
 
+def _resolve_vertex_project() -> str:
+    """Resolve GCP project ID from VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT."""
+    project = os.environ.get("VERTEX_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if project:
+        return project
+    print("[error] Set VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT")
+    sys.exit(1)
+
+
 def run_command(args: argparse.Namespace) -> int:
     source_app = os.path.abspath(args.app_path)
     if not os.path.isdir(source_app):
@@ -34,8 +43,10 @@ def run_command(args: argparse.Namespace) -> int:
     model = args.model or DEFAULT_MODEL
     lm_kwargs = {}
     if model.startswith("vertex_ai/"):
-        lm_kwargs["vertex_project"] = os.environ.get("GOOGLE_CLOUD_PROJECT", "allmos-487905")
-        lm_kwargs["vertex_location"] = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        lm_kwargs["vertex_project"] = _resolve_vertex_project()
+        lm_kwargs["vertex_location"] = os.environ.get(
+            "VERTEX_LOCATION", os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        )
     print(f"[setup] Model: {model}")
     configure_lm(model, **lm_kwargs)
 
