@@ -63,6 +63,12 @@ Before making any fixes, identify the deployment platform:
 2. **STEP 2**: Read `.sds/deploy.sh` to identify deployment platform
 3. **STEP 3**: Analyze the error context and identify the root cause
 4. **STEP 4**: Make targeted fixes using commands appropriate for the detected platform
+{% if platform == "docker" %}
+4.5. **STEP 4.5 — Validate compose file**: After any edit to docker-compose.yml,
+     immediately run `docker compose -f <path>/docker-compose.yml config --quiet`.
+     If it exits non-zero, fix the syntax error before proceeding. Never declare
+     a fix complete with an unvalidated compose file.
+{% endif %}
 5. **STEP 5**: If necessary, fix application code, deployment config, or environment variables
 6. **STEP 6**: Verify the fix makes sense in context
 
