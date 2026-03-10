@@ -6,6 +6,7 @@ from app_operator_dspy.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator_dspy.agents.deployer import DeploymentAgent
 from app_operator_dspy.agents.monitor import MonitorAgent
 
+
 def configure_lm(model: str, **kwargs) -> dspy.LM:
     """Configure the DSPy language model globally.
 

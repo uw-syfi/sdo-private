@@ -114,7 +114,9 @@ def main() -> int:
     run_parser.add_argument("--monitor-checks", type=int, default=2, help="Number of monitor checks (default: 2)")
     run_parser.add_argument("--deploy-timeout", type=int, default=300, help="Deploy timeout in seconds (default: 300)")
     run_parser.add_argument(
-        "--health-check-timeout", type=int, default=300,
+        "--health-check-timeout",
+        type=int,
+        default=300,
         help="Health check timeout in seconds (default: 300)",
     )
 

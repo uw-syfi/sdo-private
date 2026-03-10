@@ -88,10 +88,7 @@ class CodeAnalyzerAgent(dspy.Module):
                 f"\n\n[Note: {files_skipped} files skipped due to context budget. File tree above lists all files.]"
             )
 
-        print(
-            f"[code_analyzer] read {len(file_contents)} files "
-            f"({total_chars:,} chars), {files_skipped} skipped"
-        )
+        print(f"[code_analyzer] read {len(file_contents)} files ({total_chars:,} chars), {files_skipped} skipped")
         print("[code_analyzer] calling LLM for analysis...")
         result = self.analyze(repo_path=repo_path, file_tree=context)
         print("[code_analyzer] analysis complete")
