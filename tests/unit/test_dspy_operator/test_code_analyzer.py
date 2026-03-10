@@ -39,16 +39,6 @@ class TestCodeAnalyzerAgent:
         assert "FROM node:18" in call_kwargs["file_tree"]
         assert "version: '3'" in call_kwargs["file_tree"]
 
-    def test_forward_returns_raw_context(self, tmp_path):
-        (tmp_path / "Dockerfile").write_text("FROM node:18")
-
-        agent = CodeAnalyzerAgent()
-        agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="ok", issues="none"))
-
-        result = agent.forward(str(tmp_path))
-
-        assert "FROM node:18" in result.raw_context
-
     def test_forward_works_without_files(self, tmp_path):
         agent = CodeAnalyzerAgent()
         agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="a", issues="b"))
@@ -100,9 +90,10 @@ class TestCodeAnalyzerAgent:
         agent = CodeAnalyzerAgent()
         agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="a", issues="b"))
 
-        result = agent.forward(str(tmp_path))
+        agent.forward(str(tmp_path))
 
-        # Root file should appear before nested file
-        root_pos = result.raw_context.find("root content")
-        deep_pos = result.raw_context.find("deep content")
+        # Root file should appear before nested file in the context
+        file_tree = agent.analyze.call_args.kwargs["file_tree"]
+        root_pos = file_tree.find("root content")
+        deep_pos = file_tree.find("deep content")
         assert root_pos < deep_pos

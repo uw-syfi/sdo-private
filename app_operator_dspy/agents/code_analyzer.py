@@ -81,10 +81,8 @@ class CodeAnalyzerAgent(dspy.Module):
             total_chars += len(entry)
 
         context = file_tree
-        raw_context = ""
         if file_contents:
-            raw_context = "\n\n".join(file_contents)
-            context += "\n\n--- File Contents ---\n" + raw_context
+            context += "\n\n--- File Contents ---\n" + "\n\n".join(file_contents)
         if files_skipped:
             context += (
                 f"\n\n[Note: {files_skipped} files skipped due to context budget. File tree above lists all files.]"
@@ -102,9 +100,5 @@ class CodeAnalyzerAgent(dspy.Module):
         sds_dir = os.path.join(repo_path, ".sds")
         write_file(os.path.join(sds_dir, "code_analysis.md"), result.analysis)
         write_file(os.path.join(sds_dir, "deployment_issues.md"), result.issues)
-
-        # Attach raw file contents for downstream agents (e.g., deployer
-        # needs exact port mappings from compose files, not LLM summaries)
-        result.raw_context = raw_context
 
         return result
