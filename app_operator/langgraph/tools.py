@@ -193,6 +193,38 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
     return write_file  # type: ignore[reportReturnType]
 
 
+def _build_str_replace(context: ToolContext) -> Callable[[str, str, str], str]:
+    @tool("str_replace")
+    def str_replace(path: str, old_str: str, new_str: str) -> str:
+        """Replace an exact string in a file with new content.
+
+        Finds old_str in the file and replaces it with new_str. Fails if
+        old_str appears zero times (not found) or more than once (ambiguous).
+        Use this instead of write_file for targeted edits to avoid rewriting
+        the entire file.
+
+        Args:
+            path: Path to the file to edit.
+            old_str: The exact string to find and replace.
+            new_str: The string to replace old_str with.
+        """
+        try:
+            target = context.resolve_path(path)
+            content = context.filesystem.read_text(target)
+            count = content.count(old_str)
+            if count == 0:
+                return f"Error: old_str not found in {path}"
+            if count > 1:
+                return f"Error: old_str appears {count} times in {path} (must be unique)"
+            new_content = content.replace(old_str, new_str, 1)
+            context.filesystem.write_text(target, new_content)
+            return f"Edited {path}"
+        except (ValueError, OSError) as e:
+            return f"Error: {e!s}"
+
+    return str_replace  # type: ignore[reportReturnType]
+
+
 def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
     @tool("bash")
     def bash(command: str, timeout: int = SUBPROCESS_TIMEOUT_SECS) -> dict[str, Any]:
@@ -777,6 +809,7 @@ def build_tools(
         _build_read(context),
         _build_grep(context),
         _build_write_file(context),
+        _build_str_replace(context),
         _build_bash(context),
     ]
     if git_integration:

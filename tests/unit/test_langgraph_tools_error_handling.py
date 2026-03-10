@@ -11,6 +11,7 @@ from app_operator.langgraph.tools import (
     _build_grep,
     _build_ls,
     _build_read,
+    _build_str_replace,
     _build_write_file,
 )
 
@@ -145,6 +146,44 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         result = ls_tool.invoke({"path": "../outside"})
         self.assertTrue(result.startswith("Error: "))
         self.assertIn("Path escapes repository root", result)
+
+
+class TestStrReplace(unittest.TestCase):
+    def setUp(self):
+        self.repo_root = Path("/tmp/repo")
+        self.fs = InMemoryFilesystem()
+        self.fs.mkdir(self.repo_root)
+        self.context = ToolContext(self.repo_root, self.fs)
+        self.str_replace_tool = _build_str_replace(self.context)
+
+    def test_happy_path(self):
+        self.fs.write_text(self.repo_root / "file.txt", "hello world")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "world", "new_str": "there"})
+        self.assertEqual(result, "Edited file.txt")
+        self.assertEqual(self.fs.read_text(self.repo_root / "file.txt"), "hello there")
+
+    def test_old_str_not_found(self):
+        self.fs.write_text(self.repo_root / "file.txt", "hello world")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "missing", "new_str": "x"})
+        self.assertEqual(result, "Error: old_str not found in file.txt")
+
+    def test_old_str_appears_multiple_times(self):
+        self.fs.write_text(self.repo_root / "file.txt", "foo foo foo")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "foo", "new_str": "bar"})
+        self.assertEqual(result, "Error: old_str appears 3 times in file.txt (must be unique)")
+
+    def test_path_escapes_root(self):
+        result = self.str_replace_tool.invoke({"path": "../outside/file.txt", "old_str": "x", "new_str": "y"})
+        self.assertTrue(result.startswith("Error: "))
+        self.assertIn("Path escapes repository root", result)
+
+    def test_replaces_only_first_occurrence(self):
+        # old_str must be unique per the tool contract, but verify replace(..., 1) semantics
+        # by using a file where old_str appears exactly once
+        self.fs.write_text(self.repo_root / "file.txt", "aXb")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "X", "new_str": "Y"})
+        self.assertEqual(result, "Edited file.txt")
+        self.assertEqual(self.fs.read_text(self.repo_root / "file.txt"), "aYb")
 
 
 if __name__ == "__main__":

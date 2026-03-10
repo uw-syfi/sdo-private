@@ -239,9 +239,7 @@ class TestBuildSpawnSubagentTokenTracking(unittest.TestCase):
 
     def _make_ai_message(self, input_tokens: int, output_tokens: int) -> MagicMock:
         msg = MagicMock()
-        msg.__class__ = __import__(
-            "langchain_core.messages", fromlist=["AIMessage"]
-        ).AIMessage
+        msg.__class__ = __import__("langchain_core.messages", fromlist=["AIMessage"]).AIMessage
         msg.usage_metadata = {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -294,6 +292,7 @@ class TestBuildSpawnSubagentTokenTracking(unittest.TestCase):
                     spawn = next(t for t in tools if getattr(t, "name", None) == "spawn_subagent")
                     spawn.invoke({"prompt": "do subtask"})
                     return make_stream([depth0_msg])
+
                 agent.stream = stream_depth0
             else:
                 # depth-1 agent: just stream depth1_msg
@@ -367,6 +366,7 @@ class TestBuildSpawnSubagentTokenTracking(unittest.TestCase):
                     spawn = next(t for t in tools if getattr(t, "name", None) == "spawn_subagent")
                     spawn.invoke({"prompt": "d1 task"})
                     return make_stream(make_ai_msg(100))
+
                 agent.stream = stream_d0
             elif idx == 1:
                 # depth-1: spawns depth-2, then reports 20 own tokens
@@ -374,6 +374,7 @@ class TestBuildSpawnSubagentTokenTracking(unittest.TestCase):
                     spawn = next(t for t in tools if getattr(t, "name", None) == "spawn_subagent")
                     spawn.invoke({"prompt": "d2 task"})
                     return make_stream(make_ai_msg(20))
+
                 agent.stream = stream_d1
             else:
                 # depth-2: leaf, reports 5 own tokens

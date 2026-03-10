@@ -48,8 +48,14 @@ def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> Oper
             if not missing:
                 break
             logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, deploy_guardrail.max_retries)
-            result = ctx.invoke(state, agent, "", deploy_guardrail.reminder(missing), agent_name="Script Generator",
-                                prior_messages=result.messages)
+            result = ctx.invoke(
+                state,
+                agent,
+                "",
+                deploy_guardrail.reminder(missing),
+                agent_name="Script Generator",
+                prior_messages=result.messages,
+            )
 
         result = ctx.invoke(state, agent, "", health_prompt, agent_name="Script Generator")
         for retry in range(health_guardrail.max_retries):
@@ -57,8 +63,14 @@ def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> Oper
             if not missing:
                 break
             logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, health_guardrail.max_retries)
-            result = ctx.invoke(state, agent, "", health_guardrail.reminder(missing), agent_name="Script Generator",
-                                prior_messages=result.messages)
+            result = ctx.invoke(
+                state,
+                agent,
+                "",
+                health_guardrail.reminder(missing),
+                agent_name="Script Generator",
+                prior_messages=result.messages,
+            )
 
         state["scripts_done"] = True
         return state
