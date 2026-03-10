@@ -95,6 +95,9 @@ class TestDeploymentAgent:
 
         assert result.success is True
         assert result.attempts == 2
+        # Verify cleanup was called after recheck failure
+        cleanup_call = mock_shell.call_args_list[3]
+        assert "cleanup" in cleanup_call.args[0]
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_max_attempts_exceeded(self, mock_shell, tmp_path):

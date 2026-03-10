@@ -163,6 +163,7 @@ class DeploymentAgent(dspy.Module):
 
             # Full retry needed — cleanup before next attempt
             print(f"[deployer] attempt {attempt} — full retry needed, cleaning up...")
+            self._cleanup(deploy_path, repo_path)
 
         return dspy.Prediction(
             success=False,
