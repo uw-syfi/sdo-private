@@ -15,7 +15,7 @@ from app_operator.prompts import (
 from app_operator.trajectory import Phase
 from app_operator.types import HealthVerdict
 
-logger = logger.bind(node="deployer")
+logger = logger.bind(node="repair agent")
 
 
 class FixSummaryResponse(BaseModel):

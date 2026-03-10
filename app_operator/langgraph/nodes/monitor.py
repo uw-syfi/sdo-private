@@ -12,7 +12,7 @@ from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.trajectory import Phase
 
-logger = logger.bind(node="monitor")
+logger = logger.bind(node="health judge")
 
 
 class HealthVerdictResponse(BaseModel):

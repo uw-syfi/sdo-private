@@ -12,7 +12,7 @@ from app_operator.prompts import (
 )
 from app_operator.trajectory import Phase
 
-logger = _logger.bind(node="generator")
+logger = _logger.bind(node="script generator")
 
 
 def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> OperatorState:
