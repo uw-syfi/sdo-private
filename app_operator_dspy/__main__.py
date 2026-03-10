@@ -1,6 +1,7 @@
 """CLI entry point: ``uv run -m app_operator_dspy run <app_path>``."""
 
 import argparse
+import atexit
 import os
 import shutil
 import sys
@@ -23,6 +24,7 @@ def run_command(args: argparse.Namespace) -> int:
 
     # Copy app to a temp dir so we don't pollute the repo
     work_dir = tempfile.mkdtemp(prefix="sds_dspy_")
+    atexit.register(shutil.rmtree, work_dir, True)
     repo_path = os.path.join(work_dir, app_name)
     shutil.copytree(source_app, repo_path)
     print(f"[setup] App: {app_name}")
