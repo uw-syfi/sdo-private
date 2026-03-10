@@ -12,7 +12,6 @@ from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.models import get_model_context_limit
 from app_operator.langgraph.nodes.analyzer import analyze_code
 from app_operator.langgraph.nodes.deployer import (
-    ConsolidatedSummaryResponse,
     FixSummaryResponse,
     deploy_attempt,
     fix_errors,
@@ -75,9 +74,6 @@ def build_graph(
     health_agent = create_react_agent(
         llm, tools=tools, response_format=HealthVerdictResponse, pre_model_hook=compaction_hook
     )
-    consolidation_agent = create_react_agent(
-        llm, tools=tools, response_format=ConsolidatedSummaryResponse, pre_model_hook=compaction_hook
-    )
 
     def should_fix(state: OperatorState) -> str:
         health_verdict = state.get("health_verdict") or {}
@@ -104,7 +100,7 @@ def build_graph(
     graph.add_node("generate_scripts", lambda s: generate_scripts(s, ctx, script_agent))
     graph.add_node("deploy_attempt", lambda s: deploy_attempt(s, ctx))
     graph.add_node("health_check", lambda s: health_check(s, ctx, health_agent))
-    graph.add_node("fix_errors", lambda s: fix_errors(s, ctx, fix_agent, consolidation_agent))
+    graph.add_node("fix_errors", lambda s: fix_errors(s, ctx, fix_agent))
     graph.add_node("monitor_health", lambda s: monitor_health(s, ctx, health_agent, health_check_interval))
 
     graph.set_entry_point("analyze_code")

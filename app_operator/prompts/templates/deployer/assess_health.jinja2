@@ -82,6 +82,25 @@ Maintain the CLI schema throughout:
 ### 7. Return your structured verdict
 Base your verdict on the converged, reliable script output AND your independent verification.
 
+{% if has_deployment_progress is defined and has_deployment_progress %}
+### 8. Update deployment progress document
+
+Read `{{ deployment_progress_path }}` and update it as follows:
+
+1. Read the "Current Round" section to find the **Success criteria** and **Disproved if** conditions
+2. Evaluate whether the success criteria were met based on your health assessment
+3. Update the "Current Round" entry:
+   - Set **Outcome**: `confirmed` (success criteria met), `refuted` (disproved condition triggered), or `partial`
+   - Set **Reason**: brief explanation of why
+4. Move the updated "Current Round" block to the **History** section (append as `### Attempt {{ attempt if attempt is defined else "N" }}`)
+5. Write a new **Last Health Assessment** section:
+   - **Outcome**: confirmed | refuted | partial
+   - **Reason**: same as above
+   - **Current symptoms**: bullet list of observed symptoms (empty if healthy)
+
+The `diagnosis` field in your structured response should match the current symptoms list.
+{% endif %}
+
 ## Subagent Delegation
 
 **Use `spawn_subagent` aggressively to preserve your context window.**

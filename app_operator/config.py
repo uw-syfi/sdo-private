@@ -450,7 +450,9 @@ class OperatorPhaseConfig:
     """Configuration for operator phase control."""
 
     code_analysis: bool = True
-    fix_summary_consolidation: bool = True
+    fix_summary_consolidation: bool = (
+        True  # when True, agents maintain deployment_progress.md to prevent re-trying refuted hypotheses
+    )
     health_monitoring: bool = True
 
     def __post_init__(self):

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deploy_executor import DeployExecutor
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge, HealthVerdict
-from app_operator.cli_agent.agents.repair_agent import RepairAgent, get_fix_summary_path
+from app_operator.cli_agent.agents.repair_agent import RepairAgent
 from app_operator.cli_agent.agents.script_generator_agent import (
     ScriptGeneratorAgent,
     generate_scripts,  # noqa: F401 — re-exported for backward compat
@@ -119,11 +119,6 @@ class DeploymentAgent:
 
         # Determine start attempt based on existing logs
         start_attempt = self._get_next_attempt_number()
-
-        if start_attempt == 1 and self.operator_config.phase.fix_summary_consolidation:
-            summary_file = get_fix_summary_path(self.sds_dir)
-            if self.filesystem.exists(summary_file):
-                self.filesystem.remove(summary_file)
 
         end_of_range = start_attempt + max_attempts
         absolute_max_attempts = end_of_range - 1

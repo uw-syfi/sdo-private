@@ -38,9 +38,9 @@ code_analysis = false
 
 **Default:** `true`
 
-After the self-healing deployment loop, consolidates per-iteration fix summaries into a single structured report. Useful for auditing what changes the agent made across retries.
+Enables the hypothesis-driven deployment progress document (`.sds/deployment_progress.md`). When enabled, the Error Fixer writes a hypothesis (root cause, fix plan, success criteria) before making any edits, and the Health Judge reads and validates those criteria after each attempt, recording confirmed/refuted outcomes. The accumulated history prevents re-trying approaches that have already been disproved.
 
-Disable if you only care about raw trajectories and want to skip the summary step:
+Disable to skip the progress document entirely:
 
 ```toml
 [operator.phase]

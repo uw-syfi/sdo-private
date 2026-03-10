@@ -198,8 +198,8 @@ class TestCreateFixPrompt:
         assert "previous fix attempt" not in prompt.lower()
         assert "attempt #1" not in prompt
 
-    def test_second_attempt_references_previous(self):
-        """Test second attempt references previous fix attempt."""
+    def test_second_attempt_includes_hypothesis_instructions(self):
+        """Test second attempt includes instructions to write hypothesis to progress doc."""
         repo_path = Path("/test/repo")
         deploy_script = Path("/test/repo/.sds/deploy.sh")
         health_script = Path("/test/repo/.sds/health_check.sh")
@@ -213,48 +213,51 @@ class TestCreateFixPrompt:
             health_check_script_path=health_script,
         )
 
-        # Should mention previous attempt for attempt > 1
-        assert "attempt #2" in prompt.lower()
-        assert "previous" in prompt.lower()
+        # Should include hypothesis step instructions
+        assert "hypothesis" in prompt.lower()
+        assert "deployment_progress.md" in prompt
 
-    def test_fix_summary_consolidation_disabled_omits_summary_path(self):
-        """Test that fix_summary_consolidation=False omits consolidated summary path."""
-        repo_path = Path("/test/repo")
-        deploy_script = Path("/test/repo/.sds/deploy.sh")
-        health_script = Path("/test/repo/.sds/health_check.sh")
+    def test_deployment_progress_path_none_omits_progress_section(self, tmp_path):
+        """Test that deployment_progress_path=None omits progress doc instructions."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
 
         prompt = create_fix_prompt(
-            repo_path,
+            tmp_path,
             attempt=2,
             max_attempts=5,
             error_context="error",
-            deploy_script_path=deploy_script,
-            health_check_script_path=health_script,
-            fix_summary_consolidation=False,
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+            deployment_progress_path=None,
         )
 
-        assert "fix_summary.md" not in prompt
-        assert "fix_summary_1.log" in prompt
-        assert "attempt #2" in prompt.lower()
+        # No "read history" step when path is None (file doesn't exist)
+        assert (
+            "Read `" not in prompt or "deployment_progress.md" not in prompt.split("Read `")[1].split("`")[0]
+            if "Read `" in prompt
+            else True
+        )
 
-    def test_fix_summary_consolidation_enabled_includes_summary_path(self):
-        """Test that fix_summary_consolidation=True (default) includes consolidated summary path."""
-        repo_path = Path("/test/repo")
-        deploy_script = Path("/test/repo/.sds/deploy.sh")
-        health_script = Path("/test/repo/.sds/health_check.sh")
+    def test_deployment_progress_path_includes_progress_path_in_prompt(self, tmp_path):
+        """Test that deployment_progress_path is included in the prompt when the file exists."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        progress_path = sds / "deployment_progress.md"
+        progress_path.write_text("# Deployment Progress\n")
 
         prompt = create_fix_prompt(
-            repo_path,
+            tmp_path,
             attempt=2,
             max_attempts=5,
             error_context="error",
-            deploy_script_path=deploy_script,
-            health_check_script_path=health_script,
-            fix_summary_consolidation=True,
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+            deployment_progress_path=progress_path,
         )
 
-        assert "fix_summary.md" in prompt
-        assert "fix_summary_1.log" in prompt
+        assert str(progress_path) in prompt
+        assert "refuted" in prompt.lower()
 
     def test_special_characters_in_paths(self):
         """Test paths with special characters."""

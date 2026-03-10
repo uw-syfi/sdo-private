@@ -99,7 +99,6 @@ class LangGraphOperator(OperatorBase):
                 "monitor_max": self.health_check_max_count,
                 "health_monitoring": self.config.operator.phase.health_monitoring,
                 "analysis_summary": None,
-                "last_fix_summary": None,
                 "agent_token_usage": [],
             }
 

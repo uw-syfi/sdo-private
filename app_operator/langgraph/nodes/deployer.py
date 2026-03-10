@@ -2,14 +2,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app_operator.constants import FIX_SUMMARY_FILENAME
+from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import run_script, write_log_file
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.prompts import (
-    create_consolidation_prompt,
     create_fix_prompt,
     prepare_error_context,
 )
@@ -21,10 +20,6 @@ logger = logger.bind(node="deployer")
 
 class FixSummaryResponse(BaseModel):
     summary: str = Field(description="Brief summary of issues found and fixes applied")
-
-
-class ConsolidatedSummaryResponse(BaseModel):
-    summary: str = Field(description="The consolidated summary of all fix attempts")
 
 
 def deploy_attempt(state: OperatorState, ctx: NodeContext) -> OperatorState:
@@ -64,7 +59,7 @@ def _health_verdict_from_dict(d: dict) -> HealthVerdict:
     )
 
 
-def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any, consolidation_agent: Any) -> OperatorState:
+def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any) -> OperatorState:
     if ctx.should_shutdown():
         return state
 
@@ -81,7 +76,9 @@ def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any, consolida
     error_context = prepare_error_context(deploy_result, health_verdict, log_file_path, health_check_log_path)
 
     platform = ctx.config.deployment.platform
-    fix_summary_consolidation = ctx.config.operator.phase.fix_summary_consolidation
+    deployment_progress_path = None
+    if ctx.config.operator.phase.fix_summary_consolidation:
+        deployment_progress_path = ctx.repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
 
     prompt = create_fix_prompt(
         repo_path=ctx.repo_path,
@@ -91,7 +88,7 @@ def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any, consolida
         deploy_script_path=ctx.repo_path / ".sds" / "deploy.sh",
         health_check_script_path=ctx.repo_path / ".sds" / "health_check.sh",
         platform=platform,
-        fix_summary_consolidation=fix_summary_consolidation,
+        deployment_progress_path=deployment_progress_path,
         structured_output=True,
     )
 
@@ -107,55 +104,8 @@ def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any, consolida
     if summary_text:
         log_file = ctx.repo_path / ".sds" / "logs" / f"fix_summary_{state['attempt']}.log"
         write_log_file(ctx.filesystem, log_file, summary_text)
-        state["last_fix_summary"] = summary_text
-
-        if fix_summary_consolidation and consolidation_agent is not None:
-            _update_consolidated_summary(state, ctx, consolidation_agent, summary_text)
 
     ctx.recorder.end_phase("needs_retry")
 
     state["attempt"] += 1
     return state
-
-
-def _update_consolidated_summary(
-    state: OperatorState,
-    ctx: NodeContext,
-    consolidation_agent: Any,
-    current_summary: str,
-) -> None:
-    """Consolidate fix summaries into a markdown file using a structured agent."""
-    sds_dir = ctx.repo_path / ".sds"
-    summary_file = sds_dir / FIX_SUMMARY_FILENAME
-    attempt = state["attempt"]
-
-    existing_content = ""
-    if ctx.filesystem.exists(summary_file):
-        existing_content = ctx.filesystem.read_text(summary_file)
-
-    new_attempts_text = f"## Attempt {attempt}\n{current_summary}\n"
-
-    prompt = create_consolidation_prompt(existing_content, new_attempts_text)
-
-    try:
-        result = ctx.invoke(state, consolidation_agent, "", prompt, agent_name="Summary Consolidator", logger=logger)
-
-        if result.structured is not None:
-            consolidated_summary = result.structured.summary.strip()
-        else:
-            logger.warning("Consolidation agent did not return structured response, using raw response")
-            consolidated_summary = result.text.strip()
-
-        write_log_file(ctx.filesystem, summary_file, consolidated_summary)
-        logger.info(f"Updated consolidated summary at {summary_file}")
-
-    except (OSError, RuntimeError) as e:
-        logger.warning(f"Failed to consolidate summary: {e}")
-        _max_fallback = 20_000
-        if existing_content:
-            if len(existing_content) > _max_fallback:
-                existing_content = existing_content[-_max_fallback:]
-            fallback_content = existing_content + "\n\n" + new_attempts_text
-        else:
-            fallback_content = new_attempts_text
-        write_log_file(ctx.filesystem, summary_file, fallback_content)

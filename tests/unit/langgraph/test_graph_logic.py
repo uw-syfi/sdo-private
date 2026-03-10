@@ -74,7 +74,6 @@ def test_analyze_code_skips_if_files_exist():
             "monitor_count": 0,
             "monitor_max": 5,
             "analysis_summary": None,
-            "last_fix_summary": None,
             "health_verdict": None,
             "agent_token_usage": [],
         }
@@ -160,7 +159,6 @@ def test_analyze_code_runs_if_files_missing():
             "monitor_count": 0,
             "monitor_max": 5,
             "analysis_summary": None,
-            "last_fix_summary": None,
             "health_verdict": None,
             "agent_token_usage": [],
         }

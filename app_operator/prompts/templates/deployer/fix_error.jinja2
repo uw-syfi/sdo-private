@@ -47,11 +47,26 @@ Before making any fixes, identify the deployment platform:
 
 ## Approach:
 
-1. **STEP 1**: Read .sds/deploy.sh to identify deployment platform
-2. **STEP 2**: Analyze the error context and identify the root cause
-3. **STEP 3**: Make targeted fixes using commands appropriate for the detected platform
-4. **STEP 4**: If necessary, fix application code, deployment config, or environment variables
-5. **STEP 5**: Verify the fix makes sense in context
+{% if deployment_progress_path is defined and deployment_progress_path %}
+0. **STEP 0**: Read `{{ deployment_progress_path }}` to extract:
+   - **History of refuted hypotheses** — do NOT re-try any approach that was previously marked "refuted" or "partial"
+   - **Current symptoms** from "Last Health Assessment" — use these as the starting point for your diagnosis
+{% endif %}
+
+1. **STEP 1**: Before touching any file, write your hypothesis to `{{ deployment_progress_path if deployment_progress_path is defined and deployment_progress_path else ".sds/deployment_progress.md" }}`:
+   - Preserve any existing "History" and "Last Health Assessment" sections
+   - Add a new "Current Round" section at the top with:
+     - **Attempt**: {{ attempt }}
+     - **Hypothesis**: your root cause diagnosis
+     - **Fix planned**: the specific changes you will make
+     - **Success criteria**: observable outcome that would confirm your hypothesis (be specific)
+     - **Disproved if**: what outcome would show this hypothesis was wrong
+
+2. **STEP 2**: Read `.sds/deploy.sh` to identify deployment platform
+3. **STEP 3**: Analyze the error context and identify the root cause
+4. **STEP 4**: Make targeted fixes using commands appropriate for the detected platform
+5. **STEP 5**: If necessary, fix application code, deployment config, or environment variables
+6. **STEP 6**: Verify the fix makes sense in context
 
 ## Analysis methodology:
 
@@ -90,10 +105,6 @@ Use grep and other tools to filter for exactly what you need.
 The deployment has failed. Please analyze the error and fix the application deployment.
 
 {{ error_context }}
-
-{% if previous_summary_note %}
-{{ previous_summary_note }}
-{% endif %}
 
 {% if has_deployment_issues is defined and has_deployment_issues %}
 ## Deployment Issues Tracker

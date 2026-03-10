@@ -3,7 +3,8 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from app_operator.config import AgentConfig, Config, DeploymentConfig
+from app_operator.config import AgentConfig, Config, DeploymentConfig, OperatorConfig, OperatorPhaseConfig
+from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.filesystem import InMemoryFilesystem
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.nodes.monitor import HealthVerdictResponse, health_check
@@ -19,7 +20,6 @@ def _make_state(**overrides):
         "scripts_done": True,
         "deploy_result": {"success": True, "exit_code": 0, "stdout": "", "stderr": ""},
         "health_verdict": None,
-        "last_fix_summary": None,
         "agent_token_usage": [],
     }
     defaults.update(overrides)
@@ -238,3 +238,69 @@ class TestHealthCheckNode:
         content = filesystem.read_text(log_path)
         assert "healthy" in content
         assert "All services running" in content
+
+    def test_health_prompt_receives_deployment_progress_path_when_enabled(self):
+        """Test health prompt receives deployment_progress_path when flag enabled."""
+        state = _make_state()
+        repo_path = Path("/test/repo")
+        filesystem = InMemoryFilesystem()
+        phase = OperatorPhaseConfig(fix_summary_consolidation=True)
+        config = Config(
+            agent=AgentConfig(provider="codex", model="test-model"),
+            deployment=DeploymentConfig(platform="docker"),
+            operator=OperatorConfig(phase=phase),
+        )
+        loader = Mock()
+        loader.render.return_value = "rendered prompt"
+        agent = Mock()
+        recorder = Mock(spec=NullTrajectoryRecorder())
+        recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
+
+        verdict = HealthVerdictResponse(
+            healthy=True,
+            assessment="All OK",
+            diagnosis="",
+            script_was_fixed=False,
+        )
+
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
+            health_check(state, ctx, agent)
+
+        call_kwargs = loader.render.call_args[1]
+        assert call_kwargs["deployment_progress_path"] == repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
+        assert call_kwargs["has_deployment_progress"] is False  # file does not exist
+
+    def test_health_prompt_omits_progress_path_when_disabled(self):
+        """Test health prompt receives None deployment_progress_path when flag disabled."""
+        state = _make_state()
+        repo_path = Path("/test/repo")
+        filesystem = InMemoryFilesystem()
+        phase = OperatorPhaseConfig(fix_summary_consolidation=False)
+        config = Config(
+            agent=AgentConfig(provider="codex", model="test-model"),
+            deployment=DeploymentConfig(platform="docker"),
+            operator=OperatorConfig(phase=phase),
+        )
+        loader = Mock()
+        loader.render.return_value = "rendered prompt"
+        agent = Mock()
+        recorder = Mock(spec=NullTrajectoryRecorder())
+        recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
+
+        verdict = HealthVerdictResponse(
+            healthy=True,
+            assessment="All OK",
+            diagnosis="",
+            script_was_fixed=False,
+        )
+
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
+            health_check(state, ctx, agent)
+
+        call_kwargs = loader.render.call_args[1]
+        assert call_kwargs["deployment_progress_path"] is None
+        assert call_kwargs["has_deployment_progress"] is False

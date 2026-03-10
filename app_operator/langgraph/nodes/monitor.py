@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import write_log_file
@@ -26,6 +27,11 @@ def _run_health_agent(state: OperatorState, ctx: NodeContext, health_agent: Any)
     health_check_script = ctx.repo_path / ".sds" / "health_check.sh"
     platform = ctx.config.deployment.platform
 
+    deployment_progress_path = None
+    if ctx.config.operator.phase.fix_summary_consolidation:
+        deployment_progress_path = ctx.repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
+    has_deployment_progress = deployment_progress_path is not None and deployment_progress_path.exists()
+
     prompt = ctx.loader.render(
         "deployer/assess_health.jinja2",
         repo_path=ctx.repo_path,
@@ -33,6 +39,8 @@ def _run_health_agent(state: OperatorState, ctx: NodeContext, health_agent: Any)
         platform=platform,
         structured_output=True,
         recorder=ctx.recorder,
+        deployment_progress_path=deployment_progress_path,
+        has_deployment_progress=has_deployment_progress,
     )
 
     result = ctx.invoke(state, health_agent, "", prompt, agent_name="Health Judge", logger=logger)

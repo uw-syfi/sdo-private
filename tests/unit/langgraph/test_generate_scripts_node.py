@@ -40,7 +40,6 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_verdict=None,
-            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -71,7 +70,6 @@ class TestGenerateScripts:
             scripts_done=True,
             deploy_result=None,
             health_verdict=None,
-            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -94,7 +92,6 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_verdict=None,
-            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -119,7 +116,6 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_verdict=None,
-            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -152,7 +148,6 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_verdict=None,
-            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
@@ -184,7 +179,6 @@ class TestGenerateScripts:
             scripts_done=False,
             deploy_result=None,
             health_verdict=None,
-            last_fix_summary=None,
         )
 
         repo_path = Path("/test/repo")
