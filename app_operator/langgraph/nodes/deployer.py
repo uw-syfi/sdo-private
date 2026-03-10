@@ -80,6 +80,8 @@ def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any) -> Operat
     if ctx.config.operator.phase.fix_summary_consolidation:
         deployment_progress_path = ctx.repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
 
+    system_prompt = ctx.loader.render("repair_agent/system.jinja2")
+
     prompt = create_fix_prompt(
         repo_path=ctx.repo_path,
         attempt=state["attempt"],
@@ -92,7 +94,7 @@ def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any) -> Operat
         structured_output=True,
     )
 
-    result = ctx.invoke(state, fix_agent, "", prompt, agent_name="Error Fixer", logger=logger)
+    result = ctx.invoke(state, fix_agent, system_prompt, prompt, agent_name="Error Fixer", logger=logger)
     state["messages"] = result.messages
 
     if result.structured is not None:

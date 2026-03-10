@@ -431,7 +431,6 @@ class TestCreateGenerateScriptPrompt:
     def test_basic_script_generation_prompt(self):
         """Test basic script generation prompt."""
         prompt = create_generate_script_prompt(
-            system_prompt="You are a helpful assistant",
             script_name="deploy.sh",
             repo_context="A Node.js application",
             target_dir="/repo/.sds",
@@ -445,7 +444,6 @@ class TestCreateGenerateScriptPrompt:
     def test_special_characters_in_repo_context(self):
         """Test repo context with special characters."""
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context="App with <special> & 'chars' \"quotes\" \\backslash",
             target_dir="/repo/.sds",
@@ -459,7 +457,6 @@ class TestCreateGenerateScriptPrompt:
     def test_unicode_in_script_name(self):
         """Test script name with unicode characters."""
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="デプロイ.sh",
             repo_context="Context",
             target_dir="/repo/.sds",
@@ -468,25 +465,9 @@ class TestCreateGenerateScriptPrompt:
 
         assert "デプロイ.sh" in prompt
 
-    def test_very_long_system_prompt(self):
-        """Test with very long system prompt."""
-        long_system_prompt = "System: " + "x" * 50000
-
-        prompt = create_generate_script_prompt(
-            system_prompt=long_system_prompt,
-            script_name="deploy.sh",
-            repo_context="Context",
-            target_dir="/repo/.sds",
-            platform="docker",
-        )
-
-        # Should handle long prompts
-        assert isinstance(prompt, str)
-
     def test_empty_repo_context(self):
         """Test with empty repo context."""
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context="",
             target_dir="/repo/.sds",
@@ -509,7 +490,6 @@ class TestCreateGenerateScriptPrompt:
         """
 
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context=repo_context,
             target_dir="/repo/.sds",
@@ -530,7 +510,6 @@ class TestCreateGenerateScriptPrompt:
 
         for platform in platforms:
             prompt = create_generate_script_prompt(
-                system_prompt="System",
                 script_name="deploy.sh",
                 repo_context="Context",
                 target_dir="/repo/.sds",

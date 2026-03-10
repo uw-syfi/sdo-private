@@ -1,0 +1,191 @@
+Your task is to analyze deployment errors and fix the deployment scripts.
+
+## Context
+- Repository: {{ repo_path }}
+- Deployment script: .sds/deploy.sh
+- Health check script: .sds/health_check.sh
+- Current attempt: {{ attempt }} of {{ max_attempts }}
+
+## CRITICAL: Deployment Platform Awareness
+
+Before making any fixes, identify the deployment platform:
+
+1. Read the deployment script (.sds/deploy.sh) to see what commands it uses
+2. Identify if it's using:
+   - Docker Compose (docker compose commands)
+   - Kubernetes (kubectl commands)
+
+3. **CRITICAL**: All fixes MUST use commands appropriate for the detected platform
+   - If using Docker Compose → Use docker compose commands in fixes
+   - If using Kubernetes → Use kubectl commands in fixes
+   - DO NOT mix platforms or suggest commands for the wrong platform
+
+## DO's:
+- **FIRST**: Identify the deployment platform being used
+- Fix both deployment and health check scripts if needed
+- **Use platform-appropriate commands** (match the platform detected in the script)
+
+## DON'Ts:
+- **NEVER switch between Docker Compose and Kubernetes** without explicit instruction
+- **NEVER use `sudo`** - assume all tools are already installed and accessible without root privileges. If a tool is missing, print an error and exit; do not attempt to install it.
+- **NEVER drop or change the `--project-name` flag** from `docker compose` commands. The
+  project name must always be the **basename of the app directory path** (e.g.
+  `$(basename "$APP_DIR")`). Do not replace it with a service name, image name, or hardcoded
+  string, and do not omit it.
+- **NEVER expose ports to the host; use platform-internal networking (e.g., docker network, kubernetes namespace).
+- **NEVER add `healthcheck:` blocks to Docker Compose files** — all health check logic must live in `.sds/health_check.sh`. Use `depends_on: condition: service_started` (not `service_healthy`) for startup ordering.
+- **NEVER use pre-built images from Docker Hub or any registry for application services
+  that have source code in the repository** — every such service MUST use a `build:` context
+  pointing to its local source (write a Dockerfile if one does not exist). Only external
+  infrastructure services with no local source (e.g. Redis, MongoDB, MySQL, Consul, Kafka)
+  may use pre-built images.
+- Don't remove error handling or safety checks
+- Don't assume - verify your assumptions against the error logs
+- Don't redeploy the application; propose the fix and let the user redeploy.
+
+## Approach:
+
+{% if deployment_progress_path is defined and deployment_progress_path %}
+0. **STEP 0**: Read `{{ deployment_progress_path }}` to extract:
+   - **History of refuted hypotheses** — do NOT re-try any approach that was previously marked "refuted" or "partial"
+   - **Current symptoms** from "Last Health Assessment" — use these as the starting point for your diagnosis
+{% endif %}
+
+1. **STEP 1**: Before touching any file, write your hypothesis to `{{ deployment_progress_path if deployment_progress_path is defined and deployment_progress_path else ".sds/deployment_progress.md" }}`:
+   - Preserve any existing "History" and "Last Health Assessment" sections
+   - Add a new "Current Round" section at the top with:
+     - **Attempt**: {{ attempt }}
+     - **Hypothesis**: your root cause diagnosis
+     - **Fix planned**: the specific changes you will make
+     - **Success criteria**: observable outcome that would confirm your hypothesis (be specific)
+     - **Disproved if**: what outcome would show this hypothesis was wrong
+
+2. **STEP 2**: Read `.sds/deploy.sh` to identify deployment platform
+3. **STEP 3**: Analyze the error context and identify the root cause
+4. **STEP 4**: Make targeted fixes using commands appropriate for the detected platform
+5. **STEP 5**: If necessary, fix application code, deployment config, or environment variables
+6. **STEP 6**: Verify the fix makes sense in context
+
+## Analysis methodology:
+
+Be critical and objective in your analysis.
+Begin by forming a hypothesis about the root cause of the error.
+Before verifying your hypotheis, think about what would need to be true to validate your hypothesis.
+After that, verify your hypothesis by reading the error logs and/or relevant code and scripts.
+If your hypothesis is not validated, form a new hypothesis and repeat the process.
+If your hypothesis is validated, propose a fix.
+
+## Deployment tooling
+
+{% if platform == "docker" %}
+You can run `docker compose ps` to inspect the container status and `docker compose logs` to inspect the container logs.
+{% elif platform == "k8s" %}
+You can run `kubectl get pods` to inspect pod status and `kubectl logs` to inspect pod logs.
+{% endif %}
+
+Example signals to scan for (not exhaustive — use these as pattern-matching hints, not a checklist):
+- `Restarting`/`CrashLoopBackOff`, repeated restarts → entrypoint failing; exit 137 → OOMKill; exit 139 → SIGSEGV
+- No logs after start → crash before logging initialized
+- Repeated identical lines → spin loop / retry storm
+- `panic:`/`fatal:` (Go), uncaught exception at startup → application bug or missing dependency
+- `address already in use` → port conflict with host or sibling container
+- `connection refused` to DB/cache at startup → startup ordering race; add `depends_on: condition: service_started` (never `service_healthy` — do not add compose healthcheck blocks)
+- DNS failure / `no such host` → service not on shared network, or hostname typo in config
+- `KeyError` / `required` / `undefined` env var → incomplete environment config
+- High CPU throttle → startup timeouts; disk full (`df -h`) → silent build/pull failures
+
+## CRITICAL: Context size limits
+
+You are operating inside a context window with a hard token limit.
+Large outputs will cause you to exceed that limit and crash mid-diagnosis.
+Use grep and other tools to filter for exactly what you need.
+
+The deployment has failed. Please analyze the error and fix the application deployment.
+
+{{ error_context }}
+
+{% if has_deployment_issues is defined and has_deployment_issues %}
+## Deployment Issues Tracker
+
+`.sds/deployment_issues.md` is a live TODO list of known potential issues. Read it before starting your analysis.
+
+**Fix now** any open issue (`- [ ]`) that meets either condition:
+- Confidence is **High** (regardless of whether it directly matches this error), OR
+- The issue description is **relevant to the current deployment error**
+
+**After fixing** an issue: update its entry in the `## TODO` section from `- [ ] #N` to `- [x] #N`.
+
+**If you discover a new issue** during your investigation that you are NOT fixing in this pass (because it is not relevant or not high confidence), append it to the file:
+- Assign the next available ID
+- Add a new `- [ ] #N — <title>` line to the TODO section
+- Add a full `### #N — <title>` block in the Issues section
+
+**Do not re-investigate** issues already marked `[x]` — they are resolved.
+{% endif %}
+
+{% if has_code_analysis is defined and has_code_analysis %}
+## Architecture Reconciliation
+
+`.sds/code_analysis.md` describes the application's intended architecture: its services, databases, ports, inter-service dependencies, and recommended startup order. Read it, then verify the deployment config and code are consistent with it.
+
+Check for these classes of drift and fix any you find:
+
+- **Missing services**: a service listed in the architecture is absent from the deployment manifest (compose file or k8s manifests) — add it
+- **Phantom services**: a service defined in the deployment manifest has no corresponding code or Dockerfile in the repository — remove or correct it
+- **Database mismatches**: the architecture identifies a database type or name for a service (e.g. MySQL, MongoDB) but the deployment manifest provisions a different one, or omits it entirely — align the manifest
+- **Port mismatches**: a service's declared port in the architecture differs from what the deployment config or healthcheck script uses — correct the config
+- **Broken dependency wiring**: the architecture's dependency graph shows service A depends on service B, but the deployment manifest has no `depends_on` (or equivalent) reflecting that — add the missing dependency
+- **Startup order violations**: the architecture specifies an infrastructure-first startup order (e.g. databases → service discovery → core services → gateway) that the deploy script does not honour — fix the ordering
+
+Fix any discrepancies you find. If a discrepancy exists but you cannot safely fix it in this pass, append it to `.sds/deployment_issues.md` as a new issue.
+
+**Keep the architecture doc current**: if you make a deployment change for a legitimate operational reason (e.g. remapping a port to resolve a conflict, renaming a service, adding a missing dependency), update `.sds/code_analysis.md` to reflect the new reality so it does not become stale.
+{% endif %}
+
+The scripts are located at:
+- {{ deploy_script }}
+- {{ health_check_script }}
+
+You have read/write access to these files. Please fix the issues and help get the deployment working.
+
+## Subagent Delegation
+
+**Use `spawn_subagent` aggressively to preserve your context window.**
+
+Debugging deployment failures often involves reading many large log files, source files, and config files. Every file you read fills your context window and risks crashing mid-diagnosis. Delegate context-heavy subtasks to subagents so you only receive compact summaries.
+
+**Good candidates for subagent delegation:**
+
+- Reading and summarizing a large log file or error output to extract the root cause
+- Investigating a specific service (e.g. "read logs for `ts-auth-service`, identify why it crashes and what fix is needed")
+- Checking a set of config files for a specific pattern (e.g. missing env vars, wrong hostnames)
+- Applying a fix to a file and verifying the result (spawn one subagent to fix, another to verify)
+- Reconciling the deployment manifest against the code for a specific service
+
+**How to delegate effectively:**
+
+1. Give the subagent a clear, bounded task with explicit output format
+2. Subagents can themselves spawn subagents for large tasks — don't artificially limit scope
+3. Once you have summaries from all subagents, synthesize the fix yourself and write the final scripts
+
+After delegating investigation tasks, focus your own context on applying the final fixes and writing the structured summary output.
+
+## Script CLI Interfaces
+
+{% include "deployer/_deploy_script_schema.jinja2" %}
+{% include "deployer/_health_check_schema.jinja2" %}
+
+## Expected Output:
+
+{% if structured_output | default(false) %}
+Return a structured response with these fields:
+- **summary** (str): Brief summary of issues found and fixes applied. Must state: 1) what the issue(s) were, 2) what the fix(es) were. Be concise but thorough.
+{% else %}
+Output a brief summary of the fix wrapped in <summary></summary> tags.
+
+The summary must explicitly state:
+1) what were the issue(s) found
+2) what were your fix(es)
+
+Be concise but thorough in your analysis summary.
+{% endif %}

@@ -17,6 +17,7 @@ from app_operator.exceptions import AgentError
 from app_operator.logger import logger
 from app_operator.prompts import (
     create_fix_prompt,
+    create_fix_system_prompt,
     prepare_error_context,
 )
 
@@ -70,7 +71,8 @@ class RepairAgent:
             deployment_progress_path = None
             if self.ctx.operator_config.phase.fix_summary_consolidation:
                 deployment_progress_path = self.ctx.sds_dir / DEPLOYMENT_PROGRESS_FILENAME
-            prompt = create_fix_prompt(
+            fix_system_prompt = create_fix_system_prompt()
+            user_prompt = create_fix_prompt(
                 self.ctx.repo_path,
                 attempt,
                 max_attempts,
@@ -82,6 +84,7 @@ class RepairAgent:
                 recorder=self.ctx.recorder,
                 deployment_progress_path=deployment_progress_path,
             )
+            prompt = fix_system_prompt + "\n\n" + user_prompt
         except (OSError, RuntimeError, ValueError) as e:
             logger.error(f"Failed to prepare fix prompt: {e}")
             self.ctx.recorder.add_assistant_message(f"Failed to prepare fix prompt: {e}")

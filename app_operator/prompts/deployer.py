@@ -51,7 +51,6 @@ def prepare_error_context(
 
 
 def create_generate_script_prompt(
-    system_prompt: str,
     script_name: str,
     repo_context: str,
     target_dir: str,
@@ -62,7 +61,6 @@ def create_generate_script_prompt(
     """Create a prompt for generating deployment scripts.
 
     Args:
-        system_prompt: The system prompt for the agent.
         script_name: The name of the script to generate (e.g., 'deploy.sh').
         repo_context: Context string describing the repository.
         target_dir: The directory where scripts will be generated.
@@ -74,12 +72,12 @@ def create_generate_script_prompt(
         str: The rendered prompt.
     """
     if script_name == "deploy.sh":
-        template_name = "deployer/generate_deploy_script.jinja2"
+        template_name = "script_generator/deploy_user.jinja2"
     elif script_name == "health_check.sh":
-        template_name = "deployer/generate_health_check.jinja2"
+        template_name = "script_generator/health_check_user.jinja2"
     else:
         # Fallback for other scripts or backward compatibility
-        template_name = "deployer/generate_script.jinja2"
+        template_name = "script_generator/user.jinja2"
 
     sds_dir = Path(target_dir) / ".sds"
     has_code_analysis = (sds_dir / "code_analysis.md").exists()
@@ -87,7 +85,6 @@ def create_generate_script_prompt(
 
     return get_loader(dspy_config).render(
         template_name,
-        system_prompt=system_prompt,
         script_name=script_name,
         repo_context=repo_context,
         target_dir=target_dir,
@@ -135,7 +132,7 @@ def create_fix_prompt(
     has_deployment_progress = deployment_progress_path is not None and deployment_progress_path.exists()
 
     return get_loader(dspy_config).render(
-        "deployer/fix_error.jinja2",
+        "repair_agent/user.jinja2",
         repo_path=repo_path,
         attempt=attempt,
         max_attempts=max_attempts,
@@ -150,3 +147,13 @@ def create_fix_prompt(
         deployment_progress_path=deployment_progress_path,
         structured_output=structured_output,
     )
+
+
+def create_fix_system_prompt() -> str:
+    """Create the system prompt for the repair agent."""
+    return get_loader().render("repair_agent/system.jinja2")
+
+
+def create_health_system_prompt() -> str:
+    """Create the system prompt for the health judge agent."""
+    return get_loader().render("health_judge_agent/system.jinja2")

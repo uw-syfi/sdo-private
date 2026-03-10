@@ -52,19 +52,19 @@ logger = logging.getLogger(__name__)
 # These prompts rely on Jinja2 → _FILE_GEN_RE match → _generate_files() to work.
 _AGENT_INSTRUCTION_PROMPTS: frozenset[str] = frozenset(
     {
-        "deployer_generate_deploy_script",
-        "deployer_generate_health_check",
-        "deployer_generate_script",
+        "script_generator_deploy_user",
+        "script_generator_health_check_user",
+        "script_generator_user",
     }
 )
 
 SEED_TEMPLATE_MAP = {
-    "deployer_system": "seeds/deployer_system.jinja2",
-    "deployer_fix_error": "seeds/deployer_fix_error.jinja2",
+    "script_generator_system": "seeds/script_generator_system.jinja2",
+    "script_generator_deploy_user": "seeds/script_generator_deploy_user.jinja2",
+    "script_generator_health_check_user": "seeds/script_generator_health_check_user.jinja2",
+    "script_generator_user": "seeds/script_generator_user.jinja2",
+    "repair_agent_user": "seeds/repair_agent_user.jinja2",
     "deployer_summarize": "seeds/deployer_summarize.jinja2",
-    "deployer_generate_script": "seeds/deployer_generate_script.jinja2",
-    "deployer_generate_deploy_script": "seeds/deployer_generate_deploy_script.jinja2",
-    "deployer_generate_health_check": "seeds/deployer_generate_health_check.jinja2",
     "code_analyzer_system": "seeds/code_analyzer_system.jinja2",
     "code_analyzer_user": "seeds/code_analyzer_user.jinja2",
     "monitor_analyze_health": "seeds/monitor_analyze_health.jinja2",

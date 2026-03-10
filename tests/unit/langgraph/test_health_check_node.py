@@ -76,10 +76,13 @@ class TestHealthCheckNode:
 
             health_check(state, ctx, agent)
 
-        loader.render.assert_called_once()
-        call_args = loader.render.call_args
-        assert call_args[0][0] == "deployer/assess_health.jinja2"
-        assert call_args[1]["structured_output"] is True
+        assert loader.render.call_count == 2
+        render_templates = [c[0][0] for c in loader.render.call_args_list]
+        assert "health_judge_agent/system.jinja2" in render_templates
+        assert "health_judge_agent/user.jinja2" in render_templates
+        # user template receives structured_output
+        user_call = next(c for c in loader.render.call_args_list if c[0][0] == "health_judge_agent/user.jinja2")
+        assert user_call[1]["structured_output"] is True
         mock_invoke.assert_called_once()
 
     def test_structured_response_stored_as_dict(self):

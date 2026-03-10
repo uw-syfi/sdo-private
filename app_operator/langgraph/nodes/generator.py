@@ -8,7 +8,6 @@ from app_operator.progress import emit_progress
 from app_operator.prompts import (
     analyze_repository,
     create_generate_script_prompt,
-    create_system_prompt,
 )
 from app_operator.trajectory import Phase
 
@@ -21,18 +20,19 @@ def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> Oper
 
     emit_progress("script_generation")
     with ctx.recorder.phase(Phase.SCRIPT_GENERATION):
-        system_prompt = create_system_prompt(ctx.config.deployment.platform)
+        system_prompt = ctx.loader.render(
+            "script_generator/system.jinja2",
+            platform=ctx.config.deployment.platform,
+        )
         repo_context = analyze_repository(ctx.repo_path)
 
         deploy_prompt = create_generate_script_prompt(
-            system_prompt=system_prompt,
             script_name="deploy.sh",
             repo_context=repo_context,
             target_dir=str(ctx.repo_path),
             platform=ctx.config.deployment.platform,
         )
         health_prompt = create_generate_script_prompt(
-            system_prompt=system_prompt,
             script_name="health_check.sh",
             repo_context=repo_context,
             target_dir=str(ctx.repo_path),
@@ -42,7 +42,7 @@ def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> Oper
         deploy_guardrail = ArtifactGuardrail([".sds/deploy.sh"])
         health_guardrail = ArtifactGuardrail([".sds/health_check.sh"])
 
-        result = ctx.invoke(state, agent, "", deploy_prompt, agent_name="Script Generator")
+        result = ctx.invoke(state, agent, system_prompt, deploy_prompt, agent_name="Script Generator")
         for retry in range(deploy_guardrail.max_retries):
             missing = deploy_guardrail.missing(ctx.repo_path, ctx.filesystem)
             if not missing:
@@ -57,7 +57,7 @@ def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> Oper
                 prior_messages=result.messages,
             )
 
-        result = ctx.invoke(state, agent, "", health_prompt, agent_name="Script Generator")
+        result = ctx.invoke(state, agent, system_prompt, health_prompt, agent_name="Script Generator")
         for retry in range(health_guardrail.max_retries):
             missing = health_guardrail.missing(ctx.repo_path, ctx.filesystem)
             if not missing:

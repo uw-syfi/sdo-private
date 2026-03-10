@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
-from app_operator.prompts import get_loader
+from app_operator.prompts import create_health_system_prompt, get_loader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     TrajectoryRecorderProtocol,
@@ -191,14 +191,16 @@ class AppHealthJudge:
     def _render_prompt(self) -> str:
         """Render the health assessment prompt template."""
         platform = self.deployment_config.platform
-        return get_loader(self.dspy_config).render(
-            "deployer/assess_health.jinja2",
+        health_system_prompt = create_health_system_prompt()
+        user_prompt = get_loader(self.dspy_config).render(
+            "health_judge_agent/user.jinja2",
             repo_path=self.repo_path,
             health_check_script=self.health_check_script,
             platform=platform,
             structured_output=False,
             recorder=self.recorder,
         )
+        return health_system_prompt + "\n\n" + user_prompt
 
     def _record_verdict(self, verdict: HealthVerdict) -> None:
         """Record the verdict in the trajectory."""

@@ -32,8 +32,10 @@ def _run_health_agent(state: OperatorState, ctx: NodeContext, health_agent: Any)
         deployment_progress_path = ctx.repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
     has_deployment_progress = deployment_progress_path is not None and deployment_progress_path.exists()
 
+    system_prompt = ctx.loader.render("health_judge_agent/system.jinja2")
+
     prompt = ctx.loader.render(
-        "deployer/assess_health.jinja2",
+        "health_judge_agent/user.jinja2",
         repo_path=ctx.repo_path,
         health_check_script=health_check_script,
         platform=platform,
@@ -43,7 +45,7 @@ def _run_health_agent(state: OperatorState, ctx: NodeContext, health_agent: Any)
         has_deployment_progress=has_deployment_progress,
     )
 
-    result = ctx.invoke(state, health_agent, "", prompt, agent_name="Health Judge", logger=logger)
+    result = ctx.invoke(state, health_agent, system_prompt, prompt, agent_name="Health Judge", logger=logger)
 
     if result.structured is not None:
         return result.structured.model_dump()
