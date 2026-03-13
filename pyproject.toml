@@ -52,7 +52,7 @@ build-backend = "hatchling.build"
 members = ["libs/agent_cli", "libs/sds_core"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app_operator", "lego_agent", "libs"]
+packages = ["app_operator", "app_operator_dspy", "lego_agent", "libs"]
 
 [tool.ruff]
 line-length = 120

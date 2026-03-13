@@ -2,7 +2,10 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+
+if TYPE_CHECKING:
+    from app_operator.types import TokenUsage
 
 from langchain_core.messages import (
     AIMessage,
@@ -102,8 +105,10 @@ def _record_session_usage(
             totals["prompt_tokens"] += s.get("input", 0)
             totals["completion_tokens"] += s.get("output", 0)
             totals["total_tokens"] += s.get("total", 0)
-        recorder.record_token_usage(totals)
-        recorder.trajectory["metadata"]["agent_token_usage"] = sessions
+        recorder.record_token_usage(cast("TokenUsage", totals))
+        traj = getattr(recorder, "trajectory", None)
+        if traj is not None:
+            traj["metadata"]["agent_token_usage"] = sessions
 
 
 def _last_assistant_text(messages: list[BaseMessage]) -> str:

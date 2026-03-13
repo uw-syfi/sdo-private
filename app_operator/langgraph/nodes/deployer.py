@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -12,8 +12,10 @@ from app_operator.prompts import (
     create_fix_prompt,
     prepare_error_context,
 )
-from app_operator.trajectory import Phase
-from app_operator.types import HealthVerdict
+from app_operator.trajectory import (
+    Phase,
+)
+from app_operator.types import CommandResult, HealthVerdict
 
 logger = logger.bind(node="repair agent")
 
@@ -63,7 +65,7 @@ def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any) -> Operat
     if ctx.should_shutdown():
         return state
 
-    deploy_result = state.get("deploy_result") or {}
+    deploy_result = cast("CommandResult", state.get("deploy_result") or {})
     health_verdict_dict = state.get("health_verdict")
 
     log_file_path = ctx.repo_path / ".sds" / "logs" / f"deploy_attempt_{state['attempt']}.log"
