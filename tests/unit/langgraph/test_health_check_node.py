@@ -3,9 +3,12 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from app_operator.config import AgentConfig, Config, DeploymentConfig
+from app_operator.config import AgentConfig, Config, DeploymentConfig, OperatorConfig, OperatorPhaseConfig
+from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.filesystem import InMemoryFilesystem
+from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.nodes.monitor import HealthVerdictResponse, health_check
+from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder
 
 
@@ -16,13 +19,30 @@ def _make_state(**overrides):
         "messages": [],
         "scripts_done": True,
         "deploy_result": {"success": True, "exit_code": 0, "stdout": "", "stderr": ""},
-        "health_result": None,
         "health_verdict": None,
-        "last_fix_summary": None,
         "agent_token_usage": [],
     }
     defaults.update(overrides)
     return defaults
+
+
+def _make_ctx(
+    repo_path: Path,
+    filesystem,
+    config: Config,
+    loader=None,
+    check_shutdown=None,
+    recorder=None,
+) -> NodeContext:
+    return NodeContext(
+        repo_path=repo_path,
+        filesystem=filesystem,
+        loader=loader or Mock(),
+        config=config,
+        context_limit=10000,
+        recorder=recorder or NullTrajectoryRecorder(),
+        check_shutdown=check_shutdown,
+    )
 
 
 class TestHealthCheckNode:
@@ -42,6 +62,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=True,
@@ -50,25 +71,18 @@ class TestHealthCheckNode:
             script_was_fixed=False,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent_structured") as mock_invoke:
-            mock_invoke.return_value = ("response text", [], verdict)
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(
-                state,
-                repo_path,
-                filesystem,
-                agent,
-                loader,
-                config,
-                10000,
-                None,
-                recorder,
-            )
+            health_check(state, ctx, agent)
 
-        loader.render.assert_called_once()
-        call_args = loader.render.call_args
-        assert call_args[0][0] == "deployer/assess_health.jinja2"
-        assert call_args[1]["structured_output"] is True
+        assert loader.render.call_count == 2
+        render_templates = [c[0][0] for c in loader.render.call_args_list]
+        assert "health_judge_agent/system.jinja2" in render_templates
+        assert "health_judge_agent/user.jinja2" in render_templates
+        # user template receives structured_output
+        user_call = next(c for c in loader.render.call_args_list if c[0][0] == "health_judge_agent/user.jinja2")
+        assert user_call[1]["structured_output"] is True
         mock_invoke.assert_called_once()
 
     def test_structured_response_stored_as_dict(self):
@@ -85,6 +99,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=False,
@@ -93,20 +108,10 @@ class TestHealthCheckNode:
             script_was_fixed=True,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent_structured") as mock_invoke:
-            mock_invoke.return_value = ("response text", [], verdict)
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            result = health_check(
-                state,
-                repo_path,
-                filesystem,
-                agent,
-                loader,
-                config,
-                10000,
-                None,
-                recorder,
-            )
+            result = health_check(state, ctx, agent)
 
         assert result["health_verdict"] == {
             "healthy": False,
@@ -114,7 +119,6 @@ class TestHealthCheckNode:
             "diagnosis": "CrashLoopBackOff",
             "script_was_fixed": True,
         }
-        assert result["health_result"] == {"success": False}
 
     def test_healthy_verdict_ends_phase_success(self):
         """Test that a healthy verdict calls end_phase with success."""
@@ -130,6 +134,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=True,
@@ -138,20 +143,10 @@ class TestHealthCheckNode:
             script_was_fixed=False,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent_structured") as mock_invoke:
-            mock_invoke.return_value = ("response text", [], verdict)
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(
-                state,
-                repo_path,
-                filesystem,
-                agent,
-                loader,
-                config,
-                10000,
-                None,
-                recorder,
-            )
+            health_check(state, ctx, agent)
 
         recorder.end_phase.assert_called_once_with("success")
 
@@ -163,19 +158,10 @@ class TestHealthCheckNode:
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader)
 
-        result = health_check(
-            state,
-            repo_path,
-            filesystem,
-            agent,
-            loader,
-            config,
-            10000,
-            None,
-        )
+        result = health_check(state, ctx, agent)
 
-        assert result["health_result"] is None
         assert result["health_verdict"] is None
         agent.stream.assert_not_called()
 
@@ -187,18 +173,9 @@ class TestHealthCheckNode:
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         loader = Mock()
         agent = Mock()
-        check_shutdown = Mock(return_value=True)
+        ctx = _make_ctx(repo_path, filesystem, config, loader, check_shutdown=Mock(return_value=True))
 
-        result = health_check(
-            state,
-            repo_path,
-            filesystem,
-            agent,
-            loader,
-            config,
-            10000,
-            check_shutdown,
-        )
+        result = health_check(state, ctx, agent)
 
         assert result is state
         agent.stream.assert_not_called()
@@ -217,21 +194,12 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent_structured") as mock_invoke:
-            mock_invoke.return_value = ("response text", [], None)
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=None)
 
-            result = health_check(
-                state,
-                repo_path,
-                filesystem,
-                agent,
-                loader,
-                config,
-                10000,
-                None,
-                recorder,
-            )
+            result = health_check(state, ctx, agent)
 
         assert result["health_verdict"] == {
             "healthy": False,
@@ -239,7 +207,6 @@ class TestHealthCheckNode:
             "diagnosis": "",
             "script_was_fixed": False,
         }
-        assert result["health_result"] == {"success": False}
 
     def test_saves_assessment_log(self):
         """Test health_check saves assessment log file."""
@@ -255,6 +222,7 @@ class TestHealthCheckNode:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
 
         verdict = HealthVerdictResponse(
             healthy=True,
@@ -263,23 +231,79 @@ class TestHealthCheckNode:
             script_was_fixed=False,
         )
 
-        with patch("app_operator.langgraph.nodes.monitor.invoke_agent_structured") as mock_invoke:
-            mock_invoke.return_value = ("response text", [], verdict)
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(
-                state,
-                repo_path,
-                filesystem,
-                agent,
-                loader,
-                config,
-                10000,
-                None,
-                recorder,
-            )
+            health_check(state, ctx, agent)
 
         log_path = repo_path / ".sds" / "logs" / "health_check_attempt_1.log"
         assert filesystem.exists(log_path)
         content = filesystem.read_text(log_path)
         assert "healthy" in content
         assert "All services running" in content
+
+    def test_health_prompt_receives_deployment_progress_path_when_enabled(self):
+        """Test health prompt receives deployment_progress_path when flag enabled."""
+        state = _make_state()
+        repo_path = Path("/test/repo")
+        filesystem = InMemoryFilesystem()
+        phase = OperatorPhaseConfig(fix_summary_consolidation=True)
+        config = Config(
+            agent=AgentConfig(provider="codex", model="test-model"),
+            deployment=DeploymentConfig(platform="docker"),
+            operator=OperatorConfig(phase=phase),
+        )
+        loader = Mock()
+        loader.render.return_value = "rendered prompt"
+        agent = Mock()
+        recorder = Mock(spec=NullTrajectoryRecorder())
+        recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
+
+        verdict = HealthVerdictResponse(
+            healthy=True,
+            assessment="All OK",
+            diagnosis="",
+            script_was_fixed=False,
+        )
+
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
+            health_check(state, ctx, agent)
+
+        call_kwargs = loader.render.call_args[1]
+        assert call_kwargs["deployment_progress_path"] == repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
+        assert call_kwargs["has_deployment_progress"] is False  # file does not exist
+
+    def test_health_prompt_omits_progress_path_when_disabled(self):
+        """Test health prompt receives None deployment_progress_path when flag disabled."""
+        state = _make_state()
+        repo_path = Path("/test/repo")
+        filesystem = InMemoryFilesystem()
+        phase = OperatorPhaseConfig(fix_summary_consolidation=False)
+        config = Config(
+            agent=AgentConfig(provider="codex", model="test-model"),
+            deployment=DeploymentConfig(platform="docker"),
+            operator=OperatorConfig(phase=phase),
+        )
+        loader = Mock()
+        loader.render.return_value = "rendered prompt"
+        agent = Mock()
+        recorder = Mock(spec=NullTrajectoryRecorder())
+        recorder.end_phase = Mock()
+        ctx = _make_ctx(repo_path, filesystem, config, loader, recorder=recorder)
+
+        verdict = HealthVerdictResponse(
+            healthy=True,
+            assessment="All OK",
+            diagnosis="",
+            script_was_fixed=False,
+        )
+
+        with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
+            mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
+            health_check(state, ctx, agent)
+
+        call_kwargs = loader.render.call_args[1]
+        assert call_kwargs["deployment_progress_path"] is None
+        assert call_kwargs["has_deployment_progress"] is False

@@ -10,7 +10,7 @@ def create_system_prompt(platform: str) -> str:
     # The default template doesn't need it.
     # If the seed template needs it, it will fail unless we provide it.
     # However, create_system_prompt is called without repo_path info in deployer.py
-    return get_loader().render("deployer/system.jinja2", platform=platform, repo_path=".")
+    return get_loader().render("script_generator/system.jinja2", platform=platform, repo_path=".")
 
 
 def analyze_repository(

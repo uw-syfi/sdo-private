@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app_operator.constants import FIX_SUMMARY_FILENAME
 from app_operator.prompts._core import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
@@ -52,7 +51,6 @@ def prepare_error_context(
 
 
 def create_generate_script_prompt(
-    system_prompt: str,
     script_name: str,
     repo_context: str,
     target_dir: str,
@@ -63,7 +61,6 @@ def create_generate_script_prompt(
     """Create a prompt for generating deployment scripts.
 
     Args:
-        system_prompt: The system prompt for the agent.
         script_name: The name of the script to generate (e.g., 'deploy.sh').
         repo_context: Context string describing the repository.
         target_dir: The directory where scripts will be generated.
@@ -75,12 +72,12 @@ def create_generate_script_prompt(
         str: The rendered prompt.
     """
     if script_name == "deploy.sh":
-        template_name = "deployer/generate_deploy_script.jinja2"
+        template_name = "script_generator/deploy_user.jinja2"
     elif script_name == "health_check.sh":
-        template_name = "deployer/generate_health_check.jinja2"
+        template_name = "script_generator/health_check_user.jinja2"
     else:
         # Fallback for other scripts or backward compatibility
-        template_name = "deployer/generate_script.jinja2"
+        template_name = "script_generator/user.jinja2"
 
     sds_dir = Path(target_dir) / ".sds"
     has_code_analysis = (sds_dir / "code_analysis.md").exists()
@@ -88,7 +85,6 @@ def create_generate_script_prompt(
 
     return get_loader(dspy_config).render(
         template_name,
-        system_prompt=system_prompt,
         script_name=script_name,
         repo_context=repo_context,
         target_dir=target_dir,
@@ -110,7 +106,8 @@ def create_fix_prompt(
     platform: str = "auto",
     dspy_config: DSPyConfigProtocol | None = None,
     recorder=None,
-    fix_summary_consolidation: bool = True,
+    deployment_progress_path: Path | None = None,
+    structured_output: bool = False,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.
 
@@ -124,66 +121,39 @@ def create_fix_prompt(
         platform: Deployment platform (e.g., 'docker', 'k8s').
         dspy_config: Optional DSPy configuration for optimized prompts.
         recorder: Optional trajectory recorder for kwargs capture.
-        fix_summary_consolidation: Whether consolidated fix summary is enabled.
+        deployment_progress_path: Path to deployment_progress.md (None if feature disabled).
+        structured_output: If True, instruct the agent to use structured output instead of XML tags.
 
     Returns:
         str: The rendered prompt.
     """
-    previous_summary_note = ""
-    if attempt > 1:
-        consolidated_summary_path = repo_path / ".sds" / FIX_SUMMARY_FILENAME
-        prev_log_path = repo_path / ".sds" / "logs" / f"fix_summary_{attempt - 1}.log"
-
-        if fix_summary_consolidation:
-            previous_summary_note = (
-                f"\n\nNote: This is attempt #{attempt}. "
-                f"You can review the history of previous fixes at: {consolidated_summary_path}\n"
-                f"Or the specific summary of the last attempt at: {prev_log_path}\n"
-                "You can dive into prior attempts for more detail; logs follow the pattern: fix_summary_{attempt}.log"
-                "Please review the previous attempts to avoid repeating mistakes."
-            )
-        else:
-            previous_summary_note = (
-                f"\n\nNote: This is attempt #{attempt}. "
-                f"You can review the summary of the last attempt at: {prev_log_path}\n"
-                "You can dive into prior attempts for more detail; logs follow the pattern: fix_summary_{attempt}.log"
-                "Please review the previous attempts to avoid repeating mistakes."
-            )
-
     has_deployment_issues = (repo_path / ".sds" / "deployment_issues.md").exists()
     has_code_analysis = (repo_path / ".sds" / "code_analysis.md").exists()
+    has_deployment_progress = deployment_progress_path is not None and deployment_progress_path.exists()
 
     return get_loader(dspy_config).render(
-        "deployer/fix_error.jinja2",
+        "repair_agent/user.jinja2",
         repo_path=repo_path,
         attempt=attempt,
         max_attempts=max_attempts,
         error_context=error_context,
-        previous_summary_note=previous_summary_note,
         deploy_script=deploy_script_path,
         health_check_script=health_check_script_path,
         platform=platform,
         recorder=recorder,
         has_deployment_issues=has_deployment_issues,
         has_code_analysis=has_code_analysis,
+        has_deployment_progress=has_deployment_progress,
+        deployment_progress_path=deployment_progress_path,
+        structured_output=structured_output,
     )
 
 
-def create_consolidation_prompt(
-    existing_summary: str,
-    new_attempts_text: str,
-) -> str:
-    """Create a prompt for consolidating fix summaries.
+def create_fix_system_prompt() -> str:
+    """Create the system prompt for the repair agent."""
+    return get_loader().render("repair_agent/system.jinja2")
 
-    Args:
-        existing_summary: The content of the existing fix_summary.md.
-        new_attempts_text: Text describing the new attempts to integrate.
 
-    Returns:
-        str: The rendered prompt.
-    """
-    return get_loader().render(
-        "deployer/consolidate_summary.jinja2",
-        existing_summary=existing_summary,
-        new_attempts_text=new_attempts_text,
-    )
+def create_health_system_prompt() -> str:
+    """Create the system prompt for the health judge agent."""
+    return get_loader().render("health_judge_agent/system.jinja2")

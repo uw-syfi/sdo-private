@@ -11,6 +11,7 @@ from app_operator.langgraph.tools import (
     _build_grep,
     _build_ls,
     _build_read,
+    _build_str_replace,
     _build_write_file,
 )
 
@@ -60,13 +61,13 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         read_tool = _build_read(self.context)
 
         # Test file not found (via filesystem)
-        result = read_tool.invoke({"path": "missing.txt"})
+        result = read_tool.invoke({"path": "missing.txt", "start_line": 1, "end_line": 10})
         self.assertTrue(result.startswith("Error: No such file"))
 
         # Test read permission error (simulated)
         self.fs.write_text(self.repo_root / "secret.txt", "content")
         self.fs.simulate_permission_error(self.repo_root / "secret.txt")
-        result = read_tool.invoke({"path": "secret.txt"})
+        result = read_tool.invoke({"path": "secret.txt", "start_line": 1, "end_line": 10})
         self.assertTrue(result.startswith("Error: Permission denied"))
 
     def test_write_file_error(self):
@@ -88,6 +89,38 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         # Test invalid regex
         result = grep_tool.invoke({"pattern": "[", "path": "."})
         self.assertTrue(result[0].startswith("Error: "))
+
+    @patch("subprocess.run")
+    def test_bash_small_output_inline(self, mock_run):
+        """Small output is returned inline."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="hello", stderr="")
+        bash_tool = _build_bash(self.context)
+        result = bash_tool.invoke({"command": "echo hello"})
+        self.assertEqual(result["stdout"], "hello")
+        self.assertEqual(result["stderr"], "")
+
+    @patch("subprocess.run")
+    def test_bash_large_output_spilled_to_file(self, mock_run):
+        """Large output is written to .sds/logs/tools/ and paths returned."""
+        big_stdout = "x" * 11_000
+        mock_run.return_value = MagicMock(returncode=0, stdout=big_stdout, stderr="")
+        bash_tool = _build_bash(self.context)
+        result = bash_tool.invoke({"command": "echo big"})
+        self.assertIn(".sds/logs/tools/", result["stdout"])
+        self.assertIn("Read tool", result["stdout"])
+        spill_path = self.repo_root / ".sds" / "logs" / "tools" / "0001" / "stdout.txt"
+        self.assertEqual(self.fs.read_text(spill_path), big_stdout)
+
+    @patch("subprocess.run")
+    def test_bash_large_stderr_spilled(self, mock_run):
+        """Large stderr is also spilled when combined output exceeds threshold."""
+        big_stderr = "e" * 11_000
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr=big_stderr)
+        bash_tool = _build_bash(self.context)
+        result = bash_tool.invoke({"command": "fail"})
+        self.assertIn(".sds/logs/tools/", result["stderr"])
+        spill_path = self.repo_root / ".sds" / "logs" / "tools" / "0001" / "stderr.txt"
+        self.assertEqual(self.fs.read_text(spill_path), big_stderr)
 
     @patch("subprocess.run")
     def test_bash_error(self, mock_run):
@@ -113,6 +146,44 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         result = ls_tool.invoke({"path": "../outside"})
         self.assertTrue(result.startswith("Error: "))
         self.assertIn("Path escapes repository root", result)
+
+
+class TestStrReplace(unittest.TestCase):
+    def setUp(self):
+        self.repo_root = Path("/tmp/repo")
+        self.fs = InMemoryFilesystem()
+        self.fs.mkdir(self.repo_root)
+        self.context = ToolContext(self.repo_root, self.fs)
+        self.str_replace_tool = _build_str_replace(self.context)
+
+    def test_happy_path(self):
+        self.fs.write_text(self.repo_root / "file.txt", "hello world")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "world", "new_str": "there"})
+        self.assertEqual(result, "Edited file.txt")
+        self.assertEqual(self.fs.read_text(self.repo_root / "file.txt"), "hello there")
+
+    def test_old_str_not_found(self):
+        self.fs.write_text(self.repo_root / "file.txt", "hello world")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "missing", "new_str": "x"})
+        self.assertEqual(result, "Error: old_str not found in file.txt")
+
+    def test_old_str_appears_multiple_times(self):
+        self.fs.write_text(self.repo_root / "file.txt", "foo foo foo")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "foo", "new_str": "bar"})
+        self.assertEqual(result, "Error: old_str appears 3 times in file.txt (must be unique)")
+
+    def test_path_escapes_root(self):
+        result = self.str_replace_tool.invoke({"path": "../outside/file.txt", "old_str": "x", "new_str": "y"})
+        self.assertTrue(result.startswith("Error: "))
+        self.assertIn("Path escapes repository root", result)
+
+    def test_replaces_only_first_occurrence(self):
+        # old_str must be unique per the tool contract, but verify replace(..., 1) semantics
+        # by using a file where old_str appears exactly once
+        self.fs.write_text(self.repo_root / "file.txt", "aXb")
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "X", "new_str": "Y"})
+        self.assertEqual(result, "Edited file.txt")
+        self.assertEqual(self.fs.read_text(self.repo_root / "file.txt"), "aYb")
 
 
 if __name__ == "__main__":

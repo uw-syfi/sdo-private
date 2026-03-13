@@ -168,7 +168,6 @@ class AdkOperator(OperatorBase):
             # Generate deploy.sh
             if not self.filesystem.exists(self.deploy_script):
                 prompt = create_generate_script_prompt(
-                    system_prompt=system_prompt,
                     script_name="deploy.sh",
                     repo_context=repo_context,
                     target_dir=str(self.repo_path),
@@ -190,7 +189,6 @@ class AdkOperator(OperatorBase):
             # Generate health_check.sh
             if not self.filesystem.exists(self.health_check_script):
                 prompt = create_generate_script_prompt(
-                    system_prompt=system_prompt,
                     script_name="health_check.sh",
                     repo_context=repo_context,
                     target_dir=str(self.repo_path),

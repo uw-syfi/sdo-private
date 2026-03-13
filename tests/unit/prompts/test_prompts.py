@@ -84,15 +84,15 @@ def test_fix_error_prompt(loader):
         attempt=2,
         max_attempts=5,
         error_context="ERROR_CONTEXT",
-        previous_summary_note="PREV_NOTE",
         deploy_script=".sds/deploy.sh",
         health_check_script=".sds/health_check.sh",
         platform="auto",
     )
-    # Verify context injection (attempt count, error details, previous summary)
+    # Verify context injection (attempt count, error details, hypothesis step)
     assert "Current attempt: 2 of 5" in rendered
     assert "ERROR_CONTEXT" in rendered
-    assert "PREV_NOTE" in rendered
+    assert "hypothesis" in rendered.lower()
+    assert "deployment_progress.md" in rendered
 
 
 def test_summarize_prompt(loader):

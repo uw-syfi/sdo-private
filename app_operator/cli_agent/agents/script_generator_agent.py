@@ -108,8 +108,7 @@ class ScriptGeneratorAgent:
     ) -> tuple[bool, str]:
         """Generate a single script file."""
         platform = self.deployment_config.platform
-        full_prompt = create_generate_script_prompt(
-            system_prompt=system_prompt,
+        user_prompt = create_generate_script_prompt(
             script_name=script_name,
             repo_context=repo_context,
             target_dir=target_dir,
@@ -117,6 +116,7 @@ class ScriptGeneratorAgent:
             dspy_config=self.ctx.dspy_config,
             recorder=recorder,
         )
+        full_prompt = system_prompt + "\n\n" + user_prompt
 
         try:
             start_time = time.time()

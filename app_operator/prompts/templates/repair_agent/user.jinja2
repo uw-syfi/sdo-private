@@ -1,5 +1,3 @@
-You are an expert DevOps engineer debugging deployment issues.
-
 Your task is to analyze deployment errors and fix the deployment scripts.
 
 ## Context
@@ -65,8 +63,18 @@ Before making any fixes, identify the deployment platform:
 2. **STEP 2**: Read `.sds/deploy.sh` to identify deployment platform
 3. **STEP 3**: Analyze the error context and identify the root cause
 4. **STEP 4**: Make targeted fixes using commands appropriate for the detected platform
+{% if platform == "docker" %}
+4.5. **STEP 4.5 — Validate compose file**: After any edit to docker-compose.yml,
+     immediately run `docker compose -f <path>/docker-compose.yml config --quiet`.
+     If it exits non-zero, fix the syntax error before proceeding. Never declare
+     a fix complete with an unvalidated compose file.
+{% endif %}
 5. **STEP 5**: If necessary, fix application code, deployment config, or environment variables
-6. **STEP 6**: Verify the fix makes sense in context
+6. **STEP 6 — Verify before declaring done**:
+   - **Re-read every file you edited** (or the changed section) and confirm the edit is present and syntactically correct. Do not rely on the write succeeding silently.
+   - **Trace the fix against your hypothesis**: does this change directly address the root cause you stated in STEP 1? If not, revise the fix or the hypothesis.
+   - **Check for regressions**: scan the changed file for obvious DON'T violations introduced by the edit (exposed ports, healthcheck blocks, missing `--project-name`, etc.).
+   - **Do not write the output summary until all checks above pass.** If a check fails, return to the appropriate step and correct the issue first.
 
 ## Analysis methodology:
 
@@ -178,6 +186,8 @@ After delegating investigation tasks, focus your own context on applying the fin
 {% include "deployer/_health_check_schema.jinja2" %}
 
 ## Expected Output:
+
+**Only produce the output below after STEP 6 verification is complete.** Producing a summary before verifying the fix is a mistake — if the fix is wrong, the summary will be misleading and waste a repair attempt.
 
 {% if structured_output | default(false) %}
 Return a structured response with these fields:

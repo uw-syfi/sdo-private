@@ -1,7 +1,8 @@
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 if TYPE_CHECKING:
     from app_operator.types import TokenUsage
@@ -13,7 +14,9 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.runnables import RunnableConfig
 
+from app_operator.constants import LANGGRAPH_AGENT_RECURSION_LIMIT
 from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph._trajectory_handler import LangGraphTrajectoryHandler
 from app_operator.langgraph.message_utils import extract_text
@@ -22,7 +25,26 @@ from app_operator.logger import logger
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
-MAX_DISPLAY_CONTENT = 100
+_DISPLAY_HEAD = 500
+_DISPLAY_TAIL = 300
+
+
+def _truncate_for_display(text: str) -> str:
+    total = _DISPLAY_HEAD + _DISPLAY_TAIL
+    if len(text) <= total:
+        return text
+    omitted = len(text) - total
+    return f"{text[:_DISPLAY_HEAD]}\n... ({omitted} chars omitted) ...\n{text[-_DISPLAY_TAIL:]}"
+
+
+T = TypeVar("T")
+
+
+@dataclass
+class AgentResult(Generic[T]):
+    text: str
+    messages: list[BaseMessage]
+    structured: T | None
 
 
 def _extract_token_usage(message: BaseMessage) -> dict[str, int]:
@@ -72,6 +94,10 @@ def _record_session_usage(
             "input": usage.get("input", 0),
             "output": usage.get("output", 0),
             "total": usage.get("total", 0),
+            "own_input": usage.get("input", 0),
+            "own_output": usage.get("output", 0),
+            "own_total": usage.get("total", 0),
+            "subagents": [],
         }
     )
     if recorder is not None:
@@ -104,11 +130,14 @@ def _invoke_agent_core(
     recorder: TrajectoryRecorderProtocol | None,
     ui: OperatorUI,
     logger,
+    prior_messages: list[BaseMessage] | None = None,
 ) -> tuple[str, list[BaseMessage], Any | None]:
     """Shared streaming loop for invoke_agent and invoke_agent_structured."""
     handler = LangGraphTrajectoryHandler(recorder)
 
-    if system_prompt:
+    if prior_messages is not None:
+        messages: list[BaseMessage] = list(prior_messages) + [HumanMessage(content=user_prompt)]
+    elif system_prompt:
         messages: list[BaseMessage] = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -127,7 +156,8 @@ def _invoke_agent_core(
     logger.info(f"Executing {agent_name}...")
     logger.info("=" * 50)
 
-    for chunk in agent.stream({"messages": messages}, stream_mode="updates"):
+    agent_config = RunnableConfig(recursion_limit=LANGGRAPH_AGENT_RECURSION_LIMIT)
+    for chunk in agent.stream({"messages": messages}, stream_mode="updates", config=agent_config):
         for _node_name, updates in chunk.items():
             if "structured_response" in updates:
                 structured_response = updates["structured_response"]
@@ -149,11 +179,8 @@ def _invoke_agent_core(
 
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
-                            args_str = str(tool_call["args"])
-                            if len(args_str) > MAX_DISPLAY_CONTENT:
-                                args_str = f"{args_str[:MAX_DISPLAY_CONTENT]}... (truncated)"
-                            logger.info(f"[Tool Call] {tool_call['name']}({args_str})")
-                            ui.on_tool_call(tool_call["name"], args_str)
+                            logger.info(f"[Tool Call] {tool_call['name']}({tool_call['args']})")
+                            ui.on_tool_call(tool_call["name"], str(tool_call["args"]))
 
                     content_text = extract_text(msg.content)
                     if content_text:
@@ -164,10 +191,7 @@ def _invoke_agent_core(
                         logger.info(f"Token Usage: {pct}% ({usage['total']}/{context_limit})")
 
                 elif isinstance(msg, ToolMessage):
-                    content = extract_text(msg.content)
-                    if len(content) > MAX_DISPLAY_CONTENT:
-                        content = f"{content[:MAX_DISPLAY_CONTENT]}... (truncated)"
-
+                    content = _truncate_for_display(extract_text(msg.content))
                     logger.info(f"[Tool Result] {content}")
 
     logger.info("=" * 50)
@@ -188,7 +212,8 @@ def invoke_agent(
     recorder: TrajectoryRecorderProtocol | None = None,
     ui: OperatorUI | None = None,
     logger=logger,
-) -> tuple[str, list[BaseMessage]]:
+    prior_messages: list[BaseMessage] | None = None,
+) -> AgentResult:
     """Invoke a LangGraph agent and stream its output.
 
     The `logger` parameter accepts a loguru-bound logger so that callers (e.g.
@@ -196,8 +221,14 @@ def invoke_agent(
     log lines emitted here.  Without this, every log line from this shared
     utility would use the module-level unbound logger, losing the [node] prefix
     that the formatter adds when the 'node' extra is present.
+
+    If `prior_messages` is provided, the new user_prompt is appended to that
+    history, continuing the conversation rather than starting fresh.
+
+    Returns an AgentResult with .text, .messages, and .structured fields.
+    .structured is populated when the agent was created with response_format=.
     """
-    text, messages, _ = _invoke_agent_core(
+    text, messages, structured = _invoke_agent_core(
         state,
         agent,
         system_prompt,
@@ -207,37 +238,9 @@ def invoke_agent(
         recorder,
         ui or NullOperatorUI(),
         logger,
+        prior_messages=prior_messages,
     )
-    return text, messages
-
-
-def invoke_agent_structured(
-    state: OperatorState,
-    agent: Any,
-    system_prompt: str,
-    user_prompt: str,
-    agent_name: str = "Agent",
-    context_limit: int = 128000,
-    recorder: TrajectoryRecorderProtocol | None = None,
-    ui: OperatorUI | None = None,
-    logger=logger,
-) -> tuple[str, list[BaseMessage], Any | None]:
-    """Invoke a LangGraph agent that has response_format set.
-
-    Works like invoke_agent() but also captures structured_response from
-    the streamed state updates and returns it as a third element.
-    """
-    return _invoke_agent_core(
-        state,
-        agent,
-        system_prompt,
-        user_prompt,
-        agent_name,
-        context_limit,
-        recorder,
-        ui or NullOperatorUI(),
-        logger,
-    )
+    return AgentResult(text=text, messages=messages, structured=structured)
 
 
 def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:

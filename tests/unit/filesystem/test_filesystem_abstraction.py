@@ -244,7 +244,6 @@ class TestCreateGenerateScriptPromptIntegration:
         (sds / "deployment_issues.md").write_text("Issues content here")
 
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context="Context",
             target_dir=str(tmp_path),
@@ -263,7 +262,6 @@ class TestCreateGenerateScriptPromptIntegration:
         sds.mkdir()
 
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context="Context",
             target_dir=str(tmp_path),

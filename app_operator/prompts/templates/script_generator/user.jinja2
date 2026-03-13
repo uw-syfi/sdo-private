@@ -1,0 +1,66 @@
+Generate a comprehensive {{ script_name }} bash script for the following repository:
+
+{{ repo_context }}
+
+Target directory: {{ target_dir }}
+
+CRITICAL REQUIREMENTS:
+
+{% if platform == "k8s" %}
+1. **Target Platform: Kubernetes**
+   - Use `kubectl` commands.
+   {% if script_name == "deploy.sh" %}
+   - Ensure you handle manifest application and pod readiness.
+   {% else %}
+   - Check pod status and readiness.
+   {% endif %}
+{% elif platform == "docker" %}
+1. **Target Platform: Docker**
+   {% if script_name == "deploy.sh" %}
+   - Use `docker compose` or `docker` commands as appropriate for the repo.
+   - CRITICAL: The `start` command MUST use `docker compose up --build -d`, not
+     plain `up -d`.  Without `--build`, Docker reuses cached images and never
+     compiles the current source code.  Every deployment must build from source.
+   {% else %}
+   - Use `docker compose ps` or `docker ps`.
+   - Check container status.
+   {% endif %}
+{% else %}
+1. **Deployment Platform Detection**:
+   - Identify if the repo uses Docker Compose, Kubernetes, or plain Docker.
+   {% if script_name == "deploy.sh" %}
+   - Use the appropriate commands.
+   {% else %}
+   - Use the appropriate status check commands.
+   {% endif %}
+{% endif %}
+
+2. **Script Requirements**:
+   - Create the file at: .sds/{{ script_name }}
+   - Use SCRIPT_DIR to determine paths relative to the script location
+   {% if script_name == "deploy.sh" %}
+   - Include all standard deployment commands (start, stop, restart, status, logs, build, cleanup)
+   - CRITICAL: The command MUST be accepted as a positional argument ($1), NOT via a flag.
+     The operator calls the script as: deploy.sh <command> (e.g. deploy.sh start)
+     Do NOT use getopts or -c flags. Parse $1 directly in a case statement.
+   - Make it robust, well-documented, and production-ready
+   - Include proper error handling and colored output
+   - The script should work when executed from the .sds directory
+   - Check for correct prerequisites
+   {% else %}
+   - Include checks for: containers/pods, ports, endpoints, databases, cache, performance
+   - Include a summary report with health score
+   - Make it robust, well-documented, and production-ready
+   - Include proper error handling and colored output
+   - Track total checks, passed checks, failed checks, warnings
+   - The script should work when executed from the .sds directory
+   {% endif %}
+
+3. **Platform-Specific Commands**:
+   {% if script_name == "deploy.sh" %}
+   - Use the commands that match the detected/target platform (see System Prompt).
+   {% else %}
+   - Use the checks that match the detected/target platform (see System Prompt).
+   {% endif %}
+
+You must use the write_file tool to create the file .sds/{{ script_name }} directly. Do not just print the content.

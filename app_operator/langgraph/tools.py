@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -10,18 +11,31 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from langchain_core.tools import tool
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool, tool
+from langgraph.prebuilt import create_react_agent
 
 from app_operator.command_validation import DangerousCommandError, validate_command
+from app_operator.constants import LANGGRAPH_AGENT_RECURSION_LIMIT
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.langgraph.message_utils import extract_text
 
 SUBPROCESS_TIMEOUT_SECS = 120  # seconds before a subprocess command times out
+OUTPUT_SPILL_THRESHOLD = 10_000  # chars; total stdout+stderr above this triggers file spill
 
 
 class ToolContext:
     def __init__(self, repo_root: Path, filesystem: FileSystemInterface):
         self.repo_root = repo_root
         self.filesystem = filesystem
+        self._tool_call_counter = 0
+        self._counter_lock = threading.Lock()
+
+    def next_tool_call_id(self) -> int:
+        with self._counter_lock:
+            self._tool_call_counter += 1
+            return self._tool_call_counter
 
     def resolve_path(self, path: str) -> Path:
         # Construct path without checking filesystem (for InMemoryFilesystem support)
@@ -102,14 +116,22 @@ def _build_glob(context: ToolContext) -> Callable[[str], list[str]]:
     return glob  # type: ignore[reportReturnType]
 
 
-def _build_read(context: ToolContext) -> Callable[[str], str]:
+def _build_read(context: ToolContext) -> Callable[[str, int, int], str]:
     @tool("Read")
-    def read(path: str) -> str:
-        """Read the content of a file."""
+    def read(path: str, start_line: int, end_line: int) -> str:
+        """Read a range of lines from a file (1-based, inclusive).
+
+        Args:
+            path: Path to the file.
+            start_line: First line to return (1-based).
+            end_line: Last line to return (1-based, inclusive).
+        """
         try:
             target = context.resolve_path(path)
             content = context.filesystem.read_text(target)
-            return content
+            lines = content.splitlines(keepends=True)
+            selected = lines[start_line - 1 : end_line]
+            return "".join(selected)
         except (ValueError, OSError) as e:
             return f"Error: {e!s}"
 
@@ -172,6 +194,38 @@ def _build_write_file(context: ToolContext) -> Callable[[str, str], str]:
     return write_file  # type: ignore[reportReturnType]
 
 
+def _build_str_replace(context: ToolContext) -> Callable[[str, str, str], str]:
+    @tool("str_replace")
+    def str_replace(path: str, old_str: str, new_str: str) -> str:
+        """Replace an exact string in a file with new content.
+
+        Finds old_str in the file and replaces it with new_str. Fails if
+        old_str appears zero times (not found) or more than once (ambiguous).
+        Use this instead of write_file for targeted edits to avoid rewriting
+        the entire file.
+
+        Args:
+            path: Path to the file to edit.
+            old_str: The exact string to find and replace.
+            new_str: The string to replace old_str with.
+        """
+        try:
+            target = context.resolve_path(path)
+            content = context.filesystem.read_text(target)
+            count = content.count(old_str)
+            if count == 0:
+                return f"Error: old_str not found in {path}"
+            if count > 1:
+                return f"Error: old_str appears {count} times in {path} (must be unique)"
+            new_content = content.replace(old_str, new_str, 1)
+            context.filesystem.write_text(target, new_content)
+            return f"Edited {path}"
+        except (ValueError, OSError) as e:
+            return f"Error: {e!s}"
+
+    return str_replace  # type: ignore[reportReturnType]
+
+
 def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
     @tool("bash")
     def bash(command: str, timeout: int = SUBPROCESS_TIMEOUT_SECS) -> dict[str, Any]:
@@ -187,11 +241,28 @@ def _build_bash(context: ToolContext) -> Callable[[str, int], dict[str, Any]]:
                 timeout=timeout,
             )
 
+            stdout = result.stdout
+            stderr = result.stderr
+
+            if len(stdout) + len(stderr) > OUTPUT_SPILL_THRESHOLD:
+                call_id = context.next_tool_call_id()
+                spill_dir = context.repo_root / ".sds" / "logs" / "tools" / f"{call_id:04d}"
+                context.filesystem.mkdir(spill_dir, parents=True, exist_ok=True)
+
+                stdout_path = f".sds/logs/tools/{call_id:04d}/stdout.txt"
+                context.filesystem.write_text(spill_dir / "stdout.txt", stdout)
+                stdout = f"(output too large for context; use Read tool: {stdout_path})"
+
+                if stderr:
+                    stderr_path = f".sds/logs/tools/{call_id:04d}/stderr.txt"
+                    context.filesystem.write_text(spill_dir / "stderr.txt", stderr)
+                    stderr = f"(output too large for context; use Read tool: {stderr_path})"
+
             return {
                 "success": result.returncode == 0,
                 "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "stdout": stdout,
+                "stderr": stderr,
             }
         except DangerousCommandError as e:
             error_msg = str(e)
@@ -639,23 +710,120 @@ def _build_make_change_on_remote_copy(
     return make_change_on_remote_copy  # type: ignore[reportReturnType]
 
 
+MAX_SUBAGENT_DEPTH = 3
+
+
+def _build_spawn_subagent(
+    llm: Any,
+    base_tools: list,
+    compaction_hook: Any,
+    current_depth: int,
+    max_depth: int,
+    token_sink: list,
+) -> BaseTool:
+    @tool()
+    def spawn_subagent(prompt: str, system_prompt: str = "") -> str:
+        """Spawn a subagent to handle a subtask. The subagent has access to all
+        standard tools. Returns the subagent's text response."""
+        if current_depth >= max_depth:
+            return f"[Error: Maximum subagent depth ({max_depth}) reached]"
+
+        child_sink: list = []
+        child_tools = list(base_tools)
+        if current_depth + 1 < max_depth:
+            child_tools.append(
+                _build_spawn_subagent(llm, base_tools, compaction_hook, current_depth + 1, max_depth, child_sink)
+            )
+
+        child_agent = create_react_agent(llm, tools=child_tools, pre_model_hook=compaction_hook)
+
+        messages: list = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=prompt))
+
+        result_text = ""
+        total_usage: dict[str, int] = {"input": 0, "output": 0, "total": 0}
+
+        try:
+            agent_config = RunnableConfig(recursion_limit=LANGGRAPH_AGENT_RECURSION_LIMIT)
+            stream = child_agent.stream({"messages": messages}, stream_mode="updates", config=agent_config)
+        except Exception as e:
+            return f"[Subagent failed to start: {e}]"
+
+        try:
+            for chunk in stream:
+                for _node_name, updates in chunk.items():
+                    for msg in updates.get("messages", []):
+                        if isinstance(msg, AIMessage):
+                            um = getattr(msg, "usage_metadata", None)
+                            if um:
+                                total_usage["input"] += um.get("input_tokens", 0)
+                                total_usage["output"] += um.get("output_tokens", 0)
+                                total_usage["total"] += um.get("total_tokens", 0) or (
+                                    um.get("input_tokens", 0) + um.get("output_tokens", 0)
+                                )
+                            text = extract_text(msg.content)
+                            if text:
+                                result_text = text
+        except Exception as e:
+            partial = f" Partial result: {result_text}" if result_text else ""
+            return f"[Subagent hit recursion or execution limit: {e}.{partial}]"
+
+        own_input = total_usage["input"]
+        own_output = total_usage["output"]
+        own_total = total_usage["total"]
+        record = {
+            "agent": f"subagent_d{current_depth}",
+            "own_input": own_input,
+            "own_output": own_output,
+            "own_total": own_total,
+            "input": own_input + sum(r.get("input", 0) for r in child_sink),
+            "output": own_output + sum(r.get("output", 0) for r in child_sink),
+            "total": own_total + sum(r.get("total", 0) for r in child_sink),
+            "subagents": child_sink,
+        }
+        if record["total"] > 0 or record["input"] > 0:
+            token_sink.append(record)
+
+        return result_text or "[No response from subagent]"
+
+    return spawn_subagent
+
+
 def build_tools(
     repo_path: Path,
     filesystem: FileSystemInterface | None = None,
     git_integration: bool = False,
-) -> list[Callable[..., Any]]:
+    llm: Any = None,
+    compaction_hook: Any = None,
+    max_subagent_depth: int = MAX_SUBAGENT_DEPTH,
+    token_sink: list | None = None,
+) -> list[Any]:
     if filesystem is None:
         filesystem = RealFilesystem()
 
     context = ToolContext(repo_root=repo_path.resolve(), filesystem=filesystem)
-    tools = [
+    tools: list[Any] = [
         _build_ls(context),
         _build_glob(context),
         _build_read(context),
         _build_grep(context),
         _build_write_file(context),
+        _build_str_replace(context),
         _build_bash(context),
     ]
     if git_integration:
         tools.append(_build_make_change_on_remote_copy(context))
+    if llm is not None:
+        tools.append(
+            _build_spawn_subagent(
+                llm,
+                list(tools),
+                compaction_hook,
+                0,
+                max_subagent_depth,
+                token_sink if token_sink is not None else [],
+            )
+        )
     return tools

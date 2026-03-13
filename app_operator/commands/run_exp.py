@@ -199,6 +199,21 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
         return []
 
 
+def _normalize_single_repeats(results: list[AppResult], repeats: int) -> bool:
+    """Re-number repeat=None results as repeat=1 when extending to multi-repeat.
+
+    Returns True if any results were modified.
+    """
+    if repeats <= 1:
+        return False
+    changed = False
+    for r in results:
+        if r.repeat is None:
+            r.repeat = 1
+            changed = True
+    return changed
+
+
 def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> None:
     """Write per-app results as JSON to the log directory."""
     has_repeats = any(r.repeat is not None for r in results)
@@ -402,6 +417,10 @@ def run_experiment_task(
 
     # Update status to initializing
     progress.update(task_id, description=f"[cyan]{display_name}[/]: Initializing", completed=0)
+
+    # Truncate the log file immediately so watchers see fresh content from the start
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("")
 
     # 1. Init Experiment
     # Teardown any existing Docker stack before wiping the directory
@@ -692,6 +711,11 @@ def run_command(args: argparse.Namespace) -> int:
             existing = []
         elif rerun == "failed":
             existing = [r for r in existing if r.status == AppStatus.COMPLETED]
+        # Normalize single-run results when extending to multi-repeat
+        repeats = _config.get("repeats", 1)
+        if _normalize_single_repeats(existing, repeats):
+            _write_results(log_dir, exp_name, existing)
+
         results_by_exp[exp_name] = list(existing)
         completed_keys_by_exp[exp_name] = {(r.app, r.repeat) for r in existing}
         if existing:

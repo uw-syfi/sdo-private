@@ -1,74 +1,76 @@
-from pathlib import Path
 from typing import Any
 
-from app_operator.config import Config
+from app_operator.langgraph.context import NodeContext
+from app_operator.langgraph.guardrails import ArtifactGuardrail
 from app_operator.langgraph.state import OperatorState
-from app_operator.langgraph.utils import invoke_agent
+from app_operator.logger import logger as _logger
 from app_operator.progress import emit_progress
 from app_operator.prompts import (
-    PromptLoader,
     analyze_repository,
     create_generate_script_prompt,
-    create_system_prompt,
 )
-from app_operator.trajectory import (
-    NullTrajectoryRecorder,
-    Phase,
-    TrajectoryRecorderProtocol,
-)
+from app_operator.trajectory import Phase
+
+logger = _logger.bind(node="script generator")
 
 
-def generate_scripts(
-    state: OperatorState,
-    operator_config: Config,
-    repo_path: Path,
-    loader: PromptLoader,
-    agent: Any,
-    context_limit: int,
-    recorder: TrajectoryRecorderProtocol | None = None,
-) -> OperatorState:
-    recorder = recorder or NullTrajectoryRecorder()
+def generate_scripts(state: OperatorState, ctx: NodeContext, agent: Any) -> OperatorState:
     if state["scripts_done"]:
         return state
 
     emit_progress("script_generation")
-    with recorder.phase(Phase.SCRIPT_GENERATION):
-        system_prompt = create_system_prompt(operator_config.deployment.platform)
-        repo_context = analyze_repository(repo_path)
+    with ctx.recorder.phase(Phase.SCRIPT_GENERATION):
+        system_prompt = ctx.loader.render(
+            "script_generator/system.jinja2",
+            platform=ctx.config.deployment.platform,
+        )
+        repo_context = analyze_repository(ctx.repo_path)
 
         deploy_prompt = create_generate_script_prompt(
-            system_prompt=system_prompt,
             script_name="deploy.sh",
             repo_context=repo_context,
-            target_dir=str(repo_path),
-            platform=operator_config.deployment.platform,
+            target_dir=str(ctx.repo_path),
+            platform=ctx.config.deployment.platform,
         )
         health_prompt = create_generate_script_prompt(
-            system_prompt=system_prompt,
             script_name="health_check.sh",
             repo_context=repo_context,
-            target_dir=str(repo_path),
-            platform=operator_config.deployment.platform,
+            target_dir=str(ctx.repo_path),
+            platform=ctx.config.deployment.platform,
         )
 
-        _, _ = invoke_agent(
-            state,
-            agent,
-            "",
-            deploy_prompt,
-            agent_name="Script Generator",
-            context_limit=context_limit,
-            recorder=recorder,
-        )
-        _, _ = invoke_agent(
-            state,
-            agent,
-            "",
-            health_prompt,
-            agent_name="Script Generator",
-            context_limit=context_limit,
-            recorder=recorder,
-        )
+        deploy_guardrail = ArtifactGuardrail([".sds/deploy.sh"])
+        health_guardrail = ArtifactGuardrail([".sds/health_check.sh"])
+
+        result = ctx.invoke(state, agent, system_prompt, deploy_prompt, agent_name="Script Generator")
+        for retry in range(deploy_guardrail.max_retries):
+            missing = deploy_guardrail.missing(ctx.repo_path, ctx.filesystem)
+            if not missing:
+                break
+            logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, deploy_guardrail.max_retries)
+            result = ctx.invoke(
+                state,
+                agent,
+                "",
+                deploy_guardrail.reminder(missing),
+                agent_name="Script Generator",
+                prior_messages=result.messages,
+            )
+
+        result = ctx.invoke(state, agent, system_prompt, health_prompt, agent_name="Script Generator")
+        for retry in range(health_guardrail.max_retries):
+            missing = health_guardrail.missing(ctx.repo_path, ctx.filesystem)
+            if not missing:
+                break
+            logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, health_guardrail.max_retries)
+            result = ctx.invoke(
+                state,
+                agent,
+                "",
+                health_guardrail.reminder(missing),
+                agent_name="Script Generator",
+                prior_messages=result.messages,
+            )
 
         state["scripts_done"] = True
         return state

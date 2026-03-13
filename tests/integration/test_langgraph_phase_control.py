@@ -44,7 +44,6 @@ class TestLangGraphPhaseControl:
             "monitor_count": 0,
             "monitor_max": config.operator.monitoring_max_iters,
             "analysis_summary": None,
-            "last_fix_summary": None,
             "agent_token_usage": [],
             "health_verdict": None,
         }
@@ -71,7 +70,6 @@ class TestLangGraphPhaseControl:
             "monitor_count": 0,
             "monitor_max": config.operator.monitoring_max_iters,
             "analysis_summary": None,
-            "last_fix_summary": None,
             "agent_token_usage": [],
             "health_verdict": None,
         }

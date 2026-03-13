@@ -4,9 +4,28 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 from app_operator.config import AgentConfig, Config
+from app_operator.filesystem import InMemoryFilesystem
+from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.nodes.generator import generate_scripts
 from app_operator.langgraph.state import OperatorState
+from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder, Phase
+
+
+def _make_ctx(
+    repo_path: Path,
+    config: Config,
+    loader=None,
+    recorder=None,
+) -> NodeContext:
+    return NodeContext(
+        repo_path=repo_path,
+        filesystem=InMemoryFilesystem(),
+        loader=loader or Mock(),
+        config=config,
+        context_limit=10000,
+        recorder=recorder or NullTrajectoryRecorder(),
+    )
 
 
 class TestGenerateScripts:
@@ -20,8 +39,7 @@ class TestGenerateScripts:
             messages=[],
             scripts_done=False,
             deploy_result=None,
-            health_result=None,
-            last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
@@ -30,18 +48,18 @@ class TestGenerateScripts:
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.phase = Mock(return_value=MagicMock(__enter__=Mock(), __exit__=Mock()))
+        ctx = _make_ctx(repo_path, config, loader, recorder)
+        ctx.invoke = Mock(return_value=AgentResult(text="Script generated", messages=[], structured=None))
 
-        with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("Script generated", [])
+        with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
+            mock_analyze.return_value = {"files": []}
 
-            with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
-                mock_analyze.return_value = {"files": []}
-
-                result_state = generate_scripts(state, config, repo_path, loader, agent, 10000, recorder)
+            result_state = generate_scripts(state, ctx, agent)
 
         assert result_state["scripts_done"] is True
-        # Should invoke agent twice: once for deploy.sh, once for health_check.sh
-        assert mock_invoke.call_count == 2
+        # 2 initial invocations + up to 3 guardrail retries each = up to 8 total
+        # (files are never created in the mock, so all retries fire)
+        assert ctx.invoke.call_count == 2 + 3 + 3
 
     def test_generate_scripts_when_already_done(self):
         """Test generate_scripts skips when already done."""
@@ -51,20 +69,18 @@ class TestGenerateScripts:
             messages=[],
             scripts_done=True,
             deploy_result=None,
-            health_result=None,
-            last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, config)
+        ctx.invoke = Mock()
 
-        with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
-            result_state = generate_scripts(state, config, repo_path, loader, agent, 10000)
+        result_state = generate_scripts(state, ctx, None)
 
         # Should not invoke agent when scripts already done
-        mock_invoke.assert_not_called()
+        ctx.invoke.assert_not_called()
         assert result_state["scripts_done"] is True
 
     def test_generate_scripts_analyzes_repository(self):
@@ -75,25 +91,21 @@ class TestGenerateScripts:
             messages=[],
             scripts_done=False,
             deploy_result=None,
-            health_result=None,
-            last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, config)
+        ctx.invoke = Mock(return_value=AgentResult(text="", messages=[], structured=None))
 
-        with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("", [])
+        with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
+            mock_analyze.return_value = {"files": ["file1.py", "file2.py"]}
 
-            with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
-                mock_analyze.return_value = {"files": ["file1.py", "file2.py"]}
+            generate_scripts(state, ctx, None)
 
-                generate_scripts(state, config, repo_path, loader, agent, 10000)
-
-                # Verify repository was analyzed
-                mock_analyze.assert_called_once_with(repo_path)
+            # Verify repository was analyzed
+            mock_analyze.assert_called_once_with(repo_path)
 
     def test_generate_scripts_uses_correct_script_names(self):
         """Test generate_scripts generates both deploy.sh and health_check.sh."""
@@ -103,33 +115,29 @@ class TestGenerateScripts:
             messages=[],
             scripts_done=False,
             deploy_result=None,
-            health_result=None,
-            last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, config)
+        ctx.invoke = Mock(return_value=AgentResult(text="", messages=[], structured=None))
 
-        with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("", [])
+        with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
+            mock_analyze.return_value = {}
 
-            with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
-                mock_analyze.return_value = {}
+            with patch("app_operator.langgraph.nodes.generator.create_generate_script_prompt") as mock_prompt:
+                mock_prompt.return_value = "prompt"
 
-                with patch("app_operator.langgraph.nodes.generator.create_generate_script_prompt") as mock_prompt:
-                    mock_prompt.return_value = "prompt"
+                generate_scripts(state, ctx, None)
 
-                    generate_scripts(state, config, repo_path, loader, agent, 10000)
+                # Check that prompts were created for both scripts
+                assert mock_prompt.call_count == 2
+                call_args_list = mock_prompt.call_args_list
 
-                    # Check that prompts were created for both scripts
-                    assert mock_prompt.call_count == 2
-                    call_args_list = mock_prompt.call_args_list
-
-                    script_names = [call[1]["script_name"] for call in call_args_list]
-                    assert "deploy.sh" in script_names
-                    assert "health_check.sh" in script_names
+                script_names = [call[1]["script_name"] for call in call_args_list]
+                assert "deploy.sh" in script_names
+                assert "health_check.sh" in script_names
 
     def test_generate_scripts_uses_recorder_phase(self):
         """Test generate_scripts uses recorder phase context."""
@@ -139,8 +147,7 @@ class TestGenerateScripts:
             messages=[],
             scripts_done=False,
             deploy_result=None,
-            health_result=None,
-            last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
@@ -150,19 +157,18 @@ class TestGenerateScripts:
         recorder = Mock(spec=NullTrajectoryRecorder())
         phase_context = MagicMock()
         recorder.phase = Mock(return_value=phase_context)
+        ctx = _make_ctx(repo_path, config, loader, recorder)
+        ctx.invoke = Mock(return_value=AgentResult(text="", messages=[], structured=None))
 
-        with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("", [])
+        with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
+            mock_analyze.return_value = {}
 
-            with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
-                mock_analyze.return_value = {}
+            generate_scripts(state, ctx, agent)
 
-                generate_scripts(state, config, repo_path, loader, agent, 10000, recorder)
-
-                # Verify phase context was used
-                recorder.phase.assert_called_once_with(Phase.SCRIPT_GENERATION)
-                phase_context.__enter__.assert_called_once()
-                phase_context.__exit__.assert_called_once()
+            # Verify phase context was used
+            recorder.phase.assert_called_once_with(Phase.SCRIPT_GENERATION)
+            phase_context.__enter__.assert_called_once()
+            phase_context.__exit__.assert_called_once()
 
     def test_generate_scripts_uses_platform_from_config(self):
         """Test generate_scripts uses platform from config."""
@@ -172,28 +178,24 @@ class TestGenerateScripts:
             messages=[],
             scripts_done=False,
             deploy_result=None,
-            health_result=None,
-            last_fix_summary=None,
+            health_verdict=None,
         )
 
         repo_path = Path("/test/repo")
         config = Config(agent=AgentConfig(provider="codex", model="test-model"))
         config.deployment.platform = "kubernetes"
-        loader = Mock()
-        agent = Mock()
+        ctx = _make_ctx(repo_path, config)
+        ctx.invoke = Mock(return_value=AgentResult(text="", messages=[], structured=None))
 
-        with patch("app_operator.langgraph.nodes.generator.invoke_agent") as mock_invoke:
-            mock_invoke.return_value = ("", [])
+        with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
+            mock_analyze.return_value = {}
 
-            with patch("app_operator.langgraph.nodes.generator.analyze_repository") as mock_analyze:
-                mock_analyze.return_value = {}
+            with patch("app_operator.langgraph.nodes.generator.create_generate_script_prompt") as mock_prompt:
+                mock_prompt.return_value = "prompt"
 
-                with patch("app_operator.langgraph.nodes.generator.create_generate_script_prompt") as mock_prompt:
-                    mock_prompt.return_value = "prompt"
+                generate_scripts(state, ctx, None)
 
-                    generate_scripts(state, config, repo_path, loader, agent, 10000)
-
-                    # Verify platform was passed
-                    call_args_list = mock_prompt.call_args_list
-                    for call in call_args_list:
-                        assert call[1]["platform"] == "kubernetes"
+                # Verify platform was passed
+                call_args_list = mock_prompt.call_args_list
+                for call in call_args_list:
+                    assert call[1]["platform"] == "kubernetes"

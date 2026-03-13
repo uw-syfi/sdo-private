@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from app_operator.config import Config, load_config
+from app_operator.constants import LANGGRAPH_OUTER_RECURSION_LIMIT
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.langgraph._llm import build_llm
@@ -93,18 +94,20 @@ class LangGraphOperator(OperatorBase):
                 "analysis_done": not self.config.operator.phase.code_analysis,
                 "scripts_done": False,
                 "deploy_result": None,
-                "health_result": None,
                 "health_verdict": None,
                 "monitor_count": 0,
                 "monitor_max": self.health_check_max_count,
                 "health_monitoring": self.config.operator.phase.health_monitoring,
                 "analysis_summary": None,
-                "last_fix_summary": None,
                 "agent_token_usage": [],
             }
 
             thread_id = str(int(time.time()))
-            final_state = self.graph.invoke(initial_state, config={"configurable": {"thread_id": thread_id}})  # type: ignore[reportArgumentType]
+            invoke_config = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": LANGGRAPH_OUTER_RECURSION_LIMIT,
+            }
+            final_state = self.graph.invoke(initial_state, config=invoke_config)  # type: ignore[reportArgumentType]
 
             if final_state:
                 sessions = final_state.get("agent_token_usage", [])
@@ -114,8 +117,18 @@ class LangGraphOperator(OperatorBase):
                     totals["completion_tokens"] += s.get("output", 0)
                     totals["total_tokens"] += s.get("total", 0)
                 logger.info(f"Total Token Usage: {totals}")
+
+                def _log_usage(entry: dict, indent: str = "  ") -> None:
+                    own = f", own: in={entry['own_input']}, out={entry['own_output']}" if entry.get("subagents") else ""
+                    logger.info(
+                        f"{indent}{entry['agent']}: {entry['total']} tokens "
+                        f"(in={entry['input']}, out={entry['output']}{own})"
+                    )
+                    for sub in entry.get("subagents", []):
+                        _log_usage(sub, indent + "  ")
+
                 for s in sessions:
-                    logger.info(f"  {s['agent']}: {s['total']} tokens (in={s['input']}, out={s['output']})")
+                    _log_usage(s)
 
             health_verdict = final_state.get("health_verdict") if final_state else None
             self._deployed = bool(health_verdict and health_verdict.get("healthy"))

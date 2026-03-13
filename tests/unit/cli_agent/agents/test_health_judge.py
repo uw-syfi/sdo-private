@@ -217,9 +217,10 @@ def test_assess_renders_correct_template(repo_path, health_check_script, monkeyp
     judge = _make_judge(repo_path, health_check_script, agent)
     judge.assess()
 
+    # The monkeypatched get_loader captures the user prompt render call
     assert len(rendered_calls) == 1
     template_name, kwargs = rendered_calls[0]
-    assert template_name == "deployer/assess_health.jinja2"
+    assert template_name == "health_judge_agent/user.jinja2"
     assert kwargs["repo_path"] == repo_path
     assert kwargs["health_check_script"] == health_check_script
     assert "platform" in kwargs
