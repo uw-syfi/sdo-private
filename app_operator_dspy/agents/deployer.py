@@ -82,7 +82,6 @@ class DeploymentAgent(dspy.Module):
         print("[deployer] scripts generated")
 
         fix_history = ""
-        fix_summaries: list[str] = []
 
         for attempt in range(1, max_attempts + 1):
             # Step 2: Run deploy
@@ -103,13 +102,13 @@ class DeploymentAgent(dspy.Module):
                 # Cleanup failed deployment before retry
                 print(f"[deployer] attempt {attempt} — cleaning up, then fixing...")
                 self._cleanup(deploy_path, repo_path)
-                fix_history, fix_summaries = self._fix_and_track(
+                fix_history = self._fix_and_track(
                     repo_path,
                     deploy_path,
                     health_path,
                     deploy_output,
                     fix_history,
-                    fix_summaries,
+                    [],
                     attempt,
                     max_attempts,
                 )
@@ -132,13 +131,13 @@ class DeploymentAgent(dspy.Module):
             # all containers.
             print(f"[deployer] attempt {attempt} — health check failed, fixing scripts...")
             error_context = f"Deploy output:\n{deploy_output}\n\nHealth check output:\n{health_output}"
-            fix_history, fix_summaries = self._fix_and_track(
+            fix_history = self._fix_and_track(
                 repo_path,
                 deploy_path,
                 health_path,
                 error_context,
                 fix_history,
-                fix_summaries,
+                [],
                 attempt,
                 max_attempts,
             )
@@ -203,7 +202,7 @@ class DeploymentAgent(dspy.Module):
         fix_summaries: list[str],
         attempt: int,
         max_attempts: int,
-    ) -> tuple[str, list[str]]:
+    ) -> str:
         """Fix scripts based on error output and update fix history."""
         fix_result = self.fix_error(
             repo_path=repo_path,
@@ -230,9 +229,9 @@ class DeploymentAgent(dspy.Module):
         # skip on first fix (nothing to consolidate) to save an LLM call
         if fix_history:
             fix_history = self._consolidate_history(fix_history, fix_summaries)
-            return fix_history, []
+            return fix_history
 
-        return "\n".join(fix_summaries), []
+        return "\n".join(fix_summaries)
 
     def _consolidate_history(
         self,
