@@ -12,7 +12,8 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import create_react_agent
 
 from app_operator.command_validation import DangerousCommandError, validate_command
@@ -719,7 +720,7 @@ def _build_spawn_subagent(
     current_depth: int,
     max_depth: int,
     token_sink: list,
-) -> Callable[..., Any]:
+) -> BaseTool:
     @tool()
     def spawn_subagent(prompt: str, system_prompt: str = "") -> str:
         """Spawn a subagent to handle a subtask. The subagent has access to all
@@ -745,7 +746,7 @@ def _build_spawn_subagent(
         total_usage: dict[str, int] = {"input": 0, "output": 0, "total": 0}
 
         try:
-            agent_config = {"recursion_limit": LANGGRAPH_AGENT_RECURSION_LIMIT}
+            agent_config = RunnableConfig(recursion_limit=LANGGRAPH_AGENT_RECURSION_LIMIT)
             stream = child_agent.stream({"messages": messages}, stream_mode="updates", config=agent_config)
         except Exception as e:
             return f"[Subagent failed to start: {e}]"

@@ -14,6 +14,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.runnables import RunnableConfig
 
 from app_operator.constants import LANGGRAPH_AGENT_RECURSION_LIMIT
 from app_operator.filesystem import FileSystemInterface
@@ -155,7 +156,7 @@ def _invoke_agent_core(
     logger.info(f"Executing {agent_name}...")
     logger.info("=" * 50)
 
-    agent_config = {"recursion_limit": LANGGRAPH_AGENT_RECURSION_LIMIT}
+    agent_config = RunnableConfig(recursion_limit=LANGGRAPH_AGENT_RECURSION_LIMIT)
     for chunk in agent.stream({"messages": messages}, stream_mode="updates", config=agent_config):
         for _node_name, updates in chunk.items():
             if "structured_response" in updates:
