@@ -1,5 +1,6 @@
 """Tests for app_operator_dspy.agents.deployer."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import dspy
@@ -12,12 +13,7 @@ def _mock_agent(deploy_script="#!/bin/bash\nexit 0", health_script="#!/bin/bash\
     agent.gen_deploy = MagicMock(return_value=dspy.Prediction(deploy_script=deploy_script))
     agent.gen_health = MagicMock(return_value=dspy.Prediction(health_check_script=health_script))
     agent.fix_error = MagicMock(
-        return_value=dspy.Prediction(
-            fixed_deploy_script=deploy_script,
-            fixed_health_check_script=health_script,
-            compose_override="",
-            fix_summary="fixed port conflict",
-        )
+        return_value=dspy.Prediction(fix_summary="fixed port conflict"),
     )
     agent.consolidate = MagicMock(
         return_value=dspy.Prediction(
@@ -182,17 +178,17 @@ class TestDeploymentAgent:
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_compose_override_written_on_fix(self, mock_shell, tmp_path):
-        """Fix agent can output compose override for port/image fixes."""
-        override_content = "services:\n  backend:\n    ports:\n      - '5001:5000'"
+        """Fix agent edits files via tools; simulate override write via mock side_effect."""
         agent = _mock_agent()
-        agent.fix_error = MagicMock(
-            return_value=dspy.Prediction(
-                fixed_deploy_script="#!/bin/bash\nexit 0",
-                fixed_health_check_script="#!/bin/bash\nexit 0",
-                compose_override=override_content,
-                fix_summary="remapped port 5000 to 5001",
-            )
-        )
+        override_content = "services:\n  backend:\n    ports:\n      - '5001:5000'"
+
+        def write_override_and_return(**kwargs):
+            repo_path = kwargs.get("repo_path", "")
+            if repo_path:
+                (Path(repo_path) / "docker-compose.override.yml").write_text(override_content)
+            return dspy.Prediction(fix_summary="remapped port 5000 to 5001")
+
+        agent.fix_error = MagicMock(side_effect=write_override_and_return)
         mock_shell.side_effect = [
             "Exit code: 1\nStderr:\nport in use",  # deploy fail
             "Exit code: 0\nStdout:\ncleanup done",  # cleanup

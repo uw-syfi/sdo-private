@@ -38,13 +38,12 @@ class TestSignatureStructure:
 
     def test_fix_deployment_error_fields(self):
         assert "repo_path" in FixDeploymentError.input_fields
-        assert "deploy_script" in FixDeploymentError.input_fields
+        assert "deploy_path" in FixDeploymentError.input_fields
+        assert "health_path" in FixDeploymentError.input_fields
         assert "error_output" in FixDeploymentError.input_fields
         assert "fix_history" in FixDeploymentError.input_fields
-        assert "fixed_deploy_script" in FixDeploymentError.output_fields
-        assert "fixed_health_check_script" in FixDeploymentError.output_fields
-        assert "compose_override" in FixDeploymentError.output_fields
         assert "fix_summary" in FixDeploymentError.output_fields
+        assert len(FixDeploymentError.output_fields) == 1
 
     def test_consolidate_fix_summary_fields(self):
         assert "existing_summary" in ConsolidateFixSummary.input_fields

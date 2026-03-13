@@ -186,10 +186,18 @@ class GenerateHealthCheckScript(dspy.Signature):
 class FixDeploymentError(dspy.Signature):
     """You are an expert DevOps engineer debugging deployment issues.
 
-    Analyze the error output and fix the deployment and/or health check
-    scripts. You receive the current scripts and must output corrected
-    versions. You can also output a docker-compose.override.yml to patch
-    compose-level issues like port conflicts or image tags.
+    You MUST make edits directly using the read_file and write_file tools.
+    Do NOT output script content as text — apply all changes via tools.
+
+    Workflow:
+    1. Use read_file(deploy_path) and read_file(health_path) to load current scripts
+    2. Analyze the error output and fix history
+    3. Use write_file to persist fixes:
+       - deploy_path: deploy.sh script
+       - health_path: health_check.sh script
+       - {repo_path}/docker-compose.override.yml: for compose-level fixes
+         (port remapping, image tags, platform: linux/amd64)
+    4. Return fix_summary describing what you changed
 
     CRITICAL platform awareness:
     - Read the deploy script to identify the platform (Docker Compose or K8s)
@@ -231,8 +239,8 @@ class FixDeploymentError(dspy.Signature):
     """
 
     repo_path: str = dspy.InputField(desc="Path to the repository")
-    deploy_script: str = dspy.InputField(desc="Current content of deploy.sh")
-    health_check_script: str = dspy.InputField(desc="Current content of health_check.sh")
+    deploy_path: str = dspy.InputField(desc="Absolute path to deploy.sh (e.g. {repo_path}/.sds/deploy.sh)")
+    health_path: str = dspy.InputField(desc="Absolute path to health_check.sh (e.g. {repo_path}/.sds/health_check.sh)")
     error_output: str = dspy.InputField(desc="Truncated stdout/stderr from the failed deploy or health check")
     fix_history: str = dspy.InputField(
         desc="History of previous fix attempts and their outcomes, "
@@ -241,19 +249,6 @@ class FixDeploymentError(dspy.Signature):
     attempt: str = dspy.InputField(desc="Current attempt number")
     max_attempts: str = dspy.InputField(desc="Maximum allowed attempts")
 
-    fixed_deploy_script: str = dspy.OutputField(
-        desc="Corrected deploy.sh content (full script, no markdown fences). "
-        "Return the original unchanged if the deploy script is not at fault."
-    )
-    fixed_health_check_script: str = dspy.OutputField(
-        desc="Corrected health_check.sh content (full script, no markdown "
-        "fences). Return the original unchanged if the health check is fine."
-    )
-    compose_override: str = dspy.OutputField(
-        desc="Content for docker-compose.override.yml to patch compose-level "
-        "issues (port remapping, image tag fixes, env vars). Return empty "
-        "string if no compose changes needed."
-    )
     fix_summary: str = dspy.OutputField(desc="Brief summary: what issue(s) were found and what fix(es) applied")
 
 

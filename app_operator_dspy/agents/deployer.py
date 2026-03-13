@@ -13,7 +13,7 @@ from app_operator_dspy.signatures import (
     GenerateHealthCheckScript,
 )
 from app_operator_dspy.tools import DEPLOYER_TOOLS
-from app_operator_dspy.tools.filesystem import read_file, write_file
+from app_operator_dspy.tools.filesystem import write_file
 from app_operator_dspy.tools.shell import run_shell
 
 DEFAULT_MAX_ATTEMPTS = 5
@@ -205,35 +205,21 @@ class DeploymentAgent(dspy.Module):
         max_attempts: int,
     ) -> tuple[str, list[str]]:
         """Fix scripts based on error output and update fix history."""
-        current_deploy = read_file(deploy_path)
-        current_health = read_file(health_path)
-
         fix_result = self.fix_error(
             repo_path=repo_path,
-            deploy_script=current_deploy,
-            health_check_script=current_health,
+            deploy_path=deploy_path,
+            health_path=health_path,
             error_output=_truncate(error_output, _MAX_ERROR_CHARS),
             fix_history=_truncate(fix_history, _MAX_FIX_HISTORY_CHARS),
             attempt=str(attempt),
             max_attempts=str(max_attempts),
         )
 
-        # Write fixed scripts (only if changed)
-        fixed_deploy = strip_code_fences(self._validate(fix_result.fixed_deploy_script))
-        fixed_health = strip_code_fences(self._validate(fix_result.fixed_health_check_script))
-
-        if fixed_deploy != current_deploy:
-            self._write_script(deploy_path, fixed_deploy)
-        if fixed_health != current_health:
-            self._write_script(health_path, fixed_health)
-
-        # Write compose override if the fix agent produced one
-        compose_override = getattr(fix_result, "compose_override", "")
-        if compose_override:
-            override_content = strip_code_fences(compose_override)
-            if override_content:
-                self._write_compose_override(repo_path, override_content)
-                print("[deployer] wrote docker-compose.override.yml")
+        # Ensure scripts remain executable (write_file does not set execute bit)
+        if os.path.exists(deploy_path):
+            os.chmod(deploy_path, os.stat(deploy_path).st_mode | stat.S_IEXEC)
+        if os.path.exists(health_path):
+            os.chmod(health_path, os.stat(health_path).st_mode | stat.S_IEXEC)
 
         # Track fix summary
         summary = f"Attempt {attempt}: {fix_result.fix_summary}"
@@ -272,12 +258,6 @@ class DeploymentAgent(dspy.Module):
     def _write_script(path: str, content: str) -> None:
         write_file(path, content)
         os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
-
-    @staticmethod
-    def _write_compose_override(repo_path: str, content: str) -> None:
-        """Write a docker-compose.override.yml for compose-level fixes."""
-        override_path = os.path.join(repo_path, "docker-compose.override.yml")
-        write_file(override_path, content)
 
     @staticmethod
     def _cleanup(deploy_path: str, repo_path: str) -> None:
