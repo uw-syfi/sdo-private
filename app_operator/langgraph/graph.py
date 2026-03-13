@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
@@ -95,16 +95,31 @@ def build_graph(
             return "monitor"
         return "end"
 
+    def _node_analyze_code(state: OperatorState) -> OperatorState:
+        return analyze_code(state, ctx, analyze_agent)
+
+    def _node_generate_scripts(state: OperatorState) -> OperatorState:
+        return generate_scripts(state, ctx, script_agent)
+
+    def _node_deploy_attempt(state: OperatorState) -> OperatorState:
+        return deploy_attempt(state, ctx)
+
+    def _node_health_check(state: OperatorState) -> OperatorState:
+        return health_check(state, ctx, health_agent)
+
+    def _node_fix_errors(state: OperatorState) -> OperatorState:
+        return fix_errors(state, ctx, fix_agent)
+
+    def _node_monitor_health(state: OperatorState) -> OperatorState:
+        return monitor_health(state, ctx, health_agent, health_check_interval)
+
     graph = StateGraph(OperatorState)
-    graph.add_node("analyze_code", lambda state: analyze_code(cast("OperatorState", state), ctx, analyze_agent))
-    graph.add_node("generate_scripts", lambda state: generate_scripts(cast("OperatorState", state), ctx, script_agent))
-    graph.add_node("deploy_attempt", lambda state: deploy_attempt(cast("OperatorState", state), ctx))
-    graph.add_node("health_check", lambda state: health_check(cast("OperatorState", state), ctx, health_agent))
-    graph.add_node("fix_errors", lambda state: fix_errors(cast("OperatorState", state), ctx, fix_agent))
-    graph.add_node(
-        "monitor_health",
-        lambda state: monitor_health(cast("OperatorState", state), ctx, health_agent, health_check_interval),
-    )
+    graph.add_node("analyze_code", _node_analyze_code)
+    graph.add_node("generate_scripts", _node_generate_scripts)
+    graph.add_node("deploy_attempt", _node_deploy_attempt)
+    graph.add_node("health_check", _node_health_check)
+    graph.add_node("fix_errors", _node_fix_errors)
+    graph.add_node("monitor_health", _node_monitor_health)
 
     graph.set_entry_point("analyze_code")
     graph.add_edge("analyze_code", "generate_scripts")
