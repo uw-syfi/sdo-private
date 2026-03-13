@@ -43,7 +43,6 @@ class AnalyzeCodebase(dspy.Signature):
     """
 
     repo_path: str = dspy.InputField(desc="Path to the repository")
-    file_tree: str = dspy.InputField(desc="Repository file tree listing followed by raw file contents")
 
     analysis: str = dspy.OutputField(
         desc="Structured markdown analysis with services inventory table, "

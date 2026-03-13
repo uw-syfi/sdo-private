@@ -26,9 +26,8 @@ class TestCodeAnalyzerAgent:
         assert result.analysis == "# Analysis"
         assert result.issues == "# Issues"
 
-    def test_forward_passes_file_contents(self, tmp_path):
+    def test_forward_passes_repo_path(self, tmp_path):
         (tmp_path / "Dockerfile").write_text("FROM node:18")
-        (tmp_path / "docker-compose.yml").write_text("version: '3'")
 
         agent = CodeAnalyzerAgent()
         agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="ok", issues="none"))
@@ -36,64 +35,5 @@ class TestCodeAnalyzerAgent:
         agent.forward(str(tmp_path))
 
         call_kwargs = agent.analyze.call_args.kwargs
-        assert "FROM node:18" in call_kwargs["file_tree"]
-        assert "version: '3'" in call_kwargs["file_tree"]
-
-    def test_forward_works_without_files(self, tmp_path):
-        agent = CodeAnalyzerAgent()
-        agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="a", issues="b"))
-
-        result = agent.forward(str(tmp_path))
-
-        assert result.analysis == "a"
-        call_kwargs = agent.analyze.call_args.kwargs
-        assert "File Contents" not in call_kwargs["file_tree"]
-
-    def test_skips_large_files(self, tmp_path):
-        (tmp_path / "small.txt").write_text("small")
-        (tmp_path / "big.txt").write_text("x" * 200)
-
-        agent = CodeAnalyzerAgent(max_file_size=100)
-        agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="a", issues="b"))
-
-        agent.forward(str(tmp_path))
-
-        call_kwargs = agent.analyze.call_args.kwargs
-        assert "small" in call_kwargs["file_tree"]
-        assert "x" * 200 not in call_kwargs["file_tree"]
-
-    def test_respects_context_budget(self, tmp_path):
-        # Create files that together exceed the budget
-        (tmp_path / "small.txt").write_text("fits")
-        (tmp_path / "big_source.py").write_text("x" * 500)
-
-        agent = CodeAnalyzerAgent(max_context_chars=100)
-        agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="a", issues="b"))
-
-        agent.forward(str(tmp_path))
-
-        call_kwargs = agent.analyze.call_args.kwargs
-        # Small file fits in budget
-        assert "fits" in call_kwargs["file_tree"]
-        # Big file skipped due to budget
-        assert "x" * 500 not in call_kwargs["file_tree"]
-        # Skipped note present
-        assert "skipped due to context budget" in call_kwargs["file_tree"]
-
-    def test_shallower_files_read_first(self, tmp_path):
-        # Create nested file and root file
-        sub = tmp_path / "src"
-        sub.mkdir()
-        (sub / "deep.py").write_text("deep content")
-        (tmp_path / "root.txt").write_text("root content")
-
-        agent = CodeAnalyzerAgent()
-        agent.analyze = MagicMock(return_value=dspy.Prediction(analysis="a", issues="b"))
-
-        agent.forward(str(tmp_path))
-
-        # Root file should appear before nested file in the context
-        file_tree = agent.analyze.call_args.kwargs["file_tree"]
-        root_pos = file_tree.find("root content")
-        deep_pos = file_tree.find("deep content")
-        assert root_pos < deep_pos
+        assert call_kwargs["repo_path"] == str(tmp_path)
+        assert "file_tree" not in call_kwargs

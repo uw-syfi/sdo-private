@@ -29,16 +29,9 @@ class DSPyOperator(dspy.Module):
     a single end-to-end pipeline.
     """
 
-    def __init__(
-        self,
-        max_file_size: int = 100_000,
-        max_context_chars: int = 500_000,
-    ):
+    def __init__(self):
         super().__init__()
-        self.analyzer = CodeAnalyzerAgent(
-            max_file_size=max_file_size,
-            max_context_chars=max_context_chars,
-        )
+        self.analyzer = CodeAnalyzerAgent()
         self.deployer = DeploymentAgent()
         self.monitor = MonitorAgent()
 

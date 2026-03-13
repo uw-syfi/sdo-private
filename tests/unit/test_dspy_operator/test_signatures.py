@@ -33,7 +33,6 @@ class TestSignatureStructure:
 
     def test_analyze_codebase_fields(self):
         assert "repo_path" in AnalyzeCodebase.input_fields
-        assert "file_tree" in AnalyzeCodebase.input_fields
         assert "analysis" in AnalyzeCodebase.output_fields
         assert "issues" in AnalyzeCodebase.output_fields
 
