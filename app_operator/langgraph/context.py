@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface
@@ -11,6 +11,7 @@ from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderPr
 if TYPE_CHECKING:
     from app_operator.langgraph.state import OperatorState
     from app_operator.langgraph.utils import AgentResult
+    from app_operator.types import TokenUsage
 
 
 @dataclass
@@ -70,7 +71,9 @@ class NodeContext:
                     totals["prompt_tokens"] += s.get("input", 0)
                     totals["completion_tokens"] += s.get("output", 0)
                     totals["total_tokens"] += s.get("total", 0)
-                self.recorder.record_token_usage(totals)
-                self.recorder.trajectory["metadata"]["agent_token_usage"] = sessions
+                self.recorder.record_token_usage(cast("TokenUsage", totals))
+                traj = getattr(self.recorder, "trajectory", None)
+                if traj is not None:
+                    traj["metadata"]["agent_token_usage"] = sessions
         self.subagent_token_sink.clear()
         return result

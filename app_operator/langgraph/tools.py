@@ -799,12 +799,12 @@ def build_tools(
     compaction_hook: Any = None,
     max_subagent_depth: int = MAX_SUBAGENT_DEPTH,
     token_sink: list | None = None,
-) -> list[Callable[..., Any]]:
+) -> list[Any]:
     if filesystem is None:
         filesystem = RealFilesystem()
 
     context = ToolContext(repo_root=repo_path.resolve(), filesystem=filesystem)
-    tools: list[Callable[..., Any]] = [
+    tools: list[Any] = [
         _build_ls(context),
         _build_glob(context),
         _build_read(context),

@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
@@ -96,12 +96,15 @@ def build_graph(
         return "end"
 
     graph = StateGraph(OperatorState)
-    graph.add_node("analyze_code", lambda state: analyze_code(state, ctx, analyze_agent))
-    graph.add_node("generate_scripts", lambda state: generate_scripts(state, ctx, script_agent))
-    graph.add_node("deploy_attempt", lambda state: deploy_attempt(state, ctx))
-    graph.add_node("health_check", lambda state: health_check(state, ctx, health_agent))
-    graph.add_node("fix_errors", lambda state: fix_errors(state, ctx, fix_agent))
-    graph.add_node("monitor_health", lambda state: monitor_health(state, ctx, health_agent, health_check_interval))
+    graph.add_node("analyze_code", lambda state: analyze_code(cast("OperatorState", state), ctx, analyze_agent))
+    graph.add_node("generate_scripts", lambda state: generate_scripts(cast("OperatorState", state), ctx, script_agent))
+    graph.add_node("deploy_attempt", lambda state: deploy_attempt(cast("OperatorState", state), ctx))
+    graph.add_node("health_check", lambda state: health_check(cast("OperatorState", state), ctx, health_agent))
+    graph.add_node("fix_errors", lambda state: fix_errors(cast("OperatorState", state), ctx, fix_agent))
+    graph.add_node(
+        "monitor_health",
+        lambda state: monitor_health(cast("OperatorState", state), ctx, health_agent, health_check_interval),
+    )
 
     graph.set_entry_point("analyze_code")
     graph.add_edge("analyze_code", "generate_scripts")

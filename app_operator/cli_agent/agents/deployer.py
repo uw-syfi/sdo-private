@@ -298,10 +298,6 @@ class DeploymentAgent:
             health_check_log_path,
         )
 
-    def _update_consolidated_summary(self, current_attempt: int, current_summary: str) -> None:
-        """Delegate to RepairAgent for backward compatibility."""
-        self._repair._update_consolidated_summary(current_attempt, current_summary)
-
     def run_deploy_command(
         self,
         command: str = "start",
