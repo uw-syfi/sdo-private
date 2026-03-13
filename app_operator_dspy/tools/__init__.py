@@ -10,7 +10,10 @@ from app_operator_dspy.tools.filesystem import list_files, read_file, write_file
 from app_operator_dspy.tools.health_check import run_health_check
 from app_operator_dspy.tools.shell import run_shell
 
+DEPLOYER_TOOLS = [run_shell, read_file, write_file, run_health_check, list_files]
+
 __all__ = [
+    "DEPLOYER_TOOLS",
     "docker_compose_up",
     "docker_logs",
     "docker_ps",

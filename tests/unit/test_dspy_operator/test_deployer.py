@@ -32,6 +32,18 @@ class TestDeploymentAgent:
         agent = DeploymentAgent()
         assert isinstance(agent, dspy.Module)
 
+    def test_gen_deploy_gen_health_fix_error_are_react_with_tools(self):
+        """gen_deploy, gen_health, fix_error are ReAct instances with DEPLOYER_TOOLS."""
+        agent = DeploymentAgent()
+        assert isinstance(agent.gen_deploy, dspy.ReAct)
+        assert isinstance(agent.gen_health, dspy.ReAct)
+        assert isinstance(agent.fix_error, dspy.ReAct)
+        tool_names = set(agent.gen_deploy.tools.keys())
+        expected = {"run_shell", "read_file", "write_file", "run_health_check", "list_files", "finish"}
+        assert expected <= tool_names
+        assert agent.gen_deploy.tools.keys() == agent.gen_health.tools.keys()
+        assert agent.gen_health.tools.keys() == agent.fix_error.tools.keys()
+
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_successful_first_attempt(self, mock_shell, tmp_path):
         mock_shell.return_value = "Exit code: 0\nStdout:\nOK"

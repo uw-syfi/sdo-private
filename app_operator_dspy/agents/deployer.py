@@ -12,6 +12,7 @@ from app_operator_dspy.signatures import (
     GenerateDeployScript,
     GenerateHealthCheckScript,
 )
+from app_operator_dspy.tools import DEPLOYER_TOOLS
 from app_operator_dspy.tools.filesystem import read_file, write_file
 from app_operator_dspy.tools.shell import run_shell
 
@@ -51,9 +52,9 @@ class DeploymentAgent(dspy.Module):
 
     def __init__(self):
         super().__init__()
-        self.gen_deploy = dspy.ChainOfThought(GenerateDeployScript)
-        self.gen_health = dspy.ChainOfThought(GenerateHealthCheckScript)
-        self.fix_error = dspy.ChainOfThought(FixDeploymentError)
+        self.gen_deploy = dspy.ReAct(GenerateDeployScript, tools=DEPLOYER_TOOLS)
+        self.gen_health = dspy.ReAct(GenerateHealthCheckScript, tools=DEPLOYER_TOOLS)
+        self.fix_error = dspy.ReAct(FixDeploymentError, tools=DEPLOYER_TOOLS)
         self.consolidate = dspy.ChainOfThought(ConsolidateFixSummary)
 
     def forward(
@@ -208,6 +209,7 @@ class DeploymentAgent(dspy.Module):
         current_health = read_file(health_path)
 
         fix_result = self.fix_error(
+            repo_path=repo_path,
             deploy_script=current_deploy,
             health_check_script=current_health,
             error_output=_truncate(error_output, _MAX_ERROR_CHARS),

@@ -37,6 +37,7 @@ class TestSignatureStructure:
         assert "issues" in AnalyzeCodebase.output_fields
 
     def test_fix_deployment_error_fields(self):
+        assert "repo_path" in FixDeploymentError.input_fields
         assert "deploy_script" in FixDeploymentError.input_fields
         assert "error_output" in FixDeploymentError.input_fields
         assert "fix_history" in FixDeploymentError.input_fields

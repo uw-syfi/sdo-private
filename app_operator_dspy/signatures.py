@@ -230,6 +230,7 @@ class FixDeploymentError(dspy.Signature):
     - APP_DIR must resolve to the repo root, NOT to .sds/
     """
 
+    repo_path: str = dspy.InputField(desc="Path to the repository")
     deploy_script: str = dspy.InputField(desc="Current content of deploy.sh")
     health_check_script: str = dspy.InputField(desc="Current content of health_check.sh")
     error_output: str = dspy.InputField(desc="Truncated stdout/stderr from the failed deploy or health check")
