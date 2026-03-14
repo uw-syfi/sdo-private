@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
-from app_operator.pydantic_ai._base_agent import BaseAgent
+from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import HealthVerdictResponse
 from app_operator.script_runner import write_log_file
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
-class HealthAgent(BaseAgent):
+class HealthAgent(OperatorAgent):
     """Agent for health check and monitoring phases."""
 
     agent_name = "Health Judge"

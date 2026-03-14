@@ -19,6 +19,7 @@ members = [
     "sds-agent-cli",
     "sds-core",
     "sds-operator",
+    "sds-pydantic-agent",
 ]
 
 [[package]]
@@ -5672,6 +5673,17 @@ provides-extras = ["plot", "test"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pyright", specifier = ">=1.1.408" }]
+
+[[package]]
+name = "sds-pydantic-agent"
+version = "0.1.0"
+source = { editable = "libs/pydantic_agent" }
+dependencies = [
+    { name = "pydantic-ai" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic-ai", specifier = ">=1.0.0" }]
 
 [[package]]
 name = "secretstorage"

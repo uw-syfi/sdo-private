@@ -1,4 +1,4 @@
-"""Tests for BaseAgent middleware chain."""
+"""Tests for OperatorAgent middleware chain."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-from app_operator.pydantic_ai._base_agent import AgentMiddleware, BaseAgent
+from app_operator.pydantic_ai._base_agent import AgentMiddleware, OperatorAgent
 
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
@@ -44,7 +44,7 @@ def _make_agent(
     deps = _make_deps()
     recorder = _make_recorder()
 
-    class ConcreteAgent(BaseAgent):
+    class ConcreteAgent(OperatorAgent):
         phase = "test_phase"
         agent_name = "Test Agent"
 
@@ -239,3 +239,24 @@ def test_before_not_called_when_no_tools_invoked():
     agent = _make_agent(middleware=[mw], call_tools=[])
     agent._run("test")
     assert mw.before_calls == []
+
+
+def test_trajectory_recorded_after_run():
+    """TrajectoryMiddleware.after_run calls recorder.record_run with correct args."""
+    deps = _make_deps()
+    recorder = _make_recorder()
+
+    class ConcreteAgent(OperatorAgent):
+        phase = "p"
+        agent_name = "A"
+
+        def __init__(self):
+            super().__init__(deps, recorder)
+            self._agent = Agent(TestModel(call_tools=[]), deps_type=type(deps), output_type=str)
+
+    agent = ConcreteAgent()
+    agent._run("prompt")
+    recorder.record_run.assert_called_once()
+    call_args = recorder.record_run.call_args
+    assert call_args[0][0] == "p"
+    assert call_args[0][1] == "A"

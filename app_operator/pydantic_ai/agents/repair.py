@@ -8,7 +8,7 @@ from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.prompts import create_fix_prompt, prepare_error_context
-from app_operator.pydantic_ai._base_agent import BaseAgent
+from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import FixSummaryResponse, HealthVerdictResponse
 from app_operator.script_runner import write_log_file
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
-class RepairAgent(BaseAgent):
+class RepairAgent(OperatorAgent):
     """Agent for error fixing phase."""
 
     phase = Phase.DEPLOYMENT

@@ -10,7 +10,7 @@ from app_operator.guardrails import ArtifactGuardrail
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.prompts import analyze_repository, create_generate_script_prompt
-from app_operator.pydantic_ai._base_agent import BaseAgent
+from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.trajectory import Phase
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
-class ScriptAgent(BaseAgent):
+class ScriptAgent(OperatorAgent):
     """Agent for script generation phase."""
 
     phase = Phase.SCRIPT_GENERATION

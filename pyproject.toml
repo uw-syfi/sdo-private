@@ -50,7 +50,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.workspace]
-members = ["libs/agent_cli", "libs/sds_core"]
+members = ["libs/agent_cli", "libs/sds_core", "libs/pydantic_agent"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app_operator", "app_operator_dspy", "lego_agent", "libs"]
