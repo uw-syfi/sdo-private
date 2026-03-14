@@ -108,7 +108,6 @@ class DeploymentAgent(dspy.Module):
                     health_path,
                     deploy_output,
                     fix_history,
-                    [],
                     attempt,
                     max_attempts,
                 )
@@ -137,7 +136,6 @@ class DeploymentAgent(dspy.Module):
                 health_path,
                 error_context,
                 fix_history,
-                [],
                 attempt,
                 max_attempts,
             )
@@ -199,7 +197,6 @@ class DeploymentAgent(dspy.Module):
         health_path: str,
         error_output: str,
         fix_history: str,
-        fix_summaries: list[str],
         attempt: int,
         max_attempts: int,
     ) -> str:
@@ -223,15 +220,14 @@ class DeploymentAgent(dspy.Module):
         # Track fix summary
         summary = f"Attempt {attempt}: {fix_result.fix_summary}"
         print(f"[deployer] fix summary: {fix_result.fix_summary}")
-        fix_summaries = [*fix_summaries, summary]
 
         # Only consolidate when there's prior history worth grouping —
         # skip on first fix (nothing to consolidate) to save an LLM call
         if fix_history:
-            fix_history = self._consolidate_history(fix_history, fix_summaries)
+            fix_history = self._consolidate_history(fix_history, [summary])
             return fix_history
 
-        return "\n".join(fix_summaries)
+        return summary
 
     def _consolidate_history(
         self,
