@@ -6,12 +6,13 @@ import stat
 
 import dspy
 
-from app_operator_dspy.constants import CLEANUP_TIMEOUT, DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
+from app_operator_dspy.constants import CLEANUP_TIMEOUT, DEPLOY_TIMEOUT
 from app_operator_dspy.logger import get_logger
 from app_operator_dspy.signatures import (
     ConsolidateFixSummary,
     GenerateDeployScript,
     GenerateHealthCheckScript,
+    JudgeHealthCheck,
     RepairDeploymentError,
 )
 from app_operator_dspy.tools import DEPLOYER_TOOLS, write_file
@@ -37,11 +38,6 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n... ({len(text) - limit} chars truncated)"
-
-
-def _health_error_context(deploy: ShellResult, health: ShellResult) -> str:
-    """Build combined deploy + health output for the repair agent when health check fails."""
-    return f"Deploy output:\n{deploy.output}\n\nHealth check output:\n{health.output}"
 
 
 class _FixHistory(dspy.Module):
@@ -93,6 +89,7 @@ class DeploymentAgent(dspy.Module):
         self.gen_deploy = dspy.ReAct(GenerateDeployScript, tools=DEPLOYER_TOOLS)
         self.gen_health = dspy.ReAct(GenerateHealthCheckScript, tools=DEPLOYER_TOOLS)
         self.repair_agent = dspy.ReAct(RepairDeploymentError, tools=DEPLOYER_TOOLS)
+        self.health_judge = dspy.ReAct(JudgeHealthCheck, tools=DEPLOYER_TOOLS)
         self._fix_history = _FixHistory()
 
     def forward(
@@ -102,7 +99,7 @@ class DeploymentAgent(dspy.Module):
         deployment_issues: str,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         deploy_timeout: int = DEPLOY_TIMEOUT,
-        health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
+        platform: str = "docker",
     ) -> dspy.Prediction:
         sds_dir = os.path.join(repo_path, ".sds")
         deploy_path = os.path.join(sds_dir, "deploy.sh")
@@ -119,10 +116,10 @@ class DeploymentAgent(dspy.Module):
             if not deploy.succeeded:
                 error_output = deploy.output
             else:
-                health = self._run_health_check(repo_path, health_path, health_check_timeout)
-                if health.succeeded:
+                verdict = self._judge_health(repo_path, deploy.output, platform)
+                if verdict.healthy:
                     return self._success(attempt)
-                error_output = _health_error_context(deploy, health)
+                error_output = verdict.diagnosis or verdict.assessment
 
             if attempt == max_attempts:
                 return self._failure(attempt, error_output)
@@ -171,12 +168,18 @@ class DeploymentAgent(dspy.Module):
             timeout=deploy_timeout,
         )
 
-    def _run_health_check(self, repo_path: str, health_path: str, health_check_timeout: int) -> ShellResult:
-        """Run health_check.sh; return structured result."""
-        return run_shell(
-            health_path,
-            cwd=repo_path,
-            timeout=health_check_timeout,
+    def _judge_health(self, repo_path: str, deploy_output: str, platform: str) -> dspy.Prediction:
+        """Run the health judge ReAct agent and return a structured verdict."""
+        result = self.health_judge(
+            repo_path=repo_path,
+            deploy_output=_truncate(deploy_output, _MAX_ERROR_CHARS),
+            platform=platform,
+        )
+        return dspy.Prediction(
+            healthy=result.healthy,
+            assessment=result.assessment,
+            diagnosis=result.diagnosis,
+            script_was_fixed=result.script_was_fixed,
         )
 
     def _repair(

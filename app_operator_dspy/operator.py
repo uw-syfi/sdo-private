@@ -46,6 +46,7 @@ class DSPyOperator(dspy.Module):
         monitor_checks: int = 5,
         deploy_timeout: int = DEPLOY_TIMEOUT,
         health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
+        platform: str = "docker",
     ) -> dspy.Prediction:
         # Step 1: Analyze codebase
         log.info("code_analysis — analyzing repository...")
@@ -60,7 +61,7 @@ class DSPyOperator(dspy.Module):
             deployment_issues=analysis.issues,
             max_attempts=max_deploy_attempts,
             deploy_timeout=deploy_timeout,
-            health_check_timeout=health_check_timeout,
+            platform=platform,
         )
 
         if not deploy_result.success:

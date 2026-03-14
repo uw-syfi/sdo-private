@@ -25,6 +25,14 @@ def _shell_fail(output: str) -> ShellResult:
     return ShellResult(code, output)
 
 
+def _healthy_verdict():
+    return dspy.Prediction(healthy=True, assessment="all healthy", diagnosis="", script_was_fixed=False)
+
+
+def _unhealthy_verdict(diagnosis: str = "service down"):
+    return dspy.Prediction(healthy=False, assessment="health check failed", diagnosis=diagnosis, script_was_fixed=False)
+
+
 def _mock_agent(deploy_script="#!/bin/bash\nexit 0", health_script="#!/bin/bash\nexit 0"):
     agent = DeploymentAgent()
     agent.gen_deploy = MagicMock(return_value=dspy.Prediction(deploy_script=deploy_script))
@@ -32,6 +40,7 @@ def _mock_agent(deploy_script="#!/bin/bash\nexit 0", health_script="#!/bin/bash\
     agent.repair_agent = MagicMock(
         return_value=dspy.Prediction(fix_summary="fixed port conflict"),
     )
+    agent.health_judge = MagicMock(return_value=_healthy_verdict())
     agent._fix_history.consolidate = MagicMock(
         return_value=dspy.Prediction(
             consolidated_summary="## Failure Pattern: port conflict\n* Attempt 1: fixed",
@@ -57,6 +66,14 @@ class TestDeploymentAgent:
         assert agent.gen_deploy.tools.keys() == agent.gen_health.tools.keys()
         assert agent.gen_health.tools.keys() == agent.repair_agent.tools.keys()
 
+    def test_health_judge_is_react_with_tools(self):
+        """health_judge is a ReAct instance with DEPLOYER_TOOLS."""
+        agent = DeploymentAgent()
+        assert isinstance(agent.health_judge, dspy.ReAct)
+        tool_names = set(agent.health_judge.tools.keys())
+        expected = {"run_shell", "read_file", "write_file", "run_health_check", "list_files", "finish"}
+        assert expected <= tool_names
+
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_successful_first_attempt(self, mock_shell, tmp_path):
         mock_shell.return_value = _shell_ok()
@@ -68,6 +85,7 @@ class TestDeploymentAgent:
         assert result.attempts == 1
         assert agent.gen_deploy.call_count == 1
         assert agent.repair_agent.call_count == 0
+        agent.health_judge.assert_called_once()
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_deploy_fails_then_succeeds(self, mock_shell, tmp_path):
@@ -75,7 +93,6 @@ class TestDeploymentAgent:
             _shell_fail("Exit code: 1\nStderr:\nport in use"),  # deploy fail
             _shell_ok("Exit code: 0\nStdout:\ncleanup done"),  # cleanup
             _shell_ok(),  # deploy success
-            _shell_ok("Exit code: 0\nStdout:\nhealthy"),  # health success
         ]
         agent = _mock_agent()
 
@@ -84,18 +101,18 @@ class TestDeploymentAgent:
         assert result.success is True
         assert result.attempts == 2
         assert agent.repair_agent.call_count == 1
+        agent.health_judge.assert_called_once()
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_health_fail_triggers_full_retry(self, mock_shell, tmp_path):
-        """Health fail triggers fix + cleanup, then full retry (re-deploy) on next iteration."""
+        """Health judge unhealthy triggers fix + cleanup, then full retry on next iteration."""
         mock_shell.side_effect = [
             _shell_ok(),  # deploy success
-            _shell_fail("Exit code: 1\nStderr:\nbad endpoint"),  # health fail
             _shell_ok("Exit code: 0\nStdout:\ncleanup done"),  # cleanup
             _shell_ok(),  # deploy success (retry)
-            _shell_ok("Exit code: 0\nStdout:\nhealthy"),  # health success
         ]
         agent = _mock_agent()
+        agent.health_judge = MagicMock(side_effect=[_unhealthy_verdict("bad endpoint"), _healthy_verdict()])
 
         result = agent.forward(str(tmp_path), "analysis", "issues", max_attempts=3)
 
@@ -103,7 +120,7 @@ class TestDeploymentAgent:
         assert result.attempts == 2
         assert agent.repair_agent.call_count == 1
         # Verify cleanup was called after health failure
-        cleanup_call = mock_shell.call_args_list[2]
+        cleanup_call = mock_shell.call_args_list[1]
         assert "cleanup" in cleanup_call.args[0]
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
@@ -150,7 +167,6 @@ class TestDeploymentAgent:
             _shell_fail("Exit code: 1\nStderr:\nfail"),
             _shell_ok("Exit code: 0\nStdout:\ncleanup done"),  # cleanup
             _shell_ok(),
-            _shell_ok("Exit code: 0\nStdout:\nhealthy"),
         ]
         agent = _mock_agent()
 
@@ -167,7 +183,6 @@ class TestDeploymentAgent:
             _shell_fail("Exit code: 1\nStderr:\nfail again"),  # deploy fail
             _shell_ok("Exit code: 0\nStdout:\ncleanup done"),  # cleanup
             _shell_ok(),  # deploy success
-            _shell_ok("Exit code: 0\nStdout:\nhealthy"),  # health success
         ]
         agent = _mock_agent()
 
@@ -192,7 +207,6 @@ class TestDeploymentAgent:
             _shell_fail("Exit code: 1\nStderr:\nport in use"),  # deploy fail
             _shell_ok("Exit code: 0\nStdout:\ncleanup done"),  # cleanup
             _shell_ok(),  # deploy success
-            _shell_ok("Exit code: 0\nStdout:\nhealthy"),  # health success
         ]
 
         agent.forward(str(tmp_path), "analysis", "issues", max_attempts=3)
@@ -207,7 +221,6 @@ class TestDeploymentAgent:
             _shell_fail("Exit code: 1\nStderr:\nfail"),  # deploy fail
             _shell_ok("Exit code: 0\nStdout:\ncleanup done"),  # cleanup
             _shell_ok(),  # deploy success
-            _shell_ok("Exit code: 0\nStdout:\nhealthy"),  # health success
         ]
         agent = _mock_agent()
 
@@ -216,6 +229,48 @@ class TestDeploymentAgent:
         # Verify cleanup was called (2nd shell call)
         cleanup_call = mock_shell.call_args_list[1]
         assert "cleanup" in cleanup_call.args[0]
+
+    @patch("app_operator_dspy.agents.deployer.run_shell")
+    def test_unhealthy_verdict_diagnosis_used_as_error(self, mock_shell, tmp_path):
+        """When health judge returns unhealthy, diagnosis is used as error output."""
+        mock_shell.return_value = _shell_ok()
+        agent = _mock_agent()
+        agent.health_judge = MagicMock(return_value=_unhealthy_verdict("nginx container CrashLoopBackOff"))
+
+        result = agent.forward(str(tmp_path), "analysis", "issues", max_attempts=1)
+
+        assert result.success is False
+        assert "nginx container CrashLoopBackOff" in result.error
+
+    @patch("app_operator_dspy.agents.deployer.run_shell")
+    def test_unhealthy_verdict_falls_back_to_assessment(self, mock_shell, tmp_path):
+        """When diagnosis is empty, assessment is used as error output."""
+        mock_shell.return_value = _shell_ok()
+        agent = _mock_agent()
+        agent.health_judge = MagicMock(
+            return_value=dspy.Prediction(
+                healthy=False,
+                assessment="script says ok but curl fails",
+                diagnosis="",
+                script_was_fixed=False,
+            )
+        )
+
+        result = agent.forward(str(tmp_path), "analysis", "issues", max_attempts=1)
+
+        assert result.success is False
+        assert "script says ok but curl fails" in result.error
+
+    @patch("app_operator_dspy.agents.deployer.run_shell")
+    def test_platform_passed_to_health_judge(self, mock_shell, tmp_path):
+        """Platform parameter is forwarded to health judge."""
+        mock_shell.return_value = _shell_ok()
+        agent = _mock_agent()
+
+        agent.forward(str(tmp_path), "analysis", "issues", platform="k8s")
+
+        call_kwargs = agent.health_judge.call_args.kwargs
+        assert call_kwargs["platform"] == "k8s"
 
 
 class TestFixHistory:
