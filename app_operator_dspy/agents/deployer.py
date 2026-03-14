@@ -128,14 +128,14 @@ class DeploymentAgent(dspy.Module):
             code_analysis=code_analysis,
             deployment_issues=issues,
         )
+        self._write_script(
+            ctx.deploy_path,
+            strip_code_fences(self._validate(deploy_result.deploy_script)),
+        )
         health_result = self.gen_health(
             repo_path=repo_path,
             code_analysis=code_analysis,
             deployment_issues=issues,
-        )
-        self._write_script(
-            ctx.deploy_path,
-            strip_code_fences(self._validate(deploy_result.deploy_script)),
         )
         self._write_script(
             ctx.health_path,
