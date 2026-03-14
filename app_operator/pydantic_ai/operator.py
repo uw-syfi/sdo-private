@@ -140,7 +140,7 @@ class PydanticAIOperator(OperatorBase):
             _status = "interrupted"
             return 1
 
-        except (OSError, RuntimeError, ValueError) as e:
+        except Exception as e:
             logger.error(f"Unexpected error: {e}", exc_info=True)
             return 1
         finally:
@@ -188,7 +188,7 @@ class PydanticAIOperator(OperatorBase):
     def _run_health_check(self, attempt: int) -> HealthVerdictResponse | None:
         """Run agent-based health assessment."""
         logger.info("Running agent-based health assessment...")
-        return self.health_agent.run_check(phase=Phase.DEPLOYMENT, context={"attempt": attempt})
+        return self.health_agent.run_check(phase=Phase.DEPLOYMENT, attempt=attempt)
 
     def _fix_errors(self, deploy_result: dict, health_verdict: HealthVerdictResponse | None, attempt: int) -> None:
         """Run fix agent to diagnose and repair issues."""
@@ -211,7 +211,7 @@ class PydanticAIOperator(OperatorBase):
             emit_progress("monitoring", cycle=cycle)
             logger.info(f"Running health assessment (monitor cycle {cycle})...")
 
-            self.health_agent.run_check(phase=Phase.MONITORING, context={"cycle": cycle})
+            self.health_agent.run_check(phase=Phase.MONITORING, cycle=cycle)
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         if not self._shutdown_requested:

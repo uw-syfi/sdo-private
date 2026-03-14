@@ -215,6 +215,30 @@ def test_handle_shutdown_signal(repo_path, mock_config, memory_fs):
         assert operator._shutdown_requested is True
 
 
+def test_run_pydantic_ai_exception(repo_path, mock_config, memory_fs):
+    """Pydantic-AI-specific exceptions should be caught and return exit code 1."""
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    memory_fs.mkdir(repo_path)
+
+    mock_recorder = MagicMock()
+    mock_analyze = MagicMock()
+    mock_analyze.run.side_effect = UnexpectedModelBehavior("Model returned unexpected response")
+
+    with (
+        patch("app_operator.pydantic_ai.operator.AnalyzeAgent", return_value=mock_analyze),
+        patch("app_operator.pydantic_ai.operator.ScriptAgent"),
+        patch("app_operator.pydantic_ai.operator.RepairAgent"),
+        patch("app_operator.pydantic_ai.operator.HealthAgent"),
+        patch("app_operator.pydantic_ai.operator.PydanticAITrajectoryRecorder", return_value=mock_recorder),
+    ):
+        operator = PydanticAIOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
+        exit_code = operator.run()
+
+        assert exit_code == 1
+        mock_recorder.finalize.assert_called_with("failed")
+
+
 def test_recorder_total_usage_property(repo_path, mock_config, memory_fs):
     """Verify that the recorder exposes total_usage (accumulated by record_run calls)."""
     memory_fs.mkdir(repo_path)
