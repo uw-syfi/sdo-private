@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from libs.pydantic_agent import AgentMiddleware
+
+if TYPE_CHECKING:
+    from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 _MAX_ARG_LEN = 120
 
@@ -26,15 +29,39 @@ def _fmt_args(args: str | dict[str, Any] | None) -> str:
     return ", ".join(parts)
 
 
+def _fmt_k(n: int | None) -> str:
+    if n is None:
+        return "?k"
+    return f"{round(n / 1000)}k"
+
+
 class ConsoleLoggingMiddleware(AgentMiddleware):
+    def __init__(
+        self,
+        context_window: int,
+        recorder: PydanticAITrajectoryRecorder,
+    ) -> None:
+        self._context_window = context_window
+        self._recorder = recorder
+
+    def _usage_prefix(self) -> str:
+        used = _fmt_k(self._recorder.total_usage.input_tokens)
+        limit = _fmt_k(self._context_window)
+        return f"[{self._agent.agent_name} | {used}/{limit}]"
+
     def on_function_tool_call(self, event: Any) -> None:
-        logger.info("[{}] \u2192 {}({})", self._agent.agent_name, event.part.tool_name, _fmt_args(event.part.args))
+        logger.info(
+            "{} \u2192 {}({})",
+            self._usage_prefix(),
+            event.part.tool_name,
+            _fmt_args(event.part.args),
+        )
 
     def on_part_end(self, event: Any) -> None:
         from pydantic_ai.messages import ThinkingPart
 
         if isinstance(event.part, ThinkingPart) and event.part.has_content():
-            logger.info("[{}] <thinking> {}", self._agent.agent_name, event.part.content)
+            logger.info("{} <thinking> {}", self._usage_prefix(), event.part.content)
 
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output

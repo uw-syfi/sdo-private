@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -32,7 +32,10 @@ def _make_recorder():
 
 
 def _make_deps():
-    return None
+    deps = MagicMock()
+    deps.config.agent.provider = "openai"
+    deps.config.agent.model = "gpt-4o"
+    return deps
 
 
 def _make_agent(
@@ -44,19 +47,21 @@ def _make_agent(
     deps = _make_deps()
     recorder = _make_recorder()
 
-    class ConcreteAgent(OperatorAgent):
-        phase = "test_phase"
+    with patch("app_operator.pydantic_ai._base_agent.get_context_window", return_value=128_000):
 
-        def __init__(self):
-            super().__init__(deps, recorder, agent_name="Test Agent", middleware=middleware or [])
-            self._agent = Agent(
-                TestModel(call_tools=call_tools),
-                deps_type=type(deps),
-                output_type=output_type,
-                tools=tools if tools is not None else [echo],
-            )
+        class ConcreteAgent(OperatorAgent):
+            phase = "test_phase"
 
-    return ConcreteAgent()
+            def __init__(self):
+                super().__init__(deps, recorder, agent_name="Test Agent", middleware=middleware or [])
+                self._agent = Agent(
+                    TestModel(call_tools=call_tools),
+                    deps_type=type(deps),
+                    output_type=output_type,
+                    tools=tools if tools is not None else [echo],
+                )
+
+        return ConcreteAgent()
 
 
 class RecordingMiddleware(AgentMiddleware):
@@ -161,14 +166,17 @@ def test_trajectory_recorded_after_run():
     deps = _make_deps()
     recorder = _make_recorder()
 
-    class ConcreteAgent(OperatorAgent):
-        phase = "p"
+    with patch("app_operator.pydantic_ai._base_agent.get_context_window", return_value=128_000):
 
-        def __init__(self):
-            super().__init__(deps, recorder, agent_name="A")
-            self._agent = Agent(TestModel(call_tools=[]), deps_type=type(deps), output_type=str)
+        class ConcreteAgent(OperatorAgent):
+            phase = "p"
 
-    agent = ConcreteAgent()
+            def __init__(self):
+                super().__init__(deps, recorder, agent_name="A")
+                self._agent = Agent(TestModel(call_tools=[]), deps_type=type(deps), output_type=str)
+
+        agent = ConcreteAgent()
+
     agent._run("prompt")
     recorder.record_run.assert_called_once()
     call_args = recorder.record_run.call_args

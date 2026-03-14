@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import MagicMock
 
 from loguru import logger
@@ -10,11 +10,8 @@ from loguru import logger
 from app_operator.pydantic_ai._console_logging import (
     ConsoleLoggingMiddleware,
     _fmt_args,
-    _fmt_result,
+    _fmt_k,
 )
-
-if TYPE_CHECKING:
-    from libs.pydantic_agent import AgentMiddleware
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,10 +34,24 @@ class _FakeResult:
         self.output = output
 
 
-def _attach(mw: AgentMiddleware, agent_name: str = "Code Analyzer") -> ConsoleLoggingMiddleware:
-    """Attach a fake agent to the middleware and return it (for chaining)."""
+def _make_recorder(input_tokens: int | None = 0) -> Any:
+    recorder = MagicMock()
+    recorder.total_usage.input_tokens = input_tokens
+    return recorder
+
+
+def _make_mw(
+    context_window: int = 200_000,
+    input_tokens: int | None = 0,
+    agent_name: str = "Code Analyzer",
+) -> ConsoleLoggingMiddleware:
+    """Create a ConsoleLoggingMiddleware with a fake agent attached."""
+    mw = ConsoleLoggingMiddleware(
+        context_window=context_window,
+        recorder=_make_recorder(input_tokens),
+    )
     mw.on_attach(_FakeAgent(agent_name))  # type: ignore[arg-type]
-    return mw  # type: ignore[return-value]
+    return mw
 
 
 def _capture_logs() -> tuple[list[str], Any]:
@@ -61,11 +72,19 @@ def _make_tool_call_event(tool_name: str, args: dict | str | None = None) -> Any
     return event
 
 
-def _make_tool_result_event(tool_name: str, content: Any = "ok") -> Any:
-    event = MagicMock()
-    event.result.tool_name = tool_name
-    event.result.content = content
-    return event
+# ---------------------------------------------------------------------------
+# _fmt_k tests
+# ---------------------------------------------------------------------------
+
+
+def test_fmt_k_rounds_to_nearest_k():
+    assert _fmt_k(23_000) == "23k"
+    assert _fmt_k(200_000) == "200k"
+    assert _fmt_k(0) == "0k"
+
+
+def test_fmt_k_none_returns_question_mark():
+    assert _fmt_k(None) == "?k"
 
 
 # ---------------------------------------------------------------------------
@@ -114,73 +133,60 @@ def test_fmt_args_short_string_verbatim():
 
 
 # ---------------------------------------------------------------------------
-# _fmt_result tests
-# ---------------------------------------------------------------------------
-
-
-def test_fmt_result_dict_shows_returncode_and_stdout():
-    result = _fmt_result({"returncode": 0, "stdout": "hello"})
-    assert "rc=0" in result
-    assert "hello" in result
-
-
-def test_fmt_result_truncates_long_string():
-    long_str = "x" * 400
-    result = _fmt_result(long_str)
-    assert "[100 chars truncated]" in result
-    assert "x" * 300 in result
-
-
-def test_fmt_result_none():
-    assert "<none>" in _fmt_result(None)
-
-
-def test_fmt_result_short_string():
-    result = _fmt_result("ok")
-    assert "ok" in result
-
-
-# ---------------------------------------------------------------------------
 # ConsoleLoggingMiddleware hook tests
 # ---------------------------------------------------------------------------
 
 
-def test_on_function_tool_call_logs_agent_name_and_tool():
+def test_on_function_tool_call_logs_usage_prefix_and_tool():
     records, sink_id = _capture_logs()
     try:
-        mw = _attach(ConsoleLoggingMiddleware())
+        mw = _make_mw(context_window=200_000, input_tokens=0)
         mw.on_function_tool_call(_make_tool_call_event("read_file", {"path": "/tmp/x"}))
-        assert any("[Code Analyzer]" in r and "read_file" in r for r in records)
-    finally:
-        logger.remove(sink_id)
-
-
-def test_on_function_tool_result_logs_agent_name_and_result():
-    records, sink_id = _capture_logs()
-    try:
-        mw = _attach(ConsoleLoggingMiddleware())
-        mw.on_function_tool_result(_make_tool_result_event("read_file", "file contents"))
-        assert any("[Code Analyzer]" in r and "read_file" in r for r in records)
-    finally:
-        logger.remove(sink_id)
-
-
-def test_after_run_logs_agent_name_and_output():
-    records, sink_id = _capture_logs()
-    try:
-        mw = _attach(ConsoleLoggingMiddleware())
-        mw.after_run(_FakeResult("Analysis complete."))
-        assert any("[Code Analyzer]" in r and "Analysis complete" in r for r in records)
-    finally:
-        logger.remove(sink_id)
-
-
-def test_after_run_truncates_long_output():
-    records, sink_id = _capture_logs()
-    try:
-        mw = _attach(ConsoleLoggingMiddleware())
-        mw.after_run(_FakeResult("z" * 600))
         combined = " ".join(records)
-        assert "\u2026" in combined
+        assert "Code Analyzer" in combined
+        assert "0k/200k" in combined
+        assert "read_file" in combined
+    finally:
+        logger.remove(sink_id)
+
+
+def test_on_function_tool_call_shows_updated_token_count():
+    records, sink_id = _capture_logs()
+    try:
+        mw = _make_mw(context_window=200_000, input_tokens=23_000)
+        mw.on_function_tool_call(_make_tool_call_event("write_file"))
+        assert any("23k/200k" in r for r in records)
+    finally:
+        logger.remove(sink_id)
+
+
+def test_on_part_end_logs_thinking_with_usage_prefix():
+    from pydantic_ai.messages import ThinkingPart
+
+    records, sink_id = _capture_logs()
+    try:
+        mw = _make_mw(context_window=100_000, input_tokens=5_000)
+        part = ThinkingPart(content="some thoughts")
+        event = MagicMock()
+        event.part = part
+        mw.on_part_end(event)
+        combined = " ".join(records)
+        assert "5k/100k" in combined
+        assert "<thinking>" in combined
+        assert "some thoughts" in combined
+    finally:
+        logger.remove(sink_id)
+
+
+def test_after_run_logs_agent_name_and_output_no_token_prefix():
+    records, sink_id = _capture_logs()
+    try:
+        mw = _make_mw()
+        mw.after_run(_FakeResult("Analysis complete."))
+        combined = " ".join(records)
+        assert "Code Analyzer" in combined
+        assert "Analysis complete" in combined
+        # after_run does NOT include usage prefix
+        assert "|" not in combined
     finally:
         logger.remove(sink_id)

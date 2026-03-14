@@ -50,6 +50,32 @@ def build_model_str(config: Config) -> str:
     return model
 
 
+def get_context_window(model_str: str) -> int:
+    """Look up the context window size for a pydantic-ai model string.
+
+    Args:
+        model_str: A pydantic-ai model string like ``"anthropic:claude-3-5-sonnet-latest"``.
+
+    Returns:
+        Context window size in tokens.
+
+    Raises:
+        ValueError: If the model is unknown or has no context window in genai_prices.
+    """
+    from genai_prices.data_snapshot import get_snapshot
+
+    provider_id, model_name = model_str.split(":", 1) if ":" in model_str else (None, model_str)
+
+    try:
+        _, model_info = get_snapshot().find_provider_model(model_name, None, provider_id, None)
+    except LookupError as e:
+        raise ValueError(f"Unknown model '{model_str}': {e}") from e
+
+    if model_info.context_window is None:
+        raise ValueError(f"Context window not available for '{model_str}' in genai_prices database")
+    return model_info.context_window
+
+
 def build_model_settings(config: Config) -> ModelSettings | None:
     """Build pydantic-ai ModelSettings from SDS config, or None if no special settings."""
     budget = config.agent.thinking_budget
