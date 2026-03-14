@@ -39,4 +39,4 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output
         text = str(output) if not isinstance(output, str) else output
-        logger.info("[{}] {}", self._agent.agent_name, text[:500] + ("\u2026" if len(text) > 500 else ""))
+        logger.info("[{}] {}", self._agent.agent_name, text)
