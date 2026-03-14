@@ -149,3 +149,26 @@ def test_after_run_not_called_on_tool_rejection():
     with pytest.raises(UnexpectedModelBehavior):
         agent._run("hi")
     assert not mw.after_run_called
+
+
+def test_after_tool_call_invoked_even_when_tool_raises():
+    """after_tool_call must be called even if the wrapped tool raises an exception."""
+
+    def failing_tool(ctx, message: str) -> str:
+        raise RuntimeError("tool exploded")
+
+    after_calls: list[tuple[str, dict, Any]] = []
+
+    class TrackingMiddleware(AgentMiddleware):
+        def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
+            after_calls.append((tool_name, args, result))
+
+    mw = TrackingMiddleware()
+    agent = _make_agent(middleware=[mw], tools=[failing_tool])
+    with pytest.raises(RuntimeError, match="tool exploded"):
+        agent._run("hi")
+    # after_tool_call must have been called with result=None (the exception path)
+    assert len(after_calls) >= 1
+    tool_name, args, result = after_calls[0]
+    assert tool_name == "failing_tool"
+    assert result is None

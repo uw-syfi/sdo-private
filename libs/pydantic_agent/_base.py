@@ -34,9 +34,14 @@ class _InterceptingToolset(WrapperToolset):
     async def call_tool(self, name: str, tool_args: dict[str, Any], ctx: RunContext, tool: ToolsetTool) -> Any:
         if not self.before_cb(name, tool_args):
             raise ModelRetry("Tool call rejected by middleware")
-        result = await self.wrapped.call_tool(name, tool_args, ctx, tool)
-        self.after_cb(name, tool_args, result)
-        return result
+        result = None
+        try:
+            result = await self.wrapped.call_tool(name, tool_args, ctx, tool)
+            return result
+        except Exception:
+            raise
+        finally:
+            self.after_cb(name, tool_args, result)
 
 
 class BaseAgent(Generic[DepsT]):
