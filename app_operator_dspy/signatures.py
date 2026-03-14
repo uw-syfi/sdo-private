@@ -109,6 +109,29 @@ class GenerateHealthCheckScript(dspy.Signature):
 
 
 # ---------------------------------------------------------------------------
+# Deployer — Health Judge
+# ---------------------------------------------------------------------------
+
+
+class JudgeHealthCheck(dspy.Signature):
+    """Assess whether a deployed application is healthy.
+
+    Run the health check script, independently verify with platform commands
+    (docker compose ps, logs, curl), fix the script if it is buggy, and
+    validate that all services with Dockerfiles are built from source.
+    """
+
+    repo_path: str = dspy.InputField(desc="Absolute path to the repository root")
+    deploy_output: str = dspy.InputField(desc="Stdout/stderr from deploy.sh start")
+    platform: str = dspy.InputField(desc="Deployment platform: docker or k8s")
+
+    healthy: bool = dspy.OutputField(desc="Whether the application is healthy")
+    assessment: str = dspy.OutputField(desc="What the script reported vs what was independently observed")
+    diagnosis: str = dspy.OutputField(desc="If unhealthy: symptoms and root causes. If healthy: empty string")
+    script_was_fixed: bool = dspy.OutputField(desc="Whether health_check.sh was modified")
+
+
+# ---------------------------------------------------------------------------
 # Deployer — Repair
 # ---------------------------------------------------------------------------
 
