@@ -79,7 +79,6 @@ class ScriptAgent(OperatorAgent):
             logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, deploy_guardrail.max_retries)
             result = self._run(
                 deploy_guardrail.reminder(missing),
-                agent_name="Script Generator (retry)",
                 message_history=result.all_messages(),
             )
 
