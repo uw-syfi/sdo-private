@@ -175,8 +175,7 @@ class TestBash:
 
 class TestBuildTools:
     def test_default_tools(self):
-        config = Config(agent=AgentConfig(provider="openai", model="gpt-4o"))
-        tools = build_tools(config)
+        tools = build_tools()
         assert len(tools) == 7
 
 
