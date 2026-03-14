@@ -25,7 +25,13 @@ class MonitorAgent(dspy.Module):
         health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
     ) -> dspy.Prediction:
         health_output = run_health_check(repo_path, timeout=health_check_timeout)
-        return self.analyze(
+        result = self.analyze(
             health_output=health_output,
             check_number=check_number,
         )
+        normalized = result.status.lower().strip()
+        if normalized not in {"healthy", "degraded", "unhealthy"}:
+            raise ValueError(
+                f"status must be one of healthy/degraded/unhealthy, got: {result.status!r}"
+            )
+        return dspy.Prediction(status=normalized, summary=result.summary, remediation=result.remediation)

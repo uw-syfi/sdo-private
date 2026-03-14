@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import dspy
+import pytest
 
 from app_operator_dspy.agents.monitor import MonitorAgent
 
@@ -39,3 +40,23 @@ class TestMonitorAgent:
         call_kwargs = agent.analyze.call_args.kwargs
         assert "db connection refused" in call_kwargs["health_output"]
         assert call_kwargs["check_number"] == 1
+
+    @patch("app_operator_dspy.agents.monitor.run_health_check")
+    def test_status_normalized_to_lowercase(self, mock_hc):
+        mock_hc.return_value = "ok"
+        agent = MonitorAgent()
+        agent.analyze = MagicMock(
+            return_value=dspy.Prediction(status="HEALTHY", summary="fine", remediation="")
+        )
+        result = agent.forward("/app")
+        assert result.status == "healthy"
+
+    @patch("app_operator_dspy.agents.monitor.run_health_check")
+    def test_invalid_status_raises(self, mock_hc):
+        mock_hc.return_value = "ok"
+        agent = MonitorAgent()
+        agent.analyze = MagicMock(
+            return_value=dspy.Prediction(status="partially healthy", summary="?", remediation="")
+        )
+        with pytest.raises(ValueError, match="status must be one of"):
+            agent.forward("/app")
