@@ -51,16 +51,6 @@ def deploy_attempt(state: OperatorState, ctx: NodeContext) -> OperatorState:
     return state
 
 
-def _health_verdict_from_dict(d: dict) -> HealthVerdict:
-    return HealthVerdict(
-        healthy=d.get("healthy", False),
-        assessment=d.get("assessment", ""),
-        diagnosis=d.get("diagnosis", ""),
-        script_was_fixed=d.get("script_was_fixed", False),
-        raw_response="",
-    )
-
-
 def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any) -> OperatorState:
     if ctx.should_shutdown():
         return state
@@ -73,7 +63,7 @@ def fix_errors(state: OperatorState, ctx: NodeContext, fix_agent: Any) -> Operat
     health_verdict = None
     if health_verdict_dict:
         health_check_log_path = ctx.repo_path / ".sds" / "logs" / f"health_check_attempt_{state['attempt']}.log"
-        health_verdict = _health_verdict_from_dict(health_verdict_dict)
+        health_verdict = HealthVerdict.from_dict(health_verdict_dict)
 
     error_context = prepare_error_context(deploy_result, health_verdict, log_file_path, health_check_log_path)
 

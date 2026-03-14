@@ -53,13 +53,7 @@ class RepairAgent(BaseAgent):
         hv = None
         if health_verdict is not None:
             health_check_log_path = repo_path / ".sds" / "logs" / f"health_check_attempt_{attempt}.log"
-            hv = HealthVerdict(
-                healthy=health_verdict.healthy,
-                assessment=health_verdict.assessment,
-                diagnosis=health_verdict.diagnosis,
-                script_was_fixed=health_verdict.script_was_fixed,
-                raw_response="",
-            )
+            hv = HealthVerdict.from_dict(health_verdict.model_dump())
 
         error_context = prepare_error_context(deploy_result, hv, log_file_path, health_check_log_path)
 
