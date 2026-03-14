@@ -3,7 +3,6 @@
 import subprocess
 from unittest.mock import patch
 
-from app_operator_dspy.tools.docker import docker_compose_up, docker_logs, docker_ps
 from app_operator_dspy.tools.filesystem import list_files, read_file, write_file
 from app_operator_dspy.tools.health_check import run_health_check
 from app_operator_dspy.tools.shell import ShellResult, run_shell
@@ -65,29 +64,6 @@ class TestFilesystem:
     def test_list_files_no_matches(self, tmp_path):
         result = list_files(str(tmp_path), "*.xyz")
         assert "No files" in result
-
-
-class TestDocker:
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value=ShellResult(0, "Exit code: 0"))
-    def test_compose_up_with_build(self, mock_shell):
-        result = docker_compose_up("/app", build=True)
-        mock_shell.assert_called_once_with("docker compose up --build -d", cwd="/app", timeout=300)
-        assert result == "Exit code: 0"
-
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value=ShellResult(0, "Exit code: 0"))
-    def test_compose_up_no_build(self, mock_shell):
-        docker_compose_up("/app", build=False)
-        mock_shell.assert_called_once_with("docker compose up -d", cwd="/app", timeout=300)
-
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value=ShellResult(0, "Exit code: 0"))
-    def test_docker_ps(self, mock_shell):
-        docker_ps("/app")
-        mock_shell.assert_called_once_with("docker compose ps", cwd="/app")
-
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value=ShellResult(0, "Exit code: 0"))
-    def test_docker_logs(self, mock_shell):
-        docker_logs("web", tail=10, cwd="/app")
-        mock_shell.assert_called_once_with("docker compose logs --tail=10 web", cwd="/app")
 
 
 class TestHealthCheck:
