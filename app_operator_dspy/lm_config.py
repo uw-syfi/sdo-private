@@ -7,6 +7,9 @@ for use with dspy.LM / configure_lm.
 import os
 import sys
 
+from app_operator_dspy.logger import get_logger
+
+log = get_logger("lm_config")
 DEFAULT_MODEL = "vertex_ai/gemini-2.5-pro"
 
 
@@ -15,7 +18,7 @@ def resolve_vertex_project() -> str:
     project = os.environ.get("VERTEX_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
     if project:
         return project
-    print("[error] Set VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT")
+    log.error("Set VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT")
     sys.exit(1)
 
 

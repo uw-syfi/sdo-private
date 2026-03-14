@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import dspy
 
 from app_operator_dspy.constants import CLEANUP_TIMEOUT, DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
+from app_operator_dspy.logger import get_logger
 from app_operator_dspy.signatures import (
     ConsolidateFixSummary,
     GenerateDeployScript,
@@ -17,6 +18,7 @@ from app_operator_dspy.signatures import (
 from app_operator_dspy.tools import DEPLOYER_TOOLS, write_file
 from app_operator_dspy.tools.shell import ShellResult, run_shell
 
+log = get_logger("deployer")
 DEFAULT_MAX_ATTEMPTS = 5
 
 # Truncation limits to keep LLM context manageable
@@ -124,9 +126,9 @@ class DeploymentAgent(dspy.Module):
             health_check_timeout=health_check_timeout,
         )
 
-        print("[deployer] generating deploy.sh and health_check.sh...")
+        log.info("generating deploy.sh and health_check.sh...")
         self._generate_scripts(repo_path, code_analysis, deployment_issues, ctx)
-        print("[deployer] scripts generated")
+        log.info("scripts generated")
 
         self._fix_history.reset()
 
@@ -212,7 +214,7 @@ class DeploymentAgent(dspy.Module):
         if os.path.exists(ctx.health_path):
             os.chmod(ctx.health_path, os.stat(ctx.health_path).st_mode | stat.S_IEXEC)
 
-        print(f"[deployer] fix summary: {fix_result.fix_summary}")
+        log.info("fix summary: %s", fix_result.fix_summary)
         self._fix_history.append(attempt, fix_result.fix_summary)
 
     def _cleanup(self, ctx: _DeployContext) -> None:

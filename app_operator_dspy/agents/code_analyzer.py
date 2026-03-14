@@ -4,8 +4,11 @@ import os
 
 import dspy
 
+from app_operator_dspy.logger import get_logger
 from app_operator_dspy.signatures import AnalyzeCodebase
 from app_operator_dspy.tools.filesystem import write_file
+
+log = get_logger("code_analyzer")
 
 
 class CodeAnalyzerAgent(dspy.Module):
@@ -16,10 +19,10 @@ class CodeAnalyzerAgent(dspy.Module):
         self.analyze = dspy.ChainOfThought(AnalyzeCodebase)
 
     def forward(self, repo_path: str) -> dspy.Prediction:
-        print(f"[code_analyzer] scanning {repo_path}...")
-        print("[code_analyzer] calling LLM for analysis...")
+        log.info("scanning %s...", repo_path)
+        log.info("calling LLM for analysis...")
         result = self.analyze(repo_path=repo_path)
-        print("[code_analyzer] analysis complete")
+        log.info("analysis complete")
 
         # Persist analysis outputs
         sds_dir = os.path.join(repo_path, ".sds")

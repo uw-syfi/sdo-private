@@ -6,6 +6,9 @@ from app_operator_dspy.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator_dspy.agents.deployer import DeploymentAgent
 from app_operator_dspy.agents.monitor import MonitorAgent
 from app_operator_dspy.constants import DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
+from app_operator_dspy.logger import get_logger
+
+log = get_logger("operator")
 
 
 def configure_lm(model: str, **kwargs) -> dspy.LM:
@@ -45,12 +48,12 @@ class DSPyOperator(dspy.Module):
         health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
     ) -> dspy.Prediction:
         # Step 1: Analyze codebase
-        print("[phase] code_analysis — analyzing repository...")
+        log.info("code_analysis — analyzing repository...")
         analysis = self.analyzer(repo_path=repo_path)
-        print("[phase] code_analysis — done")
+        log.info("code_analysis — done")
 
         # Step 2: Deploy
-        print(f"[phase] deployment — up to {max_deploy_attempts} attempts")
+        log.info("deployment — up to %d attempts", max_deploy_attempts)
         deploy_result = self.deployer(
             repo_path=repo_path,
             code_analysis=analysis.analysis,
@@ -61,17 +64,17 @@ class DSPyOperator(dspy.Module):
         )
 
         if not deploy_result.success:
-            print(f"[phase] deployment — failed after {deploy_result.attempts} attempts")
+            log.info("deployment — failed after %d attempts", deploy_result.attempts)
             return dspy.Prediction(
                 success=False,
                 phase="deployment",
                 error=deploy_result.error,
             )
 
-        print(f"[phase] deployment — succeeded on attempt {deploy_result.attempts}")
+        log.info("deployment — succeeded on attempt %d", deploy_result.attempts)
 
         # Step 3: Monitor
-        print(f"[phase] monitoring — {monitor_checks} checks")
+        log.info("monitoring — %d checks", monitor_checks)
         statuses = []
         for i in range(1, monitor_checks + 1):
             check = self.monitor(
@@ -80,7 +83,7 @@ class DSPyOperator(dspy.Module):
                 health_check_timeout=health_check_timeout,
             )
             statuses.append(check.status)
-            print(f"[phase] monitor check {i}/{monitor_checks}: {check.status}")
+            log.info("monitor check %d/%d: %s", i, monitor_checks, check.status)
             if check.status == "unhealthy":
                 break
 

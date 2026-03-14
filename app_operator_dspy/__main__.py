@@ -11,13 +11,17 @@ import traceback
 
 from app_operator_dspy.constants import DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
 from app_operator_dspy.lm_config import DEFAULT_MODEL, get_lm_kwargs
+from app_operator_dspy.logger import get_logger, setup_logger
 from app_operator_dspy.operator import DSPyOperator, configure_lm
+
+log = get_logger("main")
 
 
 def run_command(args: argparse.Namespace) -> int:
+    setup_logger()
     source_app = os.path.abspath(args.app_path)
     if not os.path.isdir(source_app):
-        print(f"[error] App not found: {source_app}")
+        log.error("App not found: %s", source_app)
         return 1
 
     app_name = os.path.basename(source_app)
@@ -27,20 +31,20 @@ def run_command(args: argparse.Namespace) -> int:
     atexit.register(shutil.rmtree, work_dir, True)
     repo_path = os.path.join(work_dir, app_name)
     shutil.copytree(source_app, repo_path)
-    print(f"[setup] App: {app_name}")
-    print(f"[setup] Working directory: {repo_path}")
+    log.info("App: %s", app_name)
+    log.info("Working directory: %s", repo_path)
 
     # Configure LM
     model = args.model or DEFAULT_MODEL
     lm_kwargs = get_lm_kwargs(model)
-    print(f"[setup] Model: {model}")
+    log.info("Model: %s", model)
     configure_lm(model, **lm_kwargs)
 
     # Run operator
-    print("[run] Creating DSPyOperator...")
+    log.info("Creating DSPyOperator...")
     operator = DSPyOperator()
 
-    print(f"[run] Starting operator on {repo_path}")
+    log.info("Starting operator on %s", repo_path)
     start = time.time()
     try:
         result = operator(
@@ -51,49 +55,52 @@ def run_command(args: argparse.Namespace) -> int:
             health_check_timeout=args.health_check_timeout,
         )
     except Exception as e:
-        print(f"\n[ERROR] Operator failed with exception: {type(e).__name__}: {e}")
+        log.error("Operator failed with exception: %s: %s", type(e).__name__, e)
         traceback.print_exc()
         return 1
 
     elapsed = time.time() - start
-    print(f"\n{'=' * 60}")
-    print(f"[result] Completed in {elapsed:.1f}s")
-    print(f"[result] Success: {result.success}")
-    print(f"[result] Phase: {result.phase}")
+    log.info("")
+    log.info("%s", "=" * 60)
+    log.info("Completed in %.1fs", elapsed)
+    log.info("Success: %s", result.success)
+    log.info("Phase: %s", result.phase)
 
     if result.success:
-        print(f"[result] Monitor statuses: {result.statuses}")
+        log.info("Monitor statuses: %s", result.statuses)
     else:
-        print(f"[result] Error: {getattr(result, 'error', 'N/A')}")
+        log.info("Error: %s", getattr(result, "error", "N/A"))
 
-    _print_artifacts(repo_path)
+    _log_artifacts(repo_path)
     return 0 if result.success else 1
 
 
-def _print_artifacts(repo_path: str) -> None:
+def _log_artifacts(repo_path: str) -> None:
     sds_dir = os.path.join(repo_path, ".sds")
     if not os.path.isdir(sds_dir):
         return
 
-    print(f"\n[artifacts] Files in {sds_dir}:")
+    log.info("")
+    log.info("Files in %s:", sds_dir)
     for root, _dirs, files in os.walk(sds_dir):
         for f in files:
             fpath = os.path.join(root, f)
             size = os.path.getsize(fpath)
             rel = os.path.relpath(fpath, sds_dir)
-            print(f"  .sds/{rel} ({size} bytes)")
+            log.info("  .sds/%s (%d bytes)", rel, size)
 
     for script in ["code_analysis.md", "deploy.sh", "health_check.sh"]:
         spath = os.path.join(sds_dir, script)
         if os.path.isfile(spath):
             with open(spath) as fh:
                 content = fh.read()
-            print(f"\n{'=' * 60}")
-            print(f"[artifact] .sds/{script}:")
-            print(f"{'=' * 60}")
-            print(content[:2000])
+            log.info("")
+            log.info("%s", "=" * 60)
+            log.info(".sds/%s:", script)
+            log.info("%s", "=" * 60)
+            log.info("%s", content[:2000])
             if len(content) > 2000:
-                print(f"... ({len(content) - 2000} more chars)")
+                log.info("... (%d more chars)", len(content) - 2000)
 
 
 def main() -> int:
