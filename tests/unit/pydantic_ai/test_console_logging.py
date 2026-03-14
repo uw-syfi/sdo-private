@@ -127,17 +127,17 @@ def test_fmt_result_dict_shows_returncode_and_stdout():
 def test_fmt_result_truncates_long_string():
     long_str = "x" * 400
     result = _fmt_result(long_str)
-    assert result.endswith("\u2026")
-    assert len(result) <= 302  # 300 chars + ellipsis
+    assert "[100 chars truncated]" in result
+    assert "x" * 300 in result
 
 
 def test_fmt_result_none():
-    assert _fmt_result(None) == "<none>"
+    assert "<none>" in _fmt_result(None)
 
 
 def test_fmt_result_short_string():
     result = _fmt_result("ok")
-    assert result == "ok"
+    assert "ok" in result
 
 
 # ---------------------------------------------------------------------------

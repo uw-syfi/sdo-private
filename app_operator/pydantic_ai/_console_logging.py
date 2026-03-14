@@ -30,10 +30,14 @@ def _fmt_args(args: str | dict[str, Any] | None) -> str:
 def _fmt_result(result: Any) -> str:
     if isinstance(result, dict):
         rc = result.get("returncode", "?")
-        stdout = str(result.get("stdout", ""))[:_MAX_RESULT_LEN]
-        return f"rc={rc} stdout={stdout!r}"
+        stdout = str(result.get("stdout", ""))
+        truncated = len(stdout) - _MAX_RESULT_LEN
+        suffix = f" [{truncated} chars truncated]" if truncated > 0 else ""
+        return f"rc={rc} stdout=\n{stdout[:_MAX_RESULT_LEN]!r}{suffix}"
     s = str(result) if result is not None else "<none>"
-    return s[:_MAX_RESULT_LEN] + ("\u2026" if len(s) > _MAX_RESULT_LEN else "")
+    truncated = len(s) - _MAX_RESULT_LEN
+    suffix = f" [{truncated} chars truncated]" if truncated > 0 else ""
+    return f"\n{s[:_MAX_RESULT_LEN]}{suffix}"
 
 
 class ConsoleLoggingMiddleware(AgentMiddleware):
