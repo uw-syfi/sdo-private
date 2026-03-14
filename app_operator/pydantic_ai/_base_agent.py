@@ -10,6 +10,7 @@ from libs.pydantic_agent import AgentMiddleware, BaseAgent
 if TYPE_CHECKING:
     from app_operator.pydantic_ai._deps import OperatorDeps
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
+    from app_operator.trajectory import Phase
 
 __all__ = ["OperatorAgent"]
 
@@ -27,7 +28,7 @@ class OperatorAgent(BaseAgent["OperatorDeps"]):
         middleware: Additional middleware prepended *after* ``TrajectoryMiddleware``.
     """
 
-    phase: str | None = None
+    phase: Phase | None = None
     agent_name: str | None = None
 
     def __init__(
@@ -45,7 +46,7 @@ class OperatorAgent(BaseAgent["OperatorDeps"]):
         self,
         prompt: str,
         *,
-        phase: str | None = None,
+        phase: Phase | None = None,
         agent_name: str | None = None,
         context: dict[str, Any] | None = None,
         **kwargs: Any,
