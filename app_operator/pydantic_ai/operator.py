@@ -137,7 +137,7 @@ class PydanticAIOperator(OperatorBase):
             return 0
 
         except KeyboardInterrupt:
-            logger.info("Shutting down due to interrupt...")
+            logger.info("Received interrupt signal. Shutting down gracefully...")
             _status = "interrupted"
             return 1
 
@@ -217,9 +217,10 @@ class PydanticAIOperator(OperatorBase):
             self.health_agent.run_check(phase=Phase.MONITORING, cycle=cycle)
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
-        if not self._shutdown_requested:
-            self._shutdown_requested = True
-            signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
-            logger.info(f"Received {signal_name} signal. Initiating graceful shutdown...")
-            if signum == signal.SIGINT:
-                raise KeyboardInterrupt
+        self._shutdown_requested = True
+        if signum == signal.SIGINT:
+            # Restore default handler so a second Ctrl-C force-quits immediately.
+            # Avoid calling logger here — logging locks can cause a deadlock when
+            # the signal interrupts a log call on the main thread.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            raise KeyboardInterrupt
