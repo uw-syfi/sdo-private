@@ -14,6 +14,7 @@ from pydantic_ai import RunContext
 
 from app_operator.command_validation import DangerousCommandError, validate_command
 from app_operator.config import Config
+from app_operator.filesystem import FileSystemInterface
 from app_operator.pydantic_ai._deps import OperatorDeps
 
 SUBPROCESS_TIMEOUT_SECS = 120
@@ -28,7 +29,7 @@ def ls_dir(ctx: RunContext[OperatorDeps], path: str = ".") -> str:
             return f"Error: Path does not exist: {path}"
         if not ctx.deps.filesystem.is_dir(target):
             return target.name
-        entries = sorted(p.name for p in target.iterdir())
+        entries = sorted(p.name for p in ctx.deps.filesystem.iterdir(target))
         return "\n".join(entries)
     except (ValueError, OSError) as e:
         return f"Error: {e!s}"
@@ -44,8 +45,8 @@ def glob_files(ctx: RunContext[OperatorDeps], pattern: str) -> list[str]:
                 return [f"Error: Pattern escapes repository root: {pattern}"]
 
         results = []
-        for path in ctx.deps.repo_path.glob(pattern):
-            if path.is_file() or path.is_dir():
+        for path in ctx.deps.filesystem.glob(ctx.deps.repo_path, pattern):
+            if ctx.deps.filesystem.is_file(path) or ctx.deps.filesystem.is_dir(path):
                 try:
                     relative = path.relative_to(ctx.deps.repo_path)
                     results.append(str(relative))
@@ -75,10 +76,10 @@ def read_file(ctx: RunContext[OperatorDeps], path: str, start_line: int, end_lin
         return f"Error: {e!s}"
 
 
-def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path) -> list[str]:
+def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path, filesystem: FileSystemInterface) -> list[str]:
     results = []
     try:
-        content = file_path.read_text(errors="ignore")
+        content = filesystem.read_text(file_path)
     except OSError:
         return results
     for idx, line in enumerate(content.splitlines(), start=1):
@@ -96,12 +97,12 @@ def grep(ctx: RunContext[OperatorDeps], pattern: str, path: str = ".") -> list[s
         matches: list[str] = []
 
         if ctx.deps.filesystem.exists(target) and not ctx.deps.filesystem.is_dir(target):
-            matches.extend(_grep_file(regex, target, ctx.deps.repo_path))
+            matches.extend(_grep_file(regex, target, ctx.deps.repo_path, ctx.deps.filesystem))
             return matches
 
-        for file_path in target.rglob("*"):
-            if file_path.is_file():
-                matches.extend(_grep_file(regex, file_path, ctx.deps.repo_path))
+        for file_path in ctx.deps.filesystem.rglob(target, "*"):
+            if ctx.deps.filesystem.is_file(file_path):
+                matches.extend(_grep_file(regex, file_path, ctx.deps.repo_path, ctx.deps.filesystem))
         return matches
     except (ValueError, OSError, re.error) as e:
         return [f"Error: {e!s}"]

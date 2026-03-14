@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app_operator.config import AgentConfig, Config
-from app_operator.filesystem import InMemoryFilesystem, RealFilesystem
+from app_operator.filesystem import InMemoryFilesystem
 from app_operator.prompts import PromptLoader
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai.tools import (
@@ -43,19 +43,10 @@ def _ctx(deps):
 
 
 class TestLsDir:
-    def test_list_directory(self, tmp_path):
-        """Use RealFilesystem since iterdir() requires real fs."""
-        repo = tmp_path / "ls_repo"
-        repo.mkdir()
-        (repo / "src").mkdir()
-        (repo / "file.txt").write_text("hello")
-        real_deps = OperatorDeps(
-            repo_path=repo,
-            filesystem=RealFilesystem(),
-            loader=PromptLoader(),
-            config=Config(agent=AgentConfig(provider="openai", model="gpt-4o")),
-        )
-        result = ls_dir(_ctx(real_deps), ".")
+    def test_list_directory(self, deps):
+        deps.filesystem.mkdir(deps.repo_path / "src")
+        deps.filesystem.write_text(deps.repo_path / "file.txt", "hello")
+        result = ls_dir(_ctx(deps), ".")
         assert "file.txt" in result
         assert "src" in result
 
@@ -69,11 +60,15 @@ class TestGlobFiles:
         deps.filesystem.mkdir(deps.repo_path / "src")
         deps.filesystem.write_text(deps.repo_path / "src" / "main.py", "code")
         deps.filesystem.write_text(deps.repo_path / "readme.md", "docs")
-        # glob works on real filesystem via tmp_path, so use real path
-        # InMemoryFilesystem doesn't support glob natively; test the function structure
-        result = glob_files(_ctx(deps), "*.py")
-        # With InMemoryFilesystem, glob won't find files but shouldn't error
+        result = glob_files(_ctx(deps), "*.md")
         assert isinstance(result, list)
+        assert "readme.md" in result
+
+    def test_glob_nested_pattern(self, deps):
+        deps.filesystem.mkdir(deps.repo_path / "src")
+        deps.filesystem.write_text(deps.repo_path / "src" / "main.py", "code")
+        result = glob_files(_ctx(deps), "src/main.py")
+        assert "src/main.py" in result
 
     def test_absolute_pattern_escape(self, deps):
         result = glob_files(_ctx(deps), "/etc/passwd")
@@ -98,6 +93,21 @@ class TestGrep:
         deps.filesystem.write_text(deps.repo_path / "test.txt", "hello world\n")
         result = grep(_ctx(deps), "nonexistent", "test.txt")
         assert result == []
+
+    def test_grep_single_file(self, deps):
+        deps.filesystem.write_text(deps.repo_path / "test.txt", "hello world\nfoo bar\n")
+        result = grep(_ctx(deps), "hello", "test.txt")
+        assert len(result) == 1
+        assert "test.txt:1:hello world" in result[0]
+
+    def test_grep_recursive(self, deps):
+        deps.filesystem.mkdir(deps.repo_path / "src")
+        deps.filesystem.write_text(deps.repo_path / "src" / "a.py", "import os\nfoo = 1\n")
+        deps.filesystem.write_text(deps.repo_path / "src" / "b.py", "import sys\nbar = 2\n")
+        result = grep(_ctx(deps), "import", ".")
+        assert len(result) == 2
+        assert any("a.py" in r for r in result)
+        assert any("b.py" in r for r in result)
 
 
 class TestWriteFile:

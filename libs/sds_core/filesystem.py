@@ -128,6 +128,17 @@ class FileSystemInterface(ABC):
             bool: True if the path is a file, False otherwise.
         """
 
+    @abstractmethod
+    def iterdir(self, path: Path) -> list[Path]:
+        """Iterate over the contents of a directory.
+
+        Args:
+            path: The directory path to iterate.
+
+        Returns:
+            list[Path]: List of paths within the directory (non-recursive).
+        """
+
 
 class RealFilesystem(FileSystemInterface):
     """Production implementation using pathlib and os operations."""
@@ -164,6 +175,9 @@ class RealFilesystem(FileSystemInterface):
 
     def is_file(self, path: Path) -> bool:
         return path.is_file()
+
+    def iterdir(self, path: Path) -> list[Path]:
+        return list(path.iterdir())
 
 
 class InMemoryFilesystem(FileSystemInterface):
@@ -390,3 +404,21 @@ class InMemoryFilesystem(FileSystemInterface):
     def is_file(self, path: Path) -> bool:
         path_str = self._normalize_path(path)
         return path_str in self.files
+
+    def iterdir(self, path: Path) -> list[Path]:
+        dir_str = self._normalize_path(path)
+        if dir_str not in self.directories:
+            raise FileNotFoundError(f"No such directory: '{path}'")
+        prefix = dir_str + "/"
+        seen: set[str] = set()
+        results: list[Path] = []
+        for stored in list(self.files) + list(self.directories):
+            if not stored.startswith(prefix):
+                continue
+            # Only direct children: no additional '/' after the prefix
+            relative = stored[len(prefix) :]
+            child_name = relative.split("/")[0]
+            if child_name and child_name not in seen:
+                seen.add(child_name)
+                results.append(Path(dir_str) / child_name)
+        return results
