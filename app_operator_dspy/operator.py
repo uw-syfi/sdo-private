@@ -5,6 +5,7 @@ import dspy
 from app_operator_dspy.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator_dspy.agents.deployer import DeploymentAgent
 from app_operator_dspy.agents.monitor import MonitorAgent
+from app_operator_dspy.constants import DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
 
 
 def configure_lm(model: str, **kwargs) -> dspy.LM:
@@ -40,8 +41,8 @@ class DSPyOperator(dspy.Module):
         repo_path: str,
         max_deploy_attempts: int = 5,
         monitor_checks: int = 5,
-        deploy_timeout: int = 300,
-        health_check_timeout: int = 300,
+        deploy_timeout: int = DEPLOY_TIMEOUT,
+        health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
     ) -> dspy.Prediction:
         # Step 1: Analyze codebase
         print("[phase] code_analysis — analyzing repository...")

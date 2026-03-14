@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import dspy
 
-from app_operator_dspy.agents.deployer import DeploymentAgent, strip_code_fences
+from app_operator_dspy.agents.deployer import DeploymentAgent, _FixHistory, strip_code_fences
 from app_operator_dspy.tools.shell import ShellResult
 
 
@@ -32,7 +32,7 @@ def _mock_agent(deploy_script="#!/bin/bash\nexit 0", health_script="#!/bin/bash\
     agent.repair_agent = MagicMock(
         return_value=dspy.Prediction(fix_summary="fixed port conflict"),
     )
-    agent.summarizer.consolidate = MagicMock(
+    agent._fix_history.consolidate = MagicMock(
         return_value=dspy.Prediction(
             consolidated_summary="## Failure Pattern: port conflict\n* Attempt 1: fixed",
         )
@@ -156,7 +156,7 @@ class TestDeploymentAgent:
 
         agent.forward(str(tmp_path), "analysis", "issues", max_attempts=3)
 
-        agent.summarizer.consolidate.assert_not_called()
+        agent._fix_history.consolidate.assert_not_called()
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_consolidation_called_on_second_fix(self, mock_shell, tmp_path):
@@ -173,7 +173,7 @@ class TestDeploymentAgent:
 
         agent.forward(str(tmp_path), "analysis", "issues", max_attempts=3)
 
-        agent.summarizer.consolidate.assert_called_once()
+        agent._fix_history.consolidate.assert_called_once()
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_compose_override_written_on_fix(self, mock_shell, tmp_path):
@@ -216,6 +216,50 @@ class TestDeploymentAgent:
         # Verify cleanup was called (2nd shell call)
         cleanup_call = mock_shell.call_args_list[1]
         assert "cleanup" in cleanup_call.args[0]
+
+
+class TestFixHistory:
+    """Tests for _FixHistory (fix history consolidation, migrated from summarizer)."""
+
+    def test_has_consolidate_module(self):
+        """_FixHistory wraps a dspy ChainOfThought for consolidation."""
+        fh = _FixHistory()
+        assert isinstance(fh.consolidate, dspy.ChainOfThought)
+
+    def test_first_fix_returns_summary_without_consolidation(self):
+        """First fix has no prior history — consolidation is skipped."""
+        fh = _FixHistory()
+        fh.consolidate = MagicMock()
+
+        fh.append(1, "fixed port conflict")
+
+        assert fh.history == "Attempt 1: fixed port conflict"
+        fh.consolidate.assert_not_called()
+
+    def test_second_fix_calls_consolidation(self):
+        """Second fix has prior history — consolidation is called."""
+        fh = _FixHistory()
+        fh.consolidate = MagicMock(
+            return_value=dspy.Prediction(
+                consolidated_summary="## Failure Pattern: port conflict\n* Attempt 1: fixed\n* Attempt 2: retried"
+            )
+        )
+        fh.append(1, "fixed port conflict")
+
+        fh.append(2, "retried with different port")
+
+        assert "Attempt 2" in fh.history
+        fh.consolidate.assert_called_once()
+        assert fh.history == "## Failure Pattern: port conflict\n* Attempt 1: fixed\n* Attempt 2: retried"
+
+    def test_reset_clears_history(self):
+        """reset() clears history for next deployment run."""
+        fh = _FixHistory()
+        fh.append(1, "fixed")
+
+        fh.reset()
+
+        assert fh.history == ""
 
 
 class TestStripCodeFences:

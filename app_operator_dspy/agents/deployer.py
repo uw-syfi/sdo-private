@@ -7,19 +7,17 @@ from dataclasses import dataclass
 
 import dspy
 
+from app_operator_dspy.constants import CLEANUP_TIMEOUT, DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
 from app_operator_dspy.signatures import (
+    ConsolidateFixSummary,
     GenerateDeployScript,
     GenerateHealthCheckScript,
     RepairDeploymentError,
 )
-from app_operator_dspy.summarizer import Summarizer
-from app_operator_dspy.tools import DEPLOYER_TOOLS
-from app_operator_dspy.tools.filesystem import write_file
+from app_operator_dspy.tools import DEPLOYER_TOOLS, write_file
 from app_operator_dspy.tools.shell import ShellResult, run_shell
 
 DEFAULT_MAX_ATTEMPTS = 5
-DEFAULT_DEPLOY_TIMEOUT = 300
-DEFAULT_HEALTH_CHECK_TIMEOUT = 300
 
 # Truncation limits to keep LLM context manageable
 _MAX_ERROR_CHARS = 5000
@@ -56,6 +54,39 @@ def _health_error_context(deploy: ShellResult, health: ShellResult) -> str:
     return f"Deploy output:\n{deploy.output}\n\nHealth check output:\n{health.output}"
 
 
+class _FixHistory:
+    """Tracks fix attempt summaries and consolidates them to avoid repeating failed approaches.
+
+    Maintains history as internal state. On first fix: stores the summary as-is (no LLM call).
+    On subsequent fixes: calls ConsolidateFixSummary to merge new attempts into grouped history.
+    """
+
+    def __init__(self):
+        self.consolidate = dspy.ChainOfThought(ConsolidateFixSummary)
+        self._history: str = ""
+
+    @property
+    def history(self) -> str:
+        """Current fix history for passing to the repair agent."""
+        return self._history
+
+    def append(self, attempt: int, fix_summary: str) -> None:
+        """Append a new fix summary; consolidate when prior history exists."""
+        summary = f"Attempt {attempt}: {fix_summary}"
+        if not self._history:
+            self._history = summary
+            return
+        result = self.consolidate(
+            existing_summary=self._history,
+            new_attempts=summary,
+        )
+        self._history = result.consolidated_summary
+
+    def reset(self) -> None:
+        """Clear history at the start of a new deployment run."""
+        self._history = ""
+
+
 class DeploymentAgent(dspy.Module):
     """Generates deployment scripts and self-heals on failure.
 
@@ -71,7 +102,7 @@ class DeploymentAgent(dspy.Module):
         self.gen_deploy = dspy.ReAct(GenerateDeployScript, tools=DEPLOYER_TOOLS)
         self.gen_health = dspy.ReAct(GenerateHealthCheckScript, tools=DEPLOYER_TOOLS)
         self.repair_agent = dspy.ReAct(RepairDeploymentError, tools=DEPLOYER_TOOLS)
-        self.summarizer = Summarizer()
+        self._fix_history = _FixHistory()
 
     def forward(
         self,
@@ -79,8 +110,8 @@ class DeploymentAgent(dspy.Module):
         code_analysis: str,
         deployment_issues: str,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
-        deploy_timeout: int = DEFAULT_DEPLOY_TIMEOUT,
-        health_check_timeout: int = DEFAULT_HEALTH_CHECK_TIMEOUT,
+        deploy_timeout: int = DEPLOY_TIMEOUT,
+        health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
     ) -> dspy.Prediction:
         sds_dir = os.path.join(repo_path, ".sds")
         deploy_path = os.path.join(sds_dir, "deploy.sh")
@@ -97,7 +128,7 @@ class DeploymentAgent(dspy.Module):
         self._generate_scripts(repo_path, code_analysis, deployment_issues, ctx)
         print("[deployer] scripts generated")
 
-        self.summarizer.reset()
+        self._fix_history.reset()
 
         for attempt in range(1, max_attempts + 1):
             deploy = self._run_deploy(ctx)
@@ -171,7 +202,7 @@ class DeploymentAgent(dspy.Module):
             deploy_path=ctx.deploy_path,
             health_path=ctx.health_path,
             error_output=_truncate(error_output, _MAX_ERROR_CHARS),
-            fix_history=_truncate(self.summarizer.history, _MAX_FIX_HISTORY_CHARS),
+            fix_history=_truncate(self._fix_history.history, _MAX_FIX_HISTORY_CHARS),
             attempt=str(attempt),
             max_attempts=str(max_attempts),
         )
@@ -182,11 +213,15 @@ class DeploymentAgent(dspy.Module):
             os.chmod(ctx.health_path, os.stat(ctx.health_path).st_mode | stat.S_IEXEC)
 
         print(f"[deployer] fix summary: {fix_result.fix_summary}")
-        self.summarizer.append(attempt, fix_result.fix_summary)
+        self._fix_history.append(attempt, fix_result.fix_summary)
 
     def _cleanup(self, ctx: _DeployContext) -> None:
         """Stop and remove containers from a failed deployment."""
-        run_shell(f"{ctx.deploy_path} cleanup", cwd=ctx.repo_path, timeout=60)
+        run_shell(
+            f"{ctx.deploy_path} cleanup",
+            cwd=ctx.repo_path,
+            timeout=CLEANUP_TIMEOUT,
+        )
 
     @staticmethod
     def _success(attempt: int) -> dspy.Prediction:

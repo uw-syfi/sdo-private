@@ -2,7 +2,9 @@
 
 import subprocess
 
-DEFAULT_TIMEOUT = 120
+from app_operator_dspy.constants import SHELL_DEFAULT_TIMEOUT
+
+DEFAULT_TIMEOUT = SHELL_DEFAULT_TIMEOUT
 
 
 def _format_output(return_code: int, stdout: str = "", stderr: str = "") -> str:

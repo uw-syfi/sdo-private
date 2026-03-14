@@ -9,18 +9,9 @@ import tempfile
 import time
 import traceback
 
+from app_operator_dspy.constants import DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
+from app_operator_dspy.lm_config import DEFAULT_MODEL, get_lm_kwargs
 from app_operator_dspy.operator import DSPyOperator, configure_lm
-
-DEFAULT_MODEL = "vertex_ai/gemini-2.5-pro"
-
-
-def _resolve_vertex_project() -> str:
-    """Resolve GCP project ID from VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT."""
-    project = os.environ.get("VERTEX_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-    if project:
-        return project
-    print("[error] Set VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT")
-    sys.exit(1)
 
 
 def run_command(args: argparse.Namespace) -> int:
@@ -41,12 +32,7 @@ def run_command(args: argparse.Namespace) -> int:
 
     # Configure LM
     model = args.model or DEFAULT_MODEL
-    lm_kwargs = {}
-    if model.startswith("vertex_ai/"):
-        lm_kwargs["vertex_project"] = _resolve_vertex_project()
-        lm_kwargs["vertex_location"] = os.environ.get(
-            "VERTEX_LOCATION", os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-        )
+    lm_kwargs = get_lm_kwargs(model)
     print(f"[setup] Model: {model}")
     configure_lm(model, **lm_kwargs)
 
@@ -123,12 +109,17 @@ def main() -> int:
     run_parser.add_argument("--model", help=f"LiteLLM model identifier (default: {DEFAULT_MODEL})")
     run_parser.add_argument("--max-attempts", type=int, default=5, help="Max deploy attempts (default: 5)")
     run_parser.add_argument("--monitor-checks", type=int, default=2, help="Number of monitor checks (default: 2)")
-    run_parser.add_argument("--deploy-timeout", type=int, default=300, help="Deploy timeout in seconds (default: 300)")
+    run_parser.add_argument(
+        "--deploy-timeout",
+        type=int,
+        default=DEPLOY_TIMEOUT,
+        help=f"Deploy timeout in seconds (default: {DEPLOY_TIMEOUT})",
+    )
     run_parser.add_argument(
         "--health-check-timeout",
         type=int,
-        default=300,
-        help="Health check timeout in seconds (default: 300)",
+        default=HEALTH_CHECK_TIMEOUT,
+        help=f"Health check timeout in seconds (default: {HEALTH_CHECK_TIMEOUT})",
     )
 
     # Shortcut: bare path without subcommand → run
