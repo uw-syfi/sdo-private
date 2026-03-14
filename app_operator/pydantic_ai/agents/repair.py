@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext, RunUsage
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.prompts import create_fix_prompt, prepare_error_context
+from app_operator.pydantic_ai._base_agent import BaseAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import FixSummaryResponse, HealthVerdictResponse
 from app_operator.script_runner import write_log_file
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
-class RepairAgent:
+class RepairAgent(BaseAgent):
     """Agent for error fixing phase."""
 
     def __init__(
@@ -32,22 +32,21 @@ class RepairAgent:
         recorder: PydanticAITrajectoryRecorder,
         max_attempts: int,
     ):
+        super().__init__(deps, recorder)
         self._agent: Agent[OperatorDeps, FixSummaryResponse] = Agent(
             model,
             deps_type=OperatorDeps,
             output_type=FixSummaryResponse,
             tools=tools,
         )
-        self.deps = deps
-        self.recorder = recorder
         self.max_attempts = max_attempts
 
         @self._agent.instructions
         def system_prompt(ctx: RunContext[OperatorDeps]) -> str:
             return ctx.deps.loader.render("repair_agent/system.jinja2")
 
-    def run(self, deploy_result: dict, health_verdict: HealthVerdictResponse | None, attempt: int) -> RunUsage:
-        """Run fix agent to diagnose and repair issues. Returns token usage."""
+    def run(self, deploy_result: dict, health_verdict: HealthVerdictResponse | None, attempt: int) -> None:
+        """Run fix agent to diagnose and repair issues."""
         repo_path = self.deps.repo_path
         log_file_path = repo_path / ".sds" / "logs" / f"deploy_attempt_{attempt}.log"
         health_check_log_path = None
@@ -81,16 +80,9 @@ class RepairAgent:
             structured_output=True,
         )
 
-        result = self._agent.run_sync(
-            prompt,
-            deps=self.deps,
-            usage_limits=UsageLimits(),
-        )
-        self.recorder.record_run(Phase.DEPLOYMENT, "Error Fixer", result, context={"attempt": attempt})
+        result = self._run(prompt, Phase.DEPLOYMENT, "Error Fixer", context={"attempt": attempt})
 
         summary_text = result.output.summary.strip() if result.output else None
         if summary_text:
             log_file = repo_path / ".sds" / "logs" / f"fix_summary_{attempt}.log"
             write_log_file(self.deps.filesystem, log_file, summary_text)
-
-        return result.usage()

@@ -30,6 +30,7 @@ class PydanticAITrajectoryRecorder:
         self.trajectory_file = trajectories_dir / f"trajectory_{self._run_timestamp}.json"
         self._latest_link = sds_dir / "trajectory.json"
         self._next_id = 0
+        self._total_usage: RunUsage = RunUsage()
 
         self.trajectory: dict[str, Any] = {
             "metadata": {
@@ -71,6 +72,7 @@ class PydanticAITrajectoryRecorder:
 
         messages_json = ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json")
         usage = result.usage()
+        self._total_usage += usage
 
         self.trajectory["phases"].append(
             {
@@ -89,19 +91,20 @@ class PydanticAITrajectoryRecorder:
         )
         self._write_to_file()
 
-    def record_token_usage(self, usage: RunUsage) -> None:
-        """Record cumulative token usage in metadata."""
-        self.trajectory["metadata"]["token_usage"] = {
-            "input_tokens": usage.input_tokens,
-            "output_tokens": usage.output_tokens,
-            "requests": usage.requests,
-        }
-        self._write_to_file()
+    @property
+    def total_usage(self) -> RunUsage:
+        """Cumulative token usage across all recorded runs."""
+        return self._total_usage
 
     def finalize(self, status: str) -> Path:
         """Set final status, write, and create symlink."""
         self.trajectory["metadata"]["status"] = status
         self.trajectory["metadata"]["end_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.trajectory["metadata"]["token_usage"] = {
+            "input_tokens": self._total_usage.input_tokens,
+            "output_tokens": self._total_usage.output_tokens,
+            "requests": self._total_usage.requests,
+        }
         self._write_to_file()
 
         # Create/update symlink to latest trajectory

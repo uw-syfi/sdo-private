@@ -5,10 +5,10 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext, RunUsage
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
+from app_operator.pydantic_ai._base_agent import BaseAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import HealthVerdictResponse
 from app_operator.script_runner import write_log_file
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
-class HealthAgent:
+class HealthAgent(BaseAgent):
     """Agent for health check and monitoring phases."""
 
     def __init__(
@@ -30,14 +30,13 @@ class HealthAgent:
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
     ):
+        super().__init__(deps, recorder)
         self._agent: Agent[OperatorDeps, HealthVerdictResponse] = Agent(
             model,
             deps_type=OperatorDeps,
             output_type=HealthVerdictResponse,
             tools=tools,
         )
-        self.deps = deps
-        self.recorder = recorder
 
         @self._agent.instructions
         def system_prompt(ctx: RunContext[OperatorDeps]) -> str:
@@ -48,8 +47,8 @@ class HealthAgent:
         *,
         phase: Phase,
         context: dict,
-    ) -> tuple[HealthVerdictResponse, RunUsage]:
-        """Run agent-based health assessment. Returns (verdict, token_usage)."""
+    ) -> HealthVerdictResponse:
+        """Run agent-based health assessment. Returns the verdict."""
         repo_path = self.deps.repo_path
         health_check_script = repo_path / ".sds" / "health_check.sh"
         platform = self.deps.config.deployment.platform
@@ -69,12 +68,7 @@ class HealthAgent:
             has_deployment_progress=has_deployment_progress,
         )
 
-        result = self._agent.run_sync(
-            user_prompt,
-            deps=self.deps,
-            usage_limits=UsageLimits(),
-        )
-        self.recorder.record_run(phase, "Health Judge", result, context=context)
+        result = self._run(user_prompt, phase, "Health Judge", context=context)
 
         verdict = result.output
         status = "healthy" if verdict.healthy else "unhealthy"
@@ -96,4 +90,4 @@ class HealthAgent:
 
         write_log_file(self.deps.filesystem, log_file, content)
 
-        return verdict, result.usage()
+        return verdict

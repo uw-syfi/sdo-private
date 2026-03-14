@@ -75,8 +75,41 @@ def test_record_run_increments_call_id(recorder):
     assert data["phases"][1]["call_id"] == 2
 
 
-def test_record_token_usage(recorder):
-    recorder.record_token_usage(RunUsage(input_tokens=200, output_tokens=100, requests=3))
+def test_total_usage_accumulated_via_record_run(recorder):
+    mock_result = MagicMock()
+    mock_result.all_messages.return_value = []
+    mock_result.usage.return_value = RunUsage(input_tokens=200, output_tokens=100, requests=3)
+
+    with pytest.MonkeyPatch.context() as mp:
+        import pydantic_ai.messages as pai_messages
+
+        mock_adapter = MagicMock()
+        mock_adapter.dump_python.return_value = []
+        mp.setattr(pai_messages, "ModelMessagesTypeAdapter", mock_adapter)
+
+        recorder.record_run("exploration", "Agent", mock_result)
+        recorder.record_run("deployment", "Agent", mock_result)
+
+    assert recorder.total_usage.input_tokens == 400
+    assert recorder.total_usage.output_tokens == 200
+    assert recorder.total_usage.requests == 6
+
+
+def test_finalize_writes_total_usage(recorder):
+    mock_result = MagicMock()
+    mock_result.all_messages.return_value = []
+    mock_result.usage.return_value = RunUsage(input_tokens=200, output_tokens=100, requests=3)
+
+    with pytest.MonkeyPatch.context() as mp:
+        import pydantic_ai.messages as pai_messages
+
+        mock_adapter = MagicMock()
+        mock_adapter.dump_python.return_value = []
+        mp.setattr(pai_messages, "ModelMessagesTypeAdapter", mock_adapter)
+
+        recorder.record_run("exploration", "Agent", mock_result)
+
+    recorder.finalize("completed")
     data = json.loads(recorder.trajectory_file.read_text())
     assert data["metadata"]["token_usage"]["input_tokens"] == 200
     assert data["metadata"]["token_usage"]["output_tokens"] == 100

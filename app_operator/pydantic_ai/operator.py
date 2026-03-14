@@ -5,8 +5,6 @@ import threading
 import time
 from pathlib import Path
 
-from pydantic_ai import RunUsage
-
 from app_operator.config import Config, load_config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -92,7 +90,6 @@ class PydanticAIOperator(OperatorBase):
         self.health_agent = HealthAgent(self.model_str, self.tool_list, self.deps, self.recorder)
 
         self._deployed = False
-        self._token_usage: RunUsage = RunUsage()
 
     def run(self) -> int:
         if threading.current_thread() is threading.main_thread():
@@ -134,7 +131,7 @@ class PydanticAIOperator(OperatorBase):
                 logger.error("Deployment failed after max attempts.")
 
             _status = "completed" if self._deployed else "failed"
-            logger.info(f"Total Token Usage: {self._token_usage}")
+            logger.info(f"Total Token Usage: {self.recorder.total_usage}")
             emit_progress("finishing")
             return 0
 
@@ -147,20 +144,15 @@ class PydanticAIOperator(OperatorBase):
             logger.error(f"Unexpected error: {e}", exc_info=True)
             return 1
         finally:
-            self.recorder.record_token_usage(self._token_usage)
             self.recorder.finalize(_status)
-
-    def _accumulate_usage(self, usage: RunUsage) -> None:
-        """Accumulate token usage."""
-        self._token_usage += usage
 
     def _run_analysis(self) -> None:
         """Run code analysis phase."""
-        self._accumulate_usage(self.analyze_agent.run())
+        self.analyze_agent.run()
 
     def _generate_scripts(self) -> None:
         """Generate deploy.sh and health_check.sh."""
-        self._accumulate_usage(self.script_agent.run())
+        self.script_agent.run()
 
     def _deploy_with_retries(self) -> bool:
         """Deploy and fix in a loop. Returns True if healthy."""
@@ -196,13 +188,11 @@ class PydanticAIOperator(OperatorBase):
     def _run_health_check(self, attempt: int) -> HealthVerdictResponse | None:
         """Run agent-based health assessment."""
         logger.info("Running agent-based health assessment...")
-        verdict, usage = self.health_agent.run_check(phase=Phase.DEPLOYMENT, context={"attempt": attempt})
-        self._accumulate_usage(usage)
-        return verdict
+        return self.health_agent.run_check(phase=Phase.DEPLOYMENT, context={"attempt": attempt})
 
     def _fix_errors(self, deploy_result: dict, health_verdict: HealthVerdictResponse | None, attempt: int) -> None:
         """Run fix agent to diagnose and repair issues."""
-        self._accumulate_usage(self.repair_agent.run(deploy_result, health_verdict, attempt))
+        self.repair_agent.run(deploy_result, health_verdict, attempt)
 
     def _monitor(self) -> None:
         """Periodic health monitoring."""
@@ -221,8 +211,7 @@ class PydanticAIOperator(OperatorBase):
             emit_progress("monitoring", cycle=cycle)
             logger.info(f"Running health assessment (monitor cycle {cycle})...")
 
-            _verdict, usage = self.health_agent.run_check(phase=Phase.MONITORING, context={"cycle": cycle})
-            self._accumulate_usage(usage)
+            self.health_agent.run_check(phase=Phase.MONITORING, context={"cycle": cycle})
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         if not self._shutdown_requested:
