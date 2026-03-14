@@ -147,8 +147,7 @@ class DeploymentAgent(dspy.Module):
         deploy_script = self._validate(deploy_result.deploy_script)
         if deploy_script.strip().startswith("```"):
             raise ValueError(
-                "deploy_script must not contain markdown code fences; "
-                "instruct the model to output raw bash only"
+                "deploy_script must not contain markdown code fences; instruct the model to output raw bash only"
             )
         self._write_script(deploy_path, deploy_script)
 
@@ -160,8 +159,7 @@ class DeploymentAgent(dspy.Module):
         health_script = self._validate(health_result.health_check_script)
         if health_script.strip().startswith("```"):
             raise ValueError(
-                "health_check_script must not contain markdown code fences; "
-                "instruct the model to output raw bash only"
+                "health_check_script must not contain markdown code fences; instruct the model to output raw bash only"
             )
         self._write_script(health_path, health_script)
 
@@ -173,9 +171,7 @@ class DeploymentAgent(dspy.Module):
             timeout=deploy_timeout,
         )
 
-    def _run_health_check(
-        self, repo_path: str, health_path: str, health_check_timeout: int
-    ) -> ShellResult:
+    def _run_health_check(self, repo_path: str, health_path: str, health_check_timeout: int) -> ShellResult:
         """Run health_check.sh; return structured result."""
         return run_shell(
             health_path,

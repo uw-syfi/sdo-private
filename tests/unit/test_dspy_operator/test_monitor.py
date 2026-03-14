@@ -45,9 +45,7 @@ class TestMonitorAgent:
     def test_status_normalized_to_lowercase(self, mock_hc):
         mock_hc.return_value = "ok"
         agent = MonitorAgent()
-        agent.analyze = MagicMock(
-            return_value=dspy.Prediction(status="HEALTHY", summary="fine", remediation="")
-        )
+        agent.analyze = MagicMock(return_value=dspy.Prediction(status="HEALTHY", summary="fine", remediation=""))
         result = agent.forward("/app")
         assert result.status == "healthy"
 
@@ -55,8 +53,6 @@ class TestMonitorAgent:
     def test_invalid_status_raises(self, mock_hc):
         mock_hc.return_value = "ok"
         agent = MonitorAgent()
-        agent.analyze = MagicMock(
-            return_value=dspy.Prediction(status="partially healthy", summary="?", remediation="")
-        )
+        agent.analyze = MagicMock(return_value=dspy.Prediction(status="partially healthy", summary="?", remediation=""))
         with pytest.raises(ValueError, match="status must be one of"):
             agent.forward("/app")

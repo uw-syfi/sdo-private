@@ -31,7 +31,5 @@ class MonitorAgent(dspy.Module):
         )
         normalized = result.status.lower().strip()
         if normalized not in {"healthy", "degraded", "unhealthy"}:
-            raise ValueError(
-                f"status must be one of healthy/degraded/unhealthy, got: {result.status!r}"
-            )
+            raise ValueError(f"status must be one of healthy/degraded/unhealthy, got: {result.status!r}")
         return dspy.Prediction(status=normalized, summary=result.summary, remediation=result.remediation)
