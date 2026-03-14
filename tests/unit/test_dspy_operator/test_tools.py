@@ -3,6 +3,9 @@
 import subprocess
 from unittest.mock import patch
 
+import pytest
+
+from app_operator_dspy.tools.agent_tools import write_file_tool
 from app_operator_dspy.tools.filesystem import list_files, read_file, write_file
 from app_operator_dspy.tools.health_check import run_health_check
 from app_operator_dspy.tools.shell import ShellResult, run_shell
@@ -53,6 +56,17 @@ class TestFilesystem:
         result = write_file(str(f), "data")
         assert "Wrote 4 bytes" in result
         assert f.read_text() == "data"
+
+    def test_write_file_raises_on_failure(self):
+        with patch("pathlib.Path.write_text", side_effect=OSError(13, "Permission denied")):
+            with pytest.raises(OSError, match="Permission denied"):
+                write_file("/nonexistent/file.txt", "data")
+
+    def test_write_file_tool_returns_error_string(self):
+        with patch("pathlib.Path.write_text", side_effect=OSError(13, "Permission denied")):
+            result = write_file_tool("/nonexistent/file.txt", "data")
+        assert result.startswith("Error writing")
+        assert "Permission denied" in result
 
     def test_list_files(self, tmp_path):
         (tmp_path / "a.py").touch()
