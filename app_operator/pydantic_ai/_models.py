@@ -62,6 +62,6 @@ def build_model_settings(config: Config) -> ModelSettings | None:
     if normalized == "anthropic":
         return {"anthropic_thinking": {"type": "enabled", "budget_tokens": budget}}  # type: ignore[return-value]
     if normalized in ("google-gla", "google-vertex"):
-        return {"google_thinking_config": {"thinking_budget": budget, "include_thoughts": False}}  # type: ignore[return-value]
+        return {"google_thinking_config": {"thinking_budget": budget, "include_thoughts": True}}  # type: ignore[return-value]
 
     return None

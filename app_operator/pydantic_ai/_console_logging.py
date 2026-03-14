@@ -56,7 +56,7 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         from pydantic_ai.messages import ThinkingPart
 
         if isinstance(event.part, ThinkingPart) and event.part.has_content():
-            logger.debug("[{}] <thinking> {}", self._agent.agent_name, event.part.content)
+            logger.info("[{}] <thinking> {}", self._agent.agent_name, event.part.content)
 
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output
