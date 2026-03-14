@@ -9,7 +9,6 @@ from loguru import logger
 from libs.pydantic_agent import AgentMiddleware
 
 _MAX_ARG_LEN = 120
-_MAX_RESULT_LEN = 300
 
 
 def _fmt_args(args: str | dict[str, Any] | None) -> str:
@@ -27,30 +26,9 @@ def _fmt_args(args: str | dict[str, Any] | None) -> str:
     return ", ".join(parts)
 
 
-def _fmt_result(result: Any) -> str:
-    if isinstance(result, dict):
-        rc = result.get("returncode", "?")
-        stdout = str(result.get("stdout", ""))
-        truncated = len(stdout) - _MAX_RESULT_LEN
-        suffix = f" [{truncated} chars truncated]" if truncated > 0 else ""
-        return f"rc={rc} stdout=\n{stdout[:_MAX_RESULT_LEN]!r}{suffix}"
-    s = str(result) if result is not None else "<none>"
-    truncated = len(s) - _MAX_RESULT_LEN
-    suffix = f" [{truncated} chars truncated]" if truncated > 0 else ""
-    return f"\n{s[:_MAX_RESULT_LEN]}{suffix}"
-
-
 class ConsoleLoggingMiddleware(AgentMiddleware):
     def on_function_tool_call(self, event: Any) -> None:
         logger.info("[{}] \u2192 {}({})", self._agent.agent_name, event.part.tool_name, _fmt_args(event.part.args))
-
-    def on_function_tool_result(self, event: Any) -> None:
-        logger.info(
-            "[{}] \u2190 {}: {}",
-            self._agent.agent_name,
-            event.result.tool_name,
-            _fmt_result(event.result.content),
-        )
 
     def on_part_end(self, event: Any) -> None:
         from pydantic_ai.messages import ThinkingPart
