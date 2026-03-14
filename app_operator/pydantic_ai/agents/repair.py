@@ -76,7 +76,7 @@ class RepairAgent(OperatorAgent):
 
         result = self._run(prompt, context={"attempt": attempt})
 
-        summary_text = result.output.summary.strip() if result.output else None
+        summary_text = result.output.summary.strip() or None
         if summary_text:
             log_file = repo_path / ".sds" / "logs" / f"fix_summary_{attempt}.log"
             write_log_file(self.deps.filesystem, log_file, summary_text)
