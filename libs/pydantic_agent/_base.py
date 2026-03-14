@@ -100,7 +100,7 @@ class BaseAgent(Generic[DepsT]):
         # Wrap every toolset so all tool calls go through the middleware chain.
         hooked = [
             _InterceptingToolset(
-                wrapped=ts,
+                wrapped=ts,  # type: ignore[arg-type]  # WrapperToolset is typed for None deps
                 before_cb=self._before_chain,
                 after_cb=self._after_chain,
             )
@@ -109,7 +109,7 @@ class BaseAgent(Generic[DepsT]):
         # tools=[] clears the original function toolset so it doesn't also run
         # unwrapped alongside the intercepted copy already captured in `hooked`.
         # toolsets=hooked replaces user toolsets with the wrapped versions.
-        with self._agent.override(tools=[], toolsets=hooked):
+        with self._agent.override(tools=[], toolsets=hooked):  # type: ignore[arg-type]
             result = self._agent.run_sync(
                 prompt,
                 deps=self.deps,

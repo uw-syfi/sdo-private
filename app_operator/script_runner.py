@@ -7,10 +7,10 @@ Promoted from ``app_operator.langgraph.utils`` so that multiple runtimes
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
 
 from app_operator.filesystem import FileSystemInterface
 from app_operator.trajectory import TrajectoryRecorderProtocol
+from app_operator.types import CommandResult
 
 
 def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:
@@ -25,7 +25,7 @@ def run_script(
     log_file_path: Path | None = None,
     timeout: int = 900,
     recorder: TrajectoryRecorderProtocol | None = None,
-) -> dict[str, Any]:
+) -> CommandResult:
     start_time = time.time()
     try:
         result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
