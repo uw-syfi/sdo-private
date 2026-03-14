@@ -161,19 +161,26 @@ class DeploymentAgent(dspy.Module):
             code_analysis=code_analysis,
             deployment_issues=issues,
         )
-        self._write_script(
-            ctx.deploy_path,
-            strip_code_fences(self._validate(deploy_result.deploy_script)),
-        )
+        deploy_script = self._validate(deploy_result.deploy_script)
+        if deploy_script.strip().startswith("```"):
+            raise ValueError(
+                "deploy_script must not contain markdown code fences; "
+                "instruct the model to output raw bash only"
+            )
+        self._write_script(ctx.deploy_path, deploy_script)
+
         health_result = self.gen_health(
             repo_path=repo_path,
             code_analysis=code_analysis,
             deployment_issues=issues,
         )
-        self._write_script(
-            ctx.health_path,
-            strip_code_fences(self._validate(health_result.health_check_script)),
-        )
+        health_script = self._validate(health_result.health_check_script)
+        if health_script.strip().startswith("```"):
+            raise ValueError(
+                "health_check_script must not contain markdown code fences; "
+                "instruct the model to output raw bash only"
+            )
+        self._write_script(ctx.health_path, health_script)
 
     def _run_deploy(self, ctx: _DeployContext) -> ShellResult:
         """Run deploy.sh start; return structured result."""
