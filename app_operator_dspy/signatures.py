@@ -179,11 +179,11 @@ class GenerateHealthCheckScript(dspy.Signature):
 
 
 # ---------------------------------------------------------------------------
-# Deployer — Fix Errors
+# Deployer — Repair
 # ---------------------------------------------------------------------------
 
 
-class FixDeploymentError(dspy.Signature):
+class RepairDeploymentError(dspy.Signature):
     """You are an expert DevOps engineer debugging deployment issues.
 
     You MUST make edits directly using the read_file and write_file tools.
@@ -256,7 +256,7 @@ class ConsolidateFixSummary(dspy.Signature):
     """Consolidate deployment fix attempt summaries into a structured history.
 
     Group attempts by the underlying failure pattern they address.
-    This summary helps the fix agent understand what has been tried
+    This summary helps the repair agent understand what has been tried
     and avoid repeating the same failed approaches.
 
     CRITICAL rules:

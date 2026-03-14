@@ -16,4 +16,4 @@ def run_health_check(repo_path: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         Combined output including exit code, stdout, and stderr.
     """
     script = f"{repo_path}/.sds/health_check.sh"
-    return run_shell(script, cwd=repo_path, timeout=timeout)
+    return run_shell(script, cwd=repo_path, timeout=timeout).output

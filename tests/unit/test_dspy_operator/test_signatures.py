@@ -6,16 +6,16 @@ from app_operator_dspy.signatures import (
     AnalyzeCodebase,
     AnalyzeHealthCheck,
     ConsolidateFixSummary,
-    FixDeploymentError,
     GenerateDeployScript,
     GenerateHealthCheckScript,
+    RepairDeploymentError,
 )
 
 ALL_SIGNATURES = [
     AnalyzeCodebase,
     GenerateDeployScript,
     GenerateHealthCheckScript,
-    FixDeploymentError,
+    RepairDeploymentError,
     ConsolidateFixSummary,
     AnalyzeHealthCheck,
 ]
@@ -36,14 +36,14 @@ class TestSignatureStructure:
         assert "analysis" in AnalyzeCodebase.output_fields
         assert "issues" in AnalyzeCodebase.output_fields
 
-    def test_fix_deployment_error_fields(self):
-        assert "repo_path" in FixDeploymentError.input_fields
-        assert "deploy_path" in FixDeploymentError.input_fields
-        assert "health_path" in FixDeploymentError.input_fields
-        assert "error_output" in FixDeploymentError.input_fields
-        assert "fix_history" in FixDeploymentError.input_fields
-        assert "fix_summary" in FixDeploymentError.output_fields
-        assert len(FixDeploymentError.output_fields) == 1
+    def test_repair_deployment_error_fields(self):
+        assert "repo_path" in RepairDeploymentError.input_fields
+        assert "deploy_path" in RepairDeploymentError.input_fields
+        assert "health_path" in RepairDeploymentError.input_fields
+        assert "error_output" in RepairDeploymentError.input_fields
+        assert "fix_history" in RepairDeploymentError.input_fields
+        assert "fix_summary" in RepairDeploymentError.output_fields
+        assert len(RepairDeploymentError.output_fields) == 1
 
     def test_consolidate_fix_summary_fields(self):
         assert "existing_summary" in ConsolidateFixSummary.input_fields

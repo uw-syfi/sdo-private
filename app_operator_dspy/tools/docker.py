@@ -17,7 +17,7 @@ def docker_compose_up(cwd: str, build: bool = True, timeout: int = 300) -> str:
         Combined stdout/stderr output from the command.
     """
     build_flag = " --build" if build else ""
-    return run_shell(f"docker compose up{build_flag} -d", cwd=cwd, timeout=timeout)
+    return run_shell(f"docker compose up{build_flag} -d", cwd=cwd, timeout=timeout).output
 
 
 def docker_ps(cwd: str = ".") -> str:
@@ -29,7 +29,7 @@ def docker_ps(cwd: str = ".") -> str:
     Returns:
         Table of running containers with name, status, and ports.
     """
-    return run_shell("docker compose ps", cwd=cwd)
+    return run_shell("docker compose ps", cwd=cwd).output
 
 
 def docker_logs(service: str, tail: int = DEFAULT_TAIL, cwd: str = ".") -> str:
@@ -43,4 +43,4 @@ def docker_logs(service: str, tail: int = DEFAULT_TAIL, cwd: str = ".") -> str:
     Returns:
         The last ``tail`` lines of the service's logs.
     """
-    return run_shell(f"docker compose logs --tail={tail} {service}", cwd=cwd)
+    return run_shell(f"docker compose logs --tail={tail} {service}", cwd=cwd).output

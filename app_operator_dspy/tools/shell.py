@@ -5,8 +5,33 @@ import subprocess
 DEFAULT_TIMEOUT = 120
 
 
-def run_shell(command: str, cwd: str = ".", timeout: int = DEFAULT_TIMEOUT) -> str:
-    """Execute a shell command and return its combined output.
+def _format_output(return_code: int, stdout: str = "", stderr: str = "") -> str:
+    """Build formatted output string for ShellResult."""
+    parts = [f"Exit code: {return_code}"]
+    if stdout:
+        parts.append(f"Stdout:\n{stdout}")
+    if stderr:
+        parts.append(f"Stderr:\n{stderr}")
+    return "\n".join(parts)
+
+
+class ShellResult:
+    """Structured result from a shell command."""
+
+    def __init__(self, return_code: int, output: str) -> None:
+        self.return_code = return_code
+        self.output = output
+
+    @property
+    def succeeded(self) -> bool:
+        return self.return_code == 0
+
+    def __str__(self) -> str:
+        return self.output
+
+
+def run_shell(command: str, cwd: str = ".", timeout: int = DEFAULT_TIMEOUT) -> ShellResult:
+    """Execute a shell command and return structured result.
 
     Args:
         command: The shell command to execute.
@@ -14,7 +39,7 @@ def run_shell(command: str, cwd: str = ".", timeout: int = DEFAULT_TIMEOUT) -> s
         timeout: Maximum seconds to wait before killing the process.
 
     Returns:
-        A string containing the exit code, stdout, and stderr.
+        ShellResult with return_code and formatted output.
     """
     try:
         result = subprocess.run(  # noqa: S602 — shell=True is intentional
@@ -25,13 +50,15 @@ def run_shell(command: str, cwd: str = ".", timeout: int = DEFAULT_TIMEOUT) -> s
             text=True,
             timeout=timeout,
         )
-        parts = [f"Exit code: {result.returncode}"]
-        if result.stdout:
-            parts.append(f"Stdout:\n{result.stdout}")
-        if result.stderr:
-            parts.append(f"Stderr:\n{result.stderr}")
-        return "\n".join(parts)
+        output = _format_output(
+            result.returncode,
+            result.stdout or "",
+            result.stderr or "",
+        )
+        return ShellResult(result.returncode, output)
     except subprocess.TimeoutExpired:
-        return f"Exit code: 124\nStderr:\nCommand timed out after {timeout} seconds"
+        output = f"Exit code: 124\nStderr:\nCommand timed out after {timeout} seconds"
+        return ShellResult(124, output)
     except OSError as exc:
-        return f"Exit code: 1\nStderr:\n{exc}"
+        output = f"Exit code: 1\nStderr:\n{exc}"
+        return ShellResult(1, output)
