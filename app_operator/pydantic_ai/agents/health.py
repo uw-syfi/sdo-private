@@ -48,9 +48,24 @@ class HealthAgent(OperatorAgent):
         self,
         *,
         phase: Phase,
-        context: dict,
+        attempt: int | None = None,
+        cycle: int | None = None,
     ) -> HealthVerdictResponse:
-        """Run agent-based health assessment. Returns the verdict."""
+        """Run agent-based health assessment. Returns the verdict.
+
+        Args:
+            phase: The current operator phase (DEPLOYMENT or MONITORING).
+            attempt: Deployment attempt number. Required when phase is DEPLOYMENT.
+            cycle: Monitoring cycle number. Required when phase is MONITORING.
+
+        Raises:
+            ValueError: If the required parameter for the given phase is missing.
+        """
+        if phase == Phase.DEPLOYMENT and attempt is None:
+            raise ValueError("attempt is required for DEPLOYMENT phase")
+        if phase == Phase.MONITORING and cycle is None:
+            raise ValueError("cycle is required for MONITORING phase")
+
         repo_path = self.deps.repo_path
         health_check_script = repo_path / ".sds" / "health_check.sh"
         platform = self.deps.config.deployment.platform
@@ -70,6 +85,7 @@ class HealthAgent(OperatorAgent):
             has_deployment_progress=has_deployment_progress,
         )
 
+        context = {"attempt": attempt} if attempt is not None else {"cycle": cycle}
         result = self._run(user_prompt, phase=phase, context=context)
 
         verdict = result.output
@@ -84,10 +100,8 @@ class HealthAgent(OperatorAgent):
             content += f"\nDiagnosis: {verdict.diagnosis}\n"
 
         if phase == Phase.DEPLOYMENT:
-            attempt = context["attempt"]
             log_file = repo_path / ".sds" / "logs" / f"health_check_attempt_{attempt}.log"
         else:
-            cycle = context["cycle"]
             log_file = repo_path / ".sds" / "logs" / "monitor" / f"check_{cycle}_{time.strftime('%Y%m%d-%H%M%S')}.log"
 
         write_log_file(self.deps.filesystem, log_file, content)
