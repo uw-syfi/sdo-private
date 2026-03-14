@@ -3,7 +3,6 @@
 import os
 import re
 import stat
-from dataclasses import dataclass
 
 import dspy
 
@@ -40,23 +39,12 @@ def _truncate(text: str, limit: int) -> str:
     return text[:limit] + f"\n... ({len(text) - limit} chars truncated)"
 
 
-@dataclass(frozen=True)
-class _DeployContext:
-    """Paths and timeouts for a deployment run."""
-
-    repo_path: str
-    deploy_path: str
-    health_path: str
-    deploy_timeout: int
-    health_check_timeout: int
-
-
 def _health_error_context(deploy: ShellResult, health: ShellResult) -> str:
     """Build combined deploy + health output for the repair agent when health check fails."""
     return f"Deploy output:\n{deploy.output}\n\nHealth check output:\n{health.output}"
 
 
-class _FixHistory:
+class _FixHistory(dspy.Module):
     """Tracks fix attempt summaries and consolidates them to avoid repeating failed approaches.
 
     Maintains history as internal state. On first fix: stores the summary as-is (no LLM call).
@@ -64,11 +52,12 @@ class _FixHistory:
     """
 
     def __init__(self):
+        super().__init__()
         self.consolidate = dspy.ChainOfThought(ConsolidateFixSummary)
         self._history: str = ""
 
     @property
-    def history(self) -> str:
+    def text(self) -> str:
         """Current fix history for passing to the repair agent."""
         return self._history
 
@@ -118,34 +107,27 @@ class DeploymentAgent(dspy.Module):
         sds_dir = os.path.join(repo_path, ".sds")
         deploy_path = os.path.join(sds_dir, "deploy.sh")
         health_path = os.path.join(sds_dir, "health_check.sh")
-        ctx = _DeployContext(
-            repo_path=repo_path,
-            deploy_path=deploy_path,
-            health_path=health_path,
-            deploy_timeout=deploy_timeout,
-            health_check_timeout=health_check_timeout,
-        )
 
         log.info("generating deploy.sh and health_check.sh...")
-        self._generate_scripts(repo_path, code_analysis, deployment_issues, ctx)
+        self._generate_scripts(repo_path, code_analysis, deployment_issues, deploy_path, health_path)
         log.info("scripts generated")
 
         self._fix_history.reset()
 
         for attempt in range(1, max_attempts + 1):
-            deploy = self._run_deploy(ctx)
+            deploy = self._run_deploy(repo_path, deploy_path, deploy_timeout)
             if not deploy.succeeded:
                 error_output = deploy.output
             else:
-                health = self._run_health_check(ctx)
+                health = self._run_health_check(repo_path, health_path, health_check_timeout)
                 if health.succeeded:
                     return self._success(attempt)
                 error_output = _health_error_context(deploy, health)
 
             if attempt == max_attempts:
                 return self._failure(attempt, error_output)
-            self._cleanup(ctx)
-            self._repair(ctx, error_output, attempt, max_attempts)
+            self._cleanup(repo_path, deploy_path)
+            self._repair(repo_path, deploy_path, health_path, error_output, attempt, max_attempts)
 
         return self._failure(max_attempts, "max attempts reached")
 
@@ -154,7 +136,8 @@ class DeploymentAgent(dspy.Module):
         repo_path: str,
         code_analysis: str,
         issues: str,
-        ctx: _DeployContext,
+        deploy_path: str,
+        health_path: str,
     ) -> None:
         deploy_result = self.gen_deploy(
             repo_path=repo_path,
@@ -167,7 +150,7 @@ class DeploymentAgent(dspy.Module):
                 "deploy_script must not contain markdown code fences; "
                 "instruct the model to output raw bash only"
             )
-        self._write_script(ctx.deploy_path, deploy_script)
+        self._write_script(deploy_path, deploy_script)
 
         health_result = self.gen_health(
             repo_path=repo_path,
@@ -180,55 +163,59 @@ class DeploymentAgent(dspy.Module):
                 "health_check_script must not contain markdown code fences; "
                 "instruct the model to output raw bash only"
             )
-        self._write_script(ctx.health_path, health_script)
+        self._write_script(health_path, health_script)
 
-    def _run_deploy(self, ctx: _DeployContext) -> ShellResult:
+    def _run_deploy(self, repo_path: str, deploy_path: str, deploy_timeout: int) -> ShellResult:
         """Run deploy.sh start; return structured result."""
         return run_shell(
-            f"{ctx.deploy_path} start",
-            cwd=ctx.repo_path,
-            timeout=ctx.deploy_timeout,
+            f"{deploy_path} start",
+            cwd=repo_path,
+            timeout=deploy_timeout,
         )
 
-    def _run_health_check(self, ctx: _DeployContext) -> ShellResult:
+    def _run_health_check(
+        self, repo_path: str, health_path: str, health_check_timeout: int
+    ) -> ShellResult:
         """Run health_check.sh; return structured result."""
         return run_shell(
-            ctx.health_path,
-            cwd=ctx.repo_path,
-            timeout=ctx.health_check_timeout,
+            health_path,
+            cwd=repo_path,
+            timeout=health_check_timeout,
         )
 
     def _repair(
         self,
-        ctx: _DeployContext,
+        repo_path: str,
+        deploy_path: str,
+        health_path: str,
         error_output: str,
         attempt: int,
         max_attempts: int,
     ) -> None:
         """Invoke repair agent, ensure exec bits, append to fix history."""
         fix_result = self.repair_agent(
-            repo_path=ctx.repo_path,
-            deploy_path=ctx.deploy_path,
-            health_path=ctx.health_path,
+            repo_path=repo_path,
+            deploy_path=deploy_path,
+            health_path=health_path,
             error_output=_truncate(error_output, _MAX_ERROR_CHARS),
-            fix_history=_truncate(self._fix_history.history, _MAX_FIX_HISTORY_CHARS),
+            fix_history=_truncate(self._fix_history.text, _MAX_FIX_HISTORY_CHARS),
             attempt=attempt,
             max_attempts=max_attempts,
         )
 
-        if os.path.exists(ctx.deploy_path):
-            os.chmod(ctx.deploy_path, os.stat(ctx.deploy_path).st_mode | stat.S_IEXEC)
-        if os.path.exists(ctx.health_path):
-            os.chmod(ctx.health_path, os.stat(ctx.health_path).st_mode | stat.S_IEXEC)
+        if os.path.exists(deploy_path):
+            os.chmod(deploy_path, os.stat(deploy_path).st_mode | stat.S_IEXEC)
+        if os.path.exists(health_path):
+            os.chmod(health_path, os.stat(health_path).st_mode | stat.S_IEXEC)
 
         log.info("fix summary: %s", fix_result.fix_summary)
         self._fix_history.append(attempt, fix_result.fix_summary)
 
-    def _cleanup(self, ctx: _DeployContext) -> None:
+    def _cleanup(self, repo_path: str, deploy_path: str) -> None:
         """Stop and remove containers from a failed deployment."""
         run_shell(
-            f"{ctx.deploy_path} cleanup",
-            cwd=ctx.repo_path,
+            f"{deploy_path} cleanup",
+            cwd=repo_path,
             timeout=CLEANUP_TIMEOUT,
         )
 

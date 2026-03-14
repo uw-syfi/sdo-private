@@ -233,7 +233,7 @@ class TestFixHistory:
 
         fh.append(1, "fixed port conflict")
 
-        assert fh.history == "Attempt 1: fixed port conflict"
+        assert fh.text == "Attempt 1: fixed port conflict"
         fh.consolidate.assert_not_called()
 
     def test_second_fix_calls_consolidation(self):
@@ -248,9 +248,9 @@ class TestFixHistory:
 
         fh.append(2, "retried with different port")
 
-        assert "Attempt 2" in fh.history
+        assert "Attempt 2" in fh.text
         fh.consolidate.assert_called_once()
-        assert fh.history == "## Failure Pattern: port conflict\n* Attempt 1: fixed\n* Attempt 2: retried"
+        assert fh.text == "## Failure Pattern: port conflict\n* Attempt 1: fixed\n* Attempt 2: retried"
 
     def test_reset_clears_history(self):
         """reset() clears history for next deployment run."""
@@ -259,7 +259,7 @@ class TestFixHistory:
 
         fh.reset()
 
-        assert fh.history == ""
+        assert fh.text == ""
 
 
 class TestStripCodeFences:
