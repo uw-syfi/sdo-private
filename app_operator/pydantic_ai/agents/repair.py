@@ -13,7 +13,6 @@ from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import FixSummaryResponse, HealthVerdictResponse
 from app_operator.script_runner import write_log_file
 from app_operator.trajectory import Phase
-from app_operator.types import HealthVerdict
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,12 +52,10 @@ class RepairAgent(OperatorAgent):
         repo_path = self.deps.repo_path
         log_file_path = repo_path / ".sds" / "logs" / f"deploy_attempt_{attempt}.log"
         health_check_log_path = None
-        hv = None
         if health_verdict is not None:
             health_check_log_path = repo_path / ".sds" / "logs" / f"health_check_attempt_{attempt}.log"
-            hv = HealthVerdict.from_dict(health_verdict.model_dump())
 
-        error_context = prepare_error_context(deploy_result, hv, log_file_path, health_check_log_path)
+        error_context = prepare_error_context(deploy_result, health_verdict, log_file_path, health_check_log_path)
 
         platform = self.deps.config.deployment.platform
         deployment_progress_path = None
