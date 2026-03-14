@@ -1,6 +1,6 @@
 import os
 
-from google import genai
+from google import genai  # type: ignore[reportAttributeAccessIssue]  # google namespace package
 
 from app_operator.config import Config
 
