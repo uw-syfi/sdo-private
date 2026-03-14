@@ -3,6 +3,8 @@
 Maps SDS provider/model config to Pydantic AI model identifiers.
 """
 
+from pydantic_ai.settings import ModelSettings
+
 from app_operator.config import Config
 
 # Mapping from SDS provider names to pydantic-ai model prefixes.
@@ -46,3 +48,20 @@ def build_model_str(config: Config) -> str:
         return f"google-gla:{model}"
 
     return model
+
+
+def build_model_settings(config: Config) -> ModelSettings | None:
+    """Build pydantic-ai ModelSettings from SDS config, or None if no special settings."""
+    budget = config.agent.thinking_budget
+    if not budget:
+        return None
+
+    provider = config.agent.provider.lower()
+    normalized = _PROVIDER_TO_PAI_PREFIX.get(provider, provider)
+
+    if normalized == "anthropic":
+        return {"anthropic_thinking": {"type": "enabled", "budget_tokens": budget}}  # type: ignore[return-value]
+    if normalized in ("google-gla", "google-vertex"):
+        return {"google_thinking_config": {"thinking_budget": budget, "include_thoughts": False}}  # type: ignore[return-value]
+
+    return None

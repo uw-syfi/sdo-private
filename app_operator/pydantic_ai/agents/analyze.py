@@ -16,6 +16,8 @@ from app_operator.trajectory import Phase
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pydantic_ai.settings import ModelSettings
+
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
@@ -27,6 +29,7 @@ class AnalyzeAgent(OperatorAgent):
     def __init__(
         self,
         model: str,
+        model_settings: ModelSettings | None,
         tools: list[Callable],
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
@@ -38,6 +41,7 @@ class AnalyzeAgent(OperatorAgent):
             deps_type=OperatorDeps,
             output_type=str,
             tools=tools,
+            model_settings=model_settings,
         )
 
         @self._agent.instructions

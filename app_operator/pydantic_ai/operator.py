@@ -12,7 +12,7 @@ from app_operator.operator_base import OperatorBase
 from app_operator.progress import emit_progress
 from app_operator.prompts import PromptLoader
 from app_operator.pydantic_ai._deps import OperatorDeps
-from app_operator.pydantic_ai._models import build_model_str
+from app_operator.pydantic_ai._models import build_model_settings, build_model_str
 from app_operator.pydantic_ai._responses import HealthVerdictResponse
 from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 from app_operator.pydantic_ai.agents.analyze import AnalyzeAgent
@@ -61,8 +61,9 @@ class PydanticAIOperator(OperatorBase):
         self.sds_dir = self.repo_path / ".sds"
         self._persist_deployment_config()
 
-        # Build model string
+        # Build model string and settings
         self.model_str = build_model_str(self.config)
+        self.model_settings = build_model_settings(self.config)
 
         # Build tools
         self.tool_list = build_tools()
@@ -83,12 +84,17 @@ class PydanticAIOperator(OperatorBase):
         self.recorder.set_agent_name("PydanticAI")
 
         # Build agents
-        self.analyze_agent = AnalyzeAgent(self.model_str, self.tool_list, self.deps, self.recorder)
-        self.script_agent = ScriptAgent(self.model_str, self.tool_list, self.deps, self.recorder)
+        self.analyze_agent = AnalyzeAgent(self.model_str, self.model_settings, self.tool_list, self.deps, self.recorder)
+        self.script_agent = ScriptAgent(self.model_str, self.model_settings, self.tool_list, self.deps, self.recorder)
         self.repair_agent = RepairAgent(
-            self.model_str, self.tool_list, self.deps, self.recorder, max_attempts=self.max_deployment_attempts
+            self.model_str,
+            self.model_settings,
+            self.tool_list,
+            self.deps,
+            self.recorder,
+            max_attempts=self.max_deployment_attempts,
         )
-        self.health_agent = HealthAgent(self.model_str, self.tool_list, self.deps, self.recorder)
+        self.health_agent = HealthAgent(self.model_str, self.model_settings, self.tool_list, self.deps, self.recorder)
 
         self._deployed = False
 
@@ -104,6 +110,8 @@ class PydanticAIOperator(OperatorBase):
             logger.info(f"Model: {self.model_str}")
             logger.info(f"Deployment Platform: {self.config.deployment.platform}")
             logger.info(f"Deployment Target: {self.config.deployment.target}")
+            if self.config.agent.thinking_budget:
+                logger.info(f"Thinking Budget: {self.config.agent.thinking_budget} tokens")
 
             # Phase 1: Code Analysis
             if self.config.operator.phase.code_analysis:

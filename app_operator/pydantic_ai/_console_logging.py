@@ -40,6 +40,12 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
     def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
         logger.info("[{}] \u2190 {}: {}", self._agent.agent_name, tool_name, _fmt_result(result))
 
+    def on_part_end(self, event: Any) -> None:
+        from pydantic_ai.messages import ThinkingPart
+
+        if isinstance(event.part, ThinkingPart) and event.part.has_content():
+            logger.debug("[{}] <thinking> {}", self._agent.agent_name, event.part.content)
+
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output
         text = str(output) if not isinstance(output, str) else output

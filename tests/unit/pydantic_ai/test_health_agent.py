@@ -58,6 +58,7 @@ def _make_health_agent(tmp_path):
 
     agent = HealthAgent(
         model="test",
+        model_settings=None,
         tools=[],
         deps=deps,
         recorder=recorder,

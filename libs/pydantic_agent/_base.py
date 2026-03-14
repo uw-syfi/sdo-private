@@ -80,6 +80,11 @@ class BaseAgent(Generic[DepsT]):
     def agent_name(self) -> str:
         return self._agent_name
 
+    def _stream_event_chain(self, event: Any) -> None:
+        """Dispatch a streaming event to all middleware in order."""
+        for m in self._middleware:
+            m.on_stream_event(event)
+
     def _before_chain(self, tool_name: str, args: dict[str, Any]) -> bool:
         """Call ``before_tool_call`` on each middleware in order. Short-circuits on False."""
         return all(m.before_tool_call(tool_name, args) for m in self._middleware)
@@ -116,6 +121,10 @@ class BaseAgent(Generic[DepsT]):
             )
             for ts in self._agent.toolsets
         ]
+        async def _stream_handler(ctx: Any, events: Any) -> None:
+            async for event in events:
+                self._stream_event_chain(event)
+
         # tools=[] clears the original function toolset so it doesn't also run
         # unwrapped alongside the intercepted copy already captured in `hooked`.
         # toolsets=hooked replaces user toolsets with the wrapped versions.
@@ -124,6 +133,7 @@ class BaseAgent(Generic[DepsT]):
                 prompt,
                 deps=self.deps,
                 usage_limits=self._usage_limits,
+                event_stream_handler=_stream_handler,
                 **kwargs,
             )
         for m in self._middleware:
