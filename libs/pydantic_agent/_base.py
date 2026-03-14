@@ -86,6 +86,9 @@ class BaseAgent(Generic[DepsT]):
             _run_ctx: Optional context dict forwarded to ``after_run`` on each middleware.
             **kwargs: Additional keyword arguments forwarded to ``run_sync()``.
         """
+        # agent.toolsets is a public property documented to include "a function toolset
+        # holding tools that were registered on the agent directly" (i.e. tools=[...]).
+        # Wrap every toolset so all tool calls go through the middleware chain.
         hooked = [
             _InterceptingToolset(
                 wrapped=ts,
@@ -94,6 +97,9 @@ class BaseAgent(Generic[DepsT]):
             )
             for ts in self._agent.toolsets
         ]
+        # tools=[] clears the original function toolset so it doesn't also run
+        # unwrapped alongside the intercepted copy already captured in `hooked`.
+        # toolsets=hooked replaces user toolsets with the wrapped versions.
         with self._agent.override(tools=[], toolsets=hooked):
             result = self._agent.run_sync(
                 prompt,
