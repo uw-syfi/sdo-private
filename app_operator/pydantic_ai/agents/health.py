@@ -24,6 +24,8 @@ class HealthAgent(OperatorAgent):
     """Agent for health check and monitoring phases."""
 
     agent_name = "Health Judge"
+    # phase is not set at class level — it varies per call (DEPLOYMENT/MONITORING)
+    # and is always passed explicitly to _run() in run_check().
 
     def __init__(
         self,
