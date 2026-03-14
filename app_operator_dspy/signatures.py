@@ -246,8 +246,8 @@ class RepairDeploymentError(dspy.Signature):
         desc="History of previous fix attempts and their outcomes, "
         "grouped by failure pattern. Empty string on first attempt."
     )
-    attempt: str = dspy.InputField(desc="Current attempt number")
-    max_attempts: str = dspy.InputField(desc="Maximum allowed attempts")
+    attempt: int = dspy.InputField(desc="Current attempt number")
+    max_attempts: int = dspy.InputField(desc="Maximum allowed attempts")
 
     fix_summary: str = dspy.OutputField(desc="Brief summary: what issue(s) were found and what fix(es) applied")
 
@@ -308,7 +308,7 @@ class AnalyzeHealthCheck(dspy.Signature):
     """
 
     health_output: str = dspy.InputField(desc="Output from the health check script including exit code")
-    check_number: str = dspy.InputField(desc="Current monitoring cycle number")
+    check_number: int = dspy.InputField(desc="Current monitoring cycle number")
 
     status: str = dspy.OutputField(desc="One of: healthy, degraded, unhealthy")
     summary: str = dspy.OutputField(desc="Executive summary of health status (2 lines max)")

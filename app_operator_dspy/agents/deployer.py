@@ -205,8 +205,8 @@ class DeploymentAgent(dspy.Module):
             health_path=ctx.health_path,
             error_output=_truncate(error_output, _MAX_ERROR_CHARS),
             fix_history=_truncate(self._fix_history.history, _MAX_FIX_HISTORY_CHARS),
-            attempt=str(attempt),
-            max_attempts=str(max_attempts),
+            attempt=attempt,
+            max_attempts=max_attempts,
         )
 
         if os.path.exists(ctx.deploy_path):

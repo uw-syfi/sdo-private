@@ -27,5 +27,5 @@ class MonitorAgent(dspy.Module):
         health_output = run_health_check(repo_path, timeout=health_check_timeout)
         return self.analyze(
             health_output=health_output,
-            check_number=str(check_number),
+            check_number=check_number,
         )

@@ -38,4 +38,4 @@ class TestMonitorAgent:
 
         call_kwargs = agent.analyze.call_args.kwargs
         assert "db connection refused" in call_kwargs["health_output"]
-        assert call_kwargs["check_number"] == "1"
+        assert call_kwargs["check_number"] == 1
