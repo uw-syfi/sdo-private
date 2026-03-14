@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 if TYPE_CHECKING:
@@ -15,11 +14,12 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 
 from app_operator.constants import LANGGRAPH_AGENT_RECURSION_LIMIT
-from app_operator.filesystem import FileSystemInterface
 from app_operator.langgraph._trajectory_handler import LangGraphTrajectoryHandler
 from app_operator.langgraph.message_utils import extract_text
 from app_operator.langgraph.state import OperatorState
 from app_operator.logger import logger
+from app_operator.script_runner import run_script as run_script
+from app_operator.script_runner import write_log_file as write_log_file
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
@@ -239,31 +239,3 @@ def invoke_agent(
         prior_messages=prior_messages,
     )
     return AgentResult(text=text, messages=messages, structured=structured)
-
-
-def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:
-    # Re-exported from app_operator.script_runner for backward compatibility.
-    from app_operator.script_runner import write_log_file as _write_log_file
-
-    _write_log_file(filesystem, path, content)
-
-
-def run_script(
-    repo_path: Path,
-    filesystem: FileSystemInterface,
-    command: str,
-    log_file_path: Path | None = None,
-    timeout: int = 900,
-    recorder: TrajectoryRecorderProtocol | None = None,
-) -> dict[str, Any]:
-    # Re-exported from app_operator.script_runner for backward compatibility.
-    from app_operator.script_runner import run_script as _run_script
-
-    return _run_script(
-        repo_path,
-        filesystem,
-        command,
-        log_file_path=log_file_path,
-        timeout=timeout,
-        recorder=recorder,
-    )
