@@ -207,8 +207,8 @@ class RepairDeploymentError(dspy.Signature):
     - NEVER use sudo
     - For port conflicts ("address already in use"), remap the host port
       in docker-compose.override.yml — do NOT remove the port mapping
-    - This runs on macOS. Use POSIX-compatible sed syntax: ``[[:space:]]``
-      not ``\\s``, extended regex with ``sed -E`` not ``\\(`` escapes.
+    - Use POSIX-compatible sed syntax for portability: ``[[:space:]]``
+      not ``\\s``, extended regex with ``sed -E``, not ``\\(`` escapes.
 
     Analysis methodology:
     1. Form a hypothesis about the root cause
