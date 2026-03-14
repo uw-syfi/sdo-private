@@ -7,7 +7,6 @@ from app_operator_dspy.agents.deployer import DeploymentAgent
 from app_operator_dspy.agents.monitor import MonitorAgent
 from app_operator_dspy.constants import DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
 from app_operator_dspy.logger import get_logger
-from app_operator_dspy.tools.context import set_task_repo
 
 log = get_logger("operator")
 
@@ -48,7 +47,6 @@ class DSPyOperator(dspy.Module):
         deploy_timeout: int = DEPLOY_TIMEOUT,
         health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
     ) -> dspy.Prediction:
-        set_task_repo(repo_path)
         # Step 1: Analyze codebase
         log.info("code_analysis — analyzing repository...")
         analysis = self.analyzer(repo_path=repo_path)

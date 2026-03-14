@@ -13,6 +13,7 @@ from app_operator_dspy.constants import DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
 from app_operator_dspy.lm_config import DEFAULT_MODEL, get_lm_kwargs
 from app_operator_dspy.logger import get_logger, setup_logger
 from app_operator_dspy.operator import DSPyOperator, configure_lm
+from app_operator_dspy.tools.context import set_task_repo
 
 log = get_logger("main")
 
@@ -44,6 +45,7 @@ def run_command(args: argparse.Namespace) -> int:
     log.info("Creating DSPyOperator...")
     operator = DSPyOperator()
 
+    set_task_repo(repo_path)
     log.info("Starting operator on %s", repo_path)
     start = time.time()
     try:
