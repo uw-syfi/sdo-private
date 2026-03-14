@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from app_operator.pydantic_ai._deps import OperatorDeps
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
-__all__ = ["AgentMiddleware", "OperatorAgent"]
+__all__ = ["OperatorAgent"]
 
 
 class OperatorAgent(BaseAgent["OperatorDeps"]):

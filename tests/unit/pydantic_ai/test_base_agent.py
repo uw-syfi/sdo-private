@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-from app_operator.pydantic_ai._base_agent import AgentMiddleware, OperatorAgent
+from app_operator.pydantic_ai._base_agent import OperatorAgent
+from libs.pydantic_agent import AgentMiddleware
 
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
