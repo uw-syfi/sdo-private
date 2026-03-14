@@ -5,12 +5,12 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext, RunUsage
+from pydantic_ai.usage import UsageLimits
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import HealthVerdictResponse
-from app_operator.pydantic_ai.agents.utils import _extract_usage
 from app_operator.script_runner import write_log_file
 from app_operator.trajectory import Phase
 
@@ -39,12 +39,16 @@ class HealthAgent:
         self.deps = deps
         self.recorder = recorder
 
+        @self._agent.instructions
+        def system_prompt(ctx: RunContext[OperatorDeps]) -> str:
+            return ctx.deps.loader.render("health_judge_agent/system.jinja2")
+
     def run_check(
         self,
         *,
         phase: Phase,
         context: dict,
-    ) -> tuple[HealthVerdictResponse, dict[str, int]]:
+    ) -> tuple[HealthVerdictResponse, RunUsage]:
         """Run agent-based health assessment. Returns (verdict, token_usage)."""
         repo_path = self.deps.repo_path
         health_check_script = repo_path / ".sds" / "health_check.sh"
@@ -55,7 +59,6 @@ class HealthAgent:
             deployment_progress_path = repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
         has_deployment_progress = deployment_progress_path is not None and deployment_progress_path.exists()
 
-        system_prompt = self.deps.loader.render("health_judge_agent/system.jinja2")
         user_prompt = self.deps.loader.render(
             "health_judge_agent/user.jinja2",
             repo_path=repo_path,
@@ -69,7 +72,7 @@ class HealthAgent:
         result = self._agent.run_sync(
             user_prompt,
             deps=self.deps,
-            instructions=system_prompt,
+            usage_limits=UsageLimits(),
         )
         self.recorder.record_run(phase, "Health Judge", result, context=context)
 
@@ -93,4 +96,4 @@ class HealthAgent:
 
         write_log_file(self.deps.filesystem, log_file, content)
 
-        return verdict, _extract_usage(result)
+        return verdict, result.usage()

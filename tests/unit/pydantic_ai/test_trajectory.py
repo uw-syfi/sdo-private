@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic_ai import RunUsage
 
 from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
@@ -75,9 +76,11 @@ def test_record_run_increments_call_id(recorder):
 
 
 def test_record_token_usage(recorder):
-    recorder.record_token_usage({"input_tokens": 200, "output_tokens": 100})
+    recorder.record_token_usage(RunUsage(input_tokens=200, output_tokens=100, requests=3))
     data = json.loads(recorder.trajectory_file.read_text())
     assert data["metadata"]["token_usage"]["input_tokens"] == 200
+    assert data["metadata"]["token_usage"]["output_tokens"] == 100
+    assert data["metadata"]["token_usage"]["requests"] == 3
 
 
 def test_finalize(recorder):

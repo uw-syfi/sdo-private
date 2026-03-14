@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic_ai import RunUsage
 
 from app_operator.config import AgentConfig, Config, DeploymentConfig, RuntimeConfig
 from app_operator.filesystem import InMemoryFilesystem
@@ -79,12 +80,12 @@ def test_init_no_model(repo_path, memory_fs):
             PydanticAIOperator(repo_path=str(repo_path), filesystem=memory_fs, config=config)
 
 
-def _zero_usage() -> dict:
-    return {"input_tokens": 0, "output_tokens": 0, "requests": 0}
+def _zero_usage() -> RunUsage:
+    return RunUsage()
 
 
-def _some_usage() -> dict:
-    return {"input_tokens": 50, "output_tokens": 50, "requests": 1}
+def _some_usage() -> RunUsage:
+    return RunUsage(input_tokens=50, output_tokens=50, requests=1)
 
 
 def test_run_success(repo_path, mock_config, memory_fs):
@@ -230,14 +231,14 @@ def test_accumulate_usage(repo_path, mock_config, memory_fs):
         _patch_agents_stack(stack)
         operator = PydanticAIOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
 
-        usage = {"input_tokens": 100, "output_tokens": 50, "requests": 2}
+        usage = RunUsage(input_tokens=100, output_tokens=50, requests=2)
         operator._accumulate_usage(usage)
-        assert operator._token_usage["input_tokens"] == 100
-        assert operator._token_usage["output_tokens"] == 50
-        assert operator._token_usage["requests"] == 2
+        assert operator._token_usage.input_tokens == 100
+        assert operator._token_usage.output_tokens == 50
+        assert operator._token_usage.requests == 2
 
         # Accumulate again
         operator._accumulate_usage(usage)
-        assert operator._token_usage["input_tokens"] == 200
-        assert operator._token_usage["output_tokens"] == 100
-        assert operator._token_usage["requests"] == 4
+        assert operator._token_usage.input_tokens == 200
+        assert operator._token_usage.output_tokens == 100
+        assert operator._token_usage.requests == 4

@@ -5,6 +5,8 @@ import threading
 import time
 from pathlib import Path
 
+from pydantic_ai import RunUsage
+
 from app_operator.config import Config, load_config
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -90,7 +92,7 @@ class PydanticAIOperator(OperatorBase):
         self.health_agent = HealthAgent(self.model_str, self.tool_list, self.deps, self.recorder)
 
         self._deployed = False
-        self._token_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "requests": 0}
+        self._token_usage: RunUsage = RunUsage()
 
     def run(self) -> int:
         if threading.current_thread() is threading.main_thread():
@@ -148,11 +150,9 @@ class PydanticAIOperator(OperatorBase):
             self.recorder.record_token_usage(self._token_usage)
             self.recorder.finalize(_status)
 
-    def _accumulate_usage(self, usage: dict[str, int]) -> None:
-        """Accumulate token usage from a usage dict."""
-        self._token_usage["input_tokens"] += usage["input_tokens"]
-        self._token_usage["output_tokens"] += usage["output_tokens"]
-        self._token_usage["requests"] += usage["requests"]
+    def _accumulate_usage(self, usage: RunUsage) -> None:
+        """Accumulate token usage."""
+        self._token_usage += usage
 
     def _run_analysis(self) -> None:
         """Run code analysis phase."""

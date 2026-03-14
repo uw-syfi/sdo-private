@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pydantic_ai import RunUsage
+
 
 class PydanticAITrajectoryRecorder:
     """Records agent trajectories using Pydantic AI's native message format.
@@ -87,9 +89,13 @@ class PydanticAITrajectoryRecorder:
         )
         self._write_to_file()
 
-    def record_token_usage(self, usage: dict[str, int]) -> None:
+    def record_token_usage(self, usage: RunUsage) -> None:
         """Record cumulative token usage in metadata."""
-        self.trajectory["metadata"]["token_usage"] = usage
+        self.trajectory["metadata"]["token_usage"] = {
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "requests": usage.requests,
+        }
         self._write_to_file()
 
     def finalize(self, status: str) -> Path:
