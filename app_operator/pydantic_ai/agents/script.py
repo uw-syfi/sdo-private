@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 class ScriptAgent(BaseAgent):
     """Agent for script generation phase."""
 
+    phase = Phase.SCRIPT_GENERATION
+    agent_name = "Script Generator"
+
     def __init__(
         self,
         model: str,
@@ -67,7 +70,7 @@ class ScriptAgent(BaseAgent):
 
         # Generate deploy.sh
         deploy_guardrail = ArtifactGuardrail([".sds/deploy.sh"])
-        result = self._run(deploy_prompt, Phase.SCRIPT_GENERATION, "Script Generator")
+        result = self._run(deploy_prompt)
 
         for retry in range(deploy_guardrail.max_retries):
             missing = deploy_guardrail.missing(repo_path, self.deps.filesystem)
@@ -76,14 +79,13 @@ class ScriptAgent(BaseAgent):
             logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, deploy_guardrail.max_retries)
             result = self._run(
                 deploy_guardrail.reminder(missing),
-                Phase.SCRIPT_GENERATION,
-                "Script Generator (retry)",
+                agent_name="Script Generator (retry)",
                 message_history=result.all_messages(),
             )
 
         # Generate health_check.sh
         health_guardrail = ArtifactGuardrail([".sds/health_check.sh"])
-        result = self._run(health_prompt, Phase.SCRIPT_GENERATION, "Script Generator")
+        result = self._run(health_prompt)
 
         for retry in range(health_guardrail.max_retries):
             missing = health_guardrail.missing(repo_path, self.deps.filesystem)
@@ -92,7 +94,5 @@ class ScriptAgent(BaseAgent):
             logger.warning("Guardrail: {} missing (retry {}/{})", missing, retry + 1, health_guardrail.max_retries)
             result = self._run(
                 health_guardrail.reminder(missing),
-                Phase.SCRIPT_GENERATION,
-                "Script Generator (retry)",
                 message_history=result.all_messages(),
             )

@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 class HealthAgent(BaseAgent):
     """Agent for health check and monitoring phases."""
 
+    agent_name = "Health Judge"
+
     def __init__(
         self,
         model: str,
@@ -68,7 +70,7 @@ class HealthAgent(BaseAgent):
             has_deployment_progress=has_deployment_progress,
         )
 
-        result = self._run(user_prompt, phase, "Health Judge", context=context)
+        result = self._run(user_prompt, phase=phase, context=context)
 
         verdict = result.output
         status = "healthy" if verdict.healthy else "unhealthy"

@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 class RepairAgent(BaseAgent):
     """Agent for error fixing phase."""
 
+    phase = Phase.DEPLOYMENT
+    agent_name = "Error Fixer"
+
     def __init__(
         self,
         model: str,
@@ -74,7 +77,7 @@ class RepairAgent(BaseAgent):
             structured_output=True,
         )
 
-        result = self._run(prompt, Phase.DEPLOYMENT, "Error Fixer", context={"attempt": attempt})
+        result = self._run(prompt, context={"attempt": attempt})
 
         summary_text = result.output.summary.strip() if result.output else None
         if summary_text:

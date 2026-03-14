@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 class AnalyzeAgent(BaseAgent):
     """Agent for code analysis phase."""
 
+    phase = Phase.EXPLORATION
+    agent_name = "Code Analyzer"
+
     def __init__(
         self,
         model: str,
@@ -56,7 +59,7 @@ class AnalyzeAgent(BaseAgent):
         emit_progress("code_analysis")
         user_prompt = self.deps.loader.render("code_analyzer/user.jinja2", repo_path=repo_path)
 
-        result = self._run(user_prompt, Phase.EXPLORATION, "Code Analyzer")
+        result = self._run(user_prompt)
 
         guardrail = ArtifactGuardrail([".sds/code_analysis.md", ".sds/deployment_issues.md"])
         for retry in range(guardrail.max_retries):
@@ -66,8 +69,6 @@ class AnalyzeAgent(BaseAgent):
             logger.warning("Guardrail: missing {} (retry {}/{})", missing, retry + 1, guardrail.max_retries)
             result = self._run(
                 guardrail.reminder(missing),
-                Phase.EXPLORATION,
-                "Code Analyzer (retry)",
                 message_history=result.all_messages(),
             )
         else:
