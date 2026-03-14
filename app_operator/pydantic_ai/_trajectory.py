@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from pydantic_ai import RunUsage
 
 
@@ -121,5 +122,9 @@ class PydanticAITrajectoryRecorder:
         try:
             self.trajectory_file.parent.mkdir(parents=True, exist_ok=True)
             self.trajectory_file.write_text(json.dumps(self.trajectory, indent=2, default=str))
-        except OSError:
-            pass
+        except OSError as e:
+            logger.warning(
+                "Failed to write trajectory to {path}: {error}",
+                path=self.trajectory_file,
+                error=e,
+            )

@@ -1,7 +1,8 @@
 """Tests for PydanticAITrajectoryRecorder."""
 
 import json
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic_ai import RunUsage
@@ -147,3 +148,14 @@ def test_record_run_with_context(recorder):
 
     data = json.loads(recorder.trajectory_file.read_text())
     assert data["phases"][0]["context"] == {"attempt": 2}
+
+
+def test_write_to_file_logs_warning_on_oserror(recorder):
+    """A warning is logged when the trajectory file cannot be written."""
+    with patch.object(Path, "write_text", side_effect=OSError("permission denied")):
+        with patch("app_operator.pydantic_ai._trajectory.logger") as mock_logger:
+            recorder._write_to_file()
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            # The message template should mention the path and error
+            assert "trajectory" in call_args[0][0].lower() or "path" in str(call_args)
