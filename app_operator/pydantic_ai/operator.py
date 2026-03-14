@@ -64,7 +64,7 @@ class PydanticAIOperator(OperatorBase):
         self.model_str = build_model_str(self.config)
 
         # Build tools
-        self.tool_list = build_tools(self.config)
+        self.tool_list = build_tools()
 
         # Build deps
         self._shutdown_requested = False

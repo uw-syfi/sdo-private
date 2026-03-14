@@ -13,7 +13,6 @@ from typing import Any
 from pydantic_ai import RunContext
 
 from app_operator.command_validation import DangerousCommandError, validate_command
-from app_operator.config import Config
 from app_operator.filesystem import FileSystemInterface
 from app_operator.pydantic_ai._deps import OperatorDeps
 
@@ -193,7 +192,7 @@ def bash(ctx: RunContext[OperatorDeps], command: str, timeout: int = SUBPROCESS_
         return {"success": False, "exit_code": -1, "stdout": "", "stderr": f"Error: {e!s}"}
 
 
-def build_tools(config: Config) -> list[Callable]:
+def build_tools() -> list[Callable]:
     """Return list of tool functions."""
     return [
         ls_dir,
