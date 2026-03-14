@@ -14,8 +14,8 @@ import dspy
 
 class AnalyzeCodebase(dspy.Signature):
     """You are a Code Analyzer Agent specialized in understanding microservice
-    applications. Analyze the repository and produce a comprehensive deployment
-    analysis and a list of potential issues.
+    applications. Use read_file, list_files, and run_shell (with cwd=repo_path)
+    to explore the repository before producing your analysis.
 
     Analysis process:
     1. Identify project type, layout, and all services

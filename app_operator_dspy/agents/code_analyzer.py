@@ -6,6 +6,7 @@ import dspy
 
 from app_operator_dspy.logger import get_logger
 from app_operator_dspy.signatures import AnalyzeCodebase
+from app_operator_dspy.tools import CODE_ANALYZER_TOOLS
 from app_operator_dspy.tools.filesystem import write_file
 
 log = get_logger("code_analyzer")
@@ -16,7 +17,7 @@ class CodeAnalyzerAgent(dspy.Module):
 
     def __init__(self):
         super().__init__()
-        self.analyze = dspy.ChainOfThought(AnalyzeCodebase)
+        self.analyze = dspy.ReAct(AnalyzeCodebase, tools=CODE_ANALYZER_TOOLS)
 
     def forward(self, repo_path: str) -> dspy.Prediction:
         log.info("scanning %s...", repo_path)

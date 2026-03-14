@@ -19,7 +19,14 @@ DEPLOYER_TOOLS = [
     agent_tools.list_files_tool,
 ]
 
+CODE_ANALYZER_TOOLS = [
+    agent_tools.read_file_tool,
+    agent_tools.list_files_tool,
+    agent_tools.run_shell_tool,
+]
+
 __all__ = [
+    "CODE_ANALYZER_TOOLS",
     "DEPLOYER_TOOLS",
     "agent_tools",
     "list_files",
