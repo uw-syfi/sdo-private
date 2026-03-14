@@ -24,7 +24,6 @@ class ScriptAgent(OperatorAgent):
     """Agent for script generation phase."""
 
     phase = Phase.SCRIPT_GENERATION
-    agent_name = "Script Generator"
 
     def __init__(
         self,
@@ -33,7 +32,7 @@ class ScriptAgent(OperatorAgent):
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
     ):
-        super().__init__(deps, recorder)
+        super().__init__(deps, recorder, agent_name="Script Generator")
         # output_type=str: return value is intentionally unused; real output is files written via tools.
         self._agent: Agent[OperatorDeps, str] = Agent(
             model,

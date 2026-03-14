@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 class HealthAgent(OperatorAgent):
     """Agent for health check and monitoring phases."""
 
-    agent_name = "Health Judge"
     # phase is not set at class level — it varies per call (DEPLOYMENT/MONITORING)
     # and is always passed explicitly to _run() in run_check().
 
@@ -34,7 +33,7 @@ class HealthAgent(OperatorAgent):
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
     ):
-        super().__init__(deps, recorder)
+        super().__init__(deps, recorder, agent_name="Health Judge")
         self._agent: Agent[OperatorDeps, HealthVerdictResponse] = Agent(
             model,
             deps_type=OperatorDeps,

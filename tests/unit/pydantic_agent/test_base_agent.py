@@ -24,10 +24,11 @@ def _make_agent(
     tools=None,
     call_tools="all",
     output_type=str,
+    agent_name="Test Agent",
 ):
     class ConcreteAgent(BaseAgent):
         def __init__(self):
-            super().__init__(None, middleware=middleware or [])
+            super().__init__(None, agent_name=agent_name, middleware=middleware or [])
             self._agent = Agent(
                 TestModel(call_tools=call_tools),
                 deps_type=type(None),
@@ -149,6 +150,39 @@ def test_after_run_not_called_on_tool_rejection():
     with pytest.raises(UnexpectedModelBehavior):
         agent._run("hi")
     assert not mw.after_run_called
+
+
+def test_on_attach_called_on_init():
+    attached_agents = []
+
+    class AttachRecordingMw(AgentMiddleware):
+        def on_attach(self, agent):
+            super().on_attach(agent)
+            attached_agents.append(agent)
+
+    mw = AttachRecordingMw()
+    agent = _make_agent(middleware=[mw])
+    assert len(attached_agents) == 1
+    assert attached_agents[0] is agent
+    assert mw._agent is agent
+
+
+def test_agent_name_property():
+    agent = _make_agent(agent_name="My Agent")
+    assert agent.agent_name == "My Agent"
+
+
+def test_agent_name_accessible_from_middleware():
+    names_seen = []
+
+    class NameCaptureMw(AgentMiddleware):
+        def before_tool_call(self, tool_name, args):
+            names_seen.append(self._agent.agent_name)
+            return True
+
+    agent = _make_agent(middleware=[NameCaptureMw()], agent_name="Captured Agent")
+    agent._run("hi")
+    assert names_seen == ["Captured Agent"]
 
 
 def test_after_tool_call_invoked_even_when_tool_raises():

@@ -1,0 +1,46 @@
+"""Middleware that logs model responses and tool calls to the console."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from loguru import logger
+
+from libs.pydantic_agent import AgentMiddleware
+
+_MAX_ARG_LEN = 120
+_MAX_RESULT_LEN = 300
+
+
+def _fmt_args(args: dict[str, Any]) -> str:
+    parts = []
+    for k, v in args.items():
+        if k in ("content", "new_str"):
+            parts.append(f"{k}=<{len(str(v))} chars>")
+        else:
+            s = str(v)
+            parts.append(f"{k}={s[:_MAX_ARG_LEN]!r}" if len(s) > _MAX_ARG_LEN else f"{k}={s!r}")
+    return ", ".join(parts)
+
+
+def _fmt_result(result: Any) -> str:
+    if isinstance(result, dict):
+        rc = result.get("returncode", "?")
+        stdout = str(result.get("stdout", ""))[:_MAX_RESULT_LEN]
+        return f"rc={rc} stdout={stdout!r}"
+    s = str(result) if result is not None else "<none>"
+    return s[:_MAX_RESULT_LEN] + ("\u2026" if len(s) > _MAX_RESULT_LEN else "")
+
+
+class ConsoleLoggingMiddleware(AgentMiddleware):
+    def before_tool_call(self, tool_name: str, args: dict[str, Any]) -> bool:
+        logger.info("[{}] \u2192 {}({})", self._agent.agent_name, tool_name, _fmt_args(args))
+        return True
+
+    def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
+        logger.info("[{}] \u2190 {}: {}", self._agent.agent_name, tool_name, _fmt_result(result))
+
+    def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
+        output = result.output
+        text = str(output) if not isinstance(output, str) else output
+        logger.info("[{}] {}", self._agent.agent_name, text[:500] + ("\u2026" if len(text) > 500 else ""))

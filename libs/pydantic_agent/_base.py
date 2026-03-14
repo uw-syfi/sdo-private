@@ -52,9 +52,11 @@ class BaseAgent(Generic[DepsT]):
 
     Args:
         deps: Dependency injection object passed to ``agent.run_sync()``.
+        agent_name: Human-readable name for this agent instance (used in logging, trajectories).
         middleware: Optional list of ``AgentMiddleware`` instances.
             ``before_tool_call`` is called in list order; ``after_tool_call`` in reverse
             (outermost middleware wraps innermost). ``after_run`` is called in list order.
+            ``on_attach`` is called for each middleware during ``__init__``.
     """
 
     # Declared for type checkers; concrete subclasses assign this in __init__.
@@ -64,11 +66,19 @@ class BaseAgent(Generic[DepsT]):
         self,
         deps: DepsT,
         *,
+        agent_name: str,
         middleware: list[AgentMiddleware] | None = None,
     ) -> None:
         self.deps = deps
+        self._agent_name = agent_name
         self._usage_limits = UsageLimits()
         self._middleware: list[AgentMiddleware] = middleware or []
+        for m in self._middleware:
+            m.on_attach(self)
+
+    @property
+    def agent_name(self) -> str:
+        return self._agent_name
 
     def _before_chain(self, tool_name: str, args: dict[str, Any]) -> bool:
         """Call ``before_tool_call`` on each middleware in order. Short-circuits on False."""

@@ -25,7 +25,6 @@ class RepairAgent(OperatorAgent):
     """Agent for error fixing phase."""
 
     phase = Phase.DEPLOYMENT
-    agent_name = "Error Fixer"
 
     def __init__(
         self,
@@ -35,7 +34,7 @@ class RepairAgent(OperatorAgent):
         recorder: PydanticAITrajectoryRecorder,
         max_attempts: int,
     ):
-        super().__init__(deps, recorder)
+        super().__init__(deps, recorder, agent_name="Error Fixer")
         self._agent: Agent[OperatorDeps, FixSummaryResponse] = Agent(
             model,
             deps_type=OperatorDeps,

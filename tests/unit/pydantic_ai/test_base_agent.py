@@ -47,10 +47,9 @@ def _make_agent(
 
     class ConcreteAgent(OperatorAgent):
         phase = "test_phase"
-        agent_name = "Test Agent"
 
         def __init__(self):
-            super().__init__(deps, recorder, middleware=middleware or [])
+            super().__init__(deps, recorder, agent_name="Test Agent", middleware=middleware or [])
             self._agent = Agent(
                 TestModel(call_tools=call_tools),
                 deps_type=type(deps),
@@ -272,10 +271,9 @@ def test_trajectory_recorded_after_run():
 
     class ConcreteAgent(OperatorAgent):
         phase = "p"
-        agent_name = "A"
 
         def __init__(self):
-            super().__init__(deps, recorder)
+            super().__init__(deps, recorder, agent_name="A")
             self._agent = Agent(TestModel(call_tools=[]), deps_type=type(deps), output_type=str)
 
     agent = ConcreteAgent()

@@ -23,7 +23,6 @@ class AnalyzeAgent(OperatorAgent):
     """Agent for code analysis phase."""
 
     phase = Phase.EXPLORATION
-    agent_name = "Code Analyzer"
 
     def __init__(
         self,
@@ -32,7 +31,7 @@ class AnalyzeAgent(OperatorAgent):
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
     ):
-        super().__init__(deps, recorder)
+        super().__init__(deps, recorder, agent_name="Code Analyzer")
         # output_type=str: return value is intentionally unused; real output is files written via tools.
         self._agent: Agent[OperatorDeps, str] = Agent(
             model,
