@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from app_operator.prompts._core import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
-    from app_operator.types import CommandResult, HealthVerdict
+    from app_operator.types import CommandResult
+
+
+class HealthVerdictLike(Protocol):
+    """Structural protocol for any health verdict object (dataclass or Pydantic model)."""
+
+    healthy: bool
+    assessment: str
+    diagnosis: str
 
 
 def prepare_error_context(
     deploy_result: CommandResult,
-    health_verdict: HealthVerdict | None,
+    health_verdict: HealthVerdictLike | None,
     log_file_path: Path | None = None,
     health_check_log_path: Path | None = None,
 ) -> str:

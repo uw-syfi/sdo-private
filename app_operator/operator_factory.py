@@ -34,6 +34,10 @@ def create_operator(shared_kwargs: dict, config: Config) -> OperatorBase:
         adk_mod = importlib.import_module("app_operator.adk")
         return adk_mod.AdkOperator(**shared_kwargs)
 
+    if impl == "pydantic_ai":
+        pai_mod = importlib.import_module("app_operator.pydantic_ai")
+        return pai_mod.PydanticAIOperator(**shared_kwargs)
+
     # Fall through to the default cli_agent runtime.
     cli_mod = importlib.import_module("app_operator.cli_agent")
     agent = cli_mod.create_agent_from_config(shared_kwargs["repo_path"], config=config)

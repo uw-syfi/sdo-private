@@ -2,6 +2,8 @@ from typing import TypedDict
 
 from langchain_core.messages import BaseMessage
 
+from app_operator.types import CommandResult
+
 
 class OperatorState(TypedDict):
     messages: list[BaseMessage]
@@ -10,7 +12,7 @@ class OperatorState(TypedDict):
     max_attempts: int
     analysis_done: bool
     scripts_done: bool
-    deploy_result: dict | None
+    deploy_result: CommandResult | None
     health_verdict: dict | None
     monitor_count: int
     monitor_max: int | None

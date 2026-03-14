@@ -25,6 +25,16 @@ class HealthVerdict:
     script_was_fixed: bool
     raw_response: str
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "HealthVerdict":
+        return cls(
+            healthy=d.get("healthy", False),
+            assessment=d.get("assessment", ""),
+            diagnosis=d.get("diagnosis", ""),
+            script_was_fixed=d.get("script_was_fixed", False),
+            raw_response=d.get("raw_response", ""),
+        )
+
 
 class CommandResult(TypedDict):
     """Result of running a shell command (deploy script or health check)."""
