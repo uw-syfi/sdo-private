@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app_operator_dspy.tools.agent_tools import write_file_tool
+from app_operator_dspy.tools.agent_tools import run_shell_tool, write_file_tool
+from app_operator_dspy.tools.context import set_task_repo
 from app_operator_dspy.tools.filesystem import list_files, read_file, write_file
 from app_operator_dspy.tools.health_check import run_health_check
 from app_operator_dspy.tools.shell import ShellResult, run_shell
@@ -39,6 +40,25 @@ class TestRunShell:
         assert result.return_code == 1
         assert result.output.startswith("Exit code: 1")
         assert "no such file" in result.output
+
+
+class TestRunShellTool:
+    """Tests for run_shell_tool (ReAct wrapper) with task context."""
+
+    def test_runs_with_task_repo_as_cwd(self, tmp_path):
+        """run_shell_tool uses task repo path as cwd when set."""
+        set_task_repo(str(tmp_path))
+        try:
+            result = run_shell_tool("pwd")
+            assert "Exit code: 0" in result
+            assert str(tmp_path) in result
+        finally:
+            set_task_repo(None)
+
+    def test_raises_when_no_context(self):
+        """run_shell_tool raises RuntimeError when task repo is not set."""
+        with pytest.raises(RuntimeError, match="task repo context"):
+            run_shell_tool("echo ok")
 
 
 class TestFilesystem:

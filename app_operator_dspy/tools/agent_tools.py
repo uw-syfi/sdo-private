@@ -5,6 +5,7 @@ __name__ for the LLM (matching signatures) and returns strings or
 string-like values for tool feedback.
 """
 
+from app_operator_dspy.tools.context import get_task_repo
 from app_operator_dspy.tools.filesystem import list_files, read_file, write_file
 from app_operator_dspy.tools.health_check import run_health_check
 from app_operator_dspy.tools.shell import DEFAULT_TIMEOUT, run_shell
@@ -28,8 +29,18 @@ def list_files_tool(path: str, pattern: str = "*") -> str:
     return list_files(path, pattern)
 
 
-def run_shell_tool(command: str, cwd: str = ".", timeout: int = DEFAULT_TIMEOUT) -> str:
-    """Execute shell command. Returns formatted output string."""
+def run_shell_tool(command: str, timeout: int = DEFAULT_TIMEOUT) -> str:
+    """Execute shell command. Returns formatted output string.
+
+    Runs with cwd set to the task's repo path (from operator context).
+    Raises RuntimeError if task repo context is not set.
+    """
+    cwd = get_task_repo()
+    if cwd is None:
+        raise RuntimeError(
+            "run_shell_tool called without task repo context; "
+            "operator must call set_task_repo(repo_path) before agent invocation"
+        )
     result = run_shell(command, cwd=cwd, timeout=timeout)
     return result.output
 
