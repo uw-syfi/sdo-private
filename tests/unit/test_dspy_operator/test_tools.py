@@ -3,33 +3,62 @@
 import subprocess
 from unittest.mock import patch
 
-from app_operator_dspy.tools.docker import docker_compose_up, docker_logs, docker_ps
+import pytest
+
+from app_operator_dspy.tools.agent_tools import run_shell_tool, write_file_tool
+from app_operator_dspy.tools.context import set_task_repo
 from app_operator_dspy.tools.filesystem import list_files, read_file, write_file
 from app_operator_dspy.tools.health_check import run_health_check
-from app_operator_dspy.tools.shell import run_shell
+from app_operator_dspy.tools.shell import ShellResult, run_shell
 
 
 class TestRunShell:
     def test_captures_stdout(self):
         result = run_shell("echo hello")
-        assert "Exit code: 0" in result
-        assert "hello" in result
+        assert isinstance(result, ShellResult)
+        assert result.return_code == 0
+        assert result.succeeded
+        assert "Exit code: 0" in result.output
+        assert "hello" in result.output
 
     def test_captures_nonzero_exit(self):
         result = run_shell("exit 1")
-        assert "Exit code: 1" in result
+        assert result.return_code == 1
+        assert not result.succeeded
+        assert "Exit code: 1" in result.output
 
     def test_timeout_returns_exit_code_format(self):
         with patch("app_operator_dspy.tools.shell.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 1)):
             result = run_shell("sleep 100", timeout=1)
-        assert result.startswith("Exit code: 124")
-        assert "timed out" in result
+        assert result.return_code == 124
+        assert result.output.startswith("Exit code: 124")
+        assert "timed out" in result.output
 
     def test_oserror_returns_exit_code_format(self):
         with patch("app_operator_dspy.tools.shell.subprocess.run", side_effect=OSError("no such file")):
             result = run_shell("nonexistent")
-        assert result.startswith("Exit code: 1")
-        assert "no such file" in result
+        assert result.return_code == 1
+        assert result.output.startswith("Exit code: 1")
+        assert "no such file" in result.output
+
+
+class TestRunShellTool:
+    """Tests for run_shell_tool (ReAct wrapper) with task context."""
+
+    def test_runs_with_task_repo_as_cwd(self, tmp_path):
+        """run_shell_tool uses task repo path as cwd when set."""
+        set_task_repo(str(tmp_path))
+        try:
+            result = run_shell_tool("pwd")
+            assert "Exit code: 0" in result
+            assert str(tmp_path) in result
+        finally:
+            set_task_repo(None)
+
+    def test_raises_when_no_context(self):
+        """run_shell_tool raises RuntimeError when task repo is not set."""
+        with pytest.raises(RuntimeError, match="task repo context"):
+            run_shell_tool("echo ok")
 
 
 class TestFilesystem:
@@ -48,6 +77,17 @@ class TestFilesystem:
         assert "Wrote 4 bytes" in result
         assert f.read_text() == "data"
 
+    def test_write_file_raises_on_failure(self):
+        with patch("pathlib.Path.write_text", side_effect=OSError(13, "Permission denied")):
+            with pytest.raises(OSError, match="Permission denied"):
+                write_file("/nonexistent/file.txt", "data")
+
+    def test_write_file_tool_returns_error_string(self):
+        with patch("pathlib.Path.write_text", side_effect=OSError(13, "Permission denied")):
+            result = write_file_tool("/nonexistent/file.txt", "data")
+        assert result.startswith("Error writing")
+        assert "Permission denied" in result
+
     def test_list_files(self, tmp_path):
         (tmp_path / "a.py").touch()
         (tmp_path / "b.txt").touch()
@@ -60,36 +100,20 @@ class TestFilesystem:
         assert "No files" in result
 
 
-class TestDocker:
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value="Exit code: 0")
-    def test_compose_up_with_build(self, mock_shell):
-        docker_compose_up("/app", build=True)
-        mock_shell.assert_called_once_with("docker compose up --build -d", cwd="/app", timeout=300)
-
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value="Exit code: 0")
-    def test_compose_up_no_build(self, mock_shell):
-        docker_compose_up("/app", build=False)
-        mock_shell.assert_called_once_with("docker compose up -d", cwd="/app", timeout=300)
-
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value="Exit code: 0")
-    def test_docker_ps(self, mock_shell):
-        docker_ps("/app")
-        mock_shell.assert_called_once_with("docker compose ps", cwd="/app")
-
-    @patch("app_operator_dspy.tools.docker.run_shell", return_value="Exit code: 0")
-    def test_docker_logs(self, mock_shell):
-        docker_logs("web", tail=10, cwd="/app")
-        mock_shell.assert_called_once_with("docker compose logs --tail=10 web", cwd="/app")
-
-
 class TestHealthCheck:
-    @patch("app_operator_dspy.tools.health_check.run_shell", return_value="Exit code: 0\nStdout:\nAll services healthy")
+    @patch(
+        "app_operator_dspy.tools.health_check.run_shell",
+        return_value=ShellResult(0, "Exit code: 0\nStdout:\nAll services healthy"),
+    )
     def test_runs_health_check_script(self, mock_shell):
         result = run_health_check("/myapp")
         mock_shell.assert_called_once_with("/myapp/.sds/health_check.sh", cwd="/myapp", timeout=120)
         assert "healthy" in result
 
-    @patch("app_operator_dspy.tools.health_check.run_shell", return_value="Exit code: 0\nStdout:\nhealthy")
+    @patch(
+        "app_operator_dspy.tools.health_check.run_shell",
+        return_value=ShellResult(0, "Exit code: 0\nStdout:\nhealthy"),
+    )
     def test_custom_timeout(self, mock_shell):
         run_health_check("/myapp", timeout=600)
         mock_shell.assert_called_once_with("/myapp/.sds/health_check.sh", cwd="/myapp", timeout=600)

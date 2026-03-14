@@ -101,6 +101,12 @@ depends_on = [
     "app_operator.langgraph",
 ]
 
+# --- app_operator_dspy (independent of app_operator) ---
+
+[[modules]]
+path = "app_operator_dspy"
+depends_on = []
+
 # --- lego_agent (independent of app_operator) ---
 
 [[modules]]

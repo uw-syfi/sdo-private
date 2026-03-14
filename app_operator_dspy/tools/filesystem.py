@@ -33,8 +33,8 @@ def write_file(path: str, content: str) -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
         return f"Wrote {len(content)} bytes to {path}"
-    except OSError as exc:
-        return f"Error writing {path}: {exc}"
+    except OSError:
+        raise
 
 
 def list_files(path: str, pattern: str = "*") -> str:

@@ -2,9 +2,9 @@
 
 import dspy
 
+from app_operator_dspy.constants import HEALTH_CHECK_TIMEOUT
 from app_operator_dspy.signatures import AnalyzeHealthCheck
 from app_operator_dspy.tools.health_check import run_health_check
-from app_operator_dspy.tools.shell import DEFAULT_TIMEOUT
 
 
 class MonitorAgent(dspy.Module):
@@ -22,10 +22,14 @@ class MonitorAgent(dspy.Module):
         self,
         repo_path: str,
         check_number: int = 1,
-        health_check_timeout: int = DEFAULT_TIMEOUT,
+        health_check_timeout: int = HEALTH_CHECK_TIMEOUT,
     ) -> dspy.Prediction:
         health_output = run_health_check(repo_path, timeout=health_check_timeout)
-        return self.analyze(
+        result = self.analyze(
             health_output=health_output,
-            check_number=str(check_number),
+            check_number=check_number,
         )
+        normalized = result.status.lower().strip()
+        if normalized not in {"healthy", "degraded", "unhealthy"}:
+            raise ValueError(f"status must be one of healthy/degraded/unhealthy, got: {result.status!r}")
+        return dspy.Prediction(status=normalized, summary=result.summary, remediation=result.remediation)
