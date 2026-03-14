@@ -109,7 +109,9 @@ def test_run_success(repo_path, mock_config, memory_fs):
             return_value={"success": True, "exit_code": 0, "stdout": "", "stderr": ""},
         ),
     ):
-        operator = PydanticAIOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
+        operator = PydanticAIOperator(
+            repo_path=str(repo_path), filesystem=memory_fs, config=mock_config, health_check_interval=0
+        )
         exit_code = operator.run()
 
         assert exit_code == 0
