@@ -37,7 +37,7 @@ def _make_repair_agent(repo_path: Path, config):
     recorder.record_run = MagicMock()
 
     agent = RepairAgent(
-        model="openai:gpt-4o",
+        model="test",
         tools=[],
         deps=deps,
         recorder=recorder,

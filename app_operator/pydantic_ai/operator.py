@@ -22,6 +22,7 @@ from app_operator.pydantic_ai.agents.script import ScriptAgent
 from app_operator.pydantic_ai.tools import build_tools
 from app_operator.script_runner import run_script
 from app_operator.trajectory import Phase
+from app_operator.types import CommandResult
 
 
 class PydanticAIOperator(OperatorBase):
@@ -190,7 +191,9 @@ class PydanticAIOperator(OperatorBase):
         logger.info("Running agent-based health assessment...")
         return self.health_agent.run_check(phase=Phase.DEPLOYMENT, attempt=attempt)
 
-    def _fix_errors(self, deploy_result: dict, health_verdict: HealthVerdictResponse | None, attempt: int) -> None:
+    def _fix_errors(
+        self, deploy_result: CommandResult, health_verdict: HealthVerdictResponse | None, attempt: int
+    ) -> None:
         """Run fix agent to diagnose and repair issues."""
         self.repair_agent.run(deploy_result, health_verdict, attempt)
 

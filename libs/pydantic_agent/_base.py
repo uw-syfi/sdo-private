@@ -12,6 +12,7 @@ from pydantic_ai.usage import UsageLimits
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pydantic_ai import Agent
     from pydantic_ai._run_context import RunContext
     from pydantic_ai.toolsets.abstract import ToolsetTool
 
@@ -55,6 +56,9 @@ class BaseAgent(Generic[DepsT]):
             ``before_tool_call`` is called in list order; ``after_tool_call`` in reverse
             (outermost middleware wraps innermost). ``after_run`` is called in list order.
     """
+
+    # Declared for type checkers; concrete subclasses assign this in __init__.
+    _agent: Agent[DepsT, Any]
 
     def __init__(
         self,

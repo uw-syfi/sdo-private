@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
+    from app_operator.types import CommandResult
 
 
 class RepairAgent(OperatorAgent):
@@ -47,7 +48,7 @@ class RepairAgent(OperatorAgent):
         def system_prompt(ctx: RunContext[OperatorDeps]) -> str:
             return ctx.deps.loader.render("repair_agent/system.jinja2")
 
-    def run(self, deploy_result: dict, health_verdict: HealthVerdictResponse | None, attempt: int) -> None:
+    def run(self, deploy_result: CommandResult, health_verdict: HealthVerdictResponse | None, attempt: int) -> None:
         """Run fix agent to diagnose and repair issues."""
         repo_path = self.deps.repo_path
         log_file_path = repo_path / ".sds" / "logs" / f"deploy_attempt_{attempt}.log"
