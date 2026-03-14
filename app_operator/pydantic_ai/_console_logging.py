@@ -12,7 +12,11 @@ _MAX_ARG_LEN = 120
 _MAX_RESULT_LEN = 300
 
 
-def _fmt_args(args: dict[str, Any]) -> str:
+def _fmt_args(args: str | dict[str, Any] | None) -> str:
+    if args is None:
+        return ""
+    if isinstance(args, str):
+        return args[:_MAX_ARG_LEN] + ("\u2026" if len(args) > _MAX_ARG_LEN else "")
     parts = []
     for k, v in args.items():
         if k in ("content", "new_str"):
@@ -33,12 +37,16 @@ def _fmt_result(result: Any) -> str:
 
 
 class ConsoleLoggingMiddleware(AgentMiddleware):
-    def before_tool_call(self, tool_name: str, args: dict[str, Any]) -> bool:
-        logger.info("[{}] \u2192 {}({})", self._agent.agent_name, tool_name, _fmt_args(args))
-        return True
+    def on_function_tool_call(self, event: Any) -> None:
+        logger.info("[{}] \u2192 {}({})", self._agent.agent_name, event.part.tool_name, _fmt_args(event.part.args))
 
-    def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
-        logger.info("[{}] \u2190 {}: {}", self._agent.agent_name, tool_name, _fmt_result(result))
+    def on_function_tool_result(self, event: Any) -> None:
+        logger.info(
+            "[{}] \u2190 {}: {}",
+            self._agent.agent_name,
+            event.result.tool_name,
+            _fmt_result(event.result.content),
+        )
 
     def on_part_end(self, event: Any) -> None:
         from pydantic_ai.messages import ThinkingPart

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
@@ -61,34 +60,18 @@ def _make_agent(
 
 
 class RecordingMiddleware(AgentMiddleware):
-    """Middleware that records all before/after calls for inspection."""
+    """Middleware that records stream events for inspection."""
 
     def __init__(self, name="mw"):
         self.name = name
-        self.before_calls: list[tuple[str, dict]] = []
-        self.after_calls: list[tuple[str, dict, Any]] = []
+        self.tool_call_events: list[Any] = []
+        self.tool_result_events: list[Any] = []
 
-    def before_tool_call(self, tool_name: str, args: dict[str, Any]) -> bool:
-        self.before_calls.append((tool_name, args))
-        return True
+    def on_function_tool_call(self, event: Any) -> None:
+        self.tool_call_events.append(event)
 
-    def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
-        self.after_calls.append((tool_name, args, result))
-
-
-class RejectingMiddleware(AgentMiddleware):
-    """Middleware that always rejects tool calls."""
-
-    def __init__(self):
-        self.before_called = False
-        self.after_called = False
-
-    def before_tool_call(self, tool_name: str, args: dict[str, Any]) -> bool:
-        self.before_called = True
-        return False
-
-    def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
-        self.after_called = True
+    def on_function_tool_result(self, event: Any) -> None:
+        self.tool_result_events.append(event)
 
 
 # ---------------------------------------------------------------------------
@@ -100,60 +83,29 @@ def test_before_called_with_correct_name_and_args():
     mw = RecordingMiddleware()
     agent = _make_agent(middleware=[mw])
     agent._run("test")
-    assert len(mw.before_calls) == 1
-    name, args = mw.before_calls[0]
-    assert name == "echo"
-    assert "message" in args
+    assert len(mw.tool_call_events) == 1
+    assert mw.tool_call_events[0].part.tool_name == "echo"
+    assert "message" in (mw.tool_call_events[0].part.args or {})
 
 
-def test_after_called_with_correct_name_args_and_result():
+def test_after_called_with_correct_name_and_result():
     mw = RecordingMiddleware()
     agent = _make_agent(middleware=[mw])
     agent._run("test")
-    assert len(mw.after_calls) == 1
-    name, args, result = mw.after_calls[0]
-    assert name == "echo"
-    assert "message" in args
-    assert "echo:" in result
+    assert len(mw.tool_result_events) == 1
+    assert mw.tool_result_events[0].result.tool_name == "echo"
+    assert "echo:" in str(mw.tool_result_events[0].result.content)
 
 
-def test_rejection_prevents_tool_execution():
-    from pydantic_ai.exceptions import UnexpectedModelBehavior
-
-    real_echo_called = []
-
-    def tracked_echo(ctx, message: str) -> str:
-        real_echo_called.append(message)
-        return f"echo: {message}"
-
-    mw = RejectingMiddleware()
-    agent = _make_agent(middleware=[mw], tools=[tracked_echo])
-    # Rejection raises ModelRetry; agent exhausts retries → UnexpectedModelBehavior
-    with pytest.raises(UnexpectedModelBehavior):
-        agent._run("test")
-    assert real_echo_called == [], "Tool body should not have been called on rejection"
-
-
-def test_after_not_called_on_rejection():
-    from pydantic_ai.exceptions import UnexpectedModelBehavior
-
-    mw = RejectingMiddleware()
-    agent = _make_agent(middleware=[mw])
-    with pytest.raises(UnexpectedModelBehavior):
-        agent._run("test")
-    assert not mw.after_called
-
-
-def test_before_called_in_order():
+def test_stream_events_called_in_registration_order():
     order: list[str] = []
 
     class OrderedMiddleware(AgentMiddleware):
         def __init__(self, label):
             self.label = label
 
-        def before_tool_call(self, tool_name, args):
+        def on_function_tool_call(self, event):
             order.append(self.label)
-            return True
 
     mw0 = OrderedMiddleware("mw0")
     mw1 = OrderedMiddleware("mw1")
@@ -162,46 +114,11 @@ def test_before_called_in_order():
     assert order == ["mw0", "mw1"]
 
 
-def test_after_called_in_reverse_order():
-    order: list[str] = []
-
-    class OrderedMiddleware(AgentMiddleware):
-        def __init__(self, label):
-            self.label = label
-
-        def after_tool_call(self, tool_name, args, result):
-            order.append(self.label)
-
-    mw0 = OrderedMiddleware("mw0")
-    mw1 = OrderedMiddleware("mw1")
-    agent = _make_agent(middleware=[mw0, mw1])
-    agent._run("test")
-    assert order == ["mw1", "mw0"]
-
-
-def test_first_middleware_rejection_skips_second_before():
-    from pydantic_ai.exceptions import UnexpectedModelBehavior
-
-    mw1_called = []
-
-    class SecondMiddleware(AgentMiddleware):
-        def before_tool_call(self, tool_name, args):
-            mw1_called.append(True)
-            return True
-
-    mw0 = RejectingMiddleware()
-    mw1 = SecondMiddleware()
-    agent = _make_agent(middleware=[mw0, mw1])
-    with pytest.raises(UnexpectedModelBehavior):
-        agent._run("test")
-    assert mw1_called == [], "Second middleware before_tool_call should not be called after rejection"
-
-
-def test_multiple_tools_all_intercepted():
+def test_multiple_tools_all_produce_events():
     mw = RecordingMiddleware()
     agent = _make_agent(middleware=[mw], tools=[echo, shout])
     agent._run("test")
-    intercepted_names = [name for name, _ in mw.before_calls]
+    intercepted_names = [e.part.tool_name for e in mw.tool_call_events]
     assert "echo" in intercepted_names
     assert "shout" in intercepted_names
 
@@ -216,10 +133,8 @@ def test_hooks_work_with_message_history_continuation():
     mw = RecordingMiddleware()
     agent = _make_agent(middleware=[mw])
     result1 = agent._run("first")
-    # First run invokes the tool via the middleware
-    assert len(mw.before_calls) == 1
+    assert len(mw.tool_call_events) == 1
     history = result1.all_messages()
-    # Second run with message history should complete without error
     result2 = agent._run("second", message_history=history)
     assert result2 is not None
 
@@ -234,34 +149,11 @@ def test_structured_output_unaffected():
     assert result.output is not None
 
 
-def test_before_not_called_when_no_tools_invoked():
+def test_no_events_when_no_tools_invoked():
     mw = RecordingMiddleware()
     agent = _make_agent(middleware=[mw], call_tools=[])
     agent._run("test")
-    assert mw.before_calls == []
-
-
-def test_after_tool_call_invoked_even_when_tool_raises():
-    """after_tool_call must be called even if the wrapped tool raises an exception."""
-
-    def failing_tool(ctx, message: str) -> str:
-        raise RuntimeError("tool exploded")
-
-    after_calls: list[tuple[str, dict, Any]] = []
-
-    class TrackingMiddleware(AgentMiddleware):
-        def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
-            after_calls.append((tool_name, args, result))
-
-    mw = TrackingMiddleware()
-    agent = _make_agent(middleware=[mw], tools=[failing_tool])
-    with pytest.raises(RuntimeError, match="tool exploded"):
-        agent._run("test")
-    # after_tool_call must have been called with result=None (the exception path)
-    assert len(after_calls) >= 1
-    tool_name, args, result = after_calls[0]
-    assert tool_name == "failing_tool"
-    assert result is None
+    assert mw.tool_call_events == []
 
 
 def test_trajectory_recorded_after_run():

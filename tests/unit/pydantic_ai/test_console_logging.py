@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 from loguru import logger
 
@@ -53,6 +54,20 @@ def _capture_logs() -> tuple[list[str], Any]:
     return records, sink_id
 
 
+def _make_tool_call_event(tool_name: str, args: dict | str | None = None) -> Any:
+    event = MagicMock()
+    event.part.tool_name = tool_name
+    event.part.args = args
+    return event
+
+
+def _make_tool_result_event(tool_name: str, content: Any = "ok") -> Any:
+    event = MagicMock()
+    event.result.tool_name = tool_name
+    event.result.content = content
+    return event
+
+
 # ---------------------------------------------------------------------------
 # _fmt_args tests
 # ---------------------------------------------------------------------------
@@ -74,7 +89,6 @@ def test_fmt_args_elides_new_str_field():
 def test_fmt_args_truncates_long_regular_field():
     args = {"path": "a" * 200}
     result = _fmt_args(args)
-    # truncated at 120 chars + repr
     assert len(result) < 200
 
 
@@ -82,6 +96,21 @@ def test_fmt_args_short_field_shown_verbatim():
     args = {"path": "/tmp/foo"}
     result = _fmt_args(args)
     assert "path='/tmp/foo'" in result
+
+
+def test_fmt_args_none_returns_empty():
+    assert _fmt_args(None) == ""
+
+
+def test_fmt_args_string_truncated():
+    long_str = "x" * 200
+    result = _fmt_args(long_str)
+    assert result.endswith("\u2026")
+    assert len(result) <= 122  # 120 + ellipsis
+
+
+def test_fmt_args_short_string_verbatim():
+    assert _fmt_args("short") == "short"
 
 
 # ---------------------------------------------------------------------------
@@ -116,21 +145,21 @@ def test_fmt_result_short_string():
 # ---------------------------------------------------------------------------
 
 
-def test_before_tool_call_logs_agent_name_and_tool():
+def test_on_function_tool_call_logs_agent_name_and_tool():
     records, sink_id = _capture_logs()
     try:
         mw = _attach(ConsoleLoggingMiddleware())
-        mw.before_tool_call("read_file", {"path": "/tmp/x"})
+        mw.on_function_tool_call(_make_tool_call_event("read_file", {"path": "/tmp/x"}))
         assert any("[Code Analyzer]" in r and "read_file" in r for r in records)
     finally:
         logger.remove(sink_id)
 
 
-def test_after_tool_call_logs_agent_name_and_result():
+def test_on_function_tool_result_logs_agent_name_and_result():
     records, sink_id = _capture_logs()
     try:
         mw = _attach(ConsoleLoggingMiddleware())
-        mw.after_tool_call("read_file", {"path": "/tmp/x"}, "file contents")
+        mw.on_function_tool_result(_make_tool_result_event("read_file", "file contents"))
         assert any("[Code Analyzer]" in r and "read_file" in r for r in records)
     finally:
         logger.remove(sink_id)
@@ -155,9 +184,3 @@ def test_after_run_truncates_long_output():
         assert "\u2026" in combined
     finally:
         logger.remove(sink_id)
-
-
-def test_before_tool_call_returns_true():
-    mw = _attach(ConsoleLoggingMiddleware())
-    result = mw.before_tool_call("any_tool", {})
-    assert result is True

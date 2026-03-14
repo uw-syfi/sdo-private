@@ -28,8 +28,6 @@ class AgentMiddleware:
 
     Hook call order:
     - ``on_attach``: called once when middleware is registered with an agent.
-    - ``before_tool_call`` / ``after_tool_call``: called around each tool invocation.
-      ``before_tool_call`` in registration order; ``after_tool_call`` in reverse.
     - ``on_stream_event`` (and its typed delegates): called once per streaming event
       during ``run_sync()``, in registration order.
     - ``after_run``: called once per ``_run()`` after ``run_sync()`` completes, in registration order.
@@ -57,13 +55,6 @@ class AgentMiddleware:
         Stores the agent as ``self._agent``. Override to perform additional setup.
         """
         self._agent = agent
-
-    def before_tool_call(self, tool_name: str, args: dict[str, Any]) -> bool:
-        """Called before each tool call. Return False to reject the call. Default: allow."""
-        return True
-
-    def after_tool_call(self, tool_name: str, args: dict[str, Any], result: Any) -> None:
-        """Called after each tool call completes. Default: no-op."""
 
     # ------------------------------------------------------------------
     # Streaming hooks
