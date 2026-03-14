@@ -1,5 +1,3 @@
-import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
@@ -244,8 +242,10 @@ def invoke_agent(
 
 
 def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:
-    filesystem.mkdir(path.parent, parents=True, exist_ok=True)
-    filesystem.write_text(path, content)
+    # Re-exported from app_operator.script_runner for backward compatibility.
+    from app_operator.script_runner import write_log_file as _write_log_file
+
+    _write_log_file(filesystem, path, content)
 
 
 def run_script(
@@ -256,57 +256,14 @@ def run_script(
     timeout: int = 900,
     recorder: TrajectoryRecorderProtocol | None = None,
 ) -> dict[str, Any]:
-    start_time = time.time()
-    try:
-        result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
-            command,
-            cwd=str(repo_path),
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        success = result.returncode == 0
-        stdout = result.stdout
-        stderr = result.stderr
-        exit_code = result.returncode
+    # Re-exported from app_operator.script_runner for backward compatibility.
+    from app_operator.script_runner import run_script as _run_script
 
-    except subprocess.TimeoutExpired:
-        success = False
-        stdout = ""
-        stderr = f"Command timed out after {timeout} seconds"
-        exit_code = -1
-
-    except (OSError, subprocess.SubprocessError) as e:
-        success = False
-        stdout = ""
-        stderr = f"Error: {e!s}"
-        exit_code = -1
-
-    duration = time.time() - start_time
-
-    if log_file_path:
-        log_content = (
-            f"=== Command ===\n{command}\n\n"
-            f"=== Exit Code ===\n{exit_code}\n\n"
-            f"=== STDOUT ===\n{stdout}\n\n"
-            f"=== STDERR ===\n{stderr}\n"
-        )
-        write_log_file(filesystem, log_file_path, log_content)
-
-    if recorder:
-        recorder.add_tool_call(
-            tool="bash",
-            args={"command": command},
-            stdout=stdout,
-            stderr=stderr,
-            exit_code=exit_code,
-            duration=duration,
-        )
-
-    return {
-        "success": success,
-        "exit_code": exit_code,
-        "stdout": stdout,
-        "stderr": stderr,
-    }
+    return _run_script(
+        repo_path,
+        filesystem,
+        command,
+        log_file_path=log_file_path,
+        timeout=timeout,
+        recorder=recorder,
+    )

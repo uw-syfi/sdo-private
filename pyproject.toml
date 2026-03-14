@@ -24,6 +24,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=13.0.0",
     "tach>=0.33",
+    "pydantic-ai>=1.0.0",
 ]
 
 [project.optional-dependencies]

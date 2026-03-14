@@ -493,7 +493,7 @@ class OperatorConfig:
 class RuntimeConfig:
     impl: str = "cli_agent"
 
-    VALID_IMPLS = {"cli_agent", "langgraph", "adk"}
+    VALID_IMPLS = {"cli_agent", "langgraph", "adk", "pydantic_ai"}
 
     def __post_init__(self):
         validate_field(self.impl, "impl", str, valid_values=self.VALID_IMPLS)
