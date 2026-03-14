@@ -227,7 +227,7 @@ class DeploymentAgent(dspy.Module):
 
     @staticmethod
     def _success(attempt: int) -> dspy.Prediction:
-        return dspy.Prediction(success=True, attempts=attempt)
+        return dspy.Prediction(success=True, attempts=attempt, error=None)
 
     @staticmethod
     def _failure(attempt: int, error: str) -> dspy.Prediction:
