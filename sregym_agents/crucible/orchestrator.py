@@ -78,6 +78,7 @@ def _run_stage_loop(
     shared_file: Path,
     submit_mcp_url: str,
     lt_summary_file: Path | None = None,
+    trajectory_path: Path | None = None,
 ) -> tuple[bool, dict]:
     """Run the agent→judge loop for one stage. Returns (approved, usage_by_role)."""
     logger.info("=" * 60)
@@ -114,8 +115,8 @@ def _run_stage_loop(
             shared_file=str(shared_file),
             lt_summary_file=str(lt_summary_file) if lt_summary_file else None,
         )
-        sre_agent = CrucibleSREAgent(model, sre_deps)
-        _, sre_usage = sre_agent.run(sre_prompt)
+        sre_agent = CrucibleSREAgent(model, sre_deps, trajectory_path=trajectory_path)
+        _, sre_usage = sre_agent.run(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})
         usage_by_role[agent_role]["iterations"].append(sre_usage)
         usage_by_role[agent_role]["total"] = _add_usage(usage_by_role[agent_role]["total"], sre_usage)
 
@@ -138,8 +139,10 @@ def _run_stage_loop(
             shared_content=shared_content,
             shared_file=str(shared_file),
         )
-        judge_agent = CrucibleJudgeAgent(model, judge_deps)
-        _, judge_usage = judge_agent.run(judge_prompt)
+        judge_agent = CrucibleJudgeAgent(model, judge_deps, trajectory_path=trajectory_path)
+        _, judge_usage = judge_agent.run(
+            judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"}
+        )
         usage_by_role[judge_role]["iterations"].append(judge_usage)
         usage_by_role[judge_role]["total"] = _add_usage(usage_by_role[judge_role]["total"], judge_usage)
 
@@ -164,6 +167,7 @@ def run(
     planned_stages: list[str],
     submit_mcp_url: str,
     lt_summary_file: Path | None = None,
+    trajectory_path: Path | None = None,
 ) -> dict:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     agent_cfg = _load_agent_config()
@@ -183,6 +187,7 @@ def run(
         shared_file,
         submit_mcp_url,
         lt_summary_file=lt_summary_file,
+        trajectory_path=trajectory_path,
     )
     usage_by_agent = diag_usage
 
@@ -205,6 +210,7 @@ def run(
         shared_file,
         submit_mcp_url,
         lt_summary_file=lt_summary_file,
+        trajectory_path=trajectory_path,
     )
     usage_by_agent = {**diag_usage, **mit_usage}
 

@@ -82,9 +82,7 @@ class BaseAgent(Generic[DepsT]):
             async for event in events:
                 self.current_run_usage = ctx.usage
                 if hasattr(events, "usage"):
-                    self.current_request_input_tokens = (
-                        events.usage().input_tokens or 0
-                    ) - ctx_baseline_tokens
+                    self.current_request_input_tokens = (events.usage().input_tokens or 0) - ctx_baseline_tokens
                 self._stream_event_chain(event)
 
         result = self._agent.run_sync(

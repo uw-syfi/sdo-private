@@ -133,6 +133,7 @@ def main() -> None:
 
     exp_env = os.getenv("SREGYM_EXP_ENV", ".")
     shared_file = Path(exp_env) / "judged_session_state.md"
+    trajectory_path = Path(exp_env) / f"trajectory_{problem_id}.jsonl"
 
     lt_summarizer: CrucibleLTSummarizer | None = None
     lt_summary_file: Path | None = None
@@ -163,6 +164,7 @@ def main() -> None:
         planned_stages=planned_stages,
         submit_mcp_url=submit_mcp_url,
         lt_summary_file=lt_summary_file,
+        trajectory_path=trajectory_path,
     )
 
     if args.logs_dir:

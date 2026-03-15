@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
+from libs.agent_mw import TrajectoryMiddleware, TurnLoggingMiddleware
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
 from sregym_agents.crucible.middleware import LoopDetectionMiddleware, TimeoutMiddleware
@@ -80,13 +84,14 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
     MAX_SUBMIT_REMINDERS = 3
     CONTEXT_COMPACT_THRESHOLD = 0.80
 
-    def __init__(self, model: str, deps: SREDeps) -> None:
+    def __init__(self, model: str, deps: SREDeps, trajectory_path: Path | None = None) -> None:
+        mw = [TurnLoggingMiddleware(), LoopDetectionMiddleware(), TimeoutMiddleware()]
+        if trajectory_path is not None:
+            mw.insert(0, TrajectoryMiddleware(trajectory_path))
         super().__init__(
             deps,
-            middleware=[
-                LoopDetectionMiddleware(),
-                TimeoutMiddleware(),
-            ],
+            agent_name=f"sre-{deps.stage}",
+            middleware=mw,
         )
         self._model = model
         self._agent: Agent[SREDeps, str] = Agent(
@@ -107,7 +112,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
         def _system(ctx) -> str:
             return _render(f"{ctx.deps.stage}_agent_system")
 
-    def run(self, user_prompt: str) -> tuple[str, dict]:
+    def run(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
         """Run with submit reminders and context compaction. Returns (output, usage)."""
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
         message_history: list | None = None
@@ -122,7 +127,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             if message_history is not None:
                 kwargs["message_history"] = message_history
 
-            result = self._run(current_prompt, **kwargs)
+            result = self._run(current_prompt, _run_ctx=run_ctx, **kwargs)
             u = result.usage()
             input_tokens = u.request_tokens or 0
             output_tokens = u.response_tokens or 0
