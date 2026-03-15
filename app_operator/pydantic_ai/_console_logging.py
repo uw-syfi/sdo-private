@@ -57,6 +57,18 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
             _fmt_args(event.part.args),
         )
 
+    def on_function_tool_result(self, event: Any) -> None:
+        from pydantic_ai.messages import RetryPromptPart
+
+        if isinstance(event.result, RetryPromptPart):
+            tool_name = event.result.tool_name or "unknown"
+            logger.warning(
+                "{} \u2717 {}() failed: {}",
+                self._usage_prefix(),
+                tool_name,
+                event.result.model_response(),
+            )
+
     def on_part_end(self, event: Any) -> None:
         from pydantic_ai.messages import ThinkingPart
 
