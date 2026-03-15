@@ -7,16 +7,12 @@ When a run reaches the soft threshold (hard limit - 5), two things happen:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pydantic_ai import RunContext  # noqa: TC002
+from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
+from pydantic_ai.tools import ToolDefinition  # noqa: TC002
 
 from app_operator.logger import logger
-
-if TYPE_CHECKING:
-    from pydantic_ai import RunContext
-    from pydantic_ai.messages import ModelMessage
-    from pydantic_ai.tools import ToolDefinition
-
-    from app_operator.pydantic_ai._deps import OperatorDeps
+from app_operator.pydantic_ai._deps import OperatorDeps  # noqa: TC001
 
 _WRAP_UP_PROMPT = (
     "You are approaching the step limit. Please provide your final response now without making any further tool calls."
@@ -38,8 +34,6 @@ def soft_limit_history_processor(ctx: RunContext[OperatorDeps], messages: list[M
         ctx.run_step,
         ctx.deps.config.agent.step_limit,
     )
-    from pydantic_ai.messages import ModelRequest, SystemPromptPart
-
     return list(messages) + [ModelRequest(parts=[SystemPromptPart(content=_WRAP_UP_PROMPT)])]
 
 

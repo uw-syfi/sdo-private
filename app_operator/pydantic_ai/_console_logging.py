@@ -38,14 +38,14 @@ def _fmt_k(n: int | None) -> str:
 class ConsoleLoggingMiddleware(AgentMiddleware):
     def __init__(
         self,
-        context_window: int,
+        context_window: int | None,
         recorder: PydanticAITrajectoryRecorder,
     ) -> None:
         self._context_window = context_window
         self._recorder = recorder
 
     def _usage_prefix(self) -> str:
-        used = _fmt_k(self._recorder.total_usage.input_tokens)
+        used = _fmt_k(self._agent.current_run_usage.input_tokens)
         limit = _fmt_k(self._context_window)
         return f"[{self._agent.agent_name} | {used}/{limit}]"
 

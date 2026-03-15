@@ -56,6 +56,9 @@ class AgentMiddleware:
         """
         self._agent = agent
 
+    def before_run(self) -> None:
+        """Called once immediately before each ``_run()`` call."""
+
     # ------------------------------------------------------------------
     # Streaming hooks
     # ------------------------------------------------------------------

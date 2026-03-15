@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
@@ -41,6 +41,7 @@ class BaseAgent(Generic[DepsT]):
         self._agent_name = agent_name
         self._usage_limits = UsageLimits()
         self._middleware: list[AgentMiddleware] = middleware or []
+        self.current_run_usage: RunUsage = RunUsage()
         for m in self._middleware:
             m.on_attach(self)
 
@@ -70,8 +71,13 @@ class BaseAgent(Generic[DepsT]):
             **kwargs: Additional keyword arguments forwarded to ``run_sync()``.
         """
 
+        self.current_run_usage = RunUsage()
+        for m in self._middleware:
+            m.before_run()
+
         async def _stream_handler(ctx: Any, events: Any) -> None:
             async for event in events:
+                self.current_run_usage = ctx.usage
                 self._stream_event_chain(event)
 
         result = self._agent.run_sync(
