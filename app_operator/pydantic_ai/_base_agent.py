@@ -47,6 +47,10 @@ class OperatorAgent(BaseAgent["OperatorDeps"]):
         console_mw = ConsoleLoggingMiddleware(context_window=context_window, recorder=recorder)
         all_middleware = [trajectory_mw, console_mw] + (middleware or [])
         super().__init__(deps, agent_name=agent_name, middleware=all_middleware)
+        if deps.config.agent.step_limit is not None:
+            from pydantic_ai.usage import UsageLimits
+
+            self._usage_limits = UsageLimits(request_limit=deps.config.agent.step_limit)
 
     def _run(
         self,

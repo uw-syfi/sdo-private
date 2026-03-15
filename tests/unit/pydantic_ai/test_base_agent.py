@@ -35,6 +35,7 @@ def _make_deps():
     deps = MagicMock()
     deps.config.agent.provider = "openai"
     deps.config.agent.model = "gpt-4o"
+    deps.config.agent.step_limit = None
     return deps
 
 

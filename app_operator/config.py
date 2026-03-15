@@ -329,6 +329,7 @@ class AgentConfig:
     max_retries: int = 3
     retry_base_delay: int = 5
     rate_limit_backoff: int = 60
+    step_limit: int | None = 1000  # hard limit; soft limit = max(0, step_limit - 5)
 
     VALID_PROVIDERS = {
         "codex",

@@ -69,6 +69,7 @@ class BaseAgent(Generic[DepsT]):
             _run_ctx: Optional context dict forwarded to ``after_run`` on each middleware.
             **kwargs: Additional keyword arguments forwarded to ``run_sync()``.
         """
+
         async def _stream_handler(ctx: Any, events: Any) -> None:
             async for event in events:
                 self._stream_event_chain(event)
