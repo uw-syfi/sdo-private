@@ -1,0 +1,3 @@
+max_diagnosis_iterations: 3
+max_mitigation_iterations: 3
+wait_stage_timeout: 300  # seconds for benchmark to reach mitigation stage
