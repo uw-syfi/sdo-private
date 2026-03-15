@@ -35,6 +35,18 @@ def _fmt_k(n: int | None) -> str:
     return f"{round(n / 1000)}k"
 
 
+def _truncate(s: str, max_len: int = _MAX_ARG_LEN) -> str:
+    if len(s) <= max_len:
+        return s
+    remaining = len(s) - max_len
+    return f"{s[:max_len]}\u2026 ({remaining} chars left)"
+
+
+def _tool_failed(content: Any) -> bool:
+    """Return True if a tool returned a failure result dict."""
+    return isinstance(content, dict) and not content.get("success", True)
+
+
 class ConsoleLoggingMiddleware(AgentMiddleware):
     def __init__(
         self,
@@ -45,7 +57,7 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         self._recorder = recorder
 
     def _usage_prefix(self) -> str:
-        used = _fmt_k(self._agent.current_run_usage.input_tokens)
+        used = _fmt_k(self._agent.current_request_input_tokens)
         limit = _fmt_k(self._context_window)
         return f"[{self._agent.agent_name} | {used}/{limit}]"
 
@@ -58,15 +70,25 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         )
 
     def on_function_tool_result(self, event: Any) -> None:
-        from pydantic_ai.messages import RetryPromptPart
+        from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
 
-        if isinstance(event.result, RetryPromptPart):
-            tool_name = event.result.tool_name or "unknown"
+        result = event.result
+        prefix = self._usage_prefix()
+
+        if isinstance(result, RetryPromptPart):
             logger.warning(
                 "{} \u2717 {}() failed: {}",
-                self._usage_prefix(),
-                tool_name,
-                event.result.model_response(),
+                prefix,
+                result.tool_name or "unknown",
+                result.model_response(),
+            )
+        elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
+            logger.warning(
+                "{} \u2717 {}() exited with code {}: {}",
+                prefix,
+                result.tool_name,
+                result.content.get("exit_code", "?"),
+                _truncate(result.content.get("stderr", "")),
             )
 
     def on_part_end(self, event: Any) -> None:

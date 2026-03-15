@@ -42,6 +42,7 @@ class BaseAgent(Generic[DepsT]):
         self._usage_limits = UsageLimits()
         self._middleware: list[AgentMiddleware] = middleware or []
         self.current_run_usage: RunUsage = RunUsage()
+        self.current_request_input_tokens: int = 0
         for m in self._middleware:
             m.on_attach(self)
 
@@ -72,12 +73,18 @@ class BaseAgent(Generic[DepsT]):
         """
 
         self.current_run_usage = RunUsage()
+        self.current_request_input_tokens = 0
         for m in self._middleware:
             m.before_run()
 
         async def _stream_handler(ctx: Any, events: Any) -> None:
+            ctx_baseline_tokens = ctx.usage.input_tokens or 0
             async for event in events:
                 self.current_run_usage = ctx.usage
+                if hasattr(events, "usage"):
+                    self.current_request_input_tokens = (
+                        events.usage().input_tokens or 0
+                    ) - ctx_baseline_tokens
                 self._stream_event_chain(event)
 
         result = self._agent.run_sync(
