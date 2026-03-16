@@ -87,6 +87,7 @@ class TestSharedFile:
             sf.append("text")
         calls = [c.args[1] for c in mock_flock.call_args_list]
         import fcntl as _fcntl
+
         assert _fcntl.LOCK_EX in calls
         assert _fcntl.LOCK_UN in calls
 

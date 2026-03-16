@@ -25,7 +25,6 @@ def _load_agent_config() -> dict:
         return yaml.safe_load(f)
 
 
-
 def _zero_usage() -> dict:
     return {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
 
