@@ -7,11 +7,15 @@ import time
 from collections import deque
 from typing import Any
 
-from pydantic_ai.exceptions import ModelRetry
-
 from libs.pydantic_agent._middleware import AgentMiddleware
 
 logger = logging.getLogger(__name__)
+
+def _make_nudge_message(text: str) -> Any:
+    """Wrap *text* as a pydantic-ai UserPromptPart ModelRequest."""
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+    return ModelRequest(parts=[UserPromptPart(content=text)])
 
 
 class LoopDetectionMiddleware(AgentMiddleware):
@@ -21,6 +25,7 @@ class LoopDetectionMiddleware(AgentMiddleware):
         self._recent_fps: deque = deque(maxlen=3)
         self._loop_reminders: int = 0
         self._max_loop_reminders = max_loop_reminders
+        self._pending_nudge: str | None = None
 
     def on_function_tool_call(self, event: Any) -> None:
         tool_name = event.part.tool_name
@@ -43,16 +48,24 @@ class LoopDetectionMiddleware(AgentMiddleware):
                 self._loop_reminders,
                 self._max_loop_reminders,
             )
-            raise ModelRetry(
+            self._pending_nudge = (
                 "You have been calling the same tool(s) with the same arguments repeatedly "
                 "without making progress. Please try a different approach — run a different "
                 "command, inspect the system from another angle, or call the submit tool if "
                 "you have gathered enough information to submit your answer."
             )
 
+    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+        if self._pending_nudge:
+            messages = list(messages)
+            messages.append(_make_nudge_message(self._pending_nudge))
+            self._pending_nudge = None
+        return messages
+
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         self._recent_fps.clear()
         self._loop_reminders = 0
+        self._pending_nudge = None
 
 
 class TimeoutMiddleware(AgentMiddleware):
@@ -67,6 +80,7 @@ class TimeoutMiddleware(AgentMiddleware):
         self._reminders: int = 0
         self._timeout_seconds = timeout_seconds
         self._max_timeout_reminders = max_timeout_reminders
+        self._pending_nudge: str | None = None
 
     def on_function_tool_call(self, event: Any) -> None:
         elapsed = time.monotonic() - self._start_time
@@ -86,10 +100,17 @@ class TimeoutMiddleware(AgentMiddleware):
                 self._reminders,
                 self._max_timeout_reminders,
             )
-            raise ModelRetry(
+            self._pending_nudge = (
                 f"You have been running for over {self._timeout_seconds // 60} minutes. "
                 "Please wrap up and call the submit tool now."
             )
+
+    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+        if self._pending_nudge:
+            messages = list(messages)
+            messages.append(_make_nudge_message(self._pending_nudge))
+            self._pending_nudge = None
+        return messages
 
 
 __all__ = ["LoopDetectionMiddleware", "TimeoutMiddleware"]
