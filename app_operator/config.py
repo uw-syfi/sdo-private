@@ -368,6 +368,21 @@ class AgentConfig:
         validate_field(self.retry_base_delay, "retry_base_delay", int, positive=True)
         validate_field(self.rate_limit_backoff, "rate_limit_backoff", int, positive=True)
 
+    def to_model_config(self):
+        """Build a ModelConfig from this AgentConfig.
+
+        Raises:
+            ValueError: If model is not set, or if the provider has no canonical
+                        mapping (e.g. "subagent", "hybrid").
+        """
+        from libs.model_config import from_provider_and_model
+
+        if not self.model:
+            raise ValueError("agent.model must be set to create ModelConfig")
+        return from_provider_and_model(
+            self.provider, self.model, location=self.location, thinking_budget=self.thinking_budget
+        )
+
 
 # Canonical mapping from SDS provider name to the litellm model prefix.
 # Used wherever a litellm-compatible "prefix/model" string is needed.
@@ -390,31 +405,11 @@ def qualify_model_for_litellm(
 ) -> str:
     """Return a fully-qualified ``provider/model`` string for litellm.
 
-    Resolution order:
-    1. If *model* already contains a ``/``, return it unchanged.
-    2. If an SDS *provider* name is given, look it up in
-       ``PROVIDER_TO_LITELLM_PREFIX``.
-    3. Infer the prefix from well-known substrings in *model*.
-    4. Fall back to *model* as-is.
+    Delegates to ``ModelConfig.from_string`` for provider resolution.
     """
-    if "/" in model:
-        return model
+    from libs.model_config import from_string
 
-    if provider is not None:
-        prefix = PROVIDER_TO_LITELLM_PREFIX.get(provider)
-        if prefix is not None:
-            return f"{prefix}/{model}"
-
-    # Heuristic: infer provider from the model name itself.
-    lower = model.lower()
-    if "claude" in lower:
-        return f"anthropic/{model}"
-    if "gpt" in lower or "o1" in lower:
-        return f"openai/{model}"
-    if "gemini" in lower:
-        return f"gemini/{model}"
-
-    return model
+    return from_string(model, provider_hint=provider).to_litellm_str()
 
 
 @dataclass

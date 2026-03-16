@@ -59,7 +59,10 @@ def test_heuristic_gemini():
 
 
 def test_fallback_unknown():
-    assert build_model_str(_config("hybrid", "some-model")) == "some-model"
+    # "hybrid" has no canonical mapping so heuristics run; "some-model" has no
+    # recognisable substring, so it falls back to openai.  The old bare-string
+    # return value was a bug — pydantic-ai cannot dispatch unqualified strings.
+    assert build_model_str(_config("hybrid", "some-model")) == "openai:some-model"
 
 
 def test_no_model_raises():

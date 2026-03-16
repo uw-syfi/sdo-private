@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from libs.model_config import from_string
+
 
 def thinking_settings(model_str: str, budget_tokens: int) -> dict:
     """Return pydantic-ai model_settings enabling thinking for the given model.
@@ -14,13 +16,4 @@ def thinking_settings(model_str: str, budget_tokens: int) -> dict:
                    or bare "gemini-2.5-pro" or "google-vertex:gemini-2.5-pro")
         budget_tokens: thinking token budget
     """
-    lower = model_str.lower()
-    if "anthropic" in lower or "claude" in lower:
-        return {"anthropic_thinking": {"type": "enabled", "budget_tokens": budget_tokens}}
-    if "google-vertex" in lower:
-        # google-vertex uses pydantic_ai.models.google.GoogleModel → "google_thinking_config"
-        return {"google_thinking_config": {"thinking_budget": budget_tokens, "include_thoughts": True}}
-    if "gemini" in lower or "google" in lower:
-        # google-gla and bare gemini strings use pydantic_ai.models.gemini.GeminiModel → "gemini_thinking_config"
-        return {"gemini_thinking_config": {"thinking_budget": budget_tokens, "include_thoughts": True}}
-    return {}
+    return from_string(model_str, thinking_budget=budget_tokens).to_pydantic_ai_settings()

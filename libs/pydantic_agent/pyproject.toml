@@ -3,7 +3,10 @@ name = "sds-pydantic-agent"
 version = "0.1.0"
 description = "Generic pydantic-ai BaseAgent with composable middleware"
 requires-python = ">=3.10"
-dependencies = ["pydantic-ai>=1.0.0"]
+dependencies = ["pydantic-ai>=1.0.0", "sds-model-config"]
+
+[tool.uv.sources]
+sds-model-config = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

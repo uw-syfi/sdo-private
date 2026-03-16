@@ -19,6 +19,7 @@ members = [
     "sds-agent-cli",
     "sds-agent-mw",
     "sds-core",
+    "sds-model-config",
     "sds-operator",
     "sds-pydantic-agent",
 ]
@@ -5605,6 +5606,11 @@ version = "0.1.0"
 source = { editable = "libs/sds_core" }
 
 [[package]]
+name = "sds-model-config"
+version = "0.1.0"
+source = { editable = "libs/model_config" }
+
+[[package]]
 name = "sds-operator"
 version = "0.1.0"
 source = { editable = "." }
@@ -5696,10 +5702,14 @@ version = "0.1.0"
 source = { editable = "libs/pydantic_agent" }
 dependencies = [
     { name = "pydantic-ai" },
+    { name = "sds-model-config" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic-ai", specifier = ">=1.0.0" }]
+requires-dist = [
+    { name = "pydantic-ai", specifier = ">=1.0.0" },
+    { name = "sds-model-config", editable = "libs/model_config" },
+]
 
 [[package]]
 name = "secretstorage"

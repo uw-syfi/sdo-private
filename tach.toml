@@ -10,6 +10,10 @@ ignore_type_checking_imports = true
 # --- Layer 0: libs (no internal deps) ---
 
 [[modules]]
+path = "libs.model_config"
+depends_on = []
+
+[[modules]]
 path = "libs.sds_core"
 depends_on = []
 
