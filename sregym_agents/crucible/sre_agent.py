@@ -77,8 +77,8 @@ def _compact_messages(model: str, messages: list) -> tuple[str, dict]:
     compact_result = compactor.run_sync(summary_prompt)
     u = compact_result.usage()
     usage = {
-        "input_tokens": u.request_tokens or 0,
-        "output_tokens": u.response_tokens or 0,
+        "input_tokens": u.input_tokens or 0,
+        "output_tokens": u.output_tokens or 0,
         "cached_input_tokens": 0,
     }
     logger.info(f"Context compacted: {len(history_text)} chars → {len(compact_result.output)} chars")
@@ -144,12 +144,12 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                     logger.warning(
                         f"Model returned unexpected output without submitting; treating as unsubmitted. ({exc})"
                     )
-                usage["input_tokens"] += self.current_run_usage.request_tokens or 0
-                usage["output_tokens"] += self.current_run_usage.response_tokens or 0
+                usage["input_tokens"] += self.current_run_usage.input_tokens or 0
+                usage["output_tokens"] += self.current_run_usage.output_tokens or 0
                 break
             u = result.usage()
-            input_tokens = u.request_tokens or 0
-            output_tokens = u.response_tokens or 0
+            input_tokens = u.input_tokens or 0
+            output_tokens = u.output_tokens or 0
             usage["input_tokens"] += input_tokens
             usage["output_tokens"] += output_tokens
 
