@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from pydantic_ai import RunContext  # noqa: TC002 — needed at runtime for _takes_ctx annotation inspection
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 if TYPE_CHECKING:
@@ -57,12 +58,12 @@ class BaseAgent(Generic[DepsT]):
 
         middleware = self._middleware
 
-        def _chained_history_processor(ctx: Any, messages: list) -> list:
+        def _chained_history_processor(ctx: RunContext[Any], messages: list) -> list:
             for m in middleware:
                 messages = m.before_model_req_edit_messages(ctx, messages)
             return messages
 
-        async def _chained_prepare_tools(ctx: Any, tool_defs: list) -> list | None:
+        async def _chained_prepare_tools(ctx: RunContext[Any], tool_defs: list) -> list | None:
             for m in middleware:
                 result = await m.before_model_req_edit_tools(ctx, tool_defs)
                 if result is not None:
