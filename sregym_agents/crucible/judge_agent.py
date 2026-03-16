@@ -15,6 +15,7 @@ from libs.agent_mw import SoftLimitExtension, TrajectoryMiddleware, TurnLoggingM
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
 from sregym_agents.crucible.middleware import LoopDetectionMiddleware, TimeoutMiddleware
+from sregym_agents.crucible.sre_agent import _thinking_settings_for
 from sregym_agents.crucible.tools import (
     JudgeDeps,
     exec_bash_readonly,
@@ -43,6 +44,7 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
             model,
             deps_type=JudgeDeps,
             output_type=str,
+            model_settings=_thinking_settings_for(model),
             tools=[exec_bash_readonly, read_file, submit_verdict],
         )
 
