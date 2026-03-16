@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 from sregym_agents.crucible.orchestrator import (
     _add_usage,
     _build_usage_result,
-    _init_shared_file,
     _wait_for_mitigation_stage,
     _zero_usage,
 )
+from sregym_agents.crucible.tools import SharedFile
 
 # ---------------------------------------------------------------------------
 # _zero_usage
@@ -78,26 +78,35 @@ class TestBuildUsageResult:
 
 
 # ---------------------------------------------------------------------------
-# _init_shared_file
+# SharedFile.init (orchestrator init content)
 # ---------------------------------------------------------------------------
 
 
-class TestInitSharedFile:
+class TestSharedFileInit:
+    def _init(self, shared_file, app_info: dict) -> None:
+        SharedFile(shared_file).init(
+            "# SRE Judged Session State\n"
+            "## Session\n"
+            f"- App: {app_info.get('app_name', 'unknown')} "
+            f"/ Namespace: {app_info.get('namespace', 'default')}\n\n"
+            "## Diagnosis\n"
+        )
+
     def test_creates_parent_dirs(self, tmp_path: Path):
         shared = tmp_path / "sub" / "dir" / "session.md"
-        _init_shared_file(shared, {"app_name": "myapp", "namespace": "ns"}, "prob-1")
+        self._init(shared, {"app_name": "myapp", "namespace": "ns"})
         assert shared.exists()
 
     def test_writes_header_with_app_and_namespace(self, tmp_path: Path):
         shared = tmp_path / "session.md"
-        _init_shared_file(shared, {"app_name": "myapp", "namespace": "prod"}, "prob-1")
+        self._init(shared, {"app_name": "myapp", "namespace": "prod"})
         content = shared.read_text()
         assert "myapp" in content
         assert "prod" in content
 
     def test_file_readable_after_call(self, tmp_path: Path):
         shared = tmp_path / "session.md"
-        _init_shared_file(shared, {}, "prob-1")
+        self._init(shared, {})
         content = shared.read_text()
         assert len(content) > 0
 

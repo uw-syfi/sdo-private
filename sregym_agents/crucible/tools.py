@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import concurrent.futures
+import fcntl
 import json
 import logging
 import shlex
@@ -36,6 +37,34 @@ MUTATING_KUBECTL_VERBS: frozenset[str] = frozenset(
 )
 
 
+class SharedFile:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def init(self, content: str) -> None:
+        if self._path.exists():
+            logger.warning("Shared file already exists, skipping init: %s", self._path)
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(content)
+        tmp.rename(self._path)
+
+    def append(self, text: str) -> None:
+        with self._path.open("a") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                fh.write(text)
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    def read(self) -> str:
+        return self._path.read_text()
+
+    def __str__(self) -> str:
+        return str(self._path)
+
+
 @dataclass
 class SharedState:
     submitted: bool = False
@@ -45,7 +74,7 @@ class SharedState:
 @dataclass
 class SREDeps:
     namespace: str
-    shared_file: Path
+    shared_file: SharedFile
     iteration: int
     stage: str  # "diagnosis" | "mitigation"
     state: SharedState = field(default_factory=SharedState)
@@ -54,7 +83,7 @@ class SREDeps:
 @dataclass
 class JudgeDeps:
     namespace: str
-    shared_file: Path
+    shared_file: SharedFile
     iteration: int
     stage: str
     submit_mcp_url: str
@@ -266,8 +295,7 @@ def mark_hypothesis_complete(
         f"**Justification**: {justification}\n"
     )
     try:
-        with ctx.deps.shared_file.open("a") as fh:
-            fh.write(entry)
+        ctx.deps.shared_file.append(entry)
     except Exception as e:
         return f"Error writing to shared file: {e}"
 
@@ -298,8 +326,7 @@ def mark_mitigation_complete(
         f"**Justification**: {justification}\n"
     )
     try:
-        with ctx.deps.shared_file.open("a") as fh:
-            fh.write(entry)
+        ctx.deps.shared_file.append(entry)
     except Exception as e:
         return f"Error writing to shared file: {e}"
 
@@ -359,8 +386,7 @@ def submit_verdict(
 
     full_entry = entry + benchmark_block
     try:
-        with ctx.deps.shared_file.open("a") as fh:
-            fh.write(full_entry)
+        ctx.deps.shared_file.append(full_entry)
     except Exception as e:
         return f"Error writing verdict to shared file: {e}"
 
