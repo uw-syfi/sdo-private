@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -99,13 +101,18 @@ def str_replace_file(
         return f"Error replacing in file: {e}"
 
 
+def _run_async(coro):
+    """Run *coro* safely even when a pydantic-ai event loop is already running."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 def submit_solution(ctx: RunContext[SREGymDeps], ans: str) -> str:
     """Submit to the benchmark via the MCP submit server.
 
     For diagnosis: provide a natural language description of the fault.
     For mitigation: call with ans='' after applying the fix.
     """
-    import asyncio
     from contextlib import AsyncExitStack
 
     from mcp import ClientSession
@@ -121,7 +128,7 @@ def submit_solution(ctx: RunContext[SREGymDeps], ans: str) -> str:
             return text
 
     try:
-        result = asyncio.run(_submit())
+        result = _run_async(_submit())
         return f"Submission result: {result}"
     except Exception as e:
         return f"Submission error: {e}"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import concurrent.futures
 import json
 import logging
 import shlex
@@ -63,6 +64,12 @@ class JudgeDeps:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def _run_async(coro):
+    """Run *coro* safely even when a pydantic-ai event loop is already running."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 def _run_bash_sync(cmd: str) -> str:
@@ -342,7 +349,7 @@ def submit_verdict(
     benchmark_block = ""
     if verdict:
         try:
-            success, message, oracle = asyncio.run(_submit_to_benchmark(ctx.deps.submit_mcp_url, submission_ans, stage))
+            success, message, oracle = _run_async(_submit_to_benchmark(ctx.deps.submit_mcp_url, submission_ans, stage))
             oracle_text = json.dumps(oracle, indent=2) if oracle is not None else ""
             benchmark_block = (
                 f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n{oracle_text}\n</benchmark_result>\n"
