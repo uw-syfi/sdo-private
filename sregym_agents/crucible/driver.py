@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import shutil
 import time
 from datetime import datetime
@@ -35,6 +36,7 @@ def _get_api_base() -> str:
 def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
     """Poll until conductor reaches a submission-ready stage."""
     start = time.time()
+    delay = 1.0
     while time.time() - start < timeout:
         try:
             resp = requests.get(f"{api_base}/status", timeout=5)
@@ -46,7 +48,8 @@ def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
             logger.debug(f"Stage: {stage!r}, waiting...")
         except Exception as e:
             logger.debug(f"Status check failed: {e}")
-        time.sleep(1)
+        time.sleep(delay + random.uniform(0, delay * 0.1))
+        delay = min(delay * 1.5, 30)
     raise TimeoutError(f"Conductor did not reach ready stage within {timeout}s")
 
 
