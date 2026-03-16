@@ -36,7 +36,7 @@ def _thinking_settings_for(model: str) -> dict:
     if "claude" in model or "anthropic" in model:
         return {"anthropic_thinking": {"type": "enabled", "budget_tokens": THINKING_BUDGET}}
     if "gemini" in model:
-        return {"gemini_thinking_config": {"thinking_budget": THINKING_BUDGET}}
+        return {"gemini_thinking_config": {"thinking_budget": THINKING_BUDGET, "include_thoughts": True}}
     return {}
 
 
