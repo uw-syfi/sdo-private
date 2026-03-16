@@ -11,7 +11,6 @@ from app_operator.prompts import create_fix_prompt, prepare_error_context
 from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import FixSummaryResponse, HealthVerdictResponse
-from app_operator.pydantic_ai._soft_limit import soft_limit_history_processor, soft_limit_prepare_tools
 from app_operator.script_runner import write_log_file
 from app_operator.trajectory import Phase
 
@@ -39,14 +38,12 @@ class RepairAgent(OperatorAgent):
         max_attempts: int,
     ):
         super().__init__(deps, recorder, agent_name="Error Fixer")
-        self._agent: Agent[OperatorDeps, FixSummaryResponse] = Agent(
+        self._agent: Agent[OperatorDeps, FixSummaryResponse] = self._build_agent(
             model,
             deps_type=OperatorDeps,
             output_type=FixSummaryResponse,
             tools=tools,
             model_settings=model_settings,
-            history_processors=[soft_limit_history_processor],
-            prepare_tools=soft_limit_prepare_tools,
         )
         self.max_attempts = max_attempts
 

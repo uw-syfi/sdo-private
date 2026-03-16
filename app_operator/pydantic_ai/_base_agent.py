@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from app_operator.pydantic_ai._console_logging import ConsoleLoggingMiddleware
 from app_operator.pydantic_ai._models import build_model_str, get_context_window
 from app_operator.pydantic_ai._trajectory_middleware import TrajectoryMiddleware
+from libs.agent_mw import SoftLimitExtension
 from libs.pydantic_agent import AgentMiddleware, BaseAgent
 
 if TYPE_CHECKING:
@@ -45,12 +46,9 @@ class OperatorAgent(BaseAgent["OperatorDeps"]):
         model_str = build_model_str(deps.config)
         context_window = get_context_window(model_str)
         console_mw = ConsoleLoggingMiddleware(context_window=context_window, recorder=recorder)
-        all_middleware = [trajectory_mw, console_mw] + (middleware or [])
+        soft_limit_mw = SoftLimitExtension(deps.config.agent.step_limit)
+        all_middleware = [trajectory_mw, console_mw, soft_limit_mw] + (middleware or [])
         super().__init__(deps, agent_name=agent_name, middleware=all_middleware)
-        if deps.config.agent.step_limit is not None:
-            from pydantic_ai.usage import UsageLimits
-
-            self._usage_limits = UsageLimits(request_limit=deps.config.agent.step_limit)
 
     def _run(
         self,

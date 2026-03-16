@@ -12,7 +12,6 @@ from app_operator.progress import emit_progress
 from app_operator.prompts import analyze_repository, create_generate_script_prompt
 from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
-from app_operator.pydantic_ai._soft_limit import soft_limit_history_processor, soft_limit_prepare_tools
 from app_operator.trajectory import Phase
 
 if TYPE_CHECKING:
@@ -38,14 +37,12 @@ class ScriptAgent(OperatorAgent):
     ):
         super().__init__(deps, recorder, agent_name="Script Generator")
         # output_type=str: return value is intentionally unused; real output is files written via tools.
-        self._agent: Agent[OperatorDeps, str] = Agent(
+        self._agent: Agent[OperatorDeps, str] = self._build_agent(
             model,
             deps_type=OperatorDeps,
             output_type=str,
             tools=tools,
             model_settings=model_settings,
-            history_processors=[soft_limit_history_processor],
-            prepare_tools=soft_limit_prepare_tools,
         )
 
         @self._agent.instructions

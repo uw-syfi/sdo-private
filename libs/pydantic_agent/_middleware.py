@@ -122,6 +122,18 @@ class AgentMiddleware:
         """A builtin tool returned a result."""
 
     # ------------------------------------------------------------------
+    # Pre-request hooks (wired via _build_agent)
+    # ------------------------------------------------------------------
+
+    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+        """Called before each model request. Override to transform message history."""
+        return messages
+
+    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list) -> list | None:
+        """Called before each model request. Override to filter/replace available tools."""
+        return tool_defs
+
+    # ------------------------------------------------------------------
 
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         """Called once after each agent run completes.

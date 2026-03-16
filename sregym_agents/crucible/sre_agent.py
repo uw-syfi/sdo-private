@@ -12,7 +12,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-from libs.agent_mw import TrajectoryMiddleware, TurnLoggingMiddleware
+from libs.agent_mw import SoftLimitExtension, TrajectoryMiddleware, TurnLoggingMiddleware
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
 from sregym_agents.crucible.middleware import LoopDetectionMiddleware, TimeoutMiddleware
@@ -97,8 +97,10 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
     MAX_SUBMIT_REMINDERS = 3
     CONTEXT_COMPACT_THRESHOLD = 0.80
 
-    def __init__(self, model: str, deps: SREDeps, trajectory_path: Path | None = None) -> None:
-        mw = [TurnLoggingMiddleware(), LoopDetectionMiddleware(), TimeoutMiddleware()]
+    def __init__(
+        self, model: str, deps: SREDeps, trajectory_path: Path | None = None, step_limit: int | None = 500
+    ) -> None:
+        mw = [TurnLoggingMiddleware(), LoopDetectionMiddleware(), TimeoutMiddleware(), SoftLimitExtension(step_limit)]
         if trajectory_path is not None:
             mw.insert(0, TrajectoryMiddleware(trajectory_path))
         super().__init__(
@@ -107,7 +109,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             middleware=mw,
         )
         self._model = model
-        self._agent: Agent[SREDeps, str] = Agent(
+        self._agent: Agent[SREDeps, str] = self._build_agent(
             model,
             deps_type=SREDeps,
             output_type=str,
@@ -147,7 +149,9 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 if self.deps.state.submitted:
                     logger.warning(f"Model returned unexpected output after submitting; treating as complete. ({exc})")
                 else:
-                    logger.warning(f"Model returned unexpected output without submitting; treating as unsubmitted. ({exc})")
+                    logger.warning(
+                        f"Model returned unexpected output without submitting; treating as unsubmitted. ({exc})"
+                    )
                 usage["input_tokens"] += self.current_run_usage.request_tokens or 0
                 usage["output_tokens"] += self.current_run_usage.response_tokens or 0
                 break

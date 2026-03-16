@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-from libs.agent_mw import TrajectoryMiddleware, TurnLoggingMiddleware
+from libs.agent_mw import SoftLimitExtension, TrajectoryMiddleware, TurnLoggingMiddleware
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
 from sregym_agents.crucible.middleware import LoopDetectionMiddleware, TimeoutMiddleware
@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
     MAX_SUBMIT_REMINDERS = 3
 
-    def __init__(self, model: str, deps: JudgeDeps, trajectory_path: Path | None = None) -> None:
-        mw = [TurnLoggingMiddleware(), LoopDetectionMiddleware(), TimeoutMiddleware()]
+    def __init__(
+        self, model: str, deps: JudgeDeps, trajectory_path: Path | None = None, step_limit: int | None = 500
+    ) -> None:
+        mw = [TurnLoggingMiddleware(), LoopDetectionMiddleware(), TimeoutMiddleware(), SoftLimitExtension(step_limit)]
         if trajectory_path is not None:
             mw.insert(0, TrajectoryMiddleware(trajectory_path))
         super().__init__(
@@ -37,7 +39,7 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
             agent_name=f"judge-{deps.stage}",
             middleware=mw,
         )
-        self._agent: Agent[JudgeDeps, str] = Agent(
+        self._agent: Agent[JudgeDeps, str] = self._build_agent(
             model,
             deps_type=JudgeDeps,
             output_type=str,
@@ -65,9 +67,13 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
                 result = self._run(current_prompt, _run_ctx=run_ctx, **kwargs)
             except UnexpectedModelBehavior as exc:
                 if self.deps.state.submitted:
-                    logger.warning(f"Judge model returned unexpected output after submitting; treating as complete. ({exc})")
+                    logger.warning(
+                        f"Judge model returned unexpected output after submitting; treating as complete. ({exc})"
+                    )
                 else:
-                    logger.warning(f"Judge model returned unexpected output without submitting; treating as unsubmitted. ({exc})")
+                    logger.warning(
+                        f"Judge model returned unexpected output without submitting; treating as unsubmitted. ({exc})"
+                    )
                 usage["input_tokens"] += self.current_run_usage.request_tokens or 0
                 usage["output_tokens"] += self.current_run_usage.response_tokens or 0
                 break

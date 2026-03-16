@@ -50,6 +50,29 @@ class BaseAgent(Generic[DepsT]):
     def agent_name(self) -> str:
         return self._agent_name
 
+    def _build_agent(self, *args: Any, **kwargs: Any) -> Agent[DepsT, Any]:
+        """Construct a pydantic-ai Agent, wiring in history_processors and
+        prepare_tools collected from all registered middleware."""
+        from pydantic_ai import Agent
+
+        middleware = self._middleware
+
+        def _chained_history_processor(ctx: Any, messages: list) -> list:
+            for m in middleware:
+                messages = m.before_model_req_edit_messages(ctx, messages)
+            return messages
+
+        async def _chained_prepare_tools(ctx: Any, tool_defs: list) -> list | None:
+            for m in middleware:
+                result = await m.before_model_req_edit_tools(ctx, tool_defs)
+                if result is not None:
+                    tool_defs = result
+            return tool_defs
+
+        kwargs.setdefault("history_processors", []).append(_chained_history_processor)
+        kwargs["prepare_tools"] = _chained_prepare_tools
+        return Agent(*args, **kwargs)
+
     def _stream_event_chain(self, event: Any) -> None:
         """Dispatch a streaming event to all middleware in order."""
         for m in self._middleware:
