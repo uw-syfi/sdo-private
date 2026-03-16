@@ -4,19 +4,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from app_operator.logger import logger
-
-
-def _normalize_provider(provider: str) -> str:
-    provider_lower = provider.lower()
-    if provider_lower in ("codex", "opencode", "openai"):
-        return "openai"
-    if provider_lower in ("claude", "claude-code", "anthropic"):
-        return "anthropic"
-    if provider_lower == "gemini":
-        return "gemini"
-    if provider_lower in ("vertex", "vertex-ai"):
-        return "vertex"
-    return provider_lower
+from libs.model_config import normalize_provider
 
 
 def _build_vertex_kwargs(
@@ -44,7 +32,7 @@ def create_chat_model(
 
     This is the low-level factory that can be used without a full Config object.
     """
-    normalized = _normalize_provider(provider)
+    normalized = normalize_provider(provider)
 
     if normalized == "openai":
         return ChatOpenAI(model=model)

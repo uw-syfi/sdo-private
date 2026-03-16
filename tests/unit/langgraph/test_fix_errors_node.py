@@ -11,6 +11,7 @@ from app_operator.langgraph.nodes.deployer import FixSummaryResponse, fix_errors
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder
+from libs.model_config import ModelConfig
 
 
 def _make_ctx(
@@ -48,7 +49,9 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         loader = Mock()
         agent = Mock()
         check_shutdown = Mock(return_value=False)
@@ -80,7 +83,9 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config)
         ctx.invoke = Mock(
             return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="This is the summary"))
@@ -108,7 +113,9 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config)
         ctx.invoke = Mock(return_value=AgentResult(text="No summary here", messages=[], structured=None))
 
@@ -137,7 +144,9 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config, check_shutdown=Mock(return_value=True))
 
         result_state = fix_errors(state, ctx, None)
@@ -164,7 +173,9 @@ class TestFixErrors:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         filesystem.mkdir(repo_path / ".sds" / "logs", parents=True)
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config)
         ctx.invoke = Mock(
             return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="Summary text"))
@@ -202,7 +213,9 @@ class TestFixErrors:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config)
         ctx.invoke = Mock(
             return_value=AgentResult(text="", messages=[], structured=FixSummaryResponse(summary="Fixed health check"))
@@ -231,7 +244,7 @@ class TestFixErrors:
         filesystem = InMemoryFilesystem()
         phase = OperatorPhaseConfig(fix_summary_consolidation=True)
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             operator=OperatorConfig(phase=phase),
         )
         ctx = _make_ctx(repo_path, filesystem, config)
@@ -261,7 +274,7 @@ class TestFixErrors:
         filesystem = InMemoryFilesystem()
         phase = OperatorPhaseConfig(fix_summary_consolidation=False)
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             operator=OperatorConfig(phase=phase),
         )
         ctx = _make_ctx(repo_path, filesystem, config)

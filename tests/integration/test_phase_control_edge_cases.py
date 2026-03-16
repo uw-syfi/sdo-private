@@ -35,7 +35,7 @@ class TestPhaseControlEdgeCases:
     def test_analysis_files_exist_but_config_says_skip(self, temp_repo):
         """Test that existing analysis files are ignored when skip is configured."""
         config = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         )
 
         filesystem = InMemoryFilesystem()
@@ -78,7 +78,7 @@ class TestPhaseControlEdgeCases:
     def test_no_analysis_files_and_analysis_disabled(self, temp_repo):
         """Test deployment with no analysis files and analysis disabled."""
         config = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         )
 
         filesystem = InMemoryFilesystem()
@@ -113,7 +113,7 @@ class TestPhaseControlEdgeCases:
 
         # First run with analysis enabled
         config1 = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": True}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": True}}}
         )
 
         from app_operator.cli_agent.operator import AppOperator
@@ -136,7 +136,7 @@ class TestPhaseControlEdgeCases:
 
         # Second run with analysis disabled
         config2 = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         )
 
         agent2 = StubAgent()
@@ -158,7 +158,7 @@ class TestPhaseControlEdgeCases:
     def test_signal_handling_during_skipped_analysis(self, temp_repo):
         """Test that signal handling works correctly when analysis is skipped."""
         config = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         )
 
         filesystem = InMemoryFilesystem()
@@ -199,11 +199,11 @@ class TestPhaseControlEdgeCases:
         filesystem2.write_text(temp_repo / "docker-compose.yml", "services:\n  web:\n    image: nginx\n")
 
         config_enabled = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": True}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": True}}}
         )
 
         config_disabled = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         )
 
         # Verify configs are independent
@@ -226,7 +226,7 @@ class TestPhaseControlEdgeCases:
     def test_deployer_handles_missing_analysis_gracefully(self, temp_repo):
         """Test that deployer prompts handle missing analysis files gracefully."""
         config = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         )
 
         filesystem = InMemoryFilesystem()
@@ -262,7 +262,7 @@ class TestPhaseControlEdgeCases:
         """Test that fault injection works independently of analysis phase."""
         config = Config.from_dict(
             {
-                "agent": {"provider": "codex", "model": "test-model"},
+                "agent": {"backend": "codex", "model": "test-model"},
                 "operator": {"phase": {"code_analysis": False}},
                 "fault_injection": {"enabled": True, "num_faults": 1},
             }
@@ -294,7 +294,7 @@ class TestPhaseControlEdgeCases:
         """Test that DSPy signatures handle empty analysis context."""
         config = Config.from_dict(
             {
-                "agent": {"provider": "codex", "model": "test-model"},
+                "agent": {"backend": "codex", "model": "test-model"},
                 "operator": {"phase": {"code_analysis": False}},
                 "dspy": {"use_optimized": True, "optimized_version": "v1"},
             }
@@ -321,7 +321,7 @@ class TestPhaseControlEdgeCases:
         """Test ADK runtime specific edge cases."""
         config = Config.from_dict(
             {
-                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "agent": {"backend": "gemini", "model": "gemini-1.5-pro"},
                 "operator": {"phase": {"code_analysis": False}},
             }
         )
@@ -352,7 +352,7 @@ class TestPhaseControlEdgeCases:
         """Test that LangGraph conditional edges route correctly."""
         config = Config.from_dict(
             {
-                "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+                "agent": {"backend": "gemini", "model": "gemini-1.5-pro"},
                 "operator": {"phase": {"code_analysis": False}},
             }
         )
@@ -372,7 +372,7 @@ class TestPhaseControlEdgeCases:
     def test_config_loaded_at_startup_not_changeable(self, temp_repo):
         """Test that config is loaded at startup and doesn't change during run."""
         config = Config.from_dict(
-            {"agent": {"provider": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
+            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         )
 
         filesystem = InMemoryFilesystem()

@@ -58,7 +58,7 @@ class TestWriteSdsConfig:
         """Writes correct TOML for [agent] + [operator] sections."""
         config = {
             "apps": ["app1", "app2"],
-            "agent": {"provider": "gemini", "model": "gemini-2.0-flash"},
+            "agent": {"backend": "gemini", "model": "gemini-2.0-flash"},
             "operator": {"monitoring_max_iters": 3},
         }
         exp_dir = tmp_path / "exp" / "myapp" / "test_exp"
@@ -72,7 +72,7 @@ class TestWriteSdsConfig:
         with open(sds_toml, "rb") as f:
             parsed = tomllib.load(f)
 
-        assert parsed["agent"]["provider"] == "gemini"
+        assert parsed["agent"]["backend"] == "gemini"
         assert parsed["agent"]["model"] == "gemini-2.0-flash"
         assert parsed["operator"]["monitoring_max_iters"] == 3
         assert "apps" not in parsed
@@ -114,7 +114,7 @@ class TestWriteSdsConfig:
         """Written file is loadable by load_config() and produces correct Config."""
         config = {
             "apps": ["app1"],
-            "agent": {"provider": "gemini", "model": "test-model"},
+            "agent": {"backend": "gemini", "model": "test-model"},
             "operator": {
                 "monitoring_max_iters": 3,
                 "phase": {"fix_summary_consolidation": False},
@@ -126,7 +126,7 @@ class TestWriteSdsConfig:
         _write_experiment_sds_config(exp_dir, config)
 
         loaded = load_config(str(exp_dir))
-        assert loaded.agent.provider == "gemini"
+        assert loaded.agent.backend == "gemini"
         assert loaded.operator.monitoring_max_iters == 3
         assert loaded.operator.phase.fix_summary_consolidation is False
 
@@ -137,19 +137,19 @@ class TestWriteSdsConfig:
 
         # Write an existing sds.toml
         existing = exp_dir / "sds.toml"
-        existing.write_text('[agent]\nprovider = "codex"\n')
+        existing.write_text('[agent]\nbackend = "codex"\n')
 
         # Overwrite with experiment config
         config = {
             "apps": ["app1"],
-            "agent": {"provider": "gemini"},
+            "agent": {"backend": "gemini"},
         }
         _write_experiment_sds_config(exp_dir, config)
 
         with open(existing, "rb") as f:
             parsed = tomllib.load(f)
 
-        assert parsed["agent"]["provider"] == "gemini"
+        assert parsed["agent"]["backend"] == "gemini"
         # Old content should be gone
         assert "codex" not in existing.read_text()
 

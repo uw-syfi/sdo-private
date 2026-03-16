@@ -4,10 +4,11 @@ import pytest
 
 from app_operator.config import AgentConfig, Config, RuntimeConfig
 from app_operator.pydantic_ai._models import build_model_str
+from libs.model_config import ModelConfig
 
 
 def _config(provider: str, model: str) -> Config:
-    return Config(agent=AgentConfig(provider=provider, model=model))
+    return Config(agent=AgentConfig(backend=provider, model_config=ModelConfig.from_string(model)))
 
 
 def test_openai_provider():
@@ -69,7 +70,7 @@ def test_no_model_raises():
     with pytest.raises(ValueError, match="agent.model must be set"):
         build_model_str(
             Config(
-                agent=AgentConfig(provider="openai", model=None),
+                agent=AgentConfig(backend="openai"),
                 runtime=RuntimeConfig(impl="pydantic_ai"),
             )
         )

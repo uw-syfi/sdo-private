@@ -7,6 +7,7 @@ import pytest
 
 from app_operator.commands.run import add_arguments, run_command
 from app_operator.config import AgentConfig, Config, OperatorConfig, RuntimeConfig
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -22,7 +23,7 @@ def mock_args():
 def mock_config():
     """Create a mock Config object."""
     return Config(
-        agent=AgentConfig(provider="codex", model="test-model"),
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
         operator=OperatorConfig(
             interval=30,
             monitoring_max_iters=5,
@@ -169,7 +170,7 @@ def test_run_command_passes_custom_config_path(mock_config):
 def test_run_command_runs_langgraph_operator(mock_args):
     """Test that run_command creates and runs LangGraphOperator."""
     langgraph_config = Config(
-        agent=AgentConfig(provider="gemini", model="gemini-1.5-pro"),
+        agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="gemini-1.5-pro")),
         operator=OperatorConfig(
             interval=30,
             monitoring_max_iters=5,
@@ -202,7 +203,7 @@ def test_run_command_runs_langgraph_operator(mock_args):
 def test_run_command_runs_adk_operator(mock_args):
     """Test that run_command creates and runs AdkOperator."""
     adk_config = Config(
-        agent=AgentConfig(provider="gemini", model="gemini-1.5-pro"),
+        agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="gemini-1.5-pro")),
         operator=OperatorConfig(
             interval=30,
             monitoring_max_iters=5,
@@ -238,7 +239,7 @@ def test_run_command_uses_config_intervals():
     args.directory = "/test/repo"
     args.config = None
     custom_config = Config(
-        agent=AgentConfig(provider="codex", model="test-model"),
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
         operator=OperatorConfig(
             interval=60,  # Custom interval
             monitoring_max_iters=10,  # Custom monitoring

@@ -13,9 +13,9 @@ def build_llm(config: Config) -> BaseChatModel:
     if model is None:
         raise ValueError("Model must be specified for langgraph agent")
 
-    logger.info(f"Using model: {config.agent.provider}/{model}")
+    logger.info(f"Using model: {config.agent.backend}/{model}")
     return create_chat_model(
-        provider=config.agent.provider,
+        provider=config.agent.backend,
         model=model,
         location=config.agent.location,
         thinking_budget=config.agent.thinking_budget,

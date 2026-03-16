@@ -5,6 +5,7 @@ import pytest
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config
 from app_operator.ui import OperatorUI
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -31,7 +32,9 @@ def app_operator_with_ui(repo_path, mock_agent, mock_ui):
         patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
         patch("app_operator.cli_agent.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
     ):
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui, config=config)
         yield (
             op,

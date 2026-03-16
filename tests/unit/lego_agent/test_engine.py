@@ -7,6 +7,7 @@ from app_operator.config import AgentConfig, Config, OperatorConfig
 from lego_agent.engine import LegoAgentEngine
 from lego_agent.io import UserIO
 from lego_agent.prompts import get_loader
+from libs.model_config import ModelConfig
 
 
 class MockIO(UserIO):
@@ -57,7 +58,7 @@ class MockIO(UserIO):
 @pytest.fixture
 def mock_config():
     return Config(
-        agent=AgentConfig(provider="gemini", model="gemini-1.5-pro"),
+        agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="gemini-1.5-pro")),
         operator=OperatorConfig(),
     )
 

@@ -53,8 +53,8 @@ class PydanticAIOperator(OperatorBase):
         else:
             self.config = config
 
-        if not self.config.agent.provider:
-            raise ValueError("agent.provider must be set for pydantic_ai runtime")
+        if not self.config.agent.backend:
+            raise ValueError("agent.backend must be set for pydantic_ai runtime")
         if not self.config.agent.model:
             raise ValueError("agent.model must be set for pydantic_ai runtime")
 

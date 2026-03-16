@@ -199,7 +199,7 @@ def create_agent(
     config = load_config(target_dir, config_path)
 
     if provider:
-        config.agent.provider = provider
+        config.agent.backend = provider
     if model:
         config.agent.model = model
 

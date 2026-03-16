@@ -15,6 +15,7 @@ from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import HealthVerdictResponse
 from app_operator.pydantic_ai.agents.health import HealthAgent
 from app_operator.trajectory import Phase
+from libs.model_config import ModelConfig
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -23,7 +24,7 @@ from app_operator.trajectory import Phase
 
 def _make_config():
     return Config(
-        agent=AgentConfig(provider="openai", model="gpt-4o"),
+        agent=AgentConfig(backend="openai", model_config=ModelConfig(provider="openai", model="gpt-4o")),
         deployment=DeploymentConfig(platform="docker", target="local"),
         runtime=RuntimeConfig(impl="pydantic_ai"),
     )

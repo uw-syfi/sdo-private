@@ -13,6 +13,7 @@ from app_operator.langgraph.nodes.monitor import HealthVerdictResponse, health_c
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder
+from libs.model_config import ModelConfig
 
 
 def _make_state(**overrides) -> OperatorState:
@@ -64,7 +65,7 @@ class TestAnalyzeCodeTemplates:
 
     def test_renders_system_and_user_templates(self):
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="m"))
+        config = Config(agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")))
         filesystem = InMemoryFilesystem()
         loader = Mock()
         loader.render.side_effect = lambda tmpl, **kw: f"rendered:{tmpl}"
@@ -82,7 +83,7 @@ class TestAnalyzeCodeTemplates:
 
     def test_system_template_passed_to_invoke(self):
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="m"))
+        config = Config(agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")))
         filesystem = InMemoryFilesystem()
 
         def render_side_effect(tmpl, **kw):
@@ -106,7 +107,7 @@ class TestAnalyzeCodeTemplates:
 
     def test_user_template_receives_repo_path(self):
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="m"))
+        config = Config(agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")))
         filesystem = InMemoryFilesystem()
 
         captured_kwargs: dict = {}
@@ -140,7 +141,7 @@ class TestGenerateScriptsTemplates:
     def test_renders_script_generator_system_template(self):
         repo_path = Path("/test/repo")
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -161,7 +162,7 @@ class TestGenerateScriptsTemplates:
     def test_system_template_receives_platform(self):
         repo_path = Path("/test/repo")
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="k8s"),
         )
         captured: dict = {}
@@ -188,7 +189,7 @@ class TestGenerateScriptsTemplates:
     def test_invoke_called_with_system_prompt_as_system_arg(self):
         repo_path = Path("/test/repo")
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -213,7 +214,7 @@ class TestGenerateScriptsTemplates:
         """create_generate_script_prompt must not receive system_prompt keyword argument."""
         repo_path = Path("/test/repo")
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -244,7 +245,7 @@ class TestFixErrorsTemplates:
 
     def test_renders_repair_agent_system_template(self):
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="m"))
+        config = Config(agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")))
         filesystem = InMemoryFilesystem()
         loader = Mock()
         loader.render.return_value = "repair-system"
@@ -271,7 +272,7 @@ class TestFixErrorsTemplates:
 
     def test_repair_system_prompt_passed_as_system_arg_to_invoke(self):
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="m"))
+        config = Config(agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")))
         filesystem = InMemoryFilesystem()
         loader = Mock()
         loader.render.return_value = "repair-system-content"
@@ -313,7 +314,7 @@ class TestHealthCheckTemplates:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -336,7 +337,7 @@ class TestHealthCheckTemplates:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -359,7 +360,7 @@ class TestHealthCheckTemplates:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="docker"),
         )
 
@@ -392,7 +393,7 @@ class TestHealthCheckTemplates:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="m"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="m")),
             deployment=DeploymentConfig(platform="k8s"),
         )
 

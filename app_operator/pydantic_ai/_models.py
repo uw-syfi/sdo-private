@@ -18,7 +18,7 @@ def build_model_str(config: Config) -> str:
     model = config.agent.model
     if not model:
         raise ValueError("agent.model must be set for pydantic_ai runtime")
-    return from_string(model, provider_hint=config.agent.provider).to_pydantic_ai_str()
+    return from_string(model, provider_hint=config.agent.backend).to_pydantic_ai_str()
 
 
 # Local fallbacks for models missing context_window in genai_prices.

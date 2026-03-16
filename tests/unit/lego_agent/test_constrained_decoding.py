@@ -5,12 +5,13 @@ import pytest
 
 from app_operator.config import AgentConfig, Config, OperatorConfig
 from lego_agent.engine import LegoAgentEngine
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
 def mock_config():
     return Config(
-        agent=AgentConfig(provider="gemini", model="gemini-1.5-pro"),
+        agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="gemini-1.5-pro")),
         operator=OperatorConfig(),
     )
 

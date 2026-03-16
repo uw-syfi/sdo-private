@@ -3,6 +3,7 @@ import os
 from google import genai  # type: ignore[reportAttributeAccessIssue]  # google namespace package
 
 from app_operator.config import Config
+from libs.model_config import normalize_provider
 
 
 def build_adk_model(config: Config) -> str:
@@ -13,7 +14,7 @@ def build_adk_model(config: Config) -> str:
     if not config.agent.model:
         raise ValueError("agent.model must be set for ADK runtime")
 
-    provider = config.agent.provider.lower()
+    provider = normalize_provider(config.agent.backend)
 
     # Only Gemini/Vertex providers are supported by ADK runtime
     if provider not in ("gemini", "vertex"):

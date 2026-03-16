@@ -4,7 +4,7 @@ import pytest
 
 from app_operator.config import Config, FeaturesConfig, UnrecognizedFieldError
 
-_AGENT = {"agent": {"provider": "codex", "model": "test-model"}}
+_AGENT = {"agent": {"backend": "codex", "model": "test-model"}}
 
 
 class TestFeaturesConfig:

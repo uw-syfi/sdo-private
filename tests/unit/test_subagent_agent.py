@@ -6,6 +6,7 @@ import pytest
 
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 from libs.agent_cli import call_subagent
+from libs.model_config import ModelConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -380,14 +381,14 @@ class TestSubagentRegistration:
     def test_subagent_valid_provider(self):
         from app_operator.config import AgentConfig
 
-        config = AgentConfig(provider="subagent")
-        assert config.provider == "subagent"
+        config = AgentConfig(backend="subagent")
+        assert config.backend == "subagent"
 
     def test_factory_creates_subagent(self):
         from app_operator.cli_agent.factory import create_agent_from_config
         from app_operator.config import AgentConfig, Config
 
-        config = Config(agent=AgentConfig(provider="subagent", model="test-model"))
+        config = Config(agent=AgentConfig(backend="subagent", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, SubagentCodingAgent)
 
@@ -395,7 +396,11 @@ class TestSubagentRegistration:
         from app_operator.cli_agent.factory import create_agent_from_config
         from app_operator.config import AgentConfig, Config
 
-        config = Config(agent=AgentConfig(provider="subagent", model="test-model", location="us-west1"))
+        config = Config(
+            agent=AgentConfig(
+                backend="subagent", model_config=ModelConfig.from_string("test-model", location="us-west1")
+            )
+        )
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, SubagentCodingAgent)
         assert agent.location == "us-west1"
@@ -406,7 +411,7 @@ class TestSubagentRegistration:
 
         dspy_cfg = DSPyConfig()
         config = Config(
-            agent=AgentConfig(provider="subagent", model="test-model"),
+            agent=AgentConfig(backend="subagent", model_config=ModelConfig.from_string("test-model")),
             dspy=dspy_cfg,
         )
         agent = create_agent_from_config("/tmp", config=config)

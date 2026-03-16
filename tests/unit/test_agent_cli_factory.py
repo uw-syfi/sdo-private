@@ -4,6 +4,7 @@ from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import AgentConfig, Config
 from libs.agent_cli.base import AGENT_REGISTRY, CodingAgent, register_provider
 from libs.agent_cli.cli_agent import CLICodingAgent
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -60,39 +61,49 @@ class TestCreateAgentFromConfig:
     """Tests for create_agent_from_config factory function."""
 
     def test_creates_claude_agent(self, tmp_path, mock_binaries):
-        config = Config(agent=AgentConfig(provider="claude", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="claude", model_config=ModelConfig(provider="anthropic", model="test-model"))
+        )
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"
 
     def test_creates_gemini_agent(self, tmp_path, mock_binaries):
-        config = Config(agent=AgentConfig(provider="gemini", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="test-model"))
+        )
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "GeminiCodingAgent"
 
     def test_model_override_takes_precedence(self, tmp_path, mock_binaries):
-        config = Config(agent=AgentConfig(provider="claude", model="original-model"))
+        config = Config(
+            agent=AgentConfig(backend="claude", model_config=ModelConfig(provider="anthropic", model="original-model"))
+        )
         agent = create_agent_from_config(str(tmp_path), model_override="override-model", config=config)
         assert agent.model == "override-model"
 
     def test_model_from_config_when_no_override(self, tmp_path, mock_binaries):
-        config = Config(agent=AgentConfig(provider="claude", model="config-model"))
+        config = Config(
+            agent=AgentConfig(backend="claude", model_config=ModelConfig(provider="anthropic", model="config-model"))
+        )
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.model == "config-model"
 
     def test_unknown_provider_falls_back_to_codex(self, tmp_path, mock_binaries):
         """Unregistered provider falls back to codex."""
         # Bypass AgentConfig validation to test factory fallback
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "CodexCodingAgent"
 
     def test_invalid_provider_raises_value_error(self):
         """AgentConfig validation rejects unknown provider names."""
-        with pytest.raises(ValueError, match="Invalid provider"):
-            AgentConfig(provider="nonexistent_provider_xyz")
+        with pytest.raises(ValueError, match="Invalid backend"):
+            AgentConfig(backend="nonexistent_provider_xyz")
 
     def test_provider_is_case_insensitive(self, tmp_path, mock_binaries):
         """Provider lookup lowercases the name."""
-        config = Config(agent=AgentConfig(provider="Claude", model="test-model"))
+        config = Config(agent=AgentConfig(backend="Claude", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config(str(tmp_path), config=config)
         assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"

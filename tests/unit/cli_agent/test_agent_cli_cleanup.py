@@ -18,6 +18,7 @@ import pytest
 from libs.agent_cli.claude import ClaudeCodeCodingAgent
 from libs.agent_cli.codex import CodexCodingAgent
 from libs.agent_cli.gemini import GeminiCodingAgent
+from libs.model_config import ModelConfig
 
 
 class MockProcess:
@@ -579,7 +580,8 @@ def test_factory_creates_all_agent_types(mock_which):
 
             for provider_name, expected_class in agents_to_test:
                 config = Config(
-                    agent=AgentConfig(provider=provider_name, model="test-model"), operator=OperatorConfig()
+                    agent=AgentConfig(backend=provider_name, model_config=ModelConfig.from_string("test-model")),
+                    operator=OperatorConfig(),
                 )
                 agent = create_agent_from_config("/tmp", config=config)
                 assert isinstance(agent, expected_class)
@@ -590,8 +592,8 @@ def test_factory_defaults_to_codex(mock_which):
     from app_operator.config import AgentConfig, Config, OperatorConfig
 
     # With the new validation, invalid providers should raise ValueError
-    with pytest.raises(ValueError, match="Invalid provider"):
+    with pytest.raises(ValueError, match="Invalid backend"):
         Config(
-            agent=AgentConfig(provider="unknown_provider"),
+            agent=AgentConfig(backend="unknown_provider"),
             operator=OperatorConfig(),
         )

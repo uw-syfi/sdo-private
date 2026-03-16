@@ -6,6 +6,7 @@ from app_operator.config import AgentConfig, Config
 from app_operator.filesystem import InMemoryFilesystem
 from app_operator.prompts import PromptLoader
 from app_operator.pydantic_ai._deps import OperatorDeps
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def deps(tmp_path):
         repo_path=repo,
         filesystem=InMemoryFilesystem(),
         loader=PromptLoader(),
-        config=Config(agent=AgentConfig(provider="openai", model="gpt-4o")),
+        config=Config(agent=AgentConfig(backend="openai", model_config=ModelConfig(provider="openai", model="gpt-4o"))),
     )
 
 
@@ -52,7 +53,7 @@ def test_should_shutdown_with_callback(tmp_path):
         repo_path=repo,
         filesystem=InMemoryFilesystem(),
         loader=PromptLoader(),
-        config=Config(agent=AgentConfig(provider="openai", model="gpt-4o")),
+        config=Config(agent=AgentConfig(backend="openai", model_config=ModelConfig(provider="openai", model="gpt-4o"))),
         check_shutdown=lambda: True,
     )
     assert deps.should_shutdown() is True

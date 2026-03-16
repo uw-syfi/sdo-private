@@ -255,14 +255,27 @@ class ModelConfig:
                 missing.append("location (set ModelConfig.location, GOOGLE_CLOUD_LOCATION, or VERTEX_LOCATION)")
 
         if missing:
-            raise OSError(
-                f"Missing required environment for provider {self.provider!r}: " + ", ".join(missing)
-            )
+            raise OSError(f"Missing required environment for provider {self.provider!r}: " + ", ".join(missing))
 
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions (re-exported from __init__)
 # ---------------------------------------------------------------------------
+
+
+def normalize_provider(alias: str) -> str:
+    """Map an SDS provider alias to its canonical family name.
+
+    Returns one of: "openai", "anthropic", "gemini", "vertex".
+    Raises ValueError for unresolvable aliases ("subagent", "hybrid").
+    """
+    a = alias.lower()
+    if a in _UNRESOLVABLE_ALIASES:
+        raise ValueError(f"Provider {alias!r} has no canonical family mapping.")
+    canonical = _ALIAS_TO_CANONICAL.get(a)
+    if canonical is None:
+        raise ValueError(f"Unknown provider alias {alias!r}. Known: {sorted(_ALIAS_TO_CANONICAL)}")
+    return canonical
 
 
 def from_provider_and_model(

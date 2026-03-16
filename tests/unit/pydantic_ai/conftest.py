@@ -4,12 +4,13 @@ import pytest
 
 from app_operator.config import AgentConfig, Config, DeploymentConfig, RuntimeConfig
 from app_operator.filesystem import InMemoryFilesystem
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
 def mock_config():
     return Config(
-        agent=AgentConfig(provider="openai", model="gpt-4o"),
+        agent=AgentConfig(backend="openai", model_config=ModelConfig(provider="openai", model="gpt-4o")),
         deployment=DeploymentConfig(platform="docker", target="local"),
         runtime=RuntimeConfig(impl="pydantic_ai"),
     )

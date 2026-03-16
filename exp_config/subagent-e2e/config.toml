@@ -4,7 +4,7 @@ inter_run_delay = 30
 max_retries = 3
 rate_limit_backoff = 60
 output_prefix = "subagent-e2e"
-provider = "subagent"
+backend = "subagent"
 model = "vertex_ai/gemini-2.5-pro"
 work_dir = "exp_config/subagent-e2e/workdir"
 

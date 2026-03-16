@@ -8,6 +8,7 @@ from app_operator.dspy_integration.config import (
     DSPyConfig,
     DSPyOptimizationConfig,
 )
+from libs.model_config import ModelConfig
 
 
 class TestConfigIntegration:
@@ -15,21 +16,23 @@ class TestConfigIntegration:
 
     def test_default_config_includes_dspy(self):
         """Test that default Config includes DSPy config."""
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         assert isinstance(config.dspy, DSPyConfig)
         assert config.dspy.use_optimized is False
         assert config.dspy.optimized_version == "latest"
 
     def test_from_dict_empty_dspy_section(self):
         """Test loading config with empty dspy section."""
-        config = Config.from_dict({"agent": {"provider": "codex", "model": "test-model"}, "dspy": {}})
+        config = Config.from_dict({"agent": {"backend": "codex", "model": "test-model"}, "dspy": {}})
         assert isinstance(config.dspy, DSPyConfig)
         assert config.dspy.use_optimized is False
 
     def test_from_dict_with_dspy_fields(self):
         """Test loading config with dspy fields."""
         data = {
-            "agent": {"provider": "codex", "model": "test-model"},
+            "agent": {"backend": "codex", "model": "test-model"},
             "dspy": {
                 "use_optimized": True,
                 "optimized_version": "v2",
@@ -48,7 +51,7 @@ class TestConfigIntegration:
     def test_from_dict_with_nested_optimization(self):
         """Test loading config with nested optimization section."""
         data = {
-            "agent": {"provider": "codex", "model": "test-model"},
+            "agent": {"backend": "codex", "model": "test-model"},
             "dspy": {
                 "optimization": {
                     "optimizer": "MIPROv2",
@@ -68,7 +71,7 @@ class TestConfigIntegration:
     def test_from_dict_with_nested_auto_rollback(self):
         """Test loading config with nested auto_rollback section."""
         data = {
-            "agent": {"provider": "codex", "model": "test-model"},
+            "agent": {"backend": "codex", "model": "test-model"},
             "dspy": {
                 "auto_rollback": {
                     "enabled": False,
@@ -86,7 +89,7 @@ class TestConfigIntegration:
     def test_from_dict_with_metric_weights(self):
         """Test loading config with custom metric weights."""
         data = {
-            "agent": {"provider": "codex", "model": "test-model"},
+            "agent": {"backend": "codex", "model": "test-model"},
             "dspy": {
                 "optimization": {
                     "metric_weights": {
@@ -107,7 +110,7 @@ class TestConfigIntegration:
     def test_from_dict_with_all_sections(self):
         """Test loading config with all sections including dspy."""
         data = {
-            "agent": {"provider": "claude", "model": "test-model"},
+            "agent": {"backend": "claude", "model": "test-model"},
             "operator": {"interval": 60},
             "deployment": {"platform": "docker"},
             "runtime": {"impl": "cli_agent"},
@@ -122,7 +125,7 @@ class TestConfigIntegration:
             },
         }
         config = Config.from_dict(data)
-        assert config.agent.provider == "claude"
+        assert config.agent.backend == "claude"
         assert config.operator.interval == 60
         assert config.deployment.platform == "docker"
         assert config.runtime.impl == "cli_agent"
@@ -205,7 +208,7 @@ class TestConfigIntegration:
         config = Config.from_dict(
             {
                 "agent": {
-                    "provider": "gemini",
+                    "backend": "gemini",
                     "model": "gemini-3-pro-preview",
                 },
                 "dspy": {
@@ -222,7 +225,7 @@ class TestConfigIntegration:
         config = Config.from_dict(
             {
                 "agent": {
-                    "provider": "claude",
+                    "backend": "claude",
                     "model": "claude-sonnet-4-5",
                 },
                 "dspy": {
@@ -238,7 +241,7 @@ class TestConfigIntegration:
         config = Config.from_dict(
             {
                 "agent": {
-                    "provider": "gemini",
+                    "backend": "gemini",
                     "model": "gemini-3-pro-preview",
                 },
                 "dspy": {
@@ -276,7 +279,7 @@ class TestConfigIntegration:
         config = Config.from_dict(
             {
                 "agent": {
-                    "provider": "gemini",
+                    "backend": "gemini",
                     "model": "gemini-3-pro-preview",
                 },
                 "dspy": {
@@ -296,7 +299,7 @@ class TestConfigIntegration:
         config = Config.from_dict(
             {
                 "agent": {
-                    "provider": "vertex",
+                    "backend": "vertex",
                     "model": "gemini-2.5-pro",
                 },
                 "dspy": {
@@ -312,7 +315,7 @@ class TestConfigIntegration:
         config = Config.from_dict(
             {
                 "agent": {
-                    "provider": "gemini",
+                    "backend": "gemini",
                     "model": "gemini-pro",
                 },
                 "dspy": {
