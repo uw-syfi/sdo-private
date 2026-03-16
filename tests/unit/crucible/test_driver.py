@@ -20,9 +20,11 @@ def _make_response(stage: str) -> MagicMock:
 class TestWaitForStage:
     def test_returns_stage_immediately(self):
         """First poll returns a ready stage — no sleep needed."""
-        with patch("sregym_agents.crucible.driver.requests.get", return_value=_make_response("diagnosis")), \
-                patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep, \
-                patch("sregym_agents.crucible.driver.time.time", side_effect=[0, 0]):
+        with (
+            patch("sregym_agents.crucible.driver.requests.get", return_value=_make_response("diagnosis")),
+            patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep,
+            patch("sregym_agents.crucible.driver.time.time", side_effect=[0, 0]),
+        ):
             stage = _wait_for_stage("http://localhost:8000")
         assert stage == "diagnosis"
         mock_sleep.assert_not_called()
@@ -36,10 +38,12 @@ class TestWaitForStage:
         ]
         # time.time calls: start, then one per loop iteration check
         times = [0, 0, 1, 2, 3]
-        with patch("sregym_agents.crucible.driver.requests.get", side_effect=responses), \
-                patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep, \
-                patch("sregym_agents.crucible.driver.time.time", side_effect=times), \
-                patch("sregym_agents.crucible.driver.random.uniform", return_value=0.0):
+        with (
+            patch("sregym_agents.crucible.driver.requests.get", side_effect=responses),
+            patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep,
+            patch("sregym_agents.crucible.driver.time.time", side_effect=times),
+            patch("sregym_agents.crucible.driver.random.uniform", return_value=0.0),
+        ):
             stage = _wait_for_stage("http://localhost:8000", timeout=300)
 
         assert stage == "mitigation"
@@ -52,9 +56,11 @@ class TestWaitForStage:
     def test_raises_timeout_when_stage_never_ready(self):
         """Raises TimeoutError if conductor never reaches a ready stage."""
         # time.time returns 0 then immediately 999 to trigger timeout
-        with patch("sregym_agents.crucible.driver.requests.get", return_value=_make_response("pending")), \
-                patch("sregym_agents.crucible.driver.time.sleep"), \
-                patch("sregym_agents.crucible.driver.time.time", side_effect=[0, 999]):
+        with (
+            patch("sregym_agents.crucible.driver.requests.get", return_value=_make_response("pending")),
+            patch("sregym_agents.crucible.driver.time.sleep"),
+            patch("sregym_agents.crucible.driver.time.time", side_effect=[0, 999]),
+        ):
             with pytest.raises(TimeoutError, match="300s"):
                 _wait_for_stage("http://localhost:8000", timeout=300)
 
@@ -65,10 +71,12 @@ class TestWaitForStage:
             _make_response("diagnosis"),
         ]
         times = [0, 0, 1, 2]
-        with patch("sregym_agents.crucible.driver.requests.get", side_effect=responses), \
-                patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep, \
-                patch("sregym_agents.crucible.driver.time.time", side_effect=times), \
-                patch("sregym_agents.crucible.driver.random.uniform", return_value=0.0):
+        with (
+            patch("sregym_agents.crucible.driver.requests.get", side_effect=responses),
+            patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep,
+            patch("sregym_agents.crucible.driver.time.time", side_effect=times),
+            patch("sregym_agents.crucible.driver.random.uniform", return_value=0.0),
+        ):
             stage = _wait_for_stage("http://localhost:8000", timeout=300)
 
         assert stage == "diagnosis"
@@ -78,13 +86,14 @@ class TestWaitForStage:
         """Backoff delay never exceeds 30 seconds regardless of iteration count."""
         # Simulate many non-ready responses; check that sleep never exceeds 30 + jitter
         n = 30
-        responses = [_make_response("pending")] * \
-            (n - 1) + [_make_response("diagnosis")]
+        responses = [_make_response("pending")] * (n - 1) + [_make_response("diagnosis")]
         times = [0] + list(range(n + 1))
-        with patch("sregym_agents.crucible.driver.requests.get", side_effect=responses), \
-                patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep, \
-                patch("sregym_agents.crucible.driver.time.time", side_effect=times), \
-                patch("sregym_agents.crucible.driver.random.uniform", return_value=0.0):
+        with (
+            patch("sregym_agents.crucible.driver.requests.get", side_effect=responses),
+            patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep,
+            patch("sregym_agents.crucible.driver.time.time", side_effect=times),
+            patch("sregym_agents.crucible.driver.random.uniform", return_value=0.0),
+        ):
             _wait_for_stage("http://localhost:8000", timeout=9999)
 
         for c in mock_sleep.call_args_list:
