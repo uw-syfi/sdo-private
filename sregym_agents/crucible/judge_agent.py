@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-from pydantic_ai import Agent
+    from pydantic_ai import Agent
+
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from libs.agent_mw import SoftLimitExtension, TrajectoryMiddleware, TurnLoggingMiddleware

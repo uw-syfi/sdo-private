@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from sregym_agents.crucible.orchestrator import (
     _add_usage,

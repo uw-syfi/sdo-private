@@ -12,9 +12,10 @@ import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import RunContext
+if TYPE_CHECKING:
+    from pydantic_ai import RunContext
 
 logger = logging.getLogger(__name__)
 

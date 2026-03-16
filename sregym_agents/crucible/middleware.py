@@ -11,6 +11,7 @@ from libs.pydantic_agent._middleware import AgentMiddleware
 
 logger = logging.getLogger(__name__)
 
+
 def _make_nudge_message(text: str) -> Any:
     """Wrap *text* as a pydantic-ai UserPromptPart ModelRequest."""
     from pydantic_ai.messages import ModelRequest, UserPromptPart

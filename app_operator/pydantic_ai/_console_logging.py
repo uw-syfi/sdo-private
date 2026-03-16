@@ -57,7 +57,7 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         self._recorder = recorder
 
     def _usage_prefix(self) -> str:
-        used = _fmt_k(self._agent.current_request_input_tokens)
+        used = _fmt_k(self._recorder.total_usage.input_tokens)
         limit = _fmt_k(self._context_window)
         return f"[{self._agent.agent_name} | {used}/{limit}]"
 

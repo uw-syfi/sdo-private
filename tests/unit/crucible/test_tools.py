@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import pytest
 

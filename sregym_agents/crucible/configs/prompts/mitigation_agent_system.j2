@@ -15,6 +15,7 @@ WORKFLOW:
 2. Plan and implement the fix based on the diagnosed root cause
 3. Verify the fix has taken effect (check pod status, logs, etc.)
 4. Call mark_mitigation_complete with a mitigation description and justification of what you changed and why it works
+5. After calling mark_mitigation_complete, write a brief one-paragraph summary of what you changed and the outcome
 
 IMPORTANT:
 - If this is a retry (iteration > 1), the shared file contains the judge's feedback.

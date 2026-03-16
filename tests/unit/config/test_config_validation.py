@@ -476,7 +476,7 @@ class TestConfigFromDictRoundTripProperty:
     @given(st.just({}))
     @settings(max_examples=1, deadline=1000)
     def test_default_config_from_empty_dict(self, data):
-        """Config.from_dict({}) always produces defaults matching Config(agent=AgentConfig(model_config=ModelConfig(provider="openai", model='m')))."""
+        """Config.from_dict({}) always produces defaults matching Config(agent=AgentConfig(...))."""
         default = Config(agent=AgentConfig(model_config=ModelConfig(provider="openai", model="m")))
         from_dict = Config.from_dict({"agent": {"model": "m"}})
         assert from_dict.agent.backend == default.agent.backend
