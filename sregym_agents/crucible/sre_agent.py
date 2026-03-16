@@ -146,10 +146,11 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             except UnexpectedModelBehavior as exc:
                 if self.deps.state.submitted:
                     logger.warning(f"Model returned unexpected output after submitting; treating as complete. ({exc})")
-                    usage["input_tokens"] += self.current_run_usage.request_tokens or 0
-                    usage["output_tokens"] += self.current_run_usage.response_tokens or 0
-                    break
-                raise
+                else:
+                    logger.warning(f"Model returned unexpected output without submitting; treating as unsubmitted. ({exc})")
+                usage["input_tokens"] += self.current_run_usage.request_tokens or 0
+                usage["output_tokens"] += self.current_run_usage.response_tokens or 0
+                break
             u = result.usage()
             input_tokens = u.request_tokens or 0
             output_tokens = u.response_tokens or 0

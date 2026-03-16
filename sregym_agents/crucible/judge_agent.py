@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from libs.agent_mw import TrajectoryMiddleware, TurnLoggingMiddleware
 from libs.pydantic_agent._base import BaseAgent
@@ -60,7 +61,16 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
             if message_history is not None:
                 kwargs["message_history"] = message_history
 
-            result = self._run(current_prompt, _run_ctx=run_ctx, **kwargs)
+            try:
+                result = self._run(current_prompt, _run_ctx=run_ctx, **kwargs)
+            except UnexpectedModelBehavior as exc:
+                if self.deps.state.submitted:
+                    logger.warning(f"Judge model returned unexpected output after submitting; treating as complete. ({exc})")
+                else:
+                    logger.warning(f"Judge model returned unexpected output without submitting; treating as unsubmitted. ({exc})")
+                usage["input_tokens"] += self.current_run_usage.request_tokens or 0
+                usage["output_tokens"] += self.current_run_usage.response_tokens or 0
+                break
             u = result.usage()
             usage["input_tokens"] += u.request_tokens or 0
             usage["output_tokens"] += u.response_tokens or 0
