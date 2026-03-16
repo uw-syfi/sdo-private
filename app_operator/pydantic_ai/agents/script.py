@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pydantic_ai import Agent, RunContext
+    from pydantic_ai import Agent
+
+from pydantic_ai import RunContext  # noqa: TC002 — pydantic-ai evaluates @agent.instructions annotations at runtime
 
 from app_operator.guardrails import ArtifactGuardrail
 from app_operator.logger import logger
