@@ -16,8 +16,8 @@ import pytest
 from sregym_agents.crucible.tools import (
     MUTATING_KUBECTL_VERBS,
     JudgeDeps,
-    SREDeps,
     SharedFile,
+    SREDeps,
     _check_mutating_kubectl,
     _run_bash_sync,
     _submit_to_benchmark,
