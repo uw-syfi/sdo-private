@@ -78,7 +78,8 @@ class TestWaitForStage:
         """Backoff delay never exceeds 30 seconds regardless of iteration count."""
         # Simulate many non-ready responses; check that sleep never exceeds 30 + jitter
         n = 30
-        responses = [_make_response("pending")] * (n - 1) + [_make_response("diagnosis")]
+        responses = [_make_response("pending")] * \
+            (n - 1) + [_make_response("diagnosis")]
         times = [0] + list(range(n + 1))
         with patch("sregym_agents.crucible.driver.requests.get", side_effect=responses), \
                 patch("sregym_agents.crucible.driver.time.sleep") as mock_sleep, \
