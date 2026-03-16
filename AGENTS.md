@@ -65,7 +65,8 @@ uv run -m lego_agent --no-tui --prompt "task"  # CLI mode
 
 ## Development Conventions
 
-- **Test-driven**: begin designing your work (feature, refactor, bug fix, etc.) by thinking about how to test it. Write testable code.
+- **Test-driven**: begin designing your work (feature, refactor, bug fix, etc.) by thinking about how to test it. Test suite is part of your plan.
+- **Red/Green TDD**: implement by first writing out your code's functional requirements as tests. Then implement.
 - **Python**: type hints, `autopep8` formatting, `ruff` linting, `pytest` tests
 - **Structured data**: use dataclasses instead of raw `dict` when a data shape is constructed in multiple places or consumed with field access — this prevents `KeyError` and missing-field bugs at the type level
 - **Config**: dataclasses with `__post_init__` validation (`TypeError`/`ValueError`)
