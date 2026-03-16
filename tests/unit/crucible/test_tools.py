@@ -448,7 +448,7 @@ class TestSubmitVerdict:
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
 
-        with patch("sregym_agents.crucible.tools.asyncio.run") as mock_run:
+        with patch("sregym_agents.crucible.tools._run_async") as mock_run:
             submit_verdict(ctx, False, "not good enough", "answer")
 
         mock_run.assert_not_called()
@@ -461,7 +461,7 @@ class TestSubmitVerdict:
         ctx = _make_judge_ctx(tmp_path)
 
         oracle = {"Diagnosis": {"success": True}}
-        with patch("sregym_agents.crucible.tools.asyncio.run", return_value=(True, "Benchmark accepted...", oracle)):
+        with patch("sregym_agents.crucible.tools._run_async", return_value=(True, "Benchmark accepted...", oracle)):
             result = submit_verdict(ctx, True, "great work", "answer")
 
         assert ctx.deps.state.submitted is True
@@ -473,7 +473,7 @@ class TestSubmitVerdict:
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
 
-        with patch("sregym_agents.crucible.tools.asyncio.run", side_effect=RuntimeError("connection refused")):
+        with patch("sregym_agents.crucible.tools._run_async", side_effect=RuntimeError("connection refused")):
             result = submit_verdict(ctx, True, "great", "answer")
 
         assert ctx.deps.state.submitted is True
@@ -484,7 +484,25 @@ class TestSubmitVerdict:
         ctx = _make_judge_ctx(tmp_path)
         ctx.deps.shared_file = tmp_path  # directory — open will fail
 
-        with patch("sregym_agents.crucible.tools.asyncio.run", return_value=(False, "rejected", None)):
+        with patch("sregym_agents.crucible.tools._run_async", return_value=(False, "rejected", None)):
             result = submit_verdict(ctx, False, "reason", "answer")
 
         assert "Error writing verdict" in result
+
+    def test_submit_verdict_from_running_loop(self, tmp_path: Path):
+        """Regression: submit_verdict must not raise RuntimeError when called from within asyncio.run()."""
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+
+        async def _run():
+            with patch(
+                "sregym_agents.crucible.tools._submit_to_benchmark",
+                new_callable=AsyncMock,
+                return_value=(True, "Benchmark accepted", {"Diagnosis": {"success": True}}),
+            ):
+                return submit_verdict(ctx, True, "great work", "answer")
+
+        result = asyncio.run(_run())
+        assert ctx.deps.state.verdict == "APPROVED"
+        assert "<benchmark_result>" in result
