@@ -13,6 +13,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from libs.agent_mw import SoftLimitExtension, TrajectoryMiddleware, TurnLoggingMiddleware
+from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
 from sregym_agents.crucible.middleware import LoopDetectionMiddleware, TimeoutMiddleware
@@ -29,15 +30,6 @@ from sregym_agents.crucible.tools import (
 logger = logging.getLogger(__name__)
 
 THINKING_BUDGET = 4096
-
-
-def _thinking_settings_for(model: str) -> dict:
-    """Return model_settings dict with thinking budget for supported model families."""
-    if "claude" in model or "anthropic" in model:
-        return {"anthropic_thinking": {"type": "enabled", "budget_tokens": THINKING_BUDGET}}
-    if "gemini" in model:
-        return {"gemini_thinking_config": {"thinking_budget": THINKING_BUDGET, "include_thoughts": True}}
-    return {}
 
 
 _CONTEXT_WINDOWS: dict[str, int] = {
@@ -113,7 +105,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             model,
             deps_type=SREDeps,
             output_type=str,
-            model_settings=_thinking_settings_for(model),
+            model_settings=thinking_settings(model, THINKING_BUDGET),
             tools=[
                 exec_bash,
                 read_file,
