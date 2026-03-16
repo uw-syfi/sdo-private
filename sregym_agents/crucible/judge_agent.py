@@ -78,12 +78,12 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
                     logger.warning(
                         f"Judge model returned unexpected output without submitting; treating as unsubmitted. ({exc})"
                     )
-                usage["input_tokens"] += self.current_run_usage.request_tokens or 0
-                usage["output_tokens"] += self.current_run_usage.response_tokens or 0
+                usage["input_tokens"] += self.current_run_usage.input_tokens or 0
+                usage["output_tokens"] += self.current_run_usage.output_tokens or 0
                 break
             u = result.usage()
-            usage["input_tokens"] += u.request_tokens or 0
-            usage["output_tokens"] += u.response_tokens or 0
+            usage["input_tokens"] += u.input_tokens or 0
+            usage["output_tokens"] += u.output_tokens or 0
 
             if self.deps.state.submitted:
                 break
