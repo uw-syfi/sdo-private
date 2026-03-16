@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from libs.agent_mw import TrajectoryMiddleware, TurnLoggingMiddleware
@@ -26,6 +27,18 @@ from sregym_agents.crucible.tools import (
 )
 
 logger = logging.getLogger(__name__)
+
+THINKING_BUDGET = 4096
+
+
+def _thinking_settings_for(model: str) -> dict:
+    """Return model_settings dict with thinking budget for supported model families."""
+    if "claude" in model or "anthropic" in model:
+        return {"anthropic_thinking": {"type": "enabled", "budget_tokens": THINKING_BUDGET}}
+    if "gemini" in model:
+        return {"gemini_thinking_config": {"thinking_budget": THINKING_BUDGET}}
+    return {}
+
 
 _CONTEXT_WINDOWS: dict[str, int] = {
     "claude": 200_000,
@@ -98,6 +111,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             model,
             deps_type=SREDeps,
             output_type=str,
+            model_settings=_thinking_settings_for(model),
             tools=[
                 exec_bash,
                 read_file,
@@ -127,7 +141,15 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             if message_history is not None:
                 kwargs["message_history"] = message_history
 
-            result = self._run(current_prompt, _run_ctx=run_ctx, **kwargs)
+            try:
+                result = self._run(current_prompt, _run_ctx=run_ctx, **kwargs)
+            except UnexpectedModelBehavior as exc:
+                if self.deps.state.submitted:
+                    logger.warning(f"Model returned unexpected output after submitting; treating as complete. ({exc})")
+                    usage["input_tokens"] += self.current_run_usage.request_tokens or 0
+                    usage["output_tokens"] += self.current_run_usage.response_tokens or 0
+                    break
+                raise
             u = result.usage()
             input_tokens = u.request_tokens or 0
             output_tokens = u.response_tokens or 0
@@ -165,4 +187,6 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             )
 
         output = result.output if result is not None else ""
+        if output:
+            logger.info(f"Agent summary: {output}")
         return output, usage
