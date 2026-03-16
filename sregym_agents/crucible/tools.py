@@ -12,10 +12,9 @@ import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from pydantic_ai import RunContext
+from pydantic_ai import RunContext  # noqa: TC002 — pydantic-ai evaluates annotations at runtime
 
 logger = logging.getLogger(__name__)
 
