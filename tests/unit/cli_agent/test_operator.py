@@ -6,6 +6,7 @@ import pytest
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config
 from app_operator.ui import OperatorUI
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -28,7 +29,9 @@ def app_operator(repo_path, mock_agent):
         patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
         patch("app_operator.cli_agent.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
     ):
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         op = AppOperator(str(repo_path), agent=mock_agent, config=config)
         yield (
             op,
@@ -162,7 +165,9 @@ def test_run_monitor_failure_marks_failed_status(repo_path, mock_agent):
         mock_deployer_cls.return_value.run.return_value = True
         mock_monitor_cls.return_value.run.side_effect = RuntimeError("monitor failed")
 
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui, config=config)
         with patch.object(op.recorder, "finalize") as mock_finalize:
             exit_code = op.run()

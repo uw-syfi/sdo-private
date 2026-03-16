@@ -7,23 +7,11 @@ from langchain_openai import ChatOpenAI
 from loguru import logger
 
 from lego_agent.config import Config
-
-
-def _normalize_provider(provider: str) -> str:
-    provider_lower = provider.lower()
-    if provider_lower in ("codex", "opencode", "openai"):
-        return "openai"
-    if provider_lower in ("claude", "claude-code", "anthropic"):
-        return "anthropic"
-    if provider_lower == "gemini":
-        return "gemini"
-    if provider_lower in ("vertex", "vertex-ai"):
-        return "vertex"
-    return provider_lower
+from libs.model_config import normalize_provider
 
 
 def build_llm(config: Config) -> BaseChatModel:
-    provider = _normalize_provider(config.agent.provider)
+    provider = normalize_provider(config.agent.backend)
     model = config.agent.model
     location = config.agent.location
     if model is None:
@@ -67,4 +55,4 @@ def build_llm(config: Config) -> BaseChatModel:
             vx_kwargs["include_thoughts"] = True
         return ChatGoogleGenerativeAI(**vx_kwargs)
 
-    raise ValueError(f"Unsupported langgraph provider: {config.agent.provider}")
+    raise ValueError(f"Unsupported langgraph provider: {config.agent.backend}")

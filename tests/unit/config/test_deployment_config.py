@@ -76,7 +76,7 @@ class TestDeploymentConfigValidation:
     def test_from_dict(self):
         """Config.from_dict should parse deployment section."""
         data = {
-            "agent": {"provider": "codex", "model": "test-model"},
+            "agent": {"backend": "codex", "model": "test-model"},
             "deployment": {"platform": "k8s", "target": "local"},
         }
         config = Config.from_dict(data)

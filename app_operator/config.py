@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 try:
     import tomllib
 except ImportError:
@@ -13,6 +15,7 @@ from app_operator.validation import (
     validate_range,
     validate_type,
 )
+from libs.model_config import ModelConfig, from_provider_and_model
 
 
 class UnrecognizedSectionError(ConfigurationError):
@@ -321,16 +324,15 @@ class FaultInjectionConfig:
 
 @dataclass
 class AgentConfig:
-    provider: str = "codex"
-    model: str | None = None
-    location: str | None = None
-    thinking_budget: int | None = None
+    backend: str = "codex"
     # Rate limiting and retry configuration
     max_retries: int = 3
     retry_base_delay: int = 5
     rate_limit_backoff: int = 60
+    step_limit: int | None = 1000  # hard limit; soft limit = max(0, step_limit - 5)
+    model_config: ModelConfig | None = None
 
-    VALID_PROVIDERS = {
+    VALID_BACKENDS = {
         "codex",
         "gemini",
         "claude",
@@ -346,26 +348,52 @@ class AgentConfig:
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
-        validate_field(self.provider, "provider", str)
+        validate_field(self.backend, "backend", str)
 
         # Case-insensitive check
-        if self.provider.lower() not in self.VALID_PROVIDERS:
+        if self.backend.lower() not in self.VALID_BACKENDS:
             raise ValueError(
-                f"Invalid provider: '{self.provider}'. Valid providers: {', '.join(sorted(self.VALID_PROVIDERS))}"
+                f"Invalid backend: '{self.backend}'. Valid backends: {', '.join(sorted(self.VALID_BACKENDS))}"
             )
-        # Normalize provider name
-        self.provider = self.provider.lower()
-
-        validate_field(self.model, "model", str, nullable=True)
-        validate_field(self.location, "location", str, nullable=True)
-
-        if self.thinking_budget is not None:
-            validate_field(self.thinking_budget, "thinking_budget", int, positive=True)
+        # Normalize backend name
+        self.backend = self.backend.lower()
 
         # Validate retry configuration
         validate_field(self.max_retries, "max_retries", int, non_negative=True)
         validate_field(self.retry_base_delay, "retry_base_delay", int, positive=True)
         validate_field(self.rate_limit_backoff, "rate_limit_backoff", int, positive=True)
+
+        if self.model_config is not None and not isinstance(self.model_config, ModelConfig):
+            raise TypeError(f"model_config must be a ModelConfig or None, got {type(self.model_config).__name__}")
+
+    @property
+    def model(self) -> str | None:
+        return self.model_config.model if self.model_config else None
+
+    @model.setter
+    def model(self, value: str | None) -> None:
+        """Rebuild model_config preserving location and thinking_budget."""
+        if value is None:
+            self.model_config = None
+            return
+        loc = self.model_config.location if self.model_config else None
+        tb = self.model_config.thinking_budget if self.model_config else None
+        _UNRESOLVABLE = {"subagent", "hybrid"}
+        if self.backend not in _UNRESOLVABLE:
+            try:
+                self.model_config = from_provider_and_model(self.backend, value, location=loc, thinking_budget=tb)
+            except ValueError:
+                pass
+        else:
+            self.model_config = ModelConfig.from_string(value, location=loc, thinking_budget=tb)
+
+    @property
+    def location(self) -> str | None:
+        return self.model_config.location if self.model_config else None
+
+    @property
+    def thinking_budget(self) -> int | None:
+        return self.model_config.thinking_budget if self.model_config else None
 
 
 # Canonical mapping from SDS provider name to the litellm model prefix.
@@ -389,31 +417,11 @@ def qualify_model_for_litellm(
 ) -> str:
     """Return a fully-qualified ``provider/model`` string for litellm.
 
-    Resolution order:
-    1. If *model* already contains a ``/``, return it unchanged.
-    2. If an SDS *provider* name is given, look it up in
-       ``PROVIDER_TO_LITELLM_PREFIX``.
-    3. Infer the prefix from well-known substrings in *model*.
-    4. Fall back to *model* as-is.
+    Delegates to ``ModelConfig.from_string`` for provider resolution.
     """
-    if "/" in model:
-        return model
+    from libs.model_config import from_string
 
-    if provider is not None:
-        prefix = PROVIDER_TO_LITELLM_PREFIX.get(provider)
-        if prefix is not None:
-            return f"{prefix}/{model}"
-
-    # Heuristic: infer provider from the model name itself.
-    lower = model.lower()
-    if "claude" in lower:
-        return f"anthropic/{model}"
-    if "gpt" in lower or "o1" in lower:
-        return f"openai/{model}"
-    if "gemini" in lower:
-        return f"gemini/{model}"
-
-    return model
+    return from_string(model, provider_hint=provider).to_litellm_str()
 
 
 @dataclass
@@ -557,10 +565,10 @@ class GEPAConfig:
 
         validate_field(self.reflection_provider, "reflection_provider", str)
         self.reflection_provider = self.reflection_provider.lower()
-        if self.reflection_provider not in AgentConfig.VALID_PROVIDERS:
+        if self.reflection_provider not in AgentConfig.VALID_BACKENDS:
             raise ValueError(
                 f"Invalid reflection_provider: '{self.reflection_provider}'. "
-                f"Valid providers: {', '.join(sorted(AgentConfig.VALID_PROVIDERS))}"
+                f"Valid backends: {', '.join(sorted(AgentConfig.VALID_BACKENDS))}"
             )
 
         validate_field(self.reflection_model, "reflection_model", str, nullable=True)
@@ -591,7 +599,7 @@ class Config:
         validate_dataclass_fields(section_data, section_name, config_class)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Config":
+    def from_dict(cls, data: dict) -> Config:
         # Derive recognized sections from Config's own dataclass fields
         recognized_sections = {f.name for f in fields(cls)}
         unrecognized_sections = set(data.keys()) - recognized_sections
@@ -603,7 +611,7 @@ class Config:
             )
 
         # Extract and validate section data
-        agent_data = data.get("agent", {})
+        agent_data = dict(data.get("agent", {}))
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
@@ -611,6 +619,12 @@ class Config:
         gepa_data = data.get("gepa", {})
         dspy_data = data.get("dspy", {})
         fault_injection_data = data.get("fault_injection", {})
+
+        # Pop model-related flat keys - these are not AgentConfig fields but are
+        # accepted in TOML for convenience and used to build model_config.
+        _raw_model = agent_data.pop("model", None)
+        _raw_location = agent_data.pop("location", None)
+        _raw_thinking_budget = agent_data.pop("thinking_budget", None)
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
@@ -622,8 +636,28 @@ class Config:
         cls._validate_dspy_fields(dspy_data)
         cls._validate_fields(fault_injection_data, "fault_injection", FaultInjectionConfig)
 
+        # Build model_config from flat keys
+        _raw_backend = agent_data.get("backend", "codex").lower()
+        _UNRESOLVABLE = {"subagent", "hybrid"}
+        _agent_model_config = None
+        if _raw_model:
+            if _raw_backend not in _UNRESOLVABLE:
+                try:
+                    _agent_model_config = from_provider_and_model(
+                        _raw_backend,
+                        _raw_model,
+                        location=_raw_location,
+                        thinking_budget=_raw_thinking_budget,
+                    )
+                except ValueError:
+                    pass
+            else:
+                _agent_model_config = ModelConfig.from_string(
+                    _raw_model, location=_raw_location, thinking_budget=_raw_thinking_budget
+                )
+
         # Create agent config first to access model info
-        agent_config = AgentConfig(**agent_data)
+        agent_config = AgentConfig(**agent_data, model_config=_agent_model_config)
 
         # Parse DSPy config and auto-populate runtime_model if not set
         dspy_config = cls._parse_dspy_config(dspy_data, agent_config)
@@ -712,10 +746,10 @@ class Config:
                 dspy_data["runtime_model"] = teacher_model
             elif agent_config.model:
                 # No teacher_model available; derive from agent config
-                provider = agent_config.provider
+                backend = agent_config.backend
                 model = agent_config.model
 
-                dspy_data["runtime_model"] = qualify_model_for_litellm(model, provider=provider)
+                dspy_data["runtime_model"] = qualify_model_for_litellm(model, provider=backend)
 
         # Create nested config objects
         optimization = DSPyOptimizationConfig(**optimization_data) if optimization_data else DSPyOptimizationConfig()

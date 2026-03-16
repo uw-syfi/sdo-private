@@ -12,11 +12,11 @@ def test_runtime_impl_langgraph_accepts_provider_and_model():
     config = Config.from_dict(
         {
             "runtime": {"impl": "langgraph"},
-            "agent": {"provider": "openai", "model": "gpt-4o-mini"},
+            "agent": {"backend": "openai", "model": "gpt-4o-mini"},
         }
     )
     assert config.runtime.impl == "langgraph"
-    assert config.agent.provider == "openai"
+    assert config.agent.backend == "openai"
     assert config.agent.model == "gpt-4o-mini"
 
 
@@ -24,7 +24,7 @@ def test_runtime_impl_adk_accepts_model():
     config = Config.from_dict(
         {
             "runtime": {"impl": "adk"},
-            "agent": {"provider": "gemini", "model": "gemini-2.0-flash"},
+            "agent": {"backend": "gemini", "model": "gemini-2.0-flash"},
         }
     )
     assert config.runtime.impl == "adk"
@@ -32,11 +32,11 @@ def test_runtime_impl_adk_accepts_model():
 
 def test_runtime_impl_adk_still_validates_provider():
     """Test that provider validation still happens for adk runtime."""
-    with pytest.raises(ValueError, match="Invalid provider"):
+    with pytest.raises(ValueError, match="Invalid backend"):
         Config.from_dict(
             {
                 "runtime": {"impl": "adk"},
-                "agent": {"provider": "invalid_provider", "model": "gemini-2.0-flash"},
+                "agent": {"backend": "invalid_provider", "model": "gemini-2.0-flash"},
             }
         )
 
@@ -48,7 +48,7 @@ def test_langgraph_operator_requires_model(tmp_path):
     config = Config.from_dict(
         {
             "runtime": {"impl": "langgraph"},
-            "agent": {"provider": "openai"},
+            "agent": {"backend": "openai"},
         }
     )
     with (
@@ -61,22 +61,22 @@ def test_langgraph_operator_requires_model(tmp_path):
 
 
 def test_langgraph_operator_requires_provider(tmp_path):
-    """LangGraphOperator.__init__ raises if agent.provider evaluates to falsy."""
+    """LangGraphOperator.__init__ raises if agent.backend evaluates to falsy."""
     fs = InMemoryFilesystem()
     fs.mkdir(tmp_path)
     config = Config.from_dict(
         {
             "runtime": {"impl": "langgraph"},
-            "agent": {"provider": "openai", "model": "gpt-4o-mini"},
+            "agent": {"backend": "openai", "model": "gpt-4o-mini"},
         }
     )
     # Manually blank out provider to simulate missing value after construction
-    config.agent.provider = ""
+    config.agent.backend = ""
     with (
         patch("app_operator.langgraph.operator.build_llm"),
         patch("app_operator.langgraph.operator.build_graph"),
         patch("app_operator.langgraph.operator.TrajectoryRecorder"),
-        pytest.raises(ValueError, match="agent.provider must be set for langgraph runtime"),
+        pytest.raises(ValueError, match="agent.backend must be set for langgraph runtime"),
     ):
         LangGraphOperator(repo_path=str(tmp_path), filesystem=fs, config=config)
 
@@ -88,7 +88,7 @@ def test_adk_operator_requires_model(tmp_path):
     config = Config.from_dict(
         {
             "runtime": {"impl": "adk"},
-            "agent": {"provider": "gemini", "model": "gemini-2.0-flash"},
+            "agent": {"backend": "gemini", "model": "gemini-2.0-flash"},
         }
     )
     # Manually blank out model to simulate missing value after construction

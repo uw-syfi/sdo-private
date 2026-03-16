@@ -10,6 +10,7 @@ from app_operator.langgraph.nodes.generator import generate_scripts
 from app_operator.langgraph.state import OperatorState
 from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder, Phase
+from libs.model_config import ModelConfig
 
 
 def _make_ctx(
@@ -43,7 +44,9 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         loader = Mock()
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
@@ -73,7 +76,9 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, config)
         ctx.invoke = Mock()
 
@@ -95,7 +100,9 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, config)
         ctx.invoke = Mock(return_value=AgentResult(text="", messages=[], structured=None))
 
@@ -119,7 +126,9 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, config)
         ctx.invoke = Mock(return_value=AgentResult(text="", messages=[], structured=None))
 
@@ -151,7 +160,9 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         loader = Mock()
         agent = Mock()
         recorder = Mock(spec=NullTrajectoryRecorder())
@@ -182,7 +193,9 @@ class TestGenerateScripts:
         )
 
         repo_path = Path("/test/repo")
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         config.deployment.platform = "kubernetes"
         ctx = _make_ctx(repo_path, config)
         ctx.invoke = Mock(return_value=AgentResult(text="", messages=[], structured=None))

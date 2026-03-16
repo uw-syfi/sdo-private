@@ -4,7 +4,7 @@ inter_run_delay = 30
 max_retries = 3
 rate_limit_backoff = 60
 output_prefix = "hybrid-e2e"
-provider = "hybrid"
+backend = "hybrid"
 model = "vertex_ai/gemini-2.5-pro"
 work_dir = "exp_config/hybrid-e2e/workdir"
 

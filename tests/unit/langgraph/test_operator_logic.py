@@ -6,12 +6,13 @@ from app_operator.config import AgentConfig, Config, DeploymentConfig, RuntimeCo
 from app_operator.exceptions import AgentError
 from app_operator.filesystem import InMemoryFilesystem
 from app_operator.langgraph.operator import LangGraphOperator
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
 def mock_config():
     return Config(
-        agent=AgentConfig(provider="opencode", model="gpt-4"),
+        agent=AgentConfig(backend="opencode", model_config=ModelConfig(provider="openai", model="gpt-4")),
         deployment=DeploymentConfig(platform="docker", target="local"),
         runtime=RuntimeConfig(impl="langgraph"),
     )

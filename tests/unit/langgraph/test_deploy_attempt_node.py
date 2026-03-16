@@ -9,6 +9,7 @@ from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.nodes.deployer import deploy_attempt
 from app_operator.langgraph.state import OperatorState
 from app_operator.trajectory import NullTrajectoryRecorder, Phase
+from libs.model_config import ModelConfig
 
 
 def _make_ctx(
@@ -45,7 +46,9 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         check_shutdown = Mock(return_value=False)
         recorder = Mock(spec=NullTrajectoryRecorder())
         recorder.start_phase = Mock()
@@ -72,7 +75,9 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config, check_shutdown=Mock(return_value=False))
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
@@ -95,7 +100,9 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config, check_shutdown=Mock(return_value=True))
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
@@ -118,7 +125,9 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config, check_shutdown=None)
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:
@@ -142,7 +151,9 @@ class TestDeployAttempt:
 
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         ctx = _make_ctx(repo_path, filesystem, config)
 
         with patch("app_operator.langgraph.nodes.deployer.run_script") as mock_run:

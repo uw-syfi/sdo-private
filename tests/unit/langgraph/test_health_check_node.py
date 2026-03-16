@@ -10,6 +10,7 @@ from app_operator.langgraph.context import NodeContext
 from app_operator.langgraph.nodes.monitor import HealthVerdictResponse, health_check
 from app_operator.langgraph.utils import AgentResult
 from app_operator.trajectory import NullTrajectoryRecorder
+from libs.model_config import ModelConfig
 
 
 def _make_state(**overrides):
@@ -54,7 +55,7 @@ class TestHealthCheckNode:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -91,7 +92,7 @@ class TestHealthCheckNode:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -126,7 +127,7 @@ class TestHealthCheckNode:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -155,7 +156,9 @@ class TestHealthCheckNode:
         state = _make_state(deploy_result={"success": False, "exit_code": 1})
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         loader = Mock()
         agent = Mock()
         ctx = _make_ctx(repo_path, filesystem, config, loader)
@@ -170,7 +173,9 @@ class TestHealthCheckNode:
         state = _make_state()
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
-        config = Config(agent=AgentConfig(provider="codex", model="test-model"))
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
         loader = Mock()
         agent = Mock()
         ctx = _make_ctx(repo_path, filesystem, config, loader, check_shutdown=Mock(return_value=True))
@@ -186,7 +191,7 @@ class TestHealthCheckNode:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -214,7 +219,7 @@ class TestHealthCheckNode:
         repo_path = Path("/test/repo")
         filesystem = InMemoryFilesystem()
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             deployment=DeploymentConfig(platform="docker"),
         )
         loader = Mock()
@@ -249,7 +254,7 @@ class TestHealthCheckNode:
         filesystem = InMemoryFilesystem()
         phase = OperatorPhaseConfig(fix_summary_consolidation=True)
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             deployment=DeploymentConfig(platform="docker"),
             operator=OperatorConfig(phase=phase),
         )
@@ -282,7 +287,7 @@ class TestHealthCheckNode:
         filesystem = InMemoryFilesystem()
         phase = OperatorPhaseConfig(fix_summary_consolidation=False)
         config = Config(
-            agent=AgentConfig(provider="codex", model="test-model"),
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
             deployment=DeploymentConfig(platform="docker"),
             operator=OperatorConfig(phase=phase),
         )

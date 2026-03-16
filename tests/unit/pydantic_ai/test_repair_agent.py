@@ -38,6 +38,7 @@ def _make_repair_agent(repo_path: Path, config):
 
     agent = RepairAgent(
         model="test",
+        model_settings=None,
         tools=[],
         deps=deps,
         recorder=recorder,

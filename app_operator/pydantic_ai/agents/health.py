@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext
+if TYPE_CHECKING:
+    from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.pydantic_ai._base_agent import OperatorAgent
@@ -17,29 +18,32 @@ from app_operator.trajectory import Phase
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pydantic_ai.settings import ModelSettings
+
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
 class HealthAgent(OperatorAgent):
     """Agent for health check and monitoring phases."""
 
-    agent_name = "Health Judge"
     # phase is not set at class level — it varies per call (DEPLOYMENT/MONITORING)
     # and is always passed explicitly to _run() in run_check().
 
     def __init__(
         self,
         model: str,
+        model_settings: ModelSettings | None,
         tools: list[Callable],
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
     ):
-        super().__init__(deps, recorder)
-        self._agent: Agent[OperatorDeps, HealthVerdictResponse] = Agent(
+        super().__init__(deps, recorder, agent_name="Health Judge")
+        self._agent: Agent[OperatorDeps, HealthVerdictResponse] = self._build_agent(
             model,
             deps_type=OperatorDeps,
             output_type=HealthVerdictResponse,
             tools=tools,
+            model_settings=model_settings,
         )
 
         @self._agent.instructions

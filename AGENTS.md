@@ -27,7 +27,7 @@ Full schema in `app_operator/config.py`. Invalid values raise `ValueError`/`Type
 
 ```toml
 [agent]
-provider = "gemini"  # gemini | codex | claude | claude-code | opencode | openai | anthropic
+backend = "gemini"  # gemini | codex | claude | claude-code | opencode | openai | anthropic
 model = "gemini-1.5-pro"
 
 [runtime]

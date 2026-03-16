@@ -184,7 +184,7 @@ def validate_dataclass_fields(
     if not section_data:
         return
 
-    recognized = {f.name for f in fields(config_class)}
+    recognized = {f.name for f in fields(config_class) if f.init}
     unrecognized = set(section_data.keys()) - recognized
 
     if unrecognized:

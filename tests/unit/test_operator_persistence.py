@@ -6,6 +6,7 @@ import pytest
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config, DeploymentConfig
 from app_operator.filesystem import InMemoryFilesystem
+from libs.model_config import ModelConfig
 from tests.fixtures.agents import StubAgent
 
 
@@ -25,7 +26,7 @@ def test_operator_persists_config(mock_trajectory):
     agent = StubAgent(model="test")
 
     config = Config(
-        agent=AgentConfig(provider="codex", model="test-model"),
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
         deployment=DeploymentConfig(platform="k8s", target="local"),
     )
 
@@ -52,7 +53,7 @@ def test_operator_does_not_overwrite_existing_config(mock_trajectory):
     agent = StubAgent(model="test")
 
     config = Config(
-        agent=AgentConfig(provider="codex", model="test-model"),
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
         deployment=DeploymentConfig(platform="k8s", target="local"),
     )
 

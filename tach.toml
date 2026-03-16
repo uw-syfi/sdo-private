@@ -10,6 +10,10 @@ ignore_type_checking_imports = true
 # --- Layer 0: libs (no internal deps) ---
 
 [[modules]]
+path = "libs.model_config"
+depends_on = []
+
+[[modules]]
 path = "libs.sds_core"
 depends_on = []
 
@@ -67,6 +71,7 @@ path = "app_operator.adk"
 depends_on = [
     "app_operator.prompts",
     "app_operator.trajectory",
+    "libs.model_config",
     "libs.sds_core",
 ]
 
@@ -112,5 +117,6 @@ depends_on = []
 [[modules]]
 path = "lego_agent"
 depends_on = [
+    "libs.model_config",
     "libs.sds_core",
 ]

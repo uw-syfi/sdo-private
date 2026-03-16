@@ -19,7 +19,7 @@ def test_deploy_loop_success_first_try(tmp_path):
     config = Config.from_dict(
         {
             "runtime": {"impl": "adk"},
-            "agent": {"model": "gemini-pro", "provider": "gemini"},
+            "agent": {"model": "gemini-pro", "backend": "gemini"},
             "deployment": {"platform": "docker"},
         }
     )
@@ -126,7 +126,7 @@ def test_deploy_loop_handles_failure(tmp_path):
     config = Config.from_dict(
         {
             "runtime": {"impl": "adk"},
-            "agent": {"model": "gemini-pro", "provider": "gemini"},
+            "agent": {"model": "gemini-pro", "backend": "gemini"},
         }
     )
 

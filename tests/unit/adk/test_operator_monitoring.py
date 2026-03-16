@@ -13,7 +13,7 @@ def test_monitoring_cycle_runs_n_times(tmp_path):
     config = Config.from_dict(
         {
             "runtime": {"impl": "adk"},
-            "agent": {"model": "gemini-pro", "provider": "gemini"},
+            "agent": {"model": "gemini-pro", "backend": "gemini"},
             "operator": {"monitoring_max_iters": 2, "interval": 1},
         }
     )

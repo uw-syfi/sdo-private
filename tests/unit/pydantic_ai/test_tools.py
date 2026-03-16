@@ -19,6 +19,7 @@ from app_operator.pydantic_ai.tools import (
     str_replace,
     write_file,
 )
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -31,7 +32,7 @@ def deps(tmp_path):
         repo_path=repo,
         filesystem=fs,
         loader=PromptLoader(),
-        config=Config(agent=AgentConfig(provider="openai", model="gpt-4o")),
+        config=Config(agent=AgentConfig(backend="openai", model_config=ModelConfig(provider="openai", model="gpt-4o"))),
     )
 
 

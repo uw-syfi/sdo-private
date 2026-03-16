@@ -453,7 +453,7 @@ def run_command(args: argparse.Namespace) -> int:
     provider_model = model_override
     try:
         app_config = load_app_config(str(base_dir))
-        agent_provider = provider_override or app_config.agent.provider
+        agent_provider = provider_override or app_config.agent.backend
         app_location = app_config.agent.location
         provider_model = model_override or app_config.agent.model
     except (OSError, KeyError, ValueError) as e:

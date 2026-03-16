@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext
+if TYPE_CHECKING:
+    from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.prompts import create_fix_prompt, prepare_error_context
@@ -17,6 +18,8 @@ from app_operator.trajectory import Phase
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pydantic_ai.settings import ModelSettings
+
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
     from app_operator.types import CommandResult
 
@@ -25,22 +28,23 @@ class RepairAgent(OperatorAgent):
     """Agent for error fixing phase."""
 
     phase = Phase.DEPLOYMENT
-    agent_name = "Error Fixer"
 
     def __init__(
         self,
         model: str,
+        model_settings: ModelSettings | None,
         tools: list[Callable],
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
         max_attempts: int,
     ):
-        super().__init__(deps, recorder)
-        self._agent: Agent[OperatorDeps, FixSummaryResponse] = Agent(
+        super().__init__(deps, recorder, agent_name="Error Fixer")
+        self._agent: Agent[OperatorDeps, FixSummaryResponse] = self._build_agent(
             model,
             deps_type=OperatorDeps,
             output_type=FixSummaryResponse,
             tools=tools,
+            model_settings=model_settings,
         )
         self.max_attempts = max_attempts
 

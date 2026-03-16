@@ -14,7 +14,7 @@ def test_adk_smoke_run(tmp_path):
     config = Config.from_dict(
         {
             "runtime": {"impl": "adk"},
-            "agent": {"model": "gemini-pro", "provider": "gemini"},
+            "agent": {"model": "gemini-pro", "backend": "gemini"},
             "operator": {"monitoring_max_iters": 1},
         }
     )

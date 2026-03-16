@@ -6,6 +6,7 @@ import pytest
 
 from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 from app_operator.cli_agent.rlm.environment import RLMContext, RLMEnvironment
+from libs.model_config import ModelConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -258,14 +259,14 @@ class TestHybridRegistration:
     def test_hybrid_valid_provider(self):
         from app_operator.config import AgentConfig
 
-        config = AgentConfig(provider="hybrid")
-        assert config.provider == "hybrid"
+        config = AgentConfig(backend="hybrid")
+        assert config.backend == "hybrid"
 
     def test_factory_creates_hybrid(self):
         from app_operator.cli_agent.factory import create_agent_from_config
         from app_operator.config import AgentConfig, Config
 
-        config = Config(agent=AgentConfig(provider="hybrid", model="test-model"))
+        config = Config(agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, HybridCodingAgent)
 
@@ -273,7 +274,9 @@ class TestHybridRegistration:
         from app_operator.cli_agent.factory import create_agent_from_config
         from app_operator.config import AgentConfig, Config
 
-        config = Config(agent=AgentConfig(provider="hybrid", model="test-model", location="us-west1"))
+        config = Config(
+            agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model", location="us-west1"))
+        )
         agent = create_agent_from_config("/tmp", config=config)
         assert agent.location == "us-west1"
 
@@ -283,7 +286,7 @@ class TestHybridRegistration:
 
         dspy_cfg = DSPyConfig()
         config = Config(
-            agent=AgentConfig(provider="hybrid", model="test-model"),
+            agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")),
             dspy=dspy_cfg,
         )
         agent = create_agent_from_config("/tmp", config=config)

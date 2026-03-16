@@ -17,7 +17,9 @@ resolution-markers = [
 [manifest]
 members = [
     "sds-agent-cli",
+    "sds-agent-mw",
     "sds-core",
+    "sds-model-config",
     "sds-operator",
     "sds-pydantic-agent",
 ]
@@ -5584,9 +5586,29 @@ requires-dist = [
 ]
 
 [[package]]
+name = "sds-agent-mw"
+version = "0.1.0"
+source = { editable = "libs/agent_mw" }
+dependencies = [
+    { name = "pydantic-ai" },
+    { name = "sds-pydantic-agent" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic-ai", specifier = ">=1.0.0" },
+    { name = "sds-pydantic-agent", editable = "libs/pydantic_agent" },
+]
+
+[[package]]
 name = "sds-core"
 version = "0.1.0"
 source = { editable = "libs/sds_core" }
+
+[[package]]
+name = "sds-model-config"
+version = "0.1.0"
+source = { editable = "libs/model_config" }
 
 [[package]]
 name = "sds-operator"
@@ -5680,10 +5702,14 @@ version = "0.1.0"
 source = { editable = "libs/pydantic_agent" }
 dependencies = [
     { name = "pydantic-ai" },
+    { name = "sds-model-config" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic-ai", specifier = ">=1.0.0" }]
+requires-dist = [
+    { name = "pydantic-ai", specifier = ">=1.0.0" },
+    { name = "sds-model-config", editable = "libs/model_config" },
+]
 
 [[package]]
 name = "secretstorage"

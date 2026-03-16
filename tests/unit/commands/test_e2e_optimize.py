@@ -43,7 +43,7 @@ def _fake_app_config(
 ):
     """Build a lightweight app config object for run_command tests."""
     return SimpleNamespace(
-        agent=SimpleNamespace(provider=provider, model=model, location=location),
+        agent=SimpleNamespace(backend=provider, model=model, location=location),
         dspy=SimpleNamespace(
             optimization=SimpleNamespace(
                 teacher_model="gemini-2.5-pro",

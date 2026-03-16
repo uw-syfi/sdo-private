@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext
+if TYPE_CHECKING:
+    from pydantic_ai import Agent, RunContext
 
 from app_operator.guardrails import ArtifactGuardrail
 from app_operator.logger import logger
@@ -17,6 +18,8 @@ from app_operator.trajectory import Phase
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pydantic_ai.settings import ModelSettings
+
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
 
 
@@ -24,22 +27,23 @@ class ScriptAgent(OperatorAgent):
     """Agent for script generation phase."""
 
     phase = Phase.SCRIPT_GENERATION
-    agent_name = "Script Generator"
 
     def __init__(
         self,
         model: str,
+        model_settings: ModelSettings | None,
         tools: list[Callable],
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
     ):
-        super().__init__(deps, recorder)
+        super().__init__(deps, recorder, agent_name="Script Generator")
         # output_type=str: return value is intentionally unused; real output is files written via tools.
-        self._agent: Agent[OperatorDeps, str] = Agent(
+        self._agent: Agent[OperatorDeps, str] = self._build_agent(
             model,
             deps_type=OperatorDeps,
             output_type=str,
             tools=tools,
+            model_settings=model_settings,
         )
 
         @self._agent.instructions

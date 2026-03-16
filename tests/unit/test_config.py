@@ -17,7 +17,7 @@ def fake_repo_root(tmp_path, monkeypatch):
     root_dir.mkdir()
     root_sds = root_dir / "sds.toml"
     root_sds.write_text("""[agent]
-provider = "gemini"
+backend = "gemini"
 model = "gemini-2.5-flash"
 """)
     fake_config_py = root_dir / "app_operator" / "config.py"
@@ -31,7 +31,7 @@ def test_load_config_valid_config(tmp_path):
     """Test loading a valid configuration file."""
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
-provider = "gemini"
+backend = "gemini"
 model = "gemini-1.5-pro"
 
 [operator]
@@ -41,7 +41,7 @@ deployment_max_iters = 3
 """)
 
     config = load_config(str(tmp_path))
-    assert config.agent.provider == "gemini"
+    assert config.agent.backend == "gemini"
     assert config.agent.model == "gemini-1.5-pro"
     assert config.operator.interval == 60
     assert config.operator.monitoring_max_iters == 10
@@ -65,7 +65,7 @@ def test_load_config_defaults(tmp_path, monkeypatch):
     config_file = tmp_path / "sds.toml"
     config_file.write_text('[runtime]\nimpl = "langgraph"\n')
     config = load_config(str(tmp_path))
-    assert config.agent.provider == "codex"
+    assert config.agent.backend == "codex"
     assert config.agent.model is None
     assert config.operator.interval == 30
     assert config.operator.monitoring_max_iters == 5
@@ -78,14 +78,14 @@ def test_load_config_partial_config(tmp_path, fake_repo_root):
     target_dir.mkdir()
     config_file = target_dir / "sds.toml"
     config_file.write_text("""[agent]
-provider = "claude"
+backend = "claude"
 
 [operator]
 interval = 45
 """)
 
     config = load_config(str(target_dir))
-    assert config.agent.provider == "claude"
+    assert config.agent.backend == "claude"
     assert config.agent.model == "gemini-2.5-flash"  # inherited from root sds.toml
     assert config.operator.interval == 45
     assert config.operator.monitoring_max_iters == 5  # default
@@ -96,7 +96,7 @@ def test_config_unrecognized_section(tmp_path):
     """Test that unrecognized top-level sections raise an error."""
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
-provider = "gemini"
+backend = "gemini"
 
 [operator]
 interval = 30
@@ -116,7 +116,7 @@ def test_config_multiple_unrecognized_sections(tmp_path):
     """Test that multiple unrecognized sections are all reported."""
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
-provider = "gemini"
+backend = "gemini"
 
 [operator]
 interval = 30
@@ -141,7 +141,7 @@ def test_config_unrecognized_field_in_agent(tmp_path):
     """Test that unrecognized fields in [agent] section raise an error."""
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
-provider = "gemini"
+backend = "gemini"
 unknown_field = "value"
 """)
 
@@ -173,7 +173,7 @@ def test_config_multiple_unrecognized_fields(tmp_path):
     """Test that multiple unrecognized fields are all reported."""
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
-provider = "gemini"
+backend = "gemini"
 unknown_field1 = "value1"
 unknown_field2 = "value2"
 """)
@@ -191,7 +191,7 @@ def test_config_unrecognized_section_and_field(tmp_path):
     """Test that both unrecognized section and field errors can occur."""
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
-provider = "gemini"
+backend = "gemini"
 unknown_field = "value"
 
 [unknown_section]
@@ -208,11 +208,11 @@ field = "value"
 def test_config_from_dict_valid():
     """Test Config.from_dict with valid data."""
     data = {
-        "agent": {"provider": "gemini", "model": "gemini-1.5-pro"},
+        "agent": {"backend": "gemini", "model": "gemini-1.5-pro"},
         "operator": {"interval": 60, "monitoring_max_iters": 10},
     }
     config = Config.from_dict(data)
-    assert config.agent.provider == "gemini"
+    assert config.agent.backend == "gemini"
     assert config.agent.model == "gemini-1.5-pro"
     assert config.operator.interval == 60
     assert config.operator.monitoring_max_iters == 10
@@ -220,7 +220,7 @@ def test_config_from_dict_valid():
 
 def test_config_from_dict_unrecognized_section():
     """Test Config.from_dict raises error for unrecognized section."""
-    data = {"agent": {"provider": "gemini"}, "operator": {"interval": 30}, "unknown": {"field": "value"}}
+    data = {"agent": {"backend": "gemini"}, "operator": {"interval": 30}, "unknown": {"field": "value"}}
     with pytest.raises(UnrecognizedSectionError) as exc_info:
         Config.from_dict(data)
     assert "unknown" in str(exc_info.value)
@@ -228,7 +228,7 @@ def test_config_from_dict_unrecognized_section():
 
 def test_config_from_dict_unrecognized_field_agent():
     """Test Config.from_dict raises error for unrecognized field in agent."""
-    data = {"agent": {"provider": "gemini", "unknown_field": "value"}, "operator": {"interval": 30}}
+    data = {"agent": {"backend": "gemini", "unknown_field": "value"}, "operator": {"interval": 30}}
     with pytest.raises(UnrecognizedFieldError) as exc_info:
         Config.from_dict(data)
     assert "unknown_field" in str(exc_info.value)
@@ -237,7 +237,7 @@ def test_config_from_dict_unrecognized_field_agent():
 
 def test_config_from_dict_unrecognized_field_operator():
     """Test Config.from_dict raises error for unrecognized field in operator."""
-    data = {"agent": {"provider": "gemini"}, "operator": {"interval": 30, "unknown_field": "value"}}
+    data = {"agent": {"backend": "gemini"}, "operator": {"interval": 30, "unknown_field": "value"}}
     with pytest.raises(UnrecognizedFieldError) as exc_info:
         Config.from_dict(data)
     assert "unknown_field" in str(exc_info.value)
@@ -255,7 +255,7 @@ def test_config_empty_sections(tmp_path, fake_repo_root):
 """)
 
     config = load_config(str(target_dir))
-    assert config.agent.provider == "gemini"  # inherited from root sds.toml
+    assert config.agent.backend == "gemini"  # inherited from root sds.toml
     assert config.operator.interval == 30  # default
 
 
@@ -263,12 +263,12 @@ def test_config_only_agent_section(tmp_path):
     """Test config with only agent section."""
     config_file = tmp_path / "sds.toml"
     config_file.write_text("""[agent]
-provider = "claude"
+backend = "claude"
 model = "claude-sonnet-4-5"
 """)
 
     config = load_config(str(tmp_path))
-    assert config.agent.provider == "claude"
+    assert config.agent.backend == "claude"
     assert config.operator.interval == 30  # default
 
 
@@ -282,7 +282,7 @@ interval = 90
 """)
 
     config = load_config(str(target_dir))
-    assert config.agent.provider == "gemini"  # inherited from root sds.toml
+    assert config.agent.backend == "gemini"  # inherited from root sds.toml
     assert config.operator.interval == 90
 
 
@@ -292,7 +292,7 @@ class TestCliAgentRequiresModel:
     def test_cli_agent_without_model_raises(self):
         data = {
             "runtime": {"impl": "cli_agent"},
-            "agent": {"provider": "gemini"},
+            "agent": {"backend": "gemini"},
         }
         with pytest.raises(ValueError, match="agent.model is required"):
             Config.from_dict(data)
@@ -300,7 +300,7 @@ class TestCliAgentRequiresModel:
     def test_cli_agent_with_model_ok(self):
         data = {
             "runtime": {"impl": "cli_agent"},
-            "agent": {"provider": "gemini", "model": "gemini-2.5-pro"},
+            "agent": {"backend": "gemini", "model": "gemini-2.5-pro"},
         }
         config = Config.from_dict(data)
         assert config.agent.model == "gemini-2.5-pro"
@@ -308,7 +308,7 @@ class TestCliAgentRequiresModel:
     def test_non_cli_agent_without_model_ok(self):
         data = {
             "runtime": {"impl": "langgraph"},
-            "agent": {"provider": "gemini"},
+            "agent": {"backend": "gemini"},
         }
         config = Config.from_dict(data)
         assert config.agent.model is None

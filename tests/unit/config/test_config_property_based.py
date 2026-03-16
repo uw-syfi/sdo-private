@@ -153,16 +153,16 @@ class TestAgentConfigProperties:
     @settings(max_examples=50, deadline=1000)
     def test_valid_provider_always_succeeds(self, provider):
         """Every provider in VALID_PROVIDERS always constructs successfully."""
-        config = AgentConfig(provider=provider)
-        assert config.provider == provider.lower()
+        config = AgentConfig(backend=provider)
+        assert config.backend == provider.lower()
 
     @given(provider=st.text(min_size=1, max_size=50))
     @settings(max_examples=50, deadline=1000)
     def test_invalid_provider_always_raises_value_error(self, provider):
         """Any string not in VALID_PROVIDERS always raises ValueError."""
         assume(provider.lower() not in VALID_PROVIDERS)
-        with pytest.raises(ValueError, match="Invalid provider"):
-            AgentConfig(provider=provider)
+        with pytest.raises(ValueError, match="Invalid backend"):
+            AgentConfig(backend=provider)
 
 
 # ---------------------------------------------------------------------------
