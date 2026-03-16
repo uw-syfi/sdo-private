@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext
+if TYPE_CHECKING:
+    from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.prompts import create_fix_prompt, prepare_error_context

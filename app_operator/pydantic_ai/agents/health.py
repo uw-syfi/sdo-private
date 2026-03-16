@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext
+if TYPE_CHECKING:
+    from pydantic_ai import Agent, RunContext
 
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.pydantic_ai._base_agent import OperatorAgent

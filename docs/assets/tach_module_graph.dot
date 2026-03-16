@@ -15,6 +15,7 @@ digraph tach_modules {
     "app_operator.langgraph" -> "app_operator.trajectory";
     "app_operator.adk" -> "app_operator.prompts";
     "app_operator.adk" -> "app_operator.trajectory";
+    "app_operator.adk" -> "libs.model_config";
     "app_operator.adk" -> "libs.sds_core";
     "app_operator.gepa" -> "app_operator.cli_agent";
     "app_operator.gepa" -> "app_operator.prompts";
@@ -22,5 +23,6 @@ digraph tach_modules {
     "app_operator.commands" -> "app_operator.dspy_integration";
     "app_operator.__main__" -> "app_operator.commands";
     "app_operator.__main__" -> "app_operator.langgraph";
+    "lego_agent" -> "libs.model_config";
     "lego_agent" -> "libs.sds_core";
 }

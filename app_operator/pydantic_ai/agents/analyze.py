@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext
+if TYPE_CHECKING:
+    from pydantic_ai import Agent, RunContext
 
 from app_operator.guardrails import ArtifactGuardrail
 from app_operator.logger import logger
