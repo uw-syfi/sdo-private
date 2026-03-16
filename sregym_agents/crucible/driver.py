@@ -9,6 +9,7 @@ import os
 import random
 import shutil
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -137,15 +138,16 @@ def main() -> None:
 
     exp_env = os.getenv("SREGYM_EXP_ENV", ".")
     shared_file = Path(exp_env) / "judged_session_state.md"
+    _run_uid = uuid.uuid4().hex[:8]
     # Write trajectory to logs_dir (bench/sregym/logs/…) when available, matching
     # the convention used by other sregym agents (claudecode, gemini_cli, codex).
     # Fall back to exp_env for local/standalone runs.
     if args.logs_dir:
         logs_dir = Path(args.logs_dir)
         logs_dir.mkdir(parents=True, exist_ok=True)
-        trajectory_path = logs_dir / f"trajectory_{problem_id}.jsonl"
+        trajectory_path = logs_dir / f"trajectory_{problem_id}_{_run_uid}.jsonl"
     else:
-        trajectory_path = Path(exp_env) / f"trajectory_{problem_id}.jsonl"
+        trajectory_path = Path(exp_env) / f"trajectory_{problem_id}_{_run_uid}.jsonl"
 
     lt_summarizer: CrucibleLTSummarizer | None = None
     lt_summary_file: Path | None = None

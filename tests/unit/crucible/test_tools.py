@@ -17,6 +17,7 @@ from sregym_agents.crucible.tools import (
     MUTATING_KUBECTL_VERBS,
     JudgeDeps,
     SREDeps,
+    SharedFile,
     _check_mutating_kubectl,
     _run_bash_sync,
     _submit_to_benchmark,
@@ -34,7 +35,7 @@ def _make_sre_ctx(tmp_path: Path, stage: str = "diagnosis") -> MagicMock:
     ctx = MagicMock()
     ctx.deps = SREDeps(
         namespace="ns",
-        shared_file=tmp_path / "shared.md",
+        shared_file=SharedFile(tmp_path / "shared.md"),
         iteration=1,
         stage=stage,
     )
@@ -45,12 +46,59 @@ def _make_judge_ctx(tmp_path: Path, stage: str = "diagnosis") -> MagicMock:
     ctx = MagicMock()
     ctx.deps = JudgeDeps(
         namespace="ns",
-        shared_file=tmp_path / "shared.md",
+        shared_file=SharedFile(tmp_path / "shared.md"),
         iteration=1,
         stage=stage,
         submit_mcp_url="http://localhost:9000/sse",
     )
     return ctx
+
+
+# ---------------------------------------------------------------------------
+# SharedFile
+# ---------------------------------------------------------------------------
+
+
+class TestSharedFile:
+    def test_init_creates_file_with_content(self, tmp_path: Path):
+        sf = SharedFile(tmp_path / "state.md")
+        sf.init("# header\n")
+        assert (tmp_path / "state.md").read_text() == "# header\n"
+
+    def test_init_skips_existing_file(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("original")
+        sf = SharedFile(p)
+        sf.init("new content")
+        assert p.read_text() == "original"
+
+    def test_append_writes_content(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("line1\n")
+        sf = SharedFile(p)
+        sf.append("line2\n")
+        assert p.read_text() == "line1\nline2\n"
+
+    def test_append_acquires_exclusive_lock(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("")
+        sf = SharedFile(p)
+        with patch("fcntl.flock") as mock_flock:
+            sf.append("text")
+        calls = [c.args[1] for c in mock_flock.call_args_list]
+        import fcntl as _fcntl
+        assert _fcntl.LOCK_EX in calls
+        assert _fcntl.LOCK_UN in calls
+
+    def test_read_returns_file_contents(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("hello world")
+        sf = SharedFile(p)
+        assert sf.read() == "hello world"
+
+    def test_str_returns_path_string(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        assert str(SharedFile(p)) == str(p)
 
 
 # ---------------------------------------------------------------------------
@@ -393,8 +441,8 @@ class TestMarkHypothesisComplete:
 
     def test_file_write_error_returns_error_string(self, tmp_path: Path):
         ctx = _make_sre_ctx(tmp_path)
-        # shared_file is a directory — open("a") will fail
-        ctx.deps.shared_file = tmp_path  # tmp_path is a directory
+        # shared_file points to a directory — open("a") will fail
+        ctx.deps.shared_file = SharedFile(tmp_path)
         result = mark_hypothesis_complete(ctx, "diagnosis", "justification")
         assert "Error" in result
         assert ctx.deps.state.submitted is False
@@ -431,7 +479,7 @@ class TestMarkMitigationComplete:
 
     def test_file_write_error_returns_error_string(self, tmp_path: Path):
         ctx = _make_sre_ctx(tmp_path, stage="mitigation")
-        ctx.deps.shared_file = tmp_path
+        ctx.deps.shared_file = SharedFile(tmp_path)
         result = mark_mitigation_complete(ctx, "mitigation", "justification")
         assert "Error" in result
         assert ctx.deps.state.submitted is False
@@ -482,7 +530,7 @@ class TestSubmitVerdict:
 
     def test_file_write_error_returns_error_string(self, tmp_path: Path):
         ctx = _make_judge_ctx(tmp_path)
-        ctx.deps.shared_file = tmp_path  # directory — open will fail
+        ctx.deps.shared_file = SharedFile(tmp_path)  # directory — open will fail
 
         with patch("sregym_agents.crucible.tools._run_async", return_value=(False, "rejected", None)):
             result = submit_verdict(ctx, False, "reason", "answer")
