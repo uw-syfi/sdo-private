@@ -37,9 +37,24 @@ Call `EnterPlanMode`. Propose a thorough plan covering:
 
 Let the user iterate freely. **Do not write any code until the user explicitly approves the plan.**
 
+Once the user approves, **before calling `ExitPlanMode`**:
+
+1. Call `TaskCreate` with a title like `Fix issue #<N>: <slug>` and a description that captures the full approved plan plus a checklist of remaining steps:
+   - [ ] Implement code changes (list specific files)
+   - [ ] Write tests (list test file/cases)
+   - [ ] Run tests and lint
+   - [ ] Commit (git-commit skill)
+   - [ ] Push and open MR
+   - [ ] Launch background CI monitor
+2. Then call `ExitPlanMode`.
+
+This ensures the workflow survives context compression — refer to the task throughout implementation.
+
 ### 4. Implement
 
-Exit plan mode and implement exactly what was approved:
+Call `TaskGet` to retrieve the approved plan and check off each step as you go (`TaskUpdate`).
+
+Implement exactly what was approved:
 
 - Make the code change
 - Write tests (follow CLAUDE.md test-driven guidance)
