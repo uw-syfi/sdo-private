@@ -100,7 +100,7 @@ def _run_stage_loop(
             iteration=iteration,
             shared_content=shared_content,
             shared_file=str(shared_file),
-            lt_summary_file=str(lt_summary_file) if lt_summary_file else None,
+            lt_summary_file=str(lt_summary_file) if lt_summary_file else "",
         )
         sre_agent = CrucibleSREAgent(model, sre_deps, trajectory_path=trajectory_path)
         _, sre_usage = sre_agent.run(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 if TYPE_CHECKING:
     from pathlib import Path
 
+from sregym_agents.crucible._prompts import _render
 from sregym_agents.crucible.orchestrator import (
     _add_usage,
     _build_usage_result,
@@ -191,3 +192,34 @@ class TestWaitForMitigationStage:
             patch("sregym_agents.crucible.orchestrator.time.time", side_effect=times),
         ):
             _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
+
+
+# ---------------------------------------------------------------------------
+# _render lt_summary_file handling
+# ---------------------------------------------------------------------------
+
+_BASE_KWARGS = {
+    "app_name": "app",
+    "namespace": "ns",
+    "descriptions": "",
+    "iteration": 1,
+    "shared_content": "",
+    "shared_file": "/shared.md",
+}
+
+
+class TestRenderLtSummaryFile:
+    @staticmethod
+    def _render_both(lt_summary_file: str) -> list[str]:
+        return [
+            _render(tmpl, **_BASE_KWARGS, lt_summary_file=lt_summary_file)
+            for tmpl in ("diagnosis_agent_user", "mitigation_agent_user")
+        ]
+
+    def test_empty_string_omits_summary_block(self):
+        for rendered in self._render_both(""):
+            assert "summary" not in rendered.lower()
+
+    def test_path_includes_summary_block_and_path(self):
+        for rendered in self._render_both("/path/to/summary.txt"):
+            assert "/path/to/summary.txt" in rendered
