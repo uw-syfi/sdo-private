@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-from libs.agent_mw import SoftLimitExtension, TrajectoryMiddleware, TurnLoggingMiddleware
+from libs.agent_mw import FixedPathProvider, SoftLimitExtension, TrajectoryMiddleware, TurnLoggingMiddleware
 from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
@@ -36,7 +36,7 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
     ) -> None:
         mw = [TurnLoggingMiddleware(), LoopDetectionMiddleware(), TimeoutMiddleware(), SoftLimitExtension(step_limit)]
         if trajectory_path is not None:
-            mw.insert(0, TrajectoryMiddleware(trajectory_path))
+            mw.insert(0, TrajectoryMiddleware(FixedPathProvider(trajectory_path)))
         super().__init__(
             deps,
             agent_name=f"judge-{deps.stage}",

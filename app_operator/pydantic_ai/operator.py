@@ -81,7 +81,6 @@ class PydanticAIOperator(OperatorBase):
 
         # Trajectory recorder (native pydantic-ai format)
         self.recorder = PydanticAITrajectoryRecorder(self.repo_path)
-        self.recorder.set_agent_name("PydanticAI")
 
         # Build agents
         self.analyze_agent = AnalyzeAgent(self.model_str, self.model_settings, self.tool_list, self.deps, self.recorder)
