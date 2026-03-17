@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
-
-from loguru import logger
 
 from libs.pydantic_agent import AgentMiddleware
 
@@ -52,9 +51,11 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         self,
         context_window: int | None,
         recorder: PydanticAITrajectoryRecorder,
+        logger: logging.Logger | None = None,
     ) -> None:
         self._context_window = context_window
         self._recorder = recorder
+        self._logger = logger or logging.getLogger(__name__)
 
     def _usage_prefix(self) -> str:
         used = _fmt_k(self._recorder.total_usage.input_tokens)
@@ -62,8 +63,8 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         return f"[{self._agent.agent_name} | {used}/{limit}]"
 
     def on_function_tool_call(self, event: Any) -> None:
-        logger.info(
-            "{} \u2192 {}({})",
+        self._logger.info(
+            "%s \u2192 %s(%s)",
             self._usage_prefix(),
             event.part.tool_name,
             _fmt_args(event.part.args),
@@ -76,15 +77,15 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         prefix = self._usage_prefix()
 
         if isinstance(result, RetryPromptPart):
-            logger.warning(
-                "{} \u2717 {}() failed: {}",
+            self._logger.warning(
+                "%s \u2717 %s() failed: %s",
                 prefix,
                 result.tool_name or "unknown",
                 result.model_response(),
             )
         elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
-            logger.warning(
-                "{} \u2717 {}() exited with code {}: {}",
+            self._logger.warning(
+                "%s \u2717 %s() exited with code %s: %s",
                 prefix,
                 result.tool_name,
                 result.content.get("exit_code", "?"),
@@ -95,9 +96,9 @@ class ConsoleLoggingMiddleware(AgentMiddleware):
         from pydantic_ai.messages import ThinkingPart
 
         if isinstance(event.part, ThinkingPart) and event.part.has_content():
-            logger.info("{} <thinking> {}", self._usage_prefix(), event.part.content)
+            self._logger.info("%s <thinking> %s", self._usage_prefix(), event.part.content)
 
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output
         text = str(output) if not isinstance(output, str) else output
-        logger.info("[{}] {}", self._agent.agent_name, text)
+        self._logger.info("[%s] %s", self._agent.agent_name, text)
