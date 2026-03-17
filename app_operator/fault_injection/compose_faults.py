@@ -280,7 +280,7 @@ class ComposeFaultInjector(FaultInjector):
         if fault.fault_id == "CORR-001":
             return [s for s in services if services[s].get("depends_on")]
 
-        if fault.fault_id in ("CORR-004",):
+        if fault.fault_id == "CORR-004":
             return list(services.keys()) if compose_data.get("networks") else []
 
         if fault.fault_id == "CORR-005":

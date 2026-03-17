@@ -56,7 +56,7 @@ class CandidatePool:
             for candidate in self.candidates
             if not any(self._is_dominated(candidate, other) for other in self.candidates if other is not candidate)
         ]
-        return frontier if frontier else list(self.candidates)
+        return frontier or list(self.candidates)
 
     def pareto_select(
         self,

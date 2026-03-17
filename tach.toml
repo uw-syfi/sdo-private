@@ -67,15 +67,6 @@ depends_on = [
 ]
 
 [[modules]]
-path = "app_operator.adk"
-depends_on = [
-    "app_operator.prompts",
-    "app_operator.trajectory",
-    "libs.model_config",
-    "libs.sds_core",
-]
-
-[[modules]]
 path = "app_operator.gepa"
 depends_on = [
     "app_operator.cli_agent",
