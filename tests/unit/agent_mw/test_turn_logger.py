@@ -34,13 +34,6 @@ def _make_agent(middleware=None, call_tools="all"):
     return ConcreteAgent()
 
 
-def _mock_event(tool_name: str, args: dict | None = None) -> MagicMock:
-    event = MagicMock()
-    event.part.tool_name = tool_name
-    event.part.args = args or {"message": "hello"}
-    return MagicMock()
-
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
