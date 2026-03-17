@@ -13,10 +13,6 @@ digraph tach_modules {
     "app_operator.cli_agent" -> "libs.agent_cli";
     "app_operator.langgraph" -> "app_operator.prompts";
     "app_operator.langgraph" -> "app_operator.trajectory";
-    "app_operator.adk" -> "app_operator.prompts";
-    "app_operator.adk" -> "app_operator.trajectory";
-    "app_operator.adk" -> "libs.model_config";
-    "app_operator.adk" -> "libs.sds_core";
     "app_operator.gepa" -> "app_operator.cli_agent";
     "app_operator.gepa" -> "app_operator.prompts";
     "app_operator.gepa" -> "app_operator.trajectory";
