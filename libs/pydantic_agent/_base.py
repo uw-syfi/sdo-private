@@ -102,11 +102,8 @@ class BaseAgent(Generic[DepsT]):
             m.before_run()
 
         async def _stream_handler(ctx: Any, events: Any) -> None:
-            ctx_baseline_tokens = ctx.usage.input_tokens or 0
             async for event in events:
                 self.current_run_usage = ctx.usage
-                if hasattr(events, "usage"):
-                    self.current_request_input_tokens = (events.usage().input_tokens or 0) - ctx_baseline_tokens
                 self._stream_event_chain(event)
 
         result = self._agent.run_sync(
@@ -116,6 +113,7 @@ class BaseAgent(Generic[DepsT]):
             event_stream_handler=_stream_handler,
             **kwargs,
         )
+        self.current_request_input_tokens = result.usage().input_tokens or 0
         for m in self._middleware:
             m.after_run(result, _run_ctx)
         return result
