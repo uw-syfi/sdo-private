@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import MagicMock
-
-from loguru import logger
 
 from app_operator.pydantic_ai._console_logging import (
     ConsoleLoggingMiddleware,
@@ -44,25 +43,31 @@ def _make_mw(
     context_window: int = 200_000,
     input_tokens: int | None = 0,
     agent_name: str = "Code Analyzer",
+    logger: logging.Logger | None = None,
 ) -> ConsoleLoggingMiddleware:
     """Create a ConsoleLoggingMiddleware with a fake agent attached."""
     mw = ConsoleLoggingMiddleware(
         context_window=context_window,
         recorder=_make_recorder(input_tokens),
+        logger=logger,
     )
     mw.on_attach(_FakeAgent(agent_name))  # type: ignore[arg-type]
     return mw
 
 
-def _capture_logs() -> tuple[list[str], Any]:
-    """Return (records, sink_id) — records is a mutable list populated by the sink."""
+def _capture_logs(logger_name: str) -> tuple[list[str], logging.Handler]:
+    """Return (records, handler) — records is a mutable list populated by the handler."""
     records: list[str] = []
 
-    def sink(message):
-        records.append(str(message))
+    class _Sink(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(self.format(record))
 
-    sink_id = logger.add(sink, format="{message}", level="DEBUG")
-    return records, sink_id
+    handler = _Sink()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.getLogger(logger_name).addHandler(handler)
+    logging.getLogger(logger_name).setLevel(logging.DEBUG)
+    return records, handler
 
 
 def _make_tool_call_event(tool_name: str, args: dict | str | None = None) -> Any:
@@ -136,9 +141,11 @@ def test_fmt_args_short_string_verbatim():
 # ConsoleLoggingMiddleware hook tests
 # ---------------------------------------------------------------------------
 
+_LOGGER_NAME = "app_operator.pydantic_ai._console_logging"
+
 
 def test_on_function_tool_call_logs_usage_prefix_and_tool():
-    records, sink_id = _capture_logs()
+    records, handler = _capture_logs(_LOGGER_NAME)
     try:
         mw = _make_mw(context_window=200_000, input_tokens=0)
         mw.on_function_tool_call(_make_tool_call_event("read_file", {"path": "/tmp/x"}))
@@ -147,23 +154,23 @@ def test_on_function_tool_call_logs_usage_prefix_and_tool():
         assert "0k/200k" in combined
         assert "read_file" in combined
     finally:
-        logger.remove(sink_id)
+        logging.getLogger(_LOGGER_NAME).removeHandler(handler)
 
 
 def test_on_function_tool_call_shows_updated_token_count():
-    records, sink_id = _capture_logs()
+    records, handler = _capture_logs(_LOGGER_NAME)
     try:
         mw = _make_mw(context_window=200_000, input_tokens=23_000)
         mw.on_function_tool_call(_make_tool_call_event("write_file"))
         assert any("23k/200k" in r for r in records)
     finally:
-        logger.remove(sink_id)
+        logging.getLogger(_LOGGER_NAME).removeHandler(handler)
 
 
 def test_on_part_end_logs_thinking_with_usage_prefix():
     from pydantic_ai.messages import ThinkingPart
 
-    records, sink_id = _capture_logs()
+    records, handler = _capture_logs(_LOGGER_NAME)
     try:
         mw = _make_mw(context_window=100_000, input_tokens=5_000)
         part = ThinkingPart(content="some thoughts")
@@ -175,11 +182,11 @@ def test_on_part_end_logs_thinking_with_usage_prefix():
         assert "<thinking>" in combined
         assert "some thoughts" in combined
     finally:
-        logger.remove(sink_id)
+        logging.getLogger(_LOGGER_NAME).removeHandler(handler)
 
 
 def test_after_run_logs_agent_name_and_output_no_token_prefix():
-    records, sink_id = _capture_logs()
+    records, handler = _capture_logs(_LOGGER_NAME)
     try:
         mw = _make_mw()
         mw.after_run(_FakeResult("Analysis complete."))
@@ -189,4 +196,4 @@ def test_after_run_logs_agent_name_and_output_no_token_prefix():
         # after_run does NOT include usage prefix
         assert "|" not in combined
     finally:
-        logger.remove(sink_id)
+        logging.getLogger(_LOGGER_NAME).removeHandler(handler)
