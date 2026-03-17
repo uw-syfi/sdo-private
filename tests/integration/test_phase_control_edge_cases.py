@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import pytest
 
@@ -314,39 +314,6 @@ class TestPhaseControlEdgeCases:
         # These empty values should not cause errors in DSPy signatures
         assert isinstance(analysis_summary, str)
         assert isinstance(issues_summary, str)
-
-    @pytest.mark.anyio
-    @pytest.mark.skip(reason="Requires Google GenAI API credentials")
-    async def test_adk_runtime_with_analysis_disabled(self, temp_repo):
-        """Test ADK runtime specific edge cases."""
-        config = Config.from_dict(
-            {
-                "agent": {"backend": "gemini", "model": "gemini-1.5-pro"},
-                "operator": {"phase": {"code_analysis": False}},
-            }
-        )
-
-        from app_operator.adk.operator import AdkOperator
-
-        filesystem = InMemoryFilesystem()
-        # Create repo path in filesystem
-        filesystem.mkdir(temp_repo, parents=True, exist_ok=True)
-        filesystem.write_text(temp_repo / "docker-compose.yml", "services:\n  web:\n    image: nginx\n")
-
-        operator = AdkOperator(repo_path=temp_repo, config=config, filesystem=filesystem)
-
-        # Mock all async methods
-        operator._run_analysis = AsyncMock()
-        operator._generate_scripts = AsyncMock()
-        operator._deploy_with_retries = AsyncMock(return_value=True)
-        operator._run_monitoring = AsyncMock()
-
-        result = await operator.run_async()
-
-        # Verify correct async flow
-        operator._run_analysis.assert_not_called()
-        operator._generate_scripts.assert_called_once()
-        assert result == 0
 
     def test_langgraph_conditional_edge_routing(self, temp_repo):
         """Test that LangGraph conditional edges route correctly."""

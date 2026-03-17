@@ -21,7 +21,7 @@ backend = "gemini"  # gemini | codex | claude | claude-code | opencode | openai 
 model = "gemini-1.5-pro"
 
 [runtime]
-impl = "cli_agent"  # cli_agent | langgraph | adk
+impl = "cli_agent"  # cli_agent | langgraph
 
 [operator.phase]  # optional — disable phases
 code_analysis = false          # default: true

@@ -56,7 +56,7 @@ provider = "gemini"   # gemini | claude | codex | openai | rlm
 model = "gemini-1.5-pro"
 
 [runtime]
-impl = "cli_agent"    # cli_agent (default) | langgraph | adk
+impl = "cli_agent"    # cli_agent (default) | langgraph
 ```
 
 Full schema in `app_operator/config.py`. Provider credentials, runtime tradeoffs, and all other fields are in `docs/architecture.md`.

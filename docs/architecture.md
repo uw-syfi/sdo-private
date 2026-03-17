@@ -11,7 +11,6 @@ libs/agent_cli/          provider abstraction (CodingAgent ABC, AGENT_REGISTRY)
      ├── app_operator/   sds_operator — deploy, monitor, optimize
      │     ├── cli_agent/    runtime: cli_agent (default)
      │     ├── langgraph/    runtime: langgraph
-     │     ├── adk/          runtime: adk
      │     ├── trajectory.py recording
      │     ├── dspy_integration/ offline optimization
      │     └── prompts/      Jinja2 + DSPy-optimized templates
@@ -39,7 +38,6 @@ Layer 5  __main__          entry points only
 Layer 4  commands/         CLI command orchestration
 Layer 3  cli_agent/        runtime implementations
          langgraph/
-         adk/
 Layer 2  dspy_integration/ prompt optimisation tools
          fault_injection/
          gepa/
@@ -107,7 +105,7 @@ Set credentials in `.env` at the project root.
 
 ---
 
-## The Three Runtimes
+## Runtimes
 
 The runtime controls how each agent call is orchestrated. It is orthogonal to the provider. Switching runtimes requires only changing `[runtime] impl` in `sds.toml`.
 
@@ -123,10 +121,6 @@ Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-
 - `gemini` → Gemini via LangChain
 
 Best for complex orchestration where you want explicit state management between steps.
-
-### `adk`
-
-Uses Google's Agent Development Kit. Requires `agent.model` (e.g., `gemini-2.0-flash`) and a `gemini` or `vertex` provider. Provides deterministic, sequential orchestration of agent tasks.
 
 ---
 

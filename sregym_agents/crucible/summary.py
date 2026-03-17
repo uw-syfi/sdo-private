@@ -56,7 +56,7 @@ Session log:
         prompt = f"""You are maintaining a long-term knowledge base of SRE incidents.
 
 Current Long-Term Summary:
-{prior_summary if prior_summary else "(Empty)"}
+{prior_summary or "(Empty)"}
 
 New Session Summary:
 {session_summary}

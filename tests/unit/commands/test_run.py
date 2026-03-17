@@ -196,39 +196,6 @@ def test_run_command_runs_langgraph_operator(mock_args):
 
 
 # ============================================================================
-# run_command Tests - adk Runtime
-# ============================================================================
-
-
-def test_run_command_runs_adk_operator(mock_args):
-    """Test that run_command creates and runs AdkOperator."""
-    adk_config = Config(
-        agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="gemini-1.5-pro")),
-        operator=OperatorConfig(
-            interval=30,
-            monitoring_max_iters=5,
-            deployment_max_iters=20,
-        ),
-        runtime=RuntimeConfig(impl="adk"),
-    )
-
-    mock_operator = MagicMock()
-    mock_operator.run.return_value = 0
-
-    with patch("app_operator.commands.run.load_config", return_value=adk_config):
-        with patch(
-            "app_operator.commands.run.create_operator",
-            return_value=mock_operator,
-        ) as mock_create:
-            exit_code = run_command(mock_args)
-
-    # Verify create_operator was called and returned expected result
-    mock_create.assert_called_once()
-    mock_operator.run.assert_called_once()
-    assert exit_code == 0
-
-
-# ============================================================================
 # run_command Tests - Configuration Values
 # ============================================================================
 
