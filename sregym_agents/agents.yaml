@@ -1,8 +1,4 @@
 agents:
-  - name: pydantic_agent
-    kickoff_command: uv run python -m sregym_agents.pydantic_agent.driver
-    kickoff_workdir: ../..
-    kickoff_env: null
   - name: crucible
     kickoff_command: uv run python -m sregym_agents.crucible.driver
     kickoff_workdir: ../..
