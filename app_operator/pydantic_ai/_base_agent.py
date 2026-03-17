@@ -6,13 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from app_operator.pydantic_ai._console_logging import ConsoleLoggingMiddleware
 from app_operator.pydantic_ai._models import build_model_str, get_context_window
-from app_operator.pydantic_ai._trajectory_middleware import TrajectoryMiddleware
-from libs.agent_mw import SoftLimitExtension
+from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder, RecorderPathProvider
+from libs.agent_mw import SoftLimitExtension, TrajectoryMiddleware
 from libs.pydantic_agent import AgentMiddleware, BaseAgent
 
 if TYPE_CHECKING:
     from app_operator.pydantic_ai._deps import OperatorDeps
-    from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
     from app_operator.trajectory import Phase
 
 __all__ = ["OperatorAgent"]
@@ -42,7 +41,8 @@ class OperatorAgent(BaseAgent["OperatorDeps"]):
         agent_name: str,
         middleware: list[AgentMiddleware] | None = None,
     ) -> None:
-        trajectory_mw = TrajectoryMiddleware(recorder)
+        self._recorder = recorder
+        trajectory_mw = TrajectoryMiddleware(RecorderPathProvider(recorder))
         model_str = build_model_str(deps.config)
         context_window = get_context_window(model_str)
         console_mw = ConsoleLoggingMiddleware(context_window=context_window, recorder=recorder)
@@ -71,4 +71,6 @@ class OperatorAgent(BaseAgent["OperatorDeps"]):
             raise ValueError("phase must be set (via class attr or argument)")
 
         _run_ctx = {"phase": resolved_phase, "agent_name": resolved_agent_name, "context": context}
-        return super()._run(prompt, _run_ctx=_run_ctx, **kwargs)
+        result = super()._run(prompt, _run_ctx=_run_ctx, **kwargs)
+        self._recorder.record_usage(result.usage())
+        return result

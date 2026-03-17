@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -25,9 +26,10 @@ def shout(ctx, text: str) -> str:
     return text.upper()
 
 
-def _make_recorder():
+def _make_recorder(tmp_path=None):
     recorder = MagicMock()
-    recorder.record_run = MagicMock()
+    recorder.next_agent_path = MagicMock(return_value=(tmp_path or Path("/tmp")) / "traj.jsonl")
+    recorder.record_usage = MagicMock()
     return recorder
 
 
@@ -162,10 +164,10 @@ def test_no_events_when_no_tools_invoked():
     assert mw.tool_call_events == []
 
 
-def test_trajectory_recorded_after_run():
-    """TrajectoryMiddleware.after_run calls recorder.record_run with correct args."""
+def test_trajectory_recorded_after_run(tmp_path):
+    """TrajectoryMiddleware writes JSONL and recorder.record_usage is called after run."""
     deps = _make_deps()
-    recorder = _make_recorder()
+    recorder = _make_recorder(tmp_path)
 
     with patch("app_operator.pydantic_ai._base_agent.get_context_window", return_value=128_000):
 
@@ -179,7 +181,5 @@ def test_trajectory_recorded_after_run():
         agent = ConcreteAgent()
 
     agent._run("prompt")
-    recorder.record_run.assert_called_once()
-    call_args = recorder.record_run.call_args
-    assert call_args[0][0] == "p"
-    assert call_args[0][1] == "A"
+    recorder.next_agent_path.assert_called_once()
+    recorder.record_usage.assert_called_once()

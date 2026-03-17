@@ -1,13 +1,17 @@
-"""Unit tests for TrajectoryMiddleware."""
+"""Unit tests for TrajectoryMiddleware, FixedPathProvider, and TrajectoryPathProvider."""
 
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-from libs.agent_mw import TrajectoryMiddleware
+from libs.agent_mw import FixedPathProvider, TrajectoryMiddleware
 from libs.pydantic_agent import BaseAgent
 
 # ---------------------------------------------------------------------------
@@ -34,13 +38,51 @@ def _make_agent(middleware=None, call_tools="all"):
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# FixedPathProvider tests
+# ---------------------------------------------------------------------------
+
+
+def test_fixed_path_provider_returns_same_path(tmp_path):
+    out = tmp_path / "traj.jsonl"
+    provider = FixedPathProvider(out)
+    assert provider.get_path("agent1", None) == out
+    assert provider.get_path("agent2", {"phase": "x"}) == out
+
+
+# ---------------------------------------------------------------------------
+# Custom TrajectoryPathProvider tests
+# ---------------------------------------------------------------------------
+
+
+def test_custom_path_provider_routes_by_agent(tmp_path):
+    """A custom provider can route different agents to different files."""
+
+    class PerAgentProvider:
+        def __init__(self, base: Path) -> None:
+            self._base = base
+
+        def get_path(self, agent_name: str, run_ctx: dict[str, Any] | None) -> Path:
+            return self._base / f"{agent_name}.jsonl"
+
+    provider = PerAgentProvider(tmp_path)
+    mw = TrajectoryMiddleware(provider)
+    agent = _make_agent(middleware=[mw], call_tools=[])
+    agent._run("hello")
+
+    out = tmp_path / "traj-agent.jsonl"
+    assert out.exists()
+    record = json.loads(out.read_text().strip())
+    assert record["agent_name"] == "traj-agent"
+
+
+# ---------------------------------------------------------------------------
+# TrajectoryMiddleware tests (using FixedPathProvider)
 # ---------------------------------------------------------------------------
 
 
 def test_after_run_appends_json_line(tmp_path):
     out = tmp_path / "traj.jsonl"
-    mw = TrajectoryMiddleware(out)
+    mw = TrajectoryMiddleware(FixedPathProvider(out))
     agent = _make_agent(middleware=[mw], call_tools=[])
     agent._run("hello")
 
@@ -58,7 +100,7 @@ def test_after_run_appends_json_line(tmp_path):
 
 def test_after_run_appends_multiple_lines(tmp_path):
     out = tmp_path / "traj.jsonl"
-    mw = TrajectoryMiddleware(out)
+    mw = TrajectoryMiddleware(FixedPathProvider(out))
     agent = _make_agent(middleware=[mw], call_tools=[])
     agent._run("first")
     agent._run("second")
@@ -72,7 +114,7 @@ def test_after_run_appends_multiple_lines(tmp_path):
 
 def test_run_ctx_included_in_record(tmp_path):
     out = tmp_path / "traj.jsonl"
-    mw = TrajectoryMiddleware(out)
+    mw = TrajectoryMiddleware(FixedPathProvider(out))
     agent = _make_agent(middleware=[mw], call_tools=[])
     ctx = {"stage": "diagnosis", "iteration": 1, "role": "sre"}
     agent._run("prompt", _run_ctx=ctx)
@@ -83,7 +125,7 @@ def test_run_ctx_included_in_record(tmp_path):
 
 def test_creates_parent_dirs(tmp_path):
     out = tmp_path / "nested" / "deep" / "traj.jsonl"
-    mw = TrajectoryMiddleware(out)
+    mw = TrajectoryMiddleware(FixedPathProvider(out))
     agent = _make_agent(middleware=[mw], call_tools=[])
     agent._run("hi")
     assert out.exists()
@@ -91,7 +133,7 @@ def test_creates_parent_dirs(tmp_path):
 
 def test_record_is_valid_json_per_line(tmp_path):
     out = tmp_path / "traj.jsonl"
-    mw = TrajectoryMiddleware(out)
+    mw = TrajectoryMiddleware(FixedPathProvider(out))
     agent = _make_agent(middleware=[mw])
     agent._run("hi")
 

@@ -99,3 +99,74 @@ jq '.metadata | {status, agent_name, start_time, end_time}' trajectory.json
 # Extract fix summaries (assistant messages in deployment phase)
 jq '.deployment[].messages[] | select(.role=="assistant") | .content[:200]' trajectory.json
 ```
+
+---
+
+## Pydantic AI: Session Directory Format
+
+The `pydantic_ai` operator writes one **JSONL file per agent run** inside a timestamped session directory:
+
+```
+.sds/trajectories/20250317-120000/
+    metadata.json              ← index; symlinked from .sds/trajectory.json
+    001_code_analysis_analyze_agent.jsonl
+    002_script_generation_script_agent.jsonl
+    003_deployment_health_agent.jsonl
+    004_deployment_repair_agent.jsonl
+    005_deployment_health_agent.jsonl
+    006_monitoring_health_agent.jsonl
+```
+
+### `metadata.json`
+
+```json
+{
+  "metadata": {
+    "repo_path": "string — absolute path to the repository",
+    "start_time": "string — YYYY-MM-DD HH:MM:SS",
+    "end_time": "string — YYYY-MM-DD HH:MM:SS (set at finalize)",
+    "status": "string — 'running' | 'completed' | 'failed' | 'interrupted'",
+    "token_usage": {
+      "input_tokens": "int",
+      "output_tokens": "int",
+      "requests": "int"
+    }
+  },
+  "phases": {
+    "code_analysis": ["001_code_analysis_analyze_agent.jsonl"],
+    "script_generation": ["002_script_generation_script_agent.jsonl"],
+    "deployment": [
+      "003_deployment_health_agent.jsonl",
+      "004_deployment_repair_agent.jsonl",
+      "005_deployment_health_agent.jsonl"
+    ],
+    "monitoring": ["006_monitoring_health_agent.jsonl"]
+  }
+}
+```
+
+`phases` maps each phase name to an ordered list of trajectory filenames (agent hand-offs visible via list length).
+
+### Per-run JSONL file
+
+Each `.jsonl` file contains **one JSON line** per agent run written by `TrajectoryMiddleware`:
+
+```json
+{"agent_name": "...", "timestamp": "...", "run_ctx": {"phase": "...", "agent_name": "...", "context": {...}}, "messages": [...], "usage": {"input_tokens": 0, "output_tokens": 0}}
+```
+
+### Useful jq queries (new format)
+
+```bash
+# Count deployment attempts
+jq '.phases.deployment | length' .sds/trajectory.json
+
+# Get status
+jq '.metadata | {status, start_time, end_time, token_usage}' .sds/trajectory.json
+
+# List all phases and run counts
+jq '.phases | to_entries[] | {phase: .key, runs: (.value | length)}' .sds/trajectory.json
+
+# Read messages from a specific run
+jq '.' .sds/trajectories/*/003_deployment_health_agent.jsonl
+```
