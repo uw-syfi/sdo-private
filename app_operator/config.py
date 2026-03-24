@@ -478,9 +478,15 @@ class OperatorConfig:
     deployment_max_iters: int = 20
     agent_fix_timeout: int = 1800
     deploy_timeout: int = 900
+<<<<<<< Updated upstream
     dynamic_observability_injection: bool = False
     agent_timeout: int = 900
     phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
+=======
+    agent_timeout: int = 300
+    dynamic_observability_injection: bool = False
+    remediation_max_retries: int = 3
+>>>>>>> Stashed changes
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
@@ -494,9 +500,15 @@ class OperatorConfig:
             "agent_fix_timeout",
             "deploy_timeout",
             "agent_timeout",
+            "remediation_max_retries",
         ]:
             value = getattr(self, field_name)
             validate_field(value, field_name, int, positive=True)
+
+        if not isinstance(self.dynamic_observability_injection, bool):
+            raise TypeError(
+                f"dynamic_observability_injection must be bool, got {type(self.dynamic_observability_injection).__name__}"
+            )
 
 
 @dataclass
