@@ -123,35 +123,30 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
   // 2. Process Logs
   useEffect(() => {
     if (logs.length === 0) return;
-    
+
     const lastLog = logs[logs.length - 1];
     const evt = lastLog.event;
-    
-    // Attempt to match node by name
-    if (evt.name) {
-        // We look for a node where data.label matches evt.name
-        const node = nodes.find(n => n.data.label === evt.name);
-        
-        if (node) {
-            addNodeLog(node.id, lastLog);
-            
-            if (evt.type === 'thinking') {
-                updateNodeStatus(node.id, 'active');
-                // Only update thought if it's a significant chunk or we throttle it
-                // For now, just append/replace
-                if (evt.text) updateNodeThought(node.id, evt.text);
-            } else if (evt.type === 'tool_start') {
-                updateNodeStatus(node.id, 'active');
-                updateNodeThought(node.id, `Using tool: ${evt.name || 'unknown'}`);
-            } else if (evt.type === 'tool_end') {
-                // Keep active? 
-            } else if (evt.type === 'execution_result') {
-                updateNodeStatus(node.id, 'done');
-            }
-        }
+
+    // Route to the currently active agent node, or the first pending one.
+    // The backend doesn't tag events with step IDs, so we use the active/pending
+    // node as a best-effort target.
+    const targetNode =
+      nodes.find(n => n.type === 'agent' && n.data.status === 'active') ||
+      nodes.find(n => n.type === 'agent' && n.data.status === 'pending');
+
+    if (targetNode) {
+      addNodeLog(targetNode.id, lastLog);
+
+      if (evt.type === 'thinking') {
+        updateNodeStatus(targetNode.id, 'active');
+        if (evt.text) updateNodeThought(targetNode.id, evt.text);
+      } else if (evt.type === 'tool_start') {
+        updateNodeStatus(targetNode.id, 'active');
+      } else if (evt.type === 'execution_result') {
+        updateNodeStatus(targetNode.id, (evt as any).exit_code === 0 ? 'done' : 'failed');
+      }
     }
     // We intentionally omit 'nodes' from dependency array to avoid infinite loop
-    // We only want to process when 'logs' actually changes (new log arrived)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logs, addNodeLog, updateNodeStatus, updateNodeThought]);
 
