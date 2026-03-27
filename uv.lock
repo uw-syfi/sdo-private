@@ -4768,6 +4768,9 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "loguru" },
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pydantic-ai" },
@@ -4799,6 +4802,7 @@ test = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "hypothesis" },
     { name = "pyright" },
 ]
 
@@ -4814,7 +4818,9 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.1.6" },
     { name = "langgraph", specifier = ">=1.0.5" },
     { name = "loguru", specifier = ">=0.7.2" },
+    { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.7.0" },
+    { name = "numpy", specifier = ">=2.2.6" },
     { name = "numpy", marker = "extra == 'plot'", specifier = ">=1.24.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pydantic-ai", specifier = ">=1.0.0" },
@@ -4836,7 +4842,10 @@ requires-dist = [
 provides-extras = ["plot", "test"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pyright", specifier = ">=1.1.408" }]
+dev = [
+    { name = "hypothesis", specifier = ">=6.151.4" },
+    { name = "pyright", specifier = ">=1.1.408" },
+]
 
 [[package]]
 name = "sds-pydantic-agent"

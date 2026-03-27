@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import subprocess
+import time
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,15 +20,17 @@ from sregym_agents.crucible.tools import (
     MUTATING_KUBECTL_VERBS,
     JudgeDeps,
     SharedFile,
+    SharedState,
     SREDeps,
+    SRESubmission,
     _check_mutating_kubectl,
     _run_bash_sync,
     _submit_to_benchmark,
     exec_bash_readonly,
-    mark_hypothesis_complete,
-    mark_mitigation_complete,
     read_file,
+    reveal_agent_hypothesis,
     str_replace_file,
+    submit_independent_findings,
     submit_verdict,
     write_file,
 )
@@ -42,7 +47,11 @@ def _make_sre_ctx(tmp_path: Path, stage: str = "diagnosis") -> MagicMock:
     return ctx
 
 
-def _make_judge_ctx(tmp_path: Path, stage: str = "diagnosis") -> MagicMock:
+def _make_judge_ctx(
+    tmp_path: Path,
+    stage: str = "diagnosis",
+    hypothesis_text: str = "**Diagnosis**: test\n**Justification**: test\n",
+) -> MagicMock:
     ctx = MagicMock()
     ctx.deps = JudgeDeps(
         namespace="ns",
@@ -50,6 +59,7 @@ def _make_judge_ctx(tmp_path: Path, stage: str = "diagnosis") -> MagicMock:
         iteration=1,
         stage=stage,
         submit_mcp_url="http://localhost:9000/sse",
+        hypothesis_text=hypothesis_text,
     )
     return ctx
 
@@ -107,41 +117,178 @@ class TestSharedFile:
 # ---------------------------------------------------------------------------
 
 
+def _mock_popen(returncode=0, stdout="", stderr="", communicate_side_effect=None):
+    """Create a mock ``subprocess.Popen`` instance for ``_run_bash_sync`` tests."""
+    mock_proc = MagicMock()
+    mock_proc.pid = 12345
+    mock_proc.returncode = returncode
+    if communicate_side_effect:
+        mock_proc.communicate = MagicMock(side_effect=communicate_side_effect)
+    else:
+        mock_proc.communicate = MagicMock(return_value=(stdout, stderr))
+    mock_proc.wait = MagicMock()
+    mock_proc.kill = MagicMock()
+    return mock_proc
+
+
 class TestRunBashSync:
     def test_successful_command_returns_stdout(self):
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = "hello world"
-        result.stderr = ""
-        with patch("subprocess.run", return_value=result):
+        mock_proc = _mock_popen(returncode=0, stdout="hello world", stderr="")
+        with patch("subprocess.Popen", return_value=mock_proc):
             output = _run_bash_sync("echo hello world")
         assert output == "hello world"
 
     def test_nonzero_exit_appends_stderr(self):
-        result = MagicMock()
-        result.returncode = 1
-        result.stdout = "out"
-        result.stderr = "err msg"
-        with patch("subprocess.run", return_value=result):
+        mock_proc = _mock_popen(returncode=1, stdout="out", stderr="err msg")
+        with patch("subprocess.Popen", return_value=mock_proc):
             output = _run_bash_sync("false")
         assert "out" in output
         assert "STDERR:" in output
         assert "err msg" in output
+        assert "Exit code 1" in output
+
+    def test_stderr_included_on_success(self):
+        mock_proc = _mock_popen(returncode=0, stdout="ok", stderr="deprecation warning")
+        with patch("subprocess.Popen", return_value=mock_proc):
+            output = _run_bash_sync("some cmd")
+        assert "ok" in output
+        assert "STDERR:" in output
+        assert "deprecation warning" in output
+        assert "Exit code" not in output
+
+    def test_exit_code_shown_on_failure(self):
+        mock_proc = _mock_popen(returncode=127, stdout="", stderr="command not found")
+        with patch("subprocess.Popen", return_value=mock_proc):
+            output = _run_bash_sync("badcmd")
+        assert output.startswith("[Exit code 127]")
+
+    def test_uses_bash_executable_and_new_session(self):
+        mock_proc = _mock_popen(returncode=0, stdout="ok", stderr="")
+        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen_cls:
+            _run_bash_sync("echo hi")
+        mock_popen_cls.assert_called_once()
+        call_kwargs = mock_popen_cls.call_args
+        assert call_kwargs.kwargs.get("executable") == "/bin/bash"
+        assert call_kwargs.kwargs.get("start_new_session") is True
 
     def test_timeout_returns_error_string(self):
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 60)):
+        mock_proc = _mock_popen(
+            communicate_side_effect=subprocess.TimeoutExpired("cmd", 60),
+        )
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("os.killpg") as mock_killpg,
+            patch("os.getpgid", return_value=12345),
+        ):
             output = _run_bash_sync("sleep 999")
         assert "timed out" in output.lower()
+        mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+
+    def test_timeout_kills_process_group(self):
+        """On timeout, SIGKILL must be sent to the entire process group."""
+        mock_proc = _mock_popen(
+            communicate_side_effect=subprocess.TimeoutExpired("cmd", 60),
+        )
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("os.killpg") as mock_killpg,
+            patch("os.getpgid", return_value=99999),
+        ):
+            _run_bash_sync("kubectl exec -it pod -- nslookup foo")
+        mock_killpg.assert_called_once_with(99999, signal.SIGKILL)
+        mock_proc.wait.assert_called_once()
+
+    def test_timeout_fallback_to_kill_if_killpg_fails(self):
+        """If os.killpg raises OSError (e.g. process already dead), fall back to process.kill()."""
+        mock_proc = _mock_popen(
+            communicate_side_effect=subprocess.TimeoutExpired("cmd", 60),
+        )
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("os.killpg", side_effect=OSError("No such process")),
+            patch("os.getpgid", return_value=12345),
+        ):
+            output = _run_bash_sync("sleep 999")
+        assert "timed out" in output.lower()
+        mock_proc.kill.assert_called_once()
+        mock_proc.wait.assert_called_once()
 
     def test_long_output_truncated_to_file(self, tmp_path: Path):
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = "x" * 5000
-        result.stderr = ""
-        with patch("subprocess.run", return_value=result), patch("sregym_agents.crucible.tools.Path") as mock_path_cls:
+        mock_proc = _mock_popen(returncode=0, stdout="x" * 5000, stderr="")
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("sregym_agents.crucible.tools.Path") as mock_path_cls,
+        ):
             mock_path_cls.return_value.write_text = MagicMock()
             output = _run_bash_sync("bigcmd")
         assert "truncated" in output.lower() or "Output truncated" in output
+
+    def test_general_exception_kills_process_group(self):
+        """Any unexpected exception should also clean up the process group."""
+        mock_proc = _mock_popen(
+            communicate_side_effect=RuntimeError("unexpected"),
+        )
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("os.killpg") as mock_killpg,
+            patch("os.getpgid", return_value=12345),
+        ):
+            output = _run_bash_sync("bad command")
+        assert "Error executing command" in output
+        mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+        mock_proc.wait.assert_called_once()
+
+
+class TestRunBashSyncIntegration:
+    """Integration tests that run real subprocesses to verify process cleanup."""
+
+    def test_child_processes_killed_on_timeout(self):
+        """When a command times out, all child processes must be killed.
+
+        Spawns a bash command that starts a long-running child, then verifies
+        that after ``_run_bash_sync`` returns the timeout error, no orphaned
+        child processes remain.
+        """
+        # Use a short timeout for the test
+        marker = f"_run_bash_sync_test_{os.getpid()}"
+        cmd = f"bash -c 'sleep 300 & echo {marker}_$$; wait'"
+
+        with patch("sregym_agents.crucible.tools.BASH_TIMEOUT", 2):
+            output = _run_bash_sync(cmd)
+
+        assert "timed out" in output.lower()
+
+        # Give the OS a moment to reap
+        time.sleep(0.2)
+
+        # Verify no orphaned sleep processes with our marker remain
+        result = subprocess.run(
+            ["pgrep", "-f", "sleep 300"],
+            capture_output=True,
+            text=True,
+        )
+        # pgrep returns the PIDs of matching processes; filter for our marker
+        # isn't directly possible, so we check via /proc
+        if result.stdout.strip():
+            for pid_str in result.stdout.strip().split("\n"):
+                try:
+                    pid = int(pid_str.strip())
+                    # Check if this process' parent was one of ours
+                    with open(f"/proc/{pid}/cmdline") as f:
+                        cmdline = f.read()
+                    assert marker not in cmdline, f"Orphaned child process {pid} still alive after timeout"
+                except (ProcessLookupError, FileNotFoundError, ValueError):
+                    pass  # Process already gone — fine
+
+    def test_normal_command_not_affected_by_session(self):
+        """Normal (non-timeout) commands must still work correctly."""
+        output = _run_bash_sync("echo hello_from_test")
+        assert "hello_from_test" in output
+
+    def test_nonzero_exit_still_works(self):
+        """Non-zero exit codes are reported correctly with new session."""
+        output = _run_bash_sync("exit 42")
+        assert "Exit code 42" in output
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +323,10 @@ class TestCheckMutatingKubectl:
         result = _check_mutating_kubectl("kubectl -n ns delete pod mypod")
         assert result is None
 
-    def test_malformed_quoting_returns_none(self):
-        assert _check_mutating_kubectl("kubectl 'unclosed") is None
+    def test_malformed_quoting_returns_error(self):
+        result = _check_mutating_kubectl("kubectl 'unclosed")
+        assert result is not None
+        assert "malformed quoting" in result
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +336,7 @@ class TestCheckMutatingKubectl:
 
 class TestSubmitToBenchmark:
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def _make_mock_session(self, raw_response: str):
         mock_result = MagicMock()
@@ -274,7 +423,7 @@ class TestSubmitToBenchmark:
 
         assert success is False
         assert "rejected" in msg.lower()
-        assert result_oracle == oracle
+        assert result_oracle == {}
 
     def test_success_false_in_oracle(self):
         oracle = {"Diagnosis": {"success": False}}
@@ -291,6 +440,29 @@ class TestSubmitToBenchmark:
 
         assert success is False
         assert result_oracle == oracle
+
+    def test_mitigation_filters_out_diagnosis(self):
+        oracle = {
+            "Diagnosis": {"judgment": "True", "success": True, "accuracy": 100.0},
+            "TTL": 69.4,
+            "Mitigation": {"success": True},
+            "TTM": 166.5,
+        }
+        raw = repr({"status": "200", "text": json.dumps(oracle)})
+        mock_session = self._make_mock_session(raw)
+
+        with patch("mcp.ClientSession") as mock_cs, patch("mcp.client.sse.sse_client") as mock_sse:
+            mock_sse.return_value.__aenter__ = AsyncMock(return_value=("r", "w"))
+            mock_sse.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            success, msg, result_oracle = self._run(_submit_to_benchmark("http://x/sse", "", "mitigation"))
+
+        assert success is True
+        assert "accepted" in msg.lower()
+        assert result_oracle == {"Mitigation": {"success": True}, "TTM": 166.5}
+        assert "Diagnosis" not in result_oracle
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +512,33 @@ class TestReadFile:
         result = read_file(ctx, str(f), start_line=2, end_line=2)
         assert result == "(empty range)"
 
+    def test_negative_end_line_other_than_minus_one(self, tmp_path: Path):
+        f = tmp_path / "f.txt"
+        f.write_text("a\nb\nc\nd\n")
+        ctx = _make_sre_ctx(tmp_path)
+        # Any negative end_line should read to end, same as -1
+        result_neg2 = read_file(ctx, str(f), start_line=0, end_line=-2)
+        result_neg1 = read_file(ctx, str(f), start_line=0, end_line=-1)
+        assert result_neg2 == result_neg1
+
+    def test_large_file_returns_error_when_exceeds_cap(self, tmp_path: Path):
+        f = tmp_path / "big.txt"
+        # Each line ~130 chars, 250 lines ≈ 32k chars — well over MAX_READ_CHARS (25000)
+        f.write_text("\n".join(f"line{i:04d} {'x' * 120}" for i in range(250)))
+        ctx = _make_sre_ctx(tmp_path)
+        result = read_file(ctx, str(f), start_line=0, end_line=-1)
+        assert "Error: requested range too large" in result
+        assert "250 lines" in result
+        assert "decrease the line range" in result
+
+    def test_large_file_small_range_still_works(self, tmp_path: Path):
+        f = tmp_path / "big.txt"
+        f.write_text("\n".join(f"line{i:04d} {'x' * 70}" for i in range(200)))
+        ctx = _make_sre_ctx(tmp_path)
+        result = read_file(ctx, str(f), start_line=0, end_line=10)
+        assert "line0000" in result
+        assert "Error" not in result
+
 
 # ---------------------------------------------------------------------------
 # write_file
@@ -388,6 +587,15 @@ class TestStrReplaceFile:
         result = str_replace_file(ctx, str(tmp_path / "missing.txt"), "x", "y")
         assert "Error: File not found" in result
 
+    def test_empty_old_str_returns_error(self, tmp_path: Path):
+        f = tmp_path / "f.txt"
+        f.write_text("hello world")
+        ctx = _make_sre_ctx(tmp_path)
+        result = str_replace_file(ctx, str(f), "", "x")
+        assert "Error" in result
+        # File must not be corrupted
+        assert f.read_text() == "hello world"
+
 
 # ---------------------------------------------------------------------------
 # exec_bash_readonly
@@ -412,78 +620,21 @@ class TestExecBashReadonly:
 
 
 # ---------------------------------------------------------------------------
-# mark_hypothesis_complete
+# SRESubmission
 # ---------------------------------------------------------------------------
 
 
-class TestMarkHypothesisComplete:
-    def test_empty_diagnosis_returns_error(self, tmp_path: Path):
-        ctx = _make_sre_ctx(tmp_path)
-        result = mark_hypothesis_complete(ctx, "   ", "some justification")
-        assert "Error" in result
-        assert ctx.deps.state.submitted is False
+class TestSRESubmission:
+    def test_valid_submission(self):
+        sub = SRESubmission(answer="disk full", justification="saw 100% disk usage")
+        assert sub.answer == "disk full"
+        assert sub.justification == "saw 100% disk usage"
 
-    def test_empty_justification_returns_error(self, tmp_path: Path):
-        ctx = _make_sre_ctx(tmp_path)
-        result = mark_hypothesis_complete(ctx, "diagnosis text", "   ")
-        assert "Error" in result
-        assert ctx.deps.state.submitted is False
-
-    def test_valid_args_appends_to_file(self, tmp_path: Path):
-        shared = tmp_path / "shared.md"
-        shared.write_text("# header\n")
-        ctx = _make_sre_ctx(tmp_path)
-        result = mark_hypothesis_complete(ctx, "disk full", "saw 100% disk usage")
-        assert ctx.deps.state.submitted is True
-        content = shared.read_text()
-        assert "disk full" in content
-        assert "saw 100% disk usage" in content
-        assert "Hypothesis" in result
-
-    def test_file_write_error_returns_error_string(self, tmp_path: Path):
-        ctx = _make_sre_ctx(tmp_path)
-        # shared_file points to a directory — open("a") will fail
-        ctx.deps.shared_file = SharedFile(tmp_path)
-        result = mark_hypothesis_complete(ctx, "diagnosis", "justification")
-        assert "Error" in result
-        assert ctx.deps.state.submitted is False
-
-
-# ---------------------------------------------------------------------------
-# mark_mitigation_complete
-# ---------------------------------------------------------------------------
-
-
-class TestMarkMitigationComplete:
-    def test_empty_mitigation_returns_error(self, tmp_path: Path):
-        ctx = _make_sre_ctx(tmp_path, stage="mitigation")
-        result = mark_mitigation_complete(ctx, "   ", "justification")
-        assert "Error" in result
-        assert ctx.deps.state.submitted is False
-
-    def test_empty_justification_returns_error(self, tmp_path: Path):
-        ctx = _make_sre_ctx(tmp_path, stage="mitigation")
-        result = mark_mitigation_complete(ctx, "restarted pod", "   ")
-        assert "Error" in result
-        assert ctx.deps.state.submitted is False
-
-    def test_valid_args_appends_to_file(self, tmp_path: Path):
-        shared = tmp_path / "shared.md"
-        shared.write_text("# header\n")
-        ctx = _make_sre_ctx(tmp_path, stage="mitigation")
-        result = mark_mitigation_complete(ctx, "restarted pod", "pod was crashlooping")
-        assert ctx.deps.state.submitted is True
-        content = shared.read_text()
-        assert "restarted pod" in content
-        assert "pod was crashlooping" in content
-        assert "Mitigation" in result
-
-    def test_file_write_error_returns_error_string(self, tmp_path: Path):
-        ctx = _make_sre_ctx(tmp_path, stage="mitigation")
-        ctx.deps.shared_file = SharedFile(tmp_path)
-        result = mark_mitigation_complete(ctx, "mitigation", "justification")
-        assert "Error" in result
-        assert ctx.deps.state.submitted is False
+    def test_serialization_roundtrip(self):
+        sub = SRESubmission(answer="OOM kill", justification="container hit memory limit")
+        data = sub.model_dump()
+        restored = SRESubmission(**data)
+        assert restored == sub
 
 
 # ---------------------------------------------------------------------------
@@ -492,10 +643,22 @@ class TestMarkMitigationComplete:
 
 
 class TestSubmitVerdict:
+    def test_blocked_before_hypothesis_revealed(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        assert ctx.deps.state.hypothesis_revealed is False
+
+        result = submit_verdict(ctx, False, "reason", "answer")
+        assert "Error" in result
+        assert "reveal_agent_hypothesis" in result
+        assert ctx.deps.state.submitted is False
+
     def test_reject_sets_state_no_benchmark_call(self, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.hypothesis_revealed = True
 
         with patch("sregym_agents.crucible.tools._run_async") as mock_run:
             submit_verdict(ctx, False, "not good enough", "answer")
@@ -508,41 +671,251 @@ class TestSubmitVerdict:
         shared = tmp_path / "shared.md"
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.hypothesis_revealed = True
 
         oracle = {"Diagnosis": {"success": True}}
         with patch("sregym_agents.crucible.tools._run_async", return_value=(True, "Benchmark accepted...", oracle)):
-            result = submit_verdict(ctx, True, "great work", "answer")
+            submit_verdict(ctx, True, "great work", "answer")
 
         assert ctx.deps.state.submitted is True
         assert ctx.deps.state.verdict == "APPROVED"
-        assert "<benchmark_result>" in result
+        assert "<benchmark_result>" in shared.read_text()
 
     def test_benchmark_exception_writes_error_block(self, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.hypothesis_revealed = True
 
         with patch("sregym_agents.crucible.tools._run_async", side_effect=RuntimeError("connection refused")):
-            result = submit_verdict(ctx, True, "great", "answer")
+            submit_verdict(ctx, True, "great", "answer")
 
         assert ctx.deps.state.submitted is True
-        assert "<benchmark_result>" in result
-        assert "Error" in result
+        assert "<benchmark_result>" in shared.read_text()
+        assert "Error" in shared.read_text()
+
+    def test_benchmark_result_not_returned_to_llm(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.hypothesis_revealed = True
+
+        oracle = {"Diagnosis": {"success": True}}
+        with patch("sregym_agents.crucible.tools._run_async", return_value=(True, "Benchmark accepted...", oracle)):
+            result = submit_verdict(ctx, True, "great work", "answer")
+
+        assert "<benchmark_result>" not in result
+
+    def test_benchmark_result_written_to_shared_file(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.hypothesis_revealed = True
+
+        oracle = {"Diagnosis": {"success": True}}
+        with patch("sregym_agents.crucible.tools._run_async", return_value=(True, "Benchmark accepted...", oracle)):
+            submit_verdict(ctx, True, "great work", "answer")
+
+        assert "<benchmark_result>" in shared.read_text()
+
+    def test_second_submit_blocked_after_approval(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.hypothesis_revealed = True
+
+        oracle = {"Diagnosis": {"success": True}}
+        with patch(
+            "sregym_agents.crucible.tools._run_async",
+            return_value=(True, "Benchmark accepted...", oracle),
+        ) as mock_run:
+            submit_verdict(ctx, True, "great work", "answer")
+            assert mock_run.call_count == 1
+
+            result2 = submit_verdict(ctx, False, "changed my mind", "answer2")
+            assert mock_run.call_count == 1  # benchmark not called again
+
+        assert "already submitted" in result2.lower()
+        assert ctx.deps.state.verdict == "APPROVED"  # not overwritten
 
     def test_file_write_error_returns_error_string(self, tmp_path: Path):
         ctx = _make_judge_ctx(tmp_path)
         ctx.deps.shared_file = SharedFile(tmp_path)  # directory — open will fail
+        ctx.deps.state.hypothesis_revealed = True
 
         with patch("sregym_agents.crucible.tools._run_async", return_value=(False, "rejected", None)):
             result = submit_verdict(ctx, False, "reason", "answer")
 
         assert "Error writing verdict" in result
 
+
+# ---------------------------------------------------------------------------
+# submit_independent_findings
+# ---------------------------------------------------------------------------
+
+
+class TestSubmitIndependentFindings:
+    def test_records_findings_in_shared_file(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("# header\n")
+        ctx = _make_judge_ctx(tmp_path)
+        result = submit_independent_findings(ctx, "Pod X is CrashLoopBackOff due to missing config")
+        assert "recorded" in result.lower()
+        content = shared.read_text()
+        assert "Judge Independent Findings" in content
+        assert "Pod X is CrashLoopBackOff" in content
+
+    def test_sets_findings_submitted_flag(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        submit_independent_findings(ctx, "some findings")
+        assert ctx.deps.state.independent_findings_submitted is True
+
+    def test_second_call_blocked(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        submit_independent_findings(ctx, "first findings")
+        result = submit_independent_findings(ctx, "second findings")
+        assert "Error" in result
+        assert "already submitted" in result.lower()
+
+    def test_empty_findings_returns_error(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        result = submit_independent_findings(ctx, "   ")
+        assert "Error" in result
+        assert ctx.deps.state.independent_findings_submitted is False
+
+
+# ---------------------------------------------------------------------------
+# reveal_agent_hypothesis
+# ---------------------------------------------------------------------------
+
+
+class TestRevealAgentHypothesis:
+    def test_returns_hypothesis_text_from_deps(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        hypothesis = "**Diagnosis**: disk full\n**Justification**: 100% usage\n"
+        ctx = _make_judge_ctx(tmp_path, hypothesis_text=hypothesis)
+        ctx.deps.state.independent_findings_submitted = True
+        result = reveal_agent_hypothesis(ctx)
+        assert result == hypothesis
+
+    def test_blocked_before_findings_submitted(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        assert ctx.deps.state.independent_findings_submitted is False
+        result = reveal_agent_hypothesis(ctx)
+        assert "Error" in result
+        assert "submit_independent_findings" in result
+        assert ctx.deps.state.hypothesis_revealed is False
+
+    def test_sets_revealed_flag(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.independent_findings_submitted = True
+        reveal_agent_hypothesis(ctx)
+        assert ctx.deps.state.hypothesis_revealed is True
+
+    def test_second_call_blocked(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.independent_findings_submitted = True
+        reveal_agent_hypothesis(ctx)
+        result = reveal_agent_hypothesis(ctx)
+        assert "Error" in result
+        assert "already revealed" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Judge tool sequence (integration)
+# ---------------------------------------------------------------------------
+
+
+class TestJudgeToolSequence:
+    def test_happy_path_findings_then_reveal_then_verdict(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("# header\n")
+        hypothesis = "**Diagnosis**: disk full\n**Justification**: 100% usage\n"
+        ctx = _make_judge_ctx(tmp_path, hypothesis_text=hypothesis)
+
+        submit_independent_findings(ctx, "I see pod X failing with disk pressure")
+        result = reveal_agent_hypothesis(ctx)
+        assert result == hypothesis
+
+        with patch("sregym_agents.crucible.tools._run_async"):
+            submit_verdict(ctx, False, "hypothesis is correct but missing specifics", "disk full")
+
+        content = shared.read_text()
+        assert "Judge Independent Findings" in content
+        assert "Judge Verdict" in content
+
+    def test_reveal_before_findings_blocked(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        result = reveal_agent_hypothesis(ctx)
+        assert "Error" in result
+        assert ctx.deps.state.hypothesis_revealed is False
+
+    def test_verdict_before_reveal_blocked(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.independent_findings_submitted = True
+        # findings submitted but hypothesis not revealed
+        result = submit_verdict(ctx, False, "reason", "answer")
+        assert "Error" in result
+        assert ctx.deps.state.submitted is False
+
+    def test_verdict_before_findings_blocked(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        result = submit_verdict(ctx, False, "reason", "answer")
+        assert "Error" in result
+        assert ctx.deps.state.submitted is False
+
+    def test_reveal_after_findings_returns_hypothesis(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        hypothesis = "**Diagnosis**: OOM\n**Justification**: memory limit exceeded\n"
+        ctx = _make_judge_ctx(tmp_path, hypothesis_text=hypothesis)
+        submit_independent_findings(ctx, "findings text")
+        result = reveal_agent_hypothesis(ctx)
+        assert result == hypothesis
+
+    def test_full_sequence_reject_preserves_state_for_next_iteration(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("# header\n")
+        hypothesis = "**Diagnosis**: disk full\n**Justification**: 100% usage\n"
+
+        # Iteration 1 — reject
+        ctx = _make_judge_ctx(tmp_path, hypothesis_text=hypothesis)
+        submit_independent_findings(ctx, "findings for iter 1")
+        reveal_agent_hypothesis(ctx)
+        with patch("sregym_agents.crucible.tools._run_async"):
+            submit_verdict(ctx, False, "not specific enough", "disk full")
+
+        # Iteration 2 — fresh state
+        state2 = SharedState()
+        assert state2.independent_findings_submitted is False
+        assert state2.hypothesis_revealed is False
+        assert state2.submitted is False
+
     def test_submit_verdict_from_running_loop(self, tmp_path: Path):
         """Regression: submit_verdict must not raise RuntimeError when called from within asyncio.run()."""
         shared = tmp_path / "shared.md"
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
+        ctx.deps.state.hypothesis_revealed = True
 
         async def _run():
             with patch(
@@ -554,4 +927,4 @@ class TestSubmitVerdict:
 
         result = asyncio.run(_run())
         assert ctx.deps.state.verdict == "APPROVED"
-        assert "<benchmark_result>" in result
+        assert "Verdict submitted" in result

@@ -135,6 +135,14 @@ class AgentMiddleware:
 
     # ------------------------------------------------------------------
 
+    def on_run_error(self, exc: Exception) -> float | None:
+        """Called when ``run_sync()`` raises an exception.
+
+        Return a delay in seconds to retry after, or ``None`` to pass
+        (let the next middleware handle it or re-raise if no middleware handles it).
+        """
+        return None
+
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         """Called once after each agent run completes.
 

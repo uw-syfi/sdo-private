@@ -1,5 +1,11 @@
 agents:
+  - name: pydantic_agent
+    kickoff_command: uv run python -m sregym_agents.pydantic_agent.driver
+    kickoff_workdir: ../..
+    kickoff_env:
+      PYTHONUNBUFFERED: "1"
   - name: crucible
     kickoff_command: uv run python -m sregym_agents.crucible.driver
     kickoff_workdir: ../..
-    kickoff_env: null
+    kickoff_env:
+      PYTHONUNBUFFERED: "1"

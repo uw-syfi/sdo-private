@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic_ai import RunContext  # noqa: TC002 — needed at runtime for _takes_ctx annotation inspection
@@ -106,13 +108,77 @@ class BaseAgent(Generic[DepsT]):
                 self.current_run_usage = ctx.usage
                 self._stream_event_chain(event)
 
-        result = self._agent.run_sync(
-            prompt,
-            deps=self.deps,
-            usage_limits=self._usage_limits,
-            event_stream_handler=_stream_handler,
-            **kwargs,
-        )
+        while True:
+            try:
+                result = self._agent.run_sync(
+                    prompt,
+                    deps=self.deps,
+                    usage_limits=self._usage_limits,
+                    event_stream_handler=_stream_handler,
+                    **kwargs,
+                )
+                break
+            except Exception as exc:
+                delay: float | None = None
+                for m in self._middleware:
+                    delay = m.on_run_error(exc)
+                    if delay is not None:
+                        break
+                if delay is None:
+                    raise
+                time.sleep(delay)
+
+        self.current_request_input_tokens = result.usage().input_tokens or 0
+        for m in self._middleware:
+            m.after_run(result, _run_ctx)
+        return result
+
+    async def _arun(
+        self,
+        prompt: str,
+        *,
+        _run_ctx: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Async counterpart of ``_run``.
+
+        Uses ``await self._agent.run()`` instead of ``run_sync()`` so the
+        caller's event loop is reused rather than creating a new one.
+        """
+
+        self.current_run_usage = RunUsage()
+        self.current_request_input_tokens = 0
+        for m in self._middleware:
+            m.before_run()
+
+        async def _stream_handler(ctx: Any, events: Any) -> None:
+            ctx_baseline_tokens = ctx.usage.input_tokens or 0
+            async for event in events:
+                self.current_run_usage = ctx.usage
+                if hasattr(events, "usage"):
+                    self.current_request_input_tokens = (events.usage().input_tokens or 0) - ctx_baseline_tokens
+                self._stream_event_chain(event)
+
+        while True:
+            try:
+                result = await self._agent.run(
+                    prompt,
+                    deps=self.deps,
+                    usage_limits=self._usage_limits,
+                    event_stream_handler=_stream_handler,
+                    **kwargs,
+                )
+                break
+            except Exception as exc:
+                delay: float | None = None
+                for m in self._middleware:
+                    delay = m.on_run_error(exc)
+                    if delay is not None:
+                        break
+                if delay is None:
+                    raise
+                await asyncio.sleep(delay)
+
         self.current_request_input_tokens = result.usage().input_tokens or 0
         for m in self._middleware:
             m.after_run(result, _run_ctx)

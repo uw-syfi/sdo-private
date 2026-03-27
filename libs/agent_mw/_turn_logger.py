@@ -7,21 +7,18 @@ from typing import Any
 
 from libs.pydantic_agent import AgentMiddleware
 
-_MAX_ARG_LEN = 120
-
 
 def _fmt_args(args: str | dict[str, Any] | None) -> str:
     if args is None:
         return ""
     if isinstance(args, str):
-        return args[:_MAX_ARG_LEN] + ("\u2026" if len(args) > _MAX_ARG_LEN else "")
+        return args
     parts = []
     for k, v in args.items():
         if k in ("content", "new_str"):
             parts.append(f"{k}=<{len(str(v))} chars>")
         else:
-            s = str(v)
-            parts.append(f"{k}={s[:_MAX_ARG_LEN]!r}" if len(s) > _MAX_ARG_LEN else f"{k}={s!r}")
+            parts.append(f"{k}={str(v)!r}")
     return ", ".join(parts)
 
 
@@ -29,13 +26,6 @@ def _fmt_k(n: int | None) -> str:
     if n is None:
         return "?k"
     return f"{round(n / 1000)}k"
-
-
-def _truncate(s: str, max_len: int = _MAX_ARG_LEN) -> str:
-    if len(s) <= max_len:
-        return s
-    remaining = len(s) - max_len
-    return f"{s[:max_len]}\u2026 ({remaining} chars left)"
 
 
 def _tool_failed(content: Any) -> bool:
@@ -85,7 +75,18 @@ class TurnLoggingMiddleware(AgentMiddleware):
                 prefix,
                 result.tool_name,
                 result.content.get("exit_code", "?"),
-                _truncate(result.content.get("stderr", "")),
+                result.content.get("stderr", ""),
+            )
+        elif (
+            isinstance(result, ToolReturnPart)
+            and isinstance(result.content, str)
+            and result.content.startswith("Error:")
+        ):
+            self._logger.warning(
+                "%s \u2717 %s(): %s",
+                prefix,
+                result.tool_name,
+                result.content,
             )
 
     def on_part_end(self, event: Any) -> None:

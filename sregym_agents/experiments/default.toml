@@ -1,0 +1,54 @@
+# Default SREGym experiment configuration.
+#
+# Usage:
+#   bash scripts/run_sregym.sh sregym_agents/experiments/default.toml  # new run
+#   bash scripts/run_sregym.sh bench/sregym/logs/<exp-dir>/        # resume
+
+[runner]
+agent = "crucible"
+model = "google-vertex:gemini-2.5-flash"
+parallel = 4
+enable_summary = true
+no_inject_summary = true
+# repeat = 1
+# sequence_len = 0
+# sequence_seed = 42
+
+# Problem selection (mutually exclusive with [runner.variants]):
+#
+# Named pre-built set (maps to bench/sregym/sregym/conductor/tasklist.<name>.yml):
+# tasklist = "count_train"
+#
+# Path to a custom tasklist YAML:
+# tasklist = "exp_config/sregym/my_tasklist.yml"
+#
+# Inline list of specific problem IDs (all get diagnosis+mitigation):
+# problems = [
+#     "faulty_image_correlated",
+#     "incorrect_port_assignment",
+# ]
+
+[runner.variants]
+enabled = true
+count = 16
+offset = 0
+seed = 42
+# round_robin = true
+
+[runner.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+rucible_seed_kb_dir = ""
+worker_cpu_limit = "16"
+
+# Agent-specific config (only used when runner.agent = "crucible").
+[agent.crucible]
+enable_judge = true
+enable_ltm_retrieval = true
+enable_pipeline = false
+max_hypotheses = 5
+max_submissions = 5
+kb_type = "structured"
+include_benchmark_results = true
+max_diagnosis_iterations = 5
+max_mitigation_iterations = 5
+wait_stage_timeout = 300

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import os
 import random
 import shutil
+import sys
 import time
 import uuid
 from datetime import datetime
@@ -16,7 +18,8 @@ from pathlib import Path
 import requests
 
 from sregym_agents.crucible import orchestrator
-from sregym_agents.crucible.summary import SUMMARY_FILENAME, CrucibleLTSummarizer
+from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
+from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +29,24 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 _READY_STAGES = {"diagnosis", "mitigation"}
+
+
+def _load_crucible_config() -> tuple[dict, str]:
+    """Load crucible agent config and return (config_dict, source).
+
+    Reads from SREGYM_EXPERIMENT_AGENT_CONFIG env var (set by the centralized
+    launcher via run_sregym.sh). Returns hardcoded defaults when the env var
+    is absent.
+    """
+    env_cfg = os.getenv("SREGYM_EXPERIMENT_AGENT_CONFIG")
+    if env_cfg:
+        logger.info("Crucible config loaded from SREGYM_EXPERIMENT_AGENT_CONFIG env var")
+        return {"agent": json.loads(env_cfg)}, "env:SREGYM_EXPERIMENT_AGENT_CONFIG"
+    logger.warning(
+        "SREGYM_EXPERIMENT_AGENT_CONFIG not set — using hardcoded defaults. "
+        "Start experiments via scripts/run_sregym.sh to apply experiment config."
+    )
+    return {}, "defaults"
 
 
 def _get_api_base() -> str:
@@ -100,35 +121,79 @@ def _parse_args() -> argparse.Namespace:
         help="Directory for result JSON output (e.g. token usage)",
     )
     parser.add_argument(
+        "--kb-dir",
         "--summary-dir",
         type=str,
         default=None,
-        help="Directory for long_term_summary.txt (enables long-term summary mode when set)",
+        dest="kb_dir",
+        help="Directory for knowledge base files (enables KB mode when set)",
     )
     parser.add_argument(
+        "--kb-model",
         "--summary-model",
         type=str,
         default=None,
-        help="Model ID to use for long-term summarization (defaults to MODEL_ID env var)",
+        dest="kb_model",
+        help="Model ID to use for knowledge base summarization (defaults to MODEL_ID env var)",
     )
     parser.add_argument(
+        "--kb-type",
+        type=str,
+        default=None,
+        choices=["structured", "append-only"],
+        dest="kb_type",
+        help="Knowledge base implementation (overrides crucible.toml; default: structured)",
+    )
+    parser.add_argument(
+        "--no-inject-kb",
         "--no-inject-summary",
         action="store_true",
         default=False,
-        help="Update the long-term summary after each run but do not inject it before the run",
+        dest="no_inject_kb",
+        help="Update the knowledge base after each run but do not inject it before the run",
+    )
+    parser.add_argument(
+        "--no-judge",
+        action="store_true",
+        default=False,
+        help="Skip judge agent and submit SRE agent's answer directly to benchmark (overrides crucible.toml)",
     )
     return parser.parse_args()
 
 
-def main() -> None:
-    args = _parse_args()
+async def _async_main(args: argparse.Namespace) -> None:
     logger.info("Crucible driver starting...")
+
+    crucible_cfg, config_source = _load_crucible_config()
+    agent_cfg = crucible_cfg.get("agent", {})
+    logger.info(f"Effective agent config (source={config_source}): {agent_cfg}")
+    enable_judge = agent_cfg.get("enable_judge", True)
+    if args.no_judge:
+        enable_judge = False
+    flags = CrucibleFlags(
+        enable_judge=enable_judge,
+        enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
+        include_benchmark_results=agent_cfg.get("include_benchmark_results", False),
+        max_diagnosis_iterations=agent_cfg.get("max_diagnosis_iterations", 5),
+        max_mitigation_iterations=agent_cfg.get("max_mitigation_iterations", 5),
+        wait_stage_timeout=agent_cfg.get("wait_stage_timeout", 300),
+        stage_timeout=agent_cfg.get("stage_timeout", 900),
+    )
 
     api_base = _get_api_base()
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
     submit_mcp_url = f"http://localhost:{mcp_port}/submit/sse"
 
-    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url}")
+    exp_env = os.getenv("SREGYM_EXP_ENV")
+    if exp_env:
+        if not os.path.isdir(exp_env):
+            logger.error(f"SREGYM_EXP_ENV={exp_env} is not a valid directory")
+            sys.exit(1)
+        os.chdir(exp_env)
+        logger.info(f"Working directory: {os.getcwd()}")
+    else:
+        logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
+    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} flags={flags}")
 
     _wait_for_stage(api_base, timeout=300)
 
@@ -136,49 +201,63 @@ def main() -> None:
     problem_id = _get_problem_id(api_base)
     planned_stages = _get_planned_stages(api_base)
 
-    exp_env = os.getenv("SREGYM_EXP_ENV", ".")
-    shared_file = Path(exp_env) / "judged_session_state.md"
+    diagnosis_shared_file = Path("diagnosis_session_state.md")
+    mitigation_shared_file = Path("mitigation_session_state.md")
     _run_uid = uuid.uuid4().hex[:8]
     # Write trajectory to logs_dir (bench/sregym/logs/…) when available, matching
     # the convention used by other sregym agents (claudecode, gemini_cli, codex).
-    # Fall back to exp_env for local/standalone runs.
+    # Fall back to cwd (exp_env after chdir) for local/standalone runs.
     if args.logs_dir:
         logs_dir = Path(args.logs_dir)
         logs_dir.mkdir(parents=True, exist_ok=True)
         trajectory_path = logs_dir / f"trajectory_{problem_id}_{_run_uid}.jsonl"
     else:
-        trajectory_path = Path(exp_env) / f"trajectory_{problem_id}_{_run_uid}.jsonl"
+        trajectory_path = Path(f"trajectory_{problem_id}_{_run_uid}.jsonl")
 
-    lt_summarizer: CrucibleLTSummarizer | None = None
+    kb: KnowledgeBase | None = None
     lt_summary_file: Path | None = None
+    lessons_file: Path | None = None
+    architecture_file: Path | None = None
+    incidents_dir: Path | None = None
 
-    if args.summary_dir:
-        model_id = args.summary_model or os.environ.get("MODEL_ID", args.model)
-        lt_summarizer = CrucibleLTSummarizer(
-            shared_file=shared_file,
-            summary_dir=Path(args.summary_dir),
+    if args.kb_dir:
+        model_id = args.kb_model or os.environ.get("MODEL_ID", args.model)
+        seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
+        seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
+        kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
+        include_benchmark_results = agent_cfg.get("include_benchmark_results", False)
+        kb = create_knowledge_base(
+            kb_type=kb_type,
+            shared_files=[diagnosis_shared_file, mitigation_shared_file],
+            kb_dir=Path(args.kb_dir),
             model_id=model_id,
+            app_name=app_info.get("app_name", "unknown"),
+            seed_kb_dir=seed_kb_dir,
+            include_benchmark_results=include_benchmark_results,
         )
-        if not args.no_inject_summary:
-            dest = Path(exp_env) / SUMMARY_FILENAME
-            try:
-                shutil.copy2(lt_summarizer.summary_path, dest)
-                lt_summary_file = dest
-                logger.info(f"Long-term summary: copied prior knowledge to {dest}")
-            except FileNotFoundError:
-                logger.info("Long-term summary: no prior summary found; starting fresh.")
+        if not args.no_inject_kb:
+            injected = await kb.inject(Path(exp_env))
+            lt_summary_file = injected.summary
+            lessons_file = injected.lessons
+            architecture_file = injected.architecture
+            incidents_dir = injected.incidents_dir
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
-    usage_metrics = orchestrator.run(
+    usage_metrics = await orchestrator.run(
         model=args.model,
         app_info=app_info,
         problem_id=problem_id,
-        shared_file=shared_file,
+        diagnosis_shared_file=diagnosis_shared_file,
+        mitigation_shared_file=mitigation_shared_file,
         planned_stages=planned_stages,
         submit_mcp_url=submit_mcp_url,
         lt_summary_file=lt_summary_file,
+        lessons_file=lessons_file,
+        architecture_file=architecture_file,
+        incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
+        flags=flags,
     )
 
     if args.logs_dir:
@@ -186,16 +265,24 @@ def main() -> None:
         logger.info(f"Usage metrics: {usage_metrics}")
 
     env_log_file = os.environ.get("SREGYM_LOG_FILE")
-    if env_log_file and shared_file.exists():
-        dest = Path(env_log_file).with_name(f"{Path(env_log_file).stem}_{problem_id}.md")
-        shutil.copy2(shared_file, dest)
-        logger.info(f"Saved session markdown to {dest}")
+    if env_log_file:
+        stem = Path(env_log_file).stem
+        for sf, suffix in [(diagnosis_shared_file, "diagnosis"), (mitigation_shared_file, "mitigation")]:
+            if sf.exists():
+                dest = Path(env_log_file).with_name(f"{stem}_{problem_id}_{suffix}.md")
+                shutil.copy2(sf, dest)
+                logger.info(f"Saved {suffix} session markdown to {dest}")
 
-    if lt_summarizer is not None:
-        logger.info("Long-term summary: updating from completed session.")
-        lt_summarizer.run()
+    if kb is not None:
+        logger.info("Knowledge base: updating from completed session.")
+        await kb.update()
 
     logger.info("Crucible driver complete.")
+
+
+def main() -> None:
+    args = _parse_args()
+    asyncio.run(_async_main(args))
 
 
 if __name__ == "__main__":
