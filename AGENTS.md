@@ -19,8 +19,32 @@ SDS autonomously explores, validates, and evolves infrastructure using agentic L
 - **Structured data**: use dataclasses instead of raw `dict` for shapes constructed/consumed in multiple places
 - **Config**: dataclasses with `__post_init__` validation (`TypeError`/`ValueError`)
 - **Exceptions**: custom hierarchy in `app_operator/exceptions.py`
-- **Adding a new feature**: think about tests first. Test public behavior, not internal details.
-- **Fixing bugs**: write a reproducing test first, then fix. Test must be part of the fix.
+- **Adding a new feature**: Think about tests first. Test public behavior, not internal details.
+- **Fixing bugs**: Write a reproducing test first, then fix. Test must be part of the fix.
+
+## Usage Guide for LLM Agents
+
+- **Debugging deployment**: Check `.sds/deploy.sh` and `.sds/logs/`
+- **Debugging lego_agent**: Check `lego_agent_runs/<timestamp>/lego_agent.py`
+- **Optimizing prompts**: `analyze-prompts` baseline → `optimize-prompts --dry-run` → compare
+- **Adding DSPy signatures**: Add to `dspy_integration/signatures.py`, register in `SIGNATURES` dict
+- **Extending metrics**: Modify `dspy_integration/metrics.py`, ensure weights sum to 1.0
+- **Adding fault types**: Add to `COMPOSE_FAULTS`, implement `_inject_*`, register in dispatch table, add tests
+
+## Remote repo access
+
+Use `glab` command (if available) to access the remote repo on GitLab, including issues and merge requests.
+
+## Notes from Developers
+
+- Use `uv` and `uv run ...` for Python.
+- Keep this file concise — detailed docs live in `docs/`.
+- When code changes impact CLI, update README.md.
+- When removing code, delete it — do not comment it out.
+- **Avoid nested event loops:** Code that already runs inside an async event loop (e.g. a pydantic-ai tool handler) must never call `run_sync()`, `asyncio.run()`, or `loop.run_until_complete()` — these create a second event loop, and any objects bound to the outer loop (httpx connection pools, anyio locks, etc.) will raise `RuntimeError: is bound to a different event loop`. Instead, make the function `async` and `await` the coroutine directly so it stays on the same loop.
+- When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `.agents/skills/analyze-experiment/references/`.
+- When adding or moving feature flags in `app_operator/config.py`, update `docs/feature-flags.md` to match.
+- When introducing a new top-level project or library (e.g. `libs/`, `sregym_agents/`), add it to `tach.toml` with the correct `depends_on` entries.
 
 ## Code Validation (after every code edit)
 

@@ -9,27 +9,42 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-from libs.agent_mw import FixedPathProvider, SoftLimitExtension, TrajectoryMiddleware, TurnLoggingMiddleware
+from libs.agent_mw import (
+    FixedPathProvider,
+    RetryMiddleware,
+    SoftLimitExtension,
+    TrajectoryMiddleware,
+    TurnLoggingMiddleware,
+)
 from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
-from sregym_agents.crucible.middleware import LoopDetectionMiddleware, TimeoutMiddleware
+from sregym_agents.crucible.middleware import (
+    LoopDetectionMiddleware,
+    StallDetectionMiddleware,
+    ThinkingRepetitionMiddleware,
+    TimeoutMiddleware,
+)
 from sregym_agents.crucible.tools import (
+    MAX_OUTPUT_TOKENS,
+    THINKING_BUDGET,
     SREDeps,
+    SRESubmission,
+    check_hypothesis_coverage,
     exec_bash,
-    mark_hypothesis_complete,
-    mark_mitigation_complete,
+    grep,
     read_file,
+    search_prior_incidents,
+    search_prior_mitigations,
     str_replace_file,
+    triage_cluster,
     write_file,
 )
 
 logger = logging.getLogger(__name__)
-
-THINKING_BUDGET = 4096
 
 
 _CONTEXT_WINDOWS: dict[str, int] = {
@@ -85,14 +100,64 @@ def _compact_messages(model: str, messages: list) -> tuple[str, dict]:
     return compact_result.output, usage
 
 
+async def _async_compact_messages(model: str, messages: list) -> tuple[str, dict]:
+    """Async variant of ``_compact_messages``."""
+    import json
+
+    to_summarize = messages[1:] if len(messages) > 1 else messages
+    try:
+        raw = json.loads(ModelMessagesTypeAdapter.dump_json(to_summarize))
+        parts = []
+        for msg in raw:
+            kind = msg.get("kind", "unknown")
+            for part in msg.get("parts", []):
+                part_kind = part.get("part_kind", "")
+                content = part.get("content", "")
+                if isinstance(content, str) and content:
+                    parts.append(f"[{kind}/{part_kind}]: {content}")
+        history_text = "\n\n".join(parts)
+    except Exception as exc:
+        logger.warning(f"Message serialization failed: {exc}")
+        history_text = str(to_summarize)
+
+    summary_prompt = (
+        "Summarize the following conversation history, preserving all key findings, "
+        "actions taken, commands run, outputs observed, hypotheses formed, and current "
+        "state. Be detailed enough for the agent to continue without losing context.\n\n"
+        f"<history>\n{history_text}\n</history>"
+    )
+    compactor: Agent[None, str] = Agent(model, output_type=str)
+    compact_result = await compactor.run(summary_prompt)
+    u = compact_result.usage()
+    usage = {
+        "input_tokens": u.input_tokens or 0,
+        "output_tokens": u.output_tokens or 0,
+        "cached_input_tokens": 0,
+    }
+    logger.info(f"Context compacted: {len(history_text)} chars → {len(compact_result.output)} chars")
+    return compact_result.output, usage
+
+
 class CrucibleSREAgent(BaseAgent[SREDeps]):
-    MAX_SUBMIT_REMINDERS = 3
     CONTEXT_COMPACT_THRESHOLD = 0.80
 
     def __init__(
-        self, model: str, deps: SREDeps, trajectory_path: Path | None = None, step_limit: int | None = 500
+        self,
+        model: str,
+        deps: SREDeps,
+        trajectory_path: Path | None = None,
+        step_limit: int | None = 500,
+        system_prompt_override: str | None = None,
     ) -> None:
-        mw = [TurnLoggingMiddleware(), LoopDetectionMiddleware(), TimeoutMiddleware(), SoftLimitExtension(step_limit)]
+        mw = [
+            TurnLoggingMiddleware(),
+            RetryMiddleware(),
+            ThinkingRepetitionMiddleware(),
+            LoopDetectionMiddleware(),
+            StallDetectionMiddleware(),
+            TimeoutMiddleware(),
+            SoftLimitExtension(step_limit),
+        ]
         if trajectory_path is not None:
             mw.insert(0, TrajectoryMiddleware(FixedPathProvider(trajectory_path)))
         super().__init__(
@@ -101,43 +166,48 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             middleware=mw,
         )
         self._model = model
-        self._agent: Agent[SREDeps, str] = self._build_agent(
+        self._system_prompt_override = system_prompt_override
+        self._agent: Agent[SREDeps, SRESubmission] = self._build_agent(
             model,
             deps_type=SREDeps,
-            output_type=str,
-            model_settings=thinking_settings(model, THINKING_BUDGET),
+            output_type=SRESubmission,
+            model_settings={**thinking_settings(model, THINKING_BUDGET), "max_tokens": MAX_OUTPUT_TOKENS},
             tools=[
                 exec_bash,
                 read_file,
+                grep,
                 write_file,
                 str_replace_file,
-                mark_hypothesis_complete,
-                mark_mitigation_complete,
+                *([] if deps.stage == "mitigation" else [triage_cluster]),
+                search_prior_incidents if deps.stage == "diagnosis" else search_prior_mitigations,
+                # Non-KB diagnosis: self-check tool to verify hypothesis covers all triage anomalies.
+                # KB-injected agents get this from CandidateVerification.unexplained_anomalies instead.
+                *([check_hypothesis_coverage] if deps.stage == "diagnosis" and deps.lt_summary_file is None else []),
             ],
         )
 
         @self._agent.instructions
         def _system(ctx) -> str:
+            if self._system_prompt_override:
+                return self._system_prompt_override
             return _render(f"{ctx.deps.stage}_agent_system")
 
     def run(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
-        """Run with submit reminders and context compaction. Returns (output, usage)."""
+        """Run with context compaction. Returns (output, usage).
+
+        Structured output (SRESubmission) guarantees the agent produces a valid
+        answer — no reminder loop needed.
+        """
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
-        message_history: list | None = None
-        current_prompt = user_prompt
-        reminder_count = 0
         context_window = _context_window_for(self._model)
         initial_prompt = user_prompt
+        current_prompt = user_prompt
         result = None
 
         while True:
-            kwargs: dict[str, Any] = {}
-            if message_history is not None:
-                kwargs["message_history"] = message_history
-
             try:
-                result = self._run(current_prompt, _run_ctx=run_ctx, **kwargs)
-            except UnexpectedModelBehavior as exc:
+                result = self._run(current_prompt, _run_ctx=run_ctx)
+            except (UnexpectedModelBehavior, UsageLimitExceeded) as exc:
                 if self.deps.state.submitted:
                     logger.warning(f"Model returned unexpected output after submitting; treating as complete. ({exc})")
                 else:
@@ -147,19 +217,38 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 usage["input_tokens"] += self.current_run_usage.input_tokens or 0
                 usage["output_tokens"] += self.current_run_usage.output_tokens or 0
                 break
+
             u = result.usage()
             input_tokens = u.input_tokens or 0
             output_tokens = u.output_tokens or 0
             usage["input_tokens"] += input_tokens
             usage["output_tokens"] += output_tokens
 
-            if self.deps.state.submitted:
-                break
+            # Structured output guarantees a valid SRESubmission
+            output = result.output
+            self.deps.state.submitted = True
+            self.deps.state.answer = output.answer
+            self.deps.state.answer_justification = output.justification
+            self.deps.state.answer_causal_chain = output.causal_chain
+            self.deps.state.answer_reflection = output.reflection
 
-            if reminder_count >= self.MAX_SUBMIT_REMINDERS:
-                logger.warning("Max submit reminders reached — giving up.")
-                break
+            # Write to shared file
+            iteration = self.deps.iteration
+            if self.deps.stage == "diagnosis":
+                entry = f"\n### Iteration {iteration} — Agent Hypothesis\n[Submitted — pending judge review]\n"
+            else:
+                entry = (
+                    f"\n### Iteration {iteration} — Agent Strategy\n"
+                    f"**Mitigation**: {output.answer}\n"
+                    f"**Justification**: {output.justification}\n"
+                )
+            try:
+                with self.deps.shared_file.open("a") as fh:
+                    fh.write(entry)
+            except Exception as e:
+                logger.warning(f"Error writing to shared file: {e}")
 
+            # Context compaction: if context is too large, compact and re-run
             if input_tokens > self.CONTEXT_COMPACT_THRESHOLD * context_window:
                 logger.warning(
                     f"Context approaching limit ({input_tokens} > "
@@ -168,22 +257,77 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 summary, compact_usage = _compact_messages(self._model, result.all_messages())
                 for k, v in compact_usage.items():
                     usage[k] = usage.get(k, 0) + v
-                message_history = None
                 current_prompt = initial_prompt + "\n\nHere's a summary of the previous conversation:\n\n" + summary
                 logger.warning("Context compacted. Restarting with summary.")
                 continue
 
-            reminder_count += 1
-            stage = self.deps.stage
-            tool_name = "mark_hypothesis_complete" if stage == "diagnosis" else "mark_mitigation_complete"
-            logger.warning(f"Agent stopped without submitting (reminder {reminder_count}/{self.MAX_SUBMIT_REMINDERS}).")
-            message_history = list(result.all_messages())
-            current_prompt = (
-                f"You have not submitted your answer yet. "
-                f"Please call `{tool_name}` with your final answer before finishing."
-            )
+            break
 
-        output = result.output if result is not None else ""
-        if output:
-            logger.info(f"Agent summary: {output}")
-        return output, usage
+        answer = self.deps.state.answer or ""
+        if answer:
+            logger.info(f"Agent answer: {answer}")
+        return answer, usage
+
+    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
+        """Async variant of ``run()``. Uses ``_arun`` to stay on the caller's event loop."""
+        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+        context_window = _context_window_for(self._model)
+        initial_prompt = user_prompt
+        current_prompt = user_prompt
+        result = None
+
+        while True:
+            try:
+                result = await self._arun(current_prompt, _run_ctx=run_ctx)
+            except (UnexpectedModelBehavior, UsageLimitExceeded) as exc:
+                logger.warning(f"Model returned unexpected output; treating as unsubmitted. ({exc})")
+                usage["input_tokens"] += self.current_run_usage.input_tokens or 0
+                usage["output_tokens"] += self.current_run_usage.output_tokens or 0
+                break
+
+            u = result.usage()
+            input_tokens = u.input_tokens or 0
+            output_tokens = u.output_tokens or 0
+            usage["input_tokens"] += input_tokens
+            usage["output_tokens"] += output_tokens
+
+            output = result.output
+            self.deps.state.submitted = True
+            self.deps.state.answer = output.answer
+            self.deps.state.answer_justification = output.justification
+            self.deps.state.answer_causal_chain = output.causal_chain
+            self.deps.state.answer_reflection = output.reflection
+
+            iteration = self.deps.iteration
+            if self.deps.stage == "diagnosis":
+                entry = f"\n### Iteration {iteration} — Agent Hypothesis\n[Submitted — pending judge review]\n"
+            else:
+                entry = (
+                    f"\n### Iteration {iteration} — Agent Strategy\n"
+                    f"**Mitigation**: {output.answer}\n"
+                    f"**Justification**: {output.justification}\n"
+                )
+            try:
+                with self.deps.shared_file.open("a") as fh:
+                    fh.write(entry)
+            except Exception as e:
+                logger.warning(f"Error writing to shared file: {e}")
+
+            if input_tokens > self.CONTEXT_COMPACT_THRESHOLD * context_window:
+                logger.warning(
+                    f"Context approaching limit ({input_tokens} > "
+                    f"{self.CONTEXT_COMPACT_THRESHOLD * context_window:.0f}). Compacting..."
+                )
+                summary, compact_usage = await _async_compact_messages(self._model, result.all_messages())
+                for k, v in compact_usage.items():
+                    usage[k] = usage.get(k, 0) + v
+                current_prompt = initial_prompt + "\n\nHere's a summary of the previous conversation:\n\n" + summary
+                logger.warning("Context compacted. Restarting with summary.")
+                continue
+
+            break
+
+        answer = self.deps.state.answer or ""
+        if answer:
+            logger.info(f"Agent answer: {answer}")
+        return answer, usage

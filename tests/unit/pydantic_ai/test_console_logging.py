@@ -110,10 +110,10 @@ def test_fmt_args_elides_new_str_field():
     assert "new_str=<50 chars>" in result
 
 
-def test_fmt_args_truncates_long_regular_field():
+def test_fmt_args_shows_long_regular_field_verbatim():
     args = {"path": "a" * 200}
     result = _fmt_args(args)
-    assert len(result) < 200
+    assert "a" * 200 in result
 
 
 def test_fmt_args_short_field_shown_verbatim():
@@ -126,11 +126,10 @@ def test_fmt_args_none_returns_empty():
     assert _fmt_args(None) == ""
 
 
-def test_fmt_args_string_truncated():
+def test_fmt_args_long_string_shown_verbatim():
     long_str = "x" * 200
     result = _fmt_args(long_str)
-    assert result.endswith("\u2026")
-    assert len(result) <= 122  # 120 + ellipsis
+    assert result == long_str
 
 
 def test_fmt_args_short_string_verbatim():

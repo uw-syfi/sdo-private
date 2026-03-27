@@ -3,7 +3,10 @@ import copy
 import os
 import socket
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 import yaml
 
 

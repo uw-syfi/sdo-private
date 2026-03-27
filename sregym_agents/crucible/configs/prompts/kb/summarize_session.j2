@@ -1,0 +1,60 @@
+You are analyzing an SRE session log written in Markdown.
+{% if include_benchmark_results %}
+IMPORTANT: This session log contains <benchmark_result> blocks with ground-truth outcomes
+from the benchmark. These results supersede the agent's own conclusions. Pay close attention
+to where the agent's diagnosis diverged from the true root cause — the key lesson is
+understanding where and why the agent fell short in determining the actual root cause.
+When extracting root cause, causal chain, and fixes below, prefer the ground-truth from
+benchmark results over the agent's conclusions when they conflict.
+
+If the session log contains a "Recovery Diagnosis" section, that section was produced AFTER
+the benchmark rejection using the benchmark's ground truth. Use the recovery diagnosis's
+root cause and causal chain as the validated findings.
+
+If the session log contains a "Recovery Mitigation" section, that section was produced AFTER
+the benchmark rejected the agent's mitigation. Use the recovery mitigation's description
+of the correct fix as the validated mitigation approach.
+{% endif %}
+Extract the following:
+0) Application name (the specific service or component that had the incident).
+1) Observed symptoms of that application (what was externally visible / what alerts fired).
+2) Root cause CLASS — describe the type of misconfiguration, not the specific instance.
+   Write "a Kubernetes Service object was deleted" not "Service/user-service was deleted".
+   Write "Kubernetes Service targetPort mismatch" not "text-service targetPort set to 9999".
+   Do NOT include specific service names, port numbers, or field values — only the class.
+3) Causal chain as a PROPAGATION PATTERN — describe the chain from misconfiguration class →
+   mechanism → symptom class, using ONLY generic placeholders (<affected-service>,
+   <dependent-service>, <target-port>) instead of specific names. Do NOT include concrete
+   examples with specific service names or port numbers — those details are retained in
+   the full session log below and the incident file.
+   GOOD: "Deletion of a Service object → DNS resolution for <affected-service> fails →
+   dependent services cannot connect → cascading errors to entry-point"
+   BAD: "Deletion of user-service → compose-post-service DNS failure → nginx-thrift errors"
+{% if include_benchmark_results %}
+   - If the benchmark confirmed the diagnosis (success: True), mark as "Validated causal chain".
+   - If a Recovery Diagnosis section exists, use its causal chain as the validated one.
+   - If the benchmark rejected and no recovery section exists, mark as "N/A (agent diagnosis incorrect)".
+{% endif %}
+4) Fixes or mitigations applied or proposed (if any). Describe as a generic approach only.
+   Write "Recreate the missing Service object" not "Recreated user-service".
+   Do NOT include specific service names, port numbers, or field values.
+{% if include_benchmark_results %}
+   - If a Recovery Mitigation section exists, use its mitigation as the validated fix.
+   - If the benchmark rejected the mitigation and no recovery section exists, mark as "N/A (agent mitigation incorrect)".
+5) Diagnosis agent reflection (if a Recovery Diagnosis section with an "Agent Reflection" entry exists):
+   what investigative mistake the agent made, what evidence was missed or misinterpreted,
+   and what diagnostic lesson follows. Preserve this verbatim — it is a primary input for
+   extracting diagnostic strategy lessons.
+6) Mitigation agent reflection (if a Recovery Mitigation section with an "Agent Reflection" entry exists):
+   what mitigation mistake the agent made — wrong target, incomplete fix, symptom-level fix, etc. —
+   and what mitigation strategy lesson follows. Preserve this verbatim — it is a primary input for
+   extracting mitigation strategy lessons.
+{% endif %}
+
+DO NOT use external knowledge. Base your answer strictly on the text below.
+Be concise and structured.
+
+Session log:
+---
+{{ content }}
+---

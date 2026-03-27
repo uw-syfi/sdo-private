@@ -1,0 +1,62 @@
+# Example multi-stage SREGym pipeline.
+#
+# Stage 0 runs variant problems to build a knowledge base.
+# Stage 1 evaluates on a held-out set, seeded with stage 0's KB.
+#
+# Usage:
+#   bash scripts/run_sregym.sh sregym_agents/experiments/example_pipeline.toml
+#
+#   # Resume after failure:
+#   bash scripts/run_sregym.sh bench/sregym/logs/<pipeline_dir>/
+#
+#   # Rerun stage 1 only:
+#   bash scripts/run_sregym.sh bench/sregym/logs/<pipeline_dir>/ --stage 1
+
+[pipeline]
+name = "kb-bootstrap-then-eval"
+
+# Shared defaults inherited by all stages.
+[defaults]
+agent = "crucible"
+model = "google-vertex:gemini-2.5-flash"
+parallel = 4
+enable_summary = true
+no_inject_summary = true
+
+[defaults.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+worker_cpu_limit = "16"
+
+[defaults.agent_config.crucible]
+enable_judge = true
+enable_ltm_retrieval = true
+enable_pipeline = false
+kb_type = "structured"
+include_benchmark_results = true
+max_hypotheses = 5
+max_submissions = 5
+max_diagnosis_iterations = 5
+max_mitigation_iterations = 5
+wait_stage_timeout = 300
+
+# Stage 0: build KB from variant problems
+[[stages]]
+name = "build_kb"
+chain_kb = false              # first stage — no prior KB to chain from
+
+[stages.runner]
+parallel = 8
+
+[stages.runner.variants]
+enabled = true
+count = 16
+offset = 0
+seed = 42
+
+# Stage 1: evaluate using stage 0's KB as seed
+[[stages]]
+name = "evaluate"
+chain_kb = true               # auto-seeds from stage 0's kb/
+
+[stages.runner]
+tasklist = "count_train"

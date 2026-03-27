@@ -1,3 +1,4 @@
-max_diagnosis_iterations: 3
-max_mitigation_iterations: 3
+max_diagnosis_iterations: 5
+max_mitigation_iterations: 5
 wait_stage_timeout: 300  # seconds for benchmark to reach mitigation stage
+stage_timeout: 900  # 15 minutes max per diagnosis/mitigation stage
