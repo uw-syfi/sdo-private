@@ -5,8 +5,9 @@
 #   bash scripts/run_sregym.sh bench/sregym/logs/<exp-dir>/        # resume
 
 [runner]
-agent = "crucible"
-model = "google-vertex:gemini-2.5-flash"
+agent = "crucible_deepagents"
+#model = "google-vertex:gemini-2.5-flash"
+model = "google_vertexai:gemini-2.5-flash"
 parallel = 4
 enable_summary = true
 no_inject_summary = true
@@ -41,7 +42,7 @@ rucible_seed_kb_dir = ""
 worker_cpu_limit = "16"
 
 # Agent-specific config (only used when runner.agent = "crucible").
-[agent.crucible]
+[agent.crucible_deepagents]
 enable_judge = true
 enable_ltm_retrieval = true
 enable_pipeline = false

@@ -1,0 +1,88 @@
+You are maintaining a per-application knowledge base of SRE incidents.
+
+Current Long-Term Summary:
+{{ prior_summary or "(Empty)" }}
+
+New Session Summary:
+{{ session_summary }}
+
+Task: Update the Long-Term Summary using the following root-cause-first structure:
+
+The new session's incident file is: {% raw %}{{ref:{% endraw %}{{ incident_ref }}{% raw %}}}{% endraw %}
+
+### Root Cause: <root cause class name>
+
+#### Symptoms
+- <observed symptom or alert 1>
+- <observed symptom or alert 2>
+
+#### Detection
+- <distinguishing signal / investigation strategy for this root cause>
+- If NEITHER signal above is present → novel root cause, investigate from scratch
+
+#### Causal Chain
+<resource-type/field-class> → <mechanism pattern> → <symptom class> (validated) or (unvalidated)
+
+#### Mitigations
+- <generic mitigation approach>
+
+#### Seen
+<count> incidents
+
+#### References
+{% raw %}{{ref:incidents/YYYYMMDD_HHMMSS.md}}{% endraw %}, {% raw %}{{ref:incidents/YYYYMMDD_HHMMSS.md}}{% endraw %}
+
+Rules:
+- Organize ALL incidents by root cause class. Each `### Root Cause:` entry is a distinct failure
+  mechanism. Decide for each new session: does it match an existing root cause, or is it novel?
+  Use semantic similarity (not exact string match) — e.g., "Kubernetes Service targetPort mismatch"
+  and "Service port misconfiguration causing Connection refused" are the same root cause class.
+- If the new session matches an existing root cause: increment the count under `#### Seen`, append
+  the new incident reference under `#### References`, add any novel symptoms to `#### Symptoms`,
+  update `#### Detection` if the new session provides better distinguishing signals, and update
+  `#### Mitigations` if the new session provides a better or additional approach.
+- If the new session does not match any existing root cause: create a new `### Root Cause:` entry
+  with all subheadings populated from the session summary.
+- SPLITTING RULE: After merging, review each root cause entry. If an entry has accumulated 5+
+  incidents AND its `#### Symptoms` or `#### Detection` sections describe clearly distinct failure
+  mechanisms (e.g., contradictory symptoms like "pods running but not responding" vs "pods in
+  CrashLoopBackOff", or unrelated detection strategies), split it into two separate
+  `### Root Cause:` entries. Redistribute the incident references, symptoms, and detection signals
+  to the appropriate new entry. This prevents unrelated failures from being incorrectly grouped.
+- Include causal chains when the session summary provides them. Mark as "(validated)" if
+  the session summary indicates the chain was validated by the benchmark, or "(unvalidated)"
+  if no benchmark validation was available. Do NOT include causal chains marked as "N/A".
+- When merging, if a new session provides a validated causal chain for an existing root cause
+  that previously had an unvalidated chain, upgrade to the validated version.
+- All incident citations MUST use the exact format {% raw %}`{{ref:incidents/FILENAME.md}}`{% endraw %}.
+  Use the incident file name given above for the new session. Preserve existing citations
+  from the prior summary verbatim (they already use this format).
+- MIGRATION: If the prior summary uses the old symptom-first format (with `### Symptom:` headers),
+  restructure it into root-cause-first format. For each root cause listed under a symptom block,
+  create a separate `### Root Cause:` entry. The symptom from the old header becomes a bullet
+  under `#### Symptoms`. Carry over causal chains, distinguishing signals (→ `#### Detection`),
+  mitigations, and incident references to the appropriate root cause entry.
+
+ABSTRACTION RULES — these are critical for making the knowledge base reusable across incidents:
+- Root cause descriptions must name the CLASS of misconfiguration, not a specific resource
+  instance. Write "Kubernetes Service targetPort mismatch" not "text-service targetPort set
+  to 9999". NEVER include specific service names, port numbers, or field values in root cause
+  descriptions.
+- Causal chains must describe the PROPAGATION PATTERN using ONLY generic placeholders
+  (`<affected-service>`, `<dependent-service>`, `<target-port>`) rather than specific service
+  names or port numbers. Do NOT include concrete examples with specific service names or port
+  numbers — those details live in the incident files, not the summary.
+  GOOD: "A Service's `targetPort` does not match the pod's actual listening port →
+  `Connection refused` when dependent services connect via the Service → cascading failures"
+  BAD: "`text-service` Service `spec.ports[0].targetPort` was 9999 while `text-service`
+  was listening on 9090, causing `compose-post-service` to receive `Connection refused`"
+- Detection signals must describe WHAT PATTERN to look for across all resources of a
+  class, not a check on a specific resource. NEVER include specific service names, port
+  numbers, IP addresses, or field values.
+  GOOD: "If any Service's `targetPort` does not match the `containerPort` of the pods it
+  selects → likely targetPort mismatch"
+  BAD: "If `kubectl get svc text-service -o yaml` shows targetPort 9999 → likely mismatch"
+- Mitigations must be GENERIC — describe the remediation approach for the root cause class,
+  not for a specific instance. Write "Recreate the missing Service object with correct
+  configuration" not "Recreate user-service in social-network namespace".
+- Output the updated Long-Term Summary text only, with no preamble.
