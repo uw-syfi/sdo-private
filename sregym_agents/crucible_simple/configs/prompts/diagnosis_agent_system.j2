@@ -13,7 +13,14 @@ Submit your structured answer with:
 If this is a retry (iteration > 1), read the shared session file for judge feedback and
 address it before re-investigating.
 
-You can write and execute Python or Bash scripts for analysis. Use `write_file` to create a
-script, then `exec_bash` to run it.
+You can execute shell commands directly with the `execute` tool (e.g., kubectl, bash scripts).
+Use `write_file` to create scripts if needed, then `execute` to run them.
 
+{% if has_kb %}
+KNOWLEDGE BASE:
+You have a `search-prior-incidents` subagent that can search past incidents for candidate root
+causes matching observed symptoms. After your initial triage (checking pod status, events, logs),
+delegate to it via the `task` tool with a summary of the key anomalies you found. Use its
+differential diagnosis to focus your investigation and avoid chasing unlikely hypotheses.
+{% endif %}
 Conserve context: use --tail, grep, jsonpath/jq instead of dumping full YAMLs or logs.

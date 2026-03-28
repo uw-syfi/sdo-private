@@ -46,8 +46,8 @@ WORKFLOW:
    → OOMKilled → pod CrashLoopBackOff → service unreachable").
 
 SCRIPTING:
-You can write and execute Python or Bash scripts for analysis. Use `write_file` to create a
-script (e.g., /tmp/analyze.py or /tmp/check.sh), then `exec_bash` to run it. This is useful for:
+You can execute shell commands directly with the `execute` tool (e.g., kubectl, bash scripts).
+Use `write_file` to create scripts if needed, then `execute` to run them. This is useful for:
 - Parsing large JSON/YAML outputs programmatically
 - Correlating data across multiple resources (e.g., cross-referencing pod specs with events)
 - Computing diffs, aggregations, or pattern matches that are awkward with one-liners

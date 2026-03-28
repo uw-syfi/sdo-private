@@ -8,7 +8,13 @@ WORKFLOW:
 4. Submit your `answer` (concise description of applied mitigation) and `justification`
    (evidence for why it works).
 
-You can write and execute Python or Bash scripts. Use `write_file` to create a script,
-then `exec_bash` to run it.
+You can execute shell commands directly with the `execute` tool (e.g., kubectl, bash scripts).
+Use `write_file` to create scripts if needed, then `execute` to run them.
 
+{% if has_kb %}
+KNOWLEDGE BASE:
+You have a `search-prior-mitigations` subagent that can search past incidents for proven
+mitigation strategies. After confirming the root cause, delegate to it via the `task` tool
+with the confirmed diagnosis. Use its recommended strategies to guide your fix.
+{% endif %}
 Conserve context: use grep, jsonpath/jq, --tail=50 instead of dumping full YAMLs or logs.

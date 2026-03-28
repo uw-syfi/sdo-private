@@ -260,7 +260,8 @@ async def _run_stage_loop(
             ltm_model_id=model if flags.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
         )
-        sre_system = _render(f"{stage}_agent_system")
+        has_kb = flags.enable_ltm_retrieval and lt_summary_file is not None
+        sre_system = _render(f"{stage}_agent_system", has_kb=has_kb)
         sre_prompt = _render(
             f"{stage}_agent_user",
             app_name=app_info.get("app_name", "unknown"),
