@@ -8,9 +8,11 @@ Registered in `agents.yaml`. Each agent has a `kickoff_command` run from the rep
 
 - **crucible** — `uv run python -m sregym_agents.crucible.driver`
 - **crucible_deepagents** — `uv run python -m sregym_agents.crucible_deepagents.driver`
+- **crucible_simple** — `uv run python -m sregym_agents.crucible_simple.driver`
 
 ## Architecture
 
 - `crucible/` — Crucible-environment agent (pydantic-ai: orchestrator, judge, SRE agent, tools)
 - `crucible_deepagents/` — Crucible-environment agent (LangChain DeepAgents reimplementation)
+- `crucible_simple/` — Simplified Crucible agent (streamlined prompts, optional KB, DeepAgents)
 - `agents.yaml` — Agent registry consumed by the SRE Gym runner
