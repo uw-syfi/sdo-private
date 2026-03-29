@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from deepagents import create_deep_agent
-from langchain.chat_models import init_chat_model
 
 from sregym_agents.crucible_simple._prompts import _render
 from sregym_agents.crucible_simple.shell_backend import TimeoutShellBackend
@@ -17,6 +16,7 @@ from sregym_agents.crucible_simple.tools import (
     SREDeps,
     SRESubmission,
     TrajectoryCallbackHandler,
+    init_chat_model_with_thinking,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ async def run_sre_agent(
     subagents = _build_subagents(model_id, stage, deps)
 
     agent = create_deep_agent(
-        model=init_chat_model(model_id, temperature=0),
+        model=init_chat_model_with_thinking(model_id, temperature=0),
         tools=[],
         backend=TimeoutShellBackend(virtual_mode=True, inherit_env=True),
         system_prompt=system_prompt,

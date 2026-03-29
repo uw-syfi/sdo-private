@@ -9,12 +9,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from deepagents import create_deep_agent
-from langchain.chat_models import init_chat_model
 
 from sregym_agents.crucible_simple.shell_backend import TimeoutShellBackend
 from sregym_agents.crucible_simple.tools import (
     JudgeDeps,
     TrajectoryCallbackHandler,
+    init_chat_model_with_thinking,
     make_reveal_agent_hypothesis_tool,
     make_submit_independent_findings_tool,
     make_submit_verdict_tool,
@@ -44,7 +44,7 @@ async def run_judge_agent(
     ]
 
     agent = create_deep_agent(
-        model=init_chat_model(model_id, temperature=0),
+        model=init_chat_model_with_thinking(model_id, temperature=0),
         tools=custom_tools,
         backend=TimeoutShellBackend(virtual_mode=True, inherit_env=True),
         system_prompt=system_prompt,

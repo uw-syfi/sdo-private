@@ -283,6 +283,21 @@ class TrajectoryCallbackHandler(BaseCallbackHandler):
                         )
                     if hasattr(gen, "message"):
                         msg = gen.message
+                        # Extract thinking from Gemini content blocks
+                        # (list items with {"type": "thinking", "thinking": "..."})
+                        if isinstance(getattr(msg, "content", None), list):
+                            for block in msg.content:
+                                if isinstance(block, dict) and block.get("type") == "thinking":
+                                    thinking_str = str(block.get("thinking", ""))[:2000]
+                                    if thinking_str:
+                                        record["thinking"] = thinking_str
+                                        logger.info(
+                                            "[%s] turn %d — model thinking:\n%s",
+                                            self.agent_name,
+                                            self._turn_count,
+                                            thinking_str,
+                                        )
+                        # Extract thinking from Claude additional_kwargs
                         if hasattr(msg, "additional_kwargs"):
                             thinking = msg.additional_kwargs.get("thinking")
                             if thinking:
@@ -387,6 +402,25 @@ class TrajectoryCallbackHandler(BaseCallbackHandler):
     @property
     def usage(self) -> dict[str, int]:
         return dict(self._usage)
+
+
+# ---------------------------------------------------------------------------
+# Model initialization helpers
+# ---------------------------------------------------------------------------
+
+
+def init_chat_model_with_thinking(model_id: str, **kwargs: Any) -> Any:
+    """Create a LangChain chat model with thinking/chain-of-thought enabled.
+
+    For Gemini models, passes ``include_thoughts=True`` so that the model's
+    internal reasoning is returned in the response and can be logged.
+    """
+    from langchain.chat_models import init_chat_model
+
+    provider = model_id.split(":")[0] if ":" in model_id else ""
+    if provider in ("google_vertexai", "google_genai"):
+        kwargs.setdefault("include_thoughts", True)
+    return init_chat_model(model_id, **kwargs)
 
 
 # ---------------------------------------------------------------------------
