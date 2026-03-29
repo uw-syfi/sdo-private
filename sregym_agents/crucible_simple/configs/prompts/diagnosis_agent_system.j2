@@ -17,10 +17,18 @@ You can execute shell commands directly with the `execute` tool (e.g., kubectl, 
 Use `write_file` to create scripts if needed, then `execute` to run them.
 
 {% if has_kb %}
-KNOWLEDGE BASE:
-You have a `search-prior-incidents` subagent that can search past incidents for candidate root
-causes matching observed symptoms. After your initial triage (checking pod status, events, logs),
-delegate to it via the `task` tool with a summary of the key anomalies you found. Use its
-differential diagnosis to focus your investigation and avoid chasing unlikely hypotheses.
+REQUIRED WORKFLOW:
+1. Quick triage: check pod status (`kubectl get pods`), recent events, and logs of unhealthy
+   pods. Summarize the key anomalies in 2-3 bullet points.
+2. Query knowledge base: delegate to the `search-prior-incidents` subagent via
+   the `task` tool. Pass it the anomalies from step 1. Do this BEFORE forming your own
+   hypothesis — the KB contains proven root-cause patterns from past incidents that will
+   prevent you from chasing unlikely theories.
+3. Investigate: use the KB differential diagnosis to guide targeted checks. Verify the top
+   candidates with specific kubectl commands. If none match, form your own hypothesis and test it.
+4. Submit your answer.
+
+You MUST call `search-prior-incidents` before submitting. Skipping it wastes prior knowledge
+and leads to misdiagnosis.
 {% endif %}
 Conserve context: use --tail, grep, jsonpath/jq instead of dumping full YAMLs or logs.
