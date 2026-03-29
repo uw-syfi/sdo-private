@@ -9,10 +9,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from deepagents import create_deep_agent
-from deepagents.backends import LocalShellBackend
 from langchain.chat_models import init_chat_model
 
 from sregym_agents.crucible_simple._prompts import _render
+from sregym_agents.crucible_simple.shell_backend import TimeoutShellBackend
 from sregym_agents.crucible_simple.tools import (
     SREDeps,
     SRESubmission,
@@ -96,7 +96,7 @@ async def run_sre_agent(
     agent = create_deep_agent(
         model=init_chat_model(model_id, temperature=0),
         tools=[],
-        backend=LocalShellBackend(virtual_mode=True, inherit_env=True),
+        backend=TimeoutShellBackend(virtual_mode=True, inherit_env=True),
         system_prompt=system_prompt,
         subagents=subagents,
         response_format=SRESubmission,
