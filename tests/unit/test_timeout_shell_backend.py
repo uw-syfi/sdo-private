@@ -24,7 +24,9 @@ class TestTimeoutShellBackend:
     def test_timeout_kills_hanging_process(self):
         """A sleep command must be killed and return exit code 124."""
         backend = TimeoutShellBackend(
-            virtual_mode=True, inherit_env=True, timeout=1,
+            virtual_mode=True,
+            inherit_env=True,
+            timeout=1,
         )
         result = backend.execute("sleep 60")
         assert result.exit_code == 124
@@ -33,7 +35,9 @@ class TestTimeoutShellBackend:
     def test_per_command_timeout_override(self):
         """Per-command timeout overrides the default."""
         backend = TimeoutShellBackend(
-            virtual_mode=True, inherit_env=True, timeout=300,
+            virtual_mode=True,
+            inherit_env=True,
+            timeout=300,
         )
         result = backend.execute("sleep 60", timeout=1)
         assert result.exit_code == 124
@@ -41,7 +45,9 @@ class TestTimeoutShellBackend:
     def test_timeout_kills_child_processes(self):
         """Children spawned by the shell must also be killed."""
         backend = TimeoutShellBackend(
-            virtual_mode=True, inherit_env=True, timeout=2,
+            virtual_mode=True,
+            inherit_env=True,
+            timeout=2,
         )
         # Spawn a subshell that spawns a sleep — the whole group should die
         result = backend.execute("bash -c 'sleep 60 & wait'")
@@ -59,7 +65,9 @@ class TestTimeoutShellBackend:
 
     def test_output_truncation(self):
         backend = TimeoutShellBackend(
-            virtual_mode=True, inherit_env=True, max_output_bytes=50,
+            virtual_mode=True,
+            inherit_env=True,
+            max_output_bytes=50,
         )
         result = backend.execute("python3 -c \"print('x' * 200)\"")
         assert result.truncated
