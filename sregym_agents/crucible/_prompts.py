@@ -22,9 +22,7 @@ def configure(prompt_version: str) -> None:
     global _jinja_env
     prompts_dir = _PROMPTS_DIR / prompt_version
     if not prompts_dir.is_dir():
-        raise ValueError(
-            f"Prompt version {prompt_version!r} not found at {prompts_dir}"
-        )
+        raise ValueError(f"Prompt version {prompt_version!r} not found at {prompts_dir}")
     _jinja_env = Environment(
         loader=FileSystemLoader(str(prompts_dir)),
         undefined=StrictUndefined,
@@ -35,7 +33,5 @@ def configure(prompt_version: str) -> None:
 def _render(template_name: str, **kwargs: object) -> str:
     """Render a Jinja2 prompt template from the configured version directory."""
     if _jinja_env is None:
-        raise RuntimeError(
-            "Prompts not configured. Call configure(prompt_version) first."
-        )
+        raise RuntimeError("Prompts not configured. Call configure(prompt_version) first.")
     return _jinja_env.get_template(f"{template_name}.j2").render(**kwargs)
