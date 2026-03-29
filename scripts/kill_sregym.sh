@@ -22,6 +22,8 @@ fi
 # Patterns that identify sregym processes we own.
 PATTERNS=(
     "sregym_agents\.crucible\.driver"
+    "sregym_agents\.crucible_simple\.driver"
+    "sregym_agents\.crucible_deepagent\.driver"
     "bench/sregym/main\.py"
 )
 
