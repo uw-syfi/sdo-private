@@ -470,7 +470,7 @@ def grep(
     if target.is_file():
         files = [target]
     else:
-        glob_pattern = include if include else "*"
+        glob_pattern = include or "*"
         files = sorted(target.rglob(glob_pattern))
 
     for file_path in files:
