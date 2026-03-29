@@ -76,7 +76,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
                 max_iters=3,
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
-                flags=CrucibleFlags(enable_judge=False),
+                flags=CrucibleFlags(prompt_version="v1", enable_judge=False),
             )
         )
 
@@ -123,7 +123,7 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
                 max_iters=1,
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
-                flags=CrucibleFlags(enable_judge=False),
+                flags=CrucibleFlags(prompt_version="v1", enable_judge=False),
             )
         )
 
@@ -170,7 +170,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
                         max_iters=3,
                         shared_file=shared_file,
                         submit_mcp_url="http://localhost:9954/submit/sse",
-                        flags=CrucibleFlags(enable_judge=True),
+                        flags=CrucibleFlags(prompt_version="v1", enable_judge=True),
                     )
                 )
 

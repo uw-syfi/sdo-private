@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class CrucibleFlags:
+    prompt_version: str
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
