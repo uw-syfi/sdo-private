@@ -139,7 +139,7 @@ async def run_sre_agent(
     agent = create_deep_agent(
         model=init_chat_model(model_id, temperature=0),
         tools=[],
-        backend=TimeoutShellBackend(virtual_mode=True, inherit_env=True),
+        backend=TimeoutShellBackend(virtual_mode=False, inherit_env=True),
         system_prompt=system_prompt,
         subagents=subagents,
         response_format=SRESubmission,
