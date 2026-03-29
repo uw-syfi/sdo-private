@@ -283,7 +283,7 @@ class TestHypothesisTextPassedToJudgeDeps:
                     max_iters=3,
                     shared_file=shared,
                     submit_mcp_url="http://localhost:9954/submit/sse",
-                    flags=CrucibleFlags(enable_judge=True),
+                    flags=CrucibleFlags(prompt_version="v1", enable_judge=True),
                 )
             )
 

@@ -60,7 +60,7 @@ def _make_deps(
 
 
 def test_crucible_flags_defaults() -> None:
-    flags = CrucibleFlags()
+    flags = CrucibleFlags(prompt_version="v1")
     assert flags.enable_judge is True
     assert flags.enable_ltm_retrieval is False
 
@@ -68,6 +68,7 @@ def test_crucible_flags_defaults() -> None:
 def test_crucible_flags_from_config() -> None:
     cfg = {"enable_judge": False, "enable_ltm_retrieval": True}
     flags = CrucibleFlags(
+        prompt_version="v1",
         enable_judge=cfg["enable_judge"],
         enable_ltm_retrieval=cfg["enable_ltm_retrieval"],
     )
@@ -294,7 +295,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 lt_summary_file=lt_file,
-                flags=CrucibleFlags(enable_judge=False, enable_ltm_retrieval=False),
+                flags=CrucibleFlags(prompt_version="v1", enable_judge=False, enable_ltm_retrieval=False),
             )
         )
 
@@ -341,7 +342,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 lt_summary_file=lt_file,
                 incidents_dir=inc_dir,
-                flags=CrucibleFlags(enable_judge=False, enable_ltm_retrieval=True),
+                flags=CrucibleFlags(prompt_version="v1", enable_judge=False, enable_ltm_retrieval=True),
             )
         )
 

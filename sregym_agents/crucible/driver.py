@@ -18,6 +18,7 @@ from pathlib import Path
 import requests
 
 from sregym_agents.crucible import orchestrator
+from sregym_agents.crucible._prompts import configure as configure_prompts
 from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
 from sregym_agents.crucible.orchestrator import CrucibleFlags
 
@@ -158,6 +159,13 @@ def _parse_args() -> argparse.Namespace:
         default=False,
         help="Skip judge agent and submit SRE agent's answer directly to benchmark (overrides crucible.toml)",
     )
+    parser.add_argument(
+        "--prompt-version",
+        type=str,
+        default=None,
+        dest="prompt_version",
+        help="Prompt version directory name (e.g. 'v1'). Required unless set in agent config.",
+    )
     return parser.parse_args()
 
 
@@ -167,10 +175,20 @@ async def _async_main(args: argparse.Namespace) -> None:
     crucible_cfg, config_source = _load_crucible_config()
     agent_cfg = crucible_cfg.get("agent", {})
     logger.info(f"Effective agent config (source={config_source}): {agent_cfg}")
+    prompt_version = args.prompt_version or agent_cfg.get("prompt_version")
+    if not prompt_version:
+        logger.error(
+            "prompt_version is required. Set it in [agent.crucible] config "
+            "or pass --prompt-version on the command line."
+        )
+        sys.exit(1)
+    configure_prompts(prompt_version)
+
     enable_judge = agent_cfg.get("enable_judge", True)
     if args.no_judge:
         enable_judge = False
     flags = CrucibleFlags(
+        prompt_version=prompt_version,
         enable_judge=enable_judge,
         enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
         include_benchmark_results=agent_cfg.get("include_benchmark_results", False),

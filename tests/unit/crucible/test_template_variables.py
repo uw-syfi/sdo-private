@@ -8,7 +8,10 @@ import jinja2
 import jinja2.meta
 import pytest
 
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "sregym_agents" / "crucible" / "configs" / "prompts"
+_PROMPTS_ROOT = Path(__file__).resolve().parents[3] / "sregym_agents" / "crucible" / "configs" / "prompts"
+# Default version used by tests — adjust when adding new versions.
+_DEFAULT_VERSION = "v1"
+PROMPTS_DIR = _PROMPTS_ROOT / _DEFAULT_VERSION
 
 
 def _get_all_templates() -> list[tuple[str, Path]]:
@@ -60,8 +63,9 @@ def test_template_renders_with_all_variables(template_name: str, template_path: 
 
 def test_render_function_uses_strict_undefined() -> None:
     """Verify that _render() uses StrictUndefined so missing variables raise errors."""
-    from sregym_agents.crucible._prompts import _render
+    from sregym_agents.crucible._prompts import _render, configure
 
+    configure(_DEFAULT_VERSION)
     with pytest.raises(jinja2.UndefinedError):
         # diagnosis_agent_user.j2 requires many variables — omit most to trigger the error.
         _render("diagnosis_agent_user", app_name="test", namespace="test")
