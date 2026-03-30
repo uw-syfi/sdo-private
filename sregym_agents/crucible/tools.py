@@ -879,7 +879,7 @@ async def _run_verification_phase(
                 "[ltm-verify-%d] done: applies=%s, reasoning=%s",
                 idx,
                 output.applies,
-                output.reasoning[:200],
+                output.reasoning,
             )
             return output
         except Exception as e:
@@ -999,7 +999,7 @@ async def triage_cluster(
             )
 
         formatted = format_triage_report(report)
-        logger.info("[triage] done: %s", formatted[:500])
+        logger.info("[triage] done: %s", formatted)
         return formatted
     except Exception as e:
         logger.warning("[triage] failed: %s", e)
