@@ -43,5 +43,8 @@ REASONING PRINCIPLES:
   When multiple candidates are confirmed, find the most fundamental one — a single
   misconfiguration can surface as multiple downstream "confirmed" patterns.
 - Tool failures are tooling noise — try a different approach.
+- Missing resources: check whether expected env vars, Services, or ConfigMaps are absent, not
+  just whether present ones are misconfigured. An empty string "" or "could not parse target
+  name" error often means a required env var was deleted.
 
 Conserve context: use --tail, grep, jsonpath/jq instead of dumping full YAMLs or logs.
