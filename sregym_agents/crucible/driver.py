@@ -237,6 +237,9 @@ async def _async_main(args: argparse.Namespace) -> None:
     lessons_file: Path | None = None
     architecture_file: Path | None = None
     incidents_dir: Path | None = None
+    diagnosis_heuristics_file: Path | None = None
+    triage_heuristics_file: Path | None = None
+    arbitration_heuristics_file: Path | None = None
 
     if args.kb_dir:
         model_id = args.kb_model or os.environ.get("MODEL_ID", args.model)
@@ -259,6 +262,9 @@ async def _async_main(args: argparse.Namespace) -> None:
             lessons_file = injected.lessons
             architecture_file = injected.architecture
             incidents_dir = injected.incidents_dir
+            diagnosis_heuristics_file = injected.diagnosis_heuristics
+            triage_heuristics_file = injected.triage_heuristics
+            arbitration_heuristics_file = injected.arbitration_heuristics
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
@@ -276,7 +282,13 @@ async def _async_main(args: argparse.Namespace) -> None:
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        diagnosis_heuristics_file=diagnosis_heuristics_file,
+        triage_heuristics_file=triage_heuristics_file,
+        arbitration_heuristics_file=arbitration_heuristics_file,
     )
+
+    stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
+    stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
 
     if args.logs_dir:
         _save_results(logs_dir, problem_id, usage_metrics)
@@ -293,7 +305,7 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     if kb is not None:
         logger.info("Knowledge base: updating from completed session.")
-        await kb.update()
+        await kb.update(stage_outputs_file=stage_outputs_file)
 
     logger.info("Crucible driver complete.")
 

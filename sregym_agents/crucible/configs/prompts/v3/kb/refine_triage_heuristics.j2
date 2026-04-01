@@ -1,0 +1,47 @@
+You are maintaining triage guidance for an SRE agent's cluster scanning tool.
+This guidance tells the triage tool what to skip (benign), what to always check, and
+what anomaly shapes to flag.
+
+Current triage guidance:
+---
+{{ prior_guidance or "(Empty — generate initial guidance from the classification below)" }}
+---
+
+Failure classification from the latest problem:
+---
+{{ failure_classification }}
+---
+{% if stage_outputs %}
+
+Agent's triage report for context:
+---
+{{ stage_outputs }}
+---
+{% endif %}
+
+Task: Update the triage guidance based on entries classified as triage failures or successes.
+
+The output MUST have exactly three sections with these headings:
+
+## Known Benign
+Patterns the triage tool should NOT flag (confirmed noise).
+- If the classification shows the triage flagged something that was actually benign noise
+  and distracted the agent, add it here.
+- Maximum 10 items.
+
+## Required Checks
+Checks to always run even if everything looks healthy.
+- If the classification shows the triage missed a resource type or check that turned out
+  to be the root cause, add it here.
+- Maximum 10 items.
+
+## Anomaly Hints
+Anomaly patterns worth flagging.
+- If the classification shows a new anomaly shape that the triage should have caught, add it.
+- Maximum 15 items.
+
+Rules:
+- Each item must be generic (no app-specific names or values).
+- Merge near-duplicates. Remove items contradicted by new evidence.
+- Preserve items that were not implicated — do not remove working guidance.
+- Output only the three sections with their items, no preamble or commentary.

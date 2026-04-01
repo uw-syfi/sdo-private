@@ -136,6 +136,12 @@ class SREDeps:
     ltm_call_budget: int = 1
     trajectory_path: Path | None = None
     triage_report: TriageReport | None = None
+    # v3 trained guidance
+    triage_known_benign: str = ""
+    triage_required_checks: str = ""
+    triage_anomaly_hints: str = ""
+    arbitration_guidance: str = ""
+    stage_outputs_file: Path | None = None
 
 
 @dataclass
@@ -960,7 +966,13 @@ async def triage_cluster(
     if not model_id:
         return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
 
-    prompt = _render("triage_cluster", namespace=ctx.deps.namespace)
+    prompt = _render(
+        "triage_cluster",
+        namespace=ctx.deps.namespace,
+        triage_known_benign=ctx.deps.triage_known_benign,
+        triage_required_checks=ctx.deps.triage_required_checks,
+        triage_anomaly_hints=ctx.deps.triage_anomaly_hints,
+    )
 
     triage_agent: Agent[None, TriageReport] = Agent(
         model_id,
@@ -1000,6 +1012,9 @@ async def triage_cluster(
 
         formatted = format_triage_report(report)
         logger.info("[triage] done: %s", formatted)
+        if ctx.deps.stage_outputs_file:
+            with open(ctx.deps.stage_outputs_file, "a") as f:
+                f.write(f"\n## Triage Report\n{formatted}\n")
         return formatted
     except Exception as e:
         logger.warning("[triage] failed: %s", e)
@@ -1039,6 +1054,7 @@ async def check_hypothesis_coverage(
         "check_hypothesis_coverage",
         triage_context=triage_context,
         hypothesis=hypothesis,
+        arbitration_guidance=ctx.deps.arbitration_guidance,
     )
 
     coverage_agent: Agent[None, HypothesisCoverageVerdict] = Agent(
@@ -1066,6 +1082,9 @@ async def check_hypothesis_coverage(
             output.unexplained_anomalies,
             output.reasoning,
         )
+        if ctx.deps.stage_outputs_file:
+            with open(ctx.deps.stage_outputs_file, "a") as f:
+                f.write(f"\n## Hypothesis Coverage Check\n{output_json}\n")
         return output_json
     except Exception as e:
         logger.warning("[hypothesis-coverage] failed: %s", e)
@@ -1163,6 +1182,9 @@ async def search_prior_incidents(
     )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Retrieval Results\n{output_json}\n")
     return output_json
 
 

@@ -1,0 +1,1 @@
+- When multiple anomalies are confirmed, look for a single root cause that explains all of them before treating them as independent issues.
