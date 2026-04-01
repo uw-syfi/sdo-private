@@ -315,9 +315,12 @@ async def _async_main(args: argparse.Namespace) -> None:
             lessons_file = injected.lessons
             architecture_file = injected.architecture
             incidents_dir = injected.incidents_dir
-            diagnosis_heuristics_file = injected.diagnosis_heuristics
-            triage_heuristics_file = injected.triage_heuristics
-            arbitration_heuristics_file = injected.arbitration_heuristics
+            if agent_cfg.get("inject_heuristics", True):
+                diagnosis_heuristics_file = injected.diagnosis_heuristics
+                triage_heuristics_file = injected.triage_heuristics
+                arbitration_heuristics_file = injected.arbitration_heuristics
+            else:
+                logger.info("Heuristic injection disabled by inject_heuristics=false")
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
