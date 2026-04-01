@@ -50,6 +50,7 @@ max_hypotheses = 3
 max_submissions = 3
 kb_type = "structured"
 include_benchmark_results = true
+enable_heuristic_refinement = true
 max_diagnosis_iterations = 3
 max_mitigation_iterations = 3
 wait_stage_timeout = 300

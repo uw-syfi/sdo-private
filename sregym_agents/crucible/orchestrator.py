@@ -34,6 +34,7 @@ class CrucibleFlags:
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
+    enable_heuristic_refinement: bool = True
     max_diagnosis_iterations: int = 5
     max_mitigation_iterations: int = 5
     wait_stage_timeout: int = 300

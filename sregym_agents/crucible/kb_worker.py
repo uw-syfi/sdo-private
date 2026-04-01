@@ -48,6 +48,7 @@ async def process_manifest(manifest_path: Path) -> None:
         model_id=manifest["model_id"],
         app_name=manifest["app_name"],
         include_benchmark_results=manifest.get("include_benchmark_results", False),
+        enable_heuristic_refinement=manifest.get("enable_heuristic_refinement", True),
     )
 
     logger.info(

@@ -242,6 +242,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         enable_judge=enable_judge,
         enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
         include_benchmark_results=agent_cfg.get("include_benchmark_results", False),
+        enable_heuristic_refinement=agent_cfg.get("enable_heuristic_refinement", True),
         max_diagnosis_iterations=agent_cfg.get("max_diagnosis_iterations", 5),
         max_mitigation_iterations=agent_cfg.get("max_mitigation_iterations", 5),
         wait_stage_timeout=agent_cfg.get("wait_stage_timeout", 300),
@@ -297,6 +298,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
         include_benchmark_results = agent_cfg.get("include_benchmark_results", False)
+        enable_heuristic_refinement = agent_cfg.get("enable_heuristic_refinement", True)
         kb = create_knowledge_base(
             kb_type=kb_type,
             shared_files=[diagnosis_shared_file, mitigation_shared_file],
@@ -305,6 +307,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             app_name=app_info.get("app_name", "unknown"),
             seed_kb_dir=seed_kb_dir,
             include_benchmark_results=include_benchmark_results,
+            enable_heuristic_refinement=enable_heuristic_refinement,
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env))
@@ -380,6 +383,7 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "model_id": args.kb_model or os.environ.get("MODEL_ID", args.model),
                 "app_name": app_info.get("app_name", "unknown"),
                 "include_benchmark_results": agent_cfg.get("include_benchmark_results", False),
+                "enable_heuristic_refinement": agent_cfg.get("enable_heuristic_refinement", True),
                 "problem_id": problem_id,
                 "prompt_version": prompt_version,
                 "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),

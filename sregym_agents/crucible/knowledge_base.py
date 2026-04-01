@@ -105,6 +105,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
         include_benchmark_results: bool = False,
+        enable_heuristic_refinement: bool = True,
     ):
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
@@ -114,6 +115,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.app_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
         self.include_benchmark_results = include_benchmark_results
+        self.enable_heuristic_refinement = enable_heuristic_refinement
 
         if seed_kb_dir is not None:
             self._seed_from(Path(seed_kb_dir))
@@ -492,7 +494,10 @@ class StructuredKnowledgeBase(KnowledgeBase):
         logger.info(f"Long-term summary updated at {self.summary_path}")
 
         await self._distill_lessons()
-        await self._refine_heuristics(stage_outputs_file)
+        if self.enable_heuristic_refinement:
+            await self._refine_heuristics(stage_outputs_file)
+        else:
+            logger.info("Heuristic refinement disabled; skipping.")
 
 
 # Backward-compatibility alias
@@ -512,6 +517,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
         include_benchmark_results: bool = False,
+        enable_heuristic_refinement: bool = True,
     ):
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
@@ -589,6 +595,7 @@ def create_knowledge_base(
     app_name: str = "unknown",
     seed_kb_dir: Path | None = None,
     include_benchmark_results: bool = False,
+    enable_heuristic_refinement: bool = True,
 ) -> KnowledgeBase:
     """Factory function to create a knowledge base implementation."""
     if kb_type == "structured":
@@ -599,6 +606,7 @@ def create_knowledge_base(
             app_name,
             seed_kb_dir,
             include_benchmark_results=include_benchmark_results,
+            enable_heuristic_refinement=enable_heuristic_refinement,
         )
     if kb_type == "append-only":
         return AppendOnlyKnowledgeBase(
@@ -607,5 +615,6 @@ def create_knowledge_base(
             model_id,
             app_name,
             include_benchmark_results=include_benchmark_results,
+            enable_heuristic_refinement=enable_heuristic_refinement,
         )
     raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")
