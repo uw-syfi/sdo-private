@@ -137,9 +137,7 @@ class SREDeps:
     trajectory_path: Path | None = None
     triage_report: TriageReport | None = None
     # v3 trained guidance
-    triage_known_benign: str = ""
-    triage_required_checks: str = ""
-    triage_anomaly_hints: str = ""
+    triage_guidance: str = ""
     arbitration_guidance: str = ""
     stage_outputs_file: Path | None = None
 
@@ -161,6 +159,12 @@ class JudgeDeps:
 
 
 class TriageAnomaly(BaseModel):
+    category: str = Field(
+        description="Anomaly category — use a short descriptive label "
+        "(e.g., 'Non-Running Pods', 'Port Mismatch', 'Services Without Endpoints', "
+        "'ConfigMap Anomalies', 'Recent Events'). "
+        "Use standard categories when they fit; create new ones for novel anomaly types."
+    )
     resource_kind: str = Field(description="Kubernetes resource kind (e.g., Pod, Service, ConfigMap)")
     resource_name: str = Field(description="Name of the resource")
     namespace: str = Field(description="Namespace of the resource")
@@ -168,40 +172,8 @@ class TriageAnomaly(BaseModel):
 
 
 class TriageReport(BaseModel):
-    non_running_pods: list[TriageAnomaly] = Field(
-        default_factory=list, description="Pods not in Running/Completed/Succeeded state"
-    )
-    services_without_endpoints: list[TriageAnomaly] = Field(
-        default_factory=list, description="Services with 0 endpoints or selector mismatches"
-    )
-    configmap_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="ConfigMaps with unusual content (feature flags, auth scripts, etc.)"
-    )
-    deployment_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Deployment/StatefulSet spec issues (images, resources, env, etc.)"
-    )
-    probe_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Liveness/readiness probe misconfigurations"
-    )
-    job_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Running Jobs/CronJobs that may be fault injectors or load generators"
-    )
-    storage_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="PV/PVC issues (pending, access mode conflicts, affinity violations)"
-    )
-    network_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="NetworkPolicies, Ingress, DNS policy issues"
-    )
-    scheduling_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Taint/toleration, affinity, ResourceQuota issues"
-    )
-    crd_anomalies: list[TriageAnomaly] = Field(default_factory=list, description="CRD/operator-managed resource issues")
-    rbac_anomalies: list[TriageAnomaly] = Field(default_factory=list, description="RBAC permission issues")
-    recent_events: list[TriageAnomaly] = Field(
-        default_factory=list, description="Warning/error events from kubectl get events"
-    )
-    other_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Anomalies that don't fit other categories"
+    anomalies: list[TriageAnomaly] = Field(
+        default_factory=list, description="All observed anomalies, each tagged with a category"
     )
     raw_cluster_snapshot: str = Field(
         default="", description="Condensed kubectl output for downstream agents to reference"
@@ -210,28 +182,17 @@ class TriageReport(BaseModel):
 
 def format_triage_report(report: TriageReport) -> str:
     """Convert a TriageReport to readable markdown."""
-    sections = [
-        ("Non-Running Pods", report.non_running_pods),
-        ("Services Without Endpoints", report.services_without_endpoints),
-        ("ConfigMap Anomalies", report.configmap_anomalies),
-        ("Deployment Anomalies", report.deployment_anomalies),
-        ("Probe Anomalies", report.probe_anomalies),
-        ("Job Anomalies", report.job_anomalies),
-        ("Storage Anomalies", report.storage_anomalies),
-        ("Network Anomalies", report.network_anomalies),
-        ("Scheduling Anomalies", report.scheduling_anomalies),
-        ("CRD Anomalies", report.crd_anomalies),
-        ("RBAC Anomalies", report.rbac_anomalies),
-        ("Recent Events", report.recent_events),
-        ("Other Anomalies", report.other_anomalies),
-    ]
     lines = ["### Triage Report"]
-    for title, anomalies in sections:
-        if anomalies:
-            lines.append(f"\n**{title}**")
-            lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
-    if not any(anomalies for _, anomalies in sections):
+    if not report.anomalies:
         lines.append("\nNo anomalies detected.")
+        return "\n".join(lines) + "\n"
+    # Group by category, preserving first-seen order.
+    grouped: dict[str, list[TriageAnomaly]] = {}
+    for a in report.anomalies:
+        grouped.setdefault(a.category, []).append(a)
+    for category, anomalies in grouped.items():
+        lines.append(f"\n**{category}**")
+        lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
     return "\n".join(lines) + "\n"
 
 
@@ -855,6 +816,7 @@ async def _run_verification_phase(
             distinguishing_check=candidate.distinguishing_check,
             mitigation_hint=candidate.mitigation_hint,
         )
+        logger.info("[ltm-verify-%d] PROMPT:\n%s", idx, prompt)
 
         verify_agent: Agent[None, CandidateVerification] = Agent(
             model_id,
@@ -969,10 +931,9 @@ async def triage_cluster(
     prompt = _render(
         "triage_cluster",
         namespace=ctx.deps.namespace,
-        triage_known_benign=ctx.deps.triage_known_benign,
-        triage_required_checks=ctx.deps.triage_required_checks,
-        triage_anomaly_hints=ctx.deps.triage_anomaly_hints,
+        triage_guidance=ctx.deps.triage_guidance,
     )
+    logger.info("[triage-cluster] PROMPT:\n%s", prompt)
 
     triage_agent: Agent[None, TriageReport] = Agent(
         model_id,
@@ -1056,6 +1017,7 @@ async def check_hypothesis_coverage(
         hypothesis=hypothesis,
         arbitration_guidance=ctx.deps.arbitration_guidance,
     )
+    logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
 
     coverage_agent: Agent[None, HypothesisCoverageVerdict] = Agent(
         model_id,
@@ -1146,6 +1108,7 @@ async def search_prior_incidents(
         lt_summary_file=str(ctx.deps.lt_summary_file),
         incidents_dir=str(ctx.deps.incidents_dir) if ctx.deps.incidents_dir else "",
     )
+    logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
     from libs.pydantic_agent import thinking_settings
 
@@ -1253,6 +1216,7 @@ async def search_prior_incidents_any(
         lt_summary_file=str(lt_summary_file),
         incidents_dir=str(incidents_dir) if incidents_dir else "",
     )
+    logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
     from libs.pydantic_agent import thinking_settings
 
@@ -1338,6 +1302,7 @@ async def search_prior_mitigations(
         lt_summary_file=str(ctx.deps.lt_summary_file),
         incidents_dir=str(ctx.deps.incidents_dir) if ctx.deps.incidents_dir else "",
     )
+    logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
 
     from libs.pydantic_agent import thinking_settings
 
