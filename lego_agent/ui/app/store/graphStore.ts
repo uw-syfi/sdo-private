@@ -65,10 +65,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   })),
 
   addNodeLog: (id, log) => set((state) => ({
-    nodes: state.nodes.map((node) =>
-      node.id === id
-        ? { ...node, data: { ...node.data, logs: [...(node.data.logs || []), log] } }
-        : node
-    ),
+    nodes: state.nodes.map((node) => {
+      if (node.id !== id) return node;
+      const existing = node.data.logs || [];
+      // Upsert: update the entry if this log ID was already added (happens when
+      // script_execution events are coalesced — same ID, growing data field).
+      const idx = existing.findIndex(l => l.id === log.id);
+      const logs = idx >= 0
+        ? existing.map((l, i) => i === idx ? log : l)
+        : [...existing, log];
+      return { ...node, data: { ...node.data, logs } };
+    }),
   })),
 }));

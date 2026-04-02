@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useGraphStore, AgentNodeData } from '../store/graphStore';
 import { LogItem } from '../types';
 import { Node, Edge, MarkerType } from 'reactflow';
@@ -26,16 +26,23 @@ interface GraphAdapterProps {
 }
 
 export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
-  const { setNodes, setEdges, nodes, updateNodeStatus, updateNodeThought, addNodeLog } = useGraphStore();
+  const { setNodes, setEdges, updateNodeStatus, updateNodeThought, addNodeLog } = useGraphStore();
+
+  // Tracks which chain step is currently executing (0-indexed), updated via
+  // __LEGO_STEP_START__ markers emitted by Chain.run() in the subprocess stdout.
+  const currentStepRef = useRef<number>(0);
 
   // 1. Initialize Graph
   useEffect(() => {
     if (!graphConfig || !graphConfig.workflow) return;
 
+    // Reset step index on each new graph
+    currentStepRef.current = 0;
+
     const newNodes: Node<AgentNodeData>[] = [];
     const newEdges: Edge[] = [];
-    
-    const createId = () => Math.random().toString(36).substr(2, 9);
+
+    const createId = () => Math.random().toString(36).substring(2, 11);
     
     const parseNode = (configNode: GraphConfigNode, parentId?: string): string => {
        const id = configNode.id || createId(); 
@@ -80,6 +87,12 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
            });
        }
        
+       // For fan_out, render the template agent as a single child representative
+       if (type === 'fan_out' && configNode.agent) {
+           const agentCopy = { ...configNode.agent, id: undefined };
+           parseNode(agentCopy, id);
+       }
+
        if (configNode.worker && configNode.judge) {
            // Clone to ensure unique IDs if the agent object is reused
            const workerNode = { ...configNode.worker, id: undefined }; 
@@ -127,12 +140,47 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
     const lastLog = logs[logs.length - 1];
     const evt = lastLog.event;
 
-    // Route to the currently active agent node, or the first pending one.
-    // The backend doesn't tag events with step IDs, so we use the active/pending
-    // node as a best-effort target.
+    // Use getState() to read current nodes without adding them to the dep array
+    // (which would cause an infinite update loop).
+    const agentNodes = useGraphStore.getState().nodes.filter(n => n.type === 'agent');
+
+    // Detect chain step markers emitted by Chain.run() in the subprocess stdout.
+    // Script execution events get coalesced, so the data string grows and may
+    // contain multiple markers. We use the *highest* step index seen so far
+    // (never regress) to advance the active node correctly.
+    if (evt.type === 'script_execution' && typeof evt.data === 'string') {
+      const startMatches = [...evt.data.matchAll(/(?:^|\n)__LEGO_STEP_START__ (\d+)/g)];
+      if (startMatches.length > 0) {
+        const maxStep = Math.max(...startMatches.map(m => parseInt(m[1], 10)));
+        if (maxStep > currentStepRef.current) {
+          currentStepRef.current = maxStep;
+          if (maxStep < agentNodes.length) {
+            updateNodeStatus(agentNodes[maxStep].id, 'active');
+            // Mark all previous steps done when we advance past them
+            for (let i = 0; i < maxStep; i++) {
+              if (agentNodes[i].data.status !== 'done') {
+                updateNodeStatus(agentNodes[i].id, 'done');
+              }
+            }
+          }
+        }
+      }
+
+      const endMatches = [...evt.data.matchAll(/(?:^|\n)__LEGO_STEP_END__ (\d+)/g)];
+      for (const m of endMatches) {
+        const stepIdx = parseInt(m[1], 10);
+        if (stepIdx < agentNodes.length) {
+          updateNodeStatus(agentNodes[stepIdx].id, 'done');
+        }
+      }
+    }
+
+    // Route the log to the node for the current chain step, falling back to the
+    // first active or pending agent node for engine-phase events (thinking, tools).
     const targetNode =
-      nodes.find(n => n.type === 'agent' && n.data.status === 'active') ||
-      nodes.find(n => n.type === 'agent' && n.data.status === 'pending');
+      agentNodes[currentStepRef.current] ||
+      agentNodes.find(n => n.data.status === 'active') ||
+      agentNodes.find(n => n.data.status === 'pending');
 
     if (targetNode) {
       addNodeLog(targetNode.id, lastLog);
@@ -143,10 +191,9 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
       } else if (evt.type === 'tool_start') {
         updateNodeStatus(targetNode.id, 'active');
       } else if (evt.type === 'execution_result') {
-        updateNodeStatus(targetNode.id, (evt as any).exit_code === 0 ? 'done' : 'failed');
+        updateNodeStatus(targetNode.id, evt.exit_code === 0 ? 'done' : 'failed');
       }
     }
-    // We intentionally omit 'nodes' from dependency array to avoid infinite loop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logs, addNodeLog, updateNodeStatus, updateNodeThought]);
 
