@@ -106,6 +106,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         seed_kb_dir: Path | None = None,
         include_benchmark_results: bool = False,
         enable_heuristic_refinement: bool = True,
+        include_incident_files: bool = True,
     ):
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
@@ -116,6 +117,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.model_id = model_id
         self.include_benchmark_results = include_benchmark_results
         self.enable_heuristic_refinement = enable_heuristic_refinement
+        self.include_incident_files = include_incident_files
 
         if seed_kb_dir is not None:
             self._seed_from(Path(seed_kb_dir))
@@ -224,7 +226,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         else:
             logger.warning("Knowledge base: no architecture file found.")
 
-        if self.incidents_dir.is_dir():
+        if self.include_incident_files and self.incidents_dir.is_dir():
             incident_files = sorted(self.incidents_dir.glob("*.md"))[-MAX_INJECTED_INCIDENTS:]
             if incident_files:
                 dest_incidents = target_dir / KB_INCIDENTS_DIRNAME
@@ -233,6 +235,8 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     shutil.copy2(f, dest_incidents / f.name)
                 result.incidents_dir = dest_incidents
                 logger.info(f"Knowledge base: copied {len(incident_files)} incident(s) to {dest_incidents}")
+        elif not self.include_incident_files:
+            logger.info("Knowledge base: incident file injection disabled by include_incident_files=false")
 
         try:
             result.triage_additions = await self.extract_triage_additions()
@@ -477,8 +481,12 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         logger.info(f"Session summary:\n{session_summary}")
 
-        incident_id = self._save_incident(session_summary, content)
-        incident_ref = f"incidents/{incident_id}.md"
+        incident_ref = ""
+        if self.include_incident_files:
+            incident_id = self._save_incident(session_summary, content)
+            incident_ref = f"incidents/{incident_id}.md"
+        else:
+            logger.info("Skipping incident file save (include_incident_files=false)")
 
         prior_summary = self.summary_path.read_text() if self.summary_path.exists() else ""
         logger.info("Merging into long-term summary...")
@@ -518,6 +526,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         seed_kb_dir: Path | None = None,
         include_benchmark_results: bool = False,
         enable_heuristic_refinement: bool = True,
+        include_incident_files: bool = True,
     ):
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
@@ -596,6 +605,7 @@ def create_knowledge_base(
     seed_kb_dir: Path | None = None,
     include_benchmark_results: bool = False,
     enable_heuristic_refinement: bool = True,
+    include_incident_files: bool = True,
 ) -> KnowledgeBase:
     """Factory function to create a knowledge base implementation."""
     if kb_type == "structured":
@@ -607,6 +617,7 @@ def create_knowledge_base(
             seed_kb_dir,
             include_benchmark_results=include_benchmark_results,
             enable_heuristic_refinement=enable_heuristic_refinement,
+            include_incident_files=include_incident_files,
         )
     if kb_type == "append-only":
         return AppendOnlyKnowledgeBase(
@@ -616,5 +627,6 @@ def create_knowledge_base(
             app_name,
             include_benchmark_results=include_benchmark_results,
             enable_heuristic_refinement=enable_heuristic_refinement,
+            include_incident_files=include_incident_files,
         )
     raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")

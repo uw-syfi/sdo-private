@@ -49,6 +49,7 @@ async def process_manifest(manifest_path: Path) -> None:
         app_name=manifest["app_name"],
         include_benchmark_results=manifest.get("include_benchmark_results", False),
         enable_heuristic_refinement=manifest.get("enable_heuristic_refinement", True),
+        include_incident_files=manifest.get("include_incident_files", True),
     )
 
     logger.info(
