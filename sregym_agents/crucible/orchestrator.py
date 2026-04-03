@@ -179,15 +179,6 @@ def _read_kb_content(path: Path | None) -> str:
         return ""
 
 
-def _extract_guidance_section(content: str, heading: str) -> str:
-    """Extract text under a '## Heading' from a markdown document."""
-    if not content:
-        return ""
-    pattern = rf"^## {re.escape(heading)}\s*\n(.*?)(?=^## |\Z)"
-    match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
-    return match.group(1).strip() if match else ""
-
-
 async def _run_stage_loop(
     model: str,
     app_info: dict,
@@ -229,9 +220,7 @@ async def _run_stage_loop(
     # v3 trained heuristics
     is_v3 = flags.prompt_version >= "v3"
     diagnosis_guidance = ""
-    triage_known_benign = ""
-    triage_required_checks = ""
-    triage_anomaly_hints = ""
+    triage_guidance = ""
     arbitration_guidance = ""
     stage_outputs_file: Path | None = None
     if is_v3:
@@ -239,10 +228,7 @@ async def _run_stage_loop(
         if diagnosis_heuristics_file and diagnosis_heuristics_file.exists():
             diagnosis_guidance = diagnosis_heuristics_file.read_text().strip()
         if triage_heuristics_file and triage_heuristics_file.exists():
-            triage_content = triage_heuristics_file.read_text()
-            triage_known_benign = _extract_guidance_section(triage_content, "Known Benign")
-            triage_required_checks = _extract_guidance_section(triage_content, "Required Checks")
-            triage_anomaly_hints = _extract_guidance_section(triage_content, "Anomaly Hints")
+            triage_guidance = triage_heuristics_file.read_text().strip()
         if arbitration_heuristics_file and arbitration_heuristics_file.exists():
             arbitration_guidance = arbitration_heuristics_file.read_text().strip()
 
@@ -286,9 +272,7 @@ async def _run_stage_loop(
             incidents_dir=incidents_dir if flags.enable_ltm_retrieval else None,
             ltm_model_id=model if flags.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
-            triage_known_benign=triage_known_benign,
-            triage_required_checks=triage_required_checks,
-            triage_anomaly_hints=triage_anomaly_hints,
+            triage_guidance=triage_guidance,
             arbitration_guidance=arbitration_guidance,
             stage_outputs_file=stage_outputs_file,
         )
