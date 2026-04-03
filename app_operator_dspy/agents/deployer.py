@@ -86,10 +86,10 @@ class DeploymentAgent(dspy.Module):
 
     def __init__(self):
         super().__init__()
-        self.gen_deploy = dspy.ReAct(GenerateDeployScript, tools=DEPLOYER_TOOLS)
-        self.gen_health = dspy.ReAct(GenerateHealthCheckScript, tools=DEPLOYER_TOOLS)
-        self.repair_agent = dspy.ReAct(RepairDeploymentError, tools=DEPLOYER_TOOLS)
-        self.health_judge = dspy.ReAct(JudgeHealthCheck, tools=DEPLOYER_TOOLS)
+        self.gen_deploy = dspy.ReAct(GenerateDeployScript, tools=DEPLOYER_TOOLS, max_iters=12)
+        self.gen_health = dspy.ReAct(GenerateHealthCheckScript, tools=DEPLOYER_TOOLS, max_iters=12)
+        self.repair_agent = dspy.ReAct(RepairDeploymentError, tools=DEPLOYER_TOOLS, max_iters=12)
+        self.health_judge = dspy.ReAct(JudgeHealthCheck, tools=DEPLOYER_TOOLS, max_iters=12)
         self._fix_history = _FixHistory()
 
     def forward(
@@ -207,7 +207,7 @@ class DeploymentAgent(dspy.Module):
         if os.path.exists(health_path):
             os.chmod(health_path, os.stat(health_path).st_mode | stat.S_IEXEC)
 
-        log.info("fix summary: %s", fix_result.fix_summary)
+        log.info("fix summary: {}", fix_result.fix_summary)
         self._fix_history.append(attempt, fix_result.fix_summary)
 
     def _cleanup(self, repo_path: str, deploy_path: str) -> None:
