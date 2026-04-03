@@ -11,6 +11,9 @@ from app_operator_dspy.logger import get_logger
 
 log = get_logger("lm_config")
 DEFAULT_MODEL = "vertex_ai/gemini-2.5-pro"
+# Timeout per LLM call in seconds. Prevents hung Vertex AI requests
+# from blocking the pipeline indefinitely.
+LM_TIMEOUT = 600  # 10 minutes
 
 
 def resolve_vertex_project() -> str:
@@ -31,7 +34,7 @@ def get_lm_kwargs(model: str) -> dict:
     Returns:
         Dict of kwargs to pass to configure_lm (e.g. vertex_project, vertex_location).
     """
-    kwargs = {}
+    kwargs = {"timeout": LM_TIMEOUT}
     if model.startswith("vertex_ai/"):
         kwargs["vertex_project"] = resolve_vertex_project()
         kwargs["vertex_location"] = os.environ.get(

@@ -17,10 +17,10 @@ class CodeAnalyzerAgent(dspy.Module):
 
     def __init__(self):
         super().__init__()
-        self.analyze = dspy.ReAct(AnalyzeCodebase, tools=CODE_ANALYZER_TOOLS)
+        self.analyze = dspy.ReAct(AnalyzeCodebase, tools=CODE_ANALYZER_TOOLS, max_iters=12)
 
     def forward(self, repo_path: str) -> dspy.Prediction:
-        log.info("scanning %s...", repo_path)
+        log.info("scanning {}...", repo_path)
         log.info("calling LLM for analysis...")
         result = self.analyze(repo_path=repo_path)
         log.info("analysis complete")

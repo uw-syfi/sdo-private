@@ -54,7 +54,7 @@ class DSPyOperator(dspy.Module):
         log.info("code_analysis — done")
 
         # Step 2: Deploy
-        log.info("deployment — up to %d attempts", max_deploy_attempts)
+        log.info("deployment — up to {} attempts", max_deploy_attempts)
         deploy_result = self.deployer(
             repo_path=repo_path,
             code_analysis=analysis.analysis,
@@ -65,17 +65,18 @@ class DSPyOperator(dspy.Module):
         )
 
         if not deploy_result.success:
-            log.info("deployment — failed after %d attempts", deploy_result.attempts)
+            log.info("deployment — failed after {} attempts", deploy_result.attempts)
             return dspy.Prediction(
                 success=False,
                 phase="deployment",
+                attempts=deploy_result.attempts,
                 error=deploy_result.error,
             )
 
-        log.info("deployment — succeeded on attempt %d", deploy_result.attempts)
+        log.info("deployment — succeeded on attempt {}", deploy_result.attempts)
 
         # Step 3: Monitor
-        log.info("monitoring — %d checks", monitor_checks)
+        log.info("monitoring — {} checks", monitor_checks)
         statuses = []
         for i in range(1, monitor_checks + 1):
             check = self.monitor(
@@ -84,8 +85,13 @@ class DSPyOperator(dspy.Module):
                 health_check_timeout=health_check_timeout,
             )
             statuses.append(check.status)
-            log.info("monitor check %d/%d: %s", i, monitor_checks, check.status)
+            log.info("monitor check {}/{}: {}", i, monitor_checks, check.status)
             if check.status == "unhealthy":
                 break
 
-        return dspy.Prediction(success=True, phase="monitoring", statuses=statuses)
+        return dspy.Prediction(
+            success=True,
+            phase="monitoring",
+            attempts=deploy_result.attempts,
+            statuses=statuses,
+        )
