@@ -138,6 +138,12 @@ class JudgeDeps:
 
 
 class TriageAnomaly(BaseModel):
+    category: str = Field(
+        description="Anomaly category — use a short descriptive label "
+        "(e.g., 'Non-Running Pods', 'Port Mismatch', 'Services Without Endpoints', "
+        "'ConfigMap Anomalies', 'Recent Events'). "
+        "Use standard categories when they fit; create new ones for novel anomaly types."
+    )
     resource_kind: str = Field(description="Kubernetes resource kind (e.g., Pod, Service, ConfigMap)")
     resource_name: str = Field(description="Name of the resource")
     namespace: str = Field(description="Namespace of the resource")
@@ -145,38 +151,8 @@ class TriageAnomaly(BaseModel):
 
 
 class TriageReport(BaseModel):
-    non_running_pods: list[TriageAnomaly] = Field(
-        default_factory=list, description="Pods not in Running/Completed/Succeeded state"
-    )
-    services_without_endpoints: list[TriageAnomaly] = Field(
-        default_factory=list, description="Services with 0 endpoints or selector mismatches"
-    )
-    configmap_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="ConfigMaps with unusual content"
-    )
-    deployment_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Deployment/StatefulSet spec issues"
-    )
-    probe_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Liveness/readiness probe misconfigurations"
-    )
-    job_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Running Jobs/CronJobs that may be fault injectors"
-    )
-    storage_anomalies: list[TriageAnomaly] = Field(default_factory=list, description="PV/PVC issues")
-    network_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="NetworkPolicies, Ingress, DNS policy issues"
-    )
-    scheduling_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Taint/toleration, affinity, ResourceQuota issues"
-    )
-    crd_anomalies: list[TriageAnomaly] = Field(default_factory=list, description="CRD/operator-managed resource issues")
-    rbac_anomalies: list[TriageAnomaly] = Field(default_factory=list, description="RBAC permission issues")
-    recent_events: list[TriageAnomaly] = Field(
-        default_factory=list, description="Warning/error events from kubectl get events"
-    )
-    other_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Anomalies that don't fit other categories"
+    anomalies: list[TriageAnomaly] = Field(
+        default_factory=list, description="All observed anomalies, each tagged with a category"
     )
     raw_cluster_snapshot: str = Field(
         default="", description="Condensed kubectl output for downstream agents to reference"
@@ -185,28 +161,16 @@ class TriageReport(BaseModel):
 
 def format_triage_report(report: TriageReport) -> str:
     """Convert a TriageReport to readable markdown."""
-    sections = [
-        ("Non-Running Pods", report.non_running_pods),
-        ("Services Without Endpoints", report.services_without_endpoints),
-        ("ConfigMap Anomalies", report.configmap_anomalies),
-        ("Deployment Anomalies", report.deployment_anomalies),
-        ("Probe Anomalies", report.probe_anomalies),
-        ("Job Anomalies", report.job_anomalies),
-        ("Storage Anomalies", report.storage_anomalies),
-        ("Network Anomalies", report.network_anomalies),
-        ("Scheduling Anomalies", report.scheduling_anomalies),
-        ("CRD Anomalies", report.crd_anomalies),
-        ("RBAC Anomalies", report.rbac_anomalies),
-        ("Recent Events", report.recent_events),
-        ("Other Anomalies", report.other_anomalies),
-    ]
     lines = ["### Triage Report"]
-    for title, anomalies in sections:
-        if anomalies:
-            lines.append(f"\n**{title}**")
-            lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
-    if not any(anomalies for _, anomalies in sections):
+    if not report.anomalies:
         lines.append("\nNo anomalies detected.")
+        return "\n".join(lines) + "\n"
+    grouped: dict[str, list[TriageAnomaly]] = {}
+    for a in report.anomalies:
+        grouped.setdefault(a.category, []).append(a)
+    for category, anomalies in grouped.items():
+        lines.append(f"\n**{category}**")
+        lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
     return "\n".join(lines) + "\n"
 
 

@@ -73,4 +73,8 @@ OUTPUT:
 Populate the TriageReport with factual observations only.
 - No diagnosis, no hypothesis, no root cause speculation, no severity labels.
 - Put condensed kubectl output into raw_cluster_snapshot for downstream reference.
-- If no anomalies found for a category, leave it as an empty list.
+- Tag each anomaly with a descriptive category string (e.g., "Non-Running Pods",
+  "Services Without Endpoints", "Port Mismatch", "ConfigMap Anomalies",
+  "Network Anomalies", "Recent Events"). Use standard categories when they fit;
+  create new categories when you observe anomalies that don't match existing ones.
+- If no anomalies are found, return an empty anomalies list.
