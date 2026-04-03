@@ -242,7 +242,7 @@ class TestHypothesisTextPassedToJudgeDeps:
         shared_path.write_text("# Session\n")
         shared = SharedFile(shared_path)
 
-        def fake_sre_constructor(model, deps, trajectory_path=None):
+        def fake_sre_constructor(model, deps, trajectory_path=None, system_prompt_override=None):
             mock = MagicMock()
 
             def fake_run(prompt, run_ctx=None):
@@ -270,6 +270,7 @@ class TestHypothesisTextPassedToJudgeDeps:
         with (
             patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
             patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
+            patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
         ):
             import asyncio
 
