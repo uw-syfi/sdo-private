@@ -18,6 +18,8 @@ from libs.agent_mw import (
     SoftLimitExtension,
     TrajectoryMiddleware,
     TurnLoggingMiddleware,
+    arun_with_retry,
+    run_with_retry_sync,
 )
 from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
@@ -89,7 +91,7 @@ def _compact_messages(model: str, messages: list) -> tuple[str, dict]:
         f"<history>\n{history_text}\n</history>"
     )
     compactor: Agent[None, str] = Agent(model, output_type=str)
-    compact_result = compactor.run_sync(summary_prompt)
+    compact_result = run_with_retry_sync(compactor, summary_prompt)
     u = compact_result.usage()
     usage = {
         "input_tokens": u.input_tokens or 0,
@@ -127,7 +129,7 @@ async def _async_compact_messages(model: str, messages: list) -> tuple[str, dict
         f"<history>\n{history_text}\n</history>"
     )
     compactor: Agent[None, str] = Agent(model, output_type=str)
-    compact_result = await compactor.run(summary_prompt)
+    compact_result = await arun_with_retry(compactor, summary_prompt)
     u = compact_result.usage()
     usage = {
         "input_tokens": u.input_tokens or 0,

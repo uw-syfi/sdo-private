@@ -142,8 +142,9 @@ class BaseAgent(Generic[DepsT]):
     ) -> Any:
         """Async counterpart of ``_run``.
 
-        Uses ``await self._agent.run()`` instead of ``run_sync()`` so the
-        caller's event loop is reused rather than creating a new one.
+        Uses ``agent.iter()`` for node-by-node execution so that on a
+        retryable error the accumulated message history (including completed
+        tool calls) is captured and the run resumes from where it left off.
         """
 
         self.current_run_usage = RunUsage()
@@ -151,23 +152,33 @@ class BaseAgent(Generic[DepsT]):
         for m in self._middleware:
             m.before_run()
 
-        async def _stream_handler(ctx: Any, events: Any) -> None:
-            ctx_baseline_tokens = ctx.usage.input_tokens or 0
-            async for event in events:
-                self.current_run_usage = ctx.usage
-                if hasattr(events, "usage"):
-                    self.current_request_input_tokens = (events.usage().input_tokens or 0) - ctx_baseline_tokens
-                self._stream_event_chain(event)
+        message_history = kwargs.pop("message_history", None)
+        current_prompt: str | None = prompt
 
         while True:
+            agent_run = None
             try:
-                result = await self._agent.run(
-                    prompt,
+                async with self._agent.iter(
+                    current_prompt,
                     deps=self.deps,
                     usage_limits=self._usage_limits,
-                    event_stream_handler=_stream_handler,
+                    message_history=message_history,
                     **kwargs,
-                )
+                ) as agent_run:
+                    async for node in agent_run:
+                        if self._agent.is_model_request_node(node) or self._agent.is_call_tools_node(node):
+                            async with node.stream(agent_run.ctx) as stream:
+                                ctx_baseline_tokens = agent_run.ctx.state.usage.input_tokens or 0
+                                async for event in stream:
+                                    self.current_run_usage = agent_run.ctx.state.usage
+                                    if hasattr(stream, "usage"):
+                                        self.current_request_input_tokens = (
+                                            stream.usage().input_tokens or 0
+                                        ) - ctx_baseline_tokens
+                                    self._stream_event_chain(event)
+
+                result = agent_run.result
+                assert result is not None
                 break
             except Exception as exc:
                 delay: float | None = None
@@ -177,6 +188,10 @@ class BaseAgent(Generic[DepsT]):
                         break
                 if delay is None:
                     raise
+                # Capture accumulated messages for resume if available
+                if agent_run is not None:
+                    message_history = list(agent_run.all_messages())
+                    current_prompt = None
                 await asyncio.sleep(delay)
 
         self.current_request_input_tokens = result.usage().input_tokens or 0

@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2  # seconds
 DEFAULT_IDLE_TIMEOUT = 300  # 5 minutes
+_MANIFEST_MAX_RETRIES = 3
+_MANIFEST_RETRY_DELAY = 5.0
 
 
 async def process_manifest(manifest_path: Path) -> None:
@@ -87,10 +89,23 @@ async def run_worker(kb_dir: Path, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> 
                 last_activity = time.monotonic()
 
             for m in manifests:
-                try:
-                    await process_manifest(m)
-                except Exception:
-                    logger.error("KB update failed for %s", m.name, exc_info=True)
+                succeeded = False
+                for attempt in range(_MANIFEST_MAX_RETRIES):
+                    try:
+                        await process_manifest(m)
+                        succeeded = True
+                        break
+                    except Exception:
+                        logger.error(
+                            "KB update failed for %s (attempt %d/%d)",
+                            m.name,
+                            attempt + 1,
+                            _MANIFEST_MAX_RETRIES,
+                            exc_info=True,
+                        )
+                        if attempt < _MANIFEST_MAX_RETRIES - 1:
+                            await asyncio.sleep(_MANIFEST_RETRY_DELAY * (2**attempt))
+                if not succeeded:
                     failed_dir = kb_dir / "failed"
                     failed_dir.mkdir(exist_ok=True)
                     shutil.move(str(m), str(failed_dir / m.name))

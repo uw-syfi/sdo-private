@@ -22,6 +22,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
 
+from libs.agent_mw import arun_with_retry
+
 logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_CHARS = 4000
@@ -293,6 +295,12 @@ def _check_mutating_kubectl(cmd: str) -> str | None:
     return None
 
 
+_MCP_MAX_RETRIES = 5
+_MCP_INITIAL_DELAY = 1.0
+_MCP_BACKOFF_FACTOR = 2.0
+_MCP_MAX_DELAY = 60.0
+
+
 async def _submit_to_benchmark(
     submit_mcp_url: str,
     submission_ans: str,
@@ -302,14 +310,32 @@ async def _submit_to_benchmark(
 
     Returns (success, message, oracle_result_dict).
     """
+    import random
+
     from mcp import ClientSession
     from mcp.client.sse import sse_client
 
-    async with AsyncExitStack() as stack:
-        transport = await stack.enter_async_context(sse_client(url=submit_mcp_url))
-        session = await stack.enter_async_context(ClientSession(*transport))
-        await session.initialize()
-        result = await session.call_tool("submit", arguments={"ans": submission_ans})
+    for attempt in range(_MCP_MAX_RETRIES + 1):
+        try:
+            async with AsyncExitStack() as stack:
+                transport = await stack.enter_async_context(sse_client(url=submit_mcp_url))
+                session = await stack.enter_async_context(ClientSession(*transport))
+                await session.initialize()
+                result = await session.call_tool("submit", arguments={"ans": submission_ans})
+            break
+        except Exception as exc:
+            if attempt == _MCP_MAX_RETRIES:
+                raise
+            delay = min(_MCP_INITIAL_DELAY * (_MCP_BACKOFF_FACTOR**attempt), _MCP_MAX_DELAY)
+            delay += random.uniform(0, delay)
+            logger.warning(
+                "MCP submit failed (attempt %d/%d): %s — retrying in %.1fs.",
+                attempt + 1,
+                _MCP_MAX_RETRIES,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
 
     raw = result.content[0].text if result.content else "{}"
     try:
@@ -825,7 +851,8 @@ async def _run_verification_phase(
             model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
         )
         try:
-            result = await verify_agent.run(
+            result = await arun_with_retry(
+                verify_agent,
                 prompt,
                 event_stream_handler=_make_verify_stream_handler(idx),
             )
@@ -956,7 +983,8 @@ async def triage_cluster(
         return report
 
     try:
-        result = await triage_agent.run(
+        result = await arun_with_retry(
+            triage_agent,
             prompt,
             event_stream_handler=_triage_stream_handler,
         )
@@ -1026,7 +1054,7 @@ async def check_hypothesis_coverage(
     )
 
     try:
-        result = await coverage_agent.run(prompt)
+        result = await arun_with_retry(coverage_agent, prompt)
         output = result.output
 
         if ctx.deps.trajectory_path is not None:
@@ -1118,7 +1146,7 @@ async def search_prior_incidents(
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ctx.deps.ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await retrieval_agent.run(prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     diagnosis = retrieval_result.output
     logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
 
@@ -1226,7 +1254,7 @@ async def search_prior_incidents_any(
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await retrieval_agent.run(prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     diagnosis = retrieval_result.output
     logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
 
@@ -1312,7 +1340,7 @@ async def search_prior_mitigations(
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(ctx.deps.ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await retrieval_agent.run(prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     output = retrieval_result.output
     output_json = output.model_dump_json(indent=2)
     logger.info("[ltm-mitigation] output: %s", output_json)

@@ -19,6 +19,7 @@ from pathlib import Path
 import requests
 from filelock import FileLock
 
+from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import configure as configure_prompts
 from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
@@ -127,20 +128,17 @@ def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
 
 
 def _get_app_info(api_base: str) -> dict:
-    resp = requests.get(f"{api_base}/get_app", timeout=10)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", f"{api_base}/get_app", timeout=10)
     return resp.json()
 
 
 def _get_problem_id(api_base: str) -> str:
-    resp = requests.get(f"{api_base}/get_problem", timeout=10)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", f"{api_base}/get_problem", timeout=10)
     return resp.json()["problem_id"]
 
 
 def _get_planned_stages(api_base: str) -> list[str]:
-    resp = requests.get(f"{api_base}/stages", timeout=10)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", f"{api_base}/stages", timeout=10)
     return resp.json().get("stages", [])
 
 

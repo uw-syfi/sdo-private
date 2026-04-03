@@ -1,15 +1,42 @@
-"""Retry middleware for transient LLM API errors (429 / 5xx)."""
+"""Retry middleware and standalone helpers for transient LLM API errors (429 / 5xx)."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
+import time
+from typing import TYPE_CHECKING, Any
+
+from pydantic_ai.exceptions import ModelHTTPError
 
 from libs.pydantic_agent._middleware import AgentMiddleware
+
+if TYPE_CHECKING:
+    from pydantic_ai import Agent
+    from pydantic_ai.agent import AgentRunResult
 
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_STATUSES = {429} | set(range(500, 600))
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Return True if *exc* is a transient ModelHTTPError (429 / 5xx)."""
+    return isinstance(exc, ModelHTTPError) and exc.status_code in _RETRYABLE_STATUSES
+
+
+def _compute_delay(
+    attempt: int,
+    initial_delay: float,
+    backoff_factor: float,
+    max_delay: float,
+    jitter: bool,
+) -> float:
+    delay = min(initial_delay * (backoff_factor**attempt), max_delay)
+    if jitter:
+        delay = delay + random.uniform(0, delay)
+    return delay
 
 
 class RetryMiddleware(AgentMiddleware):
@@ -41,14 +68,11 @@ class RetryMiddleware(AgentMiddleware):
 
     def on_run_error(self, exc: Exception) -> float | None:
         """Return a delay for retryable errors, or ``None`` to propagate."""
-        from pydantic_ai.exceptions import ModelHTTPError
-
-        if not isinstance(exc, ModelHTTPError):
+        if not _is_retryable(exc):
             return None
 
+        assert isinstance(exc, ModelHTTPError)
         status = exc.status_code
-        if status not in _RETRYABLE_STATUSES:
-            return None
 
         if self._attempt >= self._max_retries:
             logger.warning(
@@ -74,3 +98,105 @@ class RetryMiddleware(AgentMiddleware):
         )
         self._current_delay = min(self._current_delay * self._backoff_factor, self._max_delay)
         return delay
+
+
+# ---------------------------------------------------------------------------
+# Standalone retry wrappers for bare pydantic-ai Agent instances
+# ---------------------------------------------------------------------------
+
+
+async def arun_with_retry(
+    agent: Agent[Any, Any],
+    prompt: str | None,
+    *,
+    max_retries: int = 5,
+    initial_delay: float = 1.0,
+    backoff_factor: float = 2.0,
+    max_delay: float = 60.0,
+    jitter: bool = True,
+    **run_kwargs: Any,
+) -> AgentRunResult[Any]:
+    """Run a bare pydantic-ai ``Agent`` with retry on transient errors.
+
+    Uses ``agent.iter()`` so that on failure the accumulated message history
+    (including completed tool calls) is preserved and the run resumes from
+    where it left off rather than restarting from scratch.
+    """
+    message_history = run_kwargs.pop("message_history", None)
+    current_prompt = prompt
+
+    for attempt in range(max_retries + 1):
+        agent_run = None
+        try:
+            async with agent.iter(
+                current_prompt,
+                message_history=message_history,
+                **run_kwargs,
+            ) as agent_run:
+                async for _node in agent_run:
+                    pass
+            assert agent_run.result is not None
+            return agent_run.result
+        except ModelHTTPError as exc:
+            if not _is_retryable(exc) or attempt == max_retries:
+                raise
+            # Capture accumulated messages if available; otherwise restart
+            if agent_run is not None:
+                message_history = list(agent_run.all_messages())
+                current_prompt = None
+            delay = _compute_delay(attempt, initial_delay, backoff_factor, max_delay, jitter)
+            logger.warning(
+                "Retryable error (status %d, attempt %d/%d), resuming in %.1fs.",
+                exc.status_code,
+                attempt + 1,
+                max_retries,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
+def run_with_retry_sync(
+    agent: Agent[Any, Any],
+    prompt: str | None,
+    *,
+    max_retries: int = 5,
+    initial_delay: float = 1.0,
+    backoff_factor: float = 2.0,
+    max_delay: float = 60.0,
+    jitter: bool = True,
+    **run_kwargs: Any,
+) -> AgentRunResult[Any]:
+    """Synchronous version of :func:`arun_with_retry`.
+
+    Falls back to ``agent.run_sync()`` with a simple restart-on-error loop
+    because pydantic-ai has no ``iter_sync()``.  For the sync compaction
+    call-sites this is acceptable since those agents are single-turn.
+    """
+    message_history = run_kwargs.pop("message_history", None)
+    current_prompt = prompt
+
+    for attempt in range(max_retries + 1):
+        try:
+            return agent.run_sync(
+                current_prompt,
+                message_history=message_history,
+                **run_kwargs,
+            )
+        except ModelHTTPError as exc:
+            if not _is_retryable(exc) or attempt == max_retries:
+                raise
+            current_prompt = prompt
+            message_history = None
+            delay = _compute_delay(attempt, initial_delay, backoff_factor, max_delay, jitter)
+            logger.warning(
+                "Retryable error (status %d, attempt %d/%d), retrying in %.1fs.",
+                exc.status_code,
+                attempt + 1,
+                max_retries,
+                delay,
+            )
+            time.sleep(delay)
+
+    raise RuntimeError("unreachable")  # pragma: no cover

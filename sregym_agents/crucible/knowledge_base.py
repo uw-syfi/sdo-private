@@ -13,6 +13,7 @@ from pathlib import Path
 
 from pydantic_ai import Agent
 
+from libs.agent_mw import arun_with_retry
 from sregym_agents.crucible._prompts import _render
 
 logger = logging.getLogger(__name__)
@@ -287,7 +288,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _call_llm(self, prompt: str) -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await agent.run(prompt)
+        result = await arun_with_retry(agent, prompt)
         return result.output
 
     def _save_incident(self, session_summary: str, session_content: str) -> str:
@@ -313,7 +314,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
             "kb/merge_summary", session_summary=session_summary, prior_summary=prior_summary, incident_ref=incident_ref
         )
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await agent.run(prompt)
+        result = await arun_with_retry(agent, prompt)
         output = result.output
 
         for attempt in range(_MAX_CITATION_RETRIES):
@@ -328,7 +329,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 "Use the exact format {{ref:incidents/FILENAME.md}} for each citation."
             )
             logger.warning(f"Citation validation failed (attempt {attempt + 1}/{_MAX_CITATION_RETRIES}): {invalid}")
-            result = await agent.run(correction, message_history=result.all_messages())
+            result = await arun_with_retry(agent, correction, message_history=result.all_messages())
             output = result.output
 
         return _strip_citation_wrappers(output)
@@ -555,7 +556,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
 
     async def _call_llm(self, prompt: str) -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await agent.run(prompt)
+        result = await arun_with_retry(agent, prompt)
         return result.output
 
     async def update(self, stage_outputs_file: Path | None = None) -> None:
