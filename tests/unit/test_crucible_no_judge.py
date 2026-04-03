@@ -43,7 +43,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
     sre_answer = "CPU throttling on service Z"
     sre_justification = "High CPU usage observed"
 
-    def fake_sre_agent_constructor(model, deps, trajectory_path=None):
+    def fake_sre_agent_constructor(model, deps, trajectory_path=None, system_prompt_override=None):
         mock = MagicMock()
 
         def fake_run(prompt, run_ctx=None):
@@ -65,6 +65,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted submission for stage 'Diagnosis'.", oracle),
         ),
+        patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
     ):
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 
@@ -94,7 +95,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
 
 
 def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -> None:
-    def fake_sre_agent_constructor(model, deps, trajectory_path=None):
+    def fake_sre_agent_constructor(model, deps, trajectory_path=None, system_prompt_override=None):
         mock = MagicMock()
 
         def fake_run(prompt, run_ctx=None):
@@ -112,6 +113,7 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
             new_callable=AsyncMock,
             side_effect=RuntimeError("connection refused"),
         ),
+        patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
     ):
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 
@@ -136,7 +138,7 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
 def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
     """When enable_judge=True (default), the judge agent runs and its verdict is used."""
 
-    def fake_sre_constructor(model, deps, trajectory_path=None):
+    def fake_sre_constructor(model, deps, trajectory_path=None, system_prompt_override=None):
         mock = MagicMock()
 
         def fake_run(prompt, run_ctx=None):
@@ -157,22 +159,25 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
         mock.arun = AsyncMock(side_effect=fake_run)
         return mock
 
-    with patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor):
-        with patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor):
-            with patch("sregym_agents.crucible.orchestrator._submit_to_benchmark") as mock_submit:
-                from sregym_agents.crucible.orchestrator import _run_stage_loop
+    with (
+        patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
+        patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
+        patch("sregym_agents.crucible.orchestrator._submit_to_benchmark") as mock_submit,
+        patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
+    ):
+        from sregym_agents.crucible.orchestrator import _run_stage_loop
 
-                result = asyncio.run(
-                    _run_stage_loop(
-                        model="test-model",
-                        app_info={"app_name": "myapp", "namespace": "default"},
-                        stage="diagnosis",
-                        max_iters=3,
-                        shared_file=shared_file,
-                        submit_mcp_url="http://localhost:9954/submit/sse",
-                        flags=CrucibleFlags(prompt_version="v1", enable_judge=True),
-                    )
-                )
+        result = asyncio.run(
+            _run_stage_loop(
+                model="test-model",
+                app_info={"app_name": "myapp", "namespace": "default"},
+                stage="diagnosis",
+                max_iters=3,
+                shared_file=shared_file,
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                flags=CrucibleFlags(prompt_version="v1", enable_judge=True),
+            )
+        )
 
     assert result.approved is True
     # _submit_to_benchmark is NOT called by orchestrator directly in enable_judge=True mode

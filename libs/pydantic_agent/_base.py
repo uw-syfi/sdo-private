@@ -173,7 +173,7 @@ class BaseAgent(Generic[DepsT]):
                                     self.current_run_usage = agent_run.ctx.state.usage
                                     if hasattr(stream, "usage"):
                                         self.current_request_input_tokens = (
-                                            stream.usage().input_tokens or 0
+                                            stream.usage().input_tokens or 0  # pyright: ignore[reportAttributeAccessIssue]
                                         ) - ctx_baseline_tokens
                                     self._stream_event_chain(event)
 
