@@ -122,6 +122,7 @@ async def arun_with_retry(
     (including completed tool calls) is preserved and the run resumes from
     where it left off rather than restarting from scratch.
     """
+    event_stream_handler = run_kwargs.pop("event_stream_handler", None)
     message_history = run_kwargs.pop("message_history", None)
     current_prompt = prompt
 
@@ -133,8 +134,12 @@ async def arun_with_retry(
                 message_history=message_history,
                 **run_kwargs,
             ) as agent_run:
-                async for _node in agent_run:
-                    pass
+                async for node in agent_run:
+                    if event_stream_handler is not None and (
+                        agent.is_model_request_node(node) or agent.is_call_tools_node(node)
+                    ):
+                        async with node.stream(agent_run.ctx) as stream:
+                            await event_stream_handler(agent_run.ctx, stream)
             assert agent_run.result is not None
             return agent_run.result
         except ModelHTTPError as exc:

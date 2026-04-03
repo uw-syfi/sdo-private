@@ -104,6 +104,20 @@ class TestArunWithRetry:
             with pytest.raises(ModelHTTPError):
                 await arun_with_retry(agent, "hello", max_retries=2, jitter=False)
 
+    @pytest.mark.asyncio
+    async def test_event_stream_handler_does_not_crash(self):
+        """event_stream_handler must be popped before forwarding to agent.iter()."""
+        agent = Agent(TestModel(call_tools=[]), output_type=str)
+
+        events_received: list[object] = []
+
+        async def handler(ctx, events):
+            events_received.extend([event async for event in events])
+
+        result = await arun_with_retry(agent, "hello", event_stream_handler=handler)
+        assert result.output is not None
+        assert len(events_received) > 0
+
 
 # ---------------------------------------------------------------------------
 # run_with_retry_sync
