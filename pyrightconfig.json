@@ -1,10 +1,10 @@
 {
-  "include": ["app_operator", "lego_agent", "libs"],
+  "include": ["app_operator", "lego_agent", "libs", "sregym_agents", "tests"],
   "exclude": ["apps/", ".venv/", ".claude/"],
-  "typeCheckingMode": "basic",
+  "typeCheckingMode": "standard",
   "pythonVersion": "3.12",
   "venvPath": ".",
   "venv": ".venv",
   "reportMissingTypeStubs": false,
-  "strict": ["libs/sds_core"]
+  "strict": ["libs"]
 }
