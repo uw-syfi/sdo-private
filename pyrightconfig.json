@@ -5,5 +5,6 @@
   "pythonVersion": "3.12",
   "venvPath": ".",
   "venv": ".venv",
-  "reportMissingTypeStubs": false
+  "reportMissingTypeStubs": false,
+  "strict": ["libs/sds_core"]
 }
