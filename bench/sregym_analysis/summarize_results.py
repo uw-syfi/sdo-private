@@ -199,35 +199,6 @@ def load_gemini_tokens(log_dir):
     return {}
 
 
-def load_crucible_tokens(log_dir: str) -> dict:
-    """Load token usage from Crucible result JSON files.
-
-    Returns dict mapping problem_id -> total_tokens.
-    """
-    pattern = os.path.join(log_dir, "**", "crucible_results_*.json")
-    files = glob.glob(pattern, recursive=True)
-    if not files:
-        return {}
-
-    tokens_by_pid = {}
-    for file_path in files:
-        try:
-            with open(file_path, encoding="utf-8") as f:
-                data = json.load(f)
-            problem_id = data.get("problem_id", "")
-            if not problem_id:
-                continue
-            um = data.get("usage_metrics", {}).get("total", {})
-            inp = int(um.get("input_tokens", 0) or 0)
-            out = int(um.get("output_tokens", 0) or 0)
-            total = inp + out
-            if total > 0:
-                tokens_by_pid[problem_id] = total
-        except Exception as e:
-            print(f"Warning: could not read {file_path}: {e}")
-    return tokens_by_pid
-
-
 def load_problem_type_mapping():
     """Load problem type definitions from YAML files.
 
@@ -1057,7 +1028,7 @@ def diff_results(dirs, names=None):
         )
 
     # --- Token-based plots ---
-    tokens_maps = [load_stratus_tokens(d) or load_gemini_tokens(d) or load_crucible_tokens(d) for d in dirs]
+    tokens_maps = [load_stratus_tokens(d) or load_gemini_tokens(d) for d in dirs]
     tokens_lists = [[t for t in tm.values() if t and t > 0] for tm in tokens_maps]
 
     if any(tokens_lists):

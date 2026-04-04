@@ -9,13 +9,3 @@ agents:
     kickoff_workdir: ../..
     kickoff_env:
       PYTHONUNBUFFERED: "1"
-  - name: crucible_deepagents
-    kickoff_command: uv run python -m sregym_agents.crucible_deepagents.driver
-    kickoff_workdir: ../..
-    kickoff_env:
-      PYTHONUNBUFFERED: "1"
-  - name: crucible_simple
-    kickoff_command: uv run python -m sregym_agents.crucible_simple.driver
-    kickoff_workdir: ../..
-    kickoff_env:
-      PYTHONUNBUFFERED: "1"
