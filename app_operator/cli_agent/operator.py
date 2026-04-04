@@ -2,7 +2,6 @@ import json
 import signal
 import subprocess
 import threading
-import time
 from pathlib import Path
 
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
@@ -16,7 +15,6 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
 from app_operator.progress import emit_progress
-from app_operator.prompts import get_loader
 from app_operator.trajectory import TrajectoryRecorder
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 from libs.agent_cli.base import CodingAgent
@@ -90,16 +88,6 @@ class AppOperator(OperatorBase):
                 raise AgentError(f"Failed to initialize default coding agent: {e}") from e
         else:
             self.agent = agent
-
-        # Inject MCP server config into the experiment's agent settings when
-        # dynamic observability is enabled. Providers that don't support this
-        # will raise NotImplementedError, which we silently skip.
-        if self.config.operator.prometheus_integration:
-            sds_root = Path(__file__).resolve().parent.parent.parent
-            try:
-                self.agent.inject_mcp_server(self.repo_path, sds_root)
-            except NotImplementedError:
-                pass
 
         # Attach UI to agent if supported
         if hasattr(self.agent, "event_handler"):
@@ -206,8 +194,6 @@ class AppOperator(OperatorBase):
                 logger.info("Health monitoring disabled by configuration, skipping")
 
             run_succeeded = True
-            if self.config.operator.prometheus_integration:
-                self._trigger_ai_remediation(max_retries=5)
             return 0
 
         except KeyboardInterrupt:
@@ -263,51 +249,3 @@ class AppOperator(OperatorBase):
             logger.error(f"Error during shutdown: {e}")
 
         logger.info("Shutdown Complete")
-
-    def _trigger_ai_remediation(self, max_retries: int) -> bool:
-        """Run the Gemini SRE agent in a loop until the system is healthy
-        or we run out of retries."""
-        try:
-            playbook_content = get_loader().render("sre/startup_playbook.jinja2")
-        except (OSError, RuntimeError) as e:
-            logger.warning(f"⚠️  Failed to load SRE playbook: {e}")
-            return False
-
-        print("\n" + "=" * 50)
-        print(f"🤖 [SDS Operator] STARTING AUTO-HEALING LOOP (Max Retries: {max_retries})")
-        print("=" * 50)
-
-        for attempt in range(1, max_retries + 1):
-            print(f"\n🔄 [Attempt {attempt}/{max_retries}] Summoning SRE Agent...")
-
-            try:
-                process = subprocess.Popen(
-                    ["gemini", "-y", playbook_content],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                )
-
-                full_output = ""
-                for line in process.stdout or []:
-                    print(line, end="")
-                    full_output += line
-
-                process.wait()
-
-                if "SYSTEM HEALTHY" in full_output:
-                    print(f"\n✅ [SDS Operator] Success! System healed on attempt {attempt}.")
-                    return True
-
-                print("\n⚠️ [SDS Operator] Agent finished, but system is NOT healthy yet.")
-                print("   Retrying in 5 seconds...")
-                time.sleep(5)
-
-            except (OSError, subprocess.SubprocessError) as e:
-                logger.error(f"❌ Execution error: {e}")
-                time.sleep(5)
-
-        print(f"\n❌ [SDS Operator] Failed to heal system after {max_retries} attempts.")
-        return False
