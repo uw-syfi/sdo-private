@@ -462,7 +462,8 @@ class TestSubmitToBenchmark:
         assert success is True
         assert "accepted" in msg.lower()
         assert result_oracle == {"Mitigation": {"success": True}, "TTM": 166.5}
-        assert result_oracle is not None and "Diagnosis" not in result_oracle
+        assert result_oracle is not None
+        assert "Diagnosis" not in result_oracle
 
 
 # ---------------------------------------------------------------------------

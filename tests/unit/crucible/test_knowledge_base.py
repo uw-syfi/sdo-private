@@ -489,7 +489,8 @@ class TestAppendOnlyInject:
         result = await kb.inject(target)
 
         assert result.summary == target / KB_APPEND_FILENAME
-        assert result.summary is not None and result.summary.read_text() == "prior knowledge"
+        assert result.summary is not None
+        assert result.summary.read_text() == "prior knowledge"
         assert result.lessons is None
         assert result.architecture is None
         assert result.incidents_dir is None

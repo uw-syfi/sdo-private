@@ -419,7 +419,8 @@ class TestPromptOptimizer:
         # Module was actually invoked for each example
         assert mock_module.call_count == len(examples)
         # Score is numeric (CompositeMetric returns > 0 for non-None predictions)
-        assert score is not None and 0.0 <= score <= 1.0
+        assert score is not None
+        assert 0.0 <= score <= 1.0
 
     def test_convert_to_dspy_examples_with_prompt_kwargs(self, dspy_config, tmp_path):
         """prompt_kwargs are mapped through field_mappings into dspy.Example."""

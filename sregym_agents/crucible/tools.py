@@ -314,9 +314,8 @@ async def _submit_to_benchmark(
 
     from mcp import ClientSession
     from mcp.client.sse import sse_client
-    from mcp.types import CallToolResult, TextContent
 
-    result: CallToolResult | None = None
+    result: Any = None
     for attempt in range(_MCP_MAX_RETRIES + 1):
         try:
             async with AsyncExitStack() as stack:
@@ -341,7 +340,7 @@ async def _submit_to_benchmark(
 
     assert result is not None
     first_content = result.content[0] if result.content else None
-    raw = first_content.text if isinstance(first_content, TextContent) else "{}"
+    raw: str = getattr(first_content, "text", "{}") if first_content is not None else "{}"
     try:
         parsed = ast.literal_eval(raw)
     except Exception:
