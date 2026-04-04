@@ -197,7 +197,7 @@ async def _submit_to_benchmark(
         await session.initialize()
         result = await session.call_tool("submit", arguments={"ans": submission_ans})
 
-    raw = result.content[0].text if result.content else "{}"
+    raw = getattr(result.content[0], "text", "{}") if result.content else "{}"
     try:
         parsed = ast.literal_eval(raw)
     except Exception:

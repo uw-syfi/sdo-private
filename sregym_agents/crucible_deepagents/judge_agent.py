@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from deepagents import create_deep_agent
 from langchain.chat_models import init_chat_model
+from langchain_core.runnables import RunnableConfig
 
 from sregym_agents.crucible_deepagents.tools import (
     JudgeDeps,
@@ -63,17 +64,17 @@ async def run_judge_agent(
         )
         callbacks.append(trajectory_handler)
 
-    config: dict[str, Any] = {}
+    config: RunnableConfig = {}
     if callbacks:
         config["callbacks"] = callbacks
 
     # Run the agent with submit reminder loop
-    messages = [{"role": "user", "content": user_prompt}]
+    messages: list[dict[str, str]] = [{"role": "user", "content": user_prompt}]
     reminder_count = 0
     output = ""
 
     while True:
-        result = await agent.ainvoke({"messages": messages}, config=config)
+        result = await agent.ainvoke({"messages": messages}, config=config)  # type: ignore[arg-type]
 
         # Extract final message content
         result_messages = result.get("messages", [])

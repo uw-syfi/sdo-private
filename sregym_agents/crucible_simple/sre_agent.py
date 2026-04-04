@@ -98,8 +98,8 @@ async def run_sre_agent(
         tools=[],
         backend=TimeoutShellBackend(virtual_mode=False, inherit_env=True),
         system_prompt=system_prompt,
-        subagents=subagents,
-        response_format=SRESubmission,
+        subagents=subagents,  # type: ignore[arg-type]
+        response_format=SRESubmission,  # type: ignore[arg-type]
     )
 
     callbacks = []
@@ -118,7 +118,7 @@ async def run_sre_agent(
 
     result = await agent.ainvoke(
         {"messages": [{"role": "user", "content": user_prompt}]},
-        config=config,
+        config=config,  # type: ignore[arg-type]
     )
 
     submission = result.get("structured_response")

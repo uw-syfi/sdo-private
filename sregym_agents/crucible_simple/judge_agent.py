@@ -69,7 +69,7 @@ async def run_judge_agent(
     output = ""
 
     while True:
-        result = await agent.ainvoke({"messages": messages}, config=config)
+        result = await agent.ainvoke({"messages": messages}, config=config)  # type: ignore[arg-type]
 
         result_messages = result.get("messages", [])
         if result_messages:

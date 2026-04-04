@@ -274,6 +274,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     # Write trajectory to logs_dir (bench/sregym/logs/…) when available, matching
     # the convention used by other sregym agents (claudecode, gemini_cli, codex).
     # Fall back to cwd (exp_env after chdir) for local/standalone runs.
+    logs_dir: Path | None = None
     if args.logs_dir:
         logs_dir = Path(args.logs_dir)
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -291,7 +292,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     arbitration_heuristics_file: Path | None = None
 
     if args.kb_dir:
-        model_id = args.kb_model or os.environ.get("MODEL_ID", args.model)
+        model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
         seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
         seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
@@ -310,7 +311,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             include_incident_files=include_incident_files,
         )
         if not args.no_inject_kb:
-            injected = await kb.inject(Path(exp_env))
+            injected = await kb.inject(Path(exp_env or "."))
             lt_summary_file = injected.summary
             lessons_file = injected.lessons
             architecture_file = injected.architecture
@@ -347,6 +348,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
 
     if args.logs_dir:
+        assert logs_dir is not None
         _save_results(logs_dir, problem_id, usage_metrics)
         logger.info(f"Usage metrics: {usage_metrics}")
 
@@ -363,6 +365,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         # Copy stage_outputs_file to logs_dir so it survives exp_env cleanup
         saved_stage_outputs: str | None = None
         if stage_outputs_file and stage_outputs_file.exists() and args.logs_dir:
+            assert logs_dir is not None
             dest = logs_dir / stage_outputs_file.name
             shutil.copy2(stage_outputs_file, dest)
             saved_stage_outputs = str(dest)

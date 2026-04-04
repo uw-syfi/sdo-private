@@ -13,7 +13,7 @@ name = "kb-inject-summary-ablation"
 [defaults]
 agent = "crucible"
 model = "google-vertex:gemini-2.5-flash"
-parallel = 4
+parallel = 8
 enable_summary = true
 
 [defaults.variants]
@@ -35,7 +35,7 @@ max_hypotheses = 3
 max_submissions = 3
 kb_type = "structured"
 include_benchmark_results = true
-enable_heuristic_refinement = true
+enable_heuristic_refinement = false
 include_incident_files = false
 max_diagnosis_iterations = 3
 max_mitigation_iterations = 3

@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from sregym_agents.crucible_deepagents._prompts import _render
 
@@ -75,7 +75,11 @@ async def _call_llm(model_id: str, prompt: str) -> str:
     """Make a single LLM call using langchain and return the text response."""
     model = init_chat_model(model_id, temperature=0)
     response = await model.ainvoke([HumanMessage(content=prompt)])
-    return response.content
+    content = response.content
+    if isinstance(content, list):
+        return "".join(str(c) for c in content)
+    assert isinstance(content, str)
+    return content
 
 
 class KnowledgeBase(abc.ABC):
@@ -256,9 +260,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
             incident_ref=incident_ref,
         )
         model = init_chat_model(self.model_id, temperature=0)
-        messages = [HumanMessage(content=prompt)]
+        messages: list[BaseMessage] = [HumanMessage(content=prompt)]
         response = await model.ainvoke(messages)
-        output = response.content
+        output = response.content if isinstance(response.content, str) else str(response.content)
 
         for attempt in range(_MAX_CITATION_RETRIES):
             invalid = _find_invalid_citations(output, self.incidents_dir)
@@ -272,10 +276,10 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 "Use the exact format {{ref:incidents/FILENAME.md}} for each citation."
             )
             logger.warning(f"Citation validation failed (attempt {attempt + 1}/{_MAX_CITATION_RETRIES}): {invalid}")
-            messages.append(response)
+            messages.append(response)  # type: ignore[arg-type]
             messages.append(HumanMessage(content=correction))
             response = await model.ainvoke(messages)
-            output = response.content
+            output = response.content if isinstance(response.content, str) else str(response.content)
 
         return _strip_citation_wrappers(output)
 

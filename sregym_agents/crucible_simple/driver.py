@@ -199,6 +199,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     diagnosis_shared_file = Path("diagnosis_session_state.md")
     mitigation_shared_file = Path("mitigation_session_state.md")
     _run_uid = uuid.uuid4().hex[:8]
+    logs_dir: Path | None = None
     if args.logs_dir:
         logs_dir = Path(args.logs_dir)
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -213,10 +214,10 @@ async def _async_main(args: argparse.Namespace) -> None:
     incidents_dir: Path | None = None
 
     if args.kb_dir:
-        model_id = args.kb_model or os.environ.get("MODEL_ID", args.model)
+        model_id: str = args.kb_model or os.environ.get("MODEL_ID") or args.model
         seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
         seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
-        kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
+        kb_type = args.kb_type or str(agent_cfg.get("kb_type", "structured"))
         include_benchmark_results = agent_cfg.get("include_benchmark_results", False)
         kb = create_knowledge_base(
             kb_type=kb_type,
@@ -228,6 +229,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             include_benchmark_results=include_benchmark_results,
         )
         if not args.no_inject_kb:
+            assert exp_env is not None
             injected = await kb.inject(Path(exp_env))
             lt_summary_file = injected.summary
             lessons_file = injected.lessons
@@ -252,7 +254,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         flags=flags,
     )
 
-    if args.logs_dir:
+    if args.logs_dir and logs_dir is not None:
         _save_results(logs_dir, problem_id, usage_metrics)
         logger.info(f"Usage metrics: {usage_metrics}")
 

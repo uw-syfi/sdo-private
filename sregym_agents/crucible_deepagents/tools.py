@@ -275,7 +275,10 @@ async def _submit_to_benchmark(
         await session.initialize()
         result = await session.call_tool("submit", arguments={"ans": submission_ans})
 
-    raw = result.content[0].text if result.content else "{}"
+    from mcp.types import TextContent
+
+    first_content = result.content[0] if result.content else None
+    raw = first_content.text if isinstance(first_content, TextContent) else "{}"
     try:
         parsed = ast.literal_eval(raw)
     except Exception:

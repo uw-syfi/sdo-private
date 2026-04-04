@@ -242,6 +242,7 @@ async def _run_stage_loop(
 
     last_answer = ""
     last_justification = ""
+    last_causal_chain = ""
 
     timed_out = False
     for iteration in range(1, max_iters + 1):
