@@ -32,7 +32,7 @@ def claude_agent(mock_llm_subprocess, mock_env, mock_recorder):
     mock_which.return_value = "/usr/bin/claude"
 
     with patch(
-        "libs.agent_cli.cli_agent._get_interactive_env",
+        "libs.agent_cli.cli_agent.get_interactive_env",
         return_value=mock_env,
     ):
         with patch("libs.agent_cli.cli_agent.CLICodingAgent._check_cli"):

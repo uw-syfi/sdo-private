@@ -8,88 +8,46 @@ import json
 
 import pytest
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import assume, given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from lego_agent.models import LegoAgentResponse, extract_json, parse_lego_agent_response
-
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
 
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
-    # Prefix/suffix safe characters: no braces so they don't interfere with
-    # the brace-slice extraction heuristic in extract_json.
-    _safe_text = st.text(
-        alphabet=st.characters(blacklist_characters="{}"),
-        max_size=30,
-    )
+# Prefix/suffix safe characters: no braces so they don't interfere with
+# the brace-slice extraction heuristic in extract_json.
+_safe_text = st.text(
+    alphabet=st.characters(blacklist_characters="{}"),
+    max_size=30,
+)
 
-    @st.composite
-    def clarify_json_strategy(draw):
-        """Generate a valid clarify JSON payload embedded in arbitrary text."""
-        questions = draw(
-            st.lists(
-                st.text(min_size=1, max_size=80).filter(str.strip),
-                min_size=1,
-                max_size=5,
-            )
+
+@st.composite
+def clarify_json_strategy(draw):
+    """Generate a valid clarify JSON payload embedded in arbitrary text."""
+    questions = draw(
+        st.lists(
+            st.text(min_size=1, max_size=80).filter(str.strip),
+            min_size=1,
+            max_size=5,
         )
-        payload = json.dumps({"status": "clarify", "questions": questions})
-        prefix = draw(_safe_text)
-        suffix = draw(_safe_text)
-        return prefix + payload + suffix, questions
+    )
+    payload = json.dumps({"status": "clarify", "questions": questions})
+    prefix = draw(_safe_text)
+    suffix = draw(_safe_text)
+    return prefix + payload + suffix, questions
 
-    @st.composite
-    def ready_json_strategy(draw):
-        """Generate a valid ready JSON payload embedded in arbitrary text."""
-        yaml_config = draw(st.text(min_size=1, max_size=200).filter(str.strip))
-        payload = json.dumps({"status": "ready", "yaml_config": yaml_config})
-        prefix = draw(_safe_text)
-        suffix = draw(_safe_text)
-        return prefix + payload + suffix, yaml_config
-else:
 
-    def clarify_json_strategy():
-        pass
-
-    def ready_json_strategy():
-        pass
+@st.composite
+def ready_json_strategy(draw):
+    """Generate a valid ready JSON payload embedded in arbitrary text."""
+    yaml_config = draw(st.text(min_size=1, max_size=200).filter(str.strip))
+    payload = json.dumps({"status": "ready", "yaml_config": yaml_config})
+    prefix = draw(_safe_text)
+    suffix = draw(_safe_text)
+    return prefix + payload + suffix, yaml_config
 
 
 # ---------------------------------------------------------------------------

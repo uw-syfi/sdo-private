@@ -71,7 +71,7 @@ class TestThinkingSettings:
 
     def test_budget_tokens_propagated(self):
         settings = thinking_settings("claude-3-sonnet", 8192)
-        assert settings["anthropic_thinking"]["budget_tokens"] == 8192
+        assert settings["anthropic_thinking"]["budget_tokens"] == 8192  # type: ignore[typeddict-item]
 
         settings = thinking_settings("gemini-2.5-pro", 8192)
-        assert settings["gemini_thinking_config"]["thinking_budget"] == 8192
+        assert settings["gemini_thinking_config"]["thinking_budget"] == 8192  # type: ignore[typeddict-item]

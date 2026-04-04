@@ -82,7 +82,7 @@ def test_analyze_code_skips_if_files_exist():
         # But we only care about the first step
         try:
             # We use a recursion limit to stop it from running too long if it loops
-            graph.invoke(initial_state, {"recursion_limit": 5})
+            graph.invoke(initial_state, {"recursion_limit": 5})  # type: ignore[arg-type]
         except Exception:
             pass
 
@@ -164,7 +164,7 @@ def test_analyze_code_runs_if_files_missing():
         }
 
         try:
-            graph.invoke(initial_state, {"recursion_limit": 5})
+            graph.invoke(initial_state, {"recursion_limit": 5})  # type: ignore[arg-type]
         except Exception:
             pass
 

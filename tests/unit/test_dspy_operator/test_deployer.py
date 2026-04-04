@@ -60,17 +60,17 @@ class TestDeploymentAgent:
         assert isinstance(agent.gen_deploy, dspy.ReAct)
         assert isinstance(agent.gen_health, dspy.ReAct)
         assert isinstance(agent.repair_agent, dspy.ReAct)
-        tool_names = set(agent.gen_deploy.tools.keys())
+        tool_names = set(agent.gen_deploy.tools.keys())  # type: ignore[union-attr]
         expected = {"run_shell", "read_file", "write_file", "run_health_check", "list_files", "finish"}
         assert expected <= tool_names
-        assert agent.gen_deploy.tools.keys() == agent.gen_health.tools.keys()
-        assert agent.gen_health.tools.keys() == agent.repair_agent.tools.keys()
+        assert agent.gen_deploy.tools.keys() == agent.gen_health.tools.keys()  # type: ignore[union-attr]
+        assert agent.gen_health.tools.keys() == agent.repair_agent.tools.keys()  # type: ignore[union-attr]
 
     def test_health_judge_is_react_with_tools(self):
         """health_judge is a ReAct instance with DEPLOYER_TOOLS."""
         agent = DeploymentAgent()
         assert isinstance(agent.health_judge, dspy.ReAct)
-        tool_names = set(agent.health_judge.tools.keys())
+        tool_names = set(agent.health_judge.tools.keys())  # type: ignore[union-attr]
         expected = {"run_shell", "read_file", "write_file", "run_health_check", "list_files", "finish"}
         assert expected <= tool_names
 
@@ -158,7 +158,7 @@ class TestDeploymentAgent:
 
         assert agent.gen_deploy.call_count == 1
         assert agent.gen_health.call_count == 1
-        assert agent.repair_agent.call_count >= 1
+        assert agent.repair_agent.call_count >= 1  # type: ignore[operator]
 
     @patch("app_operator_dspy.agents.deployer.run_shell")
     def test_first_fix_skips_consolidation(self, mock_shell, tmp_path):
@@ -269,7 +269,7 @@ class TestDeploymentAgent:
 
         agent.forward(str(tmp_path), "analysis", "issues", platform="k8s")
 
-        call_kwargs = agent.health_judge.call_args.kwargs
+        call_kwargs = agent.health_judge.call_args.kwargs  # type: ignore[union-attr]
         assert call_kwargs["platform"] == "k8s"
 
 

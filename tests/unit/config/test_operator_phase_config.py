@@ -27,24 +27,24 @@ class TestOperatorPhaseConfig:
     def test_type_validation_bool_required(self):
         """Test that code_analysis must be a bool."""
         with pytest.raises(TypeError, match="code_analysis must be bool"):
-            OperatorPhaseConfig(code_analysis="true")
+            OperatorPhaseConfig(code_analysis="true")  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="code_analysis must be bool"):
-            OperatorPhaseConfig(code_analysis=1)
+            OperatorPhaseConfig(code_analysis=1)  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="code_analysis must be bool"):
-            OperatorPhaseConfig(code_analysis=None)
+            OperatorPhaseConfig(code_analysis=None)  # type: ignore[arg-type]
 
     def test_fix_summary_consolidation_type_validation(self):
         """Test that fix_summary_consolidation must be a bool."""
         with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
-            OperatorPhaseConfig(fix_summary_consolidation="true")
+            OperatorPhaseConfig(fix_summary_consolidation="true")  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
-            OperatorPhaseConfig(fix_summary_consolidation=1)
+            OperatorPhaseConfig(fix_summary_consolidation=1)  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
-            OperatorPhaseConfig(fix_summary_consolidation=None)
+            OperatorPhaseConfig(fix_summary_consolidation=None)  # type: ignore[arg-type]
 
 
 class TestOperatorPhaseConfigParsing:

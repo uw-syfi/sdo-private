@@ -154,9 +154,9 @@ class TestGEPAOptimizerOptimize:
         """Results dict has all expected keys with valid values."""
         optimizer = GEPAOptimizer(
             config=gepa_config,
-            adapter=StubAdapter(),
-            reflector=StubReflector(),
-            evaluator=StubEvaluator(),
+            adapter=StubAdapter(),  # type: ignore[arg-type]
+            reflector=StubReflector(),  # type: ignore[arg-type]
+            evaluator=StubEvaluator(),  # type: ignore[arg-type]
         )
         results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         # Core result fields
@@ -183,9 +183,9 @@ class TestGEPAOptimizerOptimize:
     def test_mutation_failure_continues(self, gepa_config, examples):
         optimizer = GEPAOptimizer(
             config=gepa_config,
-            adapter=StubAdapter(),
-            reflector=FailingReflector(),
-            evaluator=StubEvaluator(),
+            adapter=StubAdapter(),  # type: ignore[arg-type]
+            reflector=FailingReflector(),  # type: ignore[arg-type]
+            evaluator=StubEvaluator(),  # type: ignore[arg-type]
         )
         results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         assert results["best_prompt"] is not None
@@ -193,9 +193,9 @@ class TestGEPAOptimizerOptimize:
     def test_invalid_mutation_skipped(self, gepa_config, examples):
         optimizer = GEPAOptimizer(
             config=gepa_config,
-            adapter=InvalidatingAdapter(),
-            reflector=StubReflector(),
-            evaluator=StubEvaluator(),
+            adapter=InvalidatingAdapter(),  # type: ignore[arg-type]
+            reflector=StubReflector(),  # type: ignore[arg-type]
+            evaluator=StubEvaluator(),  # type: ignore[arg-type]
         )
         results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         assert results["final_pool_size"] == 1
@@ -217,9 +217,9 @@ class TestGEPAOptimizerEarlyStopping:
         evaluator = StubEvaluator(base_score=0.5, improvement=0.0)
         optimizer = GEPAOptimizer(
             config=config,
-            adapter=StubAdapter(),
-            reflector=StubReflector(),
-            evaluator=evaluator,
+            adapter=StubAdapter(),  # type: ignore[arg-type]
+            reflector=StubReflector(),  # type: ignore[arg-type]
+            evaluator=evaluator,  # type: ignore[arg-type]
         )
         results = optimizer.optimize("deployer/system.jinja2", examples, examples)
         assert len(results["history"]) < 20
@@ -244,9 +244,9 @@ class TestGEPAOptimizerResume:
         adapter = StubAdapter()
         optimizer = GEPAOptimizer(
             config=config,
-            adapter=adapter,
-            reflector=StubReflector(),
-            evaluator=StubEvaluator(),
+            adapter=adapter,  # type: ignore[arg-type]
+            reflector=StubReflector(),  # type: ignore[arg-type]
+            evaluator=StubEvaluator(),  # type: ignore[arg-type]
         )
         optimizer.optimize("deployer/system.jinja2", examples, examples)
 
@@ -265,9 +265,9 @@ class TestGEPAOptimizerResume:
         )
         resume_optimizer = GEPAOptimizer(
             config=resume_config,
-            adapter=adapter,
-            reflector=StubReflector(),
-            evaluator=StubEvaluator(),
+            adapter=adapter,  # type: ignore[arg-type]
+            reflector=StubReflector(),  # type: ignore[arg-type]
+            evaluator=StubEvaluator(),  # type: ignore[arg-type]
         )
         results = resume_optimizer.resume(str(optimizer.output_dir), examples, examples)
         assert results["best_prompt"] is not None
@@ -280,9 +280,9 @@ class TestGEPAOptimizerResume:
         )
         optimizer = GEPAOptimizer(
             config=config,
-            adapter=StubAdapter(),
-            reflector=StubReflector(),
-            evaluator=StubEvaluator(),
+            adapter=StubAdapter(),  # type: ignore[arg-type]
+            reflector=StubReflector(),  # type: ignore[arg-type]
+            evaluator=StubEvaluator(),  # type: ignore[arg-type]
         )
         with pytest.raises(FileNotFoundError, match="No checkpoint"):
             optimizer.resume(str(tmp_path / "nonexistent"), examples, examples)
@@ -305,9 +305,9 @@ class TestGEPAOptimizerResume:
         )
         optimizer = GEPAOptimizer(
             config=config,
-            adapter=StubAdapter(),
-            reflector=StubReflector(),
-            evaluator=StubEvaluator(),
+            adapter=StubAdapter(),  # type: ignore[arg-type]
+            reflector=StubReflector(),  # type: ignore[arg-type]
+            evaluator=StubEvaluator(),  # type: ignore[arg-type]
         )
         with pytest.raises(ValueError, match="no candidates"):
             optimizer.resume(str(checkpoint_dir), examples, examples)
@@ -332,9 +332,9 @@ class TestGEPAOptimizerSeed:
             )
             optimizer = GEPAOptimizer(
                 config=config,
-                adapter=StubAdapter(),
-                reflector=StubReflector(),
-                evaluator=StubEvaluator(),
+                adapter=StubAdapter(),  # type: ignore[arg-type]
+                reflector=StubReflector(),  # type: ignore[arg-type]
+                evaluator=StubEvaluator(),  # type: ignore[arg-type]
             )
             batch = optimizer._sample_minibatch(examples)
             batches.append([e.description for e in batch])

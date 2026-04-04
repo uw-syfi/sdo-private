@@ -221,8 +221,8 @@ class TestRoundTripSaveLoad:
 
         assert loaded_module is not None
         assert hasattr(loaded_module, "demos")
-        assert len(loaded_module.demos) == 1
-        assert loaded_module.demos[0]["repo_path"] == "/repo1"
+        assert len(loaded_module.demos) == 1  # type: ignore[union-attr]
+        assert loaded_module.demos[0]["repo_path"] == "/repo1"  # type: ignore[index]
 
     def test_save_multiple_prompts_and_load(self, tmp_path):
         """Should save and load multiple prompts."""
@@ -261,15 +261,15 @@ class TestRoundTripSaveLoad:
         assert module2 is not None
 
         # Check that demos were loaded
-        assert len(module1.demos) == 1
-        assert len(module2.demos) == 1
+        assert len(module1.demos) == 1  # type: ignore[union-attr]
+        assert len(module2.demos) == 1  # type: ignore[union-attr]
 
         # Demos should preserve the data
-        if isinstance(module1.demos[0], dict):
-            assert module1.demos[0]["data"] == "prompt1"
+        if isinstance(module1.demos[0], dict):  # type: ignore[index]
+            assert module1.demos[0]["data"] == "prompt1"  # type: ignore[index]
 
-        if isinstance(module2.demos[0], dict):
-            assert module2.demos[0]["data"] == "prompt2"
+        if isinstance(module2.demos[0], dict):  # type: ignore[index]
+            assert module2.demos[0]["data"] == "prompt2"  # type: ignore[index]
 
     def test_load_latest_version(self, tmp_path):
         """Should load 'latest' version correctly."""
@@ -300,4 +300,4 @@ class TestRoundTripSaveLoad:
         loaded = load_optimized_module("deployer_fix_error", tmp_path / "optimized", "latest")
 
         assert loaded is not None
-        assert loaded.demos[0]["version"] == "v2"
+        assert loaded.demos[0]["version"] == "v2"  # type: ignore[index]

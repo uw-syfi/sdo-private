@@ -53,12 +53,12 @@ def _make_agent(
     with patch("app_operator.pydantic_ai._base_agent.get_context_window", return_value=128_000):
 
         class ConcreteAgent(OperatorAgent):
-            phase = "test_phase"
+            phase = "test_phase"  # type: ignore[assignment]
 
             def __init__(self):
                 super().__init__(deps, recorder, agent_name="Test Agent", middleware=middleware or [])
                 self._agent = Agent(
-                    TestModel(call_tools=call_tools),
+                    TestModel(call_tools=call_tools),  # type: ignore[arg-type]
                     deps_type=type(deps),
                     output_type=output_type,
                     tools=tools if tools is not None else [echo],
@@ -152,14 +152,14 @@ def test_structured_output_unaffected():
         value: str
 
     mw = RecordingMiddleware()
-    agent = _make_agent(middleware=[mw], output_type=MyOutput)
+    agent = _make_agent(middleware=[mw], output_type=MyOutput)  # type: ignore[arg-type]
     result = agent._run("test")
     assert result.output is not None
 
 
 def test_no_events_when_no_tools_invoked():
     mw = RecordingMiddleware()
-    agent = _make_agent(middleware=[mw], call_tools=[])
+    agent = _make_agent(middleware=[mw], call_tools=[])  # type: ignore[arg-type]
     agent._run("test")
     assert mw.tool_call_events == []
 
@@ -172,7 +172,7 @@ def test_trajectory_recorded_after_run(tmp_path):
     with patch("app_operator.pydantic_ai._base_agent.get_context_window", return_value=128_000):
 
         class ConcreteAgent(OperatorAgent):
-            phase = "p"
+            phase = "p"  # type: ignore[assignment]
 
             def __init__(self):
                 super().__init__(deps, recorder, agent_name="A")

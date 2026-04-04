@@ -10,37 +10,8 @@ from app_operator.fault_injection.compose_faults import (
 )
 from app_operator.fault_injection.models import FaultCategory, FaultResult, FaultSeverity
 
-# Try to import hypothesis, skip property tests if not available
-try:
-    from hypothesis import given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 
 @pytest.fixture
@@ -379,41 +350,35 @@ class TestComposeFaultInjectorDispatch:
 # ---------------------------------------------------------------------------
 # Strategy for property-based tests
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
-
-    @st.composite
-    def compose_data_strategy(draw):
-        """Generate a minimal docker-compose dict with varying services."""
-        num_services = draw(st.integers(min_value=0, max_value=8))
-        services = {}
-        for i in range(num_services):
-            name = f"svc{i}"
-            config = {}
-            # Randomly add ports
-            has_ports = draw(st.booleans())
-            if has_ports:
-                host = draw(st.integers(min_value=1024, max_value=60000))
-                config["ports"] = [f"{host}:{host}"]
-            # Randomly add environment
-            has_env = draw(st.booleans())
-            if has_env:
-                config["environment"] = [f"KEY{i}=val{i}"]
-            # Randomly add an image
-            has_image = draw(st.booleans())
-            if has_image:
-                config["image"] = draw(st.sampled_from(["nginx:latest", "postgres:14", "redis:7", "myapp:1.0"]))
-            services[name] = config
-        return {"services": services}
+@st.composite
+def compose_data_strategy(draw):
+    """Generate a minimal docker-compose dict with varying services."""
+    num_services = draw(st.integers(min_value=0, max_value=8))
+    services = {}
+    for i in range(num_services):
+        name = f"svc{i}"
+        config = {}
+        # Randomly add ports
+        has_ports = draw(st.booleans())
+        if has_ports:
+            host = draw(st.integers(min_value=1024, max_value=60000))
+            config["ports"] = [f"{host}:{host}"]
+        # Randomly add environment
+        has_env = draw(st.booleans())
+        if has_env:
+            config["environment"] = [f"KEY{i}=val{i}"]
+        # Randomly add an image
+        has_image = draw(st.booleans())
+        if has_image:
+            config["image"] = draw(st.sampled_from(["nginx:latest", "postgres:14", "redis:7", "myapp:1.0"]))
+        services[name] = config
+    return {"services": services}
 
 
-@pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis",
-)
 class TestComposeFaultInjectionProperty:
     """Property-based tests for ComposeFaultInjector over generated compose topologies."""
 
-    @given(compose_data=compose_data_strategy() if HYPOTHESIS_AVAILABLE else st.none())
+    @given(compose_data=compose_data_strategy())
     @settings(max_examples=50, deadline=2000)
     def test_inject_result_always_has_fault_id(self, compose_data):
         """Injecting any fault always returns a result whose fault_id matches the fault."""
@@ -423,7 +388,7 @@ class TestComposeFaultInjectionProperty:
         assert isinstance(result, FaultResult)
         assert result.fault.fault_id == fault.fault_id
 
-    @given(compose_data=compose_data_strategy() if HYPOTHESIS_AVAILABLE else st.none())
+    @given(compose_data=compose_data_strategy())
     @settings(max_examples=50, deadline=2000)
     def test_failed_injection_has_error_message(self, compose_data):
         """When injection fails, the result must carry a non-empty error message."""
@@ -435,8 +400,8 @@ class TestComposeFaultInjectionProperty:
             assert len(result.error_message) > 0
 
     @given(
-        compose_data=compose_data_strategy() if HYPOTHESIS_AVAILABLE else st.none(),
-        fault_index=st.integers(min_value=0, max_value=len(COMPOSE_FAULTS) - 1) if HYPOTHESIS_AVAILABLE else st.none(),
+        compose_data=compose_data_strategy(),
+        fault_index=st.integers(min_value=0, max_value=len(COMPOSE_FAULTS) - 1),
     )
     @settings(max_examples=50, deadline=2000)
     def test_inject_never_raises_exception(self, compose_data, fault_index):

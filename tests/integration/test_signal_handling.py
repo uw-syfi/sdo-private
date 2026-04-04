@@ -100,7 +100,7 @@ class TestSignalHandling:
 
         operator = AppOperator(
             str(repo),
-            health_check_interval=0.1,
+            health_check_interval=0.1,  # type: ignore[arg-type]
             health_check_max_count=5,
             max_deployment_attempts=1,
             agent=stub_agent,

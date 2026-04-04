@@ -23,7 +23,7 @@ def echo(ctx, message: str) -> str:
     return f"echo: {message}"
 
 
-def _make_agent(middleware=None, call_tools="all"):
+def _make_agent(middleware=None, call_tools: Any = "all"):
     class ConcreteAgent(BaseAgent):
         def __init__(self):
             super().__init__(None, agent_name="traj-agent", middleware=middleware or [])

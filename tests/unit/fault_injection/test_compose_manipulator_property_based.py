@@ -6,108 +6,65 @@ which are pure functions with clear input/output contracts.
 
 import pytest
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import assume, given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from app_operator.fault_injection._base import ComposeManipulator
 
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
-
 VALID_CATEGORIES = {"database", "cache", "frontend", "backend", "proxy", "monitoring"}
+
 
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
+@st.composite
+def service_config_strategy(draw):
+    """Generate a service config dict with optional image key."""
+    image = draw(st.one_of(st.none(), st.text(max_size=50)))
+    config = {}
+    if image is not None:
+        config["image"] = image
+    return config
 
-    @st.composite
-    def service_config_strategy(draw):
-        """Generate a service config dict with optional image key."""
-        image = draw(st.one_of(st.none(), st.text(max_size=50)))
-        config = {}
-        if image is not None:
-            config["image"] = image
-        return config
 
-    @st.composite
-    def compose_data_strategy(draw):
-        """Generate a docker-compose data dict with a services section."""
-        service_names = draw(
+@st.composite
+def compose_data_strategy(draw):
+    """Generate a docker-compose data dict with a services section."""
+    service_names = draw(
+        st.lists(
+            st.text(min_size=1, max_size=30).filter(str.isidentifier),
+            min_size=0,
+            max_size=5,
+            unique=True,
+        )
+    )
+    services = {}
+    for name in service_names:
+        config = draw(service_config_strategy())
+        # Optionally add ports and environment
+        ports = draw(
             st.lists(
-                st.text(min_size=1, max_size=30).filter(str.isidentifier),
-                min_size=0,
-                max_size=5,
-                unique=True,
+                st.text(min_size=1, max_size=20),
+                max_size=3,
             )
         )
-        services = {}
-        for name in service_names:
-            config = draw(service_config_strategy())
-            # Optionally add ports and environment
-            ports = draw(
-                st.lists(
-                    st.text(min_size=1, max_size=20),
-                    max_size=3,
-                )
+        env = draw(
+            st.one_of(
+                st.just([]),
+                st.lists(st.text(min_size=1, max_size=40), max_size=5),
+                st.dictionaries(
+                    st.text(min_size=1, max_size=20).filter(lambda s: "=" not in s),
+                    st.text(max_size=20),
+                    max_size=5,
+                ),
             )
-            env = draw(
-                st.one_of(
-                    st.just([]),
-                    st.lists(st.text(min_size=1, max_size=40), max_size=5),
-                    st.dictionaries(
-                        st.text(min_size=1, max_size=20).filter(lambda s: "=" not in s),
-                        st.text(max_size=20),
-                        max_size=5,
-                    ),
-                )
-            )
-            if ports:
-                config["ports"] = ports
-            if env:
-                config["environment"] = env
-            services[name] = config
-        return {"services": services}
-else:
-
-    def service_config_strategy():
-        pass
-
-    def compose_data_strategy():
-        pass
+        )
+        if ports:
+            config["ports"] = ports
+        if env:
+            config["environment"] = env
+        services[name] = config
+    return {"services": services}
 
 
 # ---------------------------------------------------------------------------

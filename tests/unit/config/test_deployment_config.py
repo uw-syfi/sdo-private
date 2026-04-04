@@ -2,40 +2,8 @@ import pytest
 
 from app_operator.config import Config, DeploymentConfig
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import assume, given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 
 class TestDeploymentConfigValidation:
@@ -84,7 +52,6 @@ class TestDeploymentConfigValidation:
         assert config.deployment.target == "local"
 
 
-@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
 class TestDeploymentConfigProperty:
     """Property-based tests for DeploymentConfig validation."""
 

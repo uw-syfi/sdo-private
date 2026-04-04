@@ -69,7 +69,7 @@ def test_run_with_health_verdict_response_no_round_trip(tmp_path, mock_config):
     mock_run_result.output.summary = "Applied fix"
 
     with patch.object(agent, "_run", return_value=mock_run_result) as mock_run:
-        agent.run(deploy_result, health_verdict, attempt=1)
+        agent.run(deploy_result, health_verdict, attempt=1)  # type: ignore[arg-type]
 
     # _run was called — the agent didn't crash trying to convert HealthVerdictResponse
     mock_run.assert_called_once()
@@ -91,7 +91,7 @@ def test_run_with_none_health_verdict(tmp_path, mock_config):
     mock_run_result.output.summary = "Applied fix"
 
     with patch.object(agent, "_run", return_value=mock_run_result) as mock_run:
-        agent.run(deploy_result, None, attempt=1)
+        agent.run(deploy_result, None, attempt=1)  # type: ignore[arg-type]
 
     mock_run.assert_called_once()
 
@@ -109,7 +109,7 @@ def test_health_verdict_response_fields_propagate_to_error_context():
     deploy_result = {"success": True, "exit_code": 0, "stdout": "", "stderr": ""}
 
     # Should not raise — HealthVerdictResponse satisfies HealthVerdictLike protocol
-    context = prepare_error_context(deploy_result, health_verdict)
+    context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
     assert "UNHEALTHY" in context
     assert "Redis connection refused" in context

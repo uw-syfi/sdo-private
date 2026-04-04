@@ -75,7 +75,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(state, ctx, agent)
+            health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         assert loader.render.call_count == 2
         render_templates = [c[0][0] for c in loader.render.call_args_list]
@@ -112,7 +112,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            result = health_check(state, ctx, agent)
+            result = health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         assert result["health_verdict"] == {
             "healthy": False,
@@ -147,7 +147,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(state, ctx, agent)
+            health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         recorder.end_phase.assert_called_once_with("success")
 
@@ -163,7 +163,7 @@ class TestHealthCheckNode:
         agent = Mock()
         ctx = _make_ctx(repo_path, filesystem, config, loader)
 
-        result = health_check(state, ctx, agent)
+        result = health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         assert result["health_verdict"] is None
         agent.stream.assert_not_called()
@@ -180,7 +180,7 @@ class TestHealthCheckNode:
         agent = Mock()
         ctx = _make_ctx(repo_path, filesystem, config, loader, check_shutdown=Mock(return_value=True))
 
-        result = health_check(state, ctx, agent)
+        result = health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         assert result is state
         agent.stream.assert_not_called()
@@ -204,7 +204,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=None)
 
-            result = health_check(state, ctx, agent)
+            result = health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         assert result["health_verdict"] == {
             "healthy": False,
@@ -239,7 +239,7 @@ class TestHealthCheckNode:
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
 
-            health_check(state, ctx, agent)
+            health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         log_path = repo_path / ".sds" / "logs" / "health_check_attempt_1.log"
         assert filesystem.exists(log_path)
@@ -274,7 +274,7 @@ class TestHealthCheckNode:
 
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
-            health_check(state, ctx, agent)
+            health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         call_kwargs = loader.render.call_args[1]
         assert call_kwargs["deployment_progress_path"] == repo_path / ".sds" / DEPLOYMENT_PROGRESS_FILENAME
@@ -307,7 +307,7 @@ class TestHealthCheckNode:
 
         with patch("app_operator.langgraph.utils.invoke_agent") as mock_invoke:
             mock_invoke.return_value = AgentResult(text="response text", messages=[], structured=verdict)
-            health_check(state, ctx, agent)
+            health_check(state, ctx, agent)  # type: ignore[arg-type]
 
         call_kwargs = loader.render.call_args[1]
         assert call_kwargs["deployment_progress_path"] is None

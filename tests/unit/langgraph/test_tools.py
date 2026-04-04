@@ -145,8 +145,8 @@ class TestCreateGitlabMr(unittest.TestCase):
     def test_http_error(self, mock_urlopen):
         from urllib.error import HTTPError
 
-        err = HTTPError(url="http://x", code=401, msg="Unauthorized", hdrs={}, fp=None)
-        err.read = lambda: b"Unauthorized"
+        err = HTTPError(url="http://x", code=401, msg="Unauthorized", hdrs={}, fp=None)  # type: ignore[arg-type]
+        err.read = lambda: b"Unauthorized"  # type: ignore[assignment]
         mock_urlopen.side_effect = err
 
         result = _create_gitlab_mr(

@@ -134,7 +134,7 @@ class TestRecorderGuardConsistency:
         class MinimalRecorder:
             """Recorder that lacks record_token_usage and add_assistant_message."""
 
-        agent = SubagentCodingAgent(model="test-model", recorder=MinimalRecorder())
+        agent = SubagentCodingAgent(model="test-model", recorder=MinimalRecorder())  # type: ignore[arg-type]
 
         resp = mock.MagicMock()
         resp.choices = [mock.MagicMock()]
@@ -160,7 +160,7 @@ class TestRecorderGuardConsistency:
         class MinimalRecorder:
             """Recorder that lacks record_token_usage and add_assistant_message."""
 
-        agent = HybridCodingAgent(model="test-model", recorder=MinimalRecorder())
+        agent = HybridCodingAgent(model="test-model", recorder=MinimalRecorder())  # type: ignore[arg-type]
 
         resp = mock.MagicMock()
         resp.choices = [mock.MagicMock()]
@@ -248,7 +248,7 @@ class TestLiteLLMClient:
         class MinimalRecorder:
             pass
 
-        client = LiteLLMClient("test-model", recorder=MinimalRecorder())
+        client = LiteLLMClient("test-model", recorder=MinimalRecorder())  # type: ignore[arg-type]
 
         with mock.patch("litellm.completion", return_value=self._make_response()):
             result = client.complete([{"role": "user", "content": "hi"}])

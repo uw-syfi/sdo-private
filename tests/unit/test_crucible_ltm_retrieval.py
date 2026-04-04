@@ -305,7 +305,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
                 app_info={"app_name": "myapp", "namespace": "default"},
                 stage="diagnosis",
                 max_iters=1,
-                shared_file=shared_file,
+                shared_file=shared_file,  # type: ignore[arg-type]
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 lt_summary_file=lt_file,
                 flags=CrucibleFlags(prompt_version="v1", enable_judge=False, enable_ltm_retrieval=False),
@@ -351,7 +351,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
                 app_info={"app_name": "myapp", "namespace": "default"},
                 stage="diagnosis",
                 max_iters=1,
-                shared_file=shared_file,
+                shared_file=shared_file,  # type: ignore[arg-type]
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 lt_summary_file=lt_file,
                 incidents_dir=inc_dir,

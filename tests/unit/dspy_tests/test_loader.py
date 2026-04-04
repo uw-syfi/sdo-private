@@ -24,7 +24,7 @@ class TestDSPyModuleCache:
         cache = DSPyModuleCache()
         mock_module = object()
 
-        cache.set("deployer_fix_error:v1", mock_module)
+        cache.set("deployer_fix_error:v1", mock_module)  # type: ignore[arg-type]
         result = cache.get("deployer_fix_error:v1")
 
         assert result is mock_module
@@ -32,8 +32,8 @@ class TestDSPyModuleCache:
     def test_cache_clear(self):
         """Clear should remove all entries."""
         cache = DSPyModuleCache()
-        cache.set("key1", object())
-        cache.set("key2", object())
+        cache.set("key1", object())  # type: ignore[arg-type]
+        cache.set("key2", object())  # type: ignore[arg-type]
 
         assert len(cache) == 2
 
@@ -48,10 +48,10 @@ class TestDSPyModuleCache:
         cache = DSPyModuleCache()
         assert len(cache) == 0
 
-        cache.set("key1", object())
+        cache.set("key1", object())  # type: ignore[arg-type]
         assert len(cache) == 1
 
-        cache.set("key2", object())
+        cache.set("key2", object())  # type: ignore[arg-type]
         assert len(cache) == 2
 
 
@@ -71,7 +71,7 @@ class TestGlobalCache:
     def test_reset_cache_clears(self):
         """reset_cache should clear the global cache."""
         cache = get_cache()
-        cache.set("key", object())
+        cache.set("key", object())  # type: ignore[arg-type]
         assert len(cache) == 1
 
         reset_cache()
@@ -203,7 +203,7 @@ class TestLoadOptimizedModule:
 
         assert result is not None
         assert hasattr(result, "demos")
-        assert len(result.demos) == 1
+        assert len(result.demos) == 1  # type: ignore[union-attr]
 
     def test_load_module_caching(self, tmp_path):
         """Second load should hit cache."""
@@ -235,8 +235,8 @@ class TestLoadOptimizedModule:
         result = load_optimized_module("deployer_fix_error", optimized_dir, "latest")
 
         assert result is not None
-        assert len(result.demos) == 1
-        assert result.demos[0]["marker"] == "v2"
+        assert len(result.demos) == 1  # type: ignore[union-attr]
+        assert result.demos[0]["marker"] == "v2"  # type: ignore[index]
 
     def test_load_module_invalid_signature(self, tmp_path):
         """Should return None if prompt name has no signature."""

@@ -46,7 +46,7 @@ class TestAgentRegistry:
         class DummyAgent(CodingAgent):
             def __init__(self, model=None):
                 self.model = model
-                self.recorder = None
+                self.recorder = None  # type: ignore[assignment]
 
             def generate(self, prompt, cwd=None, timeout=300, silent=False):
                 return ""
@@ -79,14 +79,14 @@ class TestCreateAgentFromConfig:
             agent=AgentConfig(backend="claude", model_config=ModelConfig(provider="anthropic", model="original-model"))
         )
         agent = create_agent_from_config(str(tmp_path), model_override="override-model", config=config)
-        assert agent.model == "override-model"
+        assert agent.model == "override-model"  # type: ignore[attr-defined]
 
     def test_model_from_config_when_no_override(self, tmp_path, mock_binaries):
         config = Config(
             agent=AgentConfig(backend="claude", model_config=ModelConfig(provider="anthropic", model="config-model"))
         )
         agent = create_agent_from_config(str(tmp_path), config=config)
-        assert agent.model == "config-model"
+        assert agent.model == "config-model"  # type: ignore[attr-defined]
 
     def test_unknown_provider_falls_back_to_codex(self, tmp_path, mock_binaries):
         """Unregistered provider falls back to codex."""

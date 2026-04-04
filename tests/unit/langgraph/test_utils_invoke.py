@@ -38,7 +38,7 @@ def test_invoke_agent_simple():
     mock_recorder = MagicMock()
 
     result = invoke_agent(
-        state,
+        state,  # type: ignore[arg-type]
         mock_agent,
         "System prompt",
         "User prompt",
@@ -82,7 +82,7 @@ def test_invoke_agent_with_tools():
         {"tools": {"messages": [tool_msg]}},
     ]
 
-    result = invoke_agent(state, mock_agent, "", "User prompt", ui=mock_ui)
+    result = invoke_agent(state, mock_agent, "", "User prompt", ui=mock_ui)  # type: ignore[arg-type]
 
     assert len(result.messages) == 3  # User, AI (tool call), Tool
     mock_ui.on_tool_call.assert_called_once_with("test_tool", "{'arg': 'val'}")
@@ -99,7 +99,7 @@ def test_invoke_agent_anthropic_usage():
     )
     mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
 
-    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Anthropic Agent")
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Anthropic Agent")  # type: ignore[arg-type]
 
     assert state["agent_token_usage"] == [
         {
@@ -126,7 +126,7 @@ def test_invoke_agent_usage_metadata():
     )
     mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
 
-    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Gemini Agent")
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Gemini Agent")  # type: ignore[arg-type]
 
     assert state["agent_token_usage"] == [
         {
@@ -180,7 +180,7 @@ def test_tool_call_args_logged_in_full():
     mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
 
     with capture_logs() as messages:
-        invoke_agent(state, mock_agent, "", "prompt")
+        invoke_agent(state, mock_agent, "", "prompt")  # type: ignore[arg-type]
 
     logged = "\n".join(messages)
     assert long_args in logged
@@ -206,7 +206,7 @@ def test_tool_result_long_content_truncated_with_head_and_tail():
     ]
 
     with capture_logs() as messages:
-        invoke_agent(state, mock_agent, "", "prompt")
+        invoke_agent(state, mock_agent, "", "prompt")  # type: ignore[arg-type]
 
     logged = "\n".join(messages)
     assert "HEAD" in logged
@@ -226,7 +226,7 @@ def test_invoke_agent_usage_metadata_preferred_over_response_metadata():
     )
     mock_agent.stream.return_value = [{"node": {"messages": [ai_msg]}}]
 
-    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Test Agent")
+    invoke_agent(state, mock_agent, "", "User prompt", agent_name="Test Agent")  # type: ignore[arg-type]
 
     assert state["agent_token_usage"] == [
         {

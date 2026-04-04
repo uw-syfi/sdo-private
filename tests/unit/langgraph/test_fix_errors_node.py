@@ -38,7 +38,7 @@ class TestFixErrors:
 
     def test_fix_errors_with_deploy_failure(self):
         """Test fix_errors processes deployment errors."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -72,7 +72,7 @@ class TestFixErrors:
 
     def test_fix_errors_extracts_summary(self):
         """Test fix_errors writes summary to log file from structured response."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -102,7 +102,7 @@ class TestFixErrors:
 
     def test_fix_errors_no_structured_response(self):
         """Test fix_errors when agent returns no structured response."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -133,7 +133,7 @@ class TestFixErrors:
 
         Verify observable outcome: state is unchanged when shutdown is signaled.
         """
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -161,7 +161,7 @@ class TestFixErrors:
 
         Verify observable outcome: summary is written to the expected log file.
         """
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -197,7 +197,7 @@ class TestFixErrors:
 
         Verify observable outcome: fix summary is set correctly for health failures.
         """
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -231,7 +231,7 @@ class TestFixErrors:
 
     def test_fix_errors_passes_deployment_progress_path_when_enabled(self):
         """Test fix_errors passes deployment_progress_path to create_fix_prompt when flag enabled."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -261,7 +261,7 @@ class TestFixErrors:
 
     def test_fix_errors_does_not_pass_progress_path_when_disabled(self):
         """Test fix_errors passes None for deployment_progress_path when flag disabled."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],

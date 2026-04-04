@@ -403,7 +403,7 @@ class TestSubagentRegistration:
         )
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, SubagentCodingAgent)
-        assert agent.location == "us-west1"
+        assert agent.location == "us-west1"  # type: ignore[attr-defined]
 
     def test_factory_forwards_dspy_config(self):
         from app_operator.cli_agent.factory import create_agent_from_config
@@ -416,7 +416,7 @@ class TestSubagentRegistration:
         )
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, SubagentCodingAgent)
-        assert agent.dspy_config is dspy_cfg
+        assert agent.dspy_config is dspy_cfg  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

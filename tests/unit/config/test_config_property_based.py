@@ -6,40 +6,8 @@ exploring the input space of configuration validation logic.
 
 import pytest
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import assume, given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from app_operator.config import (
     _FAULT_VALID_CATEGORIES,
@@ -48,10 +16,6 @@ from app_operator.config import (
     DSPyOptimizationConfig,
     FaultInjectionConfig,
     OperatorConfig,
-)
-
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
 )
 
 VALID_PROVIDERS = {
@@ -68,77 +32,68 @@ VALID_PROVIDERS = {
     "hybrid",
 }
 
+
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
+@st.composite
+def valid_metric_weights_strategy(draw):
+    """Generate metric_weights dict with 4 keys summing to ~1.0."""
+    # Draw 3 values in [0,1] and compute the 4th to ensure sum == 1.0
+    a = draw(st.floats(min_value=0.0, max_value=0.97, allow_nan=False))
+    b = draw(st.floats(min_value=0.0, max_value=1.0 - a, allow_nan=False))
+    c = draw(st.floats(min_value=0.0, max_value=1.0 - a - b, allow_nan=False))
+    d = round(1.0 - a - b - c, 10)
+    assume(0.0 <= d <= 1.0)
+    assume(0.99 <= a + b + c + d <= 1.01)
+    return {
+        "success": a,
+        "efficiency": b,
+        "tokens": c,
+        "health_check": d,
+    }
 
-    @st.composite
-    def valid_metric_weights_strategy(draw):
-        """Generate metric_weights dict with 4 keys summing to ~1.0."""
-        # Draw 3 values in [0,1] and compute the 4th to ensure sum == 1.0
-        a = draw(st.floats(min_value=0.0, max_value=0.97, allow_nan=False))
-        b = draw(st.floats(min_value=0.0, max_value=1.0 - a, allow_nan=False))
-        c = draw(st.floats(min_value=0.0, max_value=1.0 - a - b, allow_nan=False))
-        d = round(1.0 - a - b - c, 10)
-        assume(0.0 <= d <= 1.0)
-        assume(0.99 <= a + b + c + d <= 1.01)
-        return {
-            "success": a,
-            "efficiency": b,
-            "tokens": c,
-            "health_check": d,
-        }
 
-    @st.composite
-    def invalid_sum_metric_weights_strategy(draw):
-        """Generate metric_weights dict with 4 keys summing outside [0.99, 1.01]."""
-        a = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-        b = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-        c = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-        d = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-        total = a + b + c + d
-        assume(not (0.99 <= total <= 1.01))
-        return {
-            "success": a,
-            "efficiency": b,
-            "tokens": c,
-            "health_check": d,
-        }
+@st.composite
+def invalid_sum_metric_weights_strategy(draw):
+    """Generate metric_weights dict with 4 keys summing outside [0.99, 1.01]."""
+    a = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
+    b = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
+    c = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
+    d = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
+    total = a + b + c + d
+    assume(not (0.99 <= total <= 1.01))
+    return {
+        "success": a,
+        "efficiency": b,
+        "tokens": c,
+        "health_check": d,
+    }
 
-    @st.composite
-    def valid_fault_injection_args_strategy(draw):
-        """Generate valid FaultInjectionConfig constructor arguments."""
-        categories = draw(
-            st.lists(
-                st.sampled_from(sorted(_FAULT_VALID_CATEGORIES)),
-                max_size=len(_FAULT_VALID_CATEGORIES),
-                unique=True,
-            )
+
+@st.composite
+def valid_fault_injection_args_strategy(draw):
+    """Generate valid FaultInjectionConfig constructor arguments."""
+    categories = draw(
+        st.lists(
+            st.sampled_from(sorted(_FAULT_VALID_CATEGORIES)),
+            max_size=len(_FAULT_VALID_CATEGORIES),
+            unique=True,
         )
-        severities = draw(
-            st.lists(
-                st.sampled_from(sorted(_FAULT_VALID_SEVERITIES)),
-                max_size=len(_FAULT_VALID_SEVERITIES),
-                unique=True,
-            )
+    )
+    severities = draw(
+        st.lists(
+            st.sampled_from(sorted(_FAULT_VALID_SEVERITIES)),
+            max_size=len(_FAULT_VALID_SEVERITIES),
+            unique=True,
         )
-        num_faults = draw(st.integers(min_value=1, max_value=5))
-        return {
-            "categories": categories,
-            "severities": severities,
-            "num_faults": num_faults,
-        }
-else:
-
-    def valid_metric_weights_strategy():
-        pass
-
-    def invalid_sum_metric_weights_strategy():
-        pass
-
-    def valid_fault_injection_args_strategy():
-        pass
+    )
+    num_faults = draw(st.integers(min_value=1, max_value=5))
+    return {
+        "categories": categories,
+        "severities": severities,
+        "num_faults": num_faults,
+    }
 
 
 # ---------------------------------------------------------------------------

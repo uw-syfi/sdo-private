@@ -30,18 +30,18 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         ls_tool = _build_ls(self.context)
 
         # Test non-existent path
-        result = ls_tool.invoke({"path": "nonexistent"})
+        result = ls_tool.invoke({"path": "nonexistent"})  # type: ignore[attr-defined]
         self.assertTrue(result.startswith("Error: Path does not exist"))
 
         # Test internal error (simulate by mocking resolve_path to raise)
         with patch.object(self.context, "resolve_path", side_effect=OSError("Unexpected error")):
-            result = ls_tool.invoke({"path": "."})
+            result = ls_tool.invoke({"path": "."})  # type: ignore[attr-defined]
             self.assertEqual(result, "Error: Unexpected error")
 
     def test_glob_error(self):
         # 1. Test pattern escaping root (uses real Path logic, so use real context)
         glob_tool = _build_glob(self.context)
-        result = glob_tool.invoke({"pattern": "/outside/repo/*.txt"})
+        result = glob_tool.invoke({"pattern": "/outside/repo/*.txt"})  # type: ignore[attr-defined]
         self.assertEqual(result, ["Error: Pattern escapes repository root: /outside/repo/*.txt"])
 
         # 2. Test generic exception during glob iteration
@@ -54,20 +54,20 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         context = ToolContext(mock_root, self.fs)
         glob_tool_fail = _build_glob(context)
 
-        result = glob_tool_fail.invoke({"pattern": "*.txt"})
+        result = glob_tool_fail.invoke({"pattern": "*.txt"})  # type: ignore[attr-defined]
         self.assertEqual(result, ["Error: Glob failed"])
 
     def test_read_error(self):
         read_tool = _build_read(self.context)
 
         # Test file not found (via filesystem)
-        result = read_tool.invoke({"path": "missing.txt", "start_line": 1, "end_line": 10})
+        result = read_tool.invoke({"path": "missing.txt", "start_line": 1, "end_line": 10})  # type: ignore[attr-defined]
         self.assertTrue(result.startswith("Error: No such file"))
 
         # Test read permission error (simulated)
         self.fs.write_text(self.repo_root / "secret.txt", "content")
         self.fs.simulate_permission_error(self.repo_root / "secret.txt")
-        result = read_tool.invoke({"path": "secret.txt", "start_line": 1, "end_line": 10})
+        result = read_tool.invoke({"path": "secret.txt", "start_line": 1, "end_line": 10})  # type: ignore[attr-defined]
         self.assertTrue(result.startswith("Error: Permission denied"))
 
     def test_write_file_error(self):
@@ -75,19 +75,19 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
 
         # Test writing to directory
         self.fs.mkdir(self.repo_root / "subdir")
-        result = write_tool.invoke({"path": "subdir", "content": "data"})
+        result = write_tool.invoke({"path": "subdir", "content": "data"})  # type: ignore[attr-defined]
         self.assertTrue(result.startswith("Error: Path is a directory"))
 
         # Test permission error on write
         self.fs.simulate_permission_error(self.repo_root / "protected.txt")
-        result = write_tool.invoke({"path": "protected.txt", "content": "data"})
+        result = write_tool.invoke({"path": "protected.txt", "content": "data"})  # type: ignore[attr-defined]
         self.assertTrue(result.startswith("Error: Permission denied"))
 
     def test_grep_error(self):
         grep_tool = _build_grep(self.context)
 
         # Test invalid regex
-        result = grep_tool.invoke({"pattern": "[", "path": "."})
+        result = grep_tool.invoke({"pattern": "[", "path": "."})  # type: ignore[attr-defined]
         self.assertTrue(result[0].startswith("Error: "))
 
     @patch("subprocess.run")
@@ -95,7 +95,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         """Small output is returned inline."""
         mock_run.return_value = MagicMock(returncode=0, stdout="hello", stderr="")
         bash_tool = _build_bash(self.context)
-        result = bash_tool.invoke({"command": "echo hello"})
+        result = bash_tool.invoke({"command": "echo hello"})  # type: ignore[attr-defined]
         self.assertEqual(result["stdout"], "hello")
         self.assertEqual(result["stderr"], "")
 
@@ -105,7 +105,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         big_stdout = "x" * 11_000
         mock_run.return_value = MagicMock(returncode=0, stdout=big_stdout, stderr="")
         bash_tool = _build_bash(self.context)
-        result = bash_tool.invoke({"command": "echo big"})
+        result = bash_tool.invoke({"command": "echo big"})  # type: ignore[attr-defined]
         self.assertIn(".sds/logs/tools/", result["stdout"])
         self.assertIn("Read tool", result["stdout"])
         spill_path = self.repo_root / ".sds" / "logs" / "tools" / "0001" / "stdout.txt"
@@ -117,7 +117,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
         big_stderr = "e" * 11_000
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr=big_stderr)
         bash_tool = _build_bash(self.context)
-        result = bash_tool.invoke({"command": "fail"})
+        result = bash_tool.invoke({"command": "fail"})  # type: ignore[attr-defined]
         self.assertIn(".sds/logs/tools/", result["stderr"])
         spill_path = self.repo_root / ".sds" / "logs" / "tools" / "0001" / "stderr.txt"
         self.assertEqual(self.fs.read_text(spill_path), big_stderr)
@@ -128,14 +128,14 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
 
         # Test timeout
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="sleep 100", timeout=1)
-        result = bash_tool.invoke({"command": "sleep 100", "timeout": 1})
+        result = bash_tool.invoke({"command": "sleep 100", "timeout": 1})  # type: ignore[attr-defined]
         self.assertFalse(result["success"])
         self.assertEqual(result["exit_code"], -1)
         self.assertIn("Command timed out", result["stderr"])
 
         # Test generic exception
         mock_run.side_effect = OSError("System failure")
-        result = bash_tool.invoke({"command": "ls"})
+        result = bash_tool.invoke({"command": "ls"})  # type: ignore[attr-defined]
         self.assertFalse(result["success"])
         self.assertEqual(result["exit_code"], -1)
         self.assertEqual(result["stderr"], "Error: System failure")
@@ -143,7 +143,7 @@ class TestLangGraphToolsErrorHandling(unittest.TestCase):
     def test_resolve_path_error(self):
         # Test path escaping root
         ls_tool = _build_ls(self.context)
-        result = ls_tool.invoke({"path": "../outside"})
+        result = ls_tool.invoke({"path": "../outside"})  # type: ignore[attr-defined]
         self.assertTrue(result.startswith("Error: "))
         self.assertIn("Path escapes repository root", result)
 
@@ -158,22 +158,22 @@ class TestStrReplace(unittest.TestCase):
 
     def test_happy_path(self):
         self.fs.write_text(self.repo_root / "file.txt", "hello world")
-        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "world", "new_str": "there"})
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "world", "new_str": "there"})  # type: ignore[attr-defined]
         self.assertEqual(result, "Edited file.txt")
         self.assertEqual(self.fs.read_text(self.repo_root / "file.txt"), "hello there")
 
     def test_old_str_not_found(self):
         self.fs.write_text(self.repo_root / "file.txt", "hello world")
-        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "missing", "new_str": "x"})
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "missing", "new_str": "x"})  # type: ignore[attr-defined]
         self.assertEqual(result, "Error: old_str not found in file.txt")
 
     def test_old_str_appears_multiple_times(self):
         self.fs.write_text(self.repo_root / "file.txt", "foo foo foo")
-        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "foo", "new_str": "bar"})
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "foo", "new_str": "bar"})  # type: ignore[attr-defined]
         self.assertEqual(result, "Error: old_str appears 3 times in file.txt (must be unique)")
 
     def test_path_escapes_root(self):
-        result = self.str_replace_tool.invoke({"path": "../outside/file.txt", "old_str": "x", "new_str": "y"})
+        result = self.str_replace_tool.invoke({"path": "../outside/file.txt", "old_str": "x", "new_str": "y"})  # type: ignore[attr-defined]
         self.assertTrue(result.startswith("Error: "))
         self.assertIn("Path escapes repository root", result)
 
@@ -181,7 +181,7 @@ class TestStrReplace(unittest.TestCase):
         # old_str must be unique per the tool contract, but verify replace(..., 1) semantics
         # by using a file where old_str appears exactly once
         self.fs.write_text(self.repo_root / "file.txt", "aXb")
-        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "X", "new_str": "Y"})
+        result = self.str_replace_tool.invoke({"path": "file.txt", "old_str": "X", "new_str": "Y"})  # type: ignore[attr-defined]
         self.assertEqual(result, "Edited file.txt")
         self.assertEqual(self.fs.read_text(self.repo_root / "file.txt"), "aYb")
 

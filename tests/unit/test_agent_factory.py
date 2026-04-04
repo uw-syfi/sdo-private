@@ -32,7 +32,7 @@ def mock_binaries(monkeypatch):
 class MockAgent(CodingAgent):
     def __init__(self, model=None):
         self.model = model
-        self.recorder = None
+        self.recorder = None  # type: ignore[assignment]
 
     def generate(self, prompt, cwd=None, timeout=300, silent=False):
         return "mock response"
@@ -58,7 +58,7 @@ def test_create_agent_registered_provider(tmp_path):
         agent = create_agent_from_config(str(tmp_path), config=config)
 
         assert isinstance(agent, MockAgent)
-        assert agent.model == "test-model"
+        assert agent.model == "test-model"  # type: ignore[attr-defined]
 
 
 def test_create_agent_gemini(tmp_path, mock_binaries):
