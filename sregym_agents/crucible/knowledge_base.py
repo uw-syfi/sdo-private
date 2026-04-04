@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import dataclasses
 import logging
 import re
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from pydantic_ai import Agent
 
+from libs.agent_mw import arun_with_retry
 from sregym_agents.crucible._prompts import _render
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,9 @@ KB_SUMMARY_FILENAME = "long_term_summary.md"
 KB_LESSONS_FILENAME = "operational_lessons.md"
 KB_ARCHITECTURE_FILENAME = "architecture.md"
 KB_INCIDENTS_DIRNAME = "incidents"
+KB_DIAGNOSIS_HEURISTICS_FILENAME = "diagnosis_heuristics.md"
+KB_TRIAGE_HEURISTICS_FILENAME = "triage_heuristics.md"
+KB_ARBITRATION_HEURISTICS_FILENAME = "arbitration_heuristics.md"
 MAX_INJECTED_INCIDENTS = 100
 
 
@@ -32,6 +37,9 @@ class InjectedKB:
     architecture: Path | None = None
     incidents_dir: Path | None = None
     triage_additions: str | None = None
+    diagnosis_heuristics: Path | None = None
+    triage_heuristics: Path | None = None
+    arbitration_heuristics: Path | None = None
 
 
 _BENCHMARK_RESULT_RE = re.compile(r"<benchmark_result>.*?</benchmark_result>", re.DOTALL)
@@ -79,7 +87,7 @@ class KnowledgeBase(abc.ABC):
         """Copy KB files into target_dir for agent consumption."""
 
     @abc.abstractmethod
-    async def update(self) -> None:
+    async def update(self, stage_outputs_file: Path | None = None) -> None:
         """Update the knowledge base from the completed session."""
 
     @abc.abstractmethod
@@ -98,6 +106,8 @@ class StructuredKnowledgeBase(KnowledgeBase):
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
         include_benchmark_results: bool = False,
+        enable_heuristic_refinement: bool = True,
+        include_incident_files: bool = True,
     ):
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
@@ -107,6 +117,8 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.app_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
         self.include_benchmark_results = include_benchmark_results
+        self.enable_heuristic_refinement = enable_heuristic_refinement
+        self.include_incident_files = include_incident_files
 
         if seed_kb_dir is not None:
             self._seed_from(Path(seed_kb_dir))
@@ -144,6 +156,17 @@ class StructuredKnowledgeBase(KnowledgeBase):
             shutil.copy2(seed_lessons, self.lessons_path)
             logger.info(f"Seeded lessons from {seed_lessons}")
 
+        # Root-level trained heuristics
+        for filename, dest_path in [
+            (KB_DIAGNOSIS_HEURISTICS_FILENAME, self.diagnosis_heuristics_path),
+            (KB_TRIAGE_HEURISTICS_FILENAME, self.triage_heuristics_path),
+            (KB_ARBITRATION_HEURISTICS_FILENAME, self.arbitration_heuristics_path),
+        ]:
+            seed_file = seed_kb_dir / filename
+            if not dest_path.exists() and seed_file.exists():
+                shutil.copy2(seed_file, dest_path)
+                logger.info(f"Seeded {filename} from {seed_file}")
+
     @property
     def summary_path(self) -> Path:
         return self.app_dir / KB_SUMMARY_FILENAME
@@ -159,6 +182,18 @@ class StructuredKnowledgeBase(KnowledgeBase):
     @property
     def incidents_dir(self) -> Path:
         return self.app_dir / KB_INCIDENTS_DIRNAME
+
+    @property
+    def diagnosis_heuristics_path(self) -> Path:
+        return self.kb_dir / KB_DIAGNOSIS_HEURISTICS_FILENAME
+
+    @property
+    def triage_heuristics_path(self) -> Path:
+        return self.kb_dir / KB_TRIAGE_HEURISTICS_FILENAME
+
+    @property
+    def arbitration_heuristics_path(self) -> Path:
+        return self.kb_dir / KB_ARBITRATION_HEURISTICS_FILENAME
 
     async def inject(self, target_dir: Path) -> InjectedKB:
         """Copy KB files into target_dir for agent consumption.
@@ -192,7 +227,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         else:
             logger.warning("Knowledge base: no architecture file found.")
 
-        if self.incidents_dir.is_dir():
+        if self.include_incident_files and self.incidents_dir.is_dir():
             incident_files = sorted(self.incidents_dir.glob("*.md"))[-MAX_INJECTED_INCIDENTS:]
             if incident_files:
                 dest_incidents = target_dir / KB_INCIDENTS_DIRNAME
@@ -201,12 +236,27 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     shutil.copy2(f, dest_incidents / f.name)
                 result.incidents_dir = dest_incidents
                 logger.info(f"Knowledge base: copied {len(incident_files)} incident(s) to {dest_incidents}")
+        elif not self.include_incident_files:
+            logger.info("Knowledge base: incident file injection disabled by include_incident_files=false")
 
         try:
             result.triage_additions = await self.extract_triage_additions()
         except Exception as e:
             logger.warning(f"Failed to extract triage additions: {e}")
             result.triage_additions = None
+
+        # Trained heuristic files (root-level, cross-app)
+        for filename, attr in [
+            (KB_DIAGNOSIS_HEURISTICS_FILENAME, "diagnosis_heuristics"),
+            (KB_TRIAGE_HEURISTICS_FILENAME, "triage_heuristics"),
+            (KB_ARBITRATION_HEURISTICS_FILENAME, "arbitration_heuristics"),
+        ]:
+            src = self.kb_dir / filename
+            if src.exists():
+                dest = target_dir / filename
+                shutil.copy2(src, dest)
+                setattr(result, attr, dest)
+                logger.info(f"Knowledge base: copied {filename} to {dest}")
 
         return result
 
@@ -238,7 +288,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _call_llm(self, prompt: str) -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await agent.run(prompt)
+        result = await arun_with_retry(agent, prompt)
         return result.output
 
     def _save_incident(self, session_summary: str, session_content: str) -> str:
@@ -264,7 +314,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
             "kb/merge_summary", session_summary=session_summary, prior_summary=prior_summary, incident_ref=incident_ref
         )
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await agent.run(prompt)
+        result = await arun_with_retry(agent, prompt)
         output = result.output
 
         for attempt in range(_MAX_CITATION_RETRIES):
@@ -279,7 +329,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 "Use the exact format {{ref:incidents/FILENAME.md}} for each citation."
             )
             logger.warning(f"Citation validation failed (attempt {attempt + 1}/{_MAX_CITATION_RETRIES}): {invalid}")
-            result = await agent.run(correction, message_history=result.all_messages())
+            result = await arun_with_retry(agent, correction, message_history=result.all_messages())
             output = result.output
 
         return _strip_citation_wrappers(output)
@@ -316,7 +366,98 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.lessons_path.write_text(lessons)
         logger.info(f"Operational lessons written to {self.lessons_path}")
 
-    async def update(self) -> None:
+    async def _classify_failure(self, stage_outputs: str, shared_session: str) -> str:
+        """Classify where in the agent pipeline the failure (or success) occurred."""
+        prompt = _render(
+            "kb/classify_failure",
+            stage_outputs=stage_outputs,
+            shared_session=shared_session,
+        )
+        return await self._call_llm(prompt)
+
+    async def _refine_diagnosis_heuristics(self, classification: str, stage_outputs: str) -> None:
+        prior = self.diagnosis_heuristics_path.read_text() if self.diagnosis_heuristics_path.exists() else ""
+        prompt = _render(
+            "kb/refine_diagnosis_heuristics",
+            prior_guidance=prior,
+            failure_classification=classification,
+            stage_outputs=stage_outputs,
+        )
+        result = await self._call_llm(prompt)
+        self.diagnosis_heuristics_path.write_text(result)
+        logger.info(f"Diagnosis heuristics updated at {self.diagnosis_heuristics_path}")
+
+    async def _refine_triage_heuristics(self, classification: str, stage_outputs: str) -> None:
+        prior = self.triage_heuristics_path.read_text() if self.triage_heuristics_path.exists() else ""
+        prompt = _render(
+            "kb/refine_triage_heuristics",
+            prior_guidance=prior,
+            failure_classification=classification,
+            stage_outputs=stage_outputs,
+        )
+        result = await self._call_llm(prompt)
+        self.triage_heuristics_path.write_text(result)
+        logger.info(f"Triage heuristics updated at {self.triage_heuristics_path}")
+
+    async def _refine_arbitration_heuristics(self, classification: str, stage_outputs: str) -> None:
+        prior = self.arbitration_heuristics_path.read_text() if self.arbitration_heuristics_path.exists() else ""
+        prompt = _render(
+            "kb/refine_arbitration_heuristics",
+            prior_guidance=prior,
+            failure_classification=classification,
+            stage_outputs=stage_outputs,
+        )
+        result = await self._call_llm(prompt)
+        self.arbitration_heuristics_path.write_text(result)
+        logger.info(f"Arbitration heuristics updated at {self.arbitration_heuristics_path}")
+
+    async def _refine_heuristics(self, stage_outputs_file: Path | None = None) -> None:
+        """Two-stage heuristic refinement: classify failure, then targeted edits."""
+        stage_outputs = ""
+        if stage_outputs_file and stage_outputs_file.exists():
+            stage_outputs = stage_outputs_file.read_text().strip()
+
+        shared_session_parts = [sf.read_text() for sf in self.shared_files if sf.exists()]
+        shared_session = "\n\n".join(shared_session_parts).strip()
+        if not shared_session:
+            logger.info("No shared session content; skipping heuristic refinement.")
+            return
+
+        # Stage 1: classify failure
+        logger.info("Classifying agent failure modes...")
+        try:
+            classification = await self._classify_failure(stage_outputs, shared_session)
+        except Exception as e:
+            logger.error(f"Failed to classify failure: {e}")
+            return
+        logger.info(f"Failure classification:\n{classification}")
+
+        # Stage 2: targeted refinement based on classification
+        classification_lower = classification.lower()
+
+        # Determine which heuristics need updating
+        needs_diagnosis = any(kw in classification_lower for kw in ("reasoning", "retrieval", "other", "success"))
+        needs_triage = "triage" in classification_lower
+        needs_arbitration = "arbitration" in classification_lower
+
+        refinement_tasks = []
+        if needs_diagnosis:
+            refinement_tasks.append(self._refine_diagnosis_heuristics(classification, stage_outputs))
+        if needs_triage:
+            refinement_tasks.append(self._refine_triage_heuristics(classification, stage_outputs))
+        if needs_arbitration:
+            refinement_tasks.append(self._refine_arbitration_heuristics(classification, stage_outputs))
+
+        if not refinement_tasks:
+            logger.info("No heuristic refinement needed based on classification.")
+            return
+
+        results = await asyncio.gather(*refinement_tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error(f"Heuristic refinement error: {r}")
+
+    async def update(self, stage_outputs_file: Path | None = None) -> None:
         """Summarize the completed session and update the knowledge base."""
         parts = [sf.read_text() for sf in self.shared_files if sf.exists()]
         if not parts:
@@ -341,8 +482,12 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         logger.info(f"Session summary:\n{session_summary}")
 
-        incident_id = self._save_incident(session_summary, content)
-        incident_ref = f"incidents/{incident_id}.md"
+        incident_ref = ""
+        if self.include_incident_files:
+            incident_id = self._save_incident(session_summary, content)
+            incident_ref = f"incidents/{incident_id}.md"
+        else:
+            logger.info("Skipping incident file save (include_incident_files=false)")
 
         prior_summary = self.summary_path.read_text() if self.summary_path.exists() else ""
         logger.info("Merging into long-term summary...")
@@ -358,6 +503,10 @@ class StructuredKnowledgeBase(KnowledgeBase):
         logger.info(f"Long-term summary updated at {self.summary_path}")
 
         await self._distill_lessons()
+        if self.enable_heuristic_refinement:
+            await self._refine_heuristics(stage_outputs_file)
+        else:
+            logger.info("Heuristic refinement disabled; skipping.")
 
 
 # Backward-compatibility alias
@@ -377,6 +526,8 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
         include_benchmark_results: bool = False,
+        enable_heuristic_refinement: bool = True,
+        include_incident_files: bool = True,
     ):
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
@@ -405,10 +556,10 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
 
     async def _call_llm(self, prompt: str) -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await agent.run(prompt)
+        result = await arun_with_retry(agent, prompt)
         return result.output
 
-    async def update(self) -> None:
+    async def update(self, stage_outputs_file: Path | None = None) -> None:
         parts = [sf.read_text() for sf in self.shared_files if sf.exists()]
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")
@@ -454,6 +605,8 @@ def create_knowledge_base(
     app_name: str = "unknown",
     seed_kb_dir: Path | None = None,
     include_benchmark_results: bool = False,
+    enable_heuristic_refinement: bool = True,
+    include_incident_files: bool = True,
 ) -> KnowledgeBase:
     """Factory function to create a knowledge base implementation."""
     if kb_type == "structured":
@@ -464,6 +617,8 @@ def create_knowledge_base(
             app_name,
             seed_kb_dir,
             include_benchmark_results=include_benchmark_results,
+            enable_heuristic_refinement=enable_heuristic_refinement,
+            include_incident_files=include_incident_files,
         )
     if kb_type == "append-only":
         return AppendOnlyKnowledgeBase(
@@ -472,5 +627,7 @@ def create_knowledge_base(
             model_id,
             app_name,
             include_benchmark_results=include_benchmark_results,
+            enable_heuristic_refinement=enable_heuristic_refinement,
+            include_incident_files=include_incident_files,
         )
     raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")

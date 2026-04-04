@@ -20,11 +20,14 @@ if [[ "${1:-}" == "--kill" ]]; then
 fi
 
 # Patterns that identify sregym processes we own.
+# Note: forked worker processes appear as ".venv/bin/python3 main.py --agent ..."
+# (not "bench/sregym/main.py") because the cwd is changed before exec.
 PATTERNS=(
     "sregym_agents\.crucible\.driver"
     "sregym_agents\.crucible_simple\.driver"
     "sregym_agents\.crucible_deepagent\.driver"
     "bench/sregym/main\.py"
+    "main\.py --agent .+ --experiment-dir .+bench/sregym"
 )
 
 # Collect session leader PIDs (the /bin/sh wrappers that head each process group).

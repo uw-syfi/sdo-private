@@ -1,0 +1,38 @@
+Application: {{ app_name }}
+Namespace: {{ namespace }}
+
+This is judge evaluation for diagnosis iteration {{ iteration }}.
+
+Current shared session state:
+---
+{{ shared_content }}
+---
+
+The shared session file is at: {{ shared_file }}
+
+{% if architecture_content %}
+Application architecture reference:
+---
+{{ architecture_content }}
+---
+{% endif %}
+{% if lessons_content  %}
+General operational lessons from past incidents (use as context, but beware: patterns
+described here may be pre-existing cluster noise rather than the current incident's root cause —
+verify against current user-facing symptoms before accepting a diagnosis that matches a known pattern):
+---
+{{ lessons_content }}
+---
+{% endif %}
+{% if lt_summary_content  %}
+Summary of root causes from previous incidents (same caveat — a matching pattern does not
+automatically mean it is the current root cause; verify it explains the observed symptoms):
+---
+{{ lt_summary_content }}
+---
+{% endif %}
+
+The agent has submitted a hypothesis for iteration {{ iteration }}, but it is hidden from you.
+Begin by independently investigating the cluster to form your own assessment of the root cause.
+Call submit_independent_findings with your findings, then call reveal_agent_hypothesis to see
+the agent's submission, and finally evaluate it with submit_verdict.

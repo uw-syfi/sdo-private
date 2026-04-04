@@ -132,19 +132,27 @@ def test_search_calls_subagent(tmp_path: Path) -> None:
     )
     ctx = _make_sre_ctx(deps)
 
-    mock_result = DifferentialDiagnosis(
+    mock_diagnosis = DifferentialDiagnosis(
         candidate_root_causes=[],
         novel_cause_signals="",
         caveats="none",
     )
 
     mock_run_result = MagicMock()
-    mock_run_result.output = mock_result
+    mock_run_result.output = mock_diagnosis
 
-    mock_agent_instance = MagicMock()
-    mock_agent_instance.run = AsyncMock(return_value=mock_run_result)
-
-    with patch("pydantic_ai.Agent", return_value=mock_agent_instance) as mock_agent_cls:
+    with (
+        patch(
+            "sregym_agents.crucible._prompts._render",
+            return_value="rendered prompt",
+        ) as mock_render,
+        patch("pydantic_ai.Agent", return_value=MagicMock()) as mock_agent_cls,
+        patch(
+            "sregym_agents.crucible.tools.arun_with_retry",
+            new_callable=AsyncMock,
+            return_value=mock_run_result,
+        ),
+    ):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods are OOMKilled"))
 
     # Agent was constructed with the right model and output_type
@@ -158,11 +166,12 @@ def test_search_calls_subagent(tmp_path: Path) -> None:
     assert "read_file" in tool_names
     assert "exec_bash_any" in tool_names
 
-    # Prompt was passed to run and contains symptoms + file paths
-    prompt_arg = mock_agent_instance.run.call_args[0][0]
-    assert "pods are OOMKilled" in prompt_arg
-    assert str(summary) in prompt_arg
-    assert str(incidents) in prompt_arg
+    # _render was called with the expected template and kwargs
+    mock_render.assert_called_once()
+    render_kwargs = mock_render.call_args[1]
+    assert render_kwargs["observed_symptoms"] == "pods are OOMKilled"
+    assert str(summary) in render_kwargs["lt_summary_file"]
+    assert str(incidents) in render_kwargs["incidents_dir"]
 
     # Result is valid JSON with verified diagnosis structure
     parsed = json.loads(result)
@@ -207,17 +216,21 @@ def test_search_increments_counter(tmp_path: Path) -> None:
     deps.ltm_call_budget = 2  # use budget of 2 so we can test exhaustion after 2 calls
     ctx = _make_sre_ctx(deps)
 
-    mock_result = DifferentialDiagnosis(
+    mock_diagnosis = DifferentialDiagnosis(
         candidate_root_causes=[],
         novel_cause_signals="",
         caveats="none",
     )
     mock_run_result = MagicMock()
-    mock_run_result.output = mock_result
-    mock_agent_instance = MagicMock()
-    mock_agent_instance.run = AsyncMock(return_value=mock_run_result)
+    mock_run_result.output = mock_diagnosis
 
-    with patch("pydantic_ai.Agent", return_value=mock_agent_instance):
+    mock_arun = AsyncMock(return_value=mock_run_result)
+
+    with (
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch("pydantic_ai.Agent", return_value=MagicMock()),
+        patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+    ):
         # First call — should succeed
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="call 1"))
         assert deps.ltm_call_count == 1
@@ -232,8 +245,8 @@ def test_search_increments_counter(tmp_path: Path) -> None:
         parsed = json.loads(result)
         assert "budget exhausted" in parsed["caveats"].lower()
 
-    # Agent.run was called exactly twice (not three times)
-    assert mock_agent_instance.run.call_count == 2
+    # arun_with_retry was called exactly twice (not three times)
+    assert mock_arun.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +265,7 @@ def _fake_sre_constructor_factory(shared_file):
     """Return a fake SRE agent constructor that captures deps for inspection."""
     captured_deps = []
 
-    def constructor(model, deps, trajectory_path=None):
+    def constructor(model, deps, trajectory_path=None, system_prompt_override=None):
         captured_deps.append(deps)
         mock = MagicMock()
 
@@ -560,20 +573,30 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
     verify_run_result_1.all_messages.return_value = []
 
     agent_instances = []
+    verify_results = [verify_run_result_0, verify_run_result_1]
+    verify_idx = {"count": 0}
 
     def _make_agent(*args, **kwargs):
         mock = MagicMock()
         agent_instances.append((mock, kwargs.get("output_type")))
-        if kwargs.get("output_type") is DifferentialDiagnosis:
-            mock.run = AsyncMock(return_value=retrieval_run_result)
-        else:
-            # Verification agents — return based on call order
-            idx = len([a for a in agent_instances if a[1] is CandidateVerification]) - 1
-            results = [verify_run_result_0, verify_run_result_1]
-            mock.run = AsyncMock(return_value=results[min(idx, len(results) - 1)])
         return mock
 
-    with patch("pydantic_ai.Agent", side_effect=_make_agent):
+    async def _fake_arun(agent, prompt, **kwargs):
+        # Find the agent in agent_instances to determine its type
+        for inst, output_type in agent_instances:
+            if inst is agent:
+                if output_type is DifferentialDiagnosis:
+                    return retrieval_run_result
+                idx = verify_idx["count"]
+                verify_idx["count"] += 1
+                return verify_results[min(idx, len(verify_results) - 1)]
+        return retrieval_run_result  # fallback
+
+    with (
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch("pydantic_ai.Agent", side_effect=_make_agent),
+        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+    ):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
     parsed = json.loads(result)
@@ -618,11 +641,18 @@ def test_search_no_candidates_skips_verification(tmp_path: Path) -> None:
 
     def _make_agent(*args, **kwargs):
         mock = MagicMock()
-        mock.run = AsyncMock(return_value=retrieval_run_result)
         agent_instances.append(kwargs.get("output_type"))
         return mock
 
-    with patch("pydantic_ai.Agent", side_effect=_make_agent):
+    with (
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch("pydantic_ai.Agent", side_effect=_make_agent),
+        patch(
+            "sregym_agents.crucible.tools.arun_with_retry",
+            new_callable=AsyncMock,
+            return_value=retrieval_run_result,
+        ),
+    ):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
     # Only 1 agent (retrieval), no verification agents
@@ -673,23 +703,31 @@ def test_search_verification_failure_graceful(tmp_path: Path) -> None:
     verify_run_result_0.usage.return_value = MagicMock(input_tokens=100, output_tokens=50)
     verify_run_result_0.all_messages.return_value = []
 
-    agent_count = {"retrieval": 0, "verify": 0}
+    agent_instances = []
+    verify_idx = {"count": 0}
 
     def _make_agent(*args, **kwargs):
         mock = MagicMock()
-        if kwargs.get("output_type") is DifferentialDiagnosis:
-            mock.run = AsyncMock(return_value=retrieval_run_result)
-            agent_count["retrieval"] += 1
-        else:
-            idx = agent_count["verify"]
-            agent_count["verify"] += 1
-            if idx == 0:
-                mock.run = AsyncMock(return_value=verify_run_result_0)
-            else:
-                mock.run = AsyncMock(side_effect=RuntimeError("LLM timeout"))
+        agent_instances.append((mock, kwargs.get("output_type")))
         return mock
 
-    with patch("pydantic_ai.Agent", side_effect=_make_agent):
+    async def _fake_arun(agent, prompt, **kwargs):
+        for inst, output_type in agent_instances:
+            if inst is agent:
+                if output_type is DifferentialDiagnosis:
+                    return retrieval_run_result
+                idx = verify_idx["count"]
+                verify_idx["count"] += 1
+                if idx == 0:
+                    return verify_run_result_0
+                raise RuntimeError("LLM timeout")
+        return retrieval_run_result
+
+    with (
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch("pydantic_ai.Agent", side_effect=_make_agent),
+        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+    ):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
     parsed = json.loads(result)
@@ -744,19 +782,27 @@ def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
 
     def _make_agent(*args, **kwargs):
         mock = MagicMock()
-        agent_calls.append(kwargs)
-        if kwargs.get("output_type") is DifferentialDiagnosis:
-            mock.run = AsyncMock(return_value=retrieval_run_result)
-        else:
-            mock.run = AsyncMock(return_value=verify_run_result)
+        agent_calls.append((mock, kwargs))
         return mock
 
-    with patch("pydantic_ai.Agent", side_effect=_make_agent):
+    async def _fake_arun(agent, prompt, **kwargs):
+        for inst, kw in agent_calls:
+            if inst is agent:
+                if kw.get("output_type") is DifferentialDiagnosis:
+                    return retrieval_run_result
+                return verify_run_result
+        return retrieval_run_result
+
+    with (
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch("pydantic_ai.Agent", side_effect=_make_agent),
+        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+    ):
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
     # Second agent call is the verification agent
     assert len(agent_calls) == 2
-    verify_kwargs = agent_calls[1]
+    verify_kwargs = agent_calls[1][1]
     tool_names = {t.__name__ for t in verify_kwargs["tools"]}
 
     # Should have investigation tools
@@ -811,15 +857,26 @@ def test_verification_writes_trajectory(tmp_path: Path) -> None:
     verify_run_result.usage.return_value = MagicMock(input_tokens=100, output_tokens=50)
     verify_run_result.all_messages.return_value = []
 
+    agent_instances = []
+
     def _make_agent(*args, **kwargs):
         mock = MagicMock()
-        if kwargs.get("output_type") is DifferentialDiagnosis:
-            mock.run = AsyncMock(return_value=retrieval_run_result)
-        else:
-            mock.run = AsyncMock(return_value=verify_run_result)
+        agent_instances.append((mock, kwargs.get("output_type")))
         return mock
 
-    with patch("pydantic_ai.Agent", side_effect=_make_agent):
+    async def _fake_arun(agent, prompt, **kwargs):
+        for inst, output_type in agent_instances:
+            if inst is agent:
+                if output_type is DifferentialDiagnosis:
+                    return retrieval_run_result
+                return verify_run_result
+        return retrieval_run_result
+
+    with (
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch("pydantic_ai.Agent", side_effect=_make_agent),
+        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+    ):
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
     # Trajectory file should exist with a record
@@ -966,15 +1023,26 @@ def test_search_mitigations_shared_budget(tmp_path: Path) -> None:
     mock_mit_result = MagicMock()
     mock_mit_result.output = mock_mit
 
+    agent_instances = []
+
     def _make_agent(*args, **kwargs):
         mock = MagicMock()
-        if kwargs.get("output_type") is DifferentialDiagnosis:
-            mock.run = AsyncMock(return_value=mock_diag_result)
-        else:
-            mock.run = AsyncMock(return_value=mock_mit_result)
+        agent_instances.append((mock, kwargs.get("output_type")))
         return mock
 
-    with patch("pydantic_ai.Agent", side_effect=_make_agent):
+    async def _fake_arun(agent, prompt, **kwargs):
+        for inst, output_type in agent_instances:
+            if inst is agent:
+                if output_type is DifferentialDiagnosis:
+                    return mock_diag_result
+                return mock_mit_result
+        return mock_diag_result
+
+    with (
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch("pydantic_ai.Agent", side_effect=_make_agent),
+        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+    ):
         # First call (diagnosis) — count goes to 1
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
         assert deps.ltm_call_count == 1
@@ -1030,15 +1098,20 @@ def test_search_mitigations_calls_subagent(tmp_path: Path) -> None:
         agent_calls.append(kwargs)
         return mock
 
-    with patch("pydantic_ai.Agent", side_effect=_make_agent):
+    async def fake_arun_with_retry(agent, prompt, **kwargs):
+        return await agent.run(prompt)
+
+    with (
+        patch("pydantic_ai.Agent", side_effect=_make_agent),
+        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=fake_arun_with_retry),
+        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+    ):
         result = asyncio.run(search_prior_mitigations(ctx, root_cause="memory limit too low"))
 
     # Only 1 agent (retrieval), no verification agents
     assert len(agent_calls) == 1
     assert agent_calls[0]["output_type"] is MitigationSearchResult
 
-    # Prompt contains root_cause and file paths
-    prompt_arg = agent_calls[0]["tools"]  # noqa — just check agent was constructed
     parsed = json.loads(result)
     assert len(parsed["strategies"]) == 1
     assert parsed["strategies"][0]["root_cause_class"] == "memory limit too low"

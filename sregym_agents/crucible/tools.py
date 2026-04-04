@@ -22,6 +22,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
 
+from libs.agent_mw import arun_with_retry
+
 logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_CHARS = 4000
@@ -136,6 +138,10 @@ class SREDeps:
     ltm_call_budget: int = 1
     trajectory_path: Path | None = None
     triage_report: TriageReport | None = None
+    # v3 trained guidance
+    triage_guidance: str = ""
+    arbitration_guidance: str = ""
+    stage_outputs_file: Path | None = None
 
 
 @dataclass
@@ -155,6 +161,12 @@ class JudgeDeps:
 
 
 class TriageAnomaly(BaseModel):
+    category: str = Field(
+        description="Anomaly category — use a short descriptive label "
+        "(e.g., 'Non-Running Pods', 'Port Mismatch', 'Services Without Endpoints', "
+        "'ConfigMap Anomalies', 'Recent Events'). "
+        "Use standard categories when they fit; create new ones for novel anomaly types."
+    )
     resource_kind: str = Field(description="Kubernetes resource kind (e.g., Pod, Service, ConfigMap)")
     resource_name: str = Field(description="Name of the resource")
     namespace: str = Field(description="Namespace of the resource")
@@ -162,40 +174,8 @@ class TriageAnomaly(BaseModel):
 
 
 class TriageReport(BaseModel):
-    non_running_pods: list[TriageAnomaly] = Field(
-        default_factory=list, description="Pods not in Running/Completed/Succeeded state"
-    )
-    services_without_endpoints: list[TriageAnomaly] = Field(
-        default_factory=list, description="Services with 0 endpoints or selector mismatches"
-    )
-    configmap_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="ConfigMaps with unusual content (feature flags, auth scripts, etc.)"
-    )
-    deployment_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Deployment/StatefulSet spec issues (images, resources, env, etc.)"
-    )
-    probe_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Liveness/readiness probe misconfigurations"
-    )
-    job_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Running Jobs/CronJobs that may be fault injectors or load generators"
-    )
-    storage_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="PV/PVC issues (pending, access mode conflicts, affinity violations)"
-    )
-    network_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="NetworkPolicies, Ingress, DNS policy issues"
-    )
-    scheduling_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Taint/toleration, affinity, ResourceQuota issues"
-    )
-    crd_anomalies: list[TriageAnomaly] = Field(default_factory=list, description="CRD/operator-managed resource issues")
-    rbac_anomalies: list[TriageAnomaly] = Field(default_factory=list, description="RBAC permission issues")
-    recent_events: list[TriageAnomaly] = Field(
-        default_factory=list, description="Warning/error events from kubectl get events"
-    )
-    other_anomalies: list[TriageAnomaly] = Field(
-        default_factory=list, description="Anomalies that don't fit other categories"
+    anomalies: list[TriageAnomaly] = Field(
+        default_factory=list, description="All observed anomalies, each tagged with a category"
     )
     raw_cluster_snapshot: str = Field(
         default="", description="Condensed kubectl output for downstream agents to reference"
@@ -204,28 +184,17 @@ class TriageReport(BaseModel):
 
 def format_triage_report(report: TriageReport) -> str:
     """Convert a TriageReport to readable markdown."""
-    sections = [
-        ("Non-Running Pods", report.non_running_pods),
-        ("Services Without Endpoints", report.services_without_endpoints),
-        ("ConfigMap Anomalies", report.configmap_anomalies),
-        ("Deployment Anomalies", report.deployment_anomalies),
-        ("Probe Anomalies", report.probe_anomalies),
-        ("Job Anomalies", report.job_anomalies),
-        ("Storage Anomalies", report.storage_anomalies),
-        ("Network Anomalies", report.network_anomalies),
-        ("Scheduling Anomalies", report.scheduling_anomalies),
-        ("CRD Anomalies", report.crd_anomalies),
-        ("RBAC Anomalies", report.rbac_anomalies),
-        ("Recent Events", report.recent_events),
-        ("Other Anomalies", report.other_anomalies),
-    ]
     lines = ["### Triage Report"]
-    for title, anomalies in sections:
-        if anomalies:
-            lines.append(f"\n**{title}**")
-            lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
-    if not any(anomalies for _, anomalies in sections):
+    if not report.anomalies:
         lines.append("\nNo anomalies detected.")
+        return "\n".join(lines) + "\n"
+    # Group by category, preserving first-seen order.
+    grouped: dict[str, list[TriageAnomaly]] = {}
+    for a in report.anomalies:
+        grouped.setdefault(a.category, []).append(a)
+    for category, anomalies in grouped.items():
+        lines.append(f"\n**{category}**")
+        lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
     return "\n".join(lines) + "\n"
 
 
@@ -326,6 +295,12 @@ def _check_mutating_kubectl(cmd: str) -> str | None:
     return None
 
 
+_MCP_MAX_RETRIES = 5
+_MCP_INITIAL_DELAY = 1.0
+_MCP_BACKOFF_FACTOR = 2.0
+_MCP_MAX_DELAY = 60.0
+
+
 async def _submit_to_benchmark(
     submit_mcp_url: str,
     submission_ans: str,
@@ -335,14 +310,32 @@ async def _submit_to_benchmark(
 
     Returns (success, message, oracle_result_dict).
     """
+    import random
+
     from mcp import ClientSession
     from mcp.client.sse import sse_client
 
-    async with AsyncExitStack() as stack:
-        transport = await stack.enter_async_context(sse_client(url=submit_mcp_url))
-        session = await stack.enter_async_context(ClientSession(*transport))
-        await session.initialize()
-        result = await session.call_tool("submit", arguments={"ans": submission_ans})
+    for attempt in range(_MCP_MAX_RETRIES + 1):
+        try:
+            async with AsyncExitStack() as stack:
+                transport = await stack.enter_async_context(sse_client(url=submit_mcp_url))
+                session = await stack.enter_async_context(ClientSession(*transport))
+                await session.initialize()
+                result = await session.call_tool("submit", arguments={"ans": submission_ans})
+            break
+        except Exception as exc:
+            if attempt == _MCP_MAX_RETRIES:
+                raise
+            delay = min(_MCP_INITIAL_DELAY * (_MCP_BACKOFF_FACTOR**attempt), _MCP_MAX_DELAY)
+            delay += random.uniform(0, delay)
+            logger.warning(
+                "MCP submit failed (attempt %d/%d): %s — retrying in %.1fs.",
+                attempt + 1,
+                _MCP_MAX_RETRIES,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
 
     raw = result.content[0].text if result.content else "{}"
     try:
@@ -849,6 +842,7 @@ async def _run_verification_phase(
             distinguishing_check=candidate.distinguishing_check,
             mitigation_hint=candidate.mitigation_hint,
         )
+        logger.info("[ltm-verify-%d] PROMPT:\n%s", idx, prompt)
 
         verify_agent: Agent[None, CandidateVerification] = Agent(
             model_id,
@@ -857,7 +851,8 @@ async def _run_verification_phase(
             model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
         )
         try:
-            result = await verify_agent.run(
+            result = await arun_with_retry(
+                verify_agent,
                 prompt,
                 event_stream_handler=_make_verify_stream_handler(idx),
             )
@@ -879,7 +874,7 @@ async def _run_verification_phase(
                 "[ltm-verify-%d] done: applies=%s, reasoning=%s",
                 idx,
                 output.applies,
-                output.reasoning[:200],
+                output.reasoning,
             )
             return output
         except Exception as e:
@@ -960,7 +955,12 @@ async def triage_cluster(
     if not model_id:
         return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
 
-    prompt = _render("triage_cluster", namespace=ctx.deps.namespace)
+    prompt = _render(
+        "triage_cluster",
+        namespace=ctx.deps.namespace,
+        triage_guidance=ctx.deps.triage_guidance,
+    )
+    logger.info("[triage-cluster] PROMPT:\n%s", prompt)
 
     triage_agent: Agent[None, TriageReport] = Agent(
         model_id,
@@ -983,7 +983,8 @@ async def triage_cluster(
         return report
 
     try:
-        result = await triage_agent.run(
+        result = await arun_with_retry(
+            triage_agent,
             prompt,
             event_stream_handler=_triage_stream_handler,
         )
@@ -999,7 +1000,10 @@ async def triage_cluster(
             )
 
         formatted = format_triage_report(report)
-        logger.info("[triage] done: %s", formatted[:500])
+        logger.info("[triage] done: %s", formatted)
+        if ctx.deps.stage_outputs_file:
+            with open(ctx.deps.stage_outputs_file, "a") as f:
+                f.write(f"\n## Triage Report\n{formatted}\n")
         return formatted
     except Exception as e:
         logger.warning("[triage] failed: %s", e)
@@ -1039,7 +1043,9 @@ async def check_hypothesis_coverage(
         "check_hypothesis_coverage",
         triage_context=triage_context,
         hypothesis=hypothesis,
+        arbitration_guidance=ctx.deps.arbitration_guidance,
     )
+    logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
 
     coverage_agent: Agent[None, HypothesisCoverageVerdict] = Agent(
         model_id,
@@ -1048,7 +1054,7 @@ async def check_hypothesis_coverage(
     )
 
     try:
-        result = await coverage_agent.run(prompt)
+        result = await arun_with_retry(coverage_agent, prompt)
         output = result.output
 
         if ctx.deps.trajectory_path is not None:
@@ -1066,6 +1072,9 @@ async def check_hypothesis_coverage(
             output.unexplained_anomalies,
             output.reasoning,
         )
+        if ctx.deps.stage_outputs_file:
+            with open(ctx.deps.stage_outputs_file, "a") as f:
+                f.write(f"\n## Hypothesis Coverage Check\n{output_json}\n")
         return output_json
     except Exception as e:
         logger.warning("[hypothesis-coverage] failed: %s", e)
@@ -1127,6 +1136,7 @@ async def search_prior_incidents(
         lt_summary_file=str(ctx.deps.lt_summary_file),
         incidents_dir=str(ctx.deps.incidents_dir) if ctx.deps.incidents_dir else "",
     )
+    logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
     from libs.pydantic_agent import thinking_settings
 
@@ -1136,7 +1146,7 @@ async def search_prior_incidents(
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ctx.deps.ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await retrieval_agent.run(prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     diagnosis = retrieval_result.output
     logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
 
@@ -1163,6 +1173,9 @@ async def search_prior_incidents(
     )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Retrieval Results\n{output_json}\n")
     return output_json
 
 
@@ -1231,6 +1244,7 @@ async def search_prior_incidents_any(
         lt_summary_file=str(lt_summary_file),
         incidents_dir=str(incidents_dir) if incidents_dir else "",
     )
+    logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
     from libs.pydantic_agent import thinking_settings
 
@@ -1240,7 +1254,7 @@ async def search_prior_incidents_any(
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await retrieval_agent.run(prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     diagnosis = retrieval_result.output
     logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
 
@@ -1316,6 +1330,7 @@ async def search_prior_mitigations(
         lt_summary_file=str(ctx.deps.lt_summary_file),
         incidents_dir=str(ctx.deps.incidents_dir) if ctx.deps.incidents_dir else "",
     )
+    logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
 
     from libs.pydantic_agent import thinking_settings
 
@@ -1325,7 +1340,7 @@ async def search_prior_mitigations(
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(ctx.deps.ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await retrieval_agent.run(prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     output = retrieval_result.output
     output_json = output.model_dump_json(indent=2)
     logger.info("[ltm-mitigation] output: %s", output_json)

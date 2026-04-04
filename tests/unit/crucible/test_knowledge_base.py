@@ -201,6 +201,28 @@ class TestInjectIncidents:
         await kb.inject(target_dir)
         assert not (target_dir / KB_INCIDENTS_DIRNAME).exists()
 
+    async def test_skips_incidents_when_disabled(self, tmp_path: Path):
+        kb_dir = tmp_path / "kb"
+        target_dir = tmp_path / "target"
+        target_dir.mkdir()
+        shared_file = tmp_path / "shared.md"
+        shared_file.write_text("session content")
+        kb = CrucibleKnowledgeBase(
+            [shared_file],
+            kb_dir,
+            model_id="m",
+            app_name="test-app",
+            include_incident_files=False,
+        )
+        kb.incidents_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(3):
+            (kb.incidents_dir / f"2025010{i}_120000.md").write_text(f"incident {i}")
+
+        result = await kb.inject(target_dir)
+
+        assert result.incidents_dir is None
+        assert not (target_dir / KB_INCIDENTS_DIRNAME).exists()
+
 
 class TestUpdate:
     async def test_update_skips_missing_shared_file(self, tmp_path: Path):
@@ -244,6 +266,33 @@ class TestUpdate:
         incident_files = list(kb.incidents_dir.glob("*.md"))
         assert len(incident_files) == 1
         assert incident_files[0].read_text() == "session summary\n\n---\n\nreal session data"
+
+    @patch.object(CrucibleKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
+    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    async def test_update_skips_incident_save_when_disabled(self, mock_llm, mock_merge, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("real session data")
+        kb = CrucibleKnowledgeBase(
+            [shared],
+            tmp_path / "kb",
+            model_id="m",
+            app_name="test-app",
+            include_incident_files=False,
+        )
+
+        mock_llm.side_effect = [
+            "session summary",  # _summarize_session
+            "distilled lessons",  # _extract_operational_lessons
+        ]
+        mock_merge.return_value = "merged summary"
+
+        await kb.update()
+
+        assert kb.summary_path.read_text() == "merged summary"
+        # No incident files should be created
+        assert not kb.incidents_dir.exists() or len(list(kb.incidents_dir.glob("*.md"))) == 0
+        # Merge should have been called with empty incident_ref
+        mock_merge.assert_called_once_with("session summary", "", incident_ref="")
 
     @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_distill_lessons_reads_all_app_summaries(self, mock_llm, tmp_path: Path):
@@ -523,6 +572,19 @@ class TestCreateKnowledgeBase:
     def test_backward_compat_alias(self):
         assert CrucibleKnowledgeBase is StructuredKnowledgeBase
 
+    def test_include_incident_files_forwarded(self, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        kb = create_knowledge_base(
+            "structured",
+            [shared],
+            tmp_path / "kb",
+            model_id="m",
+            include_incident_files=False,
+        )
+        assert isinstance(kb, StructuredKnowledgeBase)
+        assert kb.include_incident_files is False
+
     def test_include_benchmark_results_forwarded(self, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("")
@@ -685,7 +747,7 @@ class TestCitationValidation:
         bad_output = "root cause (1 incidents, {{ref:incidents/fake_20240730.md}})"
         good_output = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}})"
 
-        # Mock Agent.run to return bad then good output
+        # Mock arun_with_retry to return bad then good output
         mock_result_bad = AsyncMock()
         mock_result_bad.output = bad_output
         mock_result_bad.all_messages = lambda: [{"role": "assistant", "content": bad_output}]
@@ -694,19 +756,22 @@ class TestCitationValidation:
         mock_result_good.output = good_output
         mock_result_good.all_messages = lambda: [{"role": "assistant", "content": good_output}]
 
-        with patch("sregym_agents.crucible.knowledge_base.Agent") as MockAgent:
-            mock_agent_instance = AsyncMock()
-            mock_agent_instance.run = AsyncMock(side_effect=[mock_result_bad, mock_result_good])
-            MockAgent.return_value = mock_agent_instance
-
+        with (
+            patch("sregym_agents.crucible.knowledge_base.Agent"),
+            patch(
+                "sregym_agents.crucible.knowledge_base.arun_with_retry",
+                new_callable=AsyncMock,
+                side_effect=[mock_result_bad, mock_result_good],
+            ) as mock_retry,
+        ):
             result = await kb._merge_into_long_term_summary(
                 "session summary", "", incident_ref="incidents/20260324_010224.md"
             )
 
         # Should have stripped the wrapper and used the corrected citation
         assert result == "root cause (1 incidents, incidents/20260324_010224.md)"
-        # Agent.run should have been called twice (initial + 1 correction)
-        assert mock_agent_instance.run.call_count == 2
+        # arun_with_retry should have been called twice (initial + 1 correction)
+        assert mock_retry.call_count == 2
 
     @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_merge_no_correction_when_citations_valid(self, mock_call_llm, tmp_path: Path):
@@ -724,14 +789,17 @@ class TestCitationValidation:
         mock_result.output = good_output
         mock_result.all_messages = list
 
-        with patch("sregym_agents.crucible.knowledge_base.Agent") as MockAgent:
-            mock_agent_instance = AsyncMock()
-            mock_agent_instance.run = AsyncMock(return_value=mock_result)
-            MockAgent.return_value = mock_agent_instance
-
+        with (
+            patch("sregym_agents.crucible.knowledge_base.Agent"),
+            patch(
+                "sregym_agents.crucible.knowledge_base.arun_with_retry",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ) as mock_retry,
+        ):
             result = await kb._merge_into_long_term_summary(
                 "session summary", "", incident_ref="incidents/20260324_010224.md"
             )
 
         assert result == "root cause (1 incidents, incidents/20260324_010224.md)"
-        assert mock_agent_instance.run.call_count == 1
+        assert mock_retry.call_count == 1

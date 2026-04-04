@@ -5,12 +5,12 @@
 #   bash scripts/run_sregym.sh bench/sregym/logs/<exp-dir>/        # resume
 
 [runner]
-agent = "crucible_deepagents"
-#model = "google-vertex:gemini-2.5-flash"
-model = "google_vertexai:gemini-2.5-flash"
+agent = "crucible"
+model = "google-vertex:gemini-2.5-flash"
+#model = "google_vertexai:gemini-2.5-flash"
 parallel = 4
 enable_summary = true
-no_inject_summary = true
+no_inject_summary = false
 # repeat = 1
 # sequence_len = 0
 # sequence_seed = 42
@@ -31,20 +31,32 @@ no_inject_summary = true
 
 [runner.variants]
 enabled = true
-count = 16
+count = 10
 offset = 0
 seed = 42
 # round_robin = true
 
 [runner.env]
 judge_model_id = "vertex-ai-gemini-2.5-pro"
-rucible_seed_kb_dir = ""
+crucible_seed_kb_dir = "/mnt/data/shli/sds/bench/sregym/logs/20260331_012038_crucible_no_kb/kb"
 worker_cpu_limit = "16"
 
 # Agent-specific config.
 [agent.crucible]
-prompt_version = "v1"
-enable_judge = true
+prompt_version = "v3"
+enable_judge = false
+enable_ltm_retrieval = true
+max_hypotheses = 3
+max_submissions = 3
+kb_type = "structured"
+include_benchmark_results = true
+enable_heuristic_refinement = false
+inject_heuristics = true
+include_incident_files = true
+max_diagnosis_iterations = 3
+max_mitigation_iterations = 3
+wait_stage_timeout = 300
+
 
 [agent.crucible_deepagents]
 enable_judge = true

@@ -1,0 +1,54 @@
+You are maintaining triage guidance for an SRE agent's cluster scanning tool.
+This guidance lists symptom areas and anomaly hints for the triage agent.
+
+Current triage guidance:
+---
+{{ prior_guidance or "(Empty — generate initial guidance from the classification below)" }}
+---
+
+Failure classification from the latest problem:
+---
+{{ failure_classification }}
+---
+{% if stage_outputs %}
+
+Agent's triage report for context:
+---
+{{ stage_outputs }}
+---
+{% endif %}
+
+Task: Update the guidance based on entries classified as triage failures or successes.
+
+The output MUST have exactly two sections:
+
+## Symptom Areas
+Each item is a broad symptom area the triage agent should check, with a brief description
+of what to look for. Examples:
+- Service-to-pod port mapping: compare every Service's targetPort against its pods' containerPort.
+- Pod health: pods not in Running/Completed state.
+
+## Anomaly Hints
+Specific anomaly patterns worth flagging (non-exhaustive — the agent should still flag
+anything that looks wrong). Examples:
+- Services whose selector labels don't match any pod.
+- ConfigMaps injecting scripts or overriding entrypoints.
+
+When to add:
+- The classification shows the triage missed a resource type or anomaly pattern that
+  turned out to be the root cause.
+- A new anomaly shape was discovered that the triage should catch in future problems.
+
+When to remove or refine:
+- An area or hint consistently produces benign noise that distracts the agent.
+- Evidence contradicts an existing item.
+- Two items say essentially the same thing — merge them.
+
+Rules:
+- Keep both sections short and high-signal. Do NOT blindly append every new observation —
+  only add items that would have changed the outcome if the agent had known them.
+  Prefer generalizing an existing item over adding a near-duplicate.
+- Maximum 10 symptom areas, maximum 15 anomaly hints.
+- Each item must be generic (no app-specific names or values).
+- Preserve items that were not implicated — do not remove working guidance.
+- Output only the two sections with their items, no preamble or commentary.

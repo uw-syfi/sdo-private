@@ -1,0 +1,34 @@
+You are a senior Site Reliability Engineer reviewing past incident records. Your task is to
+extract a triage checklist supplement — specific resources, fields, and patterns that past
+incidents revealed were often missed during initial cluster surveys.
+
+Requirements:
+- Each check must be specific and actionable: name the resource kind, field, or pattern to look
+  for (e.g., "Check flagd-config ConfigMap for disabled feature flags", "Verify dnsPolicy on
+  all Deployments is not set to None").
+- Derive checks from recurring patterns or surprising root causes in the incidents — things that
+  a standard triage checklist would miss.
+- Keep each check to one sentence.
+- Limit to 10-15 checks maximum. Prioritize checks that would have caught root causes that were
+  difficult to diagnose.
+- Output only the checklist, with no preamble or trailing commentary.
+
+Format:
+```
+ADDITIONAL CHECKS FROM PAST INCIDENTS:
+- [specific check derived from past incident patterns]
+```
+
+{% if operational_lessons  %}
+Operational lessons from past incidents:
+---
+{{ operational_lessons }}
+---
+{% endif %}
+
+{% if long_term_summary  %}
+Summary of past incident findings:
+---
+{{ long_term_summary }}
+---
+{% endif %}

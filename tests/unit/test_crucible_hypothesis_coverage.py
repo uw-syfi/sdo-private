@@ -45,16 +45,16 @@ def _make_deps(
 
 def _make_triage_report() -> TriageReport:
     return TriageReport(
-        non_running_pods=[
+        anomalies=[
             TriageAnomaly(
+                category="Non-Running Pods",
                 resource_kind="Pod",
                 resource_name="geo-abc-123",
                 namespace="hotel-reservation",
                 observation="CrashLoopBackOff, exit code 1",
             ),
-        ],
-        services_without_endpoints=[
             TriageAnomaly(
+                category="Services Without Endpoints",
                 resource_kind="Service",
                 resource_name="geo",
                 namespace="hotel-reservation",
@@ -162,10 +162,13 @@ class TestCheckHypothesisCoverageSubagent:
         mock_run_result = MagicMock()
         mock_run_result.output = mock_verdict
 
-        mock_agent_instance = MagicMock()
-        mock_agent_instance.run = AsyncMock(return_value=mock_run_result)
+        mock_arun = AsyncMock(return_value=mock_run_result)
 
-        with patch("pydantic_ai.Agent", return_value=mock_agent_instance) as mock_agent_cls:
+        with (
+            patch("pydantic_ai.Agent") as mock_agent_cls,
+            patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+            patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt") as mock_render,
+        ):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="sidecar port conflict in geo pod"))
 
         # Agent was constructed with right model and output type
@@ -177,11 +180,11 @@ class TestCheckHypothesisCoverageSubagent:
         # Agent should have NO tools (pure reasoning)
         assert "tools" not in call_kwargs[1] or call_kwargs[1].get("tools") is None
 
-        # Prompt contains both triage and hypothesis
-        prompt_arg = mock_agent_instance.run.call_args[0][0]
-        assert "sidecar port conflict" in prompt_arg
-        assert "geo" in prompt_arg
-        assert "CrashLoopBackOff" in prompt_arg
+        # _render was called with triage context and hypothesis
+        mock_render.assert_called_once()
+        render_kwargs = mock_render.call_args[1]
+        assert "sidecar port conflict" in render_kwargs["hypothesis"]
+        assert "geo" in render_kwargs["triage_context"]
 
         # Result is valid JSON
         parsed = json.loads(result)
@@ -203,10 +206,13 @@ class TestCheckHypothesisCoverageSubagent:
         mock_run_result = MagicMock()
         mock_run_result.output = mock_verdict
 
-        mock_agent_instance = MagicMock()
-        mock_agent_instance.run = AsyncMock(return_value=mock_run_result)
+        mock_arun = AsyncMock(return_value=mock_run_result)
 
-        with patch("pydantic_ai.Agent", return_value=mock_agent_instance):
+        with (
+            patch("pydantic_ai.Agent"),
+            patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+            patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        ):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="OOM kill in geo pod"))
 
         parsed = json.loads(result)
@@ -218,10 +224,13 @@ class TestCheckHypothesisCoverageSubagent:
         deps = _make_deps(tmp_path, triage_report=triage, ltm_model_id="test-model")
         ctx = _make_sre_ctx(deps)
 
-        mock_agent_instance = MagicMock()
-        mock_agent_instance.run = AsyncMock(side_effect=RuntimeError("model unavailable"))
+        mock_arun = AsyncMock(side_effect=RuntimeError("model unavailable"))
 
-        with patch("pydantic_ai.Agent", return_value=mock_agent_instance):
+        with (
+            patch("pydantic_ai.Agent"),
+            patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+            patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        ):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="some hypothesis"))
 
         assert "failed" in result.lower() or "error" in result.lower()

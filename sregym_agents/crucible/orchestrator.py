@@ -34,6 +34,7 @@ class CrucibleFlags:
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
+    enable_heuristic_refinement: bool = True
     max_diagnosis_iterations: int = 5
     max_mitigation_iterations: int = 5
     wait_stage_timeout: int = 300
@@ -51,6 +52,7 @@ class StageLoopResult:
     agent_justification: str = ""
     agent_causal_chain: str = ""
     agent_reflection: str = ""
+    stage_outputs_file: Path | None = None
 
 
 _CONFIG_DIR = Path(__file__).parent / "configs"
@@ -190,6 +192,9 @@ async def _run_stage_loop(
     incidents_dir: Path | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
+    diagnosis_heuristics_file: Path | None = None,
+    triage_heuristics_file: Path | None = None,
+    arbitration_heuristics_file: Path | None = None,
 ) -> StageLoopResult:
     """Run the agent->judge loop for one stage."""
     if flags is None:
@@ -211,6 +216,21 @@ async def _run_stage_loop(
     # Lessons and architecture are always injected unconditionally.
     lessons_content = _read_kb_content(lessons_file)
     architecture_content = _read_kb_content(architecture_file)
+
+    # v3 trained heuristics
+    is_v3 = flags.prompt_version >= "v3"
+    diagnosis_guidance = ""
+    triage_guidance = ""
+    arbitration_guidance = ""
+    stage_outputs_file: Path | None = None
+    if is_v3:
+        stage_outputs_file = Path(f"{stage}_stage_outputs.md")
+        if diagnosis_heuristics_file and diagnosis_heuristics_file.exists():
+            diagnosis_guidance = diagnosis_heuristics_file.read_text().strip()
+        if triage_heuristics_file and triage_heuristics_file.exists():
+            triage_guidance = triage_heuristics_file.read_text().strip()
+        if arbitration_heuristics_file and arbitration_heuristics_file.exists():
+            arbitration_guidance = arbitration_heuristics_file.read_text().strip()
 
     agent_role = f"{stage}-agent"
     judge_role = f"{stage}-judge"
@@ -252,8 +272,15 @@ async def _run_stage_loop(
             incidents_dir=incidents_dir if flags.enable_ltm_retrieval else None,
             ltm_model_id=model if flags.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
+            triage_guidance=triage_guidance,
+            arbitration_guidance=arbitration_guidance,
+            stage_outputs_file=stage_outputs_file,
         )
-        sre_system = _render(f"{stage}_agent_system")
+        if is_v3:
+            guidance = diagnosis_guidance if stage == "diagnosis" else ""
+            sre_system = _render(f"{stage}_agent_system", diagnosis_guidance=guidance)
+        else:
+            sre_system = _render(f"{stage}_agent_system")
         sre_prompt = _render(
             f"{stage}_agent_user",
             app_name=app_info.get("app_name", "unknown"),
@@ -269,7 +296,9 @@ async def _run_stage_loop(
         )
         logger.info(f"[{stage}-agent] SYSTEM PROMPT:\n{sre_system}")
         logger.info(f"[{stage}-agent] USER PROMPT:\n{sre_prompt}")
-        sre_agent = CrucibleSREAgent(model, sre_deps, trajectory_path=trajectory_path)
+        sre_agent = CrucibleSREAgent(
+            model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=sre_system
+        )
         _, sre_usage = await sre_agent.arun(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})
         usage_by_role[agent_role]["iterations"].append(sre_usage)
         usage_by_role[agent_role]["total"] = _add_usage(usage_by_role[agent_role]["total"], sre_usage)
@@ -322,6 +351,7 @@ async def _run_stage_loop(
                 agent_answer=last_answer,
                 agent_justification=last_justification,
                 agent_causal_chain=last_causal_chain,
+                stage_outputs_file=stage_outputs_file,
             )
 
         # Judge agent
@@ -379,6 +409,7 @@ async def _run_stage_loop(
                 agent_answer=last_answer,
                 agent_justification=last_justification,
                 agent_causal_chain=last_causal_chain,
+                stage_outputs_file=stage_outputs_file,
             )
 
         logger.info(f"Judge REJECTED {stage} (iteration {iteration}). Looping...")
@@ -393,6 +424,7 @@ async def _run_stage_loop(
         agent_answer=last_answer,
         agent_justification=last_justification,
         agent_causal_chain=last_causal_chain,
+        stage_outputs_file=stage_outputs_file,
     )
 
 
@@ -605,6 +637,9 @@ async def run(
     incidents_dir: Path | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
+    diagnosis_heuristics_file: Path | None = None,
+    triage_heuristics_file: Path | None = None,
+    arbitration_heuristics_file: Path | None = None,
 ) -> dict:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     if flags is None:
@@ -626,6 +661,9 @@ async def run(
     lessons_file = lessons_file.resolve() if lessons_file else None
     architecture_file = architecture_file.resolve() if architecture_file else None
     incidents_dir = incidents_dir.resolve() if incidents_dir else None
+    diagnosis_heuristics_file = diagnosis_heuristics_file.resolve() if diagnosis_heuristics_file else None
+    triage_heuristics_file = triage_heuristics_file.resolve() if triage_heuristics_file else None
+    arbitration_heuristics_file = arbitration_heuristics_file.resolve() if arbitration_heuristics_file else None
 
     diag_result = await _run_stage_loop(
         model,
@@ -640,6 +678,9 @@ async def run(
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        diagnosis_heuristics_file=diagnosis_heuristics_file,
+        triage_heuristics_file=triage_heuristics_file,
+        arbitration_heuristics_file=arbitration_heuristics_file,
     )
     # Recovery diagnosis: produce a validated causal chain when the benchmark
     # rejected the agent's diagnosis and we want causal chains for KB.
@@ -668,7 +709,10 @@ async def run(
 
     if "mitigation" not in planned_stages:
         logger.info("Diagnosis-only problem — orchestrator complete.")
-        return _build_usage_result(usage_by_agent)
+        result = _build_usage_result(usage_by_agent)
+        sof = diag_result.stage_outputs_file
+        result["stage_outputs_file"] = str(sof) if sof else None
+        return result
 
     _init_mitigation_file(
         mitigation_shared_file,
@@ -697,6 +741,9 @@ async def run(
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        diagnosis_heuristics_file=diagnosis_heuristics_file,
+        triage_heuristics_file=triage_heuristics_file,
+        arbitration_heuristics_file=arbitration_heuristics_file,
     )
     # Recovery mitigation: reflect on why mitigation failed when benchmark
     # rejected the agent's fix and we want lessons for KB.
@@ -725,4 +772,8 @@ async def run(
     logger.info("=" * 60)
     logger.info("CRUCIBLE: Orchestrator complete.")
     logger.info("=" * 60)
-    return _build_usage_result(usage_by_agent)
+    result = _build_usage_result(usage_by_agent)
+    # Prefer diagnosis stage outputs for the reflector (it has the full pipeline).
+    sof = diag_result.stage_outputs_file or mit_result.stage_outputs_file
+    result["stage_outputs_file"] = str(sof) if sof else None
+    return result

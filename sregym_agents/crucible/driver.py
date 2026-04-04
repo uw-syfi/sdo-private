@@ -9,6 +9,7 @@ import logging
 import os
 import random
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -16,7 +17,9 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
+from filelock import FileLock
 
+from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import configure as configure_prompts
 from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
@@ -30,6 +33,54 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 _READY_STAGES = {"diagnosis", "mitigation"}
+
+
+def _pid_is_alive(pid: int) -> bool:
+    """Check whether a process with the given PID is running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def _ensure_kb_worker(kb_dir: Path, model_id: str) -> None:
+    """Spawn a detached KB worker if one is not already running.
+
+    Uses a file lock to prevent race conditions when multiple driver
+    processes start simultaneously.
+    """
+    lock_path = kb_dir / "kb_worker.lock"
+    pid_path = kb_dir / "kb_worker.pid"
+
+    with FileLock(lock_path, timeout=10):
+        if pid_path.exists():
+            try:
+                pid = int(pid_path.read_text().strip())
+            except (ValueError, OSError):
+                pid = -1
+            if _pid_is_alive(pid):
+                logger.info("KB worker already running (pid=%d)", pid)
+                return
+            logger.info("Stale KB worker PID file (pid=%d), respawning.", pid)
+            pid_path.unlink(missing_ok=True)
+
+        log_path = kb_dir / "kb_worker.log"
+        log_file = open(log_path, "a")  # noqa: SIM115
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "sregym_agents.crucible.kb_worker",
+                "--kb-dir",
+                str(kb_dir),
+            ],
+            start_new_session=True,
+            stdout=log_file,
+            stderr=log_file,
+        )
+        pid_path.write_text(str(proc.pid))
+        logger.info("Spawned KB worker (pid=%d), log at %s", proc.pid, log_path)
 
 
 def _load_crucible_config() -> tuple[dict, str]:
@@ -77,20 +128,17 @@ def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
 
 
 def _get_app_info(api_base: str) -> dict:
-    resp = requests.get(f"{api_base}/get_app", timeout=10)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", f"{api_base}/get_app", timeout=10)
     return resp.json()
 
 
 def _get_problem_id(api_base: str) -> str:
-    resp = requests.get(f"{api_base}/get_problem", timeout=10)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", f"{api_base}/get_problem", timeout=10)
     return resp.json()["problem_id"]
 
 
 def _get_planned_stages(api_base: str) -> list[str]:
-    resp = requests.get(f"{api_base}/stages", timeout=10)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", f"{api_base}/stages", timeout=10)
     return resp.json().get("stages", [])
 
 
@@ -192,6 +240,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         enable_judge=enable_judge,
         enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
         include_benchmark_results=agent_cfg.get("include_benchmark_results", False),
+        enable_heuristic_refinement=agent_cfg.get("enable_heuristic_refinement", True),
         max_diagnosis_iterations=agent_cfg.get("max_diagnosis_iterations", 5),
         max_mitigation_iterations=agent_cfg.get("max_mitigation_iterations", 5),
         wait_stage_timeout=agent_cfg.get("wait_stage_timeout", 300),
@@ -237,6 +286,9 @@ async def _async_main(args: argparse.Namespace) -> None:
     lessons_file: Path | None = None
     architecture_file: Path | None = None
     incidents_dir: Path | None = None
+    diagnosis_heuristics_file: Path | None = None
+    triage_heuristics_file: Path | None = None
+    arbitration_heuristics_file: Path | None = None
 
     if args.kb_dir:
         model_id = args.kb_model or os.environ.get("MODEL_ID", args.model)
@@ -244,6 +296,8 @@ async def _async_main(args: argparse.Namespace) -> None:
         seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
         include_benchmark_results = agent_cfg.get("include_benchmark_results", False)
+        enable_heuristic_refinement = agent_cfg.get("enable_heuristic_refinement", True)
+        include_incident_files = agent_cfg.get("include_incident_files", True)
         kb = create_knowledge_base(
             kb_type=kb_type,
             shared_files=[diagnosis_shared_file, mitigation_shared_file],
@@ -252,6 +306,8 @@ async def _async_main(args: argparse.Namespace) -> None:
             app_name=app_info.get("app_name", "unknown"),
             seed_kb_dir=seed_kb_dir,
             include_benchmark_results=include_benchmark_results,
+            enable_heuristic_refinement=enable_heuristic_refinement,
+            include_incident_files=include_incident_files,
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env))
@@ -259,6 +315,12 @@ async def _async_main(args: argparse.Namespace) -> None:
             lessons_file = injected.lessons
             architecture_file = injected.architecture
             incidents_dir = injected.incidents_dir
+            if agent_cfg.get("inject_heuristics", True):
+                diagnosis_heuristics_file = injected.diagnosis_heuristics
+                triage_heuristics_file = injected.triage_heuristics
+                arbitration_heuristics_file = injected.arbitration_heuristics
+            else:
+                logger.info("Heuristic injection disabled by inject_heuristics=false")
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
@@ -276,7 +338,13 @@ async def _async_main(args: argparse.Namespace) -> None:
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        diagnosis_heuristics_file=diagnosis_heuristics_file,
+        triage_heuristics_file=triage_heuristics_file,
+        arbitration_heuristics_file=arbitration_heuristics_file,
     )
+
+    stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
+    stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
 
     if args.logs_dir:
         _save_results(logs_dir, problem_id, usage_metrics)
@@ -291,9 +359,53 @@ async def _async_main(args: argparse.Namespace) -> None:
                 shutil.copy2(sf, dest)
                 logger.info(f"Saved {suffix} session markdown to {dest}")
 
-    if kb is not None:
-        logger.info("Knowledge base: updating from completed session.")
-        await kb.update()
+    if kb is not None and args.kb_dir:
+        # Copy stage_outputs_file to logs_dir so it survives exp_env cleanup
+        saved_stage_outputs: str | None = None
+        if stage_outputs_file and stage_outputs_file.exists() and args.logs_dir:
+            dest = logs_dir / stage_outputs_file.name
+            shutil.copy2(stage_outputs_file, dest)
+            saved_stage_outputs = str(dest)
+            logger.info(f"Saved stage outputs to {dest}")
+
+        # Collect paths to session markdown copies already saved above
+        session_files: list[str] = []
+        if env_log_file:
+            stem = Path(env_log_file).stem
+            for suffix in ["diagnosis", "mitigation"]:
+                p = Path(env_log_file).with_name(f"{stem}_{problem_id}_{suffix}.md")
+                if p.exists():
+                    session_files.append(str(p))
+
+        if session_files:
+            manifest = {
+                "session_files": session_files,
+                "stage_outputs_file": saved_stage_outputs,
+                "kb_dir": args.kb_dir,
+                "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
+                "model_id": args.kb_model or os.environ.get("MODEL_ID", args.model),
+                "app_name": app_info.get("app_name", "unknown"),
+                "include_benchmark_results": agent_cfg.get("include_benchmark_results", False),
+                "enable_heuristic_refinement": agent_cfg.get("enable_heuristic_refinement", True),
+                "include_incident_files": agent_cfg.get("include_incident_files", True),
+                "problem_id": problem_id,
+                "prompt_version": prompt_version,
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            }
+            pending_dir = Path(args.kb_dir) / "pending"
+            pending_dir.mkdir(parents=True, exist_ok=True)
+            manifest_path = pending_dir / f"{manifest['timestamp']}_{problem_id}.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2))
+            logger.info(f"KB update manifest written to {manifest_path}")
+
+            _ensure_kb_worker(
+                Path(args.kb_dir),
+                manifest["model_id"],
+            )
+        else:
+            # Standalone mode (no SREGYM_LOG_FILE) — run KB update inline
+            logger.info("Knowledge base: updating inline (no sregym harness detected).")
+            await kb.update(stage_outputs_file=stage_outputs_file)
 
     logger.info("Crucible driver complete.")
 
