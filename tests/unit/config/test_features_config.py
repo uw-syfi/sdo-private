@@ -20,10 +20,10 @@ class TestFeaturesConfig:
 
     def test_rejects_non_bool(self):
         with pytest.raises(TypeError, match="git_integration must be bool"):
-            FeaturesConfig(git_integration="yes")
+            FeaturesConfig(git_integration="yes")  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="git_integration must be bool"):
-            FeaturesConfig(git_integration=1)
+            FeaturesConfig(git_integration=1)  # type: ignore[arg-type]
 
 
 class TestFeaturesConfigParsing:

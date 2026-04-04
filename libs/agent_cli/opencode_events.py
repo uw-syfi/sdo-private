@@ -78,7 +78,7 @@ class StepStartEvent(OpencodeEvent):
 
 
 class StepFinishEvent(OpencodeEvent):
-    def __init__(self, reason: str | None, cost: float | None, tokens: dict | None):
+    def __init__(self, reason: str | None, cost: float | None, tokens: dict[str, Any] | None):
         self.reason = reason
         self.cost = cost
         self.tokens = tokens

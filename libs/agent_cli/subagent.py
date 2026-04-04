@@ -8,6 +8,7 @@ SubagentCodingAgent (fan-out analysis calls).
 import os
 import subprocess
 import time
+from typing import Any
 
 import litellm
 from loguru import logger
@@ -22,16 +23,16 @@ _NETWORK_ERROR_MARKERS = (
 )
 
 
-def _litellm_call_with_retry(
-    kwargs: dict,
+def litellm_call_with_retry(
+    kwargs: dict[str, Any],
     label: str,
     max_attempts: int = 3,
-    token_acc: dict | None = None,
+    token_acc: dict[str, int] | None = None,
 ) -> str:
     """Call litellm.completion with retry on transient network errors."""
     for attempt in range(max_attempts):
         try:
-            response = litellm.completion(**kwargs)
+            response = litellm.completion(**kwargs)  # type: ignore[reportUnknownMemberType]
             if token_acc is not None:
                 usage = getattr(response, "usage", None)
                 if usage:
@@ -64,14 +65,14 @@ def call_subagent(
     system_prompt: str,
     user_prompt: str,
     location: str | None = None,
-    token_acc: dict | None = None,
+    token_acc: dict[str, int] | None = None,
 ) -> str:
     """Make a completely fresh, isolated litellm call.
 
     Builds a new ``messages`` list from scratch (system + user), so there is
     no shared conversation history with any other call.
     """
-    kwargs: dict = {
+    kwargs: dict[str, Any] = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -84,7 +85,7 @@ def call_subagent(
         kwargs["vertex_location"] = loc
 
     try:
-        return _litellm_call_with_retry(kwargs, label="subagent call", token_acc=token_acc)
+        return litellm_call_with_retry(kwargs, label="subagent call", token_acc=token_acc)
     except KeyboardInterrupt:
         raise
     except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:

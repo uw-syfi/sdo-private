@@ -7,7 +7,7 @@ from typing import Any
 from loguru import logger
 
 
-def _get_interactive_env() -> dict[str, str]:
+def get_interactive_env() -> dict[str, str]:
     """Capture environment variables from an interactive shell."""
     try:
         # Run env in an interactive shell to get the full user environment
@@ -19,7 +19,7 @@ def _get_interactive_env() -> dict[str, str]:
         if result.returncode != 0:
             return os.environ.copy()
 
-        env = {}
+        env: dict[str, str] = {}
         for line in result.stdout.splitlines():
             if "=" in line:
                 key, value = line.split("=", 1)

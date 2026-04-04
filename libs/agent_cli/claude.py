@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
@@ -17,13 +18,13 @@ from .events import AgentEventHandler
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         # Initialize state required for stream processing
-        self.tool_map = {}
-        self.tool_start_times = {}
-        self.tool_args = {}
-        self.final_result = None
+        self.tool_map: dict[str, str] = {}
+        self.tool_start_times: dict[str, float] = {}
+        self.tool_args: dict[str, Any] = {}
+        self.final_result: str | None = None
 
     def _process_stdout(self, line: str) -> None:
         """Process a line from stdout."""

@@ -494,7 +494,7 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", side_effect=track_popen):
                 with patch(
-                    "libs.agent_cli.cli_agent._get_interactive_env",
+                    "libs.agent_cli.cli_agent.get_interactive_env",
                     return_value=mock_env,
                 ):
                     agent = agent_class()

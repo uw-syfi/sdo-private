@@ -384,7 +384,7 @@ def test_prepare_error_context_truncates_long_outputs(agent):
         raw_response="",
     )
 
-    context = prepare_error_context(deploy_result, health_verdict)
+    context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
     assert "## Deployment Script Result" in context
     assert "Exit Code: 1" in context
@@ -564,7 +564,7 @@ def test_exit_code_zero_recorded_correctly(repo_path, stub_agent, monkeypatch):
         return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
 
     recorder = RecordingRecorder()
-    agent = DeploymentAgent(repo_path, stub_agent, recorder=recorder)
+    agent = DeploymentAgent(repo_path, stub_agent, recorder=recorder)  # type: ignore[arg-type]
 
     bind_method(agent, "run_deploy_command", fake_run_deploy)
 

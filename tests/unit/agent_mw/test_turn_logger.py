@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from unittest.mock import MagicMock
 
 from pydantic_ai import Agent
@@ -20,7 +21,7 @@ def echo(ctx, message: str) -> str:
     return f"echo: {message}"
 
 
-def _make_agent(middleware=None, call_tools="all"):
+def _make_agent(middleware=None, call_tools: Any = "all"):
     class ConcreteAgent(BaseAgent):
         def __init__(self):
             super().__init__(None, agent_name="test-agent", middleware=middleware or [])
@@ -72,7 +73,7 @@ def test_on_function_tool_result_warns_on_retry_prompt():
         agent_name = "dummy"
         current_request_input_tokens = 0
 
-    mw.on_attach(DummyAgent())
+    mw.on_attach(DummyAgent())  # type: ignore[arg-type]
 
     retry_part = MagicMock(spec=RetryPromptPart)
     retry_part.tool_name = "some_tool"
@@ -95,7 +96,7 @@ def test_on_function_tool_result_warns_on_failed_tool():
         agent_name = "dummy"
         current_request_input_tokens = 0
 
-    mw.on_attach(DummyAgent())
+    mw.on_attach(DummyAgent())  # type: ignore[arg-type]
 
     return_part = MagicMock(spec=ToolReturnPart)
     return_part.tool_name = "exec_bash"

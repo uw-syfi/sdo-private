@@ -736,9 +736,9 @@ class PromptOptimizer:
             }
 
             # Extract demonstrations if they exist (BootstrapFewShot)
-            if hasattr(predictor, "demos") and predictor.demos:
+            if hasattr(predictor, "demos") and predictor.demos:  # type: ignore[reportAttributeAccessIssue]
                 serializable_demos = []
-                for demo in predictor.demos:  # type: ignore[reportGeneralTypeIssues]
+                for demo in predictor.demos:  # type: ignore[reportAttributeAccessIssue]
                     if isinstance(demo, dict):
                         serializable_demos.append(demo)
                     elif hasattr(demo, "__dict__"):
@@ -755,11 +755,11 @@ class PromptOptimizer:
             # Extract the optimized instruction if present (COPRO / MIPROv2
             # rewrite predictor.signature.instructions; BootstrapFewShot does
             # not touch it).
-            if hasattr(predictor, "signature") and hasattr(predictor.signature, "instructions"):
-                module_state["optimized_instruction"] = predictor.signature.instructions
+            if hasattr(predictor, "signature") and hasattr(predictor.signature, "instructions"):  # type: ignore[reportAttributeAccessIssue]
+                module_state["optimized_instruction"] = predictor.signature.instructions  # type: ignore[reportAttributeAccessIssue]
                 logger.info(
                     "Saved optimized instruction (%d chars)",
-                    len(predictor.signature.instructions),
+                    len(predictor.signature.instructions),  # type: ignore[reportAttributeAccessIssue]
                 )
 
             if not module_state["demos"] and "optimized_instruction" not in module_state:

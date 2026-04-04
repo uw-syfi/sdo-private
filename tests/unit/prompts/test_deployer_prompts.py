@@ -24,7 +24,7 @@ class TestPrepareErrorContext:
         """Test basic deployment error context."""
         deploy_result = {"exit_code": 1, "success": False}
 
-        context = prepare_error_context(deploy_result, None)
+        context = prepare_error_context(deploy_result, None)  # type: ignore[arg-type]
 
         assert "Deployment Script Result" in context
         assert "Exit Code: 1" in context
@@ -41,7 +41,7 @@ class TestPrepareErrorContext:
             raw_response="",
         )
 
-        context = prepare_error_context(deploy_result, health_verdict)
+        context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
         assert "Deployment Script Result" in context
         assert "Status: SUCCESS" in context
@@ -70,7 +70,7 @@ class TestPrepareErrorContext:
         )
 
         # Should not crash
-        context = prepare_error_context(deploy_result, health_verdict)
+        context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
         # Should still produce valid context
         assert isinstance(context, str)
@@ -84,7 +84,7 @@ class TestPrepareErrorContext:
         log_path = Path("/repo/.sds/logs/deploy.log")
         health_log_path = Path("/repo/.sds/logs/health.log")
 
-        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)
+        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)  # type: ignore[arg-type]
 
         assert str(log_path) in context
         assert str(health_log_path) in context
@@ -97,7 +97,7 @@ class TestPrepareErrorContext:
         log_path = Path("/repo/logs/deploy 日本語 & test.log")
         health_log_path = Path("/repo/logs/health (1).log")
 
-        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)
+        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)  # type: ignore[arg-type]
 
         assert str(log_path) in context
         assert str(health_log_path) in context
@@ -114,7 +114,7 @@ class TestPrepareErrorContext:
         )
 
         # Should work with None log paths
-        context = prepare_error_context(deploy_result, health_verdict, None, None)
+        context = prepare_error_context(deploy_result, health_verdict, None, None)  # type: ignore[arg-type]
 
         assert isinstance(context, str)
         assert "Deployment Script Result" in context
@@ -132,7 +132,7 @@ class TestPrepareErrorContext:
             raw_response="",
         )
 
-        context = prepare_error_context(deploy_result, health_verdict)
+        context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
         assert "Exit Code: 0" in context
         assert "Status: SUCCESS" in context
@@ -142,7 +142,7 @@ class TestPrepareErrorContext:
         """Test with negative exit codes (e.g., timeout = -1)."""
         deploy_result = {"exit_code": -1, "success": False}
 
-        context = prepare_error_context(deploy_result, None)
+        context = prepare_error_context(deploy_result, None)  # type: ignore[arg-type]
 
         assert "Exit Code: -1" in context
 
@@ -150,7 +150,7 @@ class TestPrepareErrorContext:
         """Test with very large exit codes."""
         deploy_result = {"exit_code": 999999, "success": False}
 
-        context = prepare_error_context(deploy_result, None)
+        context = prepare_error_context(deploy_result, None)  # type: ignore[arg-type]
 
         assert "Exit Code: 999999" in context
 

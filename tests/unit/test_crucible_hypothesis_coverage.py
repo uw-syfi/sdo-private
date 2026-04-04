@@ -35,7 +35,7 @@ def _make_deps(
     shared_file.write_text("")
     return SREDeps(
         namespace="default",
-        shared_file=shared_file,
+        shared_file=shared_file,  # type: ignore[arg-type]
         iteration=1,
         stage="diagnosis",
         ltm_model_id=ltm_model_id,

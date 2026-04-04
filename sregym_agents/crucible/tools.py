@@ -315,6 +315,7 @@ async def _submit_to_benchmark(
     from mcp import ClientSession
     from mcp.client.sse import sse_client
 
+    result: Any = None
     for attempt in range(_MCP_MAX_RETRIES + 1):
         try:
             async with AsyncExitStack() as stack:
@@ -337,7 +338,9 @@ async def _submit_to_benchmark(
             )
             await asyncio.sleep(delay)
 
-    raw = result.content[0].text if result.content else "{}"
+    assert result is not None
+    first_content = result.content[0] if result.content else None
+    raw: str = getattr(first_content, "text", "{}") if first_content is not None else "{}"
     try:
         parsed = ast.literal_eval(raw)
     except Exception:
@@ -1120,6 +1123,10 @@ async def search_prior_incidents(
         return result
     ctx.deps.ltm_call_count += 1
 
+    ltm_model_id = ctx.deps.ltm_model_id
+    if not ltm_model_id:
+        return "Error: search_prior_incidents requires a model ID (ltm_model_id not set)."
+
     from pydantic_ai import Agent
 
     from sregym_agents.crucible._prompts import _render
@@ -1141,10 +1148,10 @@ async def search_prior_incidents(
     from libs.pydantic_agent import thinking_settings
 
     retrieval_agent: Agent[None, DifferentialDiagnosis] = Agent(
-        ctx.deps.ltm_model_id,
+        ltm_model_id,
         output_type=DifferentialDiagnosis,
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
-        model_settings=thinking_settings(ctx.deps.ltm_model_id, THINKING_BUDGET),
+        model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
     )
     retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     diagnosis = retrieval_result.output
@@ -1167,7 +1174,7 @@ async def search_prior_incidents(
         observed_symptoms=observed_symptoms,
         namespace=ctx.deps.namespace,
         stage=ctx.deps.stage,
-        model_id=ctx.deps.ltm_model_id,
+        model_id=ltm_model_id,
         trajectory_path=ctx.deps.trajectory_path,
         triage_report=ctx.deps.triage_report,
     )
@@ -1227,10 +1234,12 @@ async def search_prior_incidents_any(
 
     stage = getattr(ctx.deps, "stage", "diagnosis")
     incidents_dir = getattr(ctx.deps, "incidents_dir", None)
-    ltm_model_id = getattr(ctx.deps, "ltm_model_id", None)
-    namespace = getattr(ctx.deps, "namespace", "default")
-    trajectory_path = getattr(ctx.deps, "trajectory_path", None)
-    triage_rpt = getattr(ctx.deps, "triage_report", None)
+    ltm_model_id: str | None = getattr(ctx.deps, "ltm_model_id", None)
+    if not ltm_model_id:
+        return "Error: search_prior_incidents requires a model ID (ltm_model_id not set)."
+    namespace: str = getattr(ctx.deps, "namespace", "default")
+    trajectory_path: Path | None = getattr(ctx.deps, "trajectory_path", None)
+    triage_rpt: TriageReport | None = getattr(ctx.deps, "triage_report", None)
 
     triage_context = ""
     if triage_rpt is not None:
@@ -1319,6 +1328,10 @@ async def search_prior_mitigations(
         return result
     ctx.deps.ltm_call_count += 1
 
+    ltm_model_id = ctx.deps.ltm_model_id
+    if not ltm_model_id:
+        return "Error: search_prior_mitigations requires a model ID (ltm_model_id not set)."
+
     from pydantic_ai import Agent
 
     from sregym_agents.crucible._prompts import _render
@@ -1335,10 +1348,10 @@ async def search_prior_mitigations(
     from libs.pydantic_agent import thinking_settings
 
     retrieval_agent: Agent[None, MitigationSearchResult] = Agent(
-        ctx.deps.ltm_model_id,
+        ltm_model_id,
         output_type=MitigationSearchResult,
         tools=[read_file, exec_bash_any, grep],
-        model_settings=thinking_settings(ctx.deps.ltm_model_id, THINKING_BUDGET),
+        model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
     )
     retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
     output = retrieval_result.output

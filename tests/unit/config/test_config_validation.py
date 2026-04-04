@@ -5,41 +5,11 @@ clear error messages, preventing runtime errors from bad configurations.
 """
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app_operator.config import AgentConfig, Config, OperatorConfig
 from libs.model_config import ModelConfig
-
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
 
 
 class TestOperatorConfigValidation:
@@ -48,7 +18,7 @@ class TestOperatorConfigValidation:
     def test_interval_type_checked(self):
         """Interval must be an integer, not a string."""
         with pytest.raises(TypeError, match="interval must be int"):
-            OperatorConfig(interval="30")
+            OperatorConfig(interval="30")  # type: ignore[arg-type]
 
     def test_monitoring_max_iters_must_be_positive(self):
         """Monitoring max iterations must be positive."""
@@ -63,7 +33,7 @@ class TestOperatorConfigValidation:
     def test_monitoring_max_iters_type_checked(self):
         """Monitoring max iterations must be an integer."""
         with pytest.raises(TypeError, match="monitoring_max_iters must be int"):
-            OperatorConfig(monitoring_max_iters="5")
+            OperatorConfig(monitoring_max_iters="5")  # type: ignore[arg-type]
 
     def test_deployment_max_iters_must_be_positive(self):
         """Deployment max iterations must be positive."""
@@ -78,7 +48,7 @@ class TestOperatorConfigValidation:
     def test_deployment_max_iters_type_checked(self):
         """Deployment max iterations must be an integer."""
         with pytest.raises(TypeError, match="deployment_max_iters must be int"):
-            OperatorConfig(deployment_max_iters=3.5)
+            OperatorConfig(deployment_max_iters=3.5)  # type: ignore[arg-type]
 
     def test_valid_config_accepted(self):
         """Valid configuration values should be accepted."""
@@ -105,7 +75,7 @@ class TestOperatorConfigValidation:
     def test_agent_fix_timeout_type_checked(self):
         """Agent fix timeout must be an integer."""
         with pytest.raises(TypeError, match="agent_fix_timeout must be int"):
-            OperatorConfig(agent_fix_timeout="1800")
+            OperatorConfig(agent_fix_timeout="1800")  # type: ignore[arg-type]
 
     def test_deploy_timeout_must_be_positive(self):
         """Deploy timeout must be positive."""
@@ -115,7 +85,7 @@ class TestOperatorConfigValidation:
     def test_deploy_timeout_type_checked(self):
         """Deploy timeout must be an integer."""
         with pytest.raises(TypeError, match="deploy_timeout must be int"):
-            OperatorConfig(deploy_timeout=900.5)
+            OperatorConfig(deploy_timeout=900.5)  # type: ignore[arg-type]
 
     def test_agent_timeout_must_be_positive(self):
         """Agent timeout must be positive."""
@@ -125,7 +95,7 @@ class TestOperatorConfigValidation:
     def test_agent_timeout_type_checked(self):
         """Agent timeout must be an integer."""
         with pytest.raises(TypeError, match="agent_timeout must be int"):
-            OperatorConfig(agent_timeout="300")
+            OperatorConfig(agent_timeout="300")  # type: ignore[arg-type]
 
     def test_custom_timeout_values_accepted(self):
         """Custom timeout values should be accepted."""
@@ -149,12 +119,12 @@ class TestAgentConfigValidation:
     def test_provider_type_checked(self):
         """Provider must be a string."""
         with pytest.raises(TypeError, match="backend must be str"):
-            AgentConfig(backend=123)
+            AgentConfig(backend=123)  # type: ignore[arg-type]
 
     def test_model_type_checked(self):
         """model_config must be a ModelConfig or None."""
         with pytest.raises(TypeError, match="model_config must be a ModelConfig or None"):
-            AgentConfig(model_config="not-a-model-config")
+            AgentConfig(model_config="not-a-model-config")  # type: ignore[arg-type]
 
     def test_model_can_be_none(self):
         """Model can be None (optional)."""
@@ -276,7 +246,7 @@ class TestConfigIntegration:
     def test_config_with_float_interval_rejected(self):
         """Test that float values for interval are rejected."""
         with pytest.raises(TypeError, match="interval must be int"):
-            OperatorConfig(interval=30.5)
+            OperatorConfig(interval=30.5)  # type: ignore[arg-type]
 
     def test_provider_with_whitespace(self):
         """Test provider with leading/trailing whitespace is rejected."""
@@ -367,7 +337,6 @@ class TestConfigIntegration:
         assert config.gepa.checkpoint_interval == 5
 
 
-@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
 class TestOperatorConfigIntervalProperty:
     """Property-based tests for OperatorConfig interval boundary sweep."""
 
@@ -386,7 +355,6 @@ class TestOperatorConfigIntervalProperty:
             OperatorConfig(interval=interval)
 
 
-@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis")
 class TestOperatorConfigTimeoutsProperty:
     """Property-based tests for OperatorConfig timeout and iteration fields."""
 
@@ -429,7 +397,6 @@ class TestOperatorConfigTimeoutsProperty:
             OperatorConfig(**{field: value})
 
 
-@pytest.mark.skipif(not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed")
 class TestConfigFromDictRoundTripProperty:
     """Property-based round-trip tests for Config.from_dict."""
 

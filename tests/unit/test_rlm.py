@@ -935,7 +935,7 @@ class TestIsolatedRecursiveCall:
             {"role": "user", "content": "first prompt"},
             {"role": "assistant", "content": "first response"},
         ]
-        agent._token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        agent._token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}  # type: ignore[attr-defined]
 
         with mock.patch("litellm.completion", side_effect=capture):
             agent._call_llm_isolated("Analyse the error", {"error_log": "port 8080 in use"})
@@ -967,7 +967,7 @@ class TestIsolatedRecursiveCall:
 
         agent = RecursiveDeploymentAgent()
         agent._messages = [{"role": "system", "content": "sys"}]
-        agent._token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        agent._token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}  # type: ignore[attr-defined]
 
         with mock.patch("litellm.completion", side_effect=capture):
             agent._call_llm_isolated("Just a question", None)

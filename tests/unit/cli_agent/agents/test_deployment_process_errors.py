@@ -43,7 +43,7 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         # Run with very short timeout
-        result = deployer.run_deploy_command("start", timeout=0.1)
+        result = deployer.run_deploy_command("start", timeout=0.1)  # type: ignore[arg-type]
 
         # Should have timed out
         assert result["success"] is False
@@ -107,7 +107,7 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         start_time = time.time()
-        result = deployer.run_deploy_command("start", timeout=0.5)
+        result = deployer.run_deploy_command("start", timeout=0.5)  # type: ignore[arg-type]
         elapsed = time.time() - start_time
 
         # Should have timed out quickly (not waited 100 seconds)
@@ -160,7 +160,7 @@ class TestHealthCheckProcessErrors:
 
         # Run with short timeout
         start_time = time.time()
-        result = run_health_check(repo, health_script, timeout=0.5)
+        result = run_health_check(repo, health_script, timeout=0.5)  # type: ignore[arg-type]
         elapsed = time.time() - start_time
 
         # Should timeout quickly

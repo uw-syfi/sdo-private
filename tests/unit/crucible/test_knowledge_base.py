@@ -408,7 +408,7 @@ class TestSeedKB:
 
         with caplog.at_level(logging.WARNING):
             CrucibleKnowledgeBase(
-                tmp_path / "shared.md",
+                tmp_path / "shared.md",  # type: ignore[arg-type]
                 tmp_path / "kb",
                 model_id="m",
                 app_name="myapp",
@@ -489,6 +489,7 @@ class TestAppendOnlyInject:
         result = await kb.inject(target)
 
         assert result.summary == target / KB_APPEND_FILENAME
+        assert result.summary is not None
         assert result.summary.read_text() == "prior knowledge"
         assert result.lessons is None
         assert result.architecture is None

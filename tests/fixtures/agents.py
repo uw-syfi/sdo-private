@@ -38,7 +38,7 @@ class StubAgent(CodingAgent):
         """
         self.response = response
         self.model = model
-        self.recorder = None
+        self.recorder = None  # type: ignore[assignment]
         self.calls: list[dict[str, Any]] = []
         self.generate_calls: list[dict[str, Any]] = []
 
@@ -90,7 +90,7 @@ class ErrorAgent(CodingAgent):
         """
         self.error_message = error_message
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:  # type: ignore[override]
         """Raise a RuntimeError.
 
         Args:
@@ -117,7 +117,7 @@ class TimeoutAgent(CodingAgent):
         """
         self.sleep_duration = sleep_duration
 
-    def generate(self, prompt: str, timeout: int = 300, **kwargs) -> str:
+    def generate(self, prompt: str, timeout: int = 300, **kwargs) -> str:  # type: ignore[override]
         """Sleep longer than the timeout.
 
         Args:
@@ -149,7 +149,7 @@ class TrackingAgent(CodingAgent):
         self.generation_count = 0
         self.response = response
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:  # type: ignore[override]
         """Track the call and return a response.
 
         Args:
@@ -207,7 +207,7 @@ class ConfigurableAgent(CodingAgent):
         """
         self.default_response = response
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:  # type: ignore[override]
         """Return a configured response based on the prompt.
 
         Args:
@@ -255,7 +255,7 @@ class ScriptGeneratingAgent(CodingAgent):
         ]
         self.call_count = 0
 
-    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300, **kwargs) -> str:
+    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300, **kwargs) -> str:  # type: ignore[override]
         """Generate scripts based on the prompt.
 
         Args:

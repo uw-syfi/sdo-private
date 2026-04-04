@@ -34,7 +34,7 @@ def _make_agent(
         def __init__(self):
             super().__init__(None, agent_name=agent_name, middleware=middleware or [])
             self._agent = Agent(
-                TestModel(call_tools=call_tools),
+                TestModel(call_tools=call_tools),  # type: ignore[arg-type]
                 deps_type=type(None),
                 output_type=output_type,
                 tools=tools if tools is not None else [echo],
@@ -84,7 +84,7 @@ def test_on_function_tool_result_invoked():
 def test_after_run_called_with_result_and_ctx():
     ctx = {"key": "value"}
     mw = RecordingMiddleware()
-    agent = _make_agent(middleware=[mw], call_tools=[])
+    agent = _make_agent(middleware=[mw], call_tools=[])  # type: ignore[arg-type]
     agent._run("hi", _run_ctx=ctx)
     assert len(mw.after_run_calls) == 1
     result, run_ctx = mw.after_run_calls[0]
@@ -94,7 +94,7 @@ def test_after_run_called_with_result_and_ctx():
 
 def test_after_run_called_with_none_ctx_by_default():
     mw = RecordingMiddleware()
-    agent = _make_agent(middleware=[mw], call_tools=[])
+    agent = _make_agent(middleware=[mw], call_tools=[])  # type: ignore[arg-type]
     agent._run("hi")
     result, run_ctx = mw.after_run_calls[0]
     assert run_ctx is None
@@ -112,7 +112,7 @@ def test_after_run_called_in_registration_order():
 
     mw0 = OrderedMw("first")
     mw1 = OrderedMw("second")
-    agent = _make_agent(middleware=[mw0, mw1], call_tools=[])
+    agent = _make_agent(middleware=[mw0, mw1], call_tools=[])  # type: ignore[arg-type]
     agent._run("hi")
     assert order == ["first", "second"]
 
@@ -124,7 +124,7 @@ def test_after_run_receives_result():
         def after_run(self, result, run_ctx=None):
             received.append(result)
 
-    agent = _make_agent(middleware=[CapturingMw()], call_tools=[])
+    agent = _make_agent(middleware=[CapturingMw()], call_tools=[])  # type: ignore[arg-type]
     result = agent._run("hi")
     assert len(received) == 1
     assert received[0] is result
@@ -196,7 +196,7 @@ def test_multiple_tools_all_produce_events():
 
 def test_no_tool_events_when_no_tools_invoked():
     mw = RecordingMiddleware()
-    agent = _make_agent(middleware=[mw], call_tools=[])
+    agent = _make_agent(middleware=[mw], call_tools=[])  # type: ignore[arg-type]
     agent._run("test")
     assert mw.tool_call_events == []
 
@@ -212,7 +212,7 @@ def test_hooks_work_with_message_history_continuation():
 
 
 def test_current_request_input_tokens_tracks_run_usage():
-    agent = _make_agent(call_tools=[])
+    agent = _make_agent(call_tools=[])  # type: ignore[arg-type]
     agent._run("hi")
     assert agent.current_request_input_tokens == (agent.current_run_usage.input_tokens or 0)
 
@@ -222,6 +222,6 @@ def test_structured_output_unaffected():
         value: str
 
     mw = RecordingMiddleware()
-    agent = _make_agent(middleware=[mw], output_type=MyOutput)
+    agent = _make_agent(middleware=[mw], output_type=MyOutput)  # type: ignore[arg-type]
     result = agent._run("test")
     assert result.output is not None

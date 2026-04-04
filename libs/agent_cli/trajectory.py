@@ -30,8 +30,8 @@ class FaultInjectionMetadata(TypedDict):
     enabled: bool
     num_faults_requested: int
     num_faults_injected: int
-    faults: list
-    failed_injections: list
+    faults: list[Any]
+    failed_injections: list[Any]
     fault_ids: list[str]
     categories: list[str]
     severities: list[str]

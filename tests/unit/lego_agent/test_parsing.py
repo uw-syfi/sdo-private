@@ -61,4 +61,5 @@ def test_extract_json_with_nested_backticks():
     """
     response = parse_lego_agent_response(text)
     assert response.status == "ready"
+    assert response.yaml_config is not None
     assert "```python" in response.yaml_config

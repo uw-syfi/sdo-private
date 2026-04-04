@@ -10,11 +10,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai.messages import ModelRequest, SystemPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
 
 from libs.pydantic_agent._middleware import AgentMiddleware
 
 if TYPE_CHECKING:
+    from pydantic_ai.tools import ToolDefinition
+
     from libs.pydantic_agent._base import BaseAgent
 
 logger = logging.getLogger(__name__)
@@ -36,21 +38,23 @@ class SoftLimitExtension(AgentMiddleware):
     def __init__(self, step_limit: int | None) -> None:
         self._step_limit = step_limit
 
-    def on_attach(self, agent: BaseAgent) -> None:
+    def on_attach(self, agent: BaseAgent[Any]) -> None:
         super().on_attach(agent)
         if self._step_limit is not None:
             from pydantic_ai.usage import UsageLimits
 
-            agent._usage_limits = UsageLimits(request_limit=self._step_limit)
+            agent._usage_limits = UsageLimits(request_limit=self._step_limit)  # pyright: ignore[reportPrivateUsage]
 
-    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+    def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         threshold = _soft_threshold(self._step_limit)
         if threshold is None or ctx.run_step < threshold:
             return messages
         logger.warning("Soft step limit reached (step %d/%s).", ctx.run_step, self._step_limit)
         return list(messages) + [ModelRequest(parts=[SystemPromptPart(content=_WRAP_UP_PROMPT)])]
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list) -> list | None:
+    async def before_model_req_edit_tools(
+        self, ctx: Any, tool_defs: list[ToolDefinition]
+    ) -> list[ToolDefinition] | None:
         threshold = _soft_threshold(self._step_limit)
         if threshold is None or ctx.run_step < threshold:
             return tool_defs

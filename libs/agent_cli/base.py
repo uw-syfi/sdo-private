@@ -1,20 +1,22 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
-AGENT_REGISTRY = {}
+_T = TypeVar("_T")
+
+AGENT_REGISTRY: dict[str, Any] = {}
 
 
-def register_provider(*names: str):
+def register_provider(*names: str) -> Any:
     """Decorator to register a coding agent provider.
 
     Args:
         *names: List of provider names/aliases (case-insensitive).
     """
 
-    def decorator(cls):
+    def decorator(cls: _T) -> _T:
         for name in names:
             AGENT_REGISTRY[name.lower()] = cls
         return cls

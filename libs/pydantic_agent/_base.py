@@ -11,6 +11,8 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.tools import ToolDefinition
 
     from libs.pydantic_agent._middleware import AgentMiddleware
 
@@ -60,12 +62,14 @@ class BaseAgent(Generic[DepsT]):
 
         middleware = self._middleware
 
-        def _chained_history_processor(ctx: RunContext[Any], messages: list) -> list:
+        def _chained_history_processor(ctx: RunContext[Any], messages: list[ModelMessage]) -> list[ModelMessage]:
             for m in middleware:
                 messages = m.before_model_req_edit_messages(ctx, messages)
             return messages
 
-        async def _chained_prepare_tools(ctx: RunContext[Any], tool_defs: list) -> list | None:
+        async def _chained_prepare_tools(
+            ctx: RunContext[Any], tool_defs: list[ToolDefinition]
+        ) -> list[ToolDefinition] | None:
             for m in middleware:
                 result = await m.before_model_req_edit_tools(ctx, tool_defs)
                 if result is not None:
@@ -173,7 +177,7 @@ class BaseAgent(Generic[DepsT]):
                                     self.current_run_usage = agent_run.ctx.state.usage
                                     if hasattr(stream, "usage"):
                                         self.current_request_input_tokens = (
-                                            stream.usage().input_tokens or 0  # pyright: ignore[reportAttributeAccessIssue]
+                                            stream.usage().input_tokens or 0  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
                                         ) - ctx_baseline_tokens
                                     self._stream_event_chain(event)
 

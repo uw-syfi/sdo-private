@@ -9,119 +9,68 @@ Note: These tests require hypothesis to be installed. Install with:
 
 from pathlib import Path
 
-import pytest
-
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import assume, given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-    # Create dummy decorators and classes for when hypothesis is not available
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from app_operator.filesystem import InMemoryFilesystem
 
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
-
 # Custom strategies for filesystem testing
-if HYPOTHESIS_AVAILABLE:
 
-    @st.composite
-    def valid_filename(draw):
-        """Generate valid filenames (no path separators)."""
-        # Generate strings that don't contain path separators
-        chars = st.characters(
-            blacklist_categories=("Cs", "Cc"),  # No surrogates or control chars
-            blacklist_characters="/\\\x00",  # No path separators or null
+
+@st.composite
+def valid_filename(draw):
+    """Generate valid filenames (no path separators)."""
+    # Generate strings that don't contain path separators
+    chars = st.characters(
+        blacklist_categories=("Cs", "Cc"),  # No surrogates or control chars
+        blacklist_characters="/\\\x00",  # No path separators or null
+    )
+    name = draw(st.text(chars, min_size=1, max_size=100))
+    # Filter out "." and ".." which are special
+    assume(name not in (".", ".."))
+    return name
+
+
+@st.composite
+def valid_path_component(draw):
+    """Generate valid path components."""
+    # Similar to filename but allow some special cases
+    chars = st.characters(
+        blacklist_categories=("Cs", "Cc"),
+        blacklist_characters="/\\\x00",
+    )
+    component = draw(st.text(chars, min_size=1, max_size=50))
+    assume(component not in (".", ".."))
+    return component
+
+
+@st.composite
+def relative_path_strategy(draw):
+    """Generate relative paths."""
+    num_components = draw(st.integers(min_value=1, max_value=5))
+    components = [draw(valid_path_component()) for _ in range(num_components)]
+    return Path(*components)
+
+
+@st.composite
+def absolute_path_strategy(draw):
+    """Generate absolute paths."""
+    num_components = draw(st.integers(min_value=1, max_value=5))
+    components = [draw(valid_path_component()) for _ in range(num_components)]
+    return Path("/") / Path(*components)
+
+
+@st.composite
+def file_content_strategy(draw):
+    """Generate various file contents."""
+    return draw(
+        st.one_of(
+            st.text(min_size=0, max_size=10000),  # Regular text
+            st.binary(min_size=0, max_size=10000).map(lambda b: b.decode("utf-8", errors="ignore")),
+            # Binary-like
+            st.text(st.characters(min_codepoint=0x1F300, max_codepoint=0x1F6FF)),  # Emoji
         )
-        name = draw(st.text(chars, min_size=1, max_size=100))
-        # Filter out "." and ".." which are special
-        assume(name not in (".", ".."))
-        return name
-
-    @st.composite
-    def valid_path_component(draw):
-        """Generate valid path components."""
-        # Similar to filename but allow some special cases
-        chars = st.characters(
-            blacklist_categories=("Cs", "Cc"),
-            blacklist_characters="/\\\x00",
-        )
-        component = draw(st.text(chars, min_size=1, max_size=50))
-        assume(component not in (".", ".."))
-        return component
-
-    @st.composite
-    def relative_path_strategy(draw):
-        """Generate relative paths."""
-        num_components = draw(st.integers(min_value=1, max_value=5))
-        components = [draw(valid_path_component()) for _ in range(num_components)]
-        return Path(*components)
-
-    @st.composite
-    def absolute_path_strategy(draw):
-        """Generate absolute paths."""
-        num_components = draw(st.integers(min_value=1, max_value=5))
-        components = [draw(valid_path_component()) for _ in range(num_components)]
-        return Path("/") / Path(*components)
-
-    @st.composite
-    def file_content_strategy(draw):
-        """Generate various file contents."""
-        return draw(
-            st.one_of(
-                st.text(min_size=0, max_size=10000),  # Regular text
-                st.binary(min_size=0, max_size=10000).map(lambda b: b.decode("utf-8", errors="ignore")),
-                # Binary-like
-                st.text(st.characters(min_codepoint=0x1F300, max_codepoint=0x1F6FF)),  # Emoji
-            )
-        )
-else:
-    # Dummy strategies for when hypothesis is not available
-    def valid_filename():
-        pass
-
-    def valid_path_component():
-        pass
-
-    def relative_path_strategy():
-        pass
-
-    def absolute_path_strategy():
-        pass
-
-    def file_content_strategy():
-        pass
+    )
 
 
 class TestPropertyBasedFilesystem:

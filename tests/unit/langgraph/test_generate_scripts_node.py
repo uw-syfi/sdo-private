@@ -34,7 +34,7 @@ class TestGenerateScripts:
 
     def test_generate_scripts_when_not_done(self):
         """Test generate_scripts generates scripts when not done."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -66,7 +66,7 @@ class TestGenerateScripts:
 
     def test_generate_scripts_when_already_done(self):
         """Test generate_scripts skips when already done."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -90,7 +90,7 @@ class TestGenerateScripts:
 
     def test_generate_scripts_analyzes_repository(self):
         """Test generate_scripts analyzes repository before generating."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -116,7 +116,7 @@ class TestGenerateScripts:
 
     def test_generate_scripts_uses_correct_script_names(self):
         """Test generate_scripts generates both deploy.sh and health_check.sh."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -150,7 +150,7 @@ class TestGenerateScripts:
 
     def test_generate_scripts_uses_recorder_phase(self):
         """Test generate_scripts uses recorder phase context."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -183,7 +183,7 @@ class TestGenerateScripts:
 
     def test_generate_scripts_uses_platform_from_config(self):
         """Test generate_scripts uses platform from config."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],

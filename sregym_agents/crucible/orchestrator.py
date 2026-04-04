@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class CrucibleFlags:
-    prompt_version: str
+    prompt_version: str = "v2"
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
@@ -92,7 +92,7 @@ def _write_timeout_entry(
 
 
 def _replace_hypothesis_placeholder(
-    shared_file: Path,
+    shared_file: SharedFile | Path,
     iteration: int,
     diagnosis: str,
     justification: str,
@@ -241,6 +241,7 @@ async def _run_stage_loop(
 
     last_answer = ""
     last_justification = ""
+    last_causal_chain = ""
 
     timed_out = False
     for iteration in range(1, max_iters + 1):
@@ -476,7 +477,7 @@ async def _run_recovery_diagnosis(
     sre_state = SharedState()
     sre_deps = SREDeps(
         namespace=app_info.get("namespace", "default"),
-        shared_file=shared_file,
+        shared_file=SharedFile(shared_file),
         iteration=0,  # recovery — not a regular iteration
         stage="diagnosis",
         state=sre_state,
@@ -565,7 +566,7 @@ async def _run_recovery_mitigation(
     sre_state = SharedState()
     sre_deps = SREDeps(
         namespace=app_info.get("namespace", "default"),
-        shared_file=shared_file,
+        shared_file=SharedFile(shared_file),
         iteration=0,  # recovery — not a regular iteration
         stage="mitigation",
         state=sre_state,

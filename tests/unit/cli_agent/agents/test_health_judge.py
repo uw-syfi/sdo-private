@@ -16,7 +16,7 @@ class PlainStubAgent(CodingAgent):
         self.response = response
         self.calls: list[dict[str, Any]] = []
 
-    def generate(self, prompt, cwd=None, timeout=300, **kwargs):
+    def generate(self, prompt, cwd=None, timeout=300, **kwargs):  # type: ignore[override]
         self.calls.append({"prompt": prompt, "cwd": cwd, "timeout": timeout})
         return self.response
 
@@ -129,7 +129,7 @@ def test_assess_retries_on_unparseable_response(repo_path, health_check_script):
     responses = [GARBAGE_RESPONSE, HEALTHY_RESPONSE]
 
     class MultiAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             idx = call_count["n"]
             call_count["n"] += 1
             self.response = responses[min(idx, len(responses) - 1)]
@@ -158,7 +158,7 @@ def test_assess_exhausts_retries(repo_path, health_check_script):
 
 def test_assess_handles_agent_error(repo_path, health_check_script):
     class FailAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             raise AgentError("agent crashed")
 
     judge = _make_judge(repo_path, health_check_script, FailAgent())
@@ -169,7 +169,7 @@ def test_assess_handles_agent_error(repo_path, health_check_script):
 
 def test_assess_handles_timeout(repo_path, health_check_script):
     class TimeoutAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             raise subprocess.TimeoutExpired(cmd="agent", timeout=300)
 
     judge = _make_judge(repo_path, health_check_script, TimeoutAgent())
@@ -188,7 +188,7 @@ def test_assess_records_trajectory(repo_path, health_check_script):
         def __init__(self):
             self.messages = []
 
-        def add_assistant_message(self, msg, **kwargs):
+        def add_assistant_message(self, msg, **kwargs):  # type: ignore[override]
             self.messages.append(msg)
 
     recorder = TrackingRecorder()
@@ -265,7 +265,7 @@ def test_assess_health_template_no_xml_when_structured_output_true(repo_path, he
 
 def test_assess_survives_agent_runtime_error(repo_path, health_check_script):
     class BadAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             raise RuntimeError("unexpected crash")
 
     judge = _make_judge(repo_path, health_check_script, BadAgent())
@@ -276,7 +276,7 @@ def test_assess_survives_agent_runtime_error(repo_path, health_check_script):
 
 def test_assess_survives_agent_oserror(repo_path, health_check_script):
     class BadAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             raise OSError("binary not found")
 
     judge = _make_judge(repo_path, health_check_script, BadAgent())
@@ -287,7 +287,7 @@ def test_assess_survives_agent_oserror(repo_path, health_check_script):
 
 def test_assess_survives_agent_keyboard_interrupt(repo_path, health_check_script):
     class BadAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             raise KeyboardInterrupt
 
     judge = _make_judge(repo_path, health_check_script, BadAgent())
@@ -297,7 +297,7 @@ def test_assess_survives_agent_keyboard_interrupt(repo_path, health_check_script
 
 def test_assess_survives_agent_returns_none(repo_path, health_check_script):
     class NoneAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             return None
 
     judge = _make_judge(repo_path, health_check_script, NoneAgent())
@@ -309,7 +309,7 @@ def test_assess_survives_agent_returns_empty_string(repo_path, health_check_scri
     call_count = {"n": 0}
 
     class EmptyThenValid(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             call_count["n"] += 1
             if call_count["n"] == 1:
                 return ""
@@ -349,7 +349,7 @@ def test_assess_survives_recorder_error(repo_path, health_check_script):
     from app_operator.trajectory import NullTrajectoryRecorder
 
     class BrokenRecorder(NullTrajectoryRecorder):
-        def add_assistant_message(self, msg, **kwargs):
+        def add_assistant_message(self, msg, **kwargs):  # type: ignore[override]
             raise RuntimeError("recorder broken")
 
     agent = PlainStubAgent(response=HEALTHY_RESPONSE)
@@ -391,7 +391,7 @@ def test_assess_survives_filesystem_error(repo_path, health_check_script):
 
 def test_assess_timeout_does_not_hang(repo_path, health_check_script):
     class TimeoutAgent(PlainStubAgent):
-        def generate(self, prompt, **kwargs):
+        def generate(self, prompt, **kwargs):  # type: ignore[override]
             raise subprocess.TimeoutExpired(cmd="agent", timeout=10)
 
     judge = _make_judge(repo_path, health_check_script, TimeoutAgent())

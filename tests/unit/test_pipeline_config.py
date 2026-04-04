@@ -382,11 +382,11 @@ class TestResetStagesForRerun:
 
 def _import_run_sregym():
     """Import scripts/run_sregym.py as a module."""
-    spec = importlib.util.spec_from_file_location(
+    spec = importlib.util.spec_from_file_location(  # type: ignore[attr-defined]
         "run_sregym",
         Path(__file__).resolve().parent.parent.parent / "scripts" / "run_sregym.py",
     )
-    mod = importlib.util.module_from_spec(spec)
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[attr-defined]
     spec.loader.exec_module(mod)
     return mod
 

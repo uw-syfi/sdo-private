@@ -13,42 +13,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import assume, given, settings
-    from hypothesis import strategies as st
-
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class _DummyStrategy:
-        """Placeholder that supports arbitrary chaining and operators."""
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: self
-
-        def __or__(self, other):
-            return self
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: _DummyStrategy()
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from sregym_agents.crucible.tools import (
     MAX_OUTPUT_CHARS,
@@ -62,51 +28,37 @@ from sregym_agents.crucible.tools import (
     write_file,
 )
 
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE, reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
-
-
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
-    # Arbitrary text including special shell characters (but no \r or surrogates for file safety)
-    _file_safe_chars = st.characters(blacklist_characters="\r", blacklist_categories=("Cs",))
-    arbitrary_text = st.text(alphabet=_file_safe_chars, max_size=500)
+# Arbitrary text including special shell characters (but no \r or surrogates for file safety)
+_file_safe_chars = st.characters(blacklist_characters="\r", blacklist_categories=("Cs",))
+arbitrary_text = st.text(alphabet=_file_safe_chars, max_size=500)
 
-    # File content — arbitrary unicode (same exclusions)
-    file_content = st.text(alphabet=_file_safe_chars, max_size=2000)
+# File content — arbitrary unicode (same exclusions)
+file_content = st.text(alphabet=_file_safe_chars, max_size=2000)
 
-    # Non-empty text for old_str in replacements (same exclusions)
-    non_empty_text = st.text(alphabet=_file_safe_chars, min_size=1, max_size=200)
+# Non-empty text for old_str in replacements (same exclusions)
+non_empty_text = st.text(alphabet=_file_safe_chars, min_size=1, max_size=200)
 
-    # Line range tuples (start_line, end_line)
-    line_range = st.tuples(
-        st.integers(min_value=-10, max_value=300),
-        st.integers(min_value=-1, max_value=300),
-    )
+# Line range tuples (start_line, end_line)
+line_range = st.tuples(
+    st.integers(min_value=-10, max_value=300),
+    st.integers(min_value=-1, max_value=300),
+)
 
-    # Read-only kubectl verbs (not in MUTATING_KUBECTL_VERBS)
-    readonly_verbs = st.sampled_from(["get", "describe", "logs", "top", "version", "api-resources"])
+# Read-only kubectl verbs (not in MUTATING_KUBECTL_VERBS)
+readonly_verbs = st.sampled_from(["get", "describe", "logs", "top", "version", "api-resources"])
 
-    # Mutating kubectl verbs
-    mutating_verbs = st.sampled_from(sorted(MUTATING_KUBECTL_VERBS))
+# Mutating kubectl verbs
+mutating_verbs = st.sampled_from(sorted(MUTATING_KUBECTL_VERBS))
 
-    # Simple kubectl args (no special quoting issues)
-    kubectl_args = st.text(
-        alphabet=st.characters(categories=("L", "N"), whitelist_characters="-_./"),
-        min_size=1,
-        max_size=30,
-    )
-else:
-    arbitrary_text = None
-    file_content = None
-    non_empty_text = None
-    line_range = None
-    readonly_verbs = None
-    mutating_verbs = None
-    kubectl_args = None
+# Simple kubectl args (no special quoting issues)
+kubectl_args = st.text(
+    alphabet=st.characters(categories=("L", "N"), whitelist_characters="-_./"),
+    min_size=1,
+    max_size=30,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +70,7 @@ def _make_sre_ctx(d: Path) -> MagicMock:
     ctx = MagicMock()
     ctx.deps = SREDeps(
         namespace="ns",
-        shared_file=d / "shared.md",
+        shared_file=d / "shared.md",  # type: ignore[arg-type]
         iteration=1,
         stage="diagnosis",
     )

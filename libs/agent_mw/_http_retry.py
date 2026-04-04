@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+from typing import Any
 
 import requests
 
@@ -22,7 +23,7 @@ def request_with_retry(
     backoff_factor: float = 2.0,
     max_delay: float = 60.0,
     jitter: bool = True,
-    **requests_kwargs,
+    **requests_kwargs: Any,
 ) -> requests.Response:
     """Issue an HTTP request with retry on transient errors.
 

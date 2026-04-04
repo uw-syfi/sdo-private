@@ -129,7 +129,7 @@ def test_ensure_process_terminated_fallback(runner_setup):
     mock_proc.wait = MagicMock(side_effect=subprocess.TimeoutExpired(cmd, 1))
 
     runner = SubprocessRunner(cmd, cwd, timeout)
-    runner.process = mock_proc
+    runner.process = mock_proc  # type: ignore[assignment]
 
     runner._ensure_process_terminated()
 

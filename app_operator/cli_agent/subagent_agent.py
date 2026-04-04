@@ -24,10 +24,10 @@ from app_operator.prompts import (
     render_script_analyst_prompt,
     render_trajectory_analyst_prompt,
 )
-from libs.agent_cli import _litellm_call_with_retry, call_subagent
+from libs.agent_cli import call_subagent, litellm_call_with_retry
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 
@@ -54,7 +54,7 @@ class SubagentCodingAgent(CodingAgent):
         dspy_config: DSPyConfigProtocol | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder: TrajectoryRecorderProtocol | None = recorder
+        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
@@ -105,7 +105,7 @@ class SubagentCodingAgent(CodingAgent):
             kwargs["vertex_location"] = loc
 
         try:
-            return _litellm_call_with_retry(kwargs, label="direct text generation", token_acc=token_acc)
+            return litellm_call_with_retry(kwargs, label="direct text generation", token_acc=token_acc)
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
@@ -128,7 +128,7 @@ class SubagentCodingAgent(CodingAgent):
             kwargs["vertex_location"] = loc
 
         try:
-            raw = _litellm_call_with_retry(kwargs, label="file generation", token_acc=token_acc)
+            raw = litellm_call_with_retry(kwargs, label="file generation", token_acc=token_acc)
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
@@ -291,7 +291,7 @@ class SubagentCodingAgent(CodingAgent):
             kwargs["vertex_location"] = loc
 
         try:
-            return _litellm_call_with_retry(kwargs, label="root synthesis", token_acc=token_acc)
+            return litellm_call_with_retry(kwargs, label="root synthesis", token_acc=token_acc)
         except KeyboardInterrupt:
             raise
         except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:

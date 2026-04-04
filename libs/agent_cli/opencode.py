@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
@@ -10,8 +11,15 @@ from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
 
+def _to_args_dict(input_data: Any) -> dict[str, Any]:
+    """Convert input_data to a dict[str, Any] for tool call recording."""
+    if isinstance(input_data, dict):
+        return {str(k): v for k, v in input_data.items()}  # type: ignore[reportUnknownVariableType]
+    return {"input": input_data}
+
+
 class OpencodeGenerationSession(CLIGenerationSession):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
     def _process_stdout(self, line: str) -> None:
@@ -42,7 +50,7 @@ class OpencodeGenerationSession(CLIGenerationSession):
         elif isinstance(event, ToolUseEvent):
             # Record tool call if it has a completion status
             if event.status in ("success", "error"):
-                args = event.input_data if isinstance(event.input_data, dict) else {"input": event.input_data}
+                args = _to_args_dict(event.input_data)
                 stdout = str(event.output_data) if event.output_data is not None else ""
 
                 self.recorder.add_tool_call(

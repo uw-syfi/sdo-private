@@ -437,7 +437,7 @@ class TestInvokeAgentMessageConstruction:
         mock_agent = MagicMock()
         mock_agent.stream.return_value = []
 
-        invoke_agent(state, mock_agent, "sys-prompt", "user-prompt", agent_name="Test")
+        invoke_agent(state, mock_agent, "sys-prompt", "user-prompt", agent_name="Test")  # type: ignore[arg-type]
 
         call_args = mock_agent.stream.call_args[0][0]
         msgs = call_args["messages"]
@@ -455,7 +455,7 @@ class TestInvokeAgentMessageConstruction:
         mock_agent = MagicMock()
         mock_agent.stream.return_value = []
 
-        invoke_agent(state, mock_agent, "", "user-only", agent_name="Test")
+        invoke_agent(state, mock_agent, "", "user-only", agent_name="Test")  # type: ignore[arg-type]
 
         call_args = mock_agent.stream.call_args[0][0]
         msgs = call_args["messages"]
@@ -473,7 +473,7 @@ class TestInvokeAgentMessageConstruction:
         mock_agent.stream.return_value = []
 
         prior = [HumanMessage(content="prior1"), AIMessage(content="response1")]
-        invoke_agent(state, mock_agent, "", "new-prompt", prior_messages=prior)
+        invoke_agent(state, mock_agent, "", "new-prompt", prior_messages=prior)  # type: ignore[arg-type]
 
         call_args = mock_agent.stream.call_args[0][0]
         msgs = call_args["messages"]

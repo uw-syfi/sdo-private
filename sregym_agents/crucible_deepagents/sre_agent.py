@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from deepagents.middleware.subagents import SubAgent
+    from langchain_core.runnables import RunnableConfig
+
 from deepagents import create_deep_agent
 from langchain.chat_models import init_chat_model
 
@@ -26,9 +29,9 @@ def _build_subagents(
     model_id: str,
     stage: str,
     deps: SREDeps,
-) -> list[dict]:
+) -> list[SubAgent]:
     """Build the list of DeepAgents native subagent dicts for the SRE agent."""
-    subagents: list[dict] = []
+    subagents: list[SubAgent] = []
 
     if stage == "diagnosis":
         # Triage subagent — systematically audits the K8s namespace
@@ -141,8 +144,8 @@ async def run_sre_agent(
         tools=[],
         backend=TimeoutShellBackend(virtual_mode=False, inherit_env=True),
         system_prompt=system_prompt,
-        subagents=subagents,
-        response_format=SRESubmission,
+        subagents=subagents,  # type: ignore[arg-type]
+        response_format=SRESubmission,  # type: ignore[arg-type]
     )
 
     # Set up trajectory callback
@@ -156,7 +159,7 @@ async def run_sre_agent(
         )
         callbacks.append(trajectory_handler)
 
-    config: dict[str, Any] = {}
+    config: RunnableConfig = {}
     if callbacks:
         config["callbacks"] = callbacks
 

@@ -186,7 +186,7 @@ async def test_path_traversal_rejected(tmp_path):
         mock_engine = AsyncMock()
         mock_engine_cls.return_value = mock_engine
 
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
         # Should have sent an error about invalid work_dir
         error_msgs = [
@@ -232,7 +232,7 @@ async def test_valid_work_dir_accepted(tmp_path):
         patch("lego_agent.server.get_loader"),
         patch("lego_agent.server.run_engine_and_script", new_callable=AsyncMock),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
         # Engine should have been started (task created)
         # No error about invalid work_dir
@@ -265,7 +265,7 @@ async def test_non_dict_message_returns_error(tmp_path):
         patch("lego_agent.server.load_config", return_value=mock_config),
         patch("lego_agent.server.get_loader"),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
     error_msgs = [m for m in ws.sent_messages if m.get("type") == "error"]
     assert len(error_msgs) == 1
@@ -295,7 +295,7 @@ async def test_missing_type_field_returns_error(tmp_path):
         patch("lego_agent.server.load_config", return_value=mock_config),
         patch("lego_agent.server.get_loader"),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
     error_msgs = [m for m in ws.sent_messages if m.get("type") == "error"]
     assert len(error_msgs) == 1
@@ -325,7 +325,7 @@ async def test_non_string_type_field_returns_error(tmp_path):
         patch("lego_agent.server.load_config", return_value=mock_config),
         patch("lego_agent.server.get_loader"),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
     error_msgs = [m for m in ws.sent_messages if m.get("type") == "error"]
     assert len(error_msgs) == 1

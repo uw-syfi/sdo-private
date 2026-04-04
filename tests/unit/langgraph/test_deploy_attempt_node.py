@@ -35,7 +35,7 @@ class TestDeployAttempt:
 
     def test_deploy_attempt_successful(self):
         """Test deploy_attempt with successful deployment."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -59,12 +59,12 @@ class TestDeployAttempt:
 
             result_state = deploy_attempt(state, ctx)
 
-        assert result_state["deploy_result"]["exit_code"] == 0
+        assert result_state["deploy_result"]["exit_code"] == 0  # type: ignore[index]
         recorder.start_phase.assert_called_once_with(Phase.DEPLOYMENT, {"attempt": 1, "max_attempts": 3})
 
     def test_deploy_attempt_with_failure(self):
         """Test deploy_attempt with failed deployment."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -85,11 +85,11 @@ class TestDeployAttempt:
 
             result_state = deploy_attempt(state, ctx)
 
-        assert result_state["deploy_result"]["exit_code"] == 1
+        assert result_state["deploy_result"]["exit_code"] == 1  # type: ignore[index]
 
     def test_deploy_attempt_shutdown_check(self):
         """Test deploy_attempt respects shutdown flag."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -114,7 +114,7 @@ class TestDeployAttempt:
 
     def test_deploy_attempt_none_shutdown_check(self):
         """Test deploy_attempt with None shutdown check."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=1,
             max_attempts=3,
             messages=[],
@@ -140,7 +140,7 @@ class TestDeployAttempt:
 
     def test_deploy_attempt_uses_correct_log_path(self):
         """Test deploy_attempt uses correct log file path."""
-        state = OperatorState(
+        state = OperatorState(  # type: ignore[call-overload]
             attempt=2,
             max_attempts=3,
             messages=[],
