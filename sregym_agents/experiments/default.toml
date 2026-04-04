@@ -57,15 +57,3 @@ max_diagnosis_iterations = 3
 max_mitigation_iterations = 3
 wait_stage_timeout = 300
 
-
-[agent.crucible_deepagents]
-enable_judge = true
-enable_ltm_retrieval = true
-enable_pipeline = false
-max_hypotheses = 5
-max_submissions = 5
-kb_type = "structured"
-include_benchmark_results = true
-max_diagnosis_iterations = 5
-max_mitigation_iterations = 5
-wait_stage_timeout = 300

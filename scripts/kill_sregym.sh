@@ -24,8 +24,6 @@ fi
 # (not "bench/sregym/main.py") because the cwd is changed before exec.
 PATTERNS=(
     "sregym_agents\.crucible\.driver"
-    "sregym_agents\.crucible_simple\.driver"
-    "sregym_agents\.crucible_deepagent\.driver"
     "bench/sregym/main\.py"
     "main\.py --agent .+ --experiment-dir .+bench/sregym"
 )
