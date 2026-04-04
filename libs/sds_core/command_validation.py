@@ -7,7 +7,7 @@ to provide a safety net against destructive LLM-generated commands.
 import re
 
 # Each pattern is a tuple of (compiled_regex, human-readable description).
-DANGEROUS_PATTERNS: list[tuple[re.Pattern, str]] = [
+DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/\s*($|[;&|])"),
         "rm -rf / (delete root filesystem)",

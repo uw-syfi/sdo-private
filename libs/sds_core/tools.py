@@ -23,7 +23,7 @@ class ToolContext:
             candidate = self.repo_root / path
 
         # Normalize .. and . without filesystem access
-        parts = []
+        parts: list[str] = []
         for part in candidate.parts:
             if part == "..":
                 if parts:
@@ -120,7 +120,7 @@ def _build_find_files(context: ToolContext) -> Callable[[str], dict[str, Any]]:
                         "context": {"pattern": pattern},
                     }
 
-            results = []
+            results: list[str] = []
             # Similarly, context.repo_root.glob(pattern) uses real filesystem
             for path in context.repo_root.glob(pattern):
                 if path.is_file() or path.is_dir():

@@ -37,7 +37,7 @@ class FileSystemInterface(ABC):
         """
 
     @abstractmethod
-    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
+    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True) -> None:
         """Create a directory.
 
         Args:
@@ -47,7 +47,7 @@ class FileSystemInterface(ABC):
         """
 
     @abstractmethod
-    def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
+    def write_text(self, path: Path, content: str, encoding: str = "utf-8") -> None:
         """Write text to a file.
 
         Args:
@@ -69,7 +69,7 @@ class FileSystemInterface(ABC):
         """
 
     @abstractmethod
-    def chmod(self, path: Path, mode: int):
+    def chmod(self, path: Path, mode: int) -> None:
         """Change file permissions.
 
         Args:
@@ -78,7 +78,7 @@ class FileSystemInterface(ABC):
         """
 
     @abstractmethod
-    def remove(self, path: Path):
+    def remove(self, path: Path) -> None:
         """Remove a file.
 
         Args:
@@ -86,7 +86,7 @@ class FileSystemInterface(ABC):
         """
 
     @abstractmethod
-    def remove_tree(self, path: Path):
+    def remove_tree(self, path: Path) -> None:
         """Remove a directory tree recursively.
 
         Args:
@@ -149,22 +149,22 @@ class RealFilesystem(FileSystemInterface):
     def is_dir(self, path: Path) -> bool:
         return path.is_dir()
 
-    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
+    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True) -> None:
         path.mkdir(parents=parents, exist_ok=exist_ok)
 
-    def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
+    def write_text(self, path: Path, content: str, encoding: str = "utf-8") -> None:
         path.write_text(content, encoding=encoding)
 
     def read_text(self, path: Path, encoding: str = "utf-8") -> str:
         return path.read_text(encoding=encoding)
 
-    def chmod(self, path: Path, mode: int):
+    def chmod(self, path: Path, mode: int) -> None:
         path.chmod(mode)
 
-    def remove(self, path: Path):
+    def remove(self, path: Path) -> None:
         path.unlink()
 
-    def remove_tree(self, path: Path):
+    def remove_tree(self, path: Path) -> None:
         shutil.rmtree(path)
 
     def glob(self, path: Path, pattern: str) -> list[Path]:
@@ -190,17 +190,17 @@ class InMemoryFilesystem(FileSystemInterface):
     attempting to collect it as a test class.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the test filesystem."""
         self.files: dict[str, str] = {}  # path -> content
         self.permissions: dict[str, int] = {}  # path -> mode
-        self.directories: set = set()  # set of directory paths
+        self.directories: set[str] = set()  # set of directory paths
         self.should_fail: dict[str, Exception] = {}  # path -> exception to raise
 
         # Initialize root directory to support relative paths
         self.directories.add(self._normalize_path(Path(".")))
 
-    def simulate_permission_error(self, path: Path):
+    def simulate_permission_error(self, path: Path) -> None:
         """Configure the filesystem to raise PermissionError for a path.
 
         Args:
@@ -209,7 +209,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         self.should_fail[path_str] = PermissionError(f"Permission denied: '{path}'")
 
-    def simulate_disk_full(self, path: Path):
+    def simulate_disk_full(self, path: Path) -> None:
         """Configure the filesystem to raise disk full error for a path.
 
         Args:
@@ -218,7 +218,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         self.should_fail[path_str] = OSError(f"No space left on device: '{path}'")
 
-    def simulate_readonly(self, path: Path):
+    def simulate_readonly(self, path: Path) -> None:
         """Configure the filesystem to be read-only for a path.
 
         Args:
@@ -227,7 +227,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         self.should_fail[path_str] = OSError(f"Read-only file system: '{path}'")
 
-    def clear_failures(self):
+    def clear_failures(self) -> None:
         """Clear all simulated failures."""
         self.should_fail.clear()
 
@@ -249,7 +249,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         return path_str in self.directories
 
-    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
+    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -273,7 +273,7 @@ class InMemoryFilesystem(FileSystemInterface):
         # Create directory and parents if needed
         if parents:
             current = path
-            to_create = []
+            to_create: list[str] = []
             while True:
                 current_str = self._normalize_path(current)
                 if current_str == "." or current_str in self.directories:
@@ -287,7 +287,7 @@ class InMemoryFilesystem(FileSystemInterface):
         else:
             self.directories.add(path_str)
 
-    def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
+    def write_text(self, path: Path, content: str, encoding: str = "utf-8") -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -320,7 +320,7 @@ class InMemoryFilesystem(FileSystemInterface):
 
         return self.files[path_str]
 
-    def chmod(self, path: Path, mode: int):
+    def chmod(self, path: Path, mode: int) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -331,7 +331,7 @@ class InMemoryFilesystem(FileSystemInterface):
 
         self.permissions[path_str] = mode
 
-    def remove(self, path: Path):
+    def remove(self, path: Path) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -347,7 +347,7 @@ class InMemoryFilesystem(FileSystemInterface):
         if path_str in self.permissions:
             del self.permissions[path_str]
 
-    def remove_tree(self, path: Path):
+    def remove_tree(self, path: Path) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
