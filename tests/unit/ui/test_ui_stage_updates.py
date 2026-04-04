@@ -4,7 +4,7 @@ import pytest
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config
-from app_operator.ui import OperatorUI
+from app_operator.ui_protocol import OperatorUI
 from libs.model_config import ModelConfig
 
 
