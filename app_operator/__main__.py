@@ -6,7 +6,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-import app_operator.langgraph.viz_graph as viz_graph
 from app_operator.commands import (
     analyze_prompts,
     e2e_optimize,
@@ -91,10 +90,6 @@ Examples:
     init_exp_parser = subparsers.add_parser("init-exp", help="Initialize a new experiment from an existing application")
     init_exp.add_arguments(init_exp_parser)
 
-    # 'viz-graph' command
-    viz_graph_parser = subparsers.add_parser("viz-graph", help="Visualize the agent's dependency graph")
-    viz_graph.add_arguments(viz_graph_parser)
-
     # 'analyze-prompts' command
     analyze_prompts_parser = subparsers.add_parser(
         "analyze-prompts", help="Analyze prompt performance from trajectory data"
@@ -130,8 +125,6 @@ Examples:
         return run.run_command(args)
     if args.command == "init-exp":
         return init_exp.run_command(args)
-    if args.command == "viz-graph":
-        return viz_graph.run_command(args)
     if args.command == "analyze-prompts":
         return analyze_prompts.run_command(args)
     if args.command == "optimize-prompts":

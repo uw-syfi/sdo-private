@@ -72,13 +72,6 @@ depends_on = [
 ]
 
 [[modules]]
-path = "app_operator.langgraph"
-depends_on = [
-    "app_operator.prompts",
-    "app_operator.trajectory",
-]
-
-[[modules]]
 path = "app_operator.gepa"
 depends_on = [
     "app_operator.cli_agent",
@@ -106,7 +99,6 @@ depends_on = [
 path = "app_operator.__main__"
 depends_on = [
     "app_operator.commands",
-    "app_operator.langgraph",
 ]
 
 # --- app_operator_dspy (independent of app_operator) ---

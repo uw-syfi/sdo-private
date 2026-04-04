@@ -1,8 +1,4 @@
-"""Shared artifact guardrails.
-
-Promoted from ``app_operator.langgraph.guardrails`` so that multiple runtimes
-can reuse them without pulling in LangChain.
-"""
+"""Shared artifact guardrails."""
 
 from dataclasses import dataclass
 from pathlib import Path

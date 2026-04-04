@@ -315,8 +315,8 @@ class TestPhaseControlEdgeCases:
         assert isinstance(analysis_summary, str)
         assert isinstance(issues_summary, str)
 
-    def test_langgraph_conditional_edge_routing(self, temp_repo):
-        """Test that LangGraph conditional edges route correctly."""
+    def test_conditional_edge_routing(self, temp_repo):
+        """Test that conditional edges route correctly based on phase config."""
         config = Config.from_dict(
             {
                 "agent": {"backend": "gemini", "model": "gemini-1.5-pro"},

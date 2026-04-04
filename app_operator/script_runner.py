@@ -1,8 +1,4 @@
-"""Shared script execution utilities.
-
-Promoted from ``app_operator.langgraph.utils`` so that multiple runtimes
-(langgraph, pydantic_ai, …) can reuse them without pulling in LangChain.
-"""
+"""Shared script execution utilities."""
 
 import subprocess
 import time

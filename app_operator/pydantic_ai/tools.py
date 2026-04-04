@@ -1,7 +1,6 @@
 """Tool functions for pydantic_ai operator.
 
 Plain functions with ``RunContext[OperatorDeps]`` as first parameter.
-Same logic as ``langgraph/tools.py`` but idiomatic Pydantic AI.
 """
 
 import re

@@ -12,8 +12,7 @@ def create_operator(shared_kwargs: dict, config: Config) -> OperatorBase:
     Runtime modules are loaded via ``importlib`` so that this module does not
     introduce any static import-graph edges to the concrete runtime packages.
     This keeps the ``app_operator.commands`` import graph free of references
-    to ``app_operator.cli_agent`` and ``app_operator.langgraph``,
-    satisfying the arch contract.
+    to ``app_operator.cli_agent``, satisfying the arch contract.
 
     Args:
         shared_kwargs: Keyword arguments passed to the operator constructor
@@ -25,10 +24,6 @@ def create_operator(shared_kwargs: dict, config: Config) -> OperatorBase:
         OperatorBase: An operator instance for the configured runtime.
     """
     impl = config.runtime.impl
-
-    if impl == "langgraph":
-        lg_mod = importlib.import_module("app_operator.langgraph")
-        return lg_mod.LangGraphOperator(**shared_kwargs)
 
     if impl == "pydantic_ai":
         pai_mod = importlib.import_module("app_operator.pydantic_ai")
