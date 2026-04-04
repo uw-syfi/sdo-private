@@ -5,7 +5,6 @@ exploring the input space of configuration validation logic.
 """
 
 import pytest
-
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 

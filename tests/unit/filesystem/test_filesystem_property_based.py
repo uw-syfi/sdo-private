@@ -9,8 +9,6 @@ Note: These tests require hypothesis to be installed. Install with:
 
 from pathlib import Path
 
-import pytest
-
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 

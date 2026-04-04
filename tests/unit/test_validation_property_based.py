@@ -5,7 +5,6 @@ edge cases that manual tests may miss.
 """
 
 import pytest
-
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 

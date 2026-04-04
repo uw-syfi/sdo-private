@@ -6,9 +6,7 @@ ensuring correctness for all combinations of present/absent optional fields.
 
 import json
 
-import pytest
-
-from hypothesis import assume, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from app_operator.trajectory import TrajectoryMessage

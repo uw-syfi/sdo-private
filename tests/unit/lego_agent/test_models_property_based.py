@@ -7,7 +7,6 @@ verifying robustness against arbitrary string inputs.
 import json
 
 import pytest
-
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 

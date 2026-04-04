@@ -5,12 +5,11 @@ clear error messages, preventing runtime errors from bad configurations.
 """
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app_operator.config import AgentConfig, Config, OperatorConfig
 from libs.model_config import ModelConfig
-
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 
 class TestOperatorConfigValidation:

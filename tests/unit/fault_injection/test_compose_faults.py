@@ -3,15 +3,14 @@
 import random
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app_operator.fault_injection.compose_faults import (
     COMPOSE_FAULTS,
     ComposeFaultInjector,
 )
 from app_operator.fault_injection.models import FaultCategory, FaultResult, FaultSeverity
-
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 
 @pytest.fixture

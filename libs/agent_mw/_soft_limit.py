@@ -11,11 +11,12 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
-from pydantic_ai.tools import ToolDefinition
 
 from libs.pydantic_agent._middleware import AgentMiddleware
 
 if TYPE_CHECKING:
+    from pydantic_ai.tools import ToolDefinition
+
     from libs.pydantic_agent._base import BaseAgent
 
 logger = logging.getLogger(__name__)

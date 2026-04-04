@@ -4,7 +4,6 @@ These tests encode invariants of the static utility methods on ComposeManipulato
 which are pure functions with clear input/output contracts.
 """
 
-import pytest
 
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st

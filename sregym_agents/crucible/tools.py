@@ -314,7 +314,6 @@ async def _submit_to_benchmark(
 
     from mcp import ClientSession
     from mcp.client.sse import sse_client
-
     from mcp.types import CallToolResult, TextContent
 
     result: CallToolResult | None = None

@@ -31,7 +31,7 @@ def _fmt_k(n: int | None) -> str:
 def _tool_failed(content: Any) -> bool:
     if not isinstance(content, dict):
         return False
-    d = cast(dict[str, Any], content)
+    d = cast("dict[str, Any]", content)
     return not d.get("success", True)
 
 

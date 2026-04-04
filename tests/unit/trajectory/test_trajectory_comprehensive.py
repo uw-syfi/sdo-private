@@ -15,14 +15,13 @@ import time
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app_operator.trajectory import (
     Phase,
     TrajectoryRecorder,
 )
-
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 
 @pytest.fixture

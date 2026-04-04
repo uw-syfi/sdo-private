@@ -24,7 +24,7 @@ from app_operator.prompts import (
     render_script_analyst_prompt,
     render_trajectory_analyst_prompt,
 )
-from libs.agent_cli import litellm_call_with_retry, call_subagent
+from libs.agent_cli import call_subagent, litellm_call_with_retry
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
 from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol

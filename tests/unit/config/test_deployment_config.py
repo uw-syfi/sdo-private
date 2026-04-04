@@ -1,9 +1,8 @@
 import pytest
-
-from app_operator.config import Config, DeploymentConfig
-
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
+
+from app_operator.config import Config, DeploymentConfig
 
 
 class TestDeploymentConfigValidation:

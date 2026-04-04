@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from deepagents.middleware.subagents import SubAgent
+    from langchain_core.runnables import RunnableConfig
+
 from deepagents import create_deep_agent
-from deepagents.middleware.subagents import SubAgent
 from langchain.chat_models import init_chat_model
-from langchain_core.runnables import RunnableConfig
 
 from sregym_agents.crucible_deepagents._prompts import _render
 from sregym_agents.crucible_deepagents.tools import (

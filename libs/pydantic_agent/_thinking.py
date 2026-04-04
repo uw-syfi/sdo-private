@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import cast
-
-from pydantic_ai.settings import ModelSettings
+from typing import TYPE_CHECKING, cast
 
 from libs.model_config import from_string
+
+if TYPE_CHECKING:
+    from pydantic_ai.settings import ModelSettings
 
 
 def thinking_settings(model_str: str, budget_tokens: int) -> ModelSettings:
@@ -20,4 +21,4 @@ def thinking_settings(model_str: str, budget_tokens: int) -> ModelSettings:
                    or bare "gemini-2.5-pro" or "google-vertex:gemini-2.5-pro")
         budget_tokens: thinking token budget
     """
-    return cast(ModelSettings, from_string(model_str, thinking_budget=budget_tokens).to_pydantic_ai_settings())
+    return cast("ModelSettings", from_string(model_str, thinking_budget=budget_tokens).to_pydantic_ai_settings())
