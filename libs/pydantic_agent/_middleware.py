@@ -6,15 +6,17 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pydantic_ai.messages import (
-        BuiltinToolCallEvent,
-        BuiltinToolResultEvent,
+        BuiltinToolCallEvent,  # pyright: ignore[reportDeprecated]
+        BuiltinToolResultEvent,  # pyright: ignore[reportDeprecated]
         FinalResultEvent,
         FunctionToolCallEvent,
         FunctionToolResultEvent,
+        ModelMessage,
         PartDeltaEvent,
         PartEndEvent,
         PartStartEvent,
     )
+    from pydantic_ai.tools import ToolDefinition
 
     from libs.pydantic_agent._base import BaseAgent
 
@@ -48,9 +50,9 @@ class AgentMiddleware:
     """
 
     #: Set by ``on_attach`` to the owning ``BaseAgent`` instance.
-    _agent: BaseAgent
+    _agent: BaseAgent[Any]
 
-    def on_attach(self, agent: BaseAgent) -> None:
+    def on_attach(self, agent: BaseAgent[Any]) -> None:
         """Called once when this middleware is attached to an agent.
         Stores the agent as ``self._agent``. Override to perform additional setup.
         """
@@ -70,8 +72,8 @@ class AgentMiddleware:
         individual typed hooks below instead.
         """
         from pydantic_ai.messages import (
-            BuiltinToolCallEvent,
-            BuiltinToolResultEvent,
+            BuiltinToolCallEvent,  # pyright: ignore[reportDeprecated]
+            BuiltinToolResultEvent,  # pyright: ignore[reportDeprecated]
             FinalResultEvent,
             FunctionToolCallEvent,
             FunctionToolResultEvent,
@@ -92,9 +94,9 @@ class AgentMiddleware:
             self.on_function_tool_call(event)
         elif isinstance(event, FunctionToolResultEvent):
             self.on_function_tool_result(event)
-        elif isinstance(event, BuiltinToolCallEvent):
+        elif isinstance(event, BuiltinToolCallEvent):  # pyright: ignore[reportDeprecated]
             self.on_builtin_tool_call(event)
-        elif isinstance(event, BuiltinToolResultEvent):
+        elif isinstance(event, BuiltinToolResultEvent):  # pyright: ignore[reportDeprecated]
             self.on_builtin_tool_result(event)
 
     def on_part_start(self, event: PartStartEvent) -> None:
@@ -115,21 +117,23 @@ class AgentMiddleware:
     def on_function_tool_result(self, event: FunctionToolResultEvent) -> None:
         """A function tool returned a result."""
 
-    def on_builtin_tool_call(self, event: BuiltinToolCallEvent) -> None:
+    def on_builtin_tool_call(self, event: BuiltinToolCallEvent) -> None:  # pyright: ignore[reportDeprecated]
         """A builtin tool is about to be invoked."""
 
-    def on_builtin_tool_result(self, event: BuiltinToolResultEvent) -> None:
+    def on_builtin_tool_result(self, event: BuiltinToolResultEvent) -> None:  # pyright: ignore[reportDeprecated]
         """A builtin tool returned a result."""
 
     # ------------------------------------------------------------------
     # Pre-request hooks (wired via _build_agent)
     # ------------------------------------------------------------------
 
-    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+    def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         """Called before each model request. Override to transform message history."""
         return messages
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list) -> list | None:
+    async def before_model_req_edit_tools(
+        self, ctx: Any, tool_defs: list[ToolDefinition]
+    ) -> list[ToolDefinition] | None:
         """Called before each model request. Override to filter/replace available tools."""
         return tool_defs
 

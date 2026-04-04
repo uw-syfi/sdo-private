@@ -8,6 +8,8 @@ import time
 
 import requests
 
+from typing import Any
+
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_STATUSES = {429} | set(range(500, 600))
@@ -22,7 +24,7 @@ def request_with_retry(
     backoff_factor: float = 2.0,
     max_delay: float = 60.0,
     jitter: bool = True,
-    **requests_kwargs,
+    **requests_kwargs: Any,
 ) -> requests.Response:
     """Issue an HTTP request with retry on transient errors.
 

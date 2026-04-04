@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Alias → canonical provider mapping
@@ -84,7 +85,7 @@ class ModelConfig:
         if not self.model or not self.model.strip():
             raise ValueError("model must be a non-empty string")
         if self.thinking_budget is not None and (
-            not isinstance(self.thinking_budget, int) or self.thinking_budget <= 0
+            not isinstance(self.thinking_budget, int) or self.thinking_budget <= 0  # pyright: ignore[reportUnnecessaryIsInstance]
         ):
             raise ValueError(f"thinking_budget must be a positive int, got {self.thinking_budget!r}")
 
@@ -198,7 +199,7 @@ class ModelConfig:
         prefix = prefix_map[self.provider]
         return f"{prefix}/{self.model}"
 
-    def to_pydantic_ai_settings(self, budget_tokens: int | None = None) -> dict:
+    def to_pydantic_ai_settings(self, budget_tokens: int | None = None) -> dict[str, Any]:
         """Return pydantic-ai model_settings dict enabling extended thinking.
 
         Args:

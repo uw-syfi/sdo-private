@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import signal
@@ -5,6 +6,7 @@ import subprocess
 import sys
 import threading
 from abc import abstractmethod
+from typing import Any
 
 from loguru import logger
 
@@ -12,7 +14,7 @@ from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorder
 
 from .base import CodingAgent
 from .events import AgentEventHandler
-from .utils import _get_interactive_env
+from .utils import get_interactive_env
 
 
 class CLIGenerationSession:
@@ -21,10 +23,10 @@ class CLIGenerationSession:
     def __init__(
         self,
         binary_name: str,
-        env: dict,
+        env: dict[str, str],
         log_prefix: str,
         cmd: list[str],
-        logger,
+        logger: Any,
         cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
@@ -43,8 +45,8 @@ class CLIGenerationSession:
         self.event_handler = event_handler
 
         # State initialization
-        self.stdout_lines = []
-        self.stderr_lines = []
+        self.stdout_lines: list[str] = []
+        self.stderr_lines: list[str] = []
         self._at_line_start = True
 
     def _log_raw(self, message: str) -> None:
@@ -100,14 +102,14 @@ class CLIGenerationSession:
             self._log_raw("=" * 80 + "\n")
             sys.stdout.flush()
 
-        def read_stdout(pipe):
+        def read_stdout(pipe: io.TextIOWrapper) -> None:
             for line in iter(pipe.readline, ""):
                 if not line:
                     break
                 self._process_stdout(line)
             pipe.close()
 
-        def read_stderr(pipe):
+        def read_stderr(pipe: io.TextIOWrapper) -> None:
             for line in iter(pipe.readline, ""):
                 if not line:
                     break
@@ -194,10 +196,10 @@ class CLICodingAgent(CodingAgent):
         Raises:
             RuntimeError: If binary is not found in PATH or is not working.
         """
-        self.env = _get_interactive_env()
+        self.env = get_interactive_env()
         self.binary_name = binary_name
         self.model = model
-        self.recorder = recorder or NullTrajectoryRecorder()
+        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
 
         # Search for binary in the captured environment's PATH

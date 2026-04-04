@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 import libs.agent_cli.trajectory as _trajectory_module
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
@@ -15,12 +16,12 @@ _logger = logging.getLogger(__name__)
 
 
 class GeminiGenerationSession(CLIGenerationSession):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         # Initialize state required for stream processing
-        self.tool_map = {}
-        self.tool_start_times = {}
-        self.tool_args = {}
+        self.tool_map: dict[str, str] = {}
+        self.tool_start_times: dict[str, float] = {}
+        self.tool_args: dict[str, Any] = {}
         # Capture call_id and run_id for correlation
         self.call_id = _trajectory_module.get_current_call_id()
         self.run_id = _trajectory_module.get_run_id()
@@ -172,7 +173,7 @@ class GeminiCodingAgent(CLICodingAgent):
         gemini_dir.mkdir(parents=True, exist_ok=True)
         settings_path = gemini_dir / "settings.json"
 
-        settings: dict = {}
+        settings: dict[str, Any] = {}
         if settings_path.exists():
             try:
                 with open(settings_path) as f:

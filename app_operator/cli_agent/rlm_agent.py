@@ -20,7 +20,7 @@ from app_operator.prompts import DSPyConfigProtocol
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
 from libs.agent_cli.llm_client import LiteLLMClient
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 
@@ -60,7 +60,7 @@ class RLMCodingAgent(CodingAgent):
             dspy_config: Optional DSPy configuration for optimised prompts.
         """
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder: TrajectoryRecorderProtocol | None = recorder
+        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, cast
 
 from .utils import truncate_content, truncate_params
 
@@ -23,7 +23,7 @@ class ClaudeEvent(ABC):
         if event_type == "assistant":
             message = data.get("message", {})
             content_blocks = message.get("content", [])
-            events = []
+            events: list[ClaudeEvent] = []
             for block in content_blocks:
                 block_type = block.get("type")
                 if block_type == "text":
@@ -106,7 +106,7 @@ class ToolResultEvent(ClaudeEvent):
         # Convert output to string if it's not already
         if isinstance(output, list):
             # Handle list content (e.g., from tool_result blocks with multiple items)
-            self.output = "\n".join(str(item) for item in output)
+            self.output = "\n".join(str(item) for item in cast("list[Any]", output))
         else:
             self.output = str(output) if output else ""
         self.tool_id = tool_id

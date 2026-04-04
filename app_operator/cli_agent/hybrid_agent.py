@@ -32,7 +32,7 @@ from app_operator.prompts import (
 from libs.agent_cli import call_subagent
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.events import AgentEventHandler
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 
 @register_provider("hybrid")
@@ -60,7 +60,7 @@ class HybridCodingAgent(CodingAgent):
         dspy_config: DSPyConfigProtocol | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder: TrajectoryRecorderProtocol | None = recorder
+        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
