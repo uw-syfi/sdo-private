@@ -13,14 +13,11 @@ digraph tach_modules {
     "app_operator.cli_agent" -> "app_operator.prompts";
     "app_operator.cli_agent" -> "app_operator.trajectory";
     "app_operator.cli_agent" -> "libs.agent_cli";
-    "app_operator.langgraph" -> "app_operator.prompts";
-    "app_operator.langgraph" -> "app_operator.trajectory";
     "app_operator.gepa" -> "app_operator.cli_agent";
     "app_operator.gepa" -> "app_operator.prompts";
     "app_operator.gepa" -> "app_operator.trajectory";
     "app_operator.commands" -> "app_operator.dspy_integration";
     "app_operator.__main__" -> "app_operator.commands";
-    "app_operator.__main__" -> "app_operator.langgraph";
     "lego_agent" -> "libs.model_config";
     "lego_agent" -> "libs.sds_core";
     "sregym_agents" -> "libs.pydantic_agent";

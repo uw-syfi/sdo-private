@@ -21,7 +21,7 @@ sds_operator run <app>
   └── Trajectory recorder → .sds/trajectories/*.json
 ```
 
-All agents share a single LLM provider (gemini, claude, codex…) configured in `sds.toml` and accessed via `libs/agent_cli/`. Provider choice and runtime choice are independent — switching from Claude to Gemini or from `cli_agent` to `langgraph` requires only editing `sds.toml`.
+All agents share a single LLM provider (gemini, claude, codex…) configured in `sds.toml` and accessed via `libs/agent_cli/`. Provider choice and runtime choice are independent — switching from Claude to Gemini or from `cli_agent` to `pydantic_ai` requires only editing `sds.toml`.
 
 **Trajectories** are structured JSON recordings of every agent call — the raw material for offline prompt optimization with DSPy.
 
@@ -56,7 +56,7 @@ provider = "gemini"   # gemini | claude | codex | openai | rlm
 model = "gemini-1.5-pro"
 
 [runtime]
-impl = "cli_agent"    # cli_agent (default) | langgraph
+impl = "cli_agent"    # cli_agent (default) | pydantic_ai
 ```
 
 Full schema in `app_operator/config.py`. Provider credentials, runtime tradeoffs, and all other fields are in `docs/architecture.md`.

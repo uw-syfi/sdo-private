@@ -258,7 +258,7 @@ class TestConfigIntegration:
         """Test runtime_model stays None when agent.model not set."""
         config = Config.from_dict(
             {
-                "runtime": {"impl": "langgraph"},
+                "runtime": {"impl": "pydantic_ai"},
                 "dspy": {
                     "use_optimized": True,
                 },

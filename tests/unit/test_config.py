@@ -63,7 +63,7 @@ def test_load_config_defaults(tmp_path, monkeypatch):
     monkeypatch.setattr(_config_module, "__file__", str(fake_config_py))
 
     config_file = tmp_path / "sds.toml"
-    config_file.write_text('[runtime]\nimpl = "langgraph"\n')
+    config_file.write_text('[runtime]\nimpl = "pydantic_ai"\n')
     config = load_config(str(tmp_path))
     assert config.agent.backend == "codex"
     assert config.agent.model is None
@@ -307,7 +307,7 @@ class TestCliAgentRequiresModel:
 
     def test_non_cli_agent_without_model_ok(self):
         data = {
-            "runtime": {"impl": "langgraph"},
+            "runtime": {"impl": "pydantic_ai"},
             "agent": {"backend": "gemini"},
         }
         config = Config.from_dict(data)

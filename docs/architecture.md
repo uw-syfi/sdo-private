@@ -10,7 +10,6 @@ This document explains how the components of SDS fit together, covering provider
 libs/agent_cli/          provider abstraction (CodingAgent ABC, AGENT_REGISTRY)
      ├── app_operator/   sds_operator — deploy, monitor, optimize
      │     ├── cli_agent/    runtime: cli_agent (default)
-     │     ├── langgraph/    runtime: langgraph
      │     ├── trajectory.py recording
      │     ├── dspy_integration/ offline optimization
      │     └── prompts/      Jinja2 + DSPy-optimized templates
@@ -37,7 +36,6 @@ Both `sds_operator` and `lego_agent` share `libs/agent_cli/` for provider access
 Layer 5  __main__          entry points only
 Layer 4  commands/         CLI command orchestration
 Layer 3  cli_agent/        runtime implementations
-         langgraph/
 Layer 2  dspy_integration/ prompt optimisation tools
          fault_injection/
          gepa/
@@ -112,15 +110,6 @@ The runtime controls how each agent call is orchestrated. It is orthogonal to th
 ### `cli_agent` (default)
 
 Communicates with external coding agents via their CLI interfaces. Broadest provider support: `codex`, `gemini`, `claude`, `claude-code`, `opencode`, `rlm`. No extra dependencies.
-
-### `langgraph`
-
-Orchestrates the deployment and monitoring lifecycle as a stateful graph of LLM-powered nodes using LangChain. Requires `agent.model` to be set. Provider mapping:
-- `codex` / `opencode` / `openai` → OpenAI
-- `claude` / `claude-code` / `anthropic` → Anthropic
-- `gemini` → Gemini via LangChain
-
-Best for complex orchestration where you want explicit state management between steps.
 
 ---
 
