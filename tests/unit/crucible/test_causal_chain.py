@@ -19,7 +19,7 @@ from sregym_agents.crucible.orchestrator import (
     _run_recovery_diagnosis,
     _run_recovery_mitigation,
 )
-from sregym_agents.crucible.tools import SharedState, SRESubmission
+from sregym_agents.crucible.tools import SharedFile, SharedState, SRESubmission
 
 # ---------------------------------------------------------------------------
 # SRESubmission.causal_chain field
@@ -287,7 +287,7 @@ class TestRunRecoveryDiagnosis:
         result = await _run_recovery_diagnosis(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
         )
@@ -320,7 +320,7 @@ class TestRunRecoveryDiagnosis:
         result = await _run_recovery_diagnosis(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
         )
@@ -359,7 +359,7 @@ class TestRunRecoveryDiagnosis:
         result = await _run_recovery_diagnosis(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
             original_justification="nginx logs showed connection refused",
@@ -398,7 +398,7 @@ class TestRunRecoveryDiagnosis:
         result = await _run_recovery_diagnosis(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
         )
@@ -435,7 +435,7 @@ class TestRunRecoveryDiagnosis:
         await _run_recovery_diagnosis(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
             original_justification="nginx logs showed errors",
@@ -468,7 +468,7 @@ class TestRunRecoveryDiagnosis:
         result = await _run_recovery_diagnosis(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
         )
@@ -528,7 +528,7 @@ class TestRunRecoveryMitigation:
         result = await _run_recovery_mitigation(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
         )
@@ -559,7 +559,7 @@ class TestRunRecoveryMitigation:
         result = await _run_recovery_mitigation(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
             diagnosis_answer="ConfigMap X has wrong value",
@@ -598,7 +598,7 @@ class TestRunRecoveryMitigation:
         result = await _run_recovery_mitigation(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
         )
@@ -635,7 +635,7 @@ class TestRunRecoveryMitigation:
         await _run_recovery_mitigation(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
             original_justification="applied kubectl patch",
@@ -666,7 +666,7 @@ class TestRunRecoveryMitigation:
         result = await _run_recovery_mitigation(
             model="test-model",
             app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=shared,
+            shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
         )

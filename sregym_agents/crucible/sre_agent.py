@@ -195,8 +195,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                     f"**Justification**: {output.justification}\n"
                 )
             try:
-                with self.deps.shared_file.open("a") as fh:
-                    fh.write(entry)
+                self.deps.shared_file.append(entry)
             except Exception as e:
                 logger.warning(f"Error writing to shared file: {e}")
 

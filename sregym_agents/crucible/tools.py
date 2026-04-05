@@ -1385,8 +1385,7 @@ def submit_independent_findings(
     iteration = ctx.deps.iteration
     entry = f"\n### Iteration {iteration} — Judge Independent Findings\n{findings}\n"
     try:
-        with ctx.deps.shared_file.open("a") as fh:
-            fh.write(entry)
+        ctx.deps.shared_file.append(entry)
     except Exception as e:
         return f"Error writing to shared file: {e}"
 
