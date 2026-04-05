@@ -371,7 +371,7 @@ class TestTimeoutMiddleware:
         """before_run() resets start_time so reused instances measure from run start."""
         # Simulate a first run that exhausted reminders and set force_submit.
         times = [0.0] + [3700.0] * 10
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=times):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=times):
             mw = TimeoutMiddleware(timeout_seconds=3600, max_timeout_reminders=1)
             mw.before_model_req_edit_messages(_make_ctx(), [])  # reminder 1
             mw.before_model_req_edit_messages(_make_ctx(), [])  # force_submit = True
@@ -379,11 +379,11 @@ class TestTimeoutMiddleware:
         assert mw._reminders == 1
 
         # before_run() should reset everything for the next run.
-        with patch("sregym_agents.crucible.middleware.time.monotonic", return_value=9999.0):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", return_value=9999.0):
             mw.before_run()
         assert mw._force_submit is False
         assert mw._reminders == 0
         # A subsequent request well within timeout should add no nudge.
-        with patch("sregym_agents.crucible.middleware.time.monotonic", return_value=10001.0):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", return_value=10001.0):
             messages = mw.before_model_req_edit_messages(_make_ctx(), [])
         assert messages == []

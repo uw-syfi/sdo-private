@@ -5,9 +5,13 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from libs.pydantic_agent import AgentMiddleware
+
+if TYPE_CHECKING:
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.tools import ToolDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,7 @@ class LoopDetectionMiddleware(AgentMiddleware):
                 "if you have gathered enough information."
             )
 
-    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+    def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         if self._pending_nudge:
             messages = list(messages)
             messages.append(_make_nudge_message(self._pending_nudge))
@@ -125,14 +129,14 @@ class ThinkingRepetitionMiddleware(AgentMiddleware):
                     "Thinking repetition: max nudges exhausted — will strip tools to force submission.",
                 )
 
-    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+    def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         if self._pending_nudge:
             messages = list(messages)
             messages.append(_make_nudge_message(self._pending_nudge))
             self._pending_nudge = None
         return messages
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list) -> list | None:
+    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list[ToolDefinition]) -> list[ToolDefinition] | None:
         if self._force_submit:
             logger.warning("Thinking repetition: stripping all tools to force submission.")
             return []
@@ -182,7 +186,7 @@ class StallDetectionMiddleware(AgentMiddleware):
     def on_function_tool_call(self, event: Any) -> None:
         self._current_request_has_tool = True
 
-    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+    def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         # Skip the very first model request (nothing to evaluate yet).
         if ctx.run_step <= 1:
             return messages
@@ -226,7 +230,7 @@ class StallDetectionMiddleware(AgentMiddleware):
             self._pending_nudge = None
         return messages
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list) -> list | None:
+    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list[ToolDefinition]) -> list[ToolDefinition] | None:
         if self._force_submit:
             logger.warning("Stall: stripping all tools to force submission.")
             return []
@@ -264,7 +268,7 @@ class TimeoutMiddleware(AgentMiddleware):
         self._reminders = 0
         self._force_submit = False
 
-    def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
+    def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         elapsed = time.monotonic() - self._start_time
         if elapsed <= self._timeout_seconds:
             return messages
@@ -292,7 +296,7 @@ class TimeoutMiddleware(AgentMiddleware):
 
         return messages
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list) -> list | None:
+    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list[ToolDefinition]) -> list[ToolDefinition] | None:
         if self._force_submit:
             logger.warning("Timeout: stripping all tools to force submission.")
             return []
