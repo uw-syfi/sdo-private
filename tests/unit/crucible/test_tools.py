@@ -217,7 +217,7 @@ class TestRunBashSync:
         mock_proc = _mock_popen(returncode=0, stdout="x" * 5000, stderr="")
         with (
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("sregym_agents.crucible.tools.Path") as mock_path_cls,
+            patch("sregym_agents.crucible.tools._bash_tools.Path") as mock_path_cls,
         ):
             mock_path_cls.return_value.write_text = MagicMock()
             output = _run_bash_sync("bigcmd")
@@ -253,7 +253,7 @@ class TestRunBashSyncIntegration:
         marker = f"_run_bash_sync_test_{os.getpid()}"
         cmd = f"bash -c 'sleep 300 & echo {marker}_$$; wait'"
 
-        with patch("sregym_agents.crucible.tools.BASH_TIMEOUT", 2):
+        with patch("sregym_agents.crucible.tools._bash_tools.BASH_TIMEOUT", 2):
             output = _run_bash_sync(cmd)
 
         assert "timed out" in output.lower()
@@ -606,14 +606,14 @@ class TestStrReplaceFile:
 class TestExecBashReadonly:
     def test_allowed_command_delegates(self, tmp_path: Path):
         ctx = _make_judge_ctx(tmp_path)
-        with patch("sregym_agents.crucible.tools._run_bash_sync", return_value="ok") as mock_run:
+        with patch("sregym_agents.crucible.tools._bash_tools._run_bash_sync", return_value="ok") as mock_run:
             result = exec_bash_readonly(ctx, "ls -la")
         mock_run.assert_called_once_with("ls -la")
         assert result == "ok"
 
     def test_mutating_kubectl_blocked(self, tmp_path: Path):
         ctx = _make_judge_ctx(tmp_path)
-        with patch("sregym_agents.crucible.tools._run_bash_sync") as mock_run:
+        with patch("sregym_agents.crucible.tools._bash_tools._run_bash_sync") as mock_run:
             result = exec_bash_readonly(ctx, "kubectl delete pod mypod")
         mock_run.assert_not_called()
         assert "Error" in result
@@ -661,7 +661,9 @@ class TestSubmitVerdict:
         ctx = _make_judge_ctx(tmp_path)
         ctx.deps.state.hypothesis_revealed = True
 
-        with patch("sregym_agents.crucible.tools._submit_to_benchmark", new_callable=AsyncMock) as mock_submit:
+        with patch(
+            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark", new_callable=AsyncMock
+        ) as mock_submit:
             asyncio.run(submit_verdict(ctx, False, "not good enough", "answer"))
 
         mock_submit.assert_not_called()
@@ -676,7 +678,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ):
@@ -693,7 +695,7 @@ class TestSubmitVerdict:
         ctx.deps.state.hypothesis_revealed = True
 
         with patch(
-            "sregym_agents.crucible.tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
             new_callable=AsyncMock,
             side_effect=RuntimeError("connection refused"),
         ):
@@ -711,7 +713,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ):
@@ -727,7 +729,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ):
@@ -743,7 +745,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ) as mock_submit:
@@ -947,7 +949,7 @@ class TestJudgeToolSequence:
 
         async def _run():
             with patch(
-                "sregym_agents.crucible.tools._submit_to_benchmark",
+                "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
                 new_callable=AsyncMock,
                 return_value=(True, "Benchmark accepted", {"Diagnosis": {"success": True}}),
             ):

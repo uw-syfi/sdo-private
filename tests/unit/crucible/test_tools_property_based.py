@@ -145,7 +145,7 @@ class TestRunBashSyncProperties:
         popen_mock = self._make_popen_mock(stdout="x" * stdout_len)
         with (
             patch("subprocess.Popen", return_value=popen_mock),
-            patch("sregym_agents.crucible.tools.Path") as mock_path,
+            patch("sregym_agents.crucible.tools._bash_tools.Path") as mock_path,
         ):
             mock_path.return_value.write_text = MagicMock()
             output = _run_bash_sync(cmd)
@@ -314,7 +314,7 @@ class TestGrepProperties:
         f = d / "f.txt"
         f.write_text("some content\nanother line\n")
         ctx = _make_sre_ctx(d)
-        with patch("sregym_agents.crucible.tools._agent_cwd", return_value=d):
+        with patch("sregym_agents.crucible.tools._bash_tools._agent_cwd", return_value=d):
             result = grep(ctx, pattern, path=str(f))
         assert isinstance(result, str)
 
@@ -325,7 +325,7 @@ class TestGrepProperties:
         f = d / "f.txt"
         f.write_text(content)
         ctx = _make_sre_ctx(d)
-        with patch("sregym_agents.crucible.tools._agent_cwd", return_value=d):
+        with patch("sregym_agents.crucible.tools._bash_tools._agent_cwd", return_value=d):
             result = grep(ctx, "test", path=str(f))
         assert isinstance(result, str)
 
@@ -334,7 +334,7 @@ class TestGrepProperties:
         f.write_text("content")
         ctx = _make_sre_ctx(tmp_path)
         long_pattern = "a" * 1001
-        with patch("sregym_agents.crucible.tools._agent_cwd", return_value=tmp_path):
+        with patch("sregym_agents.crucible.tools._bash_tools._agent_cwd", return_value=tmp_path):
             result = grep(ctx, long_pattern, path=str(f))
         assert "Error" in result
         assert "too long" in result
@@ -346,7 +346,7 @@ class TestGrepProperties:
         f = d / "f.txt"
         f.write_text("test content\n")
         ctx = _make_sre_ctx(d)
-        with patch("sregym_agents.crucible.tools._agent_cwd", return_value=d):
+        with patch("sregym_agents.crucible.tools._bash_tools._agent_cwd", return_value=d):
             result = grep(ctx, pattern, path=str(f))
         assert isinstance(result, str)
         # If it's invalid regex, should contain "Error"; if valid, any string is fine

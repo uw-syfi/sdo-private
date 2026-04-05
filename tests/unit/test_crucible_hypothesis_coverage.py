@@ -167,7 +167,7 @@ class TestCheckHypothesisCoverageSubagent:
 
         with (
             patch("pydantic_ai.Agent") as mock_agent_cls,
-            patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+            patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
             patch.object(PromptRenderer, "render", return_value="rendered prompt") as mock_render,
         ):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="sidecar port conflict in geo pod"))
@@ -211,7 +211,7 @@ class TestCheckHypothesisCoverageSubagent:
 
         with (
             patch("pydantic_ai.Agent"),
-            patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+            patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
             patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         ):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="OOM kill in geo pod"))
@@ -229,7 +229,7 @@ class TestCheckHypothesisCoverageSubagent:
 
         with (
             patch("pydantic_ai.Agent"),
-            patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+            patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
             patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         ):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="some hypothesis"))

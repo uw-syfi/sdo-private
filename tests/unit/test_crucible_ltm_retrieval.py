@@ -146,7 +146,7 @@ def test_search_calls_subagent(tmp_path: Path) -> None:
         patch.object(PromptRenderer, "render", return_value="rendered prompt") as mock_render,
         patch("pydantic_ai.Agent", return_value=MagicMock()) as mock_agent_cls,
         patch(
-            "sregym_agents.crucible.tools.arun_with_retry",
+            "sregym_agents.crucible.tools._kb_tools.arun_with_retry",
             new_callable=AsyncMock,
             return_value=mock_run_result,
         ),
@@ -227,7 +227,7 @@ def test_search_increments_counter(tmp_path: Path) -> None:
     with (
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", return_value=MagicMock()),
-        patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
+        patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
     ):
         # First call — should succeed
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="call 1"))
@@ -597,7 +597,7 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
     with (
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
-        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+        patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", side_effect=_fake_arun),
     ):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
@@ -650,7 +650,7 @@ def test_search_no_candidates_skips_verification(tmp_path: Path) -> None:
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch(
-            "sregym_agents.crucible.tools.arun_with_retry",
+            "sregym_agents.crucible.tools._kb_tools.arun_with_retry",
             new_callable=AsyncMock,
             return_value=retrieval_run_result,
         ),
@@ -728,7 +728,7 @@ def test_search_verification_failure_graceful(tmp_path: Path) -> None:
     with (
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
-        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+        patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", side_effect=_fake_arun),
     ):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
@@ -798,7 +798,7 @@ def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
     with (
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
-        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+        patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", side_effect=_fake_arun),
     ):
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
@@ -877,7 +877,7 @@ def test_verification_writes_trajectory(tmp_path: Path) -> None:
     with (
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
-        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+        patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", side_effect=_fake_arun),
     ):
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
@@ -1043,7 +1043,7 @@ def test_search_mitigations_shared_budget(tmp_path: Path) -> None:
     with (
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
-        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
+        patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", side_effect=_fake_arun),
     ):
         # First call (diagnosis) — count goes to 1
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
@@ -1105,7 +1105,7 @@ def test_search_mitigations_calls_subagent(tmp_path: Path) -> None:
 
     with (
         patch("pydantic_ai.Agent", side_effect=_make_agent),
-        patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=fake_arun_with_retry),
+        patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", side_effect=fake_arun_with_retry),
         patch.object(PromptRenderer, "render", return_value="rendered prompt"),
     ):
         result = asyncio.run(search_prior_mitigations(ctx, root_cause="memory limit too low"))
