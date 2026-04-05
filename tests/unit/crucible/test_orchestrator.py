@@ -11,7 +11,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from sregym_agents.crucible._prompts import _render
+from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.orchestrator import (
     _add_usage,
     _build_usage_result,
@@ -303,10 +303,12 @@ class TestHypothesisTextPassedToJudgeDeps:
             mock.arun = AsyncMock(side_effect=fake_run)
             return mock
 
+        mock_renderer = MagicMock(spec=PromptRenderer)
+        mock_renderer.render.return_value = "rendered"
+
         with (
             patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
             patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
-            patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
         ):
             import asyncio
 
@@ -320,6 +322,7 @@ class TestHypothesisTextPassedToJudgeDeps:
                     max_iters=3,
                     shared_file=shared,
                     submit_mcp_url="http://localhost:9954/submit/sse",
+                    renderer=mock_renderer,
                     flags=CrucibleFlags(prompt_version="v1", enable_judge=True),
                 )
             )
@@ -346,11 +349,14 @@ _BASE_KWARGS = {
 }
 
 
+_renderer = PromptRenderer("v1")
+
+
 class TestRenderLtSummaryContent:
     @staticmethod
     def _render_both(lt_summary_content: str) -> list[str]:
         kwargs = {**_BASE_KWARGS, "lt_summary_content": lt_summary_content}
-        return [_render(tmpl, **kwargs) for tmpl in ("diagnosis_agent_user", "mitigation_agent_user")]
+        return [_renderer.render(tmpl, **kwargs) for tmpl in ("diagnosis_agent_user", "mitigation_agent_user")]
 
     def test_empty_string_omits_summary_block(self):
         for rendered in self._render_both(""):

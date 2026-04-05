@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
 
 from libs.agent_mw import arun_with_retry
+from sregym_agents.crucible._prompts import PromptRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,7 @@ class SREDeps:
     shared_file: SharedFile
     iteration: int
     stage: str  # "diagnosis" | "mitigation"
+    renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     state: SharedState = field(default_factory=SharedState)
     lt_summary_file: Path | None = None
     incidents_dir: Path | None = None
@@ -150,6 +152,7 @@ class JudgeDeps:
     iteration: int
     stage: str
     submit_mcp_url: str
+    renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     hypothesis_text: str = ""
     state: SharedState = field(default_factory=SharedState)
 
@@ -812,6 +815,7 @@ async def _run_verification_phase(
     namespace: str,
     stage: str,
     model_id: str,
+    renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     triage_report: TriageReport | None = None,
 ) -> VerifiedDifferentialDiagnosis:
@@ -819,14 +823,13 @@ async def _run_verification_phase(
     from pydantic_ai import Agent
 
     from libs.pydantic_agent import thinking_settings
-    from sregym_agents.crucible._prompts import _render
 
     triage_context = ""
     if triage_report is not None:
         triage_context = format_triage_report(triage_report)
 
     async def _verify_one(idx: int, candidate: CandidateRootCause) -> CandidateVerification:
-        prompt = _render(
+        prompt = renderer.render(
             "ltm_verify_candidate",
             namespace=namespace,
             stage=stage,
@@ -945,13 +948,12 @@ async def triage_cluster(
     from pydantic_ai import Agent
 
     from libs.pydantic_agent import thinking_settings
-    from sregym_agents.crucible._prompts import _render
 
     model_id = ctx.deps.ltm_model_id
     if not model_id:
         return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
 
-    prompt = _render(
+    prompt = ctx.deps.renderer.render(
         "triage_cluster",
         namespace=ctx.deps.namespace,
         triage_guidance=ctx.deps.triage_guidance,
@@ -1024,7 +1026,6 @@ async def check_hypothesis_coverage(
     from pydantic_ai import Agent
 
     from libs.pydantic_agent import thinking_settings
-    from sregym_agents.crucible._prompts import _render
 
     triage_report = ctx.deps.triage_report
     if triage_report is None:
@@ -1035,7 +1036,7 @@ async def check_hypothesis_coverage(
         return "Error: check_hypothesis_coverage requires a model ID (ltm_model_id not set)."
 
     triage_context = format_triage_report(triage_report)
-    prompt = _render(
+    prompt = ctx.deps.renderer.render(
         "check_hypothesis_coverage",
         triage_context=triage_context,
         hypothesis=hypothesis,
@@ -1122,13 +1123,11 @@ async def search_prior_incidents(
 
     from pydantic_ai import Agent
 
-    from sregym_agents.crucible._prompts import _render
-
     triage_context = ""
     if ctx.deps.triage_report is not None:
         triage_context = format_triage_report(ctx.deps.triage_report)
 
-    prompt = _render(
+    prompt = ctx.deps.renderer.render(
         "search_prior_incidents",
         stage=ctx.deps.stage,
         observed_symptoms=observed_symptoms,
@@ -1168,6 +1167,7 @@ async def search_prior_incidents(
         namespace=ctx.deps.namespace,
         stage=ctx.deps.stage,
         model_id=ltm_model_id,
+        renderer=ctx.deps.renderer,
         trajectory_path=ctx.deps.trajectory_path,
         triage_report=ctx.deps.triage_report,
     )
@@ -1223,8 +1223,6 @@ async def search_prior_incidents_any(
 
     from pydantic_ai import Agent
 
-    from sregym_agents.crucible._prompts import _render
-
     stage = getattr(ctx.deps, "stage", "diagnosis")
     incidents_dir = getattr(ctx.deps, "incidents_dir", None)
     ltm_model_id: str | None = getattr(ctx.deps, "ltm_model_id", None)
@@ -1233,12 +1231,15 @@ async def search_prior_incidents_any(
     namespace: str = getattr(ctx.deps, "namespace", "default")
     trajectory_path: Path | None = getattr(ctx.deps, "trajectory_path", None)
     triage_rpt: TriageReport | None = getattr(ctx.deps, "triage_report", None)
+    renderer: PromptRenderer | None = getattr(ctx.deps, "renderer", None)
+    if renderer is None:
+        return "Error: search_prior_incidents_any requires a PromptRenderer in deps."
 
     triage_context = ""
     if triage_rpt is not None:
         triage_context = format_triage_report(triage_rpt)
 
-    prompt = _render(
+    prompt = renderer.render(
         "search_prior_incidents",
         stage=stage,
         observed_symptoms=observed_symptoms,
@@ -1278,6 +1279,7 @@ async def search_prior_incidents_any(
         namespace=namespace,
         stage=stage,
         model_id=ltm_model_id,
+        renderer=renderer,
         trajectory_path=trajectory_path,
         triage_report=triage_rpt,
     )
@@ -1327,9 +1329,7 @@ async def search_prior_mitigations(
 
     from pydantic_ai import Agent
 
-    from sregym_agents.crucible._prompts import _render
-
-    prompt = _render(
+    prompt = ctx.deps.renderer.render(
         "search_prior_mitigations",
         root_cause=root_cause,
         failed_attempts=failed_attempts,

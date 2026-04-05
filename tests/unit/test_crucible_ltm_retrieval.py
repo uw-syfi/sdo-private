@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 import pytest
 
+from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.orchestrator import CrucibleFlags
 from sregym_agents.crucible.tools import (
     CandidateRootCause,
@@ -142,10 +143,7 @@ def test_search_calls_subagent(tmp_path: Path) -> None:
     mock_run_result.output = mock_diagnosis
 
     with (
-        patch(
-            "sregym_agents.crucible._prompts._render",
-            return_value="rendered prompt",
-        ) as mock_render,
+        patch.object(PromptRenderer, "render", return_value="rendered prompt") as mock_render,
         patch("pydantic_ai.Agent", return_value=MagicMock()) as mock_agent_cls,
         patch(
             "sregym_agents.crucible.tools.arun_with_retry",
@@ -166,7 +164,7 @@ def test_search_calls_subagent(tmp_path: Path) -> None:
     assert "read_file" in tool_names
     assert "exec_bash_any" in tool_names
 
-    # _render was called with the expected template and kwargs
+    # render was called with the expected template and kwargs
     mock_render.assert_called_once()
     render_kwargs = mock_render.call_args[1]
     assert render_kwargs["observed_symptoms"] == "pods are OOMKilled"
@@ -227,7 +225,7 @@ def test_search_increments_counter(tmp_path: Path) -> None:
     mock_arun = AsyncMock(return_value=mock_run_result)
 
     with (
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", return_value=MagicMock()),
         patch("sregym_agents.crucible.tools.arun_with_retry", mock_arun),
     ):
@@ -286,6 +284,9 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
 
     constructor, captured_deps = _fake_sre_constructor_factory(shared_file)
 
+    mock_renderer = MagicMock(spec=PromptRenderer)
+    mock_renderer.render.return_value = "rendered"
+
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
@@ -294,9 +295,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
             new_callable=AsyncMock,
             return_value=(True, "ok", None),
         ),
-        patch("sregym_agents.crucible.orchestrator._render") as mock_render,
     ):
-        mock_render.return_value = "rendered"
         from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
 
         asyncio.run(
@@ -308,6 +307,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
                 shared_file=shared_file,  # type: ignore[arg-type]
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 lt_summary_file=lt_file,
+                renderer=mock_renderer,
                 flags=CrucibleFlags(prompt_version="v1", enable_judge=False, enable_ltm_retrieval=False),
             )
         )
@@ -317,7 +317,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
     assert captured_deps[0].incidents_dir is None
 
     # The user prompt render should include lt_summary_content
-    render_calls = [c for c in mock_render.call_args_list if "diagnosis_agent_user" in str(c)]
+    render_calls = [c for c in mock_renderer.render.call_args_list if "diagnosis_agent_user" in str(c)]
     assert len(render_calls) == 1
     kwargs = render_calls[0][1]
     assert kwargs["lt_summary_content"] == "Prior incident summary content"
@@ -332,6 +332,9 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
 
     constructor, captured_deps = _fake_sre_constructor_factory(shared_file)
 
+    mock_renderer = MagicMock(spec=PromptRenderer)
+    mock_renderer.render.return_value = "rendered"
+
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
@@ -340,9 +343,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
             new_callable=AsyncMock,
             return_value=(True, "ok", None),
         ),
-        patch("sregym_agents.crucible.orchestrator._render") as mock_render,
     ):
-        mock_render.return_value = "rendered"
         from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
 
         asyncio.run(
@@ -355,6 +356,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 lt_summary_file=lt_file,
                 incidents_dir=inc_dir,
+                renderer=mock_renderer,
                 flags=CrucibleFlags(prompt_version="v1", enable_judge=False, enable_ltm_retrieval=True),
             )
         )
@@ -365,7 +367,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
     assert captured_deps[0].ltm_model_id == "test-model"
 
     # The user prompt render should have empty lt_summary_content
-    render_calls = [c for c in mock_render.call_args_list if "diagnosis_agent_user" in str(c)]
+    render_calls = [c for c in mock_renderer.render.call_args_list if "diagnosis_agent_user" in str(c)]
     assert len(render_calls) == 1
     kwargs = render_calls[0][1]
     assert kwargs["lt_summary_content"] == ""
@@ -593,7 +595,7 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
         return retrieval_run_result  # fallback
 
     with (
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
     ):
@@ -645,7 +647,7 @@ def test_search_no_candidates_skips_verification(tmp_path: Path) -> None:
         return mock
 
     with (
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch(
             "sregym_agents.crucible.tools.arun_with_retry",
@@ -724,7 +726,7 @@ def test_search_verification_failure_graceful(tmp_path: Path) -> None:
         return retrieval_run_result
 
     with (
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
     ):
@@ -794,7 +796,7 @@ def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
         return retrieval_run_result
 
     with (
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
     ):
@@ -873,7 +875,7 @@ def test_verification_writes_trajectory(tmp_path: Path) -> None:
         return retrieval_run_result
 
     with (
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
     ):
@@ -1039,7 +1041,7 @@ def test_search_mitigations_shared_budget(tmp_path: Path) -> None:
         return mock_diag_result
 
     with (
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=_fake_arun),
     ):
@@ -1104,7 +1106,7 @@ def test_search_mitigations_calls_subagent(tmp_path: Path) -> None:
     with (
         patch("pydantic_ai.Agent", side_effect=_make_agent),
         patch("sregym_agents.crucible.tools.arun_with_retry", side_effect=fake_arun_with_retry),
-        patch("sregym_agents.crucible._prompts._render", return_value="rendered prompt"),
+        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
     ):
         result = asyncio.run(search_prior_mitigations(ctx, root_cause="memory limit too low"))
 

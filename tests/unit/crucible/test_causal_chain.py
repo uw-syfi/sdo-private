@@ -281,7 +281,7 @@ class TestExtractBenchmarkReasoning:
 
 @pytest.mark.asyncio
 class TestRunRecoveryDiagnosis:
-    async def test_skips_when_no_reasoning(self, tmp_path: Path):
+    async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         result = await _run_recovery_diagnosis(
@@ -290,11 +290,12 @@ class TestRunRecoveryDiagnosis:
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
+            renderer=renderer,
         )
         assert result is None
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_appends_recovery_to_shared_file(self, mock_cls, tmp_path: Path):
+    async def test_appends_recovery_to_shared_file(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -323,6 +324,7 @@ class TestRunRecoveryDiagnosis:
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
+            renderer=renderer,
         )
 
         assert result is not None
@@ -334,7 +336,7 @@ class TestRunRecoveryDiagnosis:
         assert "**Causal Chain**: field → mechanism → symptom" in content
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_appends_reflection_to_shared_file(self, mock_cls, tmp_path: Path):
+    async def test_appends_reflection_to_shared_file(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -362,6 +364,7 @@ class TestRunRecoveryDiagnosis:
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
+            renderer=renderer,
             original_justification="nginx logs showed connection refused",
             original_causal_chain="nginx → compose.lua → localhost:8080",
         )
@@ -373,7 +376,7 @@ class TestRunRecoveryDiagnosis:
         assert "**Agent Reflection**: Agent focused on nginx logs instead of tracing downstream." in content
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_omits_reflection_when_empty(self, mock_cls, tmp_path: Path):
+    async def test_omits_reflection_when_empty(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -401,6 +404,7 @@ class TestRunRecoveryDiagnosis:
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
+            renderer=renderer,
         )
 
         assert result is not None
@@ -409,7 +413,7 @@ class TestRunRecoveryDiagnosis:
         assert "**Agent Reflection**" not in content
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_passes_original_context_to_prompt(self, mock_cls, tmp_path: Path):
+    async def test_passes_original_context_to_prompt(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -438,6 +442,7 @@ class TestRunRecoveryDiagnosis:
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
+            renderer=renderer,
             original_justification="nginx logs showed errors",
             original_causal_chain="nginx → compose.lua → localhost",
         )
@@ -447,7 +452,7 @@ class TestRunRecoveryDiagnosis:
         assert "nginx → compose.lua → localhost" in user_prompt
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_returns_none_when_agent_does_not_submit(self, mock_cls, tmp_path: Path):
+    async def test_returns_none_when_agent_does_not_submit(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -471,6 +476,7 @@ class TestRunRecoveryDiagnosis:
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
+            renderer=renderer,
         )
 
         assert result is None
@@ -522,7 +528,7 @@ class TestExtractBenchmarkMitigationReasoning:
 
 @pytest.mark.asyncio
 class TestRunRecoveryMitigation:
-    async def test_skips_when_no_reasoning(self, tmp_path: Path):
+    async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         result = await _run_recovery_mitigation(
@@ -531,11 +537,12 @@ class TestRunRecoveryMitigation:
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
+            renderer=renderer,
         )
         assert result is None
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_appends_recovery_to_shared_file(self, mock_cls, tmp_path: Path):
+    async def test_appends_recovery_to_shared_file(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -562,6 +569,7 @@ class TestRunRecoveryMitigation:
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
+            renderer=renderer,
             diagnosis_answer="ConfigMap X has wrong value",
         )
 
@@ -575,7 +583,7 @@ class TestRunRecoveryMitigation:
         assert "**Agent Reflection**: Agent fixed the wrong field." in content
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_omits_reflection_when_empty(self, mock_cls, tmp_path: Path):
+    async def test_omits_reflection_when_empty(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -601,6 +609,7 @@ class TestRunRecoveryMitigation:
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
+            renderer=renderer,
         )
 
         assert result is not None
@@ -609,7 +618,7 @@ class TestRunRecoveryMitigation:
         assert "**Agent Reflection**" not in content
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_passes_context_to_prompt(self, mock_cls, tmp_path: Path):
+    async def test_passes_context_to_prompt(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -638,6 +647,7 @@ class TestRunRecoveryMitigation:
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
+            renderer=renderer,
             original_justification="applied kubectl patch",
             diagnosis_answer="ConfigMap X has wrong value",
         )
@@ -647,7 +657,7 @@ class TestRunRecoveryMitigation:
         assert "ConfigMap X has wrong value" in user_prompt
 
     @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_returns_none_when_agent_does_not_submit(self, mock_cls, tmp_path: Path):
+    async def test_returns_none_when_agent_does_not_submit(self, mock_cls, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -669,6 +679,7 @@ class TestRunRecoveryMitigation:
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
+            renderer=renderer,
         )
 
         assert result is None

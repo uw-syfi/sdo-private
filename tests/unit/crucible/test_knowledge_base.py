@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 import pytest
 
+from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.knowledge_base import (
     KB_APPEND_FILENAME,
     KB_ARCHITECTURE_FILENAME,
@@ -29,6 +30,8 @@ from sregym_agents.crucible.knowledge_base import (
     _strip_citation_wrappers,
     create_knowledge_base,
 )
+
+_renderer = PromptRenderer("v1")
 
 
 @pytest.fixture
@@ -248,7 +251,7 @@ class TestUpdate:
     async def test_update_full_flow(self, mock_llm, mock_merge, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("real session data")
-        kb = CrucibleKnowledgeBase([shared], tmp_path / "kb", model_id="m", app_name="test-app")
+        kb = CrucibleKnowledgeBase([shared], tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
 
         mock_llm.side_effect = [
             "session summary",  # _summarize_session
@@ -278,6 +281,7 @@ class TestUpdate:
             model_id="m",
             app_name="test-app",
             include_incident_files=False,
+            renderer=_renderer,
         )
 
         mock_llm.side_effect = [
@@ -306,7 +310,7 @@ class TestUpdate:
             app_dir.mkdir(parents=True, exist_ok=True)
             (app_dir / KB_SUMMARY_FILENAME).write_text(content)
 
-        kb = CrucibleKnowledgeBase([shared], kb_dir, model_id="m", app_name="app-a")
+        kb = CrucibleKnowledgeBase([shared], kb_dir, model_id="m", app_name="app-a", renderer=_renderer)
         mock_llm.return_value = "combined lessons"
 
         await kb._distill_lessons()
@@ -523,7 +527,7 @@ class TestAppendOnlyUpdate:
     async def test_update_appends_summary(self, mock_llm, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = AppendOnlyKnowledgeBase([shared], tmp_path / "kb", model_id="m")
+        kb = AppendOnlyKnowledgeBase([shared], tmp_path / "kb", model_id="m", renderer=_renderer)
 
         mock_llm.return_value = "session summary"
         await kb.update()
@@ -537,7 +541,7 @@ class TestAppendOnlyUpdate:
     async def test_update_appends_multiple(self, mock_llm, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = AppendOnlyKnowledgeBase([shared], tmp_path / "kb", model_id="m")
+        kb = AppendOnlyKnowledgeBase([shared], tmp_path / "kb", model_id="m", renderer=_renderer)
 
         mock_llm.return_value = "summary 1"
         await kb.update()
@@ -626,6 +630,7 @@ class TestIncludeBenchmarkResults:
             model_id="m",
             app_name="test-app",
             include_benchmark_results=True,
+            renderer=_renderer,
         )
         mock_llm.side_effect = ["session summary", "merged summary", "lessons"]
         await kb.update()
@@ -645,6 +650,7 @@ class TestIncludeBenchmarkResults:
             model_id="m",
             app_name="test-app",
             include_benchmark_results=False,
+            renderer=_renderer,
         )
         mock_llm.side_effect = ["session summary", "merged summary", "lessons"]
         await kb.update()
@@ -662,6 +668,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             include_benchmark_results=True,
+            renderer=_renderer,
         )
         mock_llm.return_value = "session summary"
         await kb.update()
@@ -679,6 +686,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             include_benchmark_results=False,
+            renderer=_renderer,
         )
         mock_llm.return_value = "session summary"
         await kb.update()
@@ -739,7 +747,7 @@ class TestCitationValidation:
         """When LLM produces invalid citation, correction loop fixes it."""
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = CrucibleKnowledgeBase([shared], tmp_path / "kb", model_id="m", app_name="test-app")
+        kb = CrucibleKnowledgeBase([shared], tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
 
         # Create an incident file so we have a valid reference
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
@@ -779,7 +787,7 @@ class TestCitationValidation:
         """When LLM produces valid citations, no correction loop runs."""
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = CrucibleKnowledgeBase([shared], tmp_path / "kb", model_id="m", app_name="test-app")
+        kb = CrucibleKnowledgeBase([shared], tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
 
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
         (kb.incidents_dir / "20260324_010224.md").write_text("incident")

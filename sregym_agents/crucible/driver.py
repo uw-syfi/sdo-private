@@ -21,7 +21,7 @@ from filelock import FileLock
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
-from sregym_agents.crucible._prompts import configure as configure_prompts
+from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
 from sregym_agents.crucible.orchestrator import CrucibleFlags
 
@@ -230,7 +230,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             "or pass --prompt-version on the command line."
         )
         sys.exit(1)
-    configure_prompts(prompt_version)
+    renderer = PromptRenderer(prompt_version)
 
     enable_judge = agent_cfg.get("enable_judge", True)
     if args.no_judge:
@@ -309,6 +309,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             include_benchmark_results=include_benchmark_results,
             enable_heuristic_refinement=enable_heuristic_refinement,
             include_incident_files=include_incident_files,
+            renderer=renderer,
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env or "."))
@@ -333,6 +334,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         mitigation_shared_file=mitigation_shared_file,
         planned_stages=planned_stages,
         submit_mcp_url=submit_mcp_url,
+        renderer=renderer,
         lt_summary_file=lt_summary_file,
         lessons_file=lessons_file,
         architecture_file=architecture_file,

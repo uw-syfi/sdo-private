@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 import pytest
 
+from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.orchestrator import CrucibleFlags
 from sregym_agents.crucible.tools import SharedFile
 
@@ -57,6 +58,9 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
         mock.arun = AsyncMock(side_effect=fake_run)
         return mock
 
+    mock_renderer = MagicMock(spec=PromptRenderer)
+    mock_renderer.render.return_value = "rendered"
+
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_agent_constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent") as mock_judge_cls,
@@ -65,7 +69,6 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted submission for stage 'Diagnosis'.", oracle),
         ),
-        patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
     ):
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 
@@ -77,6 +80,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
                 max_iters=3,
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=mock_renderer,
                 flags=CrucibleFlags(prompt_version="v1", enable_judge=False),
             )
         )
@@ -105,6 +109,9 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
         mock.arun = AsyncMock(side_effect=fake_run)
         return mock
 
+    mock_renderer = MagicMock(spec=PromptRenderer)
+    mock_renderer.render.return_value = "rendered"
+
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_agent_constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
@@ -113,7 +120,6 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
             new_callable=AsyncMock,
             side_effect=RuntimeError("connection refused"),
         ),
-        patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
     ):
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 
@@ -125,6 +131,7 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
                 max_iters=1,
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=mock_renderer,
                 flags=CrucibleFlags(prompt_version="v1", enable_judge=False),
             )
         )
@@ -159,11 +166,13 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
         mock.arun = AsyncMock(side_effect=fake_run)
         return mock
 
+    mock_renderer = MagicMock(spec=PromptRenderer)
+    mock_renderer.render.return_value = "rendered"
+
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
         patch("sregym_agents.crucible.orchestrator._submit_to_benchmark") as mock_submit,
-        patch("sregym_agents.crucible.orchestrator._render", return_value="rendered"),
     ):
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 
@@ -175,6 +184,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
                 max_iters=3,
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=mock_renderer,
                 flags=CrucibleFlags(prompt_version="v1", enable_judge=True),
             )
         )

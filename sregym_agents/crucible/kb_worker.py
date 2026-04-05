@@ -21,7 +21,7 @@ import signal
 import time
 from pathlib import Path
 
-from sregym_agents.crucible._prompts import configure as configure_prompts
+from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.knowledge_base import create_knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,7 @@ async def process_manifest(manifest_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text())
 
     prompt_version = manifest.get("prompt_version")
-    if prompt_version:
-        configure_prompts(prompt_version)
+    renderer = PromptRenderer(prompt_version) if prompt_version else None
 
     shared_files = [Path(p) for p in manifest["session_files"]]
     stage_outputs_file = Path(manifest["stage_outputs_file"]) if manifest.get("stage_outputs_file") else None
@@ -52,6 +51,7 @@ async def process_manifest(manifest_path: Path) -> None:
         include_benchmark_results=manifest.get("include_benchmark_results", False),
         enable_heuristic_refinement=manifest.get("enable_heuristic_refinement", True),
         include_incident_files=manifest.get("include_incident_files", True),
+        renderer=renderer,
     )
 
     logger.info(

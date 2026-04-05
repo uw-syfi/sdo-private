@@ -23,7 +23,6 @@ from libs.agent_mw import (
 )
 from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
-from sregym_agents.crucible._prompts import _render
 from sregym_agents.crucible.tools import (
     THINKING_BUDGET,
     JudgeDeps,
@@ -79,7 +78,7 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
 
         @self._agent.instructions
         def _system(ctx) -> str:
-            return _render(f"{ctx.deps.stage}_judge_system")
+            return ctx.deps.renderer.render(f"{ctx.deps.stage}_judge_system")
 
     async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
         """Run with submit reminders. Returns (output, usage)."""

@@ -62,13 +62,13 @@ def test_template_renders_with_all_variables(template_name: str, template_path: 
 
 
 def test_render_function_uses_strict_undefined() -> None:
-    """Verify that _render() uses StrictUndefined so missing variables raise errors."""
-    from sregym_agents.crucible._prompts import _render, configure
+    """Verify that PromptRenderer uses StrictUndefined so missing variables raise errors."""
+    from sregym_agents.crucible._prompts import PromptRenderer
 
-    configure(_DEFAULT_VERSION)
+    renderer = PromptRenderer(_DEFAULT_VERSION)
     with pytest.raises(jinja2.UndefinedError):
         # diagnosis_agent_user.j2 requires many variables — omit most to trigger the error.
-        _render("diagnosis_agent_user", app_name="test", namespace="test")
+        renderer.render("diagnosis_agent_user", app_name="test", namespace="test")
 
 
 # Map of template_name -> set of variables that MUST be passed.

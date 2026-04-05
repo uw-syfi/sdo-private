@@ -10,11 +10,13 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import yaml
 
-from sregym_agents.crucible._prompts import _render
+if TYPE_CHECKING:
+    from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
@@ -188,6 +190,7 @@ async def _run_stage_loop(
     max_iters: int,
     shared_file: SharedFile,
     submit_mcp_url: str,
+    renderer: PromptRenderer,
     lt_summary_file: Path | None = None,
     lessons_file: Path | None = None,
     architecture_file: Path | None = None,
@@ -269,6 +272,7 @@ async def _run_stage_loop(
             shared_file=shared_file,
             iteration=iteration,
             stage=stage,
+            renderer=renderer,
             state=sre_state,
             lt_summary_file=lt_summary_file if flags.enable_ltm_retrieval else None,
             incidents_dir=incidents_dir if flags.enable_ltm_retrieval else None,
@@ -280,10 +284,10 @@ async def _run_stage_loop(
         )
         if is_v3:
             guidance = diagnosis_guidance if stage == "diagnosis" else ""
-            sre_system = _render(f"{stage}_agent_system", diagnosis_guidance=guidance)
+            sre_system = renderer.render(f"{stage}_agent_system", diagnosis_guidance=guidance)
         else:
-            sre_system = _render(f"{stage}_agent_system")
-        sre_prompt = _render(
+            sre_system = renderer.render(f"{stage}_agent_system")
+        sre_prompt = renderer.render(
             f"{stage}_agent_user",
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
@@ -364,11 +368,12 @@ async def _run_stage_loop(
             iteration=iteration,
             stage=stage,
             submit_mcp_url=submit_mcp_url,
+            renderer=renderer,
             hypothesis_text=hypothesis_text,
             state=judge_state,
         )
-        judge_system = _render(f"{stage}_judge_system")
-        judge_prompt = _render(
+        judge_system = renderer.render(f"{stage}_judge_system")
+        judge_prompt = renderer.render(
             f"{stage}_judge_user",
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
@@ -454,6 +459,7 @@ async def _run_recovery_diagnosis(
     shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
+    renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     original_causal_chain: str = "",
@@ -480,11 +486,12 @@ async def _run_recovery_diagnosis(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="diagnosis",
+        renderer=renderer,
         state=sre_state,
     )
 
-    system_prompt = _render("recovery_diagnosis_system")
-    user_prompt = _render(
+    system_prompt = renderer.render("recovery_diagnosis_system")
+    user_prompt = renderer.render(
         "recovery_diagnosis_user",
         benchmark_reasoning=reasoning,
         original_answer=original_answer,
@@ -541,6 +548,7 @@ async def _run_recovery_mitigation(
     shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
+    renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     diagnosis_answer: str = "",
@@ -568,11 +576,12 @@ async def _run_recovery_mitigation(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="mitigation",
+        renderer=renderer,
         state=sre_state,
     )
 
-    system_prompt = _render("recovery_mitigation_system")
-    user_prompt = _render(
+    system_prompt = renderer.render("recovery_mitigation_system")
+    user_prompt = renderer.render(
         "recovery_mitigation_user",
         benchmark_reasoning=reasoning,
         original_answer=original_answer,
@@ -630,6 +639,7 @@ async def run(
     mitigation_shared_file: Path,
     planned_stages: list[str],
     submit_mcp_url: str,
+    renderer: PromptRenderer,
     lt_summary_file: Path | None = None,
     lessons_file: Path | None = None,
     architecture_file: Path | None = None,
@@ -671,6 +681,7 @@ async def run(
         max_diag_iters,
         diagnosis_sf,
         submit_mcp_url,
+        renderer=renderer,
         lt_summary_file=lt_summary_file,
         lessons_file=lessons_file,
         architecture_file=architecture_file,
@@ -694,6 +705,7 @@ async def run(
             diagnosis_sf,
             diag_result.agent_answer,
             diag_result.benchmark_block,
+            renderer=renderer,
             trajectory_path=trajectory_path,
             original_justification=diag_result.agent_justification,
             original_causal_chain=diag_result.agent_causal_chain,
@@ -734,6 +746,7 @@ async def run(
         max_mit_iters,
         mitigation_sf,
         submit_mcp_url,
+        renderer=renderer,
         lt_summary_file=lt_summary_file,
         lessons_file=lessons_file,
         architecture_file=architecture_file,
@@ -757,6 +770,7 @@ async def run(
             mitigation_sf,
             mit_result.agent_answer,
             mit_result.benchmark_block,
+            renderer=renderer,
             trajectory_path=trajectory_path,
             original_justification=mit_result.agent_justification,
             diagnosis_answer=diag_result.agent_answer,
