@@ -213,7 +213,6 @@ def _agent_cwd() -> Path:
     return Path(os.getenv("SREGYM_EXP_ENV", "."))
 
 
-
 def _run_bash_sync(cmd: str) -> str:
     """Run *cmd* in a shell, capture stdout+stderr, truncate to MAX_OUTPUT_CHARS.
 
