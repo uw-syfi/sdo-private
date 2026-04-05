@@ -151,14 +151,16 @@ class TestThinkingRepetitionMiddleware:
         mw.on_part_end(_make_thinking_event("same thinking"))
         assert mw._force_submit is True
         result = asyncio.get_event_loop().run_until_complete(
-            mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])
+            mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])  # type: ignore[arg-type]
         )
         assert result == []
 
     def test_no_force_submit_returns_tools_unchanged(self):
         mw = ThinkingRepetitionMiddleware()
         tools = [{"name": "exec_bash"}]
-        result = asyncio.get_event_loop().run_until_complete(mw.before_model_req_edit_tools(None, tools))
+        result = asyncio.get_event_loop().run_until_complete(
+            mw.before_model_req_edit_tools(None, tools)  # type: ignore[arg-type]
+        )
         assert result == tools
 
     def test_after_run_resets_state(self):
@@ -262,7 +264,7 @@ class TestStallDetectionMiddleware:
                 mw.before_model_req_edit_messages(_make_ctx(run_step=step), [])
         assert mw._force_submit is True
         result = asyncio.get_event_loop().run_until_complete(
-            mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])
+            mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])  # type: ignore[arg-type]
         )
         assert result == []
 
@@ -325,7 +327,7 @@ class TestTimeoutMiddleware:
         with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0, 3700.0]):
             mw = TimeoutMiddleware(timeout_seconds=3600)
             messages = mw.before_model_req_edit_messages(_make_ctx(), [])
-        nudge_text = messages[0].parts[0].content
+        nudge_text = messages[0].parts[0].content  # type: ignore[union-attr]
         assert "61 minutes" in nudge_text
 
     def test_max_reminders_then_force_submit(self):
@@ -349,14 +351,16 @@ class TestTimeoutMiddleware:
             mw.before_model_req_edit_messages(_make_ctx(), [])  # force submit
         assert mw._force_submit is True
         result = asyncio.get_event_loop().run_until_complete(
-            mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])
+            mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])  # type: ignore[arg-type]
         )
         assert result == []
 
     def test_no_force_submit_returns_tools_unchanged(self):
         mw = TimeoutMiddleware(timeout_seconds=3600)
         tools = [{"name": "exec_bash"}]
-        result = asyncio.get_event_loop().run_until_complete(mw.before_model_req_edit_tools(None, tools))
+        result = asyncio.get_event_loop().run_until_complete(
+            mw.before_model_req_edit_tools(None, tools)  # type: ignore[arg-type]
+        )
         assert result == tools
 
     def test_fires_without_tool_calls(self):

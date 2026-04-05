@@ -27,14 +27,15 @@ class LoopDetectionMiddleware(AgentMiddleware):
     """Detects repeated identical tool calls and nudges the agent to try something new."""
 
     def __init__(self, max_loop_reminders: int = 3) -> None:
-        self._recent_fps: deque = deque(maxlen=3)
+        self._recent_fps: deque[frozenset[tuple[str, str]]] = deque(maxlen=3)
         self._loop_reminders: int = 0
         self._max_loop_reminders = max_loop_reminders
         self._pending_nudge: str | None = None
 
     def on_function_tool_call(self, event: Any) -> None:
-        tool_name = event.part.tool_name
-        args = event.part.args if isinstance(event.part.args, dict) else {}
+        tool_name: str = event.part.tool_name
+        raw_args: Any = event.part.args
+        args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
         fp = frozenset([(tool_name, repr(sorted(args.items())))])
         self._recent_fps.append(fp)
 
@@ -136,7 +137,9 @@ class ThinkingRepetitionMiddleware(AgentMiddleware):
             self._pending_nudge = None
         return messages
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list[ToolDefinition]) -> list[ToolDefinition] | None:
+    async def before_model_req_edit_tools(
+        self, ctx: Any, tool_defs: list[ToolDefinition]
+    ) -> list[ToolDefinition] | None:
         if self._force_submit:
             logger.warning("Thinking repetition: stripping all tools to force submission.")
             return []
@@ -230,7 +233,9 @@ class StallDetectionMiddleware(AgentMiddleware):
             self._pending_nudge = None
         return messages
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list[ToolDefinition]) -> list[ToolDefinition] | None:
+    async def before_model_req_edit_tools(
+        self, ctx: Any, tool_defs: list[ToolDefinition]
+    ) -> list[ToolDefinition] | None:
         if self._force_submit:
             logger.warning("Stall: stripping all tools to force submission.")
             return []
@@ -296,7 +301,9 @@ class TimeoutMiddleware(AgentMiddleware):
 
         return messages
 
-    async def before_model_req_edit_tools(self, ctx: Any, tool_defs: list[ToolDefinition]) -> list[ToolDefinition] | None:
+    async def before_model_req_edit_tools(
+        self, ctx: Any, tool_defs: list[ToolDefinition]
+    ) -> list[ToolDefinition] | None:
         if self._force_submit:
             logger.warning("Timeout: stripping all tools to force submission.")
             return []
