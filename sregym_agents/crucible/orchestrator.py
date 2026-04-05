@@ -33,11 +33,15 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class CrucibleFlags:
-    prompt_version: str = "v2"
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
     enable_heuristic_refinement: bool = True
+
+
+@dataclasses.dataclass(frozen=True)
+class CrucibleConfig:
+    prompt_version: str = "v2"
     max_diagnosis_iterations: int = 5
     max_mitigation_iterations: int = 5
     wait_stage_timeout: int = 300
@@ -197,6 +201,7 @@ async def _run_stage_loop(
     incidents_dir: Path | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
+    config: CrucibleConfig | None = None,
     diagnosis_heuristics_file: Path | None = None,
     triage_heuristics_file: Path | None = None,
     arbitration_heuristics_file: Path | None = None,
@@ -204,7 +209,9 @@ async def _run_stage_loop(
     """Run the agent->judge loop for one stage."""
     if flags is None:
         flags = CrucibleFlags()
-    stage_timeout = flags.stage_timeout
+    if config is None:
+        config = CrucibleConfig()
+    stage_timeout = config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
     logger.info(f"CRUCIBLE: Starting {stage.upper()} stage (timeout={stage_timeout}s)")
@@ -223,7 +230,7 @@ async def _run_stage_loop(
     architecture_content = _read_kb_content(architecture_file)
 
     # v3 trained heuristics
-    is_v3 = flags.prompt_version >= "v3"
+    is_v3 = config.prompt_version >= "v3"
     diagnosis_guidance = ""
     triage_guidance = ""
     arbitration_guidance = ""
@@ -646,6 +653,7 @@ async def run(
     incidents_dir: Path | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
+    config: CrucibleConfig | None = None,
     diagnosis_heuristics_file: Path | None = None,
     triage_heuristics_file: Path | None = None,
     arbitration_heuristics_file: Path | None = None,
@@ -653,9 +661,11 @@ async def run(
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     if flags is None:
         flags = CrucibleFlags()
-    max_diag_iters = flags.max_diagnosis_iterations
-    max_mit_iters = flags.max_mitigation_iterations
-    wait_stage_timeout = flags.wait_stage_timeout
+    if config is None:
+        config = CrucibleConfig()
+    max_diag_iters = config.max_diagnosis_iterations
+    max_mit_iters = config.max_mitigation_iterations
+    wait_stage_timeout = config.wait_stage_timeout
 
     diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
     diagnosis_sf.init(
@@ -688,6 +698,7 @@ async def run(
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        config=config,
         diagnosis_heuristics_file=diagnosis_heuristics_file,
         triage_heuristics_file=triage_heuristics_file,
         arbitration_heuristics_file=arbitration_heuristics_file,
@@ -753,6 +764,7 @@ async def run(
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        config=config,
         diagnosis_heuristics_file=diagnosis_heuristics_file,
         triage_heuristics_file=triage_heuristics_file,
         arbitration_heuristics_file=arbitration_heuristics_file,

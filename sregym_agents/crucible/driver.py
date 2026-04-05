@@ -23,7 +23,7 @@ from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
-from sregym_agents.crucible.orchestrator import CrucibleFlags
+from sregym_agents.crucible.orchestrator import CrucibleConfig, CrucibleFlags
 
 logging.basicConfig(
     level=logging.INFO,
@@ -236,11 +236,13 @@ async def _async_main(args: argparse.Namespace) -> None:
     if args.no_judge:
         enable_judge = False
     flags = CrucibleFlags(
-        prompt_version=prompt_version,
         enable_judge=enable_judge,
         enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
         include_benchmark_results=agent_cfg.get("include_benchmark_results", False),
         enable_heuristic_refinement=agent_cfg.get("enable_heuristic_refinement", True),
+    )
+    config = CrucibleConfig(
+        prompt_version=prompt_version,
         max_diagnosis_iterations=agent_cfg.get("max_diagnosis_iterations", 5),
         max_mitigation_iterations=agent_cfg.get("max_mitigation_iterations", 5),
         wait_stage_timeout=agent_cfg.get("wait_stage_timeout", 300),
@@ -260,7 +262,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         logger.info(f"Working directory: {os.getcwd()}")
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
-    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} flags={flags}")
+    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} flags={flags} config={config}")
 
     _wait_for_stage(api_base, timeout=300)
 
@@ -341,6 +343,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        config=config,
         diagnosis_heuristics_file=diagnosis_heuristics_file,
         triage_heuristics_file=triage_heuristics_file,
         arbitration_heuristics_file=arbitration_heuristics_file,
