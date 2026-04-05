@@ -21,9 +21,9 @@ from filelock import FileLock
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
-from sregym_agents.crucible._prompts import configure as configure_prompts
+from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
-from sregym_agents.crucible.orchestrator import CrucibleFlags
+from sregym_agents.crucible.orchestrator import CrucibleConfig, CrucibleFlags
 
 logging.basicConfig(
     level=logging.INFO,
@@ -230,17 +230,20 @@ async def _async_main(args: argparse.Namespace) -> None:
             "or pass --prompt-version on the command line."
         )
         sys.exit(1)
-    configure_prompts(prompt_version)
+    renderer = PromptRenderer(prompt_version)
 
     enable_judge = agent_cfg.get("enable_judge", True)
     if args.no_judge:
         enable_judge = False
     flags = CrucibleFlags(
-        prompt_version=prompt_version,
         enable_judge=enable_judge,
         enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
         include_benchmark_results=agent_cfg.get("include_benchmark_results", False),
         enable_heuristic_refinement=agent_cfg.get("enable_heuristic_refinement", True),
+        include_incident_files=agent_cfg.get("include_incident_files", True),
+    )
+    config = CrucibleConfig(
+        prompt_version=prompt_version,
         max_diagnosis_iterations=agent_cfg.get("max_diagnosis_iterations", 5),
         max_mitigation_iterations=agent_cfg.get("max_mitigation_iterations", 5),
         wait_stage_timeout=agent_cfg.get("wait_stage_timeout", 300),
@@ -260,7 +263,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         logger.info(f"Working directory: {os.getcwd()}")
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
-    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} flags={flags}")
+    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} flags={flags} config={config}")
 
     _wait_for_stage(api_base, timeout=300)
 
@@ -296,9 +299,6 @@ async def _async_main(args: argparse.Namespace) -> None:
         seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
         seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
-        include_benchmark_results = agent_cfg.get("include_benchmark_results", False)
-        enable_heuristic_refinement = agent_cfg.get("enable_heuristic_refinement", True)
-        include_incident_files = agent_cfg.get("include_incident_files", True)
         kb = create_knowledge_base(
             kb_type=kb_type,
             shared_files=[diagnosis_shared_file, mitigation_shared_file],
@@ -306,9 +306,8 @@ async def _async_main(args: argparse.Namespace) -> None:
             model_id=model_id,
             app_name=app_info.get("app_name", "unknown"),
             seed_kb_dir=seed_kb_dir,
-            include_benchmark_results=include_benchmark_results,
-            enable_heuristic_refinement=enable_heuristic_refinement,
-            include_incident_files=include_incident_files,
+            flags=flags,
+            renderer=renderer,
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env or "."))
@@ -333,12 +332,14 @@ async def _async_main(args: argparse.Namespace) -> None:
         mitigation_shared_file=mitigation_shared_file,
         planned_stages=planned_stages,
         submit_mcp_url=submit_mcp_url,
+        renderer=renderer,
         lt_summary_file=lt_summary_file,
         lessons_file=lessons_file,
         architecture_file=architecture_file,
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        config=config,
         diagnosis_heuristics_file=diagnosis_heuristics_file,
         triage_heuristics_file=triage_heuristics_file,
         arbitration_heuristics_file=arbitration_heuristics_file,
@@ -388,11 +389,11 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
                 "model_id": args.kb_model or os.environ.get("MODEL_ID", args.model),
                 "app_name": app_info.get("app_name", "unknown"),
-                "include_benchmark_results": agent_cfg.get("include_benchmark_results", False),
-                "enable_heuristic_refinement": agent_cfg.get("enable_heuristic_refinement", True),
-                "include_incident_files": agent_cfg.get("include_incident_files", True),
+                "include_benchmark_results": flags.include_benchmark_results,
+                "enable_heuristic_refinement": flags.enable_heuristic_refinement,
+                "include_incident_files": flags.include_incident_files,
                 "problem_id": problem_id,
-                "prompt_version": prompt_version,
+                "prompt_version": config.prompt_version,
                 "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
             }
             pending_dir = Path(args.kb_dir) / "pending"

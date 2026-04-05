@@ -10,11 +10,13 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import yaml
 
-from sregym_agents.crucible._prompts import _render
+if TYPE_CHECKING:
+    from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
@@ -31,11 +33,16 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class CrucibleFlags:
-    prompt_version: str = "v2"
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
     enable_heuristic_refinement: bool = True
+    include_incident_files: bool = True
+
+
+@dataclasses.dataclass(frozen=True)
+class CrucibleConfig:
+    prompt_version: str = "v2"
     max_diagnosis_iterations: int = 5
     max_mitigation_iterations: int = 5
     wait_stage_timeout: int = 300
@@ -188,12 +195,14 @@ async def _run_stage_loop(
     max_iters: int,
     shared_file: SharedFile,
     submit_mcp_url: str,
+    renderer: PromptRenderer,
     lt_summary_file: Path | None = None,
     lessons_file: Path | None = None,
     architecture_file: Path | None = None,
     incidents_dir: Path | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
+    config: CrucibleConfig | None = None,
     diagnosis_heuristics_file: Path | None = None,
     triage_heuristics_file: Path | None = None,
     arbitration_heuristics_file: Path | None = None,
@@ -201,7 +210,9 @@ async def _run_stage_loop(
     """Run the agent->judge loop for one stage."""
     if flags is None:
         flags = CrucibleFlags()
-    stage_timeout = flags.stage_timeout
+    if config is None:
+        config = CrucibleConfig()
+    stage_timeout = config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
     logger.info(f"CRUCIBLE: Starting {stage.upper()} stage (timeout={stage_timeout}s)")
@@ -220,7 +231,7 @@ async def _run_stage_loop(
     architecture_content = _read_kb_content(architecture_file)
 
     # v3 trained heuristics
-    is_v3 = flags.prompt_version >= "v3"
+    is_v3 = config.prompt_version >= "v3"
     diagnosis_guidance = ""
     triage_guidance = ""
     arbitration_guidance = ""
@@ -269,6 +280,7 @@ async def _run_stage_loop(
             shared_file=shared_file,
             iteration=iteration,
             stage=stage,
+            renderer=renderer,
             state=sre_state,
             lt_summary_file=lt_summary_file if flags.enable_ltm_retrieval else None,
             incidents_dir=incidents_dir if flags.enable_ltm_retrieval else None,
@@ -280,10 +292,10 @@ async def _run_stage_loop(
         )
         if is_v3:
             guidance = diagnosis_guidance if stage == "diagnosis" else ""
-            sre_system = _render(f"{stage}_agent_system", diagnosis_guidance=guidance)
+            sre_system = renderer.render(f"{stage}_agent_system", diagnosis_guidance=guidance)
         else:
-            sre_system = _render(f"{stage}_agent_system")
-        sre_prompt = _render(
+            sre_system = renderer.render(f"{stage}_agent_system")
+        sre_prompt = renderer.render(
             f"{stage}_agent_user",
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
@@ -364,11 +376,12 @@ async def _run_stage_loop(
             iteration=iteration,
             stage=stage,
             submit_mcp_url=submit_mcp_url,
+            renderer=renderer,
             hypothesis_text=hypothesis_text,
             state=judge_state,
         )
-        judge_system = _render(f"{stage}_judge_system")
-        judge_prompt = _render(
+        judge_system = renderer.render(f"{stage}_judge_system")
+        judge_prompt = renderer.render(
             f"{stage}_judge_user",
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
@@ -454,6 +467,7 @@ async def _run_recovery_diagnosis(
     shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
+    renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     original_causal_chain: str = "",
@@ -480,11 +494,12 @@ async def _run_recovery_diagnosis(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="diagnosis",
+        renderer=renderer,
         state=sre_state,
     )
 
-    system_prompt = _render("recovery_diagnosis_system")
-    user_prompt = _render(
+    system_prompt = renderer.render("recovery_diagnosis_system")
+    user_prompt = renderer.render(
         "recovery_diagnosis_user",
         benchmark_reasoning=reasoning,
         original_answer=original_answer,
@@ -541,6 +556,7 @@ async def _run_recovery_mitigation(
     shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
+    renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     diagnosis_answer: str = "",
@@ -568,11 +584,12 @@ async def _run_recovery_mitigation(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="mitigation",
+        renderer=renderer,
         state=sre_state,
     )
 
-    system_prompt = _render("recovery_mitigation_system")
-    user_prompt = _render(
+    system_prompt = renderer.render("recovery_mitigation_system")
+    user_prompt = renderer.render(
         "recovery_mitigation_user",
         benchmark_reasoning=reasoning,
         original_answer=original_answer,
@@ -630,12 +647,14 @@ async def run(
     mitigation_shared_file: Path,
     planned_stages: list[str],
     submit_mcp_url: str,
+    renderer: PromptRenderer,
     lt_summary_file: Path | None = None,
     lessons_file: Path | None = None,
     architecture_file: Path | None = None,
     incidents_dir: Path | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
+    config: CrucibleConfig | None = None,
     diagnosis_heuristics_file: Path | None = None,
     triage_heuristics_file: Path | None = None,
     arbitration_heuristics_file: Path | None = None,
@@ -643,9 +662,11 @@ async def run(
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     if flags is None:
         flags = CrucibleFlags()
-    max_diag_iters = flags.max_diagnosis_iterations
-    max_mit_iters = flags.max_mitigation_iterations
-    wait_stage_timeout = flags.wait_stage_timeout
+    if config is None:
+        config = CrucibleConfig()
+    max_diag_iters = config.max_diagnosis_iterations
+    max_mit_iters = config.max_mitigation_iterations
+    wait_stage_timeout = config.wait_stage_timeout
 
     diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
     diagnosis_sf.init(
@@ -671,12 +692,14 @@ async def run(
         max_diag_iters,
         diagnosis_sf,
         submit_mcp_url,
+        renderer=renderer,
         lt_summary_file=lt_summary_file,
         lessons_file=lessons_file,
         architecture_file=architecture_file,
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        config=config,
         diagnosis_heuristics_file=diagnosis_heuristics_file,
         triage_heuristics_file=triage_heuristics_file,
         arbitration_heuristics_file=arbitration_heuristics_file,
@@ -694,6 +717,7 @@ async def run(
             diagnosis_sf,
             diag_result.agent_answer,
             diag_result.benchmark_block,
+            renderer=renderer,
             trajectory_path=trajectory_path,
             original_justification=diag_result.agent_justification,
             original_causal_chain=diag_result.agent_causal_chain,
@@ -734,12 +758,14 @@ async def run(
         max_mit_iters,
         mitigation_sf,
         submit_mcp_url,
+        renderer=renderer,
         lt_summary_file=lt_summary_file,
         lessons_file=lessons_file,
         architecture_file=architecture_file,
         incidents_dir=incidents_dir,
         trajectory_path=trajectory_path,
         flags=flags,
+        config=config,
         diagnosis_heuristics_file=diagnosis_heuristics_file,
         triage_heuristics_file=triage_heuristics_file,
         arbitration_heuristics_file=arbitration_heuristics_file,
@@ -757,6 +783,7 @@ async def run(
             mitigation_sf,
             mit_result.agent_answer,
             mit_result.benchmark_block,
+            renderer=renderer,
             trajectory_path=trajectory_path,
             original_justification=mit_result.agent_justification,
             diagnosis_answer=diag_result.agent_answer,
