@@ -37,8 +37,8 @@ async def process_manifest(manifest_path: Path) -> None:
     """Load a manifest, create KB, call ``update()``, move to ``completed/``."""
     manifest = json.loads(manifest_path.read_text())
 
-    prompt_version = manifest.get("prompt_version")
-    renderer = PromptRenderer(prompt_version) if prompt_version else None
+    prompt_version = manifest["prompt_version"]
+    renderer = PromptRenderer(prompt_version)
 
     shared_files = [Path(p) for p in manifest["session_files"]]
     stage_outputs_file = Path(manifest["stage_outputs_file"]) if manifest.get("stage_outputs_file") else None
