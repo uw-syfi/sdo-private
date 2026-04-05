@@ -251,11 +251,10 @@ async def _run_stage_loop(
                 f"{stage.capitalize()} stage timed out after {elapsed:.0f}s "
                 f"(limit={stage_timeout}s) before iteration {iteration}."
             )
-            with shared_file.open("a") as fh:
-                fh.write(
-                    f"\n### {stage.capitalize()} — TIMED OUT\n"
-                    f"Stage exceeded the {stage_timeout}s time limit after {elapsed:.0f}s.\n"
-                )
+            shared_file.append(
+                f"\n### {stage.capitalize()} — TIMED OUT\n"
+                f"Stage exceeded the {stage_timeout}s time limit after {elapsed:.0f}s.\n"
+            )
             timed_out = True
             break
         logger.info(f"--- {stage.capitalize()} iteration {iteration}/{max_iters} ---")
@@ -342,8 +341,7 @@ async def _run_stage_loop(
                 f"\n### Iteration {iteration} — Judge Verdict ({stage})\n"
                 f"- Status: APPROVED (no-judge mode — direct submission)\n"
             )
-            with shared_file.open("a") as fh:
-                fh.write(entry + benchmark_block)
+            shared_file.append(entry + benchmark_block)
 
             return StageLoopResult(
                 approved=True,
@@ -451,7 +449,7 @@ def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis")
 async def _run_recovery_diagnosis(
     model: str,
     app_info: dict,
-    shared_file: Path,
+    shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
     trajectory_path: Path | None = None,
@@ -477,7 +475,7 @@ async def _run_recovery_diagnosis(
     sre_state = SharedState()
     sre_deps = SREDeps(
         namespace=app_info.get("namespace", "default"),
-        shared_file=SharedFile(shared_file),
+        shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="diagnosis",
         state=sre_state,
@@ -527,8 +525,7 @@ async def _run_recovery_diagnosis(
     if submission.reflection:
         entry += f"**Agent Reflection**: {submission.reflection}\n"
     try:
-        with shared_file.open("a") as fh:
-            fh.write(entry)
+        shared_file.append(entry)
     except Exception as e:
         logger.warning(f"Error writing recovery diagnosis to shared file: {e}")
 
@@ -539,7 +536,7 @@ async def _run_recovery_diagnosis(
 async def _run_recovery_mitigation(
     model: str,
     app_info: dict,
-    shared_file: Path,
+    shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
     trajectory_path: Path | None = None,
@@ -566,7 +563,7 @@ async def _run_recovery_mitigation(
     sre_state = SharedState()
     sre_deps = SREDeps(
         namespace=app_info.get("namespace", "default"),
-        shared_file=SharedFile(shared_file),
+        shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="mitigation",
         state=sre_state,
@@ -615,8 +612,7 @@ async def _run_recovery_mitigation(
     if submission.reflection:
         entry += f"**Agent Reflection**: {submission.reflection}\n"
     try:
-        with shared_file.open("a") as fh:
-            fh.write(entry)
+        shared_file.append(entry)
     except Exception as e:
         logger.warning(f"Error writing recovery mitigation to shared file: {e}")
 
@@ -693,7 +689,7 @@ async def run(
         recovery = await _run_recovery_diagnosis(
             model,
             app_info,
-            diagnosis_shared_file,
+            diagnosis_sf,
             diag_result.agent_answer,
             diag_result.benchmark_block,
             trajectory_path=trajectory_path,
@@ -756,7 +752,7 @@ async def run(
         recovery = await _run_recovery_mitigation(
             model,
             app_info,
-            mitigation_shared_file,
+            mitigation_sf,
             mit_result.agent_answer,
             mit_result.benchmark_block,
             trajectory_path=trajectory_path,

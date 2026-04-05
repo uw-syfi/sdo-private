@@ -790,6 +790,17 @@ class TestSubmitIndependentFindings:
         assert "Error" in result
         assert ctx.deps.state.independent_findings_submitted is False
 
+    def test_uses_append_not_direct_open(self, tmp_path: Path):
+        """Writes must go through SharedFile.append() to ensure fcntl locking."""
+        shared = tmp_path / "shared.md"
+        shared.write_text("")
+        ctx = _make_judge_ctx(tmp_path)
+        with patch.object(ctx.deps.shared_file, "append") as mock_append, \
+                patch.object(ctx.deps.shared_file, "open") as mock_open:
+            submit_independent_findings(ctx, "some findings")
+        mock_append.assert_called_once()
+        mock_open.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # reveal_agent_hypothesis
