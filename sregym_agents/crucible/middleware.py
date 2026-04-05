@@ -259,6 +259,11 @@ class TimeoutMiddleware(AgentMiddleware):
         self._max_timeout_reminders = max_timeout_reminders
         self._force_submit: bool = False
 
+    def before_run(self) -> None:
+        self._start_time = time.monotonic()
+        self._reminders = 0
+        self._force_submit = False
+
     def before_model_req_edit_messages(self, ctx: Any, messages: list) -> list:
         elapsed = time.monotonic() - self._start_time
         if elapsed <= self._timeout_seconds:

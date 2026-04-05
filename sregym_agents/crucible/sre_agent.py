@@ -19,7 +19,6 @@ from libs.agent_mw import (
     TrajectoryMiddleware,
     TurnLoggingMiddleware,
     arun_with_retry,
-    run_with_retry_sync,
 )
 from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
@@ -64,46 +63,8 @@ def _context_window_for(model: str) -> int:
     return 128_000
 
 
-def _compact_messages(model: str, messages: list) -> tuple[str, dict]:
+async def _compact_messages(model: str, messages: list) -> tuple[str, dict]:
     """Summarize message history for context compaction. Returns (summary, usage)."""
-    import json
-
-    to_summarize = messages[1:] if len(messages) > 1 else messages
-    try:
-        raw = json.loads(ModelMessagesTypeAdapter.dump_json(to_summarize))
-        parts = []
-        for msg in raw:
-            kind = msg.get("kind", "unknown")
-            for part in msg.get("parts", []):
-                part_kind = part.get("part_kind", "")
-                content = part.get("content", "")
-                if isinstance(content, str) and content:
-                    parts.append(f"[{kind}/{part_kind}]: {content}")
-        history_text = "\n\n".join(parts)
-    except Exception as exc:
-        logger.warning(f"Message serialization failed: {exc}")
-        history_text = str(to_summarize)
-
-    summary_prompt = (
-        "Summarize the following conversation history, preserving all key findings, "
-        "actions taken, commands run, outputs observed, hypotheses formed, and current "
-        "state. Be detailed enough for the agent to continue without losing context.\n\n"
-        f"<history>\n{history_text}\n</history>"
-    )
-    compactor: Agent[None, str] = Agent(model, output_type=str)
-    compact_result = run_with_retry_sync(compactor, summary_prompt)
-    u = compact_result.usage()
-    usage = {
-        "input_tokens": u.input_tokens or 0,
-        "output_tokens": u.output_tokens or 0,
-        "cached_input_tokens": 0,
-    }
-    logger.info(f"Context compacted: {len(history_text)} chars → {len(compact_result.output)} chars")
-    return compact_result.output, usage
-
-
-async def _async_compact_messages(model: str, messages: list) -> tuple[str, dict]:
-    """Async variant of ``_compact_messages``."""
     import json
 
     to_summarize = messages[1:] if len(messages) > 1 else messages
@@ -194,83 +155,8 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 return self._system_prompt_override
             return _render(f"{ctx.deps.stage}_agent_system")
 
-    def run(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
-        """Run with context compaction. Returns (output, usage).
-
-        Structured output (SRESubmission) guarantees the agent produces a valid
-        answer — no reminder loop needed.
-        """
-        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
-        context_window = _context_window_for(self._model)
-        initial_prompt = user_prompt
-        current_prompt = user_prompt
-        result = None
-
-        while True:
-            try:
-                result = self._run(current_prompt, _run_ctx=run_ctx)
-            except (UnexpectedModelBehavior, UsageLimitExceeded) as exc:
-                if self.deps.state.submitted:
-                    logger.warning(f"Model returned unexpected output after submitting; treating as complete. ({exc})")
-                else:
-                    logger.warning(
-                        f"Model returned unexpected output without submitting; treating as unsubmitted. ({exc})"
-                    )
-                usage["input_tokens"] += self.current_run_usage.input_tokens or 0
-                usage["output_tokens"] += self.current_run_usage.output_tokens or 0
-                break
-
-            u = result.usage()
-            input_tokens = u.input_tokens or 0
-            output_tokens = u.output_tokens or 0
-            usage["input_tokens"] += input_tokens
-            usage["output_tokens"] += output_tokens
-
-            # Structured output guarantees a valid SRESubmission
-            output = result.output
-            self.deps.state.submitted = True
-            self.deps.state.answer = output.answer
-            self.deps.state.answer_justification = output.justification
-            self.deps.state.answer_causal_chain = output.causal_chain
-            self.deps.state.answer_reflection = output.reflection
-
-            # Write to shared file
-            iteration = self.deps.iteration
-            if self.deps.stage == "diagnosis":
-                entry = f"\n### Iteration {iteration} — Agent Hypothesis\n[Submitted — pending judge review]\n"
-            else:
-                entry = (
-                    f"\n### Iteration {iteration} — Agent Strategy\n"
-                    f"**Mitigation**: {output.answer}\n"
-                    f"**Justification**: {output.justification}\n"
-                )
-            try:
-                self.deps.shared_file.append(entry)
-            except Exception as e:
-                logger.warning(f"Error writing to shared file: {e}")
-
-            # Context compaction: if context is too large, compact and re-run
-            if input_tokens > self.CONTEXT_COMPACT_THRESHOLD * context_window:
-                logger.warning(
-                    f"Context approaching limit ({input_tokens} > "
-                    f"{self.CONTEXT_COMPACT_THRESHOLD * context_window:.0f}). Compacting..."
-                )
-                summary, compact_usage = _compact_messages(self._model, result.all_messages())
-                for k, v in compact_usage.items():
-                    usage[k] = usage.get(k, 0) + v
-                current_prompt = initial_prompt + "\n\nHere's a summary of the previous conversation:\n\n" + summary
-                logger.warning("Context compacted. Restarting with summary.")
-                continue
-
-            break
-
-        answer = self.deps.state.answer or ""
-        if answer:
-            logger.info(f"Agent answer: {answer}")
-        return answer, usage
-
     async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
-        """Async variant of ``run()``. Uses ``_arun`` to stay on the caller's event loop."""
+        """Run with context compaction. Returns (output, usage)."""
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
         context_window = _context_window_for(self._model)
         initial_prompt = user_prompt
@@ -318,7 +204,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                     f"Context approaching limit ({input_tokens} > "
                     f"{self.CONTEXT_COMPACT_THRESHOLD * context_window:.0f}). Compacting..."
                 )
-                summary, compact_usage = await _async_compact_messages(self._model, result.all_messages())
+                summary, compact_usage = await _compact_messages(self._model, result.all_messages())
                 for k, v in compact_usage.items():
                     usage[k] = usage.get(k, 0) + v
                 current_prompt = initial_prompt + "\n\nHere's a summary of the previous conversation:\n\n" + summary

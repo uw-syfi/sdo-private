@@ -650,7 +650,7 @@ class TestSubmitVerdict:
         ctx = _make_judge_ctx(tmp_path)
         assert ctx.deps.state.hypothesis_revealed is False
 
-        result = submit_verdict(ctx, False, "reason", "answer")
+        result = asyncio.run(submit_verdict(ctx, False, "reason", "answer"))
         assert "Error" in result
         assert "reveal_agent_hypothesis" in result
         assert ctx.deps.state.submitted is False
@@ -661,10 +661,10 @@ class TestSubmitVerdict:
         ctx = _make_judge_ctx(tmp_path)
         ctx.deps.state.hypothesis_revealed = True
 
-        with patch("sregym_agents.crucible.tools._run_async") as mock_run:
-            submit_verdict(ctx, False, "not good enough", "answer")
+        with patch("sregym_agents.crucible.tools._submit_to_benchmark", new_callable=AsyncMock) as mock_submit:
+            asyncio.run(submit_verdict(ctx, False, "not good enough", "answer"))
 
-        mock_run.assert_not_called()
+        mock_submit.assert_not_called()
         assert ctx.deps.state.submitted is True
         assert ctx.deps.state.verdict == "REJECTED"
 
@@ -675,8 +675,12 @@ class TestSubmitVerdict:
         ctx.deps.state.hypothesis_revealed = True
 
         oracle = {"Diagnosis": {"success": True}}
-        with patch("sregym_agents.crucible.tools._run_async", return_value=(True, "Benchmark accepted...", oracle)):
-            submit_verdict(ctx, True, "great work", "answer")
+        with patch(
+            "sregym_agents.crucible.tools._submit_to_benchmark",
+            new_callable=AsyncMock,
+            return_value=(True, "Benchmark accepted...", oracle),
+        ):
+            asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
 
         assert ctx.deps.state.submitted is True
         assert ctx.deps.state.verdict == "APPROVED"
@@ -688,8 +692,12 @@ class TestSubmitVerdict:
         ctx = _make_judge_ctx(tmp_path)
         ctx.deps.state.hypothesis_revealed = True
 
-        with patch("sregym_agents.crucible.tools._run_async", side_effect=RuntimeError("connection refused")):
-            submit_verdict(ctx, True, "great", "answer")
+        with patch(
+            "sregym_agents.crucible.tools._submit_to_benchmark",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("connection refused"),
+        ):
+            asyncio.run(submit_verdict(ctx, True, "great", "answer"))
 
         assert ctx.deps.state.submitted is True
         assert "<benchmark_result>" in shared.read_text()
@@ -702,8 +710,12 @@ class TestSubmitVerdict:
         ctx.deps.state.hypothesis_revealed = True
 
         oracle = {"Diagnosis": {"success": True}}
-        with patch("sregym_agents.crucible.tools._run_async", return_value=(True, "Benchmark accepted...", oracle)):
-            result = submit_verdict(ctx, True, "great work", "answer")
+        with patch(
+            "sregym_agents.crucible.tools._submit_to_benchmark",
+            new_callable=AsyncMock,
+            return_value=(True, "Benchmark accepted...", oracle),
+        ):
+            result = asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
 
         assert "<benchmark_result>" not in result
 
@@ -714,8 +726,12 @@ class TestSubmitVerdict:
         ctx.deps.state.hypothesis_revealed = True
 
         oracle = {"Diagnosis": {"success": True}}
-        with patch("sregym_agents.crucible.tools._run_async", return_value=(True, "Benchmark accepted...", oracle)):
-            submit_verdict(ctx, True, "great work", "answer")
+        with patch(
+            "sregym_agents.crucible.tools._submit_to_benchmark",
+            new_callable=AsyncMock,
+            return_value=(True, "Benchmark accepted...", oracle),
+        ):
+            asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
 
         assert "<benchmark_result>" in shared.read_text()
 
@@ -727,14 +743,15 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._run_async",
+            "sregym_agents.crucible.tools._submit_to_benchmark",
+            new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
-        ) as mock_run:
-            submit_verdict(ctx, True, "great work", "answer")
-            assert mock_run.call_count == 1
+        ) as mock_submit:
+            asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
+            assert mock_submit.call_count == 1
 
-            result2 = submit_verdict(ctx, False, "changed my mind", "answer2")
-            assert mock_run.call_count == 1  # benchmark not called again
+            result2 = asyncio.run(submit_verdict(ctx, False, "changed my mind", "answer2"))
+            assert mock_submit.call_count == 1  # benchmark not called again
 
         assert "already submitted" in result2.lower()
         assert ctx.deps.state.verdict == "APPROVED"  # not overwritten
@@ -744,8 +761,7 @@ class TestSubmitVerdict:
         ctx.deps.shared_file = SharedFile(tmp_path)  # directory — open will fail
         ctx.deps.state.hypothesis_revealed = True
 
-        with patch("sregym_agents.crucible.tools._run_async", return_value=(False, "rejected", None)):
-            result = submit_verdict(ctx, False, "reason", "answer")
+        result = asyncio.run(submit_verdict(ctx, False, "reason", "answer"))
 
         assert "Error writing verdict" in result
 
@@ -864,8 +880,7 @@ class TestJudgeToolSequence:
         result = reveal_agent_hypothesis(ctx)
         assert result == hypothesis
 
-        with patch("sregym_agents.crucible.tools._run_async"):
-            submit_verdict(ctx, False, "hypothesis is correct but missing specifics", "disk full")
+        asyncio.run(submit_verdict(ctx, False, "hypothesis is correct but missing specifics", "disk full"))
 
         content = shared.read_text()
         assert "Judge Independent Findings" in content
@@ -885,7 +900,7 @@ class TestJudgeToolSequence:
         ctx = _make_judge_ctx(tmp_path)
         ctx.deps.state.independent_findings_submitted = True
         # findings submitted but hypothesis not revealed
-        result = submit_verdict(ctx, False, "reason", "answer")
+        result = asyncio.run(submit_verdict(ctx, False, "reason", "answer"))
         assert "Error" in result
         assert ctx.deps.state.submitted is False
 
@@ -893,7 +908,7 @@ class TestJudgeToolSequence:
         shared = tmp_path / "shared.md"
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
-        result = submit_verdict(ctx, False, "reason", "answer")
+        result = asyncio.run(submit_verdict(ctx, False, "reason", "answer"))
         assert "Error" in result
         assert ctx.deps.state.submitted is False
 
@@ -915,8 +930,7 @@ class TestJudgeToolSequence:
         ctx = _make_judge_ctx(tmp_path, hypothesis_text=hypothesis)
         submit_independent_findings(ctx, "findings for iter 1")
         reveal_agent_hypothesis(ctx)
-        with patch("sregym_agents.crucible.tools._run_async"):
-            submit_verdict(ctx, False, "not specific enough", "disk full")
+        asyncio.run(submit_verdict(ctx, False, "not specific enough", "disk full"))
 
         # Iteration 2 — fresh state
         state2 = SharedState()
@@ -937,7 +951,7 @@ class TestJudgeToolSequence:
                 new_callable=AsyncMock,
                 return_value=(True, "Benchmark accepted", {"Diagnosis": {"success": True}}),
             ):
-                return submit_verdict(ctx, True, "great work", "answer")
+                return await submit_verdict(ctx, True, "great work", "answer")
 
         result = asyncio.run(_run())
         assert ctx.deps.state.verdict == "APPROVED"

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import concurrent.futures
 import fcntl
 import json
 import logging
@@ -212,12 +211,6 @@ class TriageDeps:
 def _agent_cwd() -> Path:
     """Return the working directory for agent tools (from ``SREGYM_EXP_ENV`` or ``'.'``)."""
     return Path(os.getenv("SREGYM_EXP_ENV", "."))
-
-
-def _run_async(coro):
-    """Run *coro* safely even when a pydantic-ai event loop is already running."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
 
 
 def _run_bash_sync(cmd: str) -> str:
@@ -1417,7 +1410,7 @@ def reveal_agent_hypothesis(
     return ctx.deps.hypothesis_text
 
 
-def submit_verdict(
+async def submit_verdict(
     ctx: RunContext[JudgeDeps],
     verdict: bool,
     reasoning: str,
@@ -1448,7 +1441,7 @@ def submit_verdict(
     benchmark_block = ""
     if verdict:
         try:
-            success, message, oracle = _run_async(_submit_to_benchmark(ctx.deps.submit_mcp_url, submission_ans, stage))
+            success, message, oracle = await _submit_to_benchmark(ctx.deps.submit_mcp_url, submission_ans, stage)
             oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
             benchmark_block = (
                 f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n{oracle_text}\n</benchmark_result>\n"
