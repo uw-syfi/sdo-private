@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -118,81 +121,114 @@ class TestSharedFileInit:
 # ---------------------------------------------------------------------------
 
 
+def _mock_httpx_response(stage: str) -> MagicMock:
+    """Build a fake httpx-style response with the given stage in the JSON body."""
+    resp = MagicMock()
+    resp.json.return_value = {"stage": stage}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def _make_mock_client(**kwargs) -> AsyncMock:
+    """Build a mock httpx.AsyncClient with async context-manager support."""
+    client = AsyncMock(spec=httpx.AsyncClient)
+    for k, v in kwargs.items():
+        setattr(client, k, v)
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    return client
+
+
+def _counter_clock(step: float = 1.0):
+    """Return a callable that increments by *step* on each call (starts at 0)."""
+    n = {"v": -step}
+
+    def tick():
+        n["v"] += step
+        return n["v"]
+
+    return tick
+
+
 class TestWaitForMitigationStage:
-    def test_returns_immediately_when_stage_is_mitigation(self):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"stage": "mitigation"}
-        mock_resp.raise_for_status = MagicMock()
+    @pytest.mark.asyncio
+    async def test_returns_immediately_when_stage_is_mitigation(self):
+        client = _make_mock_client(
+            get=AsyncMock(return_value=_mock_httpx_response("mitigation")),
+        )
 
         with (
-            patch("sregym_agents.crucible.orchestrator.requests.get", return_value=mock_resp),
-            patch("sregym_agents.crucible.orchestrator.time.sleep") as mock_sleep,
-            patch("sregym_agents.crucible.orchestrator.time.time", side_effect=[0.0, 1.0]),
+            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
+            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=_counter_clock()),
         ):
-            _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
+            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
 
         mock_sleep.assert_not_called()
 
-    def test_polls_until_stage_matches(self):
-        responses = [
-            MagicMock(**{"json.return_value": {"stage": "diagnosis"}, "raise_for_status": MagicMock()}),
-            MagicMock(**{"json.return_value": {"stage": "diagnosis"}, "raise_for_status": MagicMock()}),
-            MagicMock(**{"json.return_value": {"stage": "mitigation"}, "raise_for_status": MagicMock()}),
-        ]
-        # time.time called at: start, loop check 1, loop check 2, loop check 3
-        times = [0.0, 1.0, 2.0, 3.0]
-
-        with (
-            patch("sregym_agents.crucible.orchestrator.requests.get", side_effect=responses),
-            patch("sregym_agents.crucible.orchestrator.time.sleep"),
-            patch("sregym_agents.crucible.orchestrator.time.time", side_effect=times),
-        ):
-            _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
-
-    def test_logs_warning_and_returns_on_timeout(self):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"stage": "diagnosis"}
-        mock_resp.raise_for_status = MagicMock()
-
-        # Use a callable side_effect so the mock never runs out of values.
-        # First call (loop start) returns 0; all subsequent calls return 400 (past timeout).
+    @pytest.mark.asyncio
+    async def test_polls_until_stage_matches(self):
         call_count = 0
 
-        def fake_time():
+        async def staged_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                return _mock_httpx_response("diagnosis")
+            return _mock_httpx_response("mitigation")
+
+        client = _make_mock_client(get=AsyncMock(side_effect=staged_get))
+
+        with (
+            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
+            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=_counter_clock()),
+        ):
+            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
+
+        assert mock_sleep.await_count == 2  # slept after two "diagnosis" responses
+
+    @pytest.mark.asyncio
+    async def test_logs_warning_and_returns_on_timeout(self):
+        client = _make_mock_client(
+            get=AsyncMock(return_value=_mock_httpx_response("diagnosis")),
+        )
+
+        # First call returns 0; all subsequent calls return past-timeout.
+        call_count = 0
+
+        def fake_monotonic():
             nonlocal call_count
             call_count += 1
             return 0.0 if call_count == 1 else 400.0
 
         with (
-            patch("sregym_agents.crucible.orchestrator.requests.get", return_value=mock_resp),
-            patch("sregym_agents.crucible.orchestrator.time.sleep"),
-            patch("sregym_agents.crucible.orchestrator.time.time", side_effect=fake_time),
+            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
+            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock),
+            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=fake_monotonic),
         ):
             # Should return without raising
-            _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
+            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
 
-    def test_handles_requests_exception_gracefully(self):
-        import requests as req
-
+    @pytest.mark.asyncio
+    async def test_handles_connection_error_gracefully(self):
         call_count = 0
-        times = [0.0, 1.0, 2.0, 3.0]
 
-        def fake_get(*args, **kwargs):
+        async def fake_get(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count < 3:
-                raise req.exceptions.ConnectionError("refused")
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = {"stage": "mitigation"}
-            mock_resp.raise_for_status = MagicMock()
-            return mock_resp
+                raise httpx.ConnectError("refused")
+            return _mock_httpx_response("mitigation")
+
+        client = _make_mock_client(get=AsyncMock(side_effect=fake_get))
 
         with (
-            patch("sregym_agents.crucible.orchestrator.requests.get", side_effect=fake_get),
-            patch("sregym_agents.crucible.orchestrator.time.sleep"),
-            patch("sregym_agents.crucible.orchestrator.time.time", side_effect=times),
+            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
+            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock),
+            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=_counter_clock()),
         ):
-            _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
+            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
 
 
 # ---------------------------------------------------------------------------
