@@ -1,4 +1,4 @@
-"""Middleware for the Crucible dual-agent judge loop."""
+"""Behavior-guard middleware: loop detection, stall detection, thinking repetition, timeout."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import time
 from collections import deque
 from typing import Any
 
-from libs.pydantic_agent._middleware import AgentMiddleware
+from libs.pydantic_agent import AgentMiddleware
 
 logger = logging.getLogger(__name__)
 

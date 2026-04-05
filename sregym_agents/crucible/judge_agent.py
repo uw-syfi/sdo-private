@@ -14,15 +14,16 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from libs.agent_mw import (
     FixedPathProvider,
+    LoopDetectionMiddleware,
     RetryMiddleware,
     SoftLimitExtension,
+    TimeoutMiddleware,
     TrajectoryMiddleware,
     TurnLoggingMiddleware,
 )
 from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
-from sregym_agents.crucible.middleware import LoopDetectionMiddleware, TimeoutMiddleware
 from sregym_agents.crucible.tools import (
     THINKING_BUDGET,
     JudgeDeps,

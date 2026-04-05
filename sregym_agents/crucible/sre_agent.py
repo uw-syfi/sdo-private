@@ -14,8 +14,12 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from libs.agent_mw import (
     FixedPathProvider,
+    LoopDetectionMiddleware,
     RetryMiddleware,
     SoftLimitExtension,
+    StallDetectionMiddleware,
+    ThinkingRepetitionMiddleware,
+    TimeoutMiddleware,
     TrajectoryMiddleware,
     TurnLoggingMiddleware,
     arun_with_retry,
@@ -23,12 +27,6 @@ from libs.agent_mw import (
 from libs.pydantic_agent import thinking_settings
 from libs.pydantic_agent._base import BaseAgent
 from sregym_agents.crucible._prompts import _render
-from sregym_agents.crucible.middleware import (
-    LoopDetectionMiddleware,
-    StallDetectionMiddleware,
-    ThinkingRepetitionMiddleware,
-    TimeoutMiddleware,
-)
 from sregym_agents.crucible.tools import (
     MAX_OUTPUT_TOKENS,
     THINKING_BUDGET,

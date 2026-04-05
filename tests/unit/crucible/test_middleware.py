@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
-from sregym_agents.crucible.middleware import (
+from libs.agent_mw import (
     LoopDetectionMiddleware,
     StallDetectionMiddleware,
     ThinkingRepetitionMiddleware,
@@ -202,7 +202,7 @@ class TestStallDetectionMiddleware:
     def test_no_trigger_within_time_gate(self):
         """No stall detection before min_elapsed_seconds."""
         # Start at t=0, still at t=60 (< 120s gate)
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [60.0] * 10):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [60.0] * 10):
             mw = StallDetectionMiddleware(max_no_tool_requests=2, min_elapsed_seconds=120)
             mw.before_run()
             # Multiple no-tool requests within time gate
@@ -214,7 +214,7 @@ class TestStallDetectionMiddleware:
     def test_no_trigger_with_tool_calls(self):
         """Tool calls reset the counter."""
         # Past time gate
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [200.0] * 20):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [200.0] * 20):
             mw = StallDetectionMiddleware(max_no_tool_requests=3, min_elapsed_seconds=120)
             mw.before_run()
             for step in range(2, 10):
@@ -225,7 +225,7 @@ class TestStallDetectionMiddleware:
 
     def test_no_trigger_below_threshold(self):
         """Fewer than max_no_tool_requests doesn't trigger."""
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [200.0] * 10):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [200.0] * 10):
             mw = StallDetectionMiddleware(max_no_tool_requests=5, min_elapsed_seconds=120)
             mw.before_run()
             # 4 no-tool requests (below threshold of 5)
@@ -236,7 +236,7 @@ class TestStallDetectionMiddleware:
 
     def test_trigger_after_threshold(self):
         """5 consecutive no-tool requests past time gate triggers nudge."""
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [200.0] * 20):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [200.0] * 20):
             mw = StallDetectionMiddleware(max_no_tool_requests=5, min_elapsed_seconds=120)
             mw.before_run()
             for step in range(2, 7):  # steps 2-6: exactly 5 no-tool requests
@@ -245,7 +245,7 @@ class TestStallDetectionMiddleware:
 
     def test_nudge_injected_into_messages(self):
         """Nudge is appended to messages."""
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [200.0] * 20):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [200.0] * 20):
             mw = StallDetectionMiddleware(max_no_tool_requests=2, min_elapsed_seconds=0)
             mw.before_run()
             mw.before_model_req_edit_messages(_make_ctx(run_step=2), [])
@@ -254,7 +254,7 @@ class TestStallDetectionMiddleware:
 
     def test_force_submit_after_max_nudges(self):
         """After max_nudges, tools are stripped."""
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [200.0] * 50):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [200.0] * 50):
             mw = StallDetectionMiddleware(max_no_tool_requests=2, min_elapsed_seconds=0, max_nudges=2)
             mw.before_run()
             # Generate enough no-tool requests to exhaust nudges
@@ -268,7 +268,7 @@ class TestStallDetectionMiddleware:
 
     def test_tool_call_resets_counter_past_gate(self):
         """A tool call resets the consecutive counter even past the time gate."""
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [200.0] * 20):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [200.0] * 20):
             mw = StallDetectionMiddleware(max_no_tool_requests=5, min_elapsed_seconds=120)
             mw.before_run()
             # 3 no-tool requests
@@ -282,7 +282,7 @@ class TestStallDetectionMiddleware:
 
     def test_first_request_skipped(self):
         """run_step=1 is skipped (no previous request to evaluate)."""
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0, 200.0]):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0, 200.0]):
             mw = StallDetectionMiddleware(max_no_tool_requests=1, min_elapsed_seconds=0)
             mw.before_run()
             messages = mw.before_model_req_edit_messages(_make_ctx(run_step=1), [])
@@ -290,7 +290,7 @@ class TestStallDetectionMiddleware:
         assert mw._consecutive_no_tool == 0
 
     def test_after_run_resets(self):
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0] + [200.0] * 10):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0] + [200.0] * 10):
             mw = StallDetectionMiddleware(max_no_tool_requests=2, min_elapsed_seconds=0)
             mw.before_run()
             for step in range(2, 6):
@@ -309,20 +309,20 @@ class TestStallDetectionMiddleware:
 
 class TestTimeoutMiddleware:
     def test_within_timeout_no_nudge(self):
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0, 5.0]):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0, 5.0]):
             mw = TimeoutMiddleware(timeout_seconds=60)
             messages = mw.before_model_req_edit_messages(_make_ctx(), [])
         assert messages == []
 
     def test_past_timeout_sets_nudge(self):
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0, 3700.0]):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0, 3700.0]):
             mw = TimeoutMiddleware(timeout_seconds=3600)
             messages = mw.before_model_req_edit_messages(_make_ctx(), [])
         assert len(messages) == 1
         assert mw._reminders == 1
 
     def test_nudge_text_includes_elapsed_minutes(self):
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0, 3700.0]):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0, 3700.0]):
             mw = TimeoutMiddleware(timeout_seconds=3600)
             messages = mw.before_model_req_edit_messages(_make_ctx(), [])
         nudge_text = messages[0].parts[0].content
@@ -330,7 +330,7 @@ class TestTimeoutMiddleware:
 
     def test_max_reminders_then_force_submit(self):
         times = [0.0] + [3700.0] * 10
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=times):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=times):
             mw = TimeoutMiddleware(timeout_seconds=3600, max_timeout_reminders=2)
             # Exhaust reminders
             for _ in range(2):
@@ -343,7 +343,7 @@ class TestTimeoutMiddleware:
 
     def test_force_submit_strips_tools(self):
         times = [0.0] + [3700.0] * 10
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=times):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=times):
             mw = TimeoutMiddleware(timeout_seconds=3600, max_timeout_reminders=1)
             mw.before_model_req_edit_messages(_make_ctx(), [])  # reminder 1
             mw.before_model_req_edit_messages(_make_ctx(), [])  # force submit
@@ -361,7 +361,7 @@ class TestTimeoutMiddleware:
 
     def test_fires_without_tool_calls(self):
         """Timeout now fires on model requests, not tool calls."""
-        with patch("sregym_agents.crucible.middleware.time.monotonic", side_effect=[0.0, 3700.0]):
+        with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0, 3700.0]):
             mw = TimeoutMiddleware(timeout_seconds=3600)
             # No tool calls — just a model request
             messages = mw.before_model_req_edit_messages(_make_ctx(), [])

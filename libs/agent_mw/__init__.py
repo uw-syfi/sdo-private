@@ -1,3 +1,9 @@
+from ._behavior_guards import (
+    LoopDetectionMiddleware,
+    StallDetectionMiddleware,
+    ThinkingRepetitionMiddleware,
+    TimeoutMiddleware,
+)
 from ._http_retry import request_with_retry
 from ._retry import RetryMiddleware, arun_with_retry, run_with_retry_sync
 from ._soft_limit import SoftLimitExtension
@@ -6,8 +12,12 @@ from ._turn_logger import TurnLoggingMiddleware
 
 __all__ = [
     "FixedPathProvider",
+    "LoopDetectionMiddleware",
     "RetryMiddleware",
     "SoftLimitExtension",
+    "StallDetectionMiddleware",
+    "ThinkingRepetitionMiddleware",
+    "TimeoutMiddleware",
     "TrajectoryMiddleware",
     "TrajectoryPathProvider",
     "TurnLoggingMiddleware",
