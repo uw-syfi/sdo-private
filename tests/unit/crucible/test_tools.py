@@ -795,8 +795,10 @@ class TestSubmitIndependentFindings:
         shared = tmp_path / "shared.md"
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
-        with patch.object(ctx.deps.shared_file, "append") as mock_append, \
-                patch.object(ctx.deps.shared_file, "open") as mock_open:
+        with (
+            patch.object(ctx.deps.shared_file, "append") as mock_append,
+            patch.object(ctx.deps.shared_file, "open") as mock_open,
+        ):
             submit_independent_findings(ctx, "some findings")
         mock_append.assert_called_once()
         mock_open.assert_not_called()
