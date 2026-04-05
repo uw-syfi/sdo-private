@@ -133,7 +133,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     def _render(self, template: str, **kwargs: object) -> str:
         assert self.prompts is not None, f"PromptRenderer required for {template}"
-        return self._render(template, **kwargs)
+        return self.prompts.render(template, **kwargs)
 
     def _seed_from(self, seed_kb_dir: Path) -> None:
         """Copy KB files from a seed directory if local files don't exist yet."""
