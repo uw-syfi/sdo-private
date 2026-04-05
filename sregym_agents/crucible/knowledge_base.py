@@ -18,6 +18,7 @@ from libs.agent_mw import arun_with_retry
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
+    from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +109,12 @@ class StructuredKnowledgeBase(KnowledgeBase):
         model_id: str,
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
-        include_benchmark_results: bool = False,
-        enable_heuristic_refinement: bool = True,
-        include_incident_files: bool = True,
+        flags: CrucibleFlags | None = None,
         renderer: PromptRenderer | None = None,
     ):
+        from sregym_agents.crucible.orchestrator import CrucibleFlags as _CrucibleFlags
+        if flags is None:
+            flags = _CrucibleFlags()
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
@@ -120,9 +122,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.app_dir = self.kb_dir / _sanitize_app_name(self.app_name)
         self.app_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
-        self.include_benchmark_results = include_benchmark_results
-        self.enable_heuristic_refinement = enable_heuristic_refinement
-        self.include_incident_files = include_incident_files
+        self.include_benchmark_results = flags.include_benchmark_results
+        self.enable_heuristic_refinement = flags.enable_heuristic_refinement
+        self.include_incident_files = flags.include_incident_files
         self.prompts = renderer
 
         if seed_kb_dir is not None:
@@ -530,17 +532,18 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         model_id: str,
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
-        include_benchmark_results: bool = False,
-        enable_heuristic_refinement: bool = True,
-        include_incident_files: bool = True,
+        flags: CrucibleFlags | None = None,
         renderer: PromptRenderer | None = None,
     ):
+        from sregym_agents.crucible.orchestrator import CrucibleFlags as _CrucibleFlags
+        if flags is None:
+            flags = _CrucibleFlags()
         self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
         self.app_name = app_name
-        self.include_benchmark_results = include_benchmark_results
+        self.include_benchmark_results = flags.include_benchmark_results
         self.prompts = renderer
 
     @property
@@ -611,9 +614,7 @@ def create_knowledge_base(
     model_id: str,
     app_name: str = "unknown",
     seed_kb_dir: Path | None = None,
-    include_benchmark_results: bool = False,
-    enable_heuristic_refinement: bool = True,
-    include_incident_files: bool = True,
+    flags: CrucibleFlags | None = None,
     renderer: PromptRenderer | None = None,
 ) -> KnowledgeBase:
     """Factory function to create a knowledge base implementation."""
@@ -624,9 +625,7 @@ def create_knowledge_base(
             model_id,
             app_name,
             seed_kb_dir,
-            include_benchmark_results=include_benchmark_results,
-            enable_heuristic_refinement=enable_heuristic_refinement,
-            include_incident_files=include_incident_files,
+            flags=flags,
             renderer=renderer,
         )
     if kb_type == "append-only":
@@ -635,9 +634,7 @@ def create_knowledge_base(
             kb_dir,
             model_id,
             app_name,
-            include_benchmark_results=include_benchmark_results,
-            enable_heuristic_refinement=enable_heuristic_refinement,
-            include_incident_files=include_incident_files,
+            flags=flags,
             renderer=renderer,
         )
     raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")

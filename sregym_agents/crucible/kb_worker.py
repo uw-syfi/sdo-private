@@ -23,6 +23,7 @@ from pathlib import Path
 
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.knowledge_base import create_knowledge_base
+from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +43,18 @@ async def process_manifest(manifest_path: Path) -> None:
     shared_files = [Path(p) for p in manifest["session_files"]]
     stage_outputs_file = Path(manifest["stage_outputs_file"]) if manifest.get("stage_outputs_file") else None
 
+    flags = CrucibleFlags(
+        include_benchmark_results=manifest.get("include_benchmark_results", False),
+        enable_heuristic_refinement=manifest.get("enable_heuristic_refinement", True),
+        include_incident_files=manifest.get("include_incident_files", True),
+    )
     kb = create_knowledge_base(
         kb_type=manifest["kb_type"],
         shared_files=shared_files,
         kb_dir=Path(manifest["kb_dir"]),
         model_id=manifest["model_id"],
         app_name=manifest["app_name"],
-        include_benchmark_results=manifest.get("include_benchmark_results", False),
-        enable_heuristic_refinement=manifest.get("enable_heuristic_refinement", True),
-        include_incident_files=manifest.get("include_incident_files", True),
+        flags=flags,
         renderer=renderer,
     )
 

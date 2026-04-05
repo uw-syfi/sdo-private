@@ -37,6 +37,7 @@ class CrucibleFlags:
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
     enable_heuristic_refinement: bool = True
+    include_incident_files: bool = True
 
 
 @dataclasses.dataclass(frozen=True)
