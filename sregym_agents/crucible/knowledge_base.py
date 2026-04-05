@@ -113,6 +113,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         renderer: PromptRenderer | None = None,
     ):
         from sregym_agents.crucible.orchestrator import CrucibleFlags as _CrucibleFlags
+
         if flags is None:
             flags = _CrucibleFlags()
         self.shared_files = shared_files
@@ -536,6 +537,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         renderer: PromptRenderer | None = None,
     ):
         from sregym_agents.crucible.orchestrator import CrucibleFlags as _CrucibleFlags
+
         if flags is None:
             flags = _CrucibleFlags()
         self.shared_files = shared_files
