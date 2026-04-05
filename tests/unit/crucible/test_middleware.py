@@ -327,7 +327,7 @@ class TestTimeoutMiddleware:
         with patch("libs.agent_mw._behavior_guards.time.monotonic", side_effect=[0.0, 3700.0]):
             mw = TimeoutMiddleware(timeout_seconds=3600)
             messages = mw.before_model_req_edit_messages(_make_ctx(), [])
-        nudge_text = messages[0].parts[0].content  # type: ignore[union-attr]
+        nudge_text = str(messages[0].parts[0].content)  # type: ignore[union-attr]
         assert "61 minutes" in nudge_text
 
     def test_max_reminders_then_force_submit(self):

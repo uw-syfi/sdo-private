@@ -35,7 +35,7 @@ class LoopDetectionMiddleware(AgentMiddleware):
     def on_function_tool_call(self, event: Any) -> None:
         tool_name: str = event.part.tool_name
         raw_args: Any = event.part.args
-        args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+        args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}  # type: ignore[assignment]
         fp = frozenset([(tool_name, repr(sorted(args.items())))])
         self._recent_fps.append(fp)
 
