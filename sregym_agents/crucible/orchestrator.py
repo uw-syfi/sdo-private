@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -10,7 +11,7 @@ import re
 import time
 from pathlib import Path
 
-import requests
+import httpx
 import yaml
 
 from sregym_agents.crucible._prompts import _render
@@ -151,20 +152,21 @@ def _init_mitigation_file(
     logger.info(f"Initialized mitigation shared file: {mitigation_file}")
 
 
-def _wait_for_mitigation_stage(api_base: str, timeout: int = 300) -> None:
+async def _wait_for_mitigation_stage(api_base: str, timeout: int = 300) -> None:
     """Poll until conductor reaches mitigation stage."""
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            resp = requests.get(f"{api_base}/status", timeout=5)
-            resp.raise_for_status()
-            stage = resp.json().get("stage")
-            if stage == "mitigation":
-                return
-            logger.debug(f"Stage: {stage!r}, waiting for mitigation...")
-        except Exception as e:
-            logger.debug(f"Status check failed: {e}")
-        time.sleep(1)
+    start = time.monotonic()
+    async with httpx.AsyncClient() as client:
+        while time.monotonic() - start < timeout:
+            try:
+                resp = await client.get(f"{api_base}/status", timeout=5)
+                resp.raise_for_status()
+                stage = resp.json().get("stage")
+                if stage == "mitigation":
+                    return
+                logger.debug(f"Stage: {stage!r}, waiting for mitigation...")
+            except Exception as e:
+                logger.debug(f"Status check failed: {e}")
+            await asyncio.sleep(1)
     logger.warning(f"Timed out waiting for mitigation stage after {timeout}s — proceeding anyway.")
 
 
@@ -727,7 +729,7 @@ async def run(
 
     api_base = f"http://{os.getenv('API_HOSTNAME', 'localhost')}:{os.getenv('API_PORT', '8000')}"
     logger.info("Waiting for benchmark to reach mitigation stage...")
-    _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
+    await _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
 
     mit_result = await _run_stage_loop(
         model,
