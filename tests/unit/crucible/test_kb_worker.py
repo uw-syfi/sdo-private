@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 def _write_manifest(pending_dir: Path, problem_id: str = "test_problem", **overrides) -> Path:
     """Helper to write a valid manifest file."""
     manifest = {
-        "session_files": [],
+        "session_files": {"diagnosis": None, "mitigation": None},
         "stage_outputs_file": None,
         "kb_dir": str(pending_dir.parent),
         "kb_type": "structured",
@@ -32,6 +32,7 @@ def _write_manifest(pending_dir: Path, problem_id: str = "test_problem", **overr
         "app_name": "test-app",
         "include_benchmark_results": False,
         "problem_id": problem_id,
+        "prompt_version": "v1",
         "timestamp": "20260401_120000",
         **overrides,
     }
@@ -50,7 +51,7 @@ class TestProcessManifest:
         session_file.write_text("session content")
         manifest_path = _write_manifest(
             pending_dir,
-            session_files=[str(session_file)],
+            session_files={"diagnosis": str(session_file), "mitigation": None},
         )
 
         mock_kb = AsyncMock()
@@ -124,7 +125,7 @@ class TestRunWorker:
         pending_dir = tmp_path / "pending"
         session_file = tmp_path / "session.md"
         session_file.write_text("content")
-        _write_manifest(pending_dir, session_files=[str(session_file)])
+        _write_manifest(pending_dir, session_files={"diagnosis": str(session_file), "mitigation": None})
 
         mock_kb = AsyncMock()
         with patch(

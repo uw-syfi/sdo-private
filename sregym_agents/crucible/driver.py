@@ -22,7 +22,7 @@ from filelock import FileLock
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
+from sregym_agents.crucible.knowledge_base import KnowledgeBase, SessionFiles, create_knowledge_base
 from sregym_agents.crucible.orchestrator import CrucibleConfig, CrucibleFlags
 
 logging.basicConfig(
@@ -301,7 +301,6 @@ async def _async_main(args: argparse.Namespace) -> None:
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
         kb = create_knowledge_base(
             kb_type=kb_type,
-            shared_files=[diagnosis_shared_file, mitigation_shared_file],
             kb_dir=Path(args.kb_dir),
             model_id=model_id,
             app_name=app_info.get("app_name", "unknown"),
@@ -373,17 +372,20 @@ async def _async_main(args: argparse.Namespace) -> None:
             logger.info(f"Saved stage outputs to {dest}")
 
         # Collect paths to session markdown copies already saved above
-        session_files: list[str] = []
+        session_files_manifest: dict | None = None
         if env_log_file:
             stem = Path(env_log_file).stem
-            for suffix in ["diagnosis", "mitigation"]:
-                p = Path(env_log_file).with_name(f"{stem}_{problem_id}_{suffix}.md")
-                if p.exists():
-                    session_files.append(str(p))
+            diag_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_diagnosis.md")
+            mit_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_mitigation.md")
+            if diag_p.exists():
+                session_files_manifest = {
+                    "diagnosis": str(diag_p),
+                    "mitigation": str(mit_p) if mit_p.exists() else None,
+                }
 
-        if session_files:
+        if session_files_manifest:
             manifest = {
-                "session_files": session_files,
+                "session_files": session_files_manifest,
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
@@ -409,7 +411,10 @@ async def _async_main(args: argparse.Namespace) -> None:
         else:
             # Standalone mode (no SREGYM_LOG_FILE) — run KB update inline
             logger.info("Knowledge base: updating inline (no sregym harness detected).")
-            await kb.update(stage_outputs_file=stage_outputs_file)
+            await kb.update(
+                SessionFiles(diagnosis=diagnosis_shared_file, mitigation=mitigation_shared_file),
+                stage_outputs_file=stage_outputs_file,
+            )
 
     logger.info("Crucible driver complete.")
 

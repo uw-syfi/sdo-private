@@ -46,6 +46,19 @@ class InjectedKB:
     arbitration_heuristics: Path | None = None
 
 
+@dataclasses.dataclass
+class SessionFiles:
+    """Session transcript files produced during a crucible run."""
+
+    diagnosis: Path | None = None
+    mitigation: Path | None = None
+
+    def read_all(self) -> list[str]:
+        """Read content from all existing session files."""
+        files = [f for f in (self.diagnosis, self.mitigation) if f is not None]
+        return [f.read_text() for f in files if f.exists()]
+
+
 _BENCHMARK_RESULT_RE = re.compile(r"<benchmark_result>.*?</benchmark_result>", re.DOTALL)
 _CITATION_RE = re.compile(r"\{\{ref:(incidents/[^}]+)\}\}")
 _MAX_CITATION_RETRIES = 2
@@ -91,7 +104,7 @@ class KnowledgeBase(abc.ABC):
         """Copy KB files into target_dir for agent consumption."""
 
     @abc.abstractmethod
-    async def update(self, stage_outputs_file: Path | None = None) -> None:
+    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
         """Update the knowledge base from the completed session."""
 
     @abc.abstractmethod
@@ -104,7 +117,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     def __init__(
         self,
-        shared_files: list[Path],
         kb_dir: Path,
         model_id: str,
         app_name: str = "unknown",
@@ -117,7 +129,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         if flags is None:
             flags = _CrucibleFlags()
-        self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
         self.app_name = app_name
@@ -420,13 +431,13 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.arbitration_heuristics_path.write_text(result)
         logger.info(f"Arbitration heuristics updated at {self.arbitration_heuristics_path}")
 
-    async def _refine_heuristics(self, stage_outputs_file: Path | None = None) -> None:
+    async def _refine_heuristics(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
         """Two-stage heuristic refinement: classify failure, then targeted edits."""
         stage_outputs = ""
         if stage_outputs_file and stage_outputs_file.exists():
             stage_outputs = stage_outputs_file.read_text().strip()
 
-        shared_session_parts = [sf.read_text() for sf in self.shared_files if sf.exists()]
+        shared_session_parts = session_files.read_all()
         shared_session = "\n\n".join(shared_session_parts).strip()
         if not shared_session:
             logger.info("No shared session content; skipping heuristic refinement.")
@@ -466,9 +477,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
             if isinstance(r, Exception):
                 logger.error(f"Heuristic refinement error: {r}")
 
-    async def update(self, stage_outputs_file: Path | None = None) -> None:
+    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
         """Summarize the completed session and update the knowledge base."""
-        parts = [sf.read_text() for sf in self.shared_files if sf.exists()]
+        parts = session_files.read_all()
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")
             return
@@ -513,7 +524,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         await self._distill_lessons()
         if self.enable_heuristic_refinement:
-            await self._refine_heuristics(stage_outputs_file)
+            await self._refine_heuristics(session_files, stage_outputs_file)
         else:
             logger.info("Heuristic refinement disabled; skipping.")
 
@@ -529,7 +540,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
 
     def __init__(
         self,
-        shared_files: list[Path],
         kb_dir: Path,
         model_id: str,
         app_name: str = "unknown",
@@ -541,7 +551,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
 
         if flags is None:
             flags = _CrucibleFlags()
-        self.shared_files = shared_files
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
@@ -572,8 +581,8 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         result = await arun_with_retry(agent, prompt)
         return result.output
 
-    async def update(self, stage_outputs_file: Path | None = None) -> None:
-        parts = [sf.read_text() for sf in self.shared_files if sf.exists()]
+    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
+        parts = session_files.read_all()
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")
             return
@@ -612,7 +621,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
 
 def create_knowledge_base(
     kb_type: str,
-    shared_files: list[Path],
     kb_dir: Path,
     model_id: str,
     app_name: str = "unknown",
@@ -624,7 +632,6 @@ def create_knowledge_base(
     """Factory function to create a knowledge base implementation."""
     if kb_type == "structured":
         return StructuredKnowledgeBase(
-            shared_files,
             kb_dir,
             model_id,
             app_name,
@@ -634,7 +641,6 @@ def create_knowledge_base(
         )
     if kb_type == "append-only":
         return AppendOnlyKnowledgeBase(
-            shared_files,
             kb_dir,
             model_id,
             app_name,

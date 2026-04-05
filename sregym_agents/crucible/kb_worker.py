@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.knowledge_base import create_knowledge_base
+from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
 from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,11 @@ async def process_manifest(manifest_path: Path) -> None:
     prompt_version = manifest["prompt_version"]
     renderer = PromptRenderer(prompt_version)
 
-    shared_files = [Path(p) for p in manifest["session_files"]]
+    sf = manifest["session_files"]
+    session_files = SessionFiles(
+        diagnosis=Path(sf["diagnosis"]) if sf.get("diagnosis") else None,
+        mitigation=Path(sf["mitigation"]) if sf.get("mitigation") else None,
+    )
     stage_outputs_file = Path(manifest["stage_outputs_file"]) if manifest.get("stage_outputs_file") else None
 
     flags = CrucibleFlags(
@@ -50,7 +54,6 @@ async def process_manifest(manifest_path: Path) -> None:
     )
     kb = create_knowledge_base(
         kb_type=manifest["kb_type"],
-        shared_files=shared_files,
         kb_dir=Path(manifest["kb_dir"]),
         model_id=manifest["model_id"],
         app_name=manifest["app_name"],
@@ -63,7 +66,7 @@ async def process_manifest(manifest_path: Path) -> None:
         manifest["problem_id"],
         manifest["app_name"],
     )
-    await kb.update(stage_outputs_file=stage_outputs_file)
+    await kb.update(session_files, stage_outputs_file=stage_outputs_file)
     logger.info("KB update complete for %s", manifest["problem_id"])
 
     completed_dir = manifest_path.parent.parent / "completed"
