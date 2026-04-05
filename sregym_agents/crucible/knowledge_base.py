@@ -131,6 +131,10 @@ class StructuredKnowledgeBase(KnowledgeBase):
         if seed_kb_dir is not None:
             self._seed_from(Path(seed_kb_dir))
 
+    def _render(self, template: str, **kwargs: object) -> str:
+        assert self.prompts is not None, f"PromptRenderer required for {template}"
+        return self._render(template, **kwargs)
+
     def _seed_from(self, seed_kb_dir: Path) -> None:
         """Copy KB files from a seed directory if local files don't exist yet."""
         sanitized = _sanitize_app_name(self.app_name)
@@ -285,7 +289,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
             logger.info("No KB content available for triage additions; returning empty.")
             return ""
 
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/extract_triage_checklist",
             operational_lessons=operational_lessons,
             long_term_summary=long_term_summary,
@@ -308,7 +312,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         return incident_id
 
     async def _summarize_session(self, content: str) -> str:
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/summarize_session",
             content=content,
             include_benchmark_results=self.include_benchmark_results,
@@ -318,7 +322,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
     async def _merge_into_long_term_summary(
         self, session_summary: str, prior_summary: str, incident_ref: str = ""
     ) -> str:
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/merge_summary", session_summary=session_summary, prior_summary=prior_summary, incident_ref=incident_ref
         )
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
@@ -343,7 +347,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         return _strip_citation_wrappers(output)
 
     async def _extract_operational_lessons(self, long_term_summary: str) -> str:
-        prompt = self.prompts.render("kb/extract_lessons", long_term_summary=long_term_summary)
+        prompt = self._render("kb/extract_lessons", long_term_summary=long_term_summary)
         return await self._call_llm(prompt)
 
     async def _distill_lessons(self) -> None:
@@ -376,7 +380,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _classify_failure(self, stage_outputs: str, shared_session: str) -> str:
         """Classify where in the agent pipeline the failure (or success) occurred."""
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/classify_failure",
             stage_outputs=stage_outputs,
             shared_session=shared_session,
@@ -385,7 +389,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _refine_diagnosis_heuristics(self, classification: str, stage_outputs: str) -> None:
         prior = self.diagnosis_heuristics_path.read_text() if self.diagnosis_heuristics_path.exists() else ""
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/refine_diagnosis_heuristics",
             prior_guidance=prior,
             failure_classification=classification,
@@ -397,7 +401,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _refine_triage_heuristics(self, classification: str, stage_outputs: str) -> None:
         prior = self.triage_heuristics_path.read_text() if self.triage_heuristics_path.exists() else ""
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/refine_triage_heuristics",
             prior_guidance=prior,
             failure_classification=classification,
@@ -409,7 +413,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _refine_arbitration_heuristics(self, classification: str, stage_outputs: str) -> None:
         prior = self.arbitration_heuristics_path.read_text() if self.arbitration_heuristics_path.exists() else ""
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/refine_arbitration_heuristics",
             prior_guidance=prior,
             failure_classification=classification,
@@ -548,6 +552,10 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         self.include_benchmark_results = flags.include_benchmark_results
         self.prompts = renderer
 
+    def _render(self, template: str, **kwargs: object) -> str:
+        assert self.prompts is not None, f"PromptRenderer required for {template}"
+        return self.prompts.render(template, **kwargs)
+
     @property
     def knowledge_path(self) -> Path:
         return self.kb_dir / KB_APPEND_FILENAME
@@ -601,7 +609,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         logger.info(f"Appended session summary to {self.knowledge_path}")
 
     async def _summarize_session(self, content: str) -> str:
-        prompt = self.prompts.render(
+        prompt = self._render(
             "kb/summarize_session",
             content=content,
             include_benchmark_results=self.include_benchmark_results,

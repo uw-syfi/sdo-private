@@ -118,6 +118,7 @@ class VerifiedDifferentialDiagnosis(BaseModel):
         description="Subset of verified_candidates where applies=True, for convenience",
     )
     novel_cause_signals: str = Field(description="What to look for if none of the candidates match")
+    caveats: str = Field(default="", description="What doesn't match; what to verify before assuming patterns apply")
 
 
 class HypothesisCoverageVerdict(BaseModel):

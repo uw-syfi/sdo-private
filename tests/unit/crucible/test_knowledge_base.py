@@ -30,6 +30,7 @@ from sregym_agents.crucible.knowledge_base import (
     _strip_citation_wrappers,
     create_knowledge_base,
 )
+from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 _renderer = PromptRenderer("v1")
 
@@ -215,7 +216,7 @@ class TestInjectIncidents:
             kb_dir,
             model_id="m",
             app_name="test-app",
-            include_incident_files=False,
+            flags=CrucibleFlags(include_incident_files=False),
         )
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
         for i in range(3):
@@ -280,7 +281,7 @@ class TestUpdate:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            include_incident_files=False,
+            flags=CrucibleFlags(include_incident_files=False),
             renderer=_renderer,
         )
 
@@ -585,7 +586,7 @@ class TestCreateKnowledgeBase:
             [shared],
             tmp_path / "kb",
             model_id="m",
-            include_incident_files=False,
+            flags=CrucibleFlags(include_incident_files=False),
         )
         assert isinstance(kb, StructuredKnowledgeBase)
         assert kb.include_incident_files is False
@@ -598,7 +599,7 @@ class TestCreateKnowledgeBase:
             [shared],
             tmp_path / "kb",
             model_id="m",
-            include_benchmark_results=True,
+            flags=CrucibleFlags(include_benchmark_results=True),
         )
         assert isinstance(kb, StructuredKnowledgeBase)
         assert kb.include_benchmark_results is True
@@ -611,7 +612,7 @@ class TestCreateKnowledgeBase:
             [shared],
             tmp_path / "kb",
             model_id="m",
-            include_benchmark_results=True,
+            flags=CrucibleFlags(include_benchmark_results=True),
         )
         assert isinstance(kb, AppendOnlyKnowledgeBase)
         assert kb.include_benchmark_results is True
@@ -629,7 +630,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            include_benchmark_results=True,
+            flags=CrucibleFlags(include_benchmark_results=True),
             renderer=_renderer,
         )
         mock_llm.side_effect = ["session summary", "merged summary", "lessons"]
@@ -649,7 +650,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            include_benchmark_results=False,
+            flags=CrucibleFlags(include_benchmark_results=False),
             renderer=_renderer,
         )
         mock_llm.side_effect = ["session summary", "merged summary", "lessons"]
@@ -667,7 +668,7 @@ class TestIncludeBenchmarkResults:
             [shared],
             tmp_path / "kb",
             model_id="m",
-            include_benchmark_results=True,
+            flags=CrucibleFlags(include_benchmark_results=True),
             renderer=_renderer,
         )
         mock_llm.return_value = "session summary"
@@ -685,7 +686,7 @@ class TestIncludeBenchmarkResults:
             [shared],
             tmp_path / "kb",
             model_id="m",
-            include_benchmark_results=False,
+            flags=CrucibleFlags(include_benchmark_results=False),
             renderer=_renderer,
         )
         mock_llm.return_value = "session summary"
@@ -703,7 +704,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            include_benchmark_results=True,
+            flags=CrucibleFlags(include_benchmark_results=True),
         )
         await kb.update()
         assert not kb.summary_path.exists()

@@ -323,7 +323,7 @@ class TestHypothesisTextPassedToJudgeDeps:
                     shared_file=shared,
                     submit_mcp_url="http://localhost:9954/submit/sse",
                     renderer=mock_renderer,
-                    flags=CrucibleFlags(prompt_version="v1", enable_judge=True),
+                    flags=CrucibleFlags(enable_judge=True),
                 )
             )
 
