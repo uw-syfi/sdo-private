@@ -16,7 +16,7 @@ from .base import KB_APPEND_FILENAME, InjectedKB, KnowledgeBase, SessionFiles, _
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.orchestrator import CrucibleFlags
+    from sregym_agents.crucible.config import CrucibleConfig
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +30,18 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         model_id: str,
         app_name: str = "unknown",
         *,
-        flags: CrucibleFlags | None = None,
+        config: CrucibleConfig | None = None,
         renderer: PromptRenderer,
     ):
-        from sregym_agents.crucible.orchestrator import CrucibleFlags as _CrucibleFlags
+        from sregym_agents.crucible.config import CrucibleConfig as _CrucibleConfig
 
-        if flags is None:
-            flags = _CrucibleFlags()
+        if config is None:
+            config = _CrucibleConfig()
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
         self.app_name = app_name
-        self.include_benchmark_results = flags.include_benchmark_results
+        self.include_benchmark_results = config.include_benchmark_results
         self.prompts = renderer
 
     @property

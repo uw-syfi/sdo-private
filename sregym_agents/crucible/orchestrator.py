@@ -17,6 +17,7 @@ from pydantic_ai.models import Model, infer_model
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
@@ -30,24 +31,6 @@ from sregym_agents.crucible.tools import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass(frozen=True)
-class CrucibleFlags:
-    enable_judge: bool = True
-    enable_ltm_retrieval: bool = False
-    include_benchmark_results: bool = False
-    enable_reflection: bool = True
-    include_incident_files: bool = True
-
-
-@dataclasses.dataclass(frozen=True)
-class CrucibleConfig:
-    prompt_version: str = "v2"
-    max_diagnosis_iterations: int = 5
-    max_mitigation_iterations: int = 5
-    wait_stage_timeout: int = 300
-    stage_timeout: int = 900  # 15 minutes max per diagnosis/mitigation stage
 
 
 @dataclasses.dataclass
@@ -206,14 +189,11 @@ async def _run_stage_loop(
     renderer: PromptRenderer,
     injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
-    flags: CrucibleFlags | None = None,
-    config: CrucibleConfig | None = None,
+    crucible_config: CrucibleConfig | None = None,
 ) -> StageLoopResult:
     """Run the agent->judge loop for one stage."""
-    if flags is None:
-        flags = CrucibleFlags()
-    if config is None:
-        config = CrucibleConfig()
+    if crucible_config is None:
+        crucible_config = CrucibleConfig()
     lt_summary_file = injected_kb.summary if injected_kb else None
     lessons_file = injected_kb.lessons if injected_kb else None
     architecture_file = injected_kb.architecture if injected_kb else None
@@ -221,7 +201,7 @@ async def _run_stage_loop(
     diagnosis_priors_file = injected_kb.diagnosis_priors if injected_kb else None
     triage_priors_file = injected_kb.triage_priors if injected_kb else None
     arbitration_priors_file = injected_kb.arbitration_priors if injected_kb else None
-    stage_timeout = config.stage_timeout
+    stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
     logger.info(f"CRUCIBLE: Starting {stage.upper()} stage (timeout={stage_timeout}s)")
@@ -231,7 +211,7 @@ async def _run_stage_loop(
     # the SRE agent will use the search_prior_incidents tool instead.
     # The judge always receives the full summary regardless of the flag.
     full_lt_summary_content = _read_kb_content(lt_summary_file)
-    if flags.enable_ltm_retrieval:
+    if crucible_config.enable_ltm_retrieval:
         lt_summary_content = ""
     else:
         lt_summary_content = full_lt_summary_content
@@ -240,7 +220,7 @@ async def _run_stage_loop(
     architecture_content = _read_kb_content(architecture_file)
 
     # v3 priors (learned rules from reflection)
-    is_v3 = config.prompt_version >= "v3"
+    is_v3 = crucible_config.prompt_version >= "v3"
     diagnosis_guidance = ""
     triage_guidance = ""
     arbitration_guidance = ""
@@ -291,9 +271,9 @@ async def _run_stage_loop(
             stage=stage,
             renderer=renderer,
             state=sre_state,
-            lt_summary_file=lt_summary_file if flags.enable_ltm_retrieval else None,
-            incidents_dir=incidents_dir if flags.enable_ltm_retrieval else None,
-            ltm_model_id=model if flags.enable_ltm_retrieval else None,
+            lt_summary_file=lt_summary_file if crucible_config.enable_ltm_retrieval else None,
+            incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
+            ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
             triage_guidance=triage_guidance,
             arbitration_guidance=arbitration_guidance,
@@ -338,7 +318,7 @@ async def _run_stage_loop(
             if sre_state.answer_causal_chain:
                 hypothesis_text += f"**Causal Chain**: {sre_state.answer_causal_chain}\n"
 
-        if not flags.enable_judge:
+        if not crucible_config.enable_judge:
             # Reveal the agent hypothesis in the shared file (normally the judge does this)
             if sre_state.answer:
                 _replace_hypothesis_placeholder(
@@ -659,18 +639,15 @@ async def run(
     renderer: PromptRenderer,
     injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
-    flags: CrucibleFlags | None = None,
-    config: CrucibleConfig | None = None,
+    crucible_config: CrucibleConfig | None = None,
 ) -> dict:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     resolved_model: Model = model if isinstance(model, Model) else infer_model(model)
-    if flags is None:
-        flags = CrucibleFlags()
-    if config is None:
-        config = CrucibleConfig()
-    max_diag_iters = config.max_diagnosis_iterations
-    max_mit_iters = config.max_mitigation_iterations
-    wait_stage_timeout = config.wait_stage_timeout
+    if crucible_config is None:
+        crucible_config = CrucibleConfig()
+    max_diag_iters = crucible_config.max_diagnosis_iterations
+    max_mit_iters = crucible_config.max_mitigation_iterations
+    wait_stage_timeout = crucible_config.wait_stage_timeout
 
     diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
     diagnosis_sf.init(
@@ -693,13 +670,12 @@ async def run(
         renderer=renderer,
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
-        flags=flags,
-        config=config,
+        crucible_config=crucible_config,
     )
     # Recovery diagnosis: produce a validated causal chain when the benchmark
     # rejected the agent's diagnosis and we want causal chains for KB.
     if (
-        flags.include_benchmark_results
+        crucible_config.include_benchmark_results
         and diag_result.benchmark_block
         and "success: False" in diag_result.benchmark_block
     ):
@@ -753,13 +729,12 @@ async def run(
         renderer=renderer,
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
-        flags=flags,
-        config=config,
+        crucible_config=crucible_config,
     )
     # Recovery mitigation: reflect on why mitigation failed when benchmark
     # rejected the agent's fix and we want lessons for KB.
     if (
-        flags.include_benchmark_results
+        crucible_config.include_benchmark_results
         and mit_result.benchmark_block
         and "success: False" in mit_result.benchmark_block
     ):

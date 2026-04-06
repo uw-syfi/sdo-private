@@ -13,7 +13,7 @@ import pytest
 from pydantic_ai.models.test import TestModel
 
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.orchestrator import CrucibleFlags
+from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.tools import SharedFile, SRESubmission
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=mock_renderer,
-                flags=CrucibleFlags(enable_judge=False),
+                crucible_config=CrucibleConfig(enable_judge=False),
             )
         )
 
@@ -101,7 +101,7 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=mock_renderer,
-                flags=CrucibleFlags(enable_judge=False),
+                crucible_config=CrucibleConfig(enable_judge=False),
             )
         )
 
@@ -154,7 +154,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=mock_renderer,
-                flags=CrucibleFlags(enable_judge=True),
+                crucible_config=CrucibleConfig(enable_judge=True),
             )
         )
 

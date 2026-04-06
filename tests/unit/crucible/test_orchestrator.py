@@ -312,7 +312,8 @@ class TestHypothesisTextPassedToJudgeDeps:
         ):
             import asyncio
 
-            from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
+            from sregym_agents.crucible.config import CrucibleConfig
+            from sregym_agents.crucible.orchestrator import _run_stage_loop
 
             asyncio.run(
                 _run_stage_loop(
@@ -323,7 +324,7 @@ class TestHypothesisTextPassedToJudgeDeps:
                     shared_file=shared,
                     submit_mcp_url="http://localhost:9954/submit/sse",
                     renderer=mock_renderer,
-                    flags=CrucibleFlags(enable_judge=True),
+                    crucible_config=CrucibleConfig(enable_judge=True),
                 )
             )
 

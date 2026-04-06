@@ -34,7 +34,7 @@ from .schema import (
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.orchestrator import CrucibleFlags
+    from sregym_agents.crucible.config import CrucibleConfig
 
 logger = logging.getLogger(__name__)
 
@@ -49,22 +49,22 @@ class StructuredKnowledgeBase(KnowledgeBase):
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
         *,
-        flags: CrucibleFlags | None = None,
+        config: CrucibleConfig | None = None,
         renderer: PromptRenderer,
     ):
-        from sregym_agents.crucible.orchestrator import CrucibleFlags as _CrucibleFlags
+        from sregym_agents.crucible.config import CrucibleConfig as _CrucibleConfig
 
-        if flags is None:
-            flags = _CrucibleFlags()
+        if config is None:
+            config = _CrucibleConfig()
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
         self.app_name = app_name
         self.app_dir = self.kb_dir / _sanitize_app_name(self.app_name)
         self.app_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
-        self.include_benchmark_results = flags.include_benchmark_results
-        self.enable_reflection = flags.enable_reflection
-        self.include_incident_files = flags.include_incident_files
+        self.include_benchmark_results = config.include_benchmark_results
+        self.enable_reflection = config.enable_reflection
+        self.include_incident_files = config.include_incident_files
         self.prompts = renderer
         self.schema = SCHEMA_V2
         self._reflector = Reflector(self.kb_dir, model_id, renderer)

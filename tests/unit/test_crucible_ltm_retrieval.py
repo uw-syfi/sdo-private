@@ -14,7 +14,7 @@ import pytest
 from pydantic_ai.models.test import TestModel
 
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.orchestrator import CrucibleFlags
+from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.tools import (
     CandidateRootCause,
     CandidateVerification,
@@ -57,24 +57,24 @@ def _make_deps(
 
 
 # ---------------------------------------------------------------------------
-# CrucibleFlags
+# CrucibleConfig (behavior flags subset)
 # ---------------------------------------------------------------------------
 
 
-def test_crucible_flags_defaults() -> None:
-    flags = CrucibleFlags()
-    assert flags.enable_judge is True
-    assert flags.enable_ltm_retrieval is False
+def test_crucible_config_defaults() -> None:
+    cfg = CrucibleConfig()
+    assert cfg.enable_judge is True
+    assert cfg.enable_ltm_retrieval is False
 
 
-def test_crucible_flags_from_config() -> None:
-    cfg = {"enable_judge": False, "enable_ltm_retrieval": True}
-    flags = CrucibleFlags(
-        enable_judge=cfg["enable_judge"],
-        enable_ltm_retrieval=cfg["enable_ltm_retrieval"],
+def test_crucible_config_from_dict_like() -> None:
+    raw = {"enable_judge": False, "enable_ltm_retrieval": True}
+    cfg = CrucibleConfig(
+        enable_judge=raw["enable_judge"],
+        enable_ltm_retrieval=raw["enable_ltm_retrieval"],
     )
-    assert flags.enable_judge is False
-    assert flags.enable_ltm_retrieval is True
+    assert cfg.enable_judge is False
+    assert cfg.enable_ltm_retrieval is True
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
         ),
     ):
         from sregym_agents.crucible.knowledge_base import InjectedKB
-        from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
+        from sregym_agents.crucible.orchestrator import _run_stage_loop
 
         asyncio.run(
             _run_stage_loop(
@@ -258,7 +258,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 injected_kb=InjectedKB(summary=lt_file),
                 renderer=mock_renderer,
-                flags=CrucibleFlags(enable_judge=False, enable_ltm_retrieval=False),
+                crucible_config=CrucibleConfig(enable_judge=False, enable_ltm_retrieval=False),
             )
         )
 
@@ -295,7 +295,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
         ),
     ):
         from sregym_agents.crucible.knowledge_base import InjectedKB
-        from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
+        from sregym_agents.crucible.orchestrator import _run_stage_loop
 
         asyncio.run(
             _run_stage_loop(
@@ -307,7 +307,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 injected_kb=InjectedKB(summary=lt_file, incidents_dir=inc_dir),
                 renderer=mock_renderer,
-                flags=CrucibleFlags(enable_judge=False, enable_ltm_retrieval=True),
+                crucible_config=CrucibleConfig(enable_judge=False, enable_ltm_retrieval=True),
             )
         )
 

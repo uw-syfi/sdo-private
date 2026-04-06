@@ -21,13 +21,13 @@ import time
 from pathlib import Path
 
 from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.config import crucible_config_from_kb_task
 from sregym_agents.crucible.kb_update_queue import (
     list_pending_tasks,
     move_to_completed,
     move_to_failed,
 )
 from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
-from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ async def process_task(task_path: Path) -> None:
     """Load a task file, create KB, call ``update()``, move to ``completed/``."""
     task = json.loads(task_path.read_text())
 
-    prompt_version = task["prompt_version"]
-    renderer = PromptRenderer(prompt_version)
+    crucible_config = crucible_config_from_kb_task(task)
+    renderer = PromptRenderer(crucible_config.prompt_version)
 
     sf = task["session_files"]
     session_files = SessionFiles(
@@ -51,17 +51,12 @@ async def process_task(task_path: Path) -> None:
     )
     stage_outputs_file = Path(task["stage_outputs_file"]) if task.get("stage_outputs_file") else None
 
-    flags = CrucibleFlags(
-        include_benchmark_results=task.get("include_benchmark_results", False),
-        enable_reflection=task.get("enable_reflection", task.get("enable_heuristic_refinement", True)),
-        include_incident_files=task.get("include_incident_files", True),
-    )
     kb = create_knowledge_base(
         kb_type=task["kb_type"],
         kb_dir=Path(task["kb_dir"]),
         model_id=task["model_id"],
         app_name=task["app_name"],
-        flags=flags,
+        config=crucible_config,
         renderer=renderer,
     )
 

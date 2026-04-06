@@ -20,9 +20,9 @@ import requests
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.config import crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
 from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
-from sregym_agents.crucible.orchestrator import CrucibleConfig, CrucibleFlags
 
 logging.basicConfig(
     level=logging.INFO,
@@ -174,32 +174,12 @@ async def _async_main(args: argparse.Namespace) -> None:
     crucible_cfg, config_source = _load_crucible_config()
     agent_cfg = crucible_cfg.get("agent", {})
     logger.info(f"Effective agent config (source={config_source}): {agent_cfg}")
-    prompt_version = args.prompt_version or agent_cfg.get("prompt_version")
-    if not prompt_version:
-        logger.error(
-            "prompt_version is required. Set it in [agent.crucible] config "
-            "or pass --prompt-version on the command line."
-        )
+    try:
+        crucible_config = crucible_config_from_experiment_agent(agent_cfg, cli_args=args)
+    except ValueError as e:
+        logger.error("%s", e)
         sys.exit(1)
-    renderer = PromptRenderer(prompt_version)
-
-    enable_judge = agent_cfg.get("enable_judge", True)
-    if args.no_judge:
-        enable_judge = False
-    flags = CrucibleFlags(
-        enable_judge=enable_judge,
-        enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
-        include_benchmark_results=agent_cfg.get("include_benchmark_results", False),
-        enable_reflection=agent_cfg.get("enable_reflection", agent_cfg.get("enable_heuristic_refinement", True)),
-        include_incident_files=agent_cfg.get("include_incident_files", True),
-    )
-    config = CrucibleConfig(
-        prompt_version=prompt_version,
-        max_diagnosis_iterations=agent_cfg.get("max_diagnosis_iterations", 5),
-        max_mitigation_iterations=agent_cfg.get("max_mitigation_iterations", 5),
-        wait_stage_timeout=agent_cfg.get("wait_stage_timeout", 300),
-        stage_timeout=agent_cfg.get("stage_timeout", 900),
-    )
+    renderer = PromptRenderer(crucible_config.prompt_version)
 
     api_base = _get_api_base()
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
@@ -214,7 +194,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         logger.info(f"Working directory: {os.getcwd()}")
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
-    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} flags={flags} config={config}")
+    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} crucible_config={crucible_config}")
 
     _wait_for_stage(api_base, timeout=300)
 
@@ -250,7 +230,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             model_id=model_id,
             app_name=app_info.get("app_name", "unknown"),
             seed_kb_dir=seed_kb_dir,
-            flags=flags,
+            config=crucible_config,
             renderer=renderer,
         )
         if not args.no_inject_kb:
@@ -279,8 +259,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         renderer=renderer,
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
-        flags=flags,
-        config=config,
+        crucible_config=crucible_config,
     )
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
@@ -330,11 +309,11 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
                 "model_id": args.kb_model or os.environ.get("MODEL_ID", args.model),
                 "app_name": app_info.get("app_name", "unknown"),
-                "include_benchmark_results": flags.include_benchmark_results,
-                "enable_reflection": flags.enable_reflection,
-                "include_incident_files": flags.include_incident_files,
+                "include_benchmark_results": crucible_config.include_benchmark_results,
+                "enable_reflection": crucible_config.enable_reflection,
+                "include_incident_files": crucible_config.include_incident_files,
                 "problem_id": problem_id,
-                "prompt_version": config.prompt_version,
+                "prompt_version": crucible_config.prompt_version,
                 "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
             }
             task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)

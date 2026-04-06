@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 import pytest
 
 from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
 from sregym_agents.crucible.knowledge_base.append_only import AppendOnlyKnowledgeBase
 from sregym_agents.crucible.knowledge_base.base import (
@@ -27,7 +28,6 @@ from sregym_agents.crucible.knowledge_base.base import (
 from sregym_agents.crucible.knowledge_base.reflection import Reflector, _parse_classified_stages
 from sregym_agents.crucible.knowledge_base.schema import SCHEMA_V2
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
-from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 # Use v2 schema filenames throughout tests
 KB_SUMMARY_FILENAME = SCHEMA_V2.summary
@@ -210,7 +210,7 @@ class TestInjectIncidents:
             kb_dir,
             model_id="m",
             app_name="test-app",
-            flags=CrucibleFlags(include_incident_files=False),
+            config=CrucibleConfig(include_incident_files=False),
             renderer=_renderer,
         )
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
@@ -270,7 +270,7 @@ class TestUpdate:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            flags=CrucibleFlags(include_incident_files=False),
+            config=CrucibleConfig(include_incident_files=False),
             renderer=_renderer,
         )
 
@@ -547,7 +547,7 @@ class TestCreateKnowledgeBase:
             "structured",
             tmp_path / "kb",
             model_id="m",
-            flags=CrucibleFlags(include_incident_files=False),
+            config=CrucibleConfig(include_incident_files=False),
             renderer=_renderer,
         )
         assert isinstance(kb, StructuredKnowledgeBase)
@@ -558,7 +558,7 @@ class TestCreateKnowledgeBase:
             "structured",
             tmp_path / "kb",
             model_id="m",
-            flags=CrucibleFlags(include_benchmark_results=True),
+            config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
         )
         assert isinstance(kb, StructuredKnowledgeBase)
@@ -569,7 +569,7 @@ class TestCreateKnowledgeBase:
             "append-only",
             tmp_path / "kb",
             model_id="m",
-            flags=CrucibleFlags(include_benchmark_results=True),
+            config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
         )
         assert isinstance(kb, AppendOnlyKnowledgeBase)
@@ -587,7 +587,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            flags=CrucibleFlags(include_benchmark_results=True),
+            config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
         )
         mock_llm.side_effect = ["session summary", "merged summary", "lessons"]
@@ -606,7 +606,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            flags=CrucibleFlags(include_benchmark_results=False),
+            config=CrucibleConfig(include_benchmark_results=False),
             renderer=_renderer,
         )
         mock_llm.side_effect = ["session summary", "merged summary", "lessons"]
@@ -623,7 +623,7 @@ class TestIncludeBenchmarkResults:
         kb = AppendOnlyKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
-            flags=CrucibleFlags(include_benchmark_results=True),
+            config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
         )
         mock_llm.return_value = "session summary"
@@ -640,7 +640,7 @@ class TestIncludeBenchmarkResults:
         kb = AppendOnlyKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
-            flags=CrucibleFlags(include_benchmark_results=False),
+            config=CrucibleConfig(include_benchmark_results=False),
             renderer=_renderer,
         )
         mock_llm.return_value = "session summary"
@@ -657,7 +657,7 @@ class TestIncludeBenchmarkResults:
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
-            flags=CrucibleFlags(include_benchmark_results=True),
+            config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
         )
         await kb.update(SessionFiles(diagnosis=shared))
