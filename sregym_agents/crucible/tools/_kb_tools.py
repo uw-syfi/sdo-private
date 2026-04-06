@@ -40,8 +40,7 @@ COVERAGE_THINKING_BUDGET = 2048
 class TriageAnomaly(BaseModel):
     category: str = Field(
         description="Anomaly category — use a short descriptive label "
-        "(e.g., 'Non-Running Pods', 'Port Mismatch', 'Services Without Endpoints', "
-        "'ConfigMap Anomalies', 'Recent Events'). "
+        "(e.g., 'Non-Running Pods')."
         "Use standard categories when they fit; create new ones for novel anomaly types."
     )
     resource_kind: str = Field(description="Kubernetes resource kind (e.g., Pod, Service, ConfigMap)")
