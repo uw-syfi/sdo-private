@@ -93,10 +93,12 @@ class TurnLoggingMiddleware(AgentMiddleware):
             )
 
     def on_part_end(self, event: Any) -> None:
-        from pydantic_ai.messages import ThinkingPart
+        from pydantic_ai.messages import TextPart, ThinkingPart
 
         if isinstance(event.part, ThinkingPart) and event.part.has_content():
             self._logger.info("%s <thinking> %s", self._usage_prefix(), event.part.content)
+        elif isinstance(event.part, TextPart) and event.part.content:
+            self._logger.info("%s <text> %s", self._usage_prefix(), event.part.content)
 
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output
