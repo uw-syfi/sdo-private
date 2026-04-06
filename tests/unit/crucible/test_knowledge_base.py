@@ -12,25 +12,23 @@ if TYPE_CHECKING:
 import pytest
 
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.knowledge_base import (
+from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
+from sregym_agents.crucible.knowledge_base.append_only import AppendOnlyKnowledgeBase
+from sregym_agents.crucible.knowledge_base.base import (
     KB_APPEND_FILENAME,
     KB_ARCHITECTURE_FILENAME,
     KB_INCIDENTS_DIRNAME,
     KB_LESSONS_FILENAME,
     KB_SUMMARY_FILENAME,
     MAX_INJECTED_INCIDENTS,
-    AppendOnlyKnowledgeBase,
-    HeuristicRefiner,
     InjectedKB,
-    SessionFiles,
-    StructuredKnowledgeBase,
     _extract_citations,
     _find_invalid_citations,
     _sanitize_app_name,
     _strip_benchmark_result,
     _strip_citation_wrappers,
-    create_knowledge_base,
 )
+from sregym_agents.crucible.knowledge_base.structured import HeuristicRefiner, StructuredKnowledgeBase
 from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 _renderer = PromptRenderer("v1")
