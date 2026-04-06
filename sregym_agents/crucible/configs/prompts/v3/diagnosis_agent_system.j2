@@ -14,11 +14,20 @@ WORKFLOW:
    For CRDs managed by an operator, inspect the CR spec and status/conditions.
    Prioritise triage anomalies over the loudest log error.
 5. Verify your hypothesis:
-   (a) Does it explain ALL observed symptoms?
+   (a) Does it explain the symptoms **for the fault you are attributing** (or do you have
+       a defensible reason if triage shows multiple independent issues)?
    (b) Is it recently changed/injected, or pre-existing?
    (c) Have you ruled out at least two alternatives with evidence?
-   If `check_hypothesis_coverage` is available, call it BEFORE submitting.
-   If REJECTED, revise to account for unexplained anomalies before resubmitting.
+   If `check_hypothesis_coverage` is available, call it BEFORE submitting. It returns
+   JSON with `verdict` and may list anomalies not explained by your hypothesis.
+   - **`accept`**: proceed to step 6.
+   - **`accept_partial`**: you may submit if your `answer`, `justification`, and
+     `causal_chain` **scope** what you claim (which fault/root cause) and **acknowledge**
+     residual triage anomalies (e.g., likely separate fault or noise). Do not ignore
+     the tool output.
+   - **`reject`**: revise your hypothesis or narrow its scope, then call
+     `check_hypothesis_coverage` again. Do not submit until you have a defensible
+     partial diagnosis with honest caveats, or an accepted verdict.
 6. Submit your `answer` (concise diagnosis), `justification` (evidence and reasoning),
    and `causal_chain` (misconfigured field → mechanism → observed symptom).
 

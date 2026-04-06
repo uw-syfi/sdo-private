@@ -122,6 +122,18 @@ class TestHypothesisCoverageVerdict:
         assert v.verdict == "reject"
         assert len(v.unexplained_anomalies) == 1
 
+    def test_accept_partial(self) -> None:
+        v = HypothesisCoverageVerdict(
+            verdict="accept_partial",
+            explained_anomalies=["Pod/geo CrashLoopBackOff", "Service/geo 0 endpoints"],
+            unexplained_anomalies=["Service/other 0 endpoints"],
+            residual_rationale="Other service is likely an independent fault; hypothesis targets geo only.",
+            reasoning="Primary chain explained; residual scoped out",
+        )
+        assert v.verdict == "accept_partial"
+        assert len(v.unexplained_anomalies) == 1
+        assert v.residual_rationale
+
 
 # ---------------------------------------------------------------------------
 # check_hypothesis_coverage — error cases
@@ -195,6 +207,30 @@ class TestCheckHypothesisCoverageSubagent:
         parsed = json.loads(result)
         assert parsed["verdict"] == "reject"
         assert len(parsed["unexplained_anomalies"]) == 1
+
+    def test_accept_partial_result(self, tmp_path: Path) -> None:
+        triage = _make_triage_report()
+        verdict = HypothesisCoverageVerdict(
+            verdict="accept_partial",
+            explained_anomalies=["Pod/geo CrashLoopBackOff"],
+            unexplained_anomalies=["Service/geo has 0 endpoints"],
+            residual_rationale="Endpoints issue is downstream of same root cause per hypothesis scope.",
+            reasoning="Partial OK",
+        )
+        deps = _make_deps(
+            tmp_path,
+            triage_report=triage,
+            ltm_model_id=TestModel(custom_output_args=verdict.model_dump()),
+        )
+        ctx = _make_sre_ctx(deps)
+
+        with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
+            result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="sidecar port conflict in geo pod"))
+
+        parsed = json.loads(result)
+        assert parsed["verdict"] == "accept_partial"
+        assert len(parsed["unexplained_anomalies"]) == 1
+        assert parsed["residual_rationale"]
 
     def test_subagent_failure_returns_graceful_error(self, tmp_path: Path) -> None:
         triage = _make_triage_report()

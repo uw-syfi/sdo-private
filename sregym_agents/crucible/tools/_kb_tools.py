@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
@@ -126,17 +126,37 @@ class VerifiedDifferentialDiagnosis(BaseModel):
     caveats: str = Field(default="", description="What doesn't match; what to verify before assuming patterns apply")
 
 
-class HypothesisCoverageVerdict(BaseModel):
-    """Result of checking whether a hypothesis explains all triage anomalies."""
+HypothesisCoverageVerdictLiteral = Literal["accept", "reject", "accept_partial"]
 
-    verdict: str = Field(description="'accept' if the hypothesis explains all anomalies, 'reject' otherwise")
+
+class HypothesisCoverageVerdict(BaseModel):
+    """Result of checking a hypothesis against triage (full, partial, or rejected)."""
+
+    verdict: HypothesisCoverageVerdictLiteral = Field(
+        description=(
+            "'accept' if every anomaly is explained or noise; "
+            "'accept_partial' if the hypothesis is sound for a scoped fault but some "
+            "anomalies are plausibly separate or out of scope; "
+            "'reject' if the hypothesis is wrong or incomplete for what it claims"
+        )
+    )
     explained_anomalies: list[str] = Field(
         default_factory=list,
         description="Triage anomalies that the hypothesis explains (including pre-existing noise)",
     )
     unexplained_anomalies: list[str] = Field(
         default_factory=list,
-        description="Triage anomalies that the hypothesis does NOT explain",
+        description=(
+            "Triage anomalies not explained by the hypothesis; may be non-empty when "
+            "verdict is accept_partial (residuals that do not invalidate the hypothesis)"
+        ),
+    )
+    residual_rationale: str = Field(
+        default="",
+        description=(
+            "When verdict is accept_partial: why listed unexplained anomalies do not "
+            "block accepting this hypothesis. Empty for accept/reject unless optional notes."
+        ),
     )
     reasoning: str = Field(description="Explanation of coverage assessment")
 
@@ -515,13 +535,15 @@ async def check_hypothesis_coverage(
     ctx: RunContext[SREDeps],
     hypothesis: str,
 ) -> str:
-    """Check whether your hypothesis explains ALL anomalies in the triage report.
+    """Cross-check your hypothesis against the triage report (multi-fault aware).
 
     Call this BEFORE submitting your diagnosis. Pass your proposed root cause
-    (including the specific resource, misconfigured field, and causal chain).
-    Returns accept/reject with reasoning about which triage anomalies are
-    unexplained. If rejected, revise your hypothesis to account for the
-    unexplained anomalies before submitting.
+    (resource, misconfigured field, causal chain). Returns structured JSON:
+    `accept` when every anomaly is explained or noise; `accept_partial` when the
+    hypothesis is sound for a scoped fault but some triage lines are plausibly
+    separate faults or out of scope (see `residual_rationale`); `reject` when the
+    hypothesis is wrong or incomplete for what it claims. If rejected, revise or
+    narrow scope before resubmitting.
     """
     from pydantic_ai import Agent
 
@@ -563,9 +585,10 @@ async def check_hypothesis_coverage(
 
         output_json = output.model_dump_json(indent=2)
         logger.info(
-            "[hypothesis-coverage] done: verdict=%s, unexplained=%s, reasoning=%s",
+            "[hypothesis-coverage] done: verdict=%s, unexplained=%s, residual_rationale=%s, reasoning=%s",
             output.verdict,
             output.unexplained_anomalies,
+            output.residual_rationale,
             output.reasoning,
         )
         if ctx.deps.stage_outputs_file:
