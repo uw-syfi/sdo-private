@@ -27,8 +27,10 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _APP_OPERATOR = _REPO_ROOT / "app_operator"
+_APP_OPERATOR_DSPY = _REPO_ROOT / "app_operator_dspy"
 _LEGO_AGENT = _REPO_ROOT / "lego_agent"
 _LIBS = _REPO_ROOT / "libs"
+_SREGYM_AGENTS = _REPO_ROOT / "sregym_agents"
 
 # Top-level subpackages (directories with __init__.py) inside app_operator.
 _SUBPACKAGES: frozenset[str] = frozenset(
@@ -192,3 +194,40 @@ def test_subpackages_declare_all():
             missing.append(f"  {rel_str}")
 
     assert not missing, "__all__ missing from subpackage __init__.py:\n" + "\n".join(missing)
+
+
+# ---------------------------------------------------------------------------
+# Rule 4: no private names in __all__
+# ---------------------------------------------------------------------------
+
+
+def test_all_does_not_export_private_names():
+    """
+    __all__ must not contain names starting with '_'.
+    Private names are implementation details and should not be part of the
+    public API surface.
+    """
+    violations: list[str] = []
+
+    roots = [_APP_OPERATOR, _APP_OPERATOR_DSPY, _LEGO_AGENT, _LIBS, _SREGYM_AGENTS]
+    for root in roots:
+        for init in sorted(root.rglob("__init__.py")):
+            try:
+                tree = ast.parse(init.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)
+                    and isinstance(node.value, ast.List)
+                ):
+                    continue
+                for elt in node.value.elts:
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value.startswith("_"):
+                        violations.append(
+                            f"  {init.relative_to(_REPO_ROOT)}:{elt.lineno}  '{elt.value}'  — private name in __all__"
+                        )
+
+    assert not violations, f"{len(violations)} private-export violation(s) found:\n" + "\n".join(violations)

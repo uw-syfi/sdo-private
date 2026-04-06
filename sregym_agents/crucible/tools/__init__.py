@@ -65,9 +65,6 @@ __all__ = [
     "MAX_OUTPUT_CHARS",
     "MAX_READ_CHARS",
     "MUTATING_KUBECTL_VERBS",
-    "_check_mutating_kubectl",
-    "_exec_bash_readonly_impl",
-    "_run_bash_sync",
     "exec_bash",
     "exec_bash_any",
     "exec_bash_readonly",
@@ -83,7 +80,6 @@ __all__ = [
     "SRESubmission",
     "TriageDeps",
     # _judge_tools
-    "_submit_to_benchmark",
     "reveal_agent_hypothesis",
     "submit_independent_findings",
     "submit_verdict",
