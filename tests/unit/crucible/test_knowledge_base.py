@@ -16,10 +16,6 @@ from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge
 from sregym_agents.crucible.knowledge_base.append_only import AppendOnlyKnowledgeBase
 from sregym_agents.crucible.knowledge_base.base import (
     KB_APPEND_FILENAME,
-    KB_ARCHITECTURE_FILENAME,
-    KB_INCIDENTS_DIRNAME,
-    KB_LESSONS_FILENAME,
-    KB_SUMMARY_FILENAME,
     MAX_INJECTED_INCIDENTS,
     InjectedKB,
     _extract_citations,
@@ -28,8 +24,16 @@ from sregym_agents.crucible.knowledge_base.base import (
     _strip_benchmark_result,
     _strip_citation_wrappers,
 )
-from sregym_agents.crucible.knowledge_base.structured import HeuristicRefiner, StructuredKnowledgeBase
+from sregym_agents.crucible.knowledge_base.reflection import Reflector, _parse_classified_stages
+from sregym_agents.crucible.knowledge_base.schema import SCHEMA_V2
+from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 from sregym_agents.crucible.orchestrator import CrucibleFlags
+
+# Use v2 schema filenames throughout tests
+KB_SUMMARY_FILENAME = SCHEMA_V2.summary
+KB_LESSONS_FILENAME = SCHEMA_V2.lessons
+KB_ARCHITECTURE_FILENAME = SCHEMA_V2.architecture
+KB_INCIDENTS_DIRNAME = SCHEMA_V2.incidents_dir
 
 _renderer = PromptRenderer("v1")
 
@@ -765,116 +769,131 @@ class TestCitationValidation:
         assert mock_retry.call_count == 1
 
 
-class TestHeuristicRefiner:
-    def _make_refiner(self, tmp_path: Path) -> HeuristicRefiner:
-        return HeuristicRefiner(tmp_path / "kb", model_id="test-model", renderer=_renderer)
+class TestParseClassifiedStages:
+    def test_extracts_single_stage(self):
+        text = "failure_modes:\n  - stage: triage\n    type: failure"
+        assert _parse_classified_stages(text) == {"triage"}
 
-    async def test_refine_skips_when_no_session_content(self, tmp_path: Path, caplog):
-        refiner = self._make_refiner(tmp_path)
+    def test_extracts_multiple_stages(self):
+        text = "failure_modes:\n  - stage: triage\n    type: failure\n  - stage: reasoning\n    type: failure\n"
+        assert _parse_classified_stages(text) == {"triage", "reasoning"}
+
+    def test_extracts_all_valid_stages(self):
+        text = "stage: triage\nstage: retrieval\nstage: reasoning\nstage: arbitration\nstage: other"
+        assert _parse_classified_stages(text) == {"triage", "retrieval", "reasoning", "arbitration", "other"}
+
+    def test_ignores_stage_names_in_prose(self):
+        text = "The triage was fine.\nfailure_modes:\n  - stage: reasoning\n    type: failure"
+        assert _parse_classified_stages(text) == {"reasoning"}
+
+    def test_empty_on_no_match(self):
+        assert _parse_classified_stages("no structured output here") == set()
+
+
+class TestReflector:
+    def _make_reflector(self, tmp_path: Path) -> Reflector:
+        return Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer)
+
+    async def test_run_skips_when_no_session_content(self, tmp_path: Path, caplog):
+        reflector = self._make_reflector(tmp_path)
         session_files = SessionFiles(diagnosis=tmp_path / "nonexistent.md")
         with caplog.at_level(logging.INFO, logger="sregym_agents.crucible.knowledge_base"):
-            await refiner.refine(session_files)
+            await reflector.run(session_files)
         assert "No shared session content" in caplog.text
-        assert not refiner.diagnosis_heuristics_path.exists()
 
-    @patch.object(HeuristicRefiner, "_classify_failure", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_diagnosis_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_triage_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_arbitration_heuristics", new_callable=AsyncMock)
-    async def test_refine_runs_diagnosis_on_reasoning_classification(
-        self, mock_arb, mock_triage, mock_diag, mock_classify, tmp_path: Path
-    ):
+    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
+    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
+    async def test_run_updates_diagnosis_on_reasoning_classification(self, mock_apply, mock_reflect, tmp_path: Path):
+        mock_reflect.return_value = "failure_modes:\n  - stage: reasoning\n    type: failure"
+
+        reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
         session.write_text("some session content")
-        mock_classify.return_value = "Reasoning failure in diagnosis step"
+        await reflector.run(SessionFiles(diagnosis=session))
 
-        refiner = self._make_refiner(tmp_path)
-        await refiner.refine(SessionFiles(diagnosis=session))
+        mock_reflect.assert_called_once()
+        assert mock_apply.call_count == 1
+        cfg = mock_apply.call_args[0][0]
+        assert cfg.filename == SCHEMA_V2.diagnosis_priors
 
-        mock_classify.assert_called_once()
-        mock_diag.assert_called_once()
-        mock_triage.assert_not_called()
-        mock_arb.assert_not_called()
+    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
+    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
+    async def test_run_updates_triage_on_triage_classification(self, mock_apply, mock_reflect, tmp_path: Path):
+        mock_reflect.return_value = "failure_modes:\n  - stage: triage\n    type: failure"
 
-    @patch.object(HeuristicRefiner, "_classify_failure", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_diagnosis_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_triage_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_arbitration_heuristics", new_callable=AsyncMock)
-    async def test_refine_runs_triage_on_triage_classification(
-        self, mock_arb, mock_triage, mock_diag, mock_classify, tmp_path: Path
+        reflector = self._make_reflector(tmp_path)
+        session = tmp_path / "session.md"
+        session.write_text("session content")
+        await reflector.run(SessionFiles(diagnosis=session))
+
+        assert mock_apply.call_count == 1
+        cfg = mock_apply.call_args[0][0]
+        assert cfg.filename == SCHEMA_V2.triage_priors
+
+    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
+    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
+    async def test_run_updates_arbitration_on_arbitration_classification(
+        self, mock_apply, mock_reflect, tmp_path: Path
     ):
+        mock_reflect.return_value = "failure_modes:\n  - stage: arbitration\n    type: failure"
+
+        reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
         session.write_text("session content")
-        mock_classify.return_value = "Triage step failed to narrow down the fault"
+        await reflector.run(SessionFiles(diagnosis=session))
 
-        refiner = self._make_refiner(tmp_path)
-        await refiner.refine(SessionFiles(diagnosis=session))
+        assert mock_apply.call_count == 1
+        cfg = mock_apply.call_args[0][0]
+        assert cfg.filename == SCHEMA_V2.arbitration_priors
 
-        mock_triage.assert_called_once()
-        mock_diag.assert_not_called()
-        mock_arb.assert_not_called()
+    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
+    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
+    async def test_run_updates_all_priors_on_success(self, mock_apply, mock_reflect, tmp_path: Path):
+        mock_reflect.return_value = "outcome: success\nfailure_modes:\n  - stage: triage\n    type: success"
 
-    @patch.object(HeuristicRefiner, "_classify_failure", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_diagnosis_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_triage_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_arbitration_heuristics", new_callable=AsyncMock)
-    async def test_refine_runs_arbitration_on_arbitration_classification(
-        self, mock_arb, mock_triage, mock_diag, mock_classify, tmp_path: Path
-    ):
+        reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
         session.write_text("session content")
-        mock_classify.return_value = "Arbitration disagreement between agents"
+        await reflector.run(SessionFiles(diagnosis=session))
 
-        refiner = self._make_refiner(tmp_path)
-        await refiner.refine(SessionFiles(diagnosis=session))
+        assert mock_apply.call_count == 3  # all prior files
 
-        mock_arb.assert_called_once()
-        mock_diag.assert_not_called()
-        mock_triage.assert_not_called()
+    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
+    async def test_run_handles_reflect_exception(self, mock_reflect, tmp_path: Path, caplog):
+        mock_reflect.side_effect = RuntimeError("LLM error")
 
-    @patch.object(HeuristicRefiner, "_classify_failure", new_callable=AsyncMock)
-    async def test_refine_handles_classify_exception(self, mock_classify, tmp_path: Path, caplog):
+        reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
         session.write_text("session content")
-        mock_classify.side_effect = RuntimeError("LLM error")
-
-        refiner = self._make_refiner(tmp_path)
         with caplog.at_level(logging.ERROR, logger="sregym_agents.crucible.knowledge_base"):
-            await refiner.refine(SessionFiles(diagnosis=session))
+            await reflector.run(SessionFiles(diagnosis=session))
 
         assert "Failed to classify failure" in caplog.text
-        assert not refiner.diagnosis_heuristics_path.exists()
 
-    @patch.object(HeuristicRefiner, "_classify_failure", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_diagnosis_heuristics", new_callable=AsyncMock)
-    async def test_refine_logs_individual_refinement_errors(self, mock_diag, mock_classify, tmp_path: Path, caplog):
+    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
+    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
+    async def test_run_logs_individual_apply_errors(self, mock_apply, mock_reflect, tmp_path: Path, caplog):
+        mock_reflect.return_value = "failure_modes:\n  - stage: reasoning\n    type: failure"
+        mock_apply.side_effect = RuntimeError("write failed")
+
+        reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
         session.write_text("session content")
-        mock_classify.return_value = "reasoning error"
-        mock_diag.side_effect = RuntimeError("write failed")
-
-        refiner = self._make_refiner(tmp_path)
         with caplog.at_level(logging.ERROR, logger="sregym_agents.crucible.knowledge_base"):
-            await refiner.refine(SessionFiles(diagnosis=session))
+            await reflector.run(SessionFiles(diagnosis=session))
 
-        assert "Heuristic refinement error" in caplog.text
+        assert "Reflection apply error" in caplog.text
 
-    @patch.object(HeuristicRefiner, "_classify_failure", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_diagnosis_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_triage_heuristics", new_callable=AsyncMock)
-    @patch.object(HeuristicRefiner, "_refine_arbitration_heuristics", new_callable=AsyncMock)
-    async def test_refine_skips_when_no_keywords_match(
-        self, mock_arb, mock_triage, mock_diag, mock_classify, tmp_path: Path, caplog
-    ):
+    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
+    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
+    async def test_run_skips_when_no_stages_match(self, mock_apply, mock_reflect, tmp_path: Path, caplog):
+        mock_reflect.return_value = "outcome: failure\nfailure_modes: none identified"
+
+        reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
         session.write_text("session content")
-        mock_classify.return_value = "unknown category"
-
-        refiner = self._make_refiner(tmp_path)
         with caplog.at_level(logging.INFO, logger="sregym_agents.crucible.knowledge_base"):
-            await refiner.refine(SessionFiles(diagnosis=session))
+            await reflector.run(SessionFiles(diagnosis=session))
 
-        assert "No heuristic refinement needed" in caplog.text
-        mock_diag.assert_not_called()
-        mock_triage.assert_not_called()
-        mock_arb.assert_not_called()
+        assert "No prior files to update" in caplog.text
+        mock_apply.assert_not_called()

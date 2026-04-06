@@ -7,13 +7,6 @@ import dataclasses
 import re
 from pathlib import Path
 
-KB_SUMMARY_FILENAME = "long_term_summary.md"
-KB_LESSONS_FILENAME = "operational_lessons.md"
-KB_ARCHITECTURE_FILENAME = "architecture.md"
-KB_INCIDENTS_DIRNAME = "incidents"
-KB_DIAGNOSIS_HEURISTICS_FILENAME = "diagnosis_heuristics.md"
-KB_TRIAGE_HEURISTICS_FILENAME = "triage_heuristics.md"
-KB_ARBITRATION_HEURISTICS_FILENAME = "arbitration_heuristics.md"
 KB_APPEND_FILENAME = "knowledge.md"
 MAX_INJECTED_INCIDENTS = 100
 
@@ -26,9 +19,9 @@ class InjectedKB:
     lessons: Path | None = None
     architecture: Path | None = None
     incidents_dir: Path | None = None
-    diagnosis_heuristics: Path | None = None
-    triage_heuristics: Path | None = None
-    arbitration_heuristics: Path | None = None
+    diagnosis_priors: Path | None = None
+    triage_priors: Path | None = None
+    arbitration_priors: Path | None = None
 
 
 @dataclasses.dataclass

@@ -37,7 +37,7 @@ class KbUpdateTaskDict(TypedDict):
     model_id: str
     app_name: str
     include_benchmark_results: bool
-    enable_heuristic_refinement: bool
+    enable_reflection: bool
     include_incident_files: bool
     problem_id: str
     prompt_version: str

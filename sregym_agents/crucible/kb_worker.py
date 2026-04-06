@@ -53,7 +53,7 @@ async def process_task(task_path: Path) -> None:
 
     flags = CrucibleFlags(
         include_benchmark_results=task.get("include_benchmark_results", False),
-        enable_heuristic_refinement=task.get("enable_heuristic_refinement", True),
+        enable_reflection=task.get("enable_reflection", task.get("enable_heuristic_refinement", True)),
         include_incident_files=task.get("include_incident_files", True),
     )
     kb = create_knowledge_base(

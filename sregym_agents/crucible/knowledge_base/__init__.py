@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from .append_only import AppendOnlyKnowledgeBase
 from .base import InjectedKB, KnowledgeBase, SessionFiles
+from .reflection import Reflector
+from .schema import CURRENT_SCHEMA_VERSION, KBSchema, get_schema, migrate_to_current
 from .structured import StructuredKnowledgeBase
 
 if TYPE_CHECKING:
@@ -15,10 +17,15 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 __all__ = [
+    "CURRENT_SCHEMA_VERSION",
     "InjectedKB",
+    "KBSchema",
     "KnowledgeBase",
+    "Reflector",
     "SessionFiles",
     "create_knowledge_base",
+    "get_schema",
+    "migrate_to_current",
 ]
 
 
