@@ -22,8 +22,7 @@ from libs.agent_mw import (
     TrajectoryMiddleware,
     TurnLoggingMiddleware,
 )
-from libs.pydantic_agent import thinking_settings
-from libs.pydantic_agent import BaseAgent
+from libs.pydantic_agent import BaseAgent, thinking_settings
 from sregym_agents.crucible.tools import (
     THINKING_BUDGET,
     JudgeDeps,
