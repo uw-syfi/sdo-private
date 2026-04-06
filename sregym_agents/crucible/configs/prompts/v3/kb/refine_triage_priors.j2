@@ -1,12 +1,13 @@
-You are maintaining triage guidance for an SRE agent's cluster scanning tool.
-This guidance lists symptom areas and anomaly hints for the triage agent.
+You are maintaining a checklist of symptom areas for an SRE agent's cluster triage tool.
+Each symptom area tells the triage agent what kinds of resources and relationships to check
+during its one-pass cluster scan.
 
-Current triage guidance:
+Current symptom areas:
 ---
-{{ prior_guidance or "(Empty — generate initial guidance from the classification below)" }}
+{{ prior_guidance or "(Empty — generate initial list from the reflection below)" }}
 ---
 
-Failure classification from the latest problem:
+Reflection from the latest problem:
 ---
 {{ failure_classification }}
 ---
@@ -18,37 +19,26 @@ Agent's triage report for context:
 ---
 {% endif %}
 
-Task: Update the guidance based on entries classified as triage failures or successes.
+Task: Update the symptom areas list based on the reflection. Focus on what the triage
+scan missed or should have covered.
 
-The output MUST have exactly two sections:
-
-## Symptom Areas
-Each item is a broad symptom area the triage agent should check, with a brief description
-of what to look for. Examples:
+Each item is a broad symptom area with a brief description of what to look for. Examples:
 - Service-to-pod port mapping: compare every Service's targetPort against its pods' containerPort.
 - Pod health: pods not in Running/Completed state.
-
-## Anomaly Hints
-Specific anomaly patterns worth flagging (non-exhaustive — the agent should still flag
-anything that looks wrong). Examples:
-- Services whose selector labels don't match any pod.
-- ConfigMaps injecting scripts or overriding entrypoints.
+- ConfigMap overrides: ConfigMaps that inject scripts or override entrypoints.
 
 When to add:
-- The classification shows the triage missed a resource type or anomaly pattern that
-  turned out to be the root cause.
-- A new anomaly shape was discovered that the triage should catch in future problems.
+- The reflection shows the triage missed a resource type or relationship that turned out
+  to matter.
 
 When to remove or refine:
-- An area or hint consistently produces benign noise that distracts the agent.
-- Evidence contradicts an existing item.
+- An area consistently produces benign noise that distracts the agent.
 - Two items say essentially the same thing — merge them.
 
 Rules:
-- Keep both sections short and high-signal. Do NOT blindly append every new observation —
-  only add items that would have changed the outcome if the agent had known them.
+- Keep the list short and high-signal. Only add items that would have changed the outcome.
   Prefer generalizing an existing item over adding a near-duplicate.
-- Maximum 10 symptom areas, maximum 15 anomaly hints.
+- Maximum 15 symptom areas.
 - Each item must be generic (no app-specific names or values).
 - Preserve items that were not implicated — do not remove working guidance.
-- Output only the two sections with their items, no preamble or commentary.
+- Output only the symptom area list (one `- ` bullet per item), no preamble or commentary.

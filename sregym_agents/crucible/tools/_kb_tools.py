@@ -540,7 +540,6 @@ async def check_hypothesis_coverage(
         "check_hypothesis_coverage",
         triage_context=triage_context,
         hypothesis=hypothesis,
-        arbitration_guidance=ctx.deps.arbitration_guidance,
     )
     logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
 

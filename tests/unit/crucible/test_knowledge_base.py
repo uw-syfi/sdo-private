@@ -25,7 +25,7 @@ from sregym_agents.crucible.knowledge_base.base import (
     strip_benchmark_result,
     strip_citation_wrappers,
 )
-from sregym_agents.crucible.knowledge_base.reflection import Reflector, _parse_classified_stages
+from sregym_agents.crucible.knowledge_base.reflection import Reflector
 from sregym_agents.crucible.knowledge_base.schema import SCHEMA_V2
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
@@ -769,27 +769,6 @@ class TestCitationValidation:
         assert mock_retry.call_count == 1
 
 
-class TestParseClassifiedStages:
-    def test_extracts_single_stage(self):
-        text = "failure_modes:\n  - stage: triage\n    type: failure"
-        assert _parse_classified_stages(text) == {"triage"}
-
-    def test_extracts_multiple_stages(self):
-        text = "failure_modes:\n  - stage: triage\n    type: failure\n  - stage: reasoning\n    type: failure\n"
-        assert _parse_classified_stages(text) == {"triage", "reasoning"}
-
-    def test_extracts_all_valid_stages(self):
-        text = "stage: triage\nstage: retrieval\nstage: reasoning\nstage: arbitration\nstage: other"
-        assert _parse_classified_stages(text) == {"triage", "retrieval", "reasoning", "arbitration", "other"}
-
-    def test_ignores_stage_names_in_prose(self):
-        text = "The triage was fine.\nfailure_modes:\n  - stage: reasoning\n    type: failure"
-        assert _parse_classified_stages(text) == {"reasoning"}
-
-    def test_empty_on_no_match(self):
-        assert _parse_classified_stages("no structured output here") == set()
-
-
 class TestReflector:
     def _make_reflector(self, tmp_path: Path) -> Reflector:
         return Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer)
@@ -803,60 +782,18 @@ class TestReflector:
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
     @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
-    async def test_run_updates_diagnosis_on_reasoning_classification(self, mock_apply, mock_reflect, tmp_path: Path):
-        mock_reflect.return_value = "failure_modes:\n  - stage: reasoning\n    type: failure"
+    async def test_run_updates_triage_priors(self, mock_apply, mock_reflect, tmp_path: Path):
+        mock_reflect.return_value = "outcome: failure\n\nThe agent missed checking network policies."
 
         reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
-        session.write_text("some session content")
+        session.write_text("session content")
         await reflector.run(SessionFiles(diagnosis=session))
 
         mock_reflect.assert_called_once()
         assert mock_apply.call_count == 1
         cfg = mock_apply.call_args[0][0]
-        assert cfg.filename == SCHEMA_V2.diagnosis_priors
-
-    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
-    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
-    async def test_run_updates_triage_on_triage_classification(self, mock_apply, mock_reflect, tmp_path: Path):
-        mock_reflect.return_value = "failure_modes:\n  - stage: triage\n    type: failure"
-
-        reflector = self._make_reflector(tmp_path)
-        session = tmp_path / "session.md"
-        session.write_text("session content")
-        await reflector.run(SessionFiles(diagnosis=session))
-
-        assert mock_apply.call_count == 1
-        cfg = mock_apply.call_args[0][0]
         assert cfg.filename == SCHEMA_V2.triage_priors
-
-    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
-    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
-    async def test_run_updates_arbitration_on_arbitration_classification(
-        self, mock_apply, mock_reflect, tmp_path: Path
-    ):
-        mock_reflect.return_value = "failure_modes:\n  - stage: arbitration\n    type: failure"
-
-        reflector = self._make_reflector(tmp_path)
-        session = tmp_path / "session.md"
-        session.write_text("session content")
-        await reflector.run(SessionFiles(diagnosis=session))
-
-        assert mock_apply.call_count == 1
-        cfg = mock_apply.call_args[0][0]
-        assert cfg.filename == SCHEMA_V2.arbitration_priors
-
-    @patch.object(Reflector, "reflect", new_callable=AsyncMock)
-    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
-    async def test_run_updates_all_priors_on_success(self, mock_apply, mock_reflect, tmp_path: Path):
-        mock_reflect.return_value = "outcome: success\nfailure_modes:\n  - stage: triage\n    type: success"
-
-        reflector = self._make_reflector(tmp_path)
-        session = tmp_path / "session.md"
-        session.write_text("session content")
-        await reflector.run(SessionFiles(diagnosis=session))
-
-        assert mock_apply.call_count == 3  # all prior files
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
     async def test_run_handles_reflect_exception(self, mock_reflect, tmp_path: Path, caplog):
@@ -886,14 +823,14 @@ class TestReflector:
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
     @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
-    async def test_run_skips_when_no_stages_match(self, mock_apply, mock_reflect, tmp_path: Path, caplog):
-        mock_reflect.return_value = "outcome: failure\nfailure_modes: none identified"
+    async def test_run_always_updates_triage_even_on_success(self, mock_apply, mock_reflect, tmp_path: Path):
+        mock_reflect.return_value = "outcome: success\n\nThe agent handled triage well."
 
         reflector = self._make_reflector(tmp_path)
         session = tmp_path / "session.md"
         session.write_text("session content")
-        with caplog.at_level(logging.INFO, logger="sregym_agents.crucible.knowledge_base"):
-            await reflector.run(SessionFiles(diagnosis=session))
+        await reflector.run(SessionFiles(diagnosis=session))
 
-        assert "No prior files to update" in caplog.text
-        mock_apply.assert_not_called()
+        assert mock_apply.call_count == 1
+        cfg = mock_apply.call_args[0][0]
+        assert cfg.filename == SCHEMA_V2.triage_priors

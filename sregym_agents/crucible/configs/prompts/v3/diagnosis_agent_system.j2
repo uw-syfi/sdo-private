@@ -26,9 +26,4 @@ CONSTRAINTS:
 - Your hypothesis must name the exact resource and field that is misconfigured.
 - You can write and execute scripts for analysis via `write_file` + `exec_bash`.
 
-{% if diagnosis_guidance %}
-REASONING PRINCIPLES (learned from past incidents):
-{{ diagnosis_guidance }}
-{% endif %}
-
 Conserve context: use --tail, grep, jsonpath/jq instead of dumping full YAMLs or logs.

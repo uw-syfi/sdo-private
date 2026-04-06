@@ -8,10 +8,8 @@ The reflection process has two phases:
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import logging
-import re
 from typing import TYPE_CHECKING
 
 from pydantic_ai import Agent
@@ -45,36 +43,7 @@ class PriorFileConfig:
 
 PRIOR_FILES: dict[str, PriorFileConfig] = {
     "triage": PriorFileConfig("kb/refine_triage_priors", SCHEMA_V2.triage_priors),
-    "diagnosis": PriorFileConfig("kb/refine_diagnosis_priors", SCHEMA_V2.diagnosis_priors),
-    "arbitration": PriorFileConfig("kb/refine_arbitration_priors", SCHEMA_V2.arbitration_priors),
 }
-
-# Which classified failure stage triggers which prior file update.
-# Commented-out entries are intentionally skipped:
-#   retrieval — KB content problem, not addressable via prior edits
-#   other     — timeouts/tool errors, not addressable via prior edits
-_STAGE_TO_PRIOR: dict[str, str] = {
-    "triage": "triage",
-    "reasoning": "diagnosis",
-    "arbitration": "arbitration",
-    # Intentionally excluded:
-    #   retrieval — KB content problem, not addressable via prior edits
-    #   other     — timeouts/tool errors, not addressable via prior edits
-    #   success   — reinforces all prior files (handled separately in apply())
-}
-
-_STAGE_RE = re.compile(r"stage:\s*(triage|retrieval|reasoning|arbitration|other)")
-_OUTCOME_SUCCESS_RE = re.compile(r"outcome:\s*success")
-
-
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
-
-
-def _parse_classified_stages(classification: str) -> set[str]:
-    """Extract stage values from the structured classification output."""
-    return set(_STAGE_RE.findall(classification))
 
 
 # ---------------------------------------------------------------------------
@@ -149,26 +118,12 @@ class Reflector:
         logger.info("Updated %s", path)
 
     async def apply(self, classification: str, stage_outputs: str) -> None:
-        """Update prior files based on the classification."""
-        classified_stages = _parse_classified_stages(classification)
-        is_success = bool(_OUTCOME_SUCCESS_RE.search(classification))
-
-        priors_to_update: set[str] = set()
-        for stage in classified_stages:
-            if stage in _STAGE_TO_PRIOR:
-                priors_to_update.add(_STAGE_TO_PRIOR[stage])
-        if is_success:
-            priors_to_update = set(PRIOR_FILES.keys())  # reinforce all
-
-        if not priors_to_update:
-            logger.info("No prior files to update based on classification.")
-            return
-
-        tasks = [self._apply_to_stage(PRIOR_FILES[name], classification, stage_outputs) for name in priors_to_update]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for r in results:
-            if isinstance(r, Exception):
-                logger.error("Reflection apply error: %s", r)
+        """Update prior files based on the reflection."""
+        for name, cfg in PRIOR_FILES.items():
+            try:
+                await self._apply_to_stage(cfg, classification, stage_outputs)
+            except Exception as e:
+                logger.error("Reflection apply error for %s: %s", name, e)
 
     # -- Combined entry point ------------------------------------------------
 

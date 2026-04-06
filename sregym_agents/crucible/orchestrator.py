@@ -185,9 +185,7 @@ async def _run_stage_loop(
     lessons_file = injected_kb.lessons if injected_kb else None
     architecture_file = injected_kb.architecture if injected_kb else None
     incidents_dir = injected_kb.incidents_dir if injected_kb else None
-    diagnosis_priors_file = injected_kb.diagnosis_priors if injected_kb else None
     triage_priors_file = injected_kb.triage_priors if injected_kb else None
-    arbitration_priors_file = injected_kb.arbitration_priors if injected_kb else None
     stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
@@ -208,18 +206,12 @@ async def _run_stage_loop(
 
     # v3 priors (learned rules from reflection)
     is_v3 = crucible_config.prompt_version >= "v3"
-    diagnosis_guidance = ""
     triage_guidance = ""
-    arbitration_guidance = ""
     stage_outputs_file: Path | None = None
     if is_v3:
         stage_outputs_file = Path(f"{stage}_stage_outputs.md")
-        if diagnosis_priors_file and diagnosis_priors_file.exists():
-            diagnosis_guidance = diagnosis_priors_file.read_text().strip()
         if triage_priors_file and triage_priors_file.exists():
             triage_guidance = triage_priors_file.read_text().strip()
-        if arbitration_priors_file and arbitration_priors_file.exists():
-            arbitration_guidance = arbitration_priors_file.read_text().strip()
 
     agent_role = f"{stage}-agent"
     judge_role = f"{stage}-judge"
@@ -263,14 +255,9 @@ async def _run_stage_loop(
             ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
             triage_guidance=triage_guidance,
-            arbitration_guidance=arbitration_guidance,
             stage_outputs_file=stage_outputs_file,
         )
-        if is_v3:
-            guidance = diagnosis_guidance if stage == "diagnosis" else ""
-            sre_system = renderer.render(f"{stage}_agent_system", diagnosis_guidance=guidance)
-        else:
-            sre_system = renderer.render(f"{stage}_agent_system")
+        sre_system = renderer.render(f"{stage}_agent_system")
         sre_prompt = renderer.render(
             f"{stage}_agent_user",
             app_name=app_info.get("app_name", "unknown"),

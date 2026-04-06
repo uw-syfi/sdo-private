@@ -30,11 +30,3 @@ Service Y's anomaly is unexplained.
 Set verdict to "accept" ONLY if every triage anomaly is either explained by the hypothesis
 or confirmed as pre-existing noise. Set verdict to "reject" if any anomaly remains
 unexplained — and list the unexplained anomalies so the diagnosing agent can revise.
-{% if arbitration_guidance %}
-
-WHEN MULTIPLE ANOMALIES COEXIST (guidance from past incidents):
-If your analysis shows multiple independent anomalies, use these heuristics to help
-the diagnosing agent identify the most fundamental root cause and submit one coherent
-hypothesis:
-{{ arbitration_guidance }}
-{% endif %}
