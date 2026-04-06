@@ -67,7 +67,7 @@ def _agent_cwd() -> Path:
     return Path(os.getenv("SREGYM_EXP_ENV", "."))
 
 
-def _run_bash_sync(cmd: str) -> str:
+def run_bash_sync(cmd: str) -> str:
     """Run *cmd* in a shell, capture stdout+stderr, truncate to MAX_OUTPUT_CHARS.
 
     The subprocess is started in its own session (``start_new_session=True``)
@@ -76,7 +76,7 @@ def _run_bash_sync(cmd: str) -> str:
     ``kubectl exec -it`` from lingering indefinitely.
     """
     cwd = str(_agent_cwd())
-    process: subprocess.Popen | None = None
+    process: subprocess.Popen[str] | None = None
     try:
         process = subprocess.Popen(  # noqa: S602
             cmd,
@@ -121,7 +121,7 @@ def _run_bash_sync(cmd: str) -> str:
     return output or "(no output)"
 
 
-def _check_mutating_kubectl(cmd: str) -> str | None:
+def check_mutating_kubectl(cmd: str) -> str | None:
     """Return an error message if *cmd* contains a mutating kubectl verb, else None."""
     try:
         tokens = shlex.split(cmd)
@@ -142,12 +142,12 @@ def _check_mutating_kubectl(cmd: str) -> str | None:
     return None
 
 
-def _exec_bash_readonly_impl(cmd: str) -> str:
+def exec_bash_readonly_impl(cmd: str) -> str:
     """Core read-only bash execution: check for mutating kubectl, then run."""
-    error = _check_mutating_kubectl(cmd)
+    error = check_mutating_kubectl(cmd)
     if error is not None:
         return error
-    return _run_bash_sync(cmd)
+    return run_bash_sync(cmd)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def exec_bash(ctx: RunContext[Any], cmd: str) -> str:
     Args:
         cmd: The shell command to run.
     """
-    return _run_bash_sync(cmd)
+    return run_bash_sync(cmd)
 
 
 def exec_bash_any(ctx: RunContext[Any], cmd: str) -> str:
@@ -170,7 +170,7 @@ def exec_bash_any(ctx: RunContext[Any], cmd: str) -> str:
     Args:
         cmd: The shell command to run.
     """
-    return _run_bash_sync(cmd)
+    return run_bash_sync(cmd)
 
 
 def read_file(
@@ -253,9 +253,9 @@ def grep(
         collected: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(target):
             dirnames[:] = [d for d in sorted(dirnames) if d not in _GREP_SKIP_DIRS]
-            for fn in sorted(filenames):
-                if fnmatch.fnmatch(fn, glob_pattern):
-                    collected.append(Path(dirpath) / fn)
+            collected.extend(
+                Path(dirpath) / fn for fn in sorted(filenames) if fnmatch.fnmatch(fn, glob_pattern)
+            )
         files = collected
 
     for file_path in files:
@@ -346,4 +346,4 @@ def exec_bash_readonly(ctx: RunContext[Any], cmd: str) -> str:
     Args:
         cmd: The shell command to run (must not mutate cluster state).
     """
-    return _exec_bash_readonly_impl(cmd)
+    return exec_bash_readonly_impl(cmd)

@@ -37,25 +37,26 @@ class SessionFiles:
         return [f.read_text() for f in files if f.exists()]
 
 
-_BENCHMARK_RESULT_RE = re.compile(r"<benchmark_result>.*?</benchmark_result>", re.DOTALL)
-_CITATION_RE = re.compile(r"\{\{ref:(incidents/[^}]+)\}\}")
-_MAX_CITATION_RETRIES = 2
+BENCHMARK_RESULT_RE = re.compile(r"<benchmark_result>.*?</benchmark_result>", re.DOTALL)
+CITATION_RE = re.compile(r"\{\{ref:(incidents/[^}]+)\}\}")
+MAX_CITATION_RETRIES = 2
 
 
-def _strip_benchmark_result(text: str) -> str:
+def strip_benchmark_result(text: str) -> str:
     """Remove all <benchmark_result>...</benchmark_result> blocks from text."""
-    return _BENCHMARK_RESULT_RE.sub("", text).strip()
+    return BENCHMARK_RESULT_RE.sub("", text).strip()
 
 
-def _extract_citations(text: str) -> list[str]:
+def extract_citations(text: str) -> list[str]:
     """Extract all {{ref:incidents/...}} citation values from text."""
-    return _CITATION_RE.findall(text)
+    result: list[str] = CITATION_RE.findall(text)
+    return result
 
 
-def _find_invalid_citations(text: str, incidents_dir: Path) -> list[str]:
+def find_invalid_citations(text: str, incidents_dir: Path) -> list[str]:
     """Return citation values that reference non-existent incident files."""
-    citations = _extract_citations(text)
-    invalid = []
+    citations = extract_citations(text)
+    invalid: list[str] = []
     for ref in citations:
         # ref is like "incidents/20260324_010224.md"
         filename = Path(ref).name
@@ -64,12 +65,12 @@ def _find_invalid_citations(text: str, incidents_dir: Path) -> list[str]:
     return invalid
 
 
-def _strip_citation_wrappers(text: str) -> str:
+def strip_citation_wrappers(text: str) -> str:
     """Replace {{ref:incidents/foo.md}} with incidents/foo.md."""
-    return _CITATION_RE.sub(r"\1", text)
+    return CITATION_RE.sub(r"\1", text)
 
 
-def _sanitize_app_name(name: str) -> str:
+def sanitize_app_name(name: str) -> str:
     """Sanitize an application name for use as a directory name."""
     return re.sub(r"[^a-zA-Z0-9_-]", "_", name).strip("_").lower() or "unknown"
 

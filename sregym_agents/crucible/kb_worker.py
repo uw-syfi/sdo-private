@@ -130,7 +130,7 @@ async def run_worker(
 def _setup_signal_handlers() -> None:
     """Ensure SIGTERM triggers a clean shutdown via KeyboardInterrupt."""
 
-    def _handler(signum, frame):
+    def _handler(signum: int, frame: object) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _handler)

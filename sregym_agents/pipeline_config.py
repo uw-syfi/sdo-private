@@ -16,6 +16,7 @@ import dataclasses
 import json
 import shutil
 from pathlib import Path
+from typing import Any, cast
 
 try:
     import tomllib
@@ -39,7 +40,7 @@ class StageConfig:
 
     name: str = ""
     chain_kb: bool = True
-    runner_overrides: dict = dataclasses.field(default_factory=dict)
+    runner_overrides: dict[str, Any] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
 
 @dataclasses.dataclass
@@ -47,8 +48,8 @@ class PipelineConfig:
     """Multi-stage experiment pipeline."""
 
     name: str = ""
-    defaults: dict = dataclasses.field(default_factory=dict)
-    stages: list[StageConfig] = dataclasses.field(default_factory=list)
+    defaults: dict[str, Any] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
+    stages: list[StageConfig] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     def __post_init__(self) -> None:
         if not self.stages:
@@ -73,7 +74,7 @@ class StageState:
 class PipelineState:
     """Persisted pipeline state for resume support."""
 
-    stages: list[StageState] = dataclasses.field(default_factory=list)
+    stages: list[StageState] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 # ---------------------------------------------------------------------------
@@ -132,24 +133,27 @@ def load_pipeline_config(path: Path) -> PipelineConfig:
 # ---------------------------------------------------------------------------
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge *override* into a copy of *base*.
 
     For nested dicts, merging is recursive.  All other values are
     replaced by the override.
     """
-    result = copy.deepcopy(base)
+    result: dict[str, Any] = copy.deepcopy(base)
     for key, val in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(val, dict):
-            result[key] = _deep_merge(result[key], val)
+            result[key] = _deep_merge(
+                cast("dict[str, Any]", result[key]),
+                cast("dict[str, Any]", val),
+            )
         else:
             result[key] = copy.deepcopy(val)
     return result
 
 
 def merge_stage_config(
-    defaults: dict,
-    overrides: dict,
+    defaults: dict[str, Any],
+    overrides: dict[str, Any],
 ) -> ExperimentConfig:
     """Deep-merge *defaults* with stage *overrides* → ExperimentConfig."""
     merged = _deep_merge(defaults, overrides)
@@ -294,7 +298,7 @@ def reset_stages_for_rerun(
 # ---------------------------------------------------------------------------
 
 
-def _toml_value(value) -> str:
+def _toml_value(value: bool | int | str | list[Any]) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
@@ -302,17 +306,15 @@ def _toml_value(value) -> str:
     if isinstance(value, str):
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
-    if isinstance(value, list):
-        items = ", ".join(_toml_value(item) for item in value)
-        return f"[{items}]"
-    raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
+    items = ", ".join(_toml_value(item) for item in value)
+    return f"[{items}]"
 
 
-def _serialize_dict_section(d: dict, prefix: str) -> list[str]:
+def _serialize_dict_section(d: dict[str, Any], prefix: str) -> list[str]:
     """Serialize a dict as TOML key=value lines, handling nested dicts."""
     lines: list[str] = []
-    simple: dict = {}
-    nested: dict = {}
+    simple: dict[str, Any] = {}
+    nested: dict[str, dict[str, Any]] = {}
     for k, v in d.items():
         if isinstance(v, dict):
             nested[k] = v

@@ -10,7 +10,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic_ai.models import Model, infer_model
@@ -27,7 +27,7 @@ from sregym_agents.crucible.tools import (
     SharedState,
     SREDeps,
     SRESubmission,
-    _submit_to_benchmark,
+    submit_to_benchmark,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class StageLoopResult:
     """Result from a single stage's agent-judge loop."""
 
     approved: bool
-    usage_by_role: dict
+    usage_by_role: dict[str, dict[str, Any]]
     benchmark_block: str = ""
     agent_answer: str = ""
     agent_justification: str = ""
@@ -47,32 +47,19 @@ class StageLoopResult:
     stage_outputs_file: Path | None = None
 
 
-def _zero_usage() -> dict:
+def _zero_usage() -> dict[str, int]:
     return {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
 
 
-def _add_usage(a: dict, b: dict) -> dict:
+def _add_usage(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
     return {k: a[k] + b.get(k, 0) for k in a}
 
 
-def _build_usage_result(usage_by_agent: dict) -> dict:
+def _build_usage_result(usage_by_agent: dict[str, dict[str, Any]]) -> dict[str, Any]:
     total = _zero_usage()
     for agent_data in usage_by_agent.values():
         total = _add_usage(total, agent_data["total"])
     return {"by_agent": usage_by_agent, "total": total}
-
-
-def _write_timeout_entry(
-    shared_file: Path,
-    label: str,
-    timeout: int,
-    elapsed: float | None = None,
-    context: str = "",
-) -> None:
-    elapsed_str = f" ({elapsed:.0f}s)" if elapsed is not None else ""
-    detail = f" {context}" if context else ""
-    with shared_file.open("a") as fh:
-        fh.write(f"\n### {label} — TIMED OUT\nExceeded {timeout}s limit{detail}{elapsed_str}.\n")
 
 
 def _replace_hypothesis_placeholder(
@@ -98,7 +85,7 @@ def _replace_hypothesis_placeholder(
 
 def _init_mitigation_file(
     mitigation_file: Path,
-    app_info: dict,
+    app_info: dict[str, Any],
     benchmark_block: str,
     diagnosis_answer: str,
     diagnosis_justification: str,
@@ -181,7 +168,7 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
 
 async def _run_stage_loop(
     model: Model,
-    app_info: dict,
+    app_info: dict[str, Any],
     stage: str,
     max_iters: int,
     shared_file: SharedFile,
@@ -236,7 +223,7 @@ async def _run_stage_loop(
 
     agent_role = f"{stage}-agent"
     judge_role = f"{stage}-judge"
-    usage_by_role: dict[str, dict] = {
+    usage_by_role: dict[str, dict[str, Any]] = {
         agent_role: {"iterations": [], "total": _zero_usage()},
         judge_role: {"iterations": [], "total": _zero_usage()},
     }
@@ -331,7 +318,7 @@ async def _run_stage_loop(
 
             answer = sre_state.answer or ""
             try:
-                success, message, oracle = await _submit_to_benchmark(submit_mcp_url, answer, stage)
+                success, message, oracle = await submit_to_benchmark(submit_mcp_url, answer, stage)
                 oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
                 benchmark_block = (
                     f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n"
@@ -452,7 +439,7 @@ def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis")
 
 async def _run_recovery_diagnosis(
     model: Model,
-    app_info: dict,
+    app_info: dict[str, Any],
     shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
@@ -503,7 +490,7 @@ async def _run_recovery_diagnosis(
 
     agent = CrucibleSREAgent(model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=system_prompt)
     try:
-        _, usage = await agent.arun(
+        await agent.arun(
             user_prompt,
             run_ctx={"stage": "diagnosis", "iteration": 0, "role": "recovery"},
         )
@@ -541,7 +528,7 @@ async def _run_recovery_diagnosis(
 
 async def _run_recovery_mitigation(
     model: Model,
-    app_info: dict,
+    app_info: dict[str, Any],
     shared_file: SharedFile,
     original_answer: str,
     benchmark_block: str,
@@ -593,7 +580,7 @@ async def _run_recovery_mitigation(
 
     agent = CrucibleSREAgent(model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=system_prompt)
     try:
-        _, usage = await agent.arun(
+        await agent.arun(
             user_prompt,
             run_ctx={"stage": "mitigation", "iteration": 0, "role": "recovery"},
         )
@@ -630,7 +617,7 @@ async def _run_recovery_mitigation(
 
 async def run(
     model: str | Model,
-    app_info: dict,
+    app_info: dict[str, Any],
     problem_id: str,
     diagnosis_shared_file: Path,
     mitigation_shared_file: Path,
@@ -640,7 +627,7 @@ async def run(
     injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
     crucible_config: CrucibleConfig | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     resolved_model: Model = model if isinstance(model, Model) else infer_model(model)
     if crucible_config is None:

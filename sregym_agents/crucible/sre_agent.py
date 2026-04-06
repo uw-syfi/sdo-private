@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai.models import Model
@@ -25,7 +25,7 @@ from libs.agent_mw import (
     TurnLoggingMiddleware,
     arun_with_retry,
 )
-from libs.pydantic_agent import BaseAgent, thinking_settings
+from libs.pydantic_agent import AgentMiddleware, BaseAgent, thinking_settings
 from sregym_agents.crucible.tools import (
     MAX_OUTPUT_TOKENS,
     THINKING_BUDGET,
@@ -61,14 +61,14 @@ def _context_window_for(model: str | Model) -> int:
     return 128_000
 
 
-async def _compact_messages(model: str | Model, messages: list) -> tuple[str, dict]:
+async def _compact_messages(model: str | Model, messages: list[Any]) -> tuple[str, dict[str, int]]:
     """Summarize message history for context compaction. Returns (summary, usage)."""
     import json
 
-    to_summarize = messages[1:] if len(messages) > 1 else messages
+    to_summarize: list[Any] = messages[1:] if len(messages) > 1 else messages
     try:
         raw = json.loads(ModelMessagesTypeAdapter.dump_json(to_summarize))
-        parts = []
+        parts: list[str] = []
         for msg in raw:
             kind = msg.get("kind", "unknown")
             for part in msg.get("parts", []):
@@ -110,7 +110,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
         step_limit: int | None = 500,
         system_prompt_override: str | None = None,
     ) -> None:
-        mw = [
+        mw: list[AgentMiddleware] = [
             TurnLoggingMiddleware(),
             RetryMiddleware(),
             ThinkingRepetitionMiddleware(),
@@ -148,12 +148,12 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
         )
 
         @self._agent.instructions
-        def _system(ctx) -> str:
+        def _system(ctx: RunContext[SREDeps]) -> str:  # pyright: ignore[reportUnusedFunction]
             if self._system_prompt_override:
                 return self._system_prompt_override
             return ctx.deps.renderer.render(f"{ctx.deps.stage}_agent_system")
 
-    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
+    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict[str, int]]:
         """Run with context compaction. Returns (output, usage)."""
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
         context_window = _context_window_for(self._model)

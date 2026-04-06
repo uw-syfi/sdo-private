@@ -11,14 +11,14 @@ from sregym_agents.crucible.tools._bash_tools import (
     MAX_OUTPUT_CHARS,
     MAX_READ_CHARS,
     MUTATING_KUBECTL_VERBS,
-    _check_mutating_kubectl,
-    _exec_bash_readonly_impl,
-    _run_bash_sync,
+    check_mutating_kubectl,
     exec_bash,
     exec_bash_any,
     exec_bash_readonly,
+    exec_bash_readonly_impl,
     grep,
     read_file,
+    run_bash_sync,
     str_replace_file,
     write_file,
 )
@@ -31,9 +31,9 @@ from sregym_agents.crucible.tools._deps import (
     TriageDeps,
 )
 from sregym_agents.crucible.tools._judge_tools import (
-    _submit_to_benchmark,
     reveal_agent_hypothesis,
     submit_independent_findings,
+    submit_to_benchmark,
     submit_verdict,
 )
 from sregym_agents.crucible.tools._kb_tools import (
@@ -65,11 +65,14 @@ __all__ = [
     "MAX_OUTPUT_CHARS",
     "MAX_READ_CHARS",
     "MUTATING_KUBECTL_VERBS",
+    "check_mutating_kubectl",
     "exec_bash",
     "exec_bash_any",
     "exec_bash_readonly",
+    "exec_bash_readonly_impl",
     "grep",
     "read_file",
+    "run_bash_sync",
     "str_replace_file",
     "write_file",
     # _deps
@@ -82,6 +85,7 @@ __all__ = [
     # _judge_tools
     "reveal_agent_hypothesis",
     "submit_independent_findings",
+    "submit_to_benchmark",
     "submit_verdict",
     # _kb_tools
     "COVERAGE_THINKING_BUDGET",

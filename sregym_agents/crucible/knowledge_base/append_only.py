@@ -12,7 +12,7 @@ from pydantic_ai import Agent
 
 from libs.agent_mw import arun_with_retry
 
-from .base import KB_APPEND_FILENAME, InjectedKB, KnowledgeBase, SessionFiles, _strip_benchmark_result
+from .base import KB_APPEND_FILENAME, InjectedKB, KnowledgeBase, SessionFiles, strip_benchmark_result
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
@@ -74,7 +74,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         if self.include_benchmark_results:
             content = raw.strip()
         else:
-            content = _strip_benchmark_result(raw)
+            content = strip_benchmark_result(raw)
         if not content:
             logger.warning("Shared file is empty after stripping benchmark results; skipping.")
             return

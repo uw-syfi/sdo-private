@@ -23,11 +23,11 @@ _MCP_BACKOFF_FACTOR = 2.0
 _MCP_MAX_DELAY = 60.0
 
 
-async def _submit_to_benchmark(
+async def submit_to_benchmark(
     submit_mcp_url: str,
     submission_ans: str,
     stage: str,
-) -> tuple[bool, str, dict | None]:
+) -> tuple[bool, str, dict[str, Any] | None]:
     """Submit *submission_ans* to the benchmark MCP server.
 
     Returns (success, message, oracle_result_dict).
@@ -80,13 +80,13 @@ async def _submit_to_benchmark(
     STAGE_TIMING_KEYS = {"Diagnosis": "TTL", "Mitigation": "TTM"}
     stage_key = stage.capitalize()
     timing_key = STAGE_TIMING_KEYS.get(stage_key)
-    filtered_oracle = {}
+    filtered_oracle: dict[str, Any] = {}
     if stage_key in oracle:
         filtered_oracle[stage_key] = oracle[stage_key]
     if timing_key and timing_key in oracle:
         filtered_oracle[timing_key] = oracle[timing_key]
 
-    stage_result = filtered_oracle.get(stage_key, {})
+    stage_result: dict[str, Any] = filtered_oracle.get(stage_key, {})
     if not stage_result.get("success"):
         return False, f"Benchmark rejected submission for stage '{stage_key}'.", filtered_oracle
 
@@ -167,7 +167,7 @@ async def submit_verdict(
     benchmark_block = ""
     if verdict:
         try:
-            success, message, oracle = await _submit_to_benchmark(ctx.deps.submit_mcp_url, submission_ans, stage)
+            success, message, oracle = await submit_to_benchmark(ctx.deps.submit_mcp_url, submission_ans, stage)
             oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
             benchmark_block = (
                 f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n{oracle_text}\n</benchmark_result>\n"

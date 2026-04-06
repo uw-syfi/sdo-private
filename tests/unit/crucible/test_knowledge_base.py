@@ -19,11 +19,11 @@ from sregym_agents.crucible.knowledge_base.base import (
     KB_APPEND_FILENAME,
     MAX_INJECTED_INCIDENTS,
     InjectedKB,
-    _extract_citations,
-    _find_invalid_citations,
-    _sanitize_app_name,
-    _strip_benchmark_result,
-    _strip_citation_wrappers,
+    extract_citations,
+    find_invalid_citations,
+    sanitize_app_name,
+    strip_benchmark_result,
+    strip_citation_wrappers,
 )
 from sregym_agents.crucible.knowledge_base.reflection import Reflector, _parse_classified_stages
 from sregym_agents.crucible.knowledge_base.schema import SCHEMA_V2
@@ -51,39 +51,39 @@ def tmp_kb(tmp_path: Path) -> tuple[StructuredKnowledgeBase, Path, Path]:
 class TestStripBenchmarkResult:
     def test_removes_single_block(self):
         text = "before <benchmark_result>secret</benchmark_result> after"
-        assert _strip_benchmark_result(text) == "before  after"
+        assert strip_benchmark_result(text) == "before  after"
 
     def test_removes_multiple_blocks(self):
         text = "<benchmark_result>a</benchmark_result> mid <benchmark_result>b</benchmark_result>"
-        assert _strip_benchmark_result(text) == "mid"
+        assert strip_benchmark_result(text) == "mid"
 
     def test_no_match_returns_original(self):
         text = "no tags here"
-        assert _strip_benchmark_result(text) == "no tags here"
+        assert strip_benchmark_result(text) == "no tags here"
 
     def test_multiline_block(self):
         text = "start\n<benchmark_result>\nline1\nline2\n</benchmark_result>\nend"
-        assert _strip_benchmark_result(text) == "start\n\nend"
+        assert strip_benchmark_result(text) == "start\n\nend"
 
 
 class TestSanitizeAppName:
     def test_lowercase_and_strip_special(self):
-        assert _sanitize_app_name("Hotel Reservation!") == "hotel_reservation"
+        assert sanitize_app_name("Hotel Reservation!") == "hotel_reservation"
 
     def test_already_clean(self):
-        assert _sanitize_app_name("socialnetwork") == "socialnetwork"
+        assert sanitize_app_name("socialnetwork") == "socialnetwork"
 
     def test_special_chars(self):
-        assert _sanitize_app_name("app/with@special#chars") == "app_with_special_chars"
+        assert sanitize_app_name("app/with@special#chars") == "app_with_special_chars"
 
     def test_empty_string(self):
-        assert _sanitize_app_name("") == "unknown"
+        assert sanitize_app_name("") == "unknown"
 
     def test_only_special_chars(self):
-        assert _sanitize_app_name("@#$") == "unknown"
+        assert sanitize_app_name("@#$") == "unknown"
 
     def test_hyphens_and_underscores_preserved(self):
-        assert _sanitize_app_name("my-app_v2") == "my-app_v2"
+        assert sanitize_app_name("my-app_v2") == "my-app_v2"
 
 
 class TestKBDirCreatedOnInit:
@@ -665,37 +665,37 @@ class TestIncludeBenchmarkResults:
 
 
 class TestCitationValidation:
-    def test_extract_citations(self):
+    def testextract_citations(self):
         text = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}}) and {{ref:incidents/20260324_010545.md}}"
-        assert _extract_citations(text) == [
+        assert extract_citations(text) == [
             "incidents/20260324_010224.md",
             "incidents/20260324_010545.md",
         ]
 
-    def test_extract_citations_none(self):
-        assert _extract_citations("no citations here") == []
+    def testextract_citations_none(self):
+        assert extract_citations("no citations here") == []
 
-    def test_find_invalid_citations_all_valid(self, tmp_path: Path):
+    def testfind_invalid_citations_all_valid(self, tmp_path: Path):
         incidents_dir = tmp_path / "incidents"
         incidents_dir.mkdir()
         (incidents_dir / "20260324_010224.md").write_text("content")
         text = "some text {{ref:incidents/20260324_010224.md}} more"
-        assert _find_invalid_citations(text, incidents_dir) == []
+        assert find_invalid_citations(text, incidents_dir) == []
 
-    def test_find_invalid_citations_some_invalid(self, tmp_path: Path):
+    def testfind_invalid_citations_some_invalid(self, tmp_path: Path):
         incidents_dir = tmp_path / "incidents"
         incidents_dir.mkdir()
         (incidents_dir / "20260324_010224.md").write_text("content")
         text = "{{ref:incidents/20260324_010224.md}} and {{ref:incidents/fake_file.md}}"
-        assert _find_invalid_citations(text, incidents_dir) == ["incidents/fake_file.md"]
+        assert find_invalid_citations(text, incidents_dir) == ["incidents/fake_file.md"]
 
-    def test_strip_citation_wrappers(self):
+    def teststrip_citation_wrappers(self):
         text = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}})"
-        assert _strip_citation_wrappers(text) == "root cause (1 incidents, incidents/20260324_010224.md)"
+        assert strip_citation_wrappers(text) == "root cause (1 incidents, incidents/20260324_010224.md)"
 
-    def test_strip_citation_wrappers_multiple(self):
+    def teststrip_citation_wrappers_multiple(self):
         text = "{{ref:incidents/a.md}} and {{ref:incidents/b.md}}"
-        assert _strip_citation_wrappers(text) == "incidents/a.md and incidents/b.md"
+        assert strip_citation_wrappers(text) == "incidents/a.md and incidents/b.md"
 
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_merge_correction_loop_fixes_bad_citation(self, mock_call_llm, tmp_path: Path):

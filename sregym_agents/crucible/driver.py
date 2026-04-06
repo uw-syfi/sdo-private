@@ -14,6 +14,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 _READY_STAGES = {"diagnosis", "mitigation"}
 
 
-def _load_crucible_config() -> tuple[dict, str]:
+def _load_crucible_config() -> tuple[dict[str, Any], str]:
     """Load crucible agent config and return (config_dict, source).
 
     Reads from SREGYM_EXPERIMENT_AGENT_CONFIG env var (set by the centralized
@@ -78,7 +79,7 @@ def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
     raise TimeoutError(f"Conductor did not reach ready stage within {timeout}s")
 
 
-def _get_app_info(api_base: str) -> dict:
+def _get_app_info(api_base: str) -> dict[str, Any]:
     resp = request_with_retry("GET", f"{api_base}/get_app", timeout=10)
     return resp.json()
 
@@ -93,10 +94,10 @@ def _get_planned_stages(api_base: str) -> list[str]:
     return resp.json().get("stages", [])
 
 
-def _save_results(logs_dir: Path, problem_id: str, usage_metrics: dict) -> None:
+def _save_results(logs_dir: Path, problem_id: str, usage_metrics: dict[str, Any]) -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_file = logs_dir / f"crucible_results_{problem_id}_{timestamp}.json"
-    results = {
+    results: dict[str, Any] = {
         "problem_id": problem_id,
         "timestamp": timestamp,
         "usage_metrics": usage_metrics,
@@ -172,7 +173,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     logger.info("Crucible driver starting...")
 
     crucible_cfg, config_source = _load_crucible_config()
-    agent_cfg = crucible_cfg.get("agent", {})
+    agent_cfg: dict[str, Any] = crucible_cfg.get("agent", {})
     logger.info(f"Effective agent config (source={config_source}): {agent_cfg}")
     try:
         crucible_config = crucible_config_from_experiment_agent(agent_cfg, cli_args=args)
@@ -290,7 +291,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             logger.info(f"Saved stage outputs to {dest}")
 
         # Collect paths to session markdown copies already saved above
-        session_files_task: dict | None = None
+        session_files_task: dict[str, str | None] | None = None
         if env_log_file:
             stem = Path(env_log_file).stem
             diag_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_diagnosis.md")
@@ -302,7 +303,7 @@ async def _async_main(args: argparse.Namespace) -> None:
                 }
 
         if session_files_task:
-            task_payload = {
+            task_payload: dict[str, Any] = {
                 "session_files": session_files_task,
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,

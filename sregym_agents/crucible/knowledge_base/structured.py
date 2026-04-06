@@ -13,15 +13,15 @@ from pydantic_ai import Agent
 from libs.agent_mw import arun_with_retry
 
 from .base import (
-    _MAX_CITATION_RETRIES,
+    MAX_CITATION_RETRIES,
     MAX_INJECTED_INCIDENTS,
     InjectedKB,
     KnowledgeBase,
     SessionFiles,
-    _find_invalid_citations,
-    _sanitize_app_name,
-    _strip_benchmark_result,
-    _strip_citation_wrappers,
+    find_invalid_citations,
+    sanitize_app_name,
+    strip_benchmark_result,
+    strip_citation_wrappers,
 )
 from .reflection import Reflector
 from .schema import (
@@ -59,7 +59,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
         self.app_name = app_name
-        self.app_dir = self.kb_dir / _sanitize_app_name(self.app_name)
+        self.app_dir = self.kb_dir / sanitize_app_name(self.app_name)
         self.app_dir.mkdir(parents=True, exist_ok=True)
         self.model_id = model_id
         self.include_benchmark_results = config.include_benchmark_results
@@ -82,7 +82,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         Reads the seed KB using its own schema version (never modifies the seed).
         """
         seed_schema = get_schema(seed_kb_dir)
-        sanitized = _sanitize_app_name(self.app_name)
+        sanitized = sanitize_app_name(self.app_name)
         seed_app_dir = seed_kb_dir / sanitized
 
         # Per-app summary
@@ -237,8 +237,8 @@ class StructuredKnowledgeBase(KnowledgeBase):
         result = await arun_with_retry(agent, prompt)
         output = result.output
 
-        for attempt in range(_MAX_CITATION_RETRIES):
-            invalid = _find_invalid_citations(output, self.incidents_dir)
+        for attempt in range(MAX_CITATION_RETRIES):
+            invalid = find_invalid_citations(output, self.incidents_dir)
             if not invalid:
                 break
             valid_files = sorted(f.name for f in self.incidents_dir.glob("*.md")) if self.incidents_dir.is_dir() else []
@@ -248,11 +248,11 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 "Please output the COMPLETE updated Long-Term Summary again with corrected citations. "
                 "Use the exact format {{ref:incidents/FILENAME.md}} for each citation."
             )
-            logger.warning(f"Citation validation failed (attempt {attempt + 1}/{_MAX_CITATION_RETRIES}): {invalid}")
+            logger.warning(f"Citation validation failed (attempt {attempt + 1}/{MAX_CITATION_RETRIES}): {invalid}")
             result = await arun_with_retry(agent, correction, message_history=result.all_messages())
             output = result.output
 
-        return _strip_citation_wrappers(output)
+        return strip_citation_wrappers(output)
 
     async def _extract_operational_lessons(self, long_term_summary: str) -> str:
         prompt = self.prompts.render("kb/extract_lessons", long_term_summary=long_term_summary)
@@ -265,7 +265,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
             logger.info(f"No {self.schema.summary} files found; skipping lessons extraction.")
             return
 
-        parts = []
+        parts: list[str] = []
         for sf in summary_files:
             text = sf.read_text().strip()
             if text:
@@ -297,7 +297,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         if self.include_benchmark_results:
             content = raw.strip()
         else:
-            content = _strip_benchmark_result(raw)
+            content = strip_benchmark_result(raw)
         if not content:
             logger.warning("Shared file is empty after stripping benchmark results; skipping.")
             return

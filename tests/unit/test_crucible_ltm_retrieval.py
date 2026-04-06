@@ -240,7 +240,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
         patch(
-            "sregym_agents.crucible.orchestrator._submit_to_benchmark",
+            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "ok", None),
         ),
@@ -289,7 +289,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
         patch(
-            "sregym_agents.crucible.orchestrator._submit_to_benchmark",
+            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "ok", None),
         ),

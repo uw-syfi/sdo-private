@@ -51,7 +51,7 @@ class TriageAnomaly(BaseModel):
 
 
 class TriageReport(BaseModel):
-    anomalies: list[TriageAnomaly] = Field(
+    anomalies: list[TriageAnomaly] = Field(  # pyright: ignore[reportUnknownVariableType]
         default_factory=list, description="All observed anomalies, each tagged with a category"
     )
     raw_cluster_snapshot: str = Field(
@@ -118,7 +118,7 @@ class VerifiedDifferentialDiagnosis(BaseModel):
     verified_candidates: list[CandidateVerification] = Field(
         description="Verification results for each candidate, ordered by original rank"
     )
-    confirmed_candidates: list[CandidateVerification] = Field(
+    confirmed_candidates: list[CandidateVerification] = Field(  # pyright: ignore[reportUnknownVariableType]
         default_factory=list,
         description="Subset of verified_candidates where applies=True, for convenience",
     )
@@ -226,7 +226,7 @@ async def _ltm_stream_handler(ctx: Any, events: Any) -> None:
                     result.tool_name or "unknown",
                     result.model_response(),
                 )
-            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
+            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):  # pyright: ignore[reportUnnecessaryIsInstance]
                 logger.warning(
                     "[ltm-search] ✗ %s() exited with code %s: %s",
                     result.tool_name,
@@ -265,7 +265,7 @@ def _make_verify_stream_handler(idx: int):
                         result.tool_name or "unknown",
                         result.model_response(),
                     )
-                elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
+                elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):  # pyright: ignore[reportUnnecessaryIsInstance]
                     logger.warning(
                         "%s ✗ %s() exited with code %s: %s",
                         prefix,
@@ -303,7 +303,7 @@ async def _triage_stream_handler(ctx: Any, events: Any) -> None:
                     result.tool_name or "unknown",
                     result.model_response(),
                 )
-            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
+            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):  # pyright: ignore[reportUnnecessaryIsInstance]
                 logger.warning(
                     "[triage] ✗ %s() exited with code %s: %s",
                     result.tool_name,
@@ -471,7 +471,7 @@ async def triage_cluster(
     )
 
     @triage_agent.output_validator
-    def _require_tool_calls(ctx: RunContext[None], report: TriageReport) -> TriageReport:
+    def _require_tool_calls(ctx: RunContext[None], report: TriageReport) -> TriageReport:  # pyright: ignore[reportUnusedFunction]
         from pydantic_ai.messages import ToolCallPart
 
         has_calls = any(isinstance(part, ToolCallPart) for msg in ctx.messages for part in msg.parts)

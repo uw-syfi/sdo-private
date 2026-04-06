@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 try:
     import tomllib
@@ -51,7 +52,7 @@ class ExperimentConfig:
 
     # Problem selection (mutually exclusive with variants)
     tasklist: str = ""  # named set or path to YAML
-    problems: list[str] = dataclasses.field(default_factory=list)
+    problems: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     # Variant mode
     variants: VariantConfig = dataclasses.field(default_factory=VariantConfig)
@@ -60,7 +61,7 @@ class ExperimentConfig:
     env: RunnerEnv = dataclasses.field(default_factory=RunnerEnv)
 
     # Agent-specific config (keyed by agent name)
-    agent_config: dict = dataclasses.field(default_factory=dict)
+    agent_config: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
     def __post_init__(self) -> None:
         if self.variants.enabled and (self.tasklist or self.problems):
@@ -123,8 +124,8 @@ def resolve_config(
     if env_overrides is None:
         env_overrides = dict(os.environ)
 
-    updates: dict = {}
-    env_updates: dict = {}
+    updates: dict[str, Any] = {}
+    env_updates: dict[str, str] = {}
 
     if "MODEL" in env_overrides:
         updates["model"] = env_overrides["MODEL"]
@@ -289,7 +290,7 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
     return env
 
 
-def _toml_value(value) -> str:
+def _toml_value(value: bool | int | str | list[Any]) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
@@ -297,10 +298,8 @@ def _toml_value(value) -> str:
     if isinstance(value, str):
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
-    if isinstance(value, list):
-        items = ", ".join(_toml_value(item) for item in value)
-        return f"[{items}]"
-    raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
+    items = ", ".join(_toml_value(item) for item in value)
+    return f"[{items}]"
 
 
 def _serialize_config(config: ExperimentConfig) -> str:

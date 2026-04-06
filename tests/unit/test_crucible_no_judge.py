@@ -43,7 +43,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent") as mock_judge_cls,
         patch(
-            "sregym_agents.crucible.orchestrator._submit_to_benchmark",
+            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(
                 True,
@@ -85,7 +85,7 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
         patch(
-            "sregym_agents.crucible.orchestrator._submit_to_benchmark",
+            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
             new_callable=AsyncMock,
             side_effect=RuntimeError("connection refused"),
         ),
@@ -141,7 +141,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
     with (
         patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
         patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
-        patch("sregym_agents.crucible.orchestrator._submit_to_benchmark") as mock_submit,
+        patch("sregym_agents.crucible.orchestrator.submit_to_benchmark") as mock_submit,
     ):
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 

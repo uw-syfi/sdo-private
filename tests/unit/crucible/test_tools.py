@@ -23,9 +23,9 @@ from sregym_agents.crucible.tools import (
     SharedState,
     SREDeps,
     SRESubmission,
-    _check_mutating_kubectl,
-    _run_bash_sync,
-    _submit_to_benchmark,
+    check_mutating_kubectl,
+    run_bash_sync,
+    submit_to_benchmark,
     exec_bash_readonly,
     read_file,
     reveal_agent_hypothesis,
@@ -113,12 +113,12 @@ class TestSharedFile:
 
 
 # ---------------------------------------------------------------------------
-# _run_bash_sync
+# run_bash_sync
 # ---------------------------------------------------------------------------
 
 
 def _mock_popen(returncode=0, stdout="", stderr="", communicate_side_effect=None):
-    """Create a mock ``subprocess.Popen`` instance for ``_run_bash_sync`` tests."""
+    """Create a mock ``subprocess.Popen`` instance for ``run_bash_sync`` tests."""
     mock_proc = MagicMock()
     mock_proc.pid = 12345
     mock_proc.returncode = returncode
@@ -135,13 +135,13 @@ class TestRunBashSync:
     def test_successful_command_returns_stdout(self):
         mock_proc = _mock_popen(returncode=0, stdout="hello world", stderr="")
         with patch("subprocess.Popen", return_value=mock_proc):
-            output = _run_bash_sync("echo hello world")
+            output = run_bash_sync("echo hello world")
         assert output == "hello world"
 
     def test_nonzero_exit_appends_stderr(self):
         mock_proc = _mock_popen(returncode=1, stdout="out", stderr="err msg")
         with patch("subprocess.Popen", return_value=mock_proc):
-            output = _run_bash_sync("false")
+            output = run_bash_sync("false")
         assert "out" in output
         assert "STDERR:" in output
         assert "err msg" in output
@@ -150,7 +150,7 @@ class TestRunBashSync:
     def test_stderr_included_on_success(self):
         mock_proc = _mock_popen(returncode=0, stdout="ok", stderr="deprecation warning")
         with patch("subprocess.Popen", return_value=mock_proc):
-            output = _run_bash_sync("some cmd")
+            output = run_bash_sync("some cmd")
         assert "ok" in output
         assert "STDERR:" in output
         assert "deprecation warning" in output
@@ -159,13 +159,13 @@ class TestRunBashSync:
     def test_exit_code_shown_on_failure(self):
         mock_proc = _mock_popen(returncode=127, stdout="", stderr="command not found")
         with patch("subprocess.Popen", return_value=mock_proc):
-            output = _run_bash_sync("badcmd")
+            output = run_bash_sync("badcmd")
         assert output.startswith("[Exit code 127]")
 
     def test_uses_bash_executable_and_new_session(self):
         mock_proc = _mock_popen(returncode=0, stdout="ok", stderr="")
         with patch("subprocess.Popen", return_value=mock_proc) as mock_popen_cls:
-            _run_bash_sync("echo hi")
+            run_bash_sync("echo hi")
         mock_popen_cls.assert_called_once()
         call_kwargs = mock_popen_cls.call_args
         assert call_kwargs.kwargs.get("executable") == "/bin/bash"
@@ -180,7 +180,7 @@ class TestRunBashSync:
             patch("os.killpg") as mock_killpg,
             patch("os.getpgid", return_value=12345),
         ):
-            output = _run_bash_sync("sleep 999")
+            output = run_bash_sync("sleep 999")
         assert "timed out" in output.lower()
         mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
 
@@ -194,7 +194,7 @@ class TestRunBashSync:
             patch("os.killpg") as mock_killpg,
             patch("os.getpgid", return_value=99999),
         ):
-            _run_bash_sync("kubectl exec -it pod -- nslookup foo")
+            run_bash_sync("kubectl exec -it pod -- nslookup foo")
         mock_killpg.assert_called_once_with(99999, signal.SIGKILL)
         mock_proc.wait.assert_called_once()
 
@@ -208,7 +208,7 @@ class TestRunBashSync:
             patch("os.killpg", side_effect=OSError("No such process")),
             patch("os.getpgid", return_value=12345),
         ):
-            output = _run_bash_sync("sleep 999")
+            output = run_bash_sync("sleep 999")
         assert "timed out" in output.lower()
         mock_proc.kill.assert_called_once()
         mock_proc.wait.assert_called_once()
@@ -220,7 +220,7 @@ class TestRunBashSync:
             patch("sregym_agents.crucible.tools._bash_tools.Path") as mock_path_cls,
         ):
             mock_path_cls.return_value.write_text = MagicMock()
-            output = _run_bash_sync("bigcmd")
+            output = run_bash_sync("bigcmd")
         assert "truncated" in output.lower() or "Output truncated" in output
 
     def test_general_exception_kills_process_group(self):
@@ -233,7 +233,7 @@ class TestRunBashSync:
             patch("os.killpg") as mock_killpg,
             patch("os.getpgid", return_value=12345),
         ):
-            output = _run_bash_sync("bad command")
+            output = run_bash_sync("bad command")
         assert "Error executing command" in output
         mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
         mock_proc.wait.assert_called_once()
@@ -246,15 +246,15 @@ class TestRunBashSyncIntegration:
         """When a command times out, all child processes must be killed.
 
         Spawns a bash command that starts a long-running child, then verifies
-        that after ``_run_bash_sync`` returns the timeout error, no orphaned
+        that after ``run_bash_sync`` returns the timeout error, no orphaned
         child processes remain.
         """
         # Use a short timeout for the test
-        marker = f"_run_bash_sync_test_{os.getpid()}"
+        marker = f"run_bash_sync_test_{os.getpid()}"
         cmd = f"bash -c 'sleep 300 & echo {marker}_$$; wait'"
 
         with patch("sregym_agents.crucible.tools._bash_tools.BASH_TIMEOUT", 2):
-            output = _run_bash_sync(cmd)
+            output = run_bash_sync(cmd)
 
         assert "timed out" in output.lower()
 
@@ -282,37 +282,37 @@ class TestRunBashSyncIntegration:
 
     def test_normal_command_not_affected_by_session(self):
         """Normal (non-timeout) commands must still work correctly."""
-        output = _run_bash_sync("echo hello_from_test")
+        output = run_bash_sync("echo hello_from_test")
         assert "hello_from_test" in output
 
     def test_nonzero_exit_still_works(self):
         """Non-zero exit codes are reported correctly with new session."""
-        output = _run_bash_sync("exit 42")
+        output = run_bash_sync("exit 42")
         assert "Exit code 42" in output
 
 
 # ---------------------------------------------------------------------------
-# _check_mutating_kubectl
+# check_mutating_kubectl
 # ---------------------------------------------------------------------------
 
 
 class TestCheckMutatingKubectl:
     def test_non_kubectl_returns_none(self):
-        assert _check_mutating_kubectl("echo foo") is None
+        assert check_mutating_kubectl("echo foo") is None
 
     @pytest.mark.parametrize("verb", ["get", "describe", "logs", "top"])
     def test_readonly_kubectl_returns_none(self, verb: str):
-        assert _check_mutating_kubectl(f"kubectl {verb} pods") is None
+        assert check_mutating_kubectl(f"kubectl {verb} pods") is None
 
     @pytest.mark.parametrize("verb", list(MUTATING_KUBECTL_VERBS))
     def test_mutating_verb_returns_error(self, verb: str):
-        result = _check_mutating_kubectl(f"kubectl {verb} something")
+        result = check_mutating_kubectl(f"kubectl {verb} something")
         assert result is not None
         assert verb in result
 
     def test_flags_before_verb_blocked(self):
         # Flags that take no value (e.g. --dry-run) are skipped correctly.
-        result = _check_mutating_kubectl("kubectl --dry-run delete pod mypod")
+        result = check_mutating_kubectl("kubectl --dry-run delete pod mypod")
         assert result is not None
         assert "delete" in result
 
@@ -320,17 +320,17 @@ class TestCheckMutatingKubectl:
         # Known limitation: `-n ns` causes `ns` to be treated as the verb candidate;
         # since `ns` is not in MUTATING_KUBECTL_VERBS, the check returns None even
         # though `delete` follows it. Tests document current behaviour, not ideal.
-        result = _check_mutating_kubectl("kubectl -n ns delete pod mypod")
+        result = check_mutating_kubectl("kubectl -n ns delete pod mypod")
         assert result is None
 
     def test_malformed_quoting_returns_error(self):
-        result = _check_mutating_kubectl("kubectl 'unclosed")
+        result = check_mutating_kubectl("kubectl 'unclosed")
         assert result is not None
         assert "malformed quoting" in result
 
 
 # ---------------------------------------------------------------------------
-# _submit_to_benchmark
+# submit_to_benchmark
 # ---------------------------------------------------------------------------
 
 
@@ -357,7 +357,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(_submit_to_benchmark("http://x/sse", "my answer", "diagnosis"))
+            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "my answer", "diagnosis"))
 
         assert success is True
         assert "accepted" in msg.lower()
@@ -373,7 +373,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(_submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert oracle is None
@@ -387,7 +387,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(_submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert "Failed to parse" in msg
@@ -403,7 +403,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(_submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert "not valid JSON" in msg
@@ -419,7 +419,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(_submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert "rejected" in msg.lower()
@@ -436,7 +436,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(_submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert result_oracle == oracle
@@ -457,7 +457,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(_submit_to_benchmark("http://x/sse", "", "mitigation"))
+            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "", "mitigation"))
 
         assert success is True
         assert "accepted" in msg.lower()
@@ -606,14 +606,14 @@ class TestStrReplaceFile:
 class TestExecBashReadonly:
     def test_allowed_command_delegates(self, tmp_path: Path):
         ctx = _make_judge_ctx(tmp_path)
-        with patch("sregym_agents.crucible.tools._bash_tools._run_bash_sync", return_value="ok") as mock_run:
+        with patch("sregym_agents.crucible.tools._bash_tools.run_bash_sync", return_value="ok") as mock_run:
             result = exec_bash_readonly(ctx, "ls -la")
         mock_run.assert_called_once_with("ls -la")
         assert result == "ok"
 
     def test_mutating_kubectl_blocked(self, tmp_path: Path):
         ctx = _make_judge_ctx(tmp_path)
-        with patch("sregym_agents.crucible.tools._bash_tools._run_bash_sync") as mock_run:
+        with patch("sregym_agents.crucible.tools._bash_tools.run_bash_sync") as mock_run:
             result = exec_bash_readonly(ctx, "kubectl delete pod mypod")
         mock_run.assert_not_called()
         assert "Error" in result
@@ -662,7 +662,7 @@ class TestSubmitVerdict:
         ctx.deps.state.hypothesis_revealed = True
 
         with patch(
-            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark", new_callable=AsyncMock
+            "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark", new_callable=AsyncMock
         ) as mock_submit:
             asyncio.run(submit_verdict(ctx, False, "not good enough", "answer"))
 
@@ -678,7 +678,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ):
@@ -695,7 +695,7 @@ class TestSubmitVerdict:
         ctx.deps.state.hypothesis_revealed = True
 
         with patch(
-            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
             side_effect=RuntimeError("connection refused"),
         ):
@@ -713,7 +713,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ):
@@ -729,7 +729,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ):
@@ -745,7 +745,7 @@ class TestSubmitVerdict:
 
         oracle = {"Diagnosis": {"success": True}}
         with patch(
-            "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
+            "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
             return_value=(True, "Benchmark accepted...", oracle),
         ) as mock_submit:
@@ -949,7 +949,7 @@ class TestJudgeToolSequence:
 
         async def _run():
             with patch(
-                "sregym_agents.crucible.tools._judge_tools._submit_to_benchmark",
+                "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
                 new_callable=AsyncMock,
                 return_value=(True, "Benchmark accepted", {"Diagnosis": {"success": True}}),
             ):
