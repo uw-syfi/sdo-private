@@ -1,12 +1,9 @@
-"""Crucible knowledge base: cross-problem learning via pydantic-ai Agent."""
+"""Structured knowledge base with root-cause-first indexing and heuristic refinement."""
 
 from __future__ import annotations
 
-import abc
 import asyncio
-import dataclasses
 import logging
-import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -16,100 +13,30 @@ from pydantic_ai import Agent
 
 from libs.agent_mw import arun_with_retry
 
+from .base import (
+    _MAX_CITATION_RETRIES,
+    KB_ARBITRATION_HEURISTICS_FILENAME,
+    KB_ARCHITECTURE_FILENAME,
+    KB_DIAGNOSIS_HEURISTICS_FILENAME,
+    KB_INCIDENTS_DIRNAME,
+    KB_LESSONS_FILENAME,
+    KB_SUMMARY_FILENAME,
+    KB_TRIAGE_HEURISTICS_FILENAME,
+    MAX_INJECTED_INCIDENTS,
+    InjectedKB,
+    KnowledgeBase,
+    SessionFiles,
+    _find_invalid_citations,
+    _sanitize_app_name,
+    _strip_benchmark_result,
+    _strip_citation_wrappers,
+)
+
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 logger = logging.getLogger(__name__)
-
-KB_SUMMARY_FILENAME = "long_term_summary.md"
-KB_LESSONS_FILENAME = "operational_lessons.md"
-KB_ARCHITECTURE_FILENAME = "architecture.md"
-KB_INCIDENTS_DIRNAME = "incidents"
-KB_DIAGNOSIS_HEURISTICS_FILENAME = "diagnosis_heuristics.md"
-KB_TRIAGE_HEURISTICS_FILENAME = "triage_heuristics.md"
-KB_ARBITRATION_HEURISTICS_FILENAME = "arbitration_heuristics.md"
-MAX_INJECTED_INCIDENTS = 100
-
-
-@dataclasses.dataclass
-class InjectedKB:
-    """Paths to KB files injected into the experiment environment."""
-
-    summary: Path | None = None
-    lessons: Path | None = None
-    architecture: Path | None = None
-    incidents_dir: Path | None = None
-    triage_additions: str | None = None
-    diagnosis_heuristics: Path | None = None
-    triage_heuristics: Path | None = None
-    arbitration_heuristics: Path | None = None
-
-
-@dataclasses.dataclass
-class SessionFiles:
-    """Session transcript files produced during a crucible run."""
-
-    diagnosis: Path | None = None
-    mitigation: Path | None = None
-
-    def read_all(self) -> list[str]:
-        """Read content from all existing session files."""
-        files = [f for f in (self.diagnosis, self.mitigation) if f is not None]
-        return [f.read_text() for f in files if f.exists()]
-
-
-_BENCHMARK_RESULT_RE = re.compile(r"<benchmark_result>.*?</benchmark_result>", re.DOTALL)
-_CITATION_RE = re.compile(r"\{\{ref:(incidents/[^}]+)\}\}")
-_MAX_CITATION_RETRIES = 2
-
-
-def _strip_benchmark_result(text: str) -> str:
-    """Remove all <benchmark_result>...</benchmark_result> blocks from text."""
-    return _BENCHMARK_RESULT_RE.sub("", text).strip()
-
-
-def _extract_citations(text: str) -> list[str]:
-    """Extract all {{ref:incidents/...}} citation values from text."""
-    return _CITATION_RE.findall(text)
-
-
-def _find_invalid_citations(text: str, incidents_dir: Path) -> list[str]:
-    """Return citation values that reference non-existent incident files."""
-    citations = _extract_citations(text)
-    invalid = []
-    for ref in citations:
-        # ref is like "incidents/20260324_010224.md"
-        filename = Path(ref).name
-        if not (incidents_dir / filename).exists():
-            invalid.append(ref)
-    return invalid
-
-
-def _strip_citation_wrappers(text: str) -> str:
-    """Replace {{ref:incidents/foo.md}} with incidents/foo.md."""
-    return _CITATION_RE.sub(r"\1", text)
-
-
-def _sanitize_app_name(name: str) -> str:
-    """Sanitize an application name for use as a directory name."""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", name).strip("_").lower() or "unknown"
-
-
-class KnowledgeBase(abc.ABC):
-    """Abstract base class for knowledge base implementations."""
-
-    @abc.abstractmethod
-    async def inject(self, target_dir: Path) -> InjectedKB:
-        """Copy KB files into target_dir for agent consumption."""
-
-    @abc.abstractmethod
-    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
-        """Update the knowledge base from the completed session."""
-
-    @abc.abstractmethod
-    async def extract_triage_additions(self) -> str:
-        """Extract triage checklist additions from KB content."""
 
 
 class HeuristicRefiner:
@@ -554,123 +481,3 @@ class StructuredKnowledgeBase(KnowledgeBase):
         else:
             logger.info("Heuristic refinement disabled; skipping.")
 
-
-# Backward-compatibility alias
-CrucibleKnowledgeBase = StructuredKnowledgeBase
-
-KB_APPEND_FILENAME = "knowledge.md"
-
-
-class AppendOnlyKnowledgeBase(KnowledgeBase):
-    """Simple append-only knowledge base that stores session summaries in a single file."""
-
-    def __init__(
-        self,
-        kb_dir: Path,
-        model_id: str,
-        app_name: str = "unknown",
-        *,
-        flags: CrucibleFlags | None = None,
-        renderer: PromptRenderer,
-    ):
-        from sregym_agents.crucible.orchestrator import CrucibleFlags as _CrucibleFlags
-
-        if flags is None:
-            flags = _CrucibleFlags()
-        self.kb_dir = Path(kb_dir)
-        self.kb_dir.mkdir(parents=True, exist_ok=True)
-        self.model_id = model_id
-        self.app_name = app_name
-        self.include_benchmark_results = flags.include_benchmark_results
-        self.prompts = renderer
-
-    @property
-    def knowledge_path(self) -> Path:
-        return self.kb_dir / KB_APPEND_FILENAME
-
-    async def inject(self, target_dir: Path) -> InjectedKB:
-        result = InjectedKB()
-        if self.knowledge_path.exists():
-            dest = target_dir / KB_APPEND_FILENAME
-            shutil.copy2(self.knowledge_path, dest)
-            result.summary = dest
-            logger.info(f"Knowledge base: copied append-only KB to {dest}")
-        else:
-            logger.info("Knowledge base: no prior knowledge file; starting fresh.")
-        return result
-
-    async def extract_triage_additions(self) -> str:
-        return ""
-
-    async def _call_llm(self, prompt: str) -> str:
-        agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry(agent, prompt)
-        return result.output
-
-    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
-        parts = session_files.read_all()
-        if not parts:
-            logger.warning("No shared files found; skipping knowledge base update.")
-            return
-
-        raw = "\n\n".join(parts)
-        if self.include_benchmark_results:
-            content = raw.strip()
-        else:
-            content = _strip_benchmark_result(raw)
-        if not content:
-            logger.warning("Shared file is empty after stripping benchmark results; skipping.")
-            return
-
-        logger.info("Generating session summary for append-only KB...")
-        try:
-            session_summary = await self._summarize_session(content)
-        except Exception as e:
-            logger.error(f"Failed to generate session summary: {e}")
-            return
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        entry = f"\n\n---\n\n## {timestamp}\n\n{session_summary}"
-
-        with open(self.knowledge_path, "a") as f:
-            f.write(entry)
-        logger.info(f"Appended session summary to {self.knowledge_path}")
-
-    async def _summarize_session(self, content: str) -> str:
-        prompt = self.prompts.render(
-            "kb/summarize_session",
-            content=content,
-            include_benchmark_results=self.include_benchmark_results,
-        )
-        return await self._call_llm(prompt)
-
-
-def create_knowledge_base(
-    kb_type: str,
-    kb_dir: Path,
-    model_id: str,
-    app_name: str = "unknown",
-    seed_kb_dir: Path | None = None,
-    *,
-    flags: CrucibleFlags | None = None,
-    renderer: PromptRenderer,
-) -> KnowledgeBase:
-    """Factory function to create a knowledge base implementation."""
-    if kb_type == "structured":
-        return StructuredKnowledgeBase(
-            kb_dir,
-            model_id,
-            app_name,
-            seed_kb_dir,
-            flags=flags,
-            renderer=renderer,
-        )
-    if kb_type == "append-only":
-        return AppendOnlyKnowledgeBase(
-            kb_dir,
-            model_id,
-            app_name,
-            flags=flags,
-            renderer=renderer,
-        )
-    raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")

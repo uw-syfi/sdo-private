@@ -20,7 +20,6 @@ from sregym_agents.crucible.knowledge_base import (
     KB_SUMMARY_FILENAME,
     MAX_INJECTED_INCIDENTS,
     AppendOnlyKnowledgeBase,
-    CrucibleKnowledgeBase,
     HeuristicRefiner,
     InjectedKB,
     SessionFiles,
@@ -38,12 +37,12 @@ _renderer = PromptRenderer("v1")
 
 
 @pytest.fixture
-def tmp_kb(tmp_path: Path) -> tuple[CrucibleKnowledgeBase, Path, Path]:
+def tmp_kb(tmp_path: Path) -> tuple[StructuredKnowledgeBase, Path, Path]:
     """Return (kb, kb_dir, target_dir)."""
     kb_dir = tmp_path / "kb"
     target_dir = tmp_path / "target"
     target_dir.mkdir()
-    kb = CrucibleKnowledgeBase(kb_dir, model_id="test-model", app_name="test-app", renderer=_renderer)
+    kb = StructuredKnowledgeBase(kb_dir, model_id="test-model", app_name="test-app", renderer=_renderer)
     return kb, kb_dir, target_dir
 
 
@@ -88,12 +87,12 @@ class TestSanitizeAppName:
 class TestKBDirCreatedOnInit:
     def test_kb_dir_created_on_init(self, tmp_path: Path):
         kb_dir = tmp_path / "nested" / "kb"
-        CrucibleKnowledgeBase(kb_dir, model_id="m", app_name="myapp", renderer=_renderer)
+        StructuredKnowledgeBase(kb_dir, model_id="m", app_name="myapp", renderer=_renderer)
         assert kb_dir.is_dir()
 
     def test_app_subdir_created_on_init(self, tmp_path: Path):
         kb_dir = tmp_path / "kb"
-        kb = CrucibleKnowledgeBase(kb_dir, model_id="m", app_name="My App!", renderer=_renderer)
+        kb = StructuredKnowledgeBase(kb_dir, model_id="m", app_name="My App!", renderer=_renderer)
         assert kb.app_dir.is_dir()
         assert kb.app_dir.name == "my_app"
 
@@ -205,7 +204,7 @@ class TestInjectIncidents:
         kb_dir = tmp_path / "kb"
         target_dir = tmp_path / "target"
         target_dir.mkdir()
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             kb_dir,
             model_id="m",
             app_name="test-app",
@@ -224,7 +223,7 @@ class TestInjectIncidents:
 
 class TestUpdate:
     async def test_update_skips_missing_shared_file(self, tmp_path: Path):
-        kb = CrucibleKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
+        kb = StructuredKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
         # Should not raise
         await kb.update(SessionFiles(diagnosis=tmp_path / "nonexistent.md"))
         assert not kb.summary_path.exists()
@@ -232,16 +231,16 @@ class TestUpdate:
     async def test_update_skips_empty_content(self, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("<benchmark_result>only this</benchmark_result>")
-        kb = CrucibleKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
+        kb = StructuredKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
         await kb.update(SessionFiles(diagnosis=shared))
         assert not kb.summary_path.exists()
 
-    @patch.object(CrucibleKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
-    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_update_full_flow(self, mock_llm, mock_merge, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("real session data")
-        kb = CrucibleKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
+        kb = StructuredKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
 
         mock_llm.side_effect = [
             "session summary",  # _summarize_session
@@ -260,12 +259,12 @@ class TestUpdate:
         assert len(incident_files) == 1
         assert incident_files[0].read_text() == "session summary\n\n---\n\nreal session data"
 
-    @patch.object(CrucibleKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
-    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_update_skips_incident_save_when_disabled(self, mock_llm, mock_merge, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("real session data")
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
@@ -287,7 +286,7 @@ class TestUpdate:
         # Merge should have been called with empty incident_ref
         mock_merge.assert_called_once_with("session summary", "", incident_ref="")
 
-    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_distill_lessons_reads_all_app_summaries(self, mock_llm, tmp_path: Path):
         kb_dir = tmp_path / "kb"
 
@@ -297,7 +296,7 @@ class TestUpdate:
             app_dir.mkdir(parents=True, exist_ok=True)
             (app_dir / KB_SUMMARY_FILENAME).write_text(content)
 
-        kb = CrucibleKnowledgeBase(kb_dir, model_id="m", app_name="app-a", renderer=_renderer)
+        kb = StructuredKnowledgeBase(kb_dir, model_id="m", app_name="app-a", renderer=_renderer)
         mock_llm.return_value = "combined lessons"
 
         await kb._distill_lessons()
@@ -319,7 +318,7 @@ class TestSeedKB:
         (seed_dir / "myapp").mkdir(parents=True)
         (seed_dir / "myapp" / KB_SUMMARY_FILENAME).write_text("seeded summary")
 
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="myapp",
@@ -334,7 +333,7 @@ class TestSeedKB:
         incidents.mkdir(parents=True)
         (incidents / "20260101_120000.md").write_text("incident content")
 
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="myapp",
@@ -350,7 +349,7 @@ class TestSeedKB:
         seed_dir.mkdir(parents=True)
         (seed_dir / KB_LESSONS_FILENAME).write_text("seeded lessons")
 
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="myapp",
@@ -364,7 +363,7 @@ class TestSeedKB:
         (seed_dir / "myapp").mkdir(parents=True)
         (seed_dir / "myapp" / KB_ARCHITECTURE_FILENAME).write_text("arch info")
 
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="myapp",
@@ -383,7 +382,7 @@ class TestSeedKB:
         app_dir.mkdir(parents=True)
         (app_dir / KB_ARCHITECTURE_FILENAME).write_text("existing arch")
 
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             kb_dir,
             model_id="m",
             app_name="myapp",
@@ -398,7 +397,7 @@ class TestSeedKB:
         # App dir exists but no architecture.md
 
         with caplog.at_level(logging.WARNING):
-            CrucibleKnowledgeBase(
+            StructuredKnowledgeBase(
                 tmp_path / "kb",
                 model_id="m",
                 app_name="myapp",
@@ -419,7 +418,7 @@ class TestSeedKB:
         app_dir.mkdir(parents=True)
         (app_dir / KB_SUMMARY_FILENAME).write_text("existing summary")
 
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             kb_dir,
             model_id="m",
             app_name="myapp",
@@ -433,7 +432,7 @@ class TestSeedKB:
         (seed_dir / "otherapp").mkdir(parents=True)
         (seed_dir / "otherapp" / KB_SUMMARY_FILENAME).write_text("other summary")
 
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="myapp",
@@ -443,7 +442,7 @@ class TestSeedKB:
         assert not kb.summary_path.exists()
 
     def test_no_seed_dir(self, tmp_path: Path):
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="myapp",
@@ -545,9 +544,6 @@ class TestCreateKnowledgeBase:
         with pytest.raises(ValueError, match="Unknown kb_type"):
             create_knowledge_base("invalid", tmp_path / "kb", model_id="m", renderer=_renderer)
 
-    def test_backward_compat_alias(self):
-        assert CrucibleKnowledgeBase is StructuredKnowledgeBase
-
     def test_include_incident_files_forwarded(self, tmp_path: Path):
         kb = create_knowledge_base(
             "structured",
@@ -585,11 +581,11 @@ class TestCreateKnowledgeBase:
 class TestIncludeBenchmarkResults:
     """Tests for the include_benchmark_results toggle."""
 
-    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_structured_preserves_benchmark_when_enabled(self, mock_llm, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
@@ -604,11 +600,11 @@ class TestIncludeBenchmarkResults:
         assert "<benchmark_result>" in summarize_prompt
         assert "ground truth" in summarize_prompt
 
-    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_structured_strips_benchmark_when_disabled(self, mock_llm, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
@@ -659,7 +655,7 @@ class TestIncludeBenchmarkResults:
         """When include_benchmark_results=True but content is only whitespace, still skip."""
         shared = tmp_path / "shared.md"
         shared.write_text("   ")
-        kb = CrucibleKnowledgeBase(
+        kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             model_id="m",
             app_name="test-app",
@@ -703,12 +699,12 @@ class TestCitationValidation:
         text = "{{ref:incidents/a.md}} and {{ref:incidents/b.md}}"
         assert _strip_citation_wrappers(text) == "incidents/a.md and incidents/b.md"
 
-    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_merge_correction_loop_fixes_bad_citation(self, mock_call_llm, tmp_path: Path):
         """When LLM produces invalid citation, correction loop fixes it."""
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = CrucibleKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
+        kb = StructuredKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
 
         # Create an incident file so we have a valid reference
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
@@ -727,9 +723,9 @@ class TestCitationValidation:
         mock_result_good.all_messages = lambda: [{"role": "assistant", "content": good_output}]
 
         with (
-            patch("sregym_agents.crucible.knowledge_base.Agent"),
+            patch("sregym_agents.crucible.knowledge_base.structured.Agent"),
             patch(
-                "sregym_agents.crucible.knowledge_base.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.structured.arun_with_retry",
                 new_callable=AsyncMock,
                 side_effect=[mock_result_bad, mock_result_good],
             ) as mock_retry,
@@ -743,12 +739,12 @@ class TestCitationValidation:
         # arun_with_retry should have been called twice (initial + 1 correction)
         assert mock_retry.call_count == 2
 
-    @patch.object(CrucibleKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_merge_no_correction_when_citations_valid(self, mock_call_llm, tmp_path: Path):
         """When LLM produces valid citations, no correction loop runs."""
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = CrucibleKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
+        kb = StructuredKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
 
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
         (kb.incidents_dir / "20260324_010224.md").write_text("incident")
@@ -760,9 +756,9 @@ class TestCitationValidation:
         mock_result.all_messages = list
 
         with (
-            patch("sregym_agents.crucible.knowledge_base.Agent"),
+            patch("sregym_agents.crucible.knowledge_base.structured.Agent"),
             patch(
-                "sregym_agents.crucible.knowledge_base.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.structured.arun_with_retry",
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ) as mock_retry,
