@@ -214,9 +214,7 @@ class ModelConfig:
             return {}
         if self.provider == "anthropic":
             return {"anthropic_thinking": {"type": "enabled", "budget_tokens": budget}}
-        if self.provider == "gemini":
-            return {"gemini_thinking_config": {"thinking_budget": budget, "include_thoughts": True}}
-        if self.provider == "vertex":
+        if self.provider in ("gemini", "vertex"):
             return {"google_thinking_config": {"thinking_budget": budget, "include_thoughts": True}}
         # openai does not support thinking config
         return {}

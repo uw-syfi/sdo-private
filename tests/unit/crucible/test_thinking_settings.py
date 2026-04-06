@@ -32,10 +32,10 @@ class TestThinkingSettings:
             "google-gla:gemini-2.0-flash",
         ],
     )
-    def test_gemini_gla_models_return_gemini_thinking_config(self, model: str):
+    def test_gemini_gla_models_return_google_thinking_config(self, model: str):
         settings = thinking_settings(model, BUDGET)
         assert settings == {
-            "gemini_thinking_config": {
+            "google_thinking_config": {
                 "thinking_budget": BUDGET,
                 "include_thoughts": True,
             },
@@ -74,4 +74,4 @@ class TestThinkingSettings:
         assert settings["anthropic_thinking"]["budget_tokens"] == 8192  # type: ignore[typeddict-item]
 
         settings = thinking_settings("gemini-2.5-pro", 8192)
-        assert settings["gemini_thinking_config"]["thinking_budget"] == 8192  # type: ignore[typeddict-item]
+        assert settings["google_thinking_config"]["thinking_budget"] == 8192  # type: ignore[typeddict-item]
