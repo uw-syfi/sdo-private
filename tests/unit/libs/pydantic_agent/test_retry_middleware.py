@@ -183,8 +183,10 @@ class TestRetryIntegration:
                 class _Failing:
                     async def __aenter__(self):
                         raise _make_http_error(429)
+
                     async def __aexit__(self, *exc):
                         return False
+
                 return _Failing()
             return original_iter(*args, **kwargs)
 
@@ -203,6 +205,7 @@ class TestRetryIntegration:
         class _AlwaysFailing:
             async def __aenter__(self):
                 raise ValueError("not retryable")
+
             async def __aexit__(self, *exc):
                 return False
 
@@ -221,6 +224,7 @@ class TestRetryIntegration:
         class _AlwaysFailing:
             async def __aenter__(self):
                 raise _make_http_error(429)
+
             async def __aexit__(self, *exc):
                 return False
 

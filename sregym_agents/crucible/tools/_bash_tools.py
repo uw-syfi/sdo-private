@@ -253,9 +253,7 @@ def grep(
         collected: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(target):
             dirnames[:] = [d for d in sorted(dirnames) if d not in _GREP_SKIP_DIRS]
-            collected.extend(
-                Path(dirpath) / fn for fn in sorted(filenames) if fnmatch.fnmatch(fn, glob_pattern)
-            )
+            collected.extend(Path(dirpath) / fn for fn in sorted(filenames) if fnmatch.fnmatch(fn, glob_pattern))
         files = collected
 
     for file_path in files:
