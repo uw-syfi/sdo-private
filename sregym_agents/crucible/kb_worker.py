@@ -77,7 +77,11 @@ async def process_task(task_path: Path) -> None:
     move_to_completed(task_path, kb_dir)
 
 
-async def run_worker(kb_dir: Path, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> None:
+async def run_worker(
+    kb_dir: Path,
+    idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
+    poll_interval: float = POLL_INTERVAL,
+) -> None:
     """Poll ``pending/`` and process tasks sequentially.
 
     Exits after *idle_timeout* seconds with no new tasks.
@@ -119,10 +123,10 @@ async def run_worker(kb_dir: Path, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> 
                     move_to_failed(m, kb_dir)
 
             if time.monotonic() - last_activity > idle_timeout:
-                logger.info("KB worker idle for %ds, exiting.", idle_timeout)
+                logger.info("KB worker idle for %.1fs, exiting.", idle_timeout)
                 break
 
-            await asyncio.sleep(POLL_INTERVAL)
+            await asyncio.sleep(poll_interval)
     finally:
         pid_path.unlink(missing_ok=True)
         logger.info("KB worker exiting, PID file cleaned up.")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 import re
@@ -34,6 +35,26 @@ MUTATING_KUBECTL_VERBS: frozenset[str] = frozenset(
     }
 )
 MAX_GREP_RESULTS = 200
+
+# Directories skipped during recursive grep to avoid scanning virtualenvs,
+# caches, and other large non-source trees.
+_GREP_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        ".venv",
+        "venv",
+        ".env",
+        ".git",
+        "__pycache__",
+        "node_modules",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".eggs",
+        "dist",
+        "build",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +250,13 @@ def grep(
         files = [target]
     else:
         glob_pattern = include or "*"
-        files = sorted(target.rglob(glob_pattern))
+        collected: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(target):
+            dirnames[:] = [d for d in sorted(dirnames) if d not in _GREP_SKIP_DIRS]
+            for fn in sorted(filenames):
+                if fnmatch.fnmatch(fn, glob_pattern):
+                    collected.append(Path(dirpath) / fn)
+        files = collected
 
     for file_path in files:
         if not file_path.is_file():

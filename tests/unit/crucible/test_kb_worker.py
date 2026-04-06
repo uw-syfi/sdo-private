@@ -83,21 +83,24 @@ class TestProcessTask:
                 await process_task(task_path)
 
 
+_FAST_POLL = 0.01  # fast poll interval for tests
+
+
 class TestRunWorker:
     @pytest.mark.asyncio
     async def test_exits_after_idle_timeout(self, tmp_path: Path):
         """Worker exits when no tasks appear within idle timeout."""
         start = time.monotonic()
-        await run_worker(tmp_path, idle_timeout=3)
+        await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
         elapsed = time.monotonic() - start
-        assert elapsed >= 3
-        assert elapsed < 10
+        assert elapsed >= 0.05
+        assert elapsed < 5
 
     @pytest.mark.asyncio
     async def test_cleans_up_pid_file(self, tmp_path: Path):
         """PID file is removed on exit."""
         pid_path = tmp_path / "kb_worker.pid"
-        await run_worker(tmp_path, idle_timeout=1)
+        await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
         assert not pid_path.exists()
 
     @pytest.mark.asyncio
@@ -114,7 +117,7 @@ class TestRunWorker:
             await original_sleep(0)
 
         with patch("sregym_agents.crucible.kb_worker.asyncio.sleep", side_effect=_capture_pid_and_timeout):
-            await run_worker(tmp_path, idle_timeout=1)
+            await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
 
         assert len(pid_seen) > 0
         assert pid_seen[0] == os.getpid()
@@ -132,7 +135,7 @@ class TestRunWorker:
             "sregym_agents.crucible.kb_worker.create_knowledge_base",
             return_value=mock_kb,
         ):
-            await run_worker(tmp_path, idle_timeout=3)
+            await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
 
         mock_kb.update.assert_awaited_once()
         assert not list(pending_dir.glob("*.json"))

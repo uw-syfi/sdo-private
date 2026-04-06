@@ -271,9 +271,9 @@ class SubprocessRunner:
             elapsed = current_time - start_time
             loop_iterations += 1
 
-            # Log monitoring progress every 10 seconds (100 iterations at 0.1s
+            # Log monitoring progress every 10 seconds (1000 iterations at 0.01s
             # sleep)
-            if summarizer is not None and loop_iterations % 100 == 0:
+            if summarizer is not None and loop_iterations % 1000 == 0:
                 logger.debug(
                     f"SubprocessRunner: Monitoring loop iter={loop_iterations}, "
                     f"elapsed={elapsed:.1f}s, process_running={self.process.poll() is None}"
@@ -316,7 +316,7 @@ class SubprocessRunner:
                 progress_callback()
 
             # Yield to allow other processing
-            self.sleep_func(0.1)
+            self.sleep_func(0.01)
 
         # Process completed
         return {
