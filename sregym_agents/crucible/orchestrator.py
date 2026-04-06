@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-import yaml
 from pydantic_ai.models import Model, infer_model
 
 if TYPE_CHECKING:
@@ -63,14 +62,6 @@ class StageLoopResult:
     agent_causal_chain: str = ""
     agent_reflection: str = ""
     stage_outputs_file: Path | None = None
-
-
-_CONFIG_DIR = Path(__file__).parent / "configs"
-
-
-def _load_agent_config() -> dict:
-    with open(_CONFIG_DIR / "agent_config.yaml") as f:
-        return yaml.safe_load(f)
 
 
 def _zero_usage() -> dict:
