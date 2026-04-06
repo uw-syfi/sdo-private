@@ -8,7 +8,7 @@ from typing import Any, cast
 from libs.pydantic_agent import AgentMiddleware
 
 
-def _fmt_args(args: str | dict[str, Any] | None) -> str:
+def fmt_tool_args(args: str | dict[str, Any] | None) -> str:
     if args is None:
         return ""
     if isinstance(args, str):
@@ -28,7 +28,7 @@ def _fmt_k(n: int | None) -> str:
     return f"{round(n / 1000)}k"
 
 
-def _tool_failed(content: Any) -> bool:
+def tool_call_failed(content: Any) -> bool:
     if not isinstance(content, dict):
         return False
     d = cast("dict[str, Any]", content)
@@ -56,7 +56,7 @@ class TurnLoggingMiddleware(AgentMiddleware):
             "%s \u2192 %s(%s)",
             self._usage_prefix(),
             event.part.tool_name,
-            _fmt_args(event.part.args),
+            fmt_tool_args(event.part.args),
         )
 
     def on_function_tool_result(self, event: Any) -> None:
@@ -72,7 +72,7 @@ class TurnLoggingMiddleware(AgentMiddleware):
                 result.tool_name or "unknown",
                 result.model_response(),
             )
-        elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
+        elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
             self._logger.warning(
                 "%s \u2717 %s() exited with code %s: %s",
                 prefix,

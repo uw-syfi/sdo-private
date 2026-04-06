@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.exceptions import ModelHTTPError
 
-from libs.pydantic_agent._middleware import AgentMiddleware
+from libs.pydantic_agent import AgentMiddleware
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent

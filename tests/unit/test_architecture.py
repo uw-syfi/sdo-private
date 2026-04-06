@@ -1,17 +1,21 @@
 """
 AST-based architectural boundary tests.
 
-These tests enforce three rules using static analysis of import statements:
+These tests enforce four rules using static analysis of import statements:
 
   Rule 1 — Façade rule: cross-package imports must go through __init__.py.
             Code in package A must not import from app_operator.B.submodule;
             it must import from app_operator.B directly.
 
   Rule 2 — Private module rule: _-prefixed submodules are package-private.
-            No file outside a package may import from a _-prefixed submodule.
+            No file outside a package's directory may import from a
+            _-prefixed submodule defined within it.
 
   Rule 3 — Public API rule: every non-trivial subpackage __init__.py must
             declare __all__ to make its public surface explicit.
+
+  Rule 4 — Clean exports rule: __all__ must not contain _-prefixed names.
+            Private names are implementation details, not public API.
 
 Layer-ordering rules (which package may import from which) are enforced
 separately by import-linter contracts in pyproject.toml.
@@ -22,17 +26,23 @@ import ast
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Roots
+# Project package registry — single source of truth for all rules.
+# Maps the importable top-level name to its source directory.
+# Add a new entry here whenever a new top-level project package is introduced.
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
-_APP_OPERATOR = _REPO_ROOT / "app_operator"
-_APP_OPERATOR_DSPY = _REPO_ROOT / "app_operator_dspy"
-_LEGO_AGENT = _REPO_ROOT / "lego_agent"
-_LIBS = _REPO_ROOT / "libs"
-_SREGYM_AGENTS = _REPO_ROOT / "sregym_agents"
 
-# Top-level subpackages (directories with __init__.py) inside app_operator.
+_PROJECT_PACKAGES: dict[str, Path] = {
+    "app_operator": _REPO_ROOT / "app_operator",
+    "app_operator_dspy": _REPO_ROOT / "app_operator_dspy",
+    "lego_agent": _REPO_ROOT / "lego_agent",
+    "libs": _REPO_ROOT / "libs",
+    "sregym_agents": _REPO_ROOT / "sregym_agents",
+}
+
+# Top-level subpackages inside app_operator (used by Rules 1 and 3).
+_APP_OPERATOR = _PROJECT_PACKAGES["app_operator"]
 _SUBPACKAGES: frozenset[str] = frozenset(
     p.name for p in _APP_OPERATOR.iterdir() if p.is_dir() and (p / "__init__.py").exists()
 )
@@ -50,7 +60,7 @@ def _iter_py_files(*roots: Path) -> list[Path]:
 
 
 def _home_package(filepath: Path) -> str | None:
-    """Return the top-level subpackage a file belongs to, or None."""
+    """Return the app_operator subpackage a file belongs to, or None."""
     try:
         rel = filepath.relative_to(_APP_OPERATOR)
     except ValueError:
@@ -73,6 +83,27 @@ def _fmt(filepath: Path, lineno: int, module: str, reason: str) -> str:
     return f"  {filepath.relative_to(_REPO_ROOT)}:{lineno}  '{module}'  — {reason}"
 
 
+def _private_owner_dir(module: str) -> Path | None:
+    """
+    Return the directory that owns the first _-prefixed segment in a dotted
+    module path, or None if the module is not a project module or has no
+    private segment.
+
+    The owner is the immediate parent directory of the _-prefixed segment:
+      "libs.agent_mw._turn_logger"  →  <root>/libs/agent_mw/
+      "app_operator.commands._foo"  →  <root>/app_operator/commands/
+      "sregym_agents.crucible._bar" →  <root>/sregym_agents/crucible/
+    """
+    parts = module.split(".")
+    root = _PROJECT_PACKAGES.get(parts[0])
+    if root is None:
+        return None
+    for i, part in enumerate(parts[1:], 1):
+        if part.startswith("_"):
+            return root.joinpath(*parts[1:i]) if i > 1 else root
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Rule 1: façade rule
 # ---------------------------------------------------------------------------
@@ -85,7 +116,7 @@ def test_cross_package_imports_go_through_init():
     """
     violations: list[str] = []
 
-    for filepath in _iter_py_files(_APP_OPERATOR, _LEGO_AGENT, _LIBS):
+    for filepath in _iter_py_files(*_PROJECT_PACKAGES.values()):
         home = _home_package(filepath)
 
         for module, lineno in _from_imports(filepath):
@@ -119,34 +150,28 @@ def test_cross_package_imports_go_through_init():
 
 def test_no_private_submodule_imports_across_packages():
     """
-    Modules named with a leading underscore are package-private.
-    No file outside that package may import from them.
+    Modules named with a leading underscore are private to their parent directory.
+    No file outside that directory may import from them.
     """
     violations: list[str] = []
 
-    for filepath in _iter_py_files(_APP_OPERATOR, _LEGO_AGENT, _LIBS):
-        home = _home_package(filepath)
-
+    for filepath in _iter_py_files(*_PROJECT_PACKAGES.values()):
         for module, lineno in _from_imports(filepath):
-            parts = module.split(".")
-            if parts[0] != "app_operator":
+            owner_dir = _private_owner_dir(module)
+            if owner_dir is None:
                 continue
 
-            # Find the first _-prefixed segment after the root
-            private_part = next((p for p in parts[1:] if p.startswith("_")), None)
-            if private_part is None:
-                continue
-
-            # Determine which package owns the private symbol
-            target_pkg = parts[1] if parts[1] in _SUBPACKAGES else None
-
-            if target_pkg != home:
+            try:
+                filepath.relative_to(owner_dir)
+            except ValueError:
+                parts = module.split(".")
+                private_part = next(p for p in parts[1:] if p.startswith("_"))
                 violations.append(
                     _fmt(
                         filepath,
                         lineno,
                         module,
-                        f"'{private_part}' is package-private to '{target_pkg}'",
+                        f"'{private_part}' is private to '{owner_dir.relative_to(_REPO_ROOT)}'",
                     )
                 )
 
@@ -209,8 +234,7 @@ def test_all_does_not_export_private_names():
     """
     violations: list[str] = []
 
-    roots = [_APP_OPERATOR, _APP_OPERATOR_DSPY, _LEGO_AGENT, _LIBS, _SREGYM_AGENTS]
-    for root in roots:
+    for root in _PROJECT_PACKAGES.values():
         for init in sorted(root.rglob("__init__.py")):
             try:
                 tree = ast.parse(init.read_text(encoding="utf-8"))

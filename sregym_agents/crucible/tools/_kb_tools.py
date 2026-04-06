@@ -211,11 +211,11 @@ async def _ltm_stream_handler(ctx: Any, events: Any) -> None:
         ToolReturnPart,
     )
 
-    from libs.agent_mw._turn_logger import _fmt_args, _tool_failed
+    from libs.agent_mw import fmt_tool_args, tool_call_failed
 
     async for event in events:
         if isinstance(event, FunctionToolCallEvent):
-            logger.info("[ltm-search] → %s(%s)", event.part.tool_name, _fmt_args(event.part.args))
+            logger.info("[ltm-search] → %s(%s)", event.part.tool_name, fmt_tool_args(event.part.args))
         elif isinstance(event, FunctionToolResultEvent):
             result = event.result
             if isinstance(result, RetryPromptPart):
@@ -224,7 +224,7 @@ async def _ltm_stream_handler(ctx: Any, events: Any) -> None:
                     result.tool_name or "unknown",
                     result.model_response(),
                 )
-            elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
+            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
                 logger.warning(
                     "[ltm-search] ✗ %s() exited with code %s: %s",
                     result.tool_name,
@@ -249,11 +249,11 @@ def _make_verify_stream_handler(idx: int):
             ToolReturnPart,
         )
 
-        from libs.agent_mw._turn_logger import _fmt_args, _tool_failed
+        from libs.agent_mw import fmt_tool_args, tool_call_failed
 
         async for event in events:
             if isinstance(event, FunctionToolCallEvent):
-                logger.info("%s → %s(%s)", prefix, event.part.tool_name, _fmt_args(event.part.args))
+                logger.info("%s → %s(%s)", prefix, event.part.tool_name, fmt_tool_args(event.part.args))
             elif isinstance(event, FunctionToolResultEvent):
                 result = event.result
                 if isinstance(result, RetryPromptPart):
@@ -263,7 +263,7 @@ def _make_verify_stream_handler(idx: int):
                         result.tool_name or "unknown",
                         result.model_response(),
                     )
-                elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
+                elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
                     logger.warning(
                         "%s ✗ %s() exited with code %s: %s",
                         prefix,
@@ -288,11 +288,11 @@ async def _triage_stream_handler(ctx: Any, events: Any) -> None:
         ToolReturnPart,
     )
 
-    from libs.agent_mw._turn_logger import _fmt_args, _tool_failed
+    from libs.agent_mw import fmt_tool_args, tool_call_failed
 
     async for event in events:
         if isinstance(event, FunctionToolCallEvent):
-            logger.info("[triage] → %s(%s)", event.part.tool_name, _fmt_args(event.part.args))
+            logger.info("[triage] → %s(%s)", event.part.tool_name, fmt_tool_args(event.part.args))
         elif isinstance(event, FunctionToolResultEvent):
             result = event.result
             if isinstance(result, RetryPromptPart):
@@ -301,7 +301,7 @@ async def _triage_stream_handler(ctx: Any, events: Any) -> None:
                     result.tool_name or "unknown",
                     result.model_response(),
                 )
-            elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
+            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
                 logger.warning(
                     "[triage] ✗ %s() exited with code %s: %s",
                     result.tool_name,
