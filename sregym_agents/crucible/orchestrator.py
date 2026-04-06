@@ -19,6 +19,7 @@ from pydantic_ai.models import Model, infer_model
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
+from sregym_agents.crucible.knowledge_base.base import InjectedKB
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
     JudgeDeps,
@@ -189,6 +190,22 @@ def _read_kb_content(path: Path | None) -> str:
         return ""
 
 
+def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
+    """Resolve optional paths on an InjectedKB copy."""
+    if injected is None:
+        return None
+    return InjectedKB(
+        summary=injected.summary.resolve() if injected.summary else None,
+        lessons=injected.lessons.resolve() if injected.lessons else None,
+        architecture=injected.architecture.resolve() if injected.architecture else None,
+        incidents_dir=injected.incidents_dir.resolve() if injected.incidents_dir else None,
+        triage_additions=injected.triage_additions,
+        diagnosis_heuristics=injected.diagnosis_heuristics.resolve() if injected.diagnosis_heuristics else None,
+        triage_heuristics=injected.triage_heuristics.resolve() if injected.triage_heuristics else None,
+        arbitration_heuristics=injected.arbitration_heuristics.resolve() if injected.arbitration_heuristics else None,
+    )
+
+
 async def _run_stage_loop(
     model: Model,
     app_info: dict,
@@ -197,22 +214,23 @@ async def _run_stage_loop(
     shared_file: SharedFile,
     submit_mcp_url: str,
     renderer: PromptRenderer,
-    lt_summary_file: Path | None = None,
-    lessons_file: Path | None = None,
-    architecture_file: Path | None = None,
-    incidents_dir: Path | None = None,
+    injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
     config: CrucibleConfig | None = None,
-    diagnosis_heuristics_file: Path | None = None,
-    triage_heuristics_file: Path | None = None,
-    arbitration_heuristics_file: Path | None = None,
 ) -> StageLoopResult:
     """Run the agent->judge loop for one stage."""
     if flags is None:
         flags = CrucibleFlags()
     if config is None:
         config = CrucibleConfig()
+    lt_summary_file = injected_kb.summary if injected_kb else None
+    lessons_file = injected_kb.lessons if injected_kb else None
+    architecture_file = injected_kb.architecture if injected_kb else None
+    incidents_dir = injected_kb.incidents_dir if injected_kb else None
+    diagnosis_heuristics_file = injected_kb.diagnosis_heuristics if injected_kb else None
+    triage_heuristics_file = injected_kb.triage_heuristics if injected_kb else None
+    arbitration_heuristics_file = injected_kb.arbitration_heuristics if injected_kb else None
     stage_timeout = config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
@@ -649,16 +667,10 @@ async def run(
     planned_stages: list[str],
     submit_mcp_url: str,
     renderer: PromptRenderer,
-    lt_summary_file: Path | None = None,
-    lessons_file: Path | None = None,
-    architecture_file: Path | None = None,
-    incidents_dir: Path | None = None,
+    injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
     flags: CrucibleFlags | None = None,
     config: CrucibleConfig | None = None,
-    diagnosis_heuristics_file: Path | None = None,
-    triage_heuristics_file: Path | None = None,
-    arbitration_heuristics_file: Path | None = None,
 ) -> dict:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     resolved_model: Model = model if isinstance(model, Model) else infer_model(model)
@@ -679,13 +691,7 @@ async def run(
         "## Diagnosis\n"
     )
     logger.info(f"Initialized diagnosis shared file: {diagnosis_sf}")
-    lt_summary_file = lt_summary_file.resolve() if lt_summary_file else None
-    lessons_file = lessons_file.resolve() if lessons_file else None
-    architecture_file = architecture_file.resolve() if architecture_file else None
-    incidents_dir = incidents_dir.resolve() if incidents_dir else None
-    diagnosis_heuristics_file = diagnosis_heuristics_file.resolve() if diagnosis_heuristics_file else None
-    triage_heuristics_file = triage_heuristics_file.resolve() if triage_heuristics_file else None
-    arbitration_heuristics_file = arbitration_heuristics_file.resolve() if arbitration_heuristics_file else None
+    injected_kb = _resolve_injected_kb(injected_kb)
 
     diag_result = await _run_stage_loop(
         resolved_model,
@@ -695,16 +701,10 @@ async def run(
         diagnosis_sf,
         submit_mcp_url,
         renderer=renderer,
-        lt_summary_file=lt_summary_file,
-        lessons_file=lessons_file,
-        architecture_file=architecture_file,
-        incidents_dir=incidents_dir,
+        injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         flags=flags,
         config=config,
-        diagnosis_heuristics_file=diagnosis_heuristics_file,
-        triage_heuristics_file=triage_heuristics_file,
-        arbitration_heuristics_file=arbitration_heuristics_file,
     )
     # Recovery diagnosis: produce a validated causal chain when the benchmark
     # rejected the agent's diagnosis and we want causal chains for KB.
@@ -761,16 +761,10 @@ async def run(
         mitigation_sf,
         submit_mcp_url,
         renderer=renderer,
-        lt_summary_file=lt_summary_file,
-        lessons_file=lessons_file,
-        architecture_file=architecture_file,
-        incidents_dir=incidents_dir,
+        injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         flags=flags,
         config=config,
-        diagnosis_heuristics_file=diagnosis_heuristics_file,
-        triage_heuristics_file=triage_heuristics_file,
-        arbitration_heuristics_file=arbitration_heuristics_file,
     )
     # Recovery mitigation: reflect on why mitigation failed when benchmark
     # rejected the agent's fix and we want lessons for KB.

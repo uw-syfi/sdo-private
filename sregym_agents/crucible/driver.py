@@ -22,7 +22,7 @@ from filelock import FileLock
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.knowledge_base import KnowledgeBase, SessionFiles, create_knowledge_base
+from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
 from sregym_agents.crucible.orchestrator import CrucibleConfig, CrucibleFlags
 
 logging.basicConfig(
@@ -286,13 +286,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         trajectory_path = Path(f"trajectory_{problem_id}_{_run_uid}.jsonl")
 
     kb: KnowledgeBase | None = None
-    lt_summary_file: Path | None = None
-    lessons_file: Path | None = None
-    architecture_file: Path | None = None
-    incidents_dir: Path | None = None
-    diagnosis_heuristics_file: Path | None = None
-    triage_heuristics_file: Path | None = None
-    arbitration_heuristics_file: Path | None = None
+    injected_kb: InjectedKB | None = None
 
     if args.kb_dir:
         model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
@@ -310,16 +304,17 @@ async def _async_main(args: argparse.Namespace) -> None:
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env or "."))
-            lt_summary_file = injected.summary
-            lessons_file = injected.lessons
-            architecture_file = injected.architecture
-            incidents_dir = injected.incidents_dir
             if agent_cfg.get("inject_heuristics", True):
-                diagnosis_heuristics_file = injected.diagnosis_heuristics
-                triage_heuristics_file = injected.triage_heuristics
-                arbitration_heuristics_file = injected.arbitration_heuristics
+                injected_kb = injected
             else:
                 logger.info("Heuristic injection disabled by inject_heuristics=false")
+                injected_kb = InjectedKB(
+                    summary=injected.summary,
+                    lessons=injected.lessons,
+                    architecture=injected.architecture,
+                    incidents_dir=injected.incidents_dir,
+                    triage_additions=injected.triage_additions,
+                )
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
@@ -332,16 +327,10 @@ async def _async_main(args: argparse.Namespace) -> None:
         planned_stages=planned_stages,
         submit_mcp_url=submit_mcp_url,
         renderer=renderer,
-        lt_summary_file=lt_summary_file,
-        lessons_file=lessons_file,
-        architecture_file=architecture_file,
-        incidents_dir=incidents_dir,
+        injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         flags=flags,
         config=config,
-        diagnosis_heuristics_file=diagnosis_heuristics_file,
-        triage_heuristics_file=triage_heuristics_file,
-        arbitration_heuristics_file=arbitration_heuristics_file,
     )
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")

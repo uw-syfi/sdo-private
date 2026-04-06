@@ -245,6 +245,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
             return_value=(True, "ok", None),
         ),
     ):
+        from sregym_agents.crucible.knowledge_base import InjectedKB
         from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
 
         asyncio.run(
@@ -255,7 +256,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
                 max_iters=1,
                 shared_file=shared_file,  # type: ignore[arg-type]
                 submit_mcp_url="http://localhost:9954/submit/sse",
-                lt_summary_file=lt_file,
+                injected_kb=InjectedKB(summary=lt_file),
                 renderer=mock_renderer,
                 flags=CrucibleFlags(enable_judge=False, enable_ltm_retrieval=False),
             )
@@ -293,6 +294,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
             return_value=(True, "ok", None),
         ),
     ):
+        from sregym_agents.crucible.knowledge_base import InjectedKB
         from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
 
         asyncio.run(
@@ -303,8 +305,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
                 max_iters=1,
                 shared_file=shared_file,  # type: ignore[arg-type]
                 submit_mcp_url="http://localhost:9954/submit/sse",
-                lt_summary_file=lt_file,
-                incidents_dir=inc_dir,
+                injected_kb=InjectedKB(summary=lt_file, incidents_dir=inc_dir),
                 renderer=mock_renderer,
                 flags=CrucibleFlags(enable_judge=False, enable_ltm_retrieval=True),
             )

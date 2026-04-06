@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .append_only import AppendOnlyKnowledgeBase
-from .base import KnowledgeBase, SessionFiles
+from .base import InjectedKB, KnowledgeBase, SessionFiles
 from .structured import StructuredKnowledgeBase
 
 if TYPE_CHECKING:
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.orchestrator import CrucibleFlags
 
 __all__ = [
+    "InjectedKB",
     "KnowledgeBase",
     "SessionFiles",
     "create_knowledge_base",
