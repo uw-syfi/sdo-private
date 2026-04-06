@@ -312,12 +312,14 @@ class TestHypothesisTextPassedToJudgeDeps:
         ):
             import asyncio
 
+            from pydantic_ai.models import infer_model
+
             from sregym_agents.crucible.config import CrucibleConfig
             from sregym_agents.crucible.orchestrator import _run_stage_loop
 
             asyncio.run(
                 _run_stage_loop(
-                    model="test-model",
+                    model=infer_model("test"),
                     app_info={"app_name": "myapp", "namespace": "default"},
                     stage="diagnosis",
                     max_iters=3,

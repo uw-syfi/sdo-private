@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 import pytest
+from pydantic_ai.models import infer_model
 
 from sregym_agents.crucible.orchestrator import (
     StageLoopResult,
@@ -285,7 +286,7 @@ class TestRunRecoveryDiagnosis:
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -319,7 +320,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -359,7 +360,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -399,7 +400,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -437,7 +438,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -471,7 +472,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -532,7 +533,7 @@ class TestRunRecoveryMitigation:
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -564,7 +565,7 @@ class TestRunRecoveryMitigation:
         )
 
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -604,7 +605,7 @@ class TestRunRecoveryMitigation:
         )
 
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -642,7 +643,7 @@ class TestRunRecoveryMitigation:
         )
 
         await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -674,7 +675,7 @@ class TestRunRecoveryMitigation:
         )
 
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",

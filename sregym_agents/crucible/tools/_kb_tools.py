@@ -22,6 +22,8 @@ from sregym_agents.crucible.tools._deps import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pydantic_ai.models import Model
+
 logger = logging.getLogger(__name__)
 
 THINKING_BUDGET = 4096
@@ -345,7 +347,7 @@ async def _run_verification_phase(
     observed_symptoms: str,
     namespace: str,
     stage: str,
-    model_id: str,
+    model_id: Model | str,
     renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     triage_report: TriageReport | None = None,
