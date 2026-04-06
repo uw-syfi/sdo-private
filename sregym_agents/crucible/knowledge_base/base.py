@@ -26,7 +26,6 @@ class InjectedKB:
     lessons: Path | None = None
     architecture: Path | None = None
     incidents_dir: Path | None = None
-    triage_additions: str | None = None
     diagnosis_heuristics: Path | None = None
     triage_heuristics: Path | None = None
     arbitration_heuristics: Path | None = None
@@ -92,7 +91,3 @@ class KnowledgeBase(abc.ABC):
     @abc.abstractmethod
     async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
         """Update the knowledge base from the completed session."""
-
-    @abc.abstractmethod
-    async def extract_triage_additions(self) -> str:
-        """Extract triage checklist additions from KB content."""

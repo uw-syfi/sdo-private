@@ -264,7 +264,6 @@ async def _async_main(args: argparse.Namespace) -> None:
                     lessons=injected.lessons,
                     architecture=injected.architecture,
                     incidents_dir=injected.incidents_dir,
-                    triage_additions=injected.triage_additions,
                 )
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")

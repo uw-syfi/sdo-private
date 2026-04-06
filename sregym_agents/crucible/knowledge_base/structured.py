@@ -303,12 +303,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
         elif not self.include_incident_files:
             logger.info("Knowledge base: incident file injection disabled by include_incident_files=false")
 
-        try:
-            result.triage_additions = await self.extract_triage_additions()
-        except Exception as e:
-            logger.warning(f"Failed to extract triage additions: {e}")
-            result.triage_additions = None
-
         # Trained heuristic files (root-level, cross-app)
         for filename, attr in [
             (KB_DIAGNOSIS_HEURISTICS_FILENAME, "diagnosis_heuristics"),
@@ -322,32 +316,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 setattr(result, attr, dest)
                 logger.info(f"Knowledge base: copied {filename} to {dest}")
 
-        return result
-
-    async def extract_triage_additions(self) -> str:
-        """Extract a triage checklist supplement from KB lessons and per-app summary.
-
-        Returns the triage checklist text, or empty string if source files are missing.
-        """
-        operational_lessons = ""
-        if self.lessons_path.exists():
-            operational_lessons = self.lessons_path.read_text().strip()
-
-        long_term_summary = ""
-        if self.summary_path.exists():
-            long_term_summary = self.summary_path.read_text().strip()
-
-        if not operational_lessons and not long_term_summary:
-            logger.info("No KB content available for triage additions; returning empty.")
-            return ""
-
-        prompt = self.prompts.render(
-            "kb/extract_triage_checklist",
-            operational_lessons=operational_lessons,
-            long_term_summary=long_term_summary,
-        )
-        result = await self._call_llm(prompt)
-        logger.info(f"Triage additions extracted ({len(result)} chars)")
         return result
 
     async def _call_llm(self, prompt: str) -> str:

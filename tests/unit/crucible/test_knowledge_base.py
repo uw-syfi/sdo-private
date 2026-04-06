@@ -479,10 +479,6 @@ class TestAppendOnlyInject:
         assert result.architecture is None
         assert result.incidents_dir is None
 
-    async def test_extract_triage_additions_returns_empty(self, tmp_path: Path):
-        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", model_id="m", renderer=_renderer)
-        assert await kb.extract_triage_additions() == ""
-
 
 class TestAppendOnlyUpdate:
     async def test_update_skips_missing_shared_file(self, tmp_path: Path):

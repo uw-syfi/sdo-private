@@ -59,9 +59,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
             logger.info("Knowledge base: no prior knowledge file; starting fresh.")
         return result
 
-    async def extract_triage_additions(self) -> str:
-        return ""
-
     async def _call_llm(self, prompt: str) -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
         result = await arun_with_retry(agent, prompt)

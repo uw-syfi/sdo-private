@@ -199,7 +199,6 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
         lessons=injected.lessons.resolve() if injected.lessons else None,
         architecture=injected.architecture.resolve() if injected.architecture else None,
         incidents_dir=injected.incidents_dir.resolve() if injected.incidents_dir else None,
-        triage_additions=injected.triage_additions,
         diagnosis_heuristics=injected.diagnosis_heuristics.resolve() if injected.diagnosis_heuristics else None,
         triage_heuristics=injected.triage_heuristics.resolve() if injected.triage_heuristics else None,
         arbitration_heuristics=injected.arbitration_heuristics.resolve() if injected.arbitration_heuristics else None,
