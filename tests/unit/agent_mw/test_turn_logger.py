@@ -71,7 +71,7 @@ def test_on_function_tool_result_warns_on_retry_prompt():
     # Attach middleware to a dummy agent
     class DummyAgent:
         agent_name = "dummy"
-        current_request_input_tokens = 0
+        context_window_token_usage = 0
 
     mw.on_attach(DummyAgent())  # type: ignore[arg-type]
 
@@ -94,7 +94,7 @@ def test_on_function_tool_result_warns_on_failed_tool():
 
     class DummyAgent:
         agent_name = "dummy"
-        current_request_input_tokens = 0
+        context_window_token_usage = 0
 
     mw.on_attach(DummyAgent())  # type: ignore[arg-type]
 

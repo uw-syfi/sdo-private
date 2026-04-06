@@ -47,7 +47,7 @@ class TurnLoggingMiddleware(AgentMiddleware):
         self._context_window = context_window
 
     def _usage_prefix(self) -> str:
-        used = _fmt_k(self._agent.current_request_input_tokens)
+        used = _fmt_k(self._agent.context_window_token_usage)
         limit = _fmt_k(self._context_window)
         return f"[{self._agent.agent_name} | {used}/{limit}]"
 

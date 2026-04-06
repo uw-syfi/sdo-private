@@ -49,7 +49,7 @@ class BaseAgent(Generic[DepsT]):
         self._usage_limits = UsageLimits()
         self._middleware: list[AgentMiddleware] = middleware or []
         self.current_run_usage: RunUsage = RunUsage()
-        self.current_request_input_tokens: int = 0
+        self.context_window_token_usage: int = 0
         for m in self._middleware:
             m.on_attach(self)
 
@@ -105,7 +105,7 @@ class BaseAgent(Generic[DepsT]):
         """
 
         self.current_run_usage = RunUsage()
-        self.current_request_input_tokens = 0
+        self.context_window_token_usage = 0
         for m in self._middleware:
             m.before_run()
 
@@ -134,7 +134,7 @@ class BaseAgent(Generic[DepsT]):
                     raise
                 time.sleep(delay)
 
-        self.current_request_input_tokens = result.usage().input_tokens or 0
+        self.context_window_token_usage = result.usage().input_tokens or 0
         for m in self._middleware:
             m.after_run(result, _run_ctx)
         return result
@@ -154,7 +154,7 @@ class BaseAgent(Generic[DepsT]):
         """
 
         self.current_run_usage = RunUsage()
-        self.current_request_input_tokens = 0
+        self.context_window_token_usage = 0
         for m in self._middleware:
             m.before_run()
 
@@ -178,7 +178,7 @@ class BaseAgent(Generic[DepsT]):
                                 async for event in stream:
                                     self.current_run_usage = agent_run.ctx.state.usage
                                     if hasattr(stream, "usage"):
-                                        self.current_request_input_tokens = (
+                                        self.context_window_token_usage = (
                                             stream.usage().input_tokens or 0  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
                                         ) - ctx_baseline_tokens
                                     self._stream_event_chain(event)
@@ -200,7 +200,13 @@ class BaseAgent(Generic[DepsT]):
                     current_prompt = None
                 await asyncio.sleep(delay)
 
-        self.current_request_input_tokens = result.usage().input_tokens or 0
+        # Only fall back to cumulative usage when streaming didn't provide
+        # per-request tokens (e.g. the model backend lacks stream.usage()).
+        # The streaming loop sets context_window_token_usage to the *last*
+        # individual request's input tokens — the actual context size, not the
+        # sum across all requests in the run.
+        if self.context_window_token_usage == 0:  # pyright: ignore[reportUnknownMemberType]
+            self.context_window_token_usage = result.usage().input_tokens or 0
         for m in self._middleware:
             m.after_run(result, _run_ctx)
         return result

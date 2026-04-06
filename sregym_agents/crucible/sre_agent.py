@@ -197,9 +197,10 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             except Exception as e:
                 logger.warning(f"Error writing to shared file: {e}")
 
-            if input_tokens > self.CONTEXT_COMPACT_THRESHOLD * context_window:
+            last_request_tokens = self.context_window_token_usage
+            if last_request_tokens > self.CONTEXT_COMPACT_THRESHOLD * context_window:
                 logger.warning(
-                    f"Context approaching limit ({input_tokens} > "
+                    f"Context approaching limit ({last_request_tokens} > "
                     f"{self.CONTEXT_COMPACT_THRESHOLD * context_window:.0f}). Compacting..."
                 )
                 summary, compact_usage = await _compact_messages(self._model, result.all_messages())
