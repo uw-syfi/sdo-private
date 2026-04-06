@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic_ai import Agent
@@ -161,53 +161,74 @@ class TestBeforeRunReset:
 
 
 # ---------------------------------------------------------------------------
-# Integration: retry loop in BaseAgent._run()
+# Integration: retry loop in BaseAgent._arun()
 # ---------------------------------------------------------------------------
 
 
 class TestRetryIntegration:
-    @patch("libs.pydantic_agent._base.time.sleep")
-    def test_retry_then_succeed(self, mock_sleep):
+    @pytest.mark.asyncio
+    @patch("libs.pydantic_agent._base.asyncio.sleep", new_callable=AsyncMock)
+    async def test_retry_then_succeed(self, mock_sleep):
         mw = RetryMiddleware(max_retries=3, jitter=False, initial_delay=0.1)
         agent = _make_agent(middleware=[mw])
 
         call_count = 0
-        original_run_sync = agent._agent.run_sync
+        original_iter = agent._agent.iter
 
-        def _failing_then_ok(*args, **kwargs):
+        def _patched_iter(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
-                raise _make_http_error(429)
-            return original_run_sync(*args, **kwargs)
+                # Return a context manager that raises on __aenter__
+                class _Failing:
+                    async def __aenter__(self):
+                        raise _make_http_error(429)
+                    async def __aexit__(self, *exc):
+                        return False
+                return _Failing()
+            return original_iter(*args, **kwargs)
 
-        agent._agent.run_sync = _failing_then_ok
-        result = agent._run("hi")
+        agent._agent.iter = _patched_iter
+        result = await agent._arun("hi")
         assert result is not None
         assert call_count == 3
-        assert mock_sleep.call_count == 2
+        assert mock_sleep.await_count == 2
 
-    @patch("libs.pydantic_agent._base.time.sleep")
-    def test_non_retryable_error_propagates(self, mock_sleep):
+    @pytest.mark.asyncio
+    @patch("libs.pydantic_agent._base.asyncio.sleep", new_callable=AsyncMock)
+    async def test_non_retryable_error_propagates(self, mock_sleep):
         mw = RetryMiddleware()
         agent = _make_agent(middleware=[mw])
 
-        agent._agent.run_sync = MagicMock(side_effect=ValueError("not retryable"))
+        class _AlwaysFailing:
+            async def __aenter__(self):
+                raise ValueError("not retryable")
+            async def __aexit__(self, *exc):
+                return False
+
+        agent._agent.iter = lambda *a, **kw: _AlwaysFailing()
 
         with pytest.raises(ValueError, match="not retryable"):
-            agent._run("hi")
-        mock_sleep.assert_not_called()
+            await agent._arun("hi")
+        mock_sleep.assert_not_awaited()
 
-    @patch("libs.pydantic_agent._base.time.sleep")
-    def test_retries_exhausted_propagates(self, mock_sleep):
+    @pytest.mark.asyncio
+    @patch("libs.pydantic_agent._base.asyncio.sleep", new_callable=AsyncMock)
+    async def test_retries_exhausted_propagates(self, mock_sleep):
         mw = RetryMiddleware(max_retries=2, jitter=False)
         agent = _make_agent(middleware=[mw])
 
-        agent._agent.run_sync = MagicMock(side_effect=_make_http_error(429))
+        class _AlwaysFailing:
+            async def __aenter__(self):
+                raise _make_http_error(429)
+            async def __aexit__(self, *exc):
+                return False
+
+        agent._agent.iter = lambda *a, **kw: _AlwaysFailing()
 
         with pytest.raises(ModelHTTPError):
-            agent._run("hi")
-        assert mock_sleep.call_count == 2
+            await agent._arun("hi")
+        assert mock_sleep.await_count == 2
 
 
 # ---------------------------------------------------------------------------
