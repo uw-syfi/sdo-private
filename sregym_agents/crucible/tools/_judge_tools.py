@@ -10,9 +10,9 @@ import random
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from pydantic_ai import RunContext
+from pydantic_ai import RunContext  # noqa: TC002 — needed at runtime for pydantic-ai tool introspection
 
+if TYPE_CHECKING:
     from sregym_agents.crucible.tools._deps import JudgeDeps
 
 logger = logging.getLogger(__name__)

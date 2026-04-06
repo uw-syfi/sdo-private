@@ -11,13 +11,16 @@ from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
 
 from libs.agent_mw import arun_with_retry
+from sregym_agents.crucible._prompts import (
+    PromptRenderer,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
+)
 from sregym_agents.crucible.tools._bash_tools import exec_bash_any, grep, read_file, str_replace_file, write_file
+from sregym_agents.crucible.tools._deps import (
+    SREDeps,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.tools._deps import SREDeps
 
 logger = logging.getLogger(__name__)
 

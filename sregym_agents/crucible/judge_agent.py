@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic_ai import Agent
+    from pydantic_ai.models import Model
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
@@ -43,7 +44,7 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
     MAX_SUBMIT_REMINDERS = 3
 
     def __init__(
-        self, model: str, deps: JudgeDeps, trajectory_path: Path | None = None, step_limit: int | None = 500
+        self, model: Model, deps: JudgeDeps, trajectory_path: Path | None = None, step_limit: int | None = 500
     ) -> None:
         mw = [
             TurnLoggingMiddleware(),

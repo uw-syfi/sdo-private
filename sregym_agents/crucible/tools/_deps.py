@@ -14,6 +14,8 @@ from sregym_agents.crucible._prompts import PromptRenderer
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pydantic_ai.models import Model
+
     from sregym_agents.crucible.tools._kb_tools import TriageReport
 
 logger = logging.getLogger(__name__)
@@ -112,7 +114,7 @@ class SREDeps:
     state: SharedState = field(default_factory=SharedState)
     lt_summary_file: Path | None = None
     incidents_dir: Path | None = None
-    ltm_model_id: str | None = None
+    ltm_model_id: Model | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
     trajectory_path: Path | None = None

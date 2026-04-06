@@ -10,10 +10,9 @@ import signal
 import subprocess
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from pydantic_ai import RunContext
+from pydantic_ai import RunContext  # noqa: TC002 — needed at runtime for pydantic-ai tool introspection
 
 logger = logging.getLogger(__name__)
 

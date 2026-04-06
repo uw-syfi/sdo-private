@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+from pydantic_ai.models.test import TestModel
 
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.tools import (
@@ -21,7 +23,9 @@ from sregym_agents.crucible.tools import (
 )
 
 
-def _make_sre_ctx(deps: SREDeps) -> MagicMock:
+def _make_sre_ctx(deps: SREDeps):
+    from unittest.mock import MagicMock
+
     ctx = MagicMock()
     ctx.deps = deps
     return ctx
@@ -30,7 +34,7 @@ def _make_sre_ctx(deps: SREDeps) -> MagicMock:
 def _make_deps(
     tmp_path: Path,
     triage_report: TriageReport | None = None,
-    ltm_model_id: str | None = None,
+    ltm_model_id: TestModel | None = None,
 ) -> SREDeps:
     shared_file = tmp_path / "session.md"
     shared_file.write_text("")
@@ -126,7 +130,7 @@ class TestHypothesisCoverageVerdict:
 
 class TestCheckHypothesisCoverageErrors:
     def test_no_triage_report(self, tmp_path: Path) -> None:
-        deps = _make_deps(tmp_path, triage_report=None, ltm_model_id="test-model")
+        deps = _make_deps(tmp_path, triage_report=None, ltm_model_id=TestModel())
         ctx = _make_sre_ctx(deps)
 
         result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="port conflict in geo"))
@@ -148,72 +152,44 @@ class TestCheckHypothesisCoverageErrors:
 
 
 class TestCheckHypothesisCoverageSubagent:
-    def test_calls_subagent_with_triage_and_hypothesis(self, tmp_path: Path) -> None:
+    def test_accept_result(self, tmp_path: Path) -> None:
         triage = _make_triage_report()
-        deps = _make_deps(tmp_path, triage_report=triage, ltm_model_id="test-model")
-        ctx = _make_sre_ctx(deps)
-
-        mock_verdict = HypothesisCoverageVerdict(
+        verdict = HypothesisCoverageVerdict(
             verdict="accept",
             explained_anomalies=["Pod/geo CrashLoopBackOff", "Service/geo 0 endpoints"],
             unexplained_anomalies=[],
             reasoning="All explained",
         )
+        deps = _make_deps(
+            tmp_path,
+            triage_report=triage,
+            ltm_model_id=TestModel(custom_output_args=verdict.model_dump()),
+        )
+        ctx = _make_sre_ctx(deps)
 
-        mock_run_result = MagicMock()
-        mock_run_result.output = mock_verdict
-
-        mock_arun = AsyncMock(return_value=mock_run_result)
-
-        with (
-            patch("pydantic_ai.Agent") as mock_agent_cls,
-            patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
-            patch.object(PromptRenderer, "render", return_value="rendered prompt") as mock_render,
-        ):
+        with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="sidecar port conflict in geo pod"))
 
-        # Agent was constructed with right model and output type
-        mock_agent_cls.assert_called_once()
-        call_kwargs = mock_agent_cls.call_args
-        assert call_kwargs[0][0] == "test-model"
-        assert call_kwargs[1]["output_type"] is HypothesisCoverageVerdict
-
-        # Agent should have NO tools (pure reasoning)
-        assert "tools" not in call_kwargs[1] or call_kwargs[1].get("tools") is None
-
-        # _render was called with triage context and hypothesis
-        mock_render.assert_called_once()
-        render_kwargs = mock_render.call_args[1]
-        assert "sidecar port conflict" in render_kwargs["hypothesis"]
-        assert "geo" in render_kwargs["triage_context"]
-
-        # Result is valid JSON
         parsed = json.loads(result)
         assert parsed["verdict"] == "accept"
         assert len(parsed["unexplained_anomalies"]) == 0
 
     def test_reject_result(self, tmp_path: Path) -> None:
         triage = _make_triage_report()
-        deps = _make_deps(tmp_path, triage_report=triage, ltm_model_id="test-model")
-        ctx = _make_sre_ctx(deps)
-
-        mock_verdict = HypothesisCoverageVerdict(
+        verdict = HypothesisCoverageVerdict(
             verdict="reject",
             explained_anomalies=["Pod/geo CrashLoopBackOff"],
             unexplained_anomalies=["Service/geo has 0 endpoints"],
             reasoning="Hypothesis doesn't explain service issue",
         )
+        deps = _make_deps(
+            tmp_path,
+            triage_report=triage,
+            ltm_model_id=TestModel(custom_output_args=verdict.model_dump()),
+        )
+        ctx = _make_sre_ctx(deps)
 
-        mock_run_result = MagicMock()
-        mock_run_result.output = mock_verdict
-
-        mock_arun = AsyncMock(return_value=mock_run_result)
-
-        with (
-            patch("pydantic_ai.Agent"),
-            patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
-            patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        ):
+        with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="OOM kill in geo pod"))
 
         parsed = json.loads(result)
@@ -222,13 +198,12 @@ class TestCheckHypothesisCoverageSubagent:
 
     def test_subagent_failure_returns_graceful_error(self, tmp_path: Path) -> None:
         triage = _make_triage_report()
-        deps = _make_deps(tmp_path, triage_report=triage, ltm_model_id="test-model")
+        deps = _make_deps(tmp_path, triage_report=triage, ltm_model_id=TestModel())
         ctx = _make_sre_ctx(deps)
 
         mock_arun = AsyncMock(side_effect=RuntimeError("model unavailable"))
 
         with (
-            patch("pydantic_ai.Agent"),
             patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
             patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         ):

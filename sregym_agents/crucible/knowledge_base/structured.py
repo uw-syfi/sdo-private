@@ -480,4 +480,3 @@ class StructuredKnowledgeBase(KnowledgeBase):
             await self._refiner.refine(session_files, stage_outputs_file)
         else:
             logger.info("Heuristic refinement disabled; skipping.")
-

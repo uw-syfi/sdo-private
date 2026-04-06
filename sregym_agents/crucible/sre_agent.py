@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.models import Model
 
 from libs.agent_mw import (
     FixedPathProvider,
@@ -53,14 +54,15 @@ _CONTEXT_WINDOWS: dict[str, int] = {
 }
 
 
-def _context_window_for(model: str) -> int:
+def _context_window_for(model: str | Model) -> int:
+    name = model.model_name if isinstance(model, Model) else model
     for prefix, window in _CONTEXT_WINDOWS.items():
-        if prefix in model:
+        if prefix in name:
             return window
     return 128_000
 
 
-async def _compact_messages(model: str, messages: list) -> tuple[str, dict]:
+async def _compact_messages(model: str | Model, messages: list) -> tuple[str, dict]:
     """Summarize message history for context compaction. Returns (summary, usage)."""
     import json
 
@@ -103,7 +105,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
 
     def __init__(
         self,
-        model: str,
+        model: Model,
         deps: SREDeps,
         trajectory_path: Path | None = None,
         step_limit: int | None = 500,

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 import yaml
+from pydantic_ai.models import Model, infer_model
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
@@ -189,7 +190,7 @@ def _read_kb_content(path: Path | None) -> str:
 
 
 async def _run_stage_loop(
-    model: str,
+    model: Model,
     app_info: dict,
     stage: str,
     max_iters: int,
@@ -462,7 +463,7 @@ def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis")
 
 
 async def _run_recovery_diagnosis(
-    model: str,
+    model: Model,
     app_info: dict,
     shared_file: SharedFile,
     original_answer: str,
@@ -551,7 +552,7 @@ async def _run_recovery_diagnosis(
 
 
 async def _run_recovery_mitigation(
-    model: str,
+    model: Model,
     app_info: dict,
     shared_file: SharedFile,
     original_answer: str,
@@ -640,7 +641,7 @@ async def _run_recovery_mitigation(
 
 
 async def run(
-    model: str,
+    model: str | Model,
     app_info: dict,
     problem_id: str,
     diagnosis_shared_file: Path,
@@ -660,6 +661,7 @@ async def run(
     arbitration_heuristics_file: Path | None = None,
 ) -> dict:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
+    resolved_model: Model = model if isinstance(model, Model) else infer_model(model)
     if flags is None:
         flags = CrucibleFlags()
     if config is None:
@@ -686,7 +688,7 @@ async def run(
     arbitration_heuristics_file = arbitration_heuristics_file.resolve() if arbitration_heuristics_file else None
 
     diag_result = await _run_stage_loop(
-        model,
+        resolved_model,
         app_info,
         "diagnosis",
         max_diag_iters,
@@ -712,7 +714,7 @@ async def run(
         and "success: False" in diag_result.benchmark_block
     ):
         recovery = await _run_recovery_diagnosis(
-            model,
+            resolved_model,
             app_info,
             diagnosis_sf,
             diag_result.agent_answer,
@@ -752,7 +754,7 @@ async def run(
     await _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
 
     mit_result = await _run_stage_loop(
-        model,
+        resolved_model,
         app_info,
         "mitigation",
         max_mit_iters,
@@ -778,7 +780,7 @@ async def run(
         and "success: False" in mit_result.benchmark_block
     ):
         recovery = await _run_recovery_mitigation(
-            model,
+            resolved_model,
             app_info,
             mitigation_sf,
             mit_result.agent_answer,
