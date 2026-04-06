@@ -9,7 +9,6 @@ import logging
 import os
 import random
 import shutil
-import subprocess
 import sys
 import time
 import uuid
@@ -17,11 +16,11 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from filelock import FileLock
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
 from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
 from sregym_agents.crucible.orchestrator import CrucibleConfig, CrucibleFlags
 
@@ -33,54 +32,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 _READY_STAGES = {"diagnosis", "mitigation"}
-
-
-def _pid_is_alive(pid: int) -> bool:
-    """Check whether a process with the given PID is running."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ProcessLookupError):
-        return False
-
-
-def _ensure_kb_worker(kb_dir: Path, model_id: str) -> None:
-    """Spawn a detached KB worker if one is not already running.
-
-    Uses a file lock to prevent race conditions when multiple driver
-    processes start simultaneously.
-    """
-    lock_path = kb_dir / "kb_worker.lock"
-    pid_path = kb_dir / "kb_worker.pid"
-
-    with FileLock(lock_path, timeout=10):
-        if pid_path.exists():
-            try:
-                pid = int(pid_path.read_text().strip())
-            except (ValueError, OSError):
-                pid = -1
-            if _pid_is_alive(pid):
-                logger.info("KB worker already running (pid=%d)", pid)
-                return
-            logger.info("Stale KB worker PID file (pid=%d), respawning.", pid)
-            pid_path.unlink(missing_ok=True)
-
-        log_path = kb_dir / "kb_worker.log"
-        log_file = open(log_path, "a")  # noqa: SIM115
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "sregym_agents.crucible.kb_worker",
-                "--kb-dir",
-                str(kb_dir),
-            ],
-            start_new_session=True,
-            stdout=log_file,
-            stderr=log_file,
-        )
-        pid_path.write_text(str(proc.pid))
-        logger.info("Spawned KB worker (pid=%d), log at %s", proc.pid, log_path)
 
 
 def _load_crucible_config() -> tuple[dict, str]:
@@ -361,20 +312,20 @@ async def _async_main(args: argparse.Namespace) -> None:
             logger.info(f"Saved stage outputs to {dest}")
 
         # Collect paths to session markdown copies already saved above
-        session_files_manifest: dict | None = None
+        session_files_task: dict | None = None
         if env_log_file:
             stem = Path(env_log_file).stem
             diag_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_diagnosis.md")
             mit_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_mitigation.md")
             if diag_p.exists():
-                session_files_manifest = {
+                session_files_task = {
                     "diagnosis": str(diag_p),
                     "mitigation": str(mit_p) if mit_p.exists() else None,
                 }
 
-        if session_files_manifest:
-            manifest = {
-                "session_files": session_files_manifest,
+        if session_files_task:
+            task_payload = {
+                "session_files": session_files_task,
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
@@ -387,16 +338,10 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "prompt_version": config.prompt_version,
                 "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
             }
-            pending_dir = Path(args.kb_dir) / "pending"
-            pending_dir.mkdir(parents=True, exist_ok=True)
-            manifest_path = pending_dir / f"{manifest['timestamp']}_{problem_id}.json"
-            manifest_path.write_text(json.dumps(manifest, indent=2))
-            logger.info(f"KB update manifest written to {manifest_path}")
+            task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)
+            logger.info(f"KB update task written to {task_path}")
 
-            _ensure_kb_worker(
-                Path(args.kb_dir),
-                manifest["model_id"],
-            )
+            ensure_kb_worker(Path(args.kb_dir))
         else:
             # Standalone mode (no SREGYM_LOG_FILE) — run KB update inline
             logger.info("Knowledge base: updating inline (no sregym harness detected).")
