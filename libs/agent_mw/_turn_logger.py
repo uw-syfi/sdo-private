@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, cast
 
 from libs.pydantic_agent import AgentMiddleware
@@ -45,11 +46,21 @@ class TurnLoggingMiddleware(AgentMiddleware):
     ) -> None:
         self._logger = logger or logging.getLogger(__name__)
         self._context_window = context_window
+        self._start_time: float | None = None
+
+    def before_run(self) -> None:
+        if self._start_time is None:
+            self._start_time = time.monotonic()
+
+    def _elapsed(self) -> str:
+        if self._start_time is None:
+            return "0.0s"
+        return f"{time.monotonic() - self._start_time:.1f}s"
 
     def _usage_prefix(self) -> str:
         used = _fmt_k(self._agent.context_window_token_usage)
         limit = _fmt_k(self._context_window)
-        return f"[{self._agent.agent_name} | {used}/{limit}]"
+        return f"[{self._agent.agent_name} | {self._elapsed()} | {used}/{limit}]"
 
     def on_function_tool_call(self, event: Any) -> None:
         self._logger.info(
