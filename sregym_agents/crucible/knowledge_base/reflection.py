@@ -138,10 +138,15 @@ PRIOR_FILES: dict[str, PriorFileConfig] = {
         "kb/refine_triage_priors",
         SCHEMA_V2.triage_priors,
     ),
+    "verification": MarkdownPriorConfig(
+        "kb/refine_verification_priors",
+        SCHEMA_V2.verification_priors,
+    ),
 }
 
 STAGE_TO_PRIOR: dict[str, str] = {
     "triage": "triage",
+    "verification": "verification",
 }
 
 

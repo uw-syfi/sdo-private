@@ -114,8 +114,10 @@ class StructuredKnowledgeBase(KnowledgeBase):
             logger.info(f"Seeded lessons from {seed_lessons}")
 
         # Root-level priors (seed may use old filenames; we write to current schema)
-        for prior_field in ("diagnosis_priors", "triage_priors", "arbitration_priors"):
-            seed_filename = getattr(seed_schema, prior_field)
+        for prior_field in ("diagnosis_priors", "triage_priors", "arbitration_priors", "verification_priors"):
+            seed_filename = getattr(seed_schema, prior_field, "")
+            if not seed_filename:
+                continue
             dest_path = self.kb_dir / getattr(self.schema, prior_field)
             seed_file = seed_kb_dir / seed_filename
             if not dest_path.exists() and seed_file.exists():
@@ -149,6 +151,10 @@ class StructuredKnowledgeBase(KnowledgeBase):
     @property
     def arbitration_priors_path(self) -> Path:
         return self.kb_dir / self.schema.arbitration_priors
+
+    @property
+    def verification_priors_path(self) -> Path:
+        return self.kb_dir / self.schema.verification_priors
 
     async def inject(self, target_dir: Path) -> InjectedKB:
         """Copy KB files into target_dir for agent consumption.
@@ -195,7 +201,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
             logger.info("Knowledge base: incident file injection disabled by include_incident_files=false")
 
         # Prior files (root-level, cross-app)
-        for prior_field in ("diagnosis_priors", "triage_priors", "arbitration_priors"):
+        for prior_field in ("diagnosis_priors", "triage_priors", "arbitration_priors", "verification_priors"):
             filename = getattr(self.schema, prior_field)
             src = self.kb_dir / filename
             if src.exists():

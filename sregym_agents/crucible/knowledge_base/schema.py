@@ -32,6 +32,7 @@ class KBSchema:
     diagnosis_priors: str
     triage_priors: str
     arbitration_priors: str
+    verification_priors: str = ""
 
 
 SCHEMA_V1 = KBSchema(
@@ -54,6 +55,7 @@ SCHEMA_V2 = KBSchema(
     diagnosis_priors="diagnosis_priors.md",
     triage_priors="triage_priors.md",
     arbitration_priors="arbitration_priors.md",
+    verification_priors="verification_priors.md",
 )
 
 SCHEMAS: dict[int, KBSchema] = {1: SCHEMA_V1, 2: SCHEMA_V2}

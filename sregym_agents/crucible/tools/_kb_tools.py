@@ -240,6 +240,7 @@ async def _run_verification_phase(
     renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     triage_report: TriageReport | None = None,
+    verification_guidance: str = "",
 ) -> VerifiedDifferentialDiagnosis:
     """Spawn one verification subagent per candidate in parallel and return aggregated results."""
     triage_context = ""
@@ -258,6 +259,7 @@ async def _run_verification_phase(
             root_cause=candidate.root_cause,
             distinguishing_check=candidate.distinguishing_check,
             mitigation_hint=candidate.mitigation_hint,
+            verification_guidance=verification_guidance,
         )
         logger.info("[ltm-verify-%d] PROMPT:\n%s", idx, prompt)
 
@@ -530,6 +532,7 @@ async def search_prior_incidents(
         renderer=ctx.deps.renderer,
         trajectory_path=ctx.deps.trajectory_path,
         triage_report=ctx.deps.triage_report,
+        verification_guidance=ctx.deps.verification_guidance,
     )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)

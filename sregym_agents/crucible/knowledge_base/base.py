@@ -22,6 +22,7 @@ class InjectedKB:
     diagnosis_priors: Path | None = None
     triage_priors: Path | None = None
     arbitration_priors: Path | None = None
+    verification_priors: Path | None = None
 
 
 @dataclasses.dataclass

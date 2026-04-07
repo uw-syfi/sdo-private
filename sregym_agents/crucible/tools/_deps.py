@@ -121,6 +121,7 @@ class SREDeps:
     triage_report: TriageReport | None = None
     # v3 trained guidance
     triage_guidance: str = ""
+    verification_guidance: str = ""
     stage_outputs_file: Path | None = None
 
 

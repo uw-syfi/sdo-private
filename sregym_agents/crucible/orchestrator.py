@@ -163,6 +163,7 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
         diagnosis_priors=injected.diagnosis_priors.resolve() if injected.diagnosis_priors else None,
         triage_priors=injected.triage_priors.resolve() if injected.triage_priors else None,
         arbitration_priors=injected.arbitration_priors.resolve() if injected.arbitration_priors else None,
+        verification_priors=injected.verification_priors.resolve() if injected.verification_priors else None,
     )
 
 
@@ -186,6 +187,7 @@ async def _run_stage_loop(
     architecture_file = injected_kb.architecture if injected_kb else None
     incidents_dir = injected_kb.incidents_dir if injected_kb else None
     triage_priors_file = injected_kb.triage_priors if injected_kb else None
+    verification_priors_file = injected_kb.verification_priors if injected_kb else None
     stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
@@ -207,11 +209,14 @@ async def _run_stage_loop(
     # v3 priors (learned rules from reflection)
     is_v3 = crucible_config.prompt_version >= "v3"
     triage_guidance = ""
+    verification_guidance = ""
     stage_outputs_file: Path | None = None
     if is_v3:
         stage_outputs_file = Path(f"{stage}_stage_outputs.md")
         if triage_priors_file and triage_priors_file.exists():
             triage_guidance = triage_priors_file.read_text().strip()
+        if verification_priors_file and verification_priors_file.exists():
+            verification_guidance = verification_priors_file.read_text().strip()
 
     agent_role = f"{stage}-agent"
     judge_role = f"{stage}-judge"
@@ -255,6 +260,7 @@ async def _run_stage_loop(
             ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
             triage_guidance=triage_guidance,
+            verification_guidance=verification_guidance,
             stage_outputs_file=stage_outputs_file,
         )
         sre_system = renderer.render(f"{stage}_agent_system")
