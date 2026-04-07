@@ -113,6 +113,7 @@ def ensure_kb_worker(kb_dir: Path) -> None:
                 "--kb-dir",
                 str(kb_dir),
             ],
+            cwd=str(kb_dir),
             start_new_session=True,
             stdout=log_file,
             stderr=log_file,
