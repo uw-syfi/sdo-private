@@ -382,6 +382,16 @@ async def _run_verification_phase(
 # ---------------------------------------------------------------------------
 
 
+SPECIALIST_THINKING_BUDGET = 1024
+
+
+def _slugify(name: str) -> str:
+    """Convert area name to a safe agent-name slug."""
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
+
+
 async def triage_cluster(
     ctx: RunContext[SREDeps],
 ) -> str:
@@ -396,32 +406,22 @@ async def triage_cluster(
     if not model_id:
         return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
 
-    triage_guidance = ""
-    if ctx.deps.triage_priors:
-        parts: list[str] = []
-        for area in ctx.deps.triage_priors.areas:
-            parts.append(f"## {area.name}")
-            parts.extend(f"- {hint}" for hint in area.hints)
-        triage_guidance = "\n".join(parts)
+    namespace = ctx.deps.namespace
+    renderer = ctx.deps.renderer
+    trajectory_path = ctx.deps.trajectory_path
 
-    prompt = ctx.deps.renderer.render(
-        "triage_cluster",
-        namespace=ctx.deps.namespace,
-        triage_guidance=triage_guidance,
-    )
-    logger.info("[triage-cluster] PROMPT:\n%s", prompt)
-
-    triage_agent = InlineAgent(
+    # Phase 1: Coordinator — smoke test only
+    coordinator = InlineAgent(
         model_id,
-        agent_name="triage",
-        output_type=TriageReport,
+        agent_name="triage-coordinator",
+        output_type=TriageCoordinatorReport,
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(model_id, THINKING_BUDGET),
-        middleware=_subagent_middleware(ctx.deps.trajectory_path),
+        middleware=_subagent_middleware(trajectory_path),
     )
 
-    @triage_agent.agent.output_validator
-    def _require_tool_calls(ctx: RunContext[None], report: TriageReport) -> TriageReport:  # pyright: ignore[reportUnusedFunction]
+    @coordinator.agent.output_validator
+    def _require_tool_calls(ctx: RunContext[None], report: TriageCoordinatorReport) -> TriageCoordinatorReport:  # pyright: ignore[reportUnusedFunction]
         from pydantic_ai.messages import ToolCallPart
 
         has_calls = any(isinstance(part, ToolCallPart) for msg in ctx.messages for part in msg.parts)
@@ -433,23 +433,108 @@ async def triage_cluster(
             )
         return report
 
-    try:
-        result = await triage_agent.arun(
-            prompt,
-            run_ctx={"stage": ctx.deps.stage, "role": "triage"},
-        )
-        report = result.output
-        ctx.deps.triage_report = report
+    coordinator_prompt = renderer.render(
+        "triage_coordinator",
+        namespace=namespace,
+    )
+    logger.info("[triage-coordinator] PROMPT:\n%s", coordinator_prompt)
 
+    try:
+        coord_result = await coordinator.arun(
+            coordinator_prompt,
+            run_ctx={"stage": ctx.deps.stage, "role": "triage-coordinator"},
+        )
+        coord_report = coord_result.output
+    except Exception as e:
+        logger.warning("[triage-coordinator] failed: %s", e)
+        return f"Triage failed with error: {e}. Proceed with manual investigation."
+
+    # Phase 2: Check triage priors
+    priors = ctx.deps.triage_priors
+
+    if not priors or not priors.areas:
+        # No priors yet — return coordinator results as-is
+        report = TriageReport(anomalies=list(coord_report.base_anomalies))
+        ctx.deps.triage_report = report
         formatted = format_triage_report(report)
-        logger.info("[triage] done: %s", formatted)
+        logger.info("[triage] done (no priors): %s", formatted)
         if ctx.deps.stage_outputs_file:
             with open(ctx.deps.stage_outputs_file, "a") as f:
                 f.write(f"\n## Triage Report\n{formatted}\n")
         return formatted
-    except Exception as e:
-        logger.warning("[triage] failed: %s", e)
-        return f"Triage failed with error: {e}. Proceed with manual investigation."
+
+    # Phase 3: Parallel specialist subagents
+    async def _run_specialist(area: TriageArea) -> TriageSpecialistReport:
+        hints_text = "\n".join(f"- {h}" for h in area.hints)
+        prompt = renderer.render(
+            "triage_specialist",
+            namespace=namespace,
+            category=area.name,
+            hints=hints_text,
+            cluster_snapshot=coord_report.cluster_snapshot,
+        )
+        slug = _slugify(area.name)
+        logger.info("[triage-%s] PROMPT:\n%s", slug, prompt)
+        agent = InlineAgent(
+            model_id,
+            agent_name=f"triage-{slug}",
+            output_type=TriageSpecialistReport,
+            tools=[read_file, exec_bash_any, grep, write_file],
+            model_settings=thinking_settings(model_id, SPECIALIST_THINKING_BUDGET),
+            middleware=_subagent_middleware(trajectory_path),
+        )
+        result = await agent.arun(
+            prompt,
+            run_ctx={"stage": ctx.deps.stage, "role": f"triage-{slug}"},
+        )
+        return result.output
+
+    sem = asyncio.Semaphore(6)
+
+    async def _run_specialist_limited(area: TriageArea) -> TriageSpecialistReport:
+        async with sem:
+            try:
+                return await _run_specialist(area)
+            except Exception as e:
+                logger.warning("[triage-%s] failed: %s", _slugify(area.name), e)
+                return TriageSpecialistReport(
+                    category=area.name,
+                    healthy=True,
+                    assessment=f"Specialist failed with error: {e}",
+                    anomalies=[],
+                )
+
+    specialist_results = await asyncio.gather(
+        *[_run_specialist_limited(area) for area in priors.areas],
+    )
+
+    # Phase 4: Merge — only include unhealthy areas
+    unhealthy = [spec for spec in specialist_results if not spec.healthy]
+
+    all_anomalies = list(coord_report.base_anomalies)
+    for spec in unhealthy:
+        all_anomalies.extend(spec.anomalies)
+
+    # Deduplicate
+    seen: set[tuple[str, str, str, str]] = set()
+    deduped: list[TriageAnomaly] = []
+    for a in all_anomalies:
+        key = (a.resource_kind, a.resource_name, a.namespace, a.observation[:80])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(a)
+
+    report = TriageReport(
+        anomalies=deduped,
+        area_assessments=[AreaAssessment(category=spec.category, assessment=spec.assessment) for spec in unhealthy],
+    )
+    ctx.deps.triage_report = report
+    formatted = format_triage_report(report)
+    logger.info("[triage] done: %s", formatted)
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## Triage Report\n{formatted}\n")
+    return formatted
 
 
 async def check_hypothesis_coverage(

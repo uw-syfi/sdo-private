@@ -1,11 +1,11 @@
-{# Contract: triage priors are ## sections (one disjoint concern each); see tests/unit/crucible/test_refine_triage_priors_contract.py #}
 You are maintaining learned triage focus areas for an SRE agent's one-pass cluster scan.
-Each area is a separate concern: factual observations to collect or patterns to notice — not
-diagnosis, root cause, or remediation.
+Each area becomes a separate specialist subagent — its hints must be self-contained
+(the specialist sees only its own area, not others). Areas cover factual observations
+to collect or patterns to notice — not diagnosis, root cause, or remediation.
 
-Current priors (markdown):
+Current triage priors (YAML):
 ---
-{{ prior_guidance or "(Empty — build initial ## sections only from the reflection and stage outputs below; do not invent a generic checklist of layers or technologies.)" }}
+{{ prior_priors }}
 ---
 
 Reflection from the latest problem:
@@ -14,52 +14,56 @@ Reflection from the latest problem:
 ---
 {% if stage_outputs %}
 
-Agent's triage report for context:
+Agent's stage outputs for context:
 ---
 {{ stage_outputs }}
 ---
 {% endif %}
 
-Task: Decide whether the priors need updating based on the reflection. If the existing priors
-already cover this run's lessons adequately, do not update — set should_update to false and
-explain why in diff_summary. Otherwise, update the priors: emphasize what the triage scan
-missed or should have covered. Preserve guidance that was not implicated unless the reflection
-shows it is wrong or harmful.
+Task: Decide whether the priors need updating based on the reflection. If the existing
+priors already cover this run's lessons adequately, set should_update to false and
+explain why in diff_summary. Otherwise, produce updated_priors with all areas
+(preserving unchanged areas alongside any additions, merges, or removals).
 
-Document shape (required):
-- Use one markdown `##` heading per focus area. The heading text is a short title you choose
-  for that area (from the incident — not from any fixed taxonomy).
-- Under each `##`, write the body for that area only: a short paragraph and/or `-` bullets.
-- Each bullet: one sentence; keep bodies compact so the full file stays readable.
+Output structure (structured — you produce JSON matching these fields):
+- should_update: true/false
+- diff_summary: numbered list of edit decisions and rationale
+- updated_priors: object with an "areas" list, each area having:
+    - name: short title for the focus area
+    - hints: list of 1-sentence hints (what to look for, what kubectl output to check)
+
+Example updated_priors shape:
+  areas:
+    - name: "Pod Scheduling Pressure"
+      hints:
+        - "Check for pods stuck in Pending state with resource-related events."
+        - "Look for node taints or affinity rules that prevent scheduling."
+    - name: "Service Endpoint Gaps"
+      hints:
+        - "Compare Service selector labels against actual pod labels."
+        - "Check for Endpoints objects with empty subsets."
 
 Mutual exclusivity (required):
-- **No overlap between `##` sections.** If the same kubectl observation, log line, or pattern
-  could plausibly belong under two headings, merge those sections into one `##` or narrow scopes
-  until each observation fits at most one section.
-- Prefer fewer disjoint sections over many redundant ones.
+- No overlap between areas. If the same kubectl observation, log line, or pattern
+  could plausibly belong under two areas, merge those areas into one or narrow scopes
+  until each observation fits at most one area.
+- Prefer fewer disjoint areas over many redundant ones.
 
-When to add a section or expand a body:
+When to add an area or expand hints:
 - The reflection shows triage missed something that mattered for the outcome.
 
 When to remove, merge, or narrow:
-- A section produces benign noise or duplicates another — merge or delete.
-- Two sections overlap — merge per the rule above.
+- An area produces benign noise or duplicates another — merge or delete.
+- Two areas overlap — merge per the mutual-exclusivity rule.
 
 Rules:
-- Maximum 12 `##` sections total.
-- All wording must be generic (no app-specific names, hostnames, or literal config values).
+- Maximum 12 areas total.
+- Maximum 10 hints per area.
+- When limits would be exceeded, merge related areas or prioritize the most impactful hints.
+- All wording must be generic (no app-specific names, hostnames, ports, or literal config values).
 - Do not restate the agent's built-in triage methodology; only add learned gaps from this run.
-- In updated_content, output markdown only: `##` sections and bodies, no preamble or commentary before the first `##`.
+- Each hint must be self-contained — a specialist subagent reading only that area's hints
+  should know exactly what to check without context from other areas.
 - In diff_summary, write a numbered list where each item explains one edit decision and why
-  (e.g. "1. Added section 'Pod scheduling' — triage missed pending pods that indicated resource
-  pressure\n2. Merged 'Log patterns' into 'Error signals' — overlapping scope"). If not
-  updating, explain why the existing priors are sufficient.
-
-Example shape (placeholder titles only — do not copy these as real areas):
-## Example area title alpha
-
-- One sentence on what to notice in this area only.
-
-## Example area title beta
-
-Short paragraph for this area only.
+  (e.g. "1. Added area 'Pod Scheduling Pressure' — triage missed pending pods that
+  indicated resource pressure"). If not updating, explain why the existing priors suffice.

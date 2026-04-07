@@ -18,6 +18,7 @@ from pydantic_ai import Agent
 
 from libs.agent_mw import arun_with_retry
 
+from ..tools._kb_tools import TriagePriors
 from .schema import SCHEMA_V2
 
 if TYPE_CHECKING:
@@ -73,6 +74,19 @@ class PriorUpdateResult(BaseModel):
 
     updated_content: str
     """The full updated prior markdown. Ignored when should_update is False."""
+
+
+class TriagePriorUpdateResult(BaseModel):
+    """Structured output for triage prior refinement (YAML-backed)."""
+
+    should_update: bool
+    """False when the existing priors already cover this run's lessons."""
+
+    diff_summary: str
+    """Numbered list of edit decisions (or why no change was needed)."""
+
+    updated_priors: TriagePriors
+    """Structured triage priors — areas with names and hints."""
 
 
 # ---------------------------------------------------------------------------
@@ -133,11 +147,61 @@ class MarkdownPriorConfig(PriorFileConfig):
             logger.info("No update needed for %s", self.filename)
 
 
+class TriagePriorConfig(PriorFileConfig):
+    """For triage priors stored as structured YAML."""
+
+    def __init__(self) -> None:
+        self.template = "kb/refine_triage_priors"
+        self.filename = "triage_priors.yaml"
+
+    async def apply(
+        self,
+        reflector: Reflector,
+        classification: str,
+        stage_outputs: str,
+    ) -> None:
+        import yaml
+
+        from ..tools._kb_tools import load_triage_priors
+
+        path = reflector.kb_dir / self.filename
+        prior = load_triage_priors(path) if path.exists() else TriagePriors(areas=[])
+
+        prior_text = (
+            yaml.dump(prior.model_dump(), default_flow_style=False)
+            if prior.areas
+            else "(Empty — no triage areas defined yet)"
+        )
+
+        prompt = reflector.prompts.render(
+            self.template,
+            prior_priors=prior_text,
+            failure_classification=classification,
+            stage_outputs=stage_outputs,
+        )
+        agent: Agent[None, TriagePriorUpdateResult] = Agent(
+            reflector.model_id,
+            output_type=TriagePriorUpdateResult,
+        )
+        result = await arun_with_retry(agent, prompt)
+        if result.output.should_update:
+            logger.info(
+                "Updating %s:\n%s",
+                self.filename,
+                result.output.diff_summary,
+            )
+            path.write_text(
+                yaml.dump(
+                    result.output.updated_priors.model_dump(),
+                    default_flow_style=False,
+                )
+            )
+        else:
+            logger.info("No update needed for %s", self.filename)
+
+
 PRIOR_FILES: dict[str, PriorFileConfig] = {
-    "triage": MarkdownPriorConfig(
-        "kb/refine_triage_priors",
-        SCHEMA_V2.triage_priors,
-    ),
+    "triage": TriagePriorConfig(),
     "verification": MarkdownPriorConfig(
         "kb/refine_verification_priors",
         SCHEMA_V2.verification_priors,
