@@ -16,8 +16,8 @@ _REFINE_TRIAGE_PRIORS = (
 )
 
 
-def test_refine_triage_priors_requires_markdown_sections_and_non_overlap() -> None:
+def test_refine_triage_priors_requires_yaml_structure_and_non_overlap() -> None:
     text = _REFINE_TRIAGE_PRIORS.read_text()
     assert "mutual exclusivity" in text.lower() or "no overlap" in text.lower()
-    assert "##" in text
-    assert "preamble" in text.lower() or "commentary" in text.lower()
+    assert "areas" in text
+    assert "hints" in text

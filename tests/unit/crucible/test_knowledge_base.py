@@ -25,7 +25,13 @@ from sregym_agents.crucible.knowledge_base.base import (
     strip_benchmark_result,
     strip_citation_wrappers,
 )
-from sregym_agents.crucible.knowledge_base.reflection import Reflector
+from sregym_agents.crucible.knowledge_base.reflection import (
+    PRIOR_FILES,
+    STAGE_TO_PRIOR,
+    FailureClassification,
+    Reflector,
+    StageFailure,
+)
 from sregym_agents.crucible.knowledge_base.schema import SCHEMA_V2
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
@@ -780,9 +786,21 @@ class TestReflector:
         assert "No stage output content" in caplog.text
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
-    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
+    @patch.object(Reflector, "apply", new_callable=AsyncMock)
     async def test_run_updates_triage_priors(self, mock_apply, mock_reflect, tmp_path: Path):
-        mock_reflect.return_value = "outcome: failure\n\nThe agent missed checking network policies."
+        classification = FailureClassification(
+            outcome="failure",
+            stage_failures=[
+                StageFailure(
+                    stage="triage",
+                    description="Missed network policies",
+                    evidence="No network policy check in triage output",
+                    lesson="Always check network policies during triage",
+                ),
+            ],
+            summary="The agent missed checking network policies.",
+        )
+        mock_reflect.return_value = classification
 
         reflector = self._make_reflector(tmp_path)
         stage_outputs = tmp_path / "stage_outputs.md"
@@ -790,9 +808,10 @@ class TestReflector:
         await reflector.run(stage_outputs_file=stage_outputs)
 
         mock_reflect.assert_called_once()
-        assert mock_apply.call_count == 1
-        cfg = mock_apply.call_args[0][0]
-        assert cfg.filename == SCHEMA_V2.triage_priors
+        mock_apply.assert_called_once()
+        call_args = mock_apply.call_args
+        assert call_args[0][0] is classification
+        assert call_args[0][1] == "stage output content"
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
     async def test_run_handles_reflect_exception(self, mock_reflect, tmp_path: Path, caplog):
@@ -807,10 +826,25 @@ class TestReflector:
         assert "Failed to classify failure" in caplog.text
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
-    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
-    async def test_run_logs_individual_apply_errors(self, mock_apply, mock_reflect, tmp_path: Path, caplog):
-        mock_reflect.return_value = "failure_modes:\n  - stage: reasoning\n    type: failure"
-        mock_apply.side_effect = RuntimeError("write failed")
+    @patch(
+        "sregym_agents.crucible.knowledge_base.reflection.TriagePriorConfig.apply",
+        new_callable=AsyncMock,
+    )
+    async def test_run_logs_individual_apply_errors(self, mock_cfg_apply, mock_reflect, tmp_path: Path, caplog):
+        classification = FailureClassification(
+            outcome="failure",
+            stage_failures=[
+                StageFailure(
+                    stage="triage",
+                    description="Bad triage",
+                    evidence="Missed pods",
+                    lesson="Check pods",
+                ),
+            ],
+            summary="Triage failure.",
+        )
+        mock_reflect.return_value = classification
+        mock_cfg_apply.side_effect = RuntimeError("write failed")
 
         reflector = self._make_reflector(tmp_path)
         stage_outputs = tmp_path / "stage_outputs.md"
@@ -819,17 +853,188 @@ class TestReflector:
             await reflector.run(stage_outputs_file=stage_outputs)
 
         assert "Reflection apply error" in caplog.text
+        mock_cfg_apply.assert_called_once()
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
-    @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
-    async def test_run_always_updates_triage_even_on_success(self, mock_apply, mock_reflect, tmp_path: Path):
-        mock_reflect.return_value = "outcome: success\n\nThe agent handled triage well."
+    @patch.object(Reflector, "apply", new_callable=AsyncMock)
+    async def test_run_success_no_failures_skips_apply(self, mock_apply, mock_reflect, tmp_path: Path, caplog):
+        classification = FailureClassification(
+            outcome="success",
+            stage_failures=[],
+            summary="The agent handled everything well.",
+        )
+        mock_reflect.return_value = classification
 
         reflector = self._make_reflector(tmp_path)
         stage_outputs = tmp_path / "stage_outputs.md"
         stage_outputs.write_text("stage output content")
-        await reflector.run(stage_outputs_file=stage_outputs)
+        with caplog.at_level(logging.INFO, logger="sregym_agents.crucible.knowledge_base"):
+            await reflector.run(stage_outputs_file=stage_outputs)
 
-        assert mock_apply.call_count == 1
-        cfg = mock_apply.call_args[0][0]
-        assert cfg.filename == SCHEMA_V2.triage_priors
+        mock_apply.assert_called_once()
+
+
+class TestFailureClassification:
+    def test_failure_classification_roundtrip(self):
+        fc = FailureClassification(
+            outcome="failure",
+            stage_failures=[
+                StageFailure(
+                    stage="triage",
+                    description="Missed pods",
+                    evidence="No pod check in output",
+                    lesson="Always check pods",
+                ),
+                StageFailure(
+                    stage="verification",
+                    description="Wrong confirmation",
+                    evidence="Confirmed bad hypothesis",
+                    lesson="Cross-check evidence",
+                ),
+            ],
+            summary="Multiple stage failures.",
+        )
+        json_str = fc.model_dump_json()
+        restored = FailureClassification.model_validate_json(json_str)
+        assert restored == fc
+        assert len(restored.stage_failures) == 2
+        assert restored.stage_failures[0].stage == "triage"
+        assert restored.stage_failures[1].stage == "verification"
+
+    async def test_apply_skips_on_success(self, tmp_path: Path, caplog):
+        reflector = Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer)
+        classification = FailureClassification(
+            outcome="success",
+            stage_failures=[],
+            summary="All good.",
+        )
+        with caplog.at_level(logging.INFO, logger="sregym_agents.crucible.knowledge_base"):
+            await reflector.apply(classification, "some stage outputs")
+        assert "Unambiguous success; skipping prior updates" in caplog.text
+
+    @patch(
+        "sregym_agents.crucible.knowledge_base.reflection.TriagePriorConfig.apply",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "sregym_agents.crucible.knowledge_base.reflection.MarkdownPriorConfig.apply",
+        new_callable=AsyncMock,
+    )
+    async def test_apply_only_updates_failed_stages(
+        self,
+        mock_md_apply,
+        mock_triage_apply,
+        tmp_path: Path,
+    ):
+        reflector = Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer)
+        classification = FailureClassification(
+            outcome="failure",
+            stage_failures=[
+                StageFailure(
+                    stage="verification",
+                    description="Wrong confirmation",
+                    evidence="Confirmed bad hypothesis",
+                    lesson="Cross-check evidence",
+                ),
+            ],
+            summary="Verification failure only.",
+        )
+        await reflector.apply(classification, "stage outputs text")
+
+        # Only verification prior (MarkdownPriorConfig) should be called, not triage
+        mock_md_apply.assert_called_once()
+        mock_triage_apply.assert_not_called()
+
+
+class TestPriorFilesAndStageMappings:
+    def test_verification_prior_in_prior_files(self):
+        assert "verification" in PRIOR_FILES
+        cfg = PRIOR_FILES["verification"]
+        assert cfg.filename == SCHEMA_V2.verification_priors
+
+    def test_stage_to_prior_mapping(self):
+        assert STAGE_TO_PRIOR["verification"] == "verification"
+        assert STAGE_TO_PRIOR["triage"] == "triage"
+
+
+class TestMigrateTriage:
+    def test_migrate_triage_priors(self, tmp_path: Path):
+        import yaml
+
+        from sregym_agents.crucible.knowledge_base.schema import migrate_triage_priors
+
+        md_content = (
+            "## Network Connectivity\n"
+            "- Check DNS resolution\n"
+            "- Verify service endpoints\n"
+            "\n"
+            "## Pod Health\n"
+            "- Check restart counts\n"
+            "- Look for OOMKilled events\n"
+        )
+        md_path = tmp_path / "triage_priors.md"
+        md_path.write_text(md_content)
+
+        migrate_triage_priors(tmp_path)
+
+        yaml_path = tmp_path / "triage_priors.yaml"
+        assert yaml_path.exists()
+        assert not md_path.exists()
+
+        data = yaml.safe_load(yaml_path.read_text())
+        assert len(data["areas"]) == 2
+        assert data["areas"][0]["name"] == "Network Connectivity"
+        assert data["areas"][0]["hints"] == ["Check DNS resolution", "Verify service endpoints"]
+        assert data["areas"][1]["name"] == "Pod Health"
+        assert data["areas"][1]["hints"] == ["Check restart counts", "Look for OOMKilled events"]
+
+    def test_load_triage_priors(self, tmp_path: Path):
+        import yaml
+
+        from sregym_agents.crucible.tools._kb_tools import TriagePriors, load_triage_priors
+
+        data = {
+            "areas": [
+                {"name": "DNS", "hints": ["Check CoreDNS pods", "Verify resolv.conf"]},
+                {"name": "Storage", "hints": ["Check PV/PVC bindings"]},
+            ]
+        }
+        yaml_path = tmp_path / "triage_priors.yaml"
+        yaml_path.write_text(yaml.dump(data, default_flow_style=False))
+
+        result = load_triage_priors(yaml_path)
+        assert isinstance(result, TriagePriors)
+        assert len(result.areas) == 2
+        assert result.areas[0].name == "DNS"
+        assert result.areas[0].hints == ["Check CoreDNS pods", "Verify resolv.conf"]
+
+
+class TestPromptContracts:
+    _v3_renderer = PromptRenderer("v3")
+
+    def test_classify_failure_prompt_references_stages(self):
+        rendered = self._v3_renderer.render(
+            "kb/classify_failure",
+            stage_outputs="(test outputs)",
+        )
+        for stage in ("triage", "retrieval", "verification", "reasoning", "coverage_check"):
+            assert stage in rendered, f"classify_failure.j2 missing stage: {stage}"
+
+    def test_refine_triage_priors_references_yaml(self):
+        rendered = self._v3_renderer.render(
+            "kb/refine_triage_priors",
+            prior_priors="(test priors)",
+            failure_classification="(test classification)",
+            stage_outputs="(test outputs)",
+        )
+        assert "areas" in rendered
+        assert "hints" in rendered
+
+    def test_refine_verification_priors_references_sections(self):
+        rendered = self._v3_renderer.render(
+            "kb/refine_verification_priors",
+            prior_guidance="(test guidance)",
+            failure_classification="(test classification)",
+            stage_outputs="(test outputs)",
+        )
+        assert "##" in rendered
