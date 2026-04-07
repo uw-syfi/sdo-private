@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import FixedPathProvider, RetryMiddleware, TrajectoryMiddleware, TurnLoggingMiddleware
+from libs.pydantic_agent import InlineAgent, thinking_settings
 from sregym_agents.crucible._prompts import (
     PromptRenderer,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
 )
@@ -223,76 +222,12 @@ def format_triage_report(report: TriageReport) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _make_stream_handler(name: str, start_time: float):
-    """Create a stream handler that logs with [name | elapsed] prefix."""
-
-    def _prefix() -> str:
-        elapsed = time.monotonic() - start_time
-        return f"[{name} | {elapsed:.1f}s]"
-
-    async def _handler(ctx: Any, events: Any) -> None:
-        from pydantic_ai.messages import (
-            FunctionToolCallEvent,
-            FunctionToolResultEvent,
-            PartEndEvent,
-            RetryPromptPart,
-            ThinkingPart,
-            ToolReturnPart,
-        )
-
-        from libs.agent_mw import fmt_tool_args, tool_call_failed
-
-        async for event in events:
-            if isinstance(event, FunctionToolCallEvent):
-                logger.info("%s → %s(%s)", _prefix(), event.part.tool_name, fmt_tool_args(event.part.args))
-            elif isinstance(event, FunctionToolResultEvent):
-                result = event.result
-                if isinstance(result, RetryPromptPart):
-                    logger.warning(
-                        "%s ✗ %s() failed: %s",
-                        _prefix(),
-                        result.tool_name or "unknown",
-                        result.model_response(),
-                    )
-                elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):  # pyright: ignore[reportUnnecessaryIsInstance]
-                    logger.warning(
-                        "%s ✗ %s() exited with code %s: %s",
-                        _prefix(),
-                        result.tool_name,
-                        result.content.get("exit_code", "?"),
-                        result.content.get("stderr", ""),
-                    )
-            elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart) and event.part.has_content():
-                logger.info("%s <thinking> %s", _prefix(), event.part.content)
-
-    return _handler
-
-
-def _write_trajectory_record(
-    trajectory_path: Path,
-    agent_name: str,
-    result: Any,
-    run_ctx: dict[str, Any] | None = None,
-) -> None:
-    """Write a single trajectory record for an inline agent run (same format as TrajectoryMiddleware)."""
-    from datetime import datetime
-
-    from pydantic_ai.messages import ModelMessagesTypeAdapter
-
-    u = result.usage()
-    record = {
-        "agent_name": agent_name,
-        "timestamp": datetime.now().isoformat(),
-        "run_ctx": run_ctx,
-        "messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json"),
-        "usage": {
-            "input_tokens": u.input_tokens or 0,
-            "output_tokens": u.output_tokens or 0,
-        },
-    }
-    trajectory_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(trajectory_path, "a") as f:
-        f.write(json.dumps(record) + "\n")
+def _subagent_middleware(trajectory_path: Path | None = None) -> list[Any]:
+    """Standard middleware stack for inline subagents."""
+    mw: list[Any] = [TurnLoggingMiddleware(), RetryMiddleware()]
+    if trajectory_path is not None:
+        mw.append(TrajectoryMiddleware(FixedPathProvider(trajectory_path)))
+    return mw
 
 
 async def _run_verification_phase(
@@ -307,10 +242,6 @@ async def _run_verification_phase(
     triage_report: TriageReport | None = None,
 ) -> VerifiedDifferentialDiagnosis:
     """Spawn one verification subagent per candidate in parallel and return aggregated results."""
-    from pydantic_ai import Agent
-
-    from libs.pydantic_agent import thinking_settings
-
     triage_context = ""
     if triage_report is not None:
         triage_context = format_triage_report(triage_report)
@@ -330,31 +261,24 @@ async def _run_verification_phase(
         )
         logger.info("[ltm-verify-%d] PROMPT:\n%s", idx, prompt)
 
-        verify_agent: Agent[None, CandidateVerification] = Agent(
+        verify_agent = InlineAgent(
             model_id,
+            agent_name=f"ltm-verify-{idx}",
             output_type=CandidateVerification,
             tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
             model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
+            middleware=_subagent_middleware(trajectory_path),
         )
         try:
-            result = await arun_with_retry(
-                verify_agent,
+            result = await verify_agent.arun(
                 prompt,
-                event_stream_handler=_make_stream_handler(f"ltm-verify-{idx}", time.monotonic()),
+                run_ctx={"stage": stage, "role": "ltm-verify", "candidate_index": idx},
             )
             output = result.output
             # Ensure echoed fields match the candidate
             output.candidate_index = idx
             output.root_cause_class = candidate.root_cause_class
             output.root_cause = candidate.root_cause
-
-            if trajectory_path is not None:
-                _write_trajectory_record(
-                    trajectory_path,
-                    f"ltm-verify-{idx}",
-                    result,
-                    run_ctx={"stage": stage, "role": "ltm-verify", "candidate_index": idx},
-                )
 
             logger.info(
                 "[ltm-verify-%d] done: applies=%s, reasoning=%s",
@@ -402,10 +326,6 @@ async def triage_cluster(
     endpoints, misconfigurations, etc.). Pass the output to search_prior_incidents
     as part of your observed_symptoms.
     """
-    from pydantic_ai import Agent
-
-    from libs.pydantic_agent import thinking_settings
-
     model_id = ctx.deps.ltm_model_id
     if not model_id:
         return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
@@ -417,14 +337,16 @@ async def triage_cluster(
     )
     logger.info("[triage-cluster] PROMPT:\n%s", prompt)
 
-    triage_agent: Agent[None, TriageReport] = Agent(
+    triage_agent = InlineAgent(
         model_id,
+        agent_name="triage",
         output_type=TriageReport,
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(model_id, THINKING_BUDGET),
+        middleware=_subagent_middleware(ctx.deps.trajectory_path),
     )
 
-    @triage_agent.output_validator
+    @triage_agent.agent.output_validator
     def _require_tool_calls(ctx: RunContext[None], report: TriageReport) -> TriageReport:  # pyright: ignore[reportUnusedFunction]
         from pydantic_ai.messages import ToolCallPart
 
@@ -438,21 +360,12 @@ async def triage_cluster(
         return report
 
     try:
-        result = await arun_with_retry(
-            triage_agent,
+        result = await triage_agent.arun(
             prompt,
-            event_stream_handler=_make_stream_handler("triage", time.monotonic()),
+            run_ctx={"stage": ctx.deps.stage, "role": "triage"},
         )
         report = result.output
         ctx.deps.triage_report = report
-
-        if ctx.deps.trajectory_path is not None:
-            _write_trajectory_record(
-                ctx.deps.trajectory_path,
-                "triage",
-                result,
-                run_ctx={"stage": ctx.deps.stage, "role": "triage"},
-            )
 
         formatted = format_triage_report(report)
         logger.info("[triage] done: %s", formatted)
@@ -479,10 +392,6 @@ async def check_hypothesis_coverage(
     hypothesis is wrong or incomplete for what it claims. If rejected, revise or
     narrow scope before resubmitting.
     """
-    from pydantic_ai import Agent
-
-    from libs.pydantic_agent import thinking_settings
-
     triage_report = ctx.deps.triage_report
     if triage_report is None:
         return "Error: no triage report available. Call triage_cluster first."
@@ -499,23 +408,20 @@ async def check_hypothesis_coverage(
     )
     logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
 
-    coverage_agent: Agent[None, HypothesisCoverageVerdict] = Agent(
+    coverage_agent = InlineAgent(
         model_id,
+        agent_name="hypothesis-coverage",
         output_type=HypothesisCoverageVerdict,
         model_settings=thinking_settings(model_id, COVERAGE_THINKING_BUDGET),
+        middleware=_subagent_middleware(ctx.deps.trajectory_path),
     )
 
     try:
-        result = await arun_with_retry(coverage_agent, prompt)
+        result = await coverage_agent.arun(
+            prompt,
+            run_ctx={"stage": ctx.deps.stage, "role": "hypothesis-coverage"},
+        )
         output = result.output
-
-        if ctx.deps.trajectory_path is not None:
-            _write_trajectory_record(
-                ctx.deps.trajectory_path,
-                "hypothesis-coverage",
-                result,
-                run_ctx={"stage": ctx.deps.stage, "role": "hypothesis-coverage"},
-            )
 
         output_json = output.model_dump_json(indent=2)
         logger.info(
@@ -577,8 +483,6 @@ async def search_prior_incidents(
     if not ltm_model_id:
         return "Error: search_prior_incidents requires a model ID (ltm_model_id not set)."
 
-    from pydantic_ai import Agent
-
     triage_context = ""
     if ctx.deps.triage_report is not None:
         triage_context = format_triage_report(ctx.deps.triage_report)
@@ -593,17 +497,15 @@ async def search_prior_incidents(
     )
     logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
-    from libs.pydantic_agent import thinking_settings
-
-    retrieval_agent: Agent[None, DifferentialDiagnosis] = Agent(
+    retrieval_agent = InlineAgent(
         ltm_model_id,
+        agent_name="ltm-search",
         output_type=DifferentialDiagnosis,
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
+        middleware=_subagent_middleware(),
     )
-    retrieval_result = await arun_with_retry(
-        retrieval_agent, prompt, event_stream_handler=_make_stream_handler("ltm-search", time.monotonic())
-    )
+    retrieval_result = await retrieval_agent.arun(prompt)
     diagnosis = retrieval_result.output
     logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
 
@@ -676,8 +578,6 @@ async def search_prior_mitigations(
     if not ltm_model_id:
         return "Error: search_prior_mitigations requires a model ID (ltm_model_id not set)."
 
-    from pydantic_ai import Agent
-
     prompt = ctx.deps.renderer.render(
         "search_prior_mitigations",
         root_cause=root_cause,
@@ -687,17 +587,15 @@ async def search_prior_mitigations(
     )
     logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
 
-    from libs.pydantic_agent import thinking_settings
-
-    retrieval_agent: Agent[None, MitigationSearchResult] = Agent(
+    retrieval_agent = InlineAgent(
         ltm_model_id,
+        agent_name="ltm-mitigation",
         output_type=MitigationSearchResult,
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
+        middleware=_subagent_middleware(),
     )
-    retrieval_result = await arun_with_retry(
-        retrieval_agent, prompt, event_stream_handler=_make_stream_handler("ltm-mitigation", time.monotonic())
-    )
+    retrieval_result = await retrieval_agent.arun(prompt)
     output = retrieval_result.output
     output_json = output.model_dump_json(indent=2)
     logger.info("[ltm-mitigation] output: %s", output_json)
