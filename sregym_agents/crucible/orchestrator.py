@@ -582,6 +582,16 @@ async def _run_recovery_diagnosis(
     except Exception as e:
         logger.warning(f"Error writing recovery diagnosis to shared file: {e}")
 
+    # Append recovery result to stage outputs file
+    if stage_outputs_file:
+        with open(stage_outputs_file, "a") as f:
+            f.write(f"**Diagnosis**: {submission.answer}\n")
+            f.write(f"**Justification**: {submission.justification}\n")
+            if submission.causal_chain:
+                f.write(f"**Causal Chain**: {submission.causal_chain}\n")
+            if submission.reflection:
+                f.write(f"**Agent Reflection**: {submission.reflection}\n")
+
     logger.info(f"Recovery diagnosis complete: {submission.answer}")
     return submission
 
@@ -676,6 +686,14 @@ async def _run_recovery_mitigation(
         shared_file.append(entry)
     except Exception as e:
         logger.warning(f"Error writing recovery mitigation to shared file: {e}")
+
+    # Append recovery result to stage outputs file
+    if stage_outputs_file:
+        with open(stage_outputs_file, "a") as f:
+            f.write(f"**Mitigation**: {submission.answer}\n")
+            f.write(f"**Justification**: {submission.justification}\n")
+            if submission.reflection:
+                f.write(f"**Agent Reflection**: {submission.reflection}\n")
 
     logger.info(f"Recovery mitigation complete: {submission.answer}")
     return submission
