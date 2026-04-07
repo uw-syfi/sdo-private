@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -222,43 +223,12 @@ def format_triage_report(report: TriageReport) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def _ltm_stream_handler(ctx: Any, events: Any) -> None:
-    from pydantic_ai.messages import (
-        FunctionToolCallEvent,
-        FunctionToolResultEvent,
-        PartEndEvent,
-        RetryPromptPart,
-        ThinkingPart,
-        ToolReturnPart,
-    )
+def _make_stream_handler(name: str, start_time: float):
+    """Create a stream handler that logs with [name | elapsed] prefix."""
 
-    from libs.agent_mw import fmt_tool_args, tool_call_failed
-
-    async for event in events:
-        if isinstance(event, FunctionToolCallEvent):
-            logger.info("[ltm-search] → %s(%s)", event.part.tool_name, fmt_tool_args(event.part.args))
-        elif isinstance(event, FunctionToolResultEvent):
-            result = event.result
-            if isinstance(result, RetryPromptPart):
-                logger.warning(
-                    "[ltm-search] ✗ %s() failed: %s",
-                    result.tool_name or "unknown",
-                    result.model_response(),
-                )
-            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):  # pyright: ignore[reportUnnecessaryIsInstance]
-                logger.warning(
-                    "[ltm-search] ✗ %s() exited with code %s: %s",
-                    result.tool_name,
-                    result.content.get("exit_code", "?"),
-                    result.content.get("stderr", ""),
-                )
-        elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart) and event.part.has_content():
-            logger.info("[ltm-search] <thinking> %s", event.part.content)
-
-
-def _make_verify_stream_handler(idx: int):
-    """Create a stream handler that logs with [ltm-verify-{idx}] prefix."""
-    prefix = f"[ltm-verify-{idx}]"
+    def _prefix() -> str:
+        elapsed = time.monotonic() - start_time
+        return f"[{name} | {elapsed:.1f}s]"
 
     async def _handler(ctx: Any, events: Any) -> None:
         from pydantic_ai.messages import (
@@ -274,63 +244,28 @@ def _make_verify_stream_handler(idx: int):
 
         async for event in events:
             if isinstance(event, FunctionToolCallEvent):
-                logger.info("%s → %s(%s)", prefix, event.part.tool_name, fmt_tool_args(event.part.args))
+                logger.info("%s → %s(%s)", _prefix(), event.part.tool_name, fmt_tool_args(event.part.args))
             elif isinstance(event, FunctionToolResultEvent):
                 result = event.result
                 if isinstance(result, RetryPromptPart):
                     logger.warning(
                         "%s ✗ %s() failed: %s",
-                        prefix,
+                        _prefix(),
                         result.tool_name or "unknown",
                         result.model_response(),
                     )
                 elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):  # pyright: ignore[reportUnnecessaryIsInstance]
                     logger.warning(
                         "%s ✗ %s() exited with code %s: %s",
-                        prefix,
+                        _prefix(),
                         result.tool_name,
                         result.content.get("exit_code", "?"),
                         result.content.get("stderr", ""),
                     )
             elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart) and event.part.has_content():
-                logger.info("%s <thinking> %s", prefix, event.part.content)
+                logger.info("%s <thinking> %s", _prefix(), event.part.content)
 
     return _handler
-
-
-async def _triage_stream_handler(ctx: Any, events: Any) -> None:
-    """Stream handler that logs triage subagent events with [triage] prefix."""
-    from pydantic_ai.messages import (
-        FunctionToolCallEvent,
-        FunctionToolResultEvent,
-        PartEndEvent,
-        RetryPromptPart,
-        ThinkingPart,
-        ToolReturnPart,
-    )
-
-    from libs.agent_mw import fmt_tool_args, tool_call_failed
-
-    async for event in events:
-        if isinstance(event, FunctionToolCallEvent):
-            logger.info("[triage] → %s(%s)", event.part.tool_name, fmt_tool_args(event.part.args))
-        elif isinstance(event, FunctionToolResultEvent):
-            result = event.result
-            if isinstance(result, RetryPromptPart):
-                logger.warning(
-                    "[triage] ✗ %s() failed: %s",
-                    result.tool_name or "unknown",
-                    result.model_response(),
-                )
-            elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):  # pyright: ignore[reportUnnecessaryIsInstance]
-                logger.warning(
-                    "[triage] ✗ %s() exited with code %s: %s",
-                    result.tool_name,
-                    result.content.get("exit_code", "?"),
-                    result.content.get("stderr", ""),
-                )
-        elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart) and event.part.has_content():
-            logger.info("[triage] <thinking> %s", event.part.content)
 
 
 def _write_trajectory_record(
@@ -405,7 +340,7 @@ async def _run_verification_phase(
             result = await arun_with_retry(
                 verify_agent,
                 prompt,
-                event_stream_handler=_make_verify_stream_handler(idx),
+                event_stream_handler=_make_stream_handler(f"ltm-verify-{idx}", time.monotonic()),
             )
             output = result.output
             # Ensure echoed fields match the candidate
@@ -506,7 +441,7 @@ async def triage_cluster(
         result = await arun_with_retry(
             triage_agent,
             prompt,
-            event_stream_handler=_triage_stream_handler,
+            event_stream_handler=_make_stream_handler("triage", time.monotonic()),
         )
         report = result.output
         ctx.deps.triage_report = report
@@ -666,7 +601,9 @@ async def search_prior_incidents(
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(
+        retrieval_agent, prompt, event_stream_handler=_make_stream_handler("ltm-search", time.monotonic())
+    )
     diagnosis = retrieval_result.output
     logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
 
@@ -758,7 +695,9 @@ async def search_prior_mitigations(
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
     )
-    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await arun_with_retry(
+        retrieval_agent, prompt, event_stream_handler=_make_stream_handler("ltm-mitigation", time.monotonic())
+    )
     output = retrieval_result.output
     output_json = output.model_dump_json(indent=2)
     logger.info("[ltm-mitigation] output: %s", output_json)
