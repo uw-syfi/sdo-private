@@ -1,10 +1,11 @@
-You are maintaining a checklist of symptom areas for an SRE agent's cluster triage tool.
-Each symptom area tells the triage agent what kinds of resources and relationships to check
-during its one-pass cluster scan.
+{# Contract: triage priors are ## sections (one disjoint concern each); see tests/unit/crucible/test_refine_triage_priors_contract.py #}
+You are maintaining learned triage focus areas for an SRE agent's one-pass cluster scan.
+Each area is a separate concern: factual observations to collect or patterns to notice — not
+diagnosis, root cause, or remediation.
 
-Current symptom areas:
+Current priors (markdown):
 ---
-{{ prior_guidance or "(Empty — generate initial list from the reflection below)" }}
+{{ prior_guidance or "(Empty — build initial ## sections only from the reflection and stage outputs below; do not invent a generic checklist of layers or technologies.)" }}
 ---
 
 Reflection from the latest problem:
@@ -19,26 +20,40 @@ Agent's triage report for context:
 ---
 {% endif %}
 
-Task: Update the symptom areas list based on the reflection. Focus on what the triage
-scan missed or should have covered.
+Task: Update the priors based on the reflection. Emphasize what the triage scan missed or
+should have covered. Preserve guidance that was not implicated unless the reflection shows it
+is wrong or harmful.
 
-Each item is a broad symptom area with a brief description of what to look for. Examples:
-- Service-to-pod port mapping: compare every Service's targetPort against its pods' containerPort.
-- Pod health: pods not in Running/Completed state.
-- ConfigMap overrides: ConfigMaps that inject scripts or override entrypoints.
+Document shape (required):
+- Use one markdown `##` heading per focus area. The heading text is a short title you choose
+  for that area (from the incident — not from any fixed taxonomy).
+- Under each `##`, write the body for that area only: a short paragraph and/or `-` bullets.
+- Each bullet: one sentence; keep bodies compact so the full file stays readable.
 
-When to add:
-- The reflection shows the triage missed a resource type or relationship that turned out
-  to matter.
+Mutual exclusivity (required):
+- **No overlap between `##` sections.** If the same kubectl observation, log line, or pattern
+  could plausibly belong under two headings, merge those sections into one `##` or narrow scopes
+  until each observation fits at most one section.
+- Prefer fewer disjoint sections over many redundant ones.
 
-When to remove or refine:
-- An area consistently produces benign noise that distracts the agent.
-- Two items say essentially the same thing — merge them.
+When to add a section or expand a body:
+- The reflection shows triage missed something that mattered for the outcome.
+
+When to remove, merge, or narrow:
+- A section produces benign noise or duplicates another — merge or delete.
+- Two sections overlap — merge per the rule above.
 
 Rules:
-- Keep the list short and high-signal. Only add items that would have changed the outcome.
-  Prefer generalizing an existing item over adding a near-duplicate.
-- Maximum 15 symptom areas.
-- Each item must be generic (no app-specific names or values).
-- Preserve items that were not implicated — do not remove working guidance.
-- Output only the symptom area list (one `- ` bullet per item), no preamble or commentary.
+- Maximum 12 `##` sections total.
+- All wording must be generic (no app-specific names, hostnames, or literal config values).
+- Do not restate the agent's built-in triage methodology; only add learned gaps from this run.
+- Output markdown only: `##` sections and bodies, no preamble or commentary before the first `##`.
+
+Example shape (placeholder titles only — do not copy these as real areas):
+## Example area title alpha
+
+- One sentence on what to notice in this area only.
+
+## Example area title beta
+
+Short paragraph for this area only.

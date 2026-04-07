@@ -141,9 +141,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 str_replace_file,
                 *([] if deps.stage == "mitigation" else [triage_cluster]),
                 search_prior_incidents if deps.stage == "diagnosis" else search_prior_mitigations,
-                # Non-KB diagnosis: self-check tool to verify hypothesis covers all triage anomalies.
-                # KB-injected agents get this from CandidateVerification.unexplained_anomalies instead.
-                *([check_hypothesis_coverage] if deps.stage == "diagnosis" and deps.lt_summary_file is None else []),
+                *([] if deps.stage == "mitigation" else [check_hypothesis_coverage]),
             ],
         )
 

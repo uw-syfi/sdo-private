@@ -8,26 +8,24 @@ WORKFLOW:
 3. Search prior incidents: call `search_prior_incidents` with key anomalies from the
    triage report. Budget: 1 call per stage.
    - If any confirmed candidate has a complete `causal_chain` that explains ALL symptoms,
-     validate it makes sense and proceed to step 6.
+     validate it makes sense and proceed to step 6. No further verification needed.
    - If no candidates are confirmed, continue to step 4.
 4. Deep investigation: trace symptoms to root cause via kubectl, logs, and resource specs.
    For CRDs managed by an operator, inspect the CR spec and status/conditions.
    Prioritise triage anomalies over the loudest log error.
-5. Verify your hypothesis:
-   (a) Does it explain the symptoms **for the fault you are attributing** (or do you have
-       a defensible reason if triage shows multiple independent issues)?
-   (b) Is it recently changed/injected, or pre-existing?
-   (c) Have you ruled out at least two alternatives with evidence?
-   If `check_hypothesis_coverage` is available, call it BEFORE submitting. It returns
-   JSON with `verdict` and may list anomalies not explained by your hypothesis.
-   - **`accept`**: proceed to step 6.
-   - **`accept_partial`**: you may submit if your `answer`, `justification`, and
-     `causal_chain` **scope** what you claim (which fault/root cause) and **acknowledge**
-     residual triage anomalies (e.g., likely separate fault or noise). Do not ignore
-     the tool output.
-   - **`reject`**: revise your hypothesis or narrow its scope, then call
-     `check_hypothesis_coverage` again. Do not submit until you have a defensible
-     partial diagnosis with honest caveats, or an accepted verdict.
+5. Verify your hypothesis — MANDATORY when step 3 did not yield a confirmed candidate:
+   You MUST NOT submit without a passing `check_hypothesis_coverage` call.
+   (a) Formulate your hypothesis (resource, misconfigured field, causal chain).
+   (b) Call `check_hypothesis_coverage` with your hypothesis. It returns JSON with
+       `verdict` and may list anomalies not explained.
+   (c) Act on the verdict:
+       - **`accept`**: proceed to step 6.
+       - **`accept_partial`**: proceed to step 6, but your `answer`, `justification`,
+         and `causal_chain` MUST **scope** what you claim and **acknowledge** residual
+         triage anomalies (e.g., likely separate fault or noise).
+       - **`reject`**: DO NOT submit. Read the unexplained anomalies and reasoning,
+         revise your hypothesis or narrow its scope, and go back to (b). Repeat until
+         you reach `accept` or `accept_partial`.
 6. Submit your `answer` (concise diagnosis), `justification` (evidence and reasoning),
    and `causal_chain` (misconfigured field → mechanism → observed symptom).
 

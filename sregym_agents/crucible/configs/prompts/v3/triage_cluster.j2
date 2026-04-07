@@ -29,6 +29,8 @@ policies, storage claims, and specs of any unhealthy pods or deployments.
 
 {% if triage_guidance %}
 TRIAGE GUIDANCE (learned from past incidents — check these, plus anything else that looks wrong):
+Each block below is a separate `##` section: one concern per heading. Treat sections as
+mutually exclusive — do not attribute the same observation to multiple sections.
 {{ triage_guidance }}
 {% endif %}
 
