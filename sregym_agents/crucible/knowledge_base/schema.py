@@ -80,6 +80,48 @@ def get_schema(kb_dir: Path) -> KBSchema:
     return SCHEMAS[read_schema_version(kb_dir)]
 
 
+def migrate_triage_priors(kb_dir: Path) -> None:
+    """Migrate triage_priors.md (markdown) to triage_priors.yaml (structured YAML)."""
+    yaml_path = kb_dir / "triage_priors.yaml"
+    md_path = kb_dir / SCHEMA_V2.triage_priors  # "triage_priors.md"
+
+    if yaml_path.exists():
+        return  # Already migrated
+    if not md_path.exists():
+        return  # Nothing to migrate
+
+    import re
+
+    import yaml
+
+    content = md_path.read_text()
+    areas: list[dict[str, object]] = []
+    current_name: str | None = None
+    current_hints: list[str] = []
+
+    for line in content.splitlines():
+        header_match = re.match(r"^##\s+(.+)$", line)
+        if header_match:
+            if current_name and current_hints:
+                areas.append({"name": current_name, "hints": current_hints})
+            current_name = header_match.group(1).strip()
+            current_hints = []
+        elif line.strip().startswith("- "):
+            hint = line.strip()[2:].strip()
+            if hint:
+                current_hints.append(hint)
+
+    # Don't forget the last section
+    if current_name and current_hints:
+        areas.append({"name": current_name, "hints": current_hints})
+
+    # Write YAML
+    yaml_path.write_text(yaml.dump({"areas": areas}, default_flow_style=False))
+    # Remove old markdown file
+    md_path.unlink()
+    logger.info("Migrated %s -> %s", md_path.name, yaml_path.name)
+
+
 def migrate_to_current(kb_dir: Path) -> None:
     """Migrate a KB directory from its current schema to CURRENT_SCHEMA_VERSION.
 
@@ -87,6 +129,8 @@ def migrate_to_current(kb_dir: Path) -> None:
     """
     current = read_schema_version(kb_dir)
     if current >= CURRENT_SCHEMA_VERSION:
+        # Always attempt triage priors migration (md -> yaml)
+        migrate_triage_priors(kb_dir)
         return
 
     old = SCHEMAS[current]
@@ -102,3 +146,6 @@ def migrate_to_current(kb_dir: Path) -> None:
 
     write_schema_version(kb_dir)
     logger.info("KB schema migrated from v%d to v%d", current, CURRENT_SCHEMA_VERSION)
+
+    # Always attempt triage priors migration (md -> yaml)
+    migrate_triage_priors(kb_dir)

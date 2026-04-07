@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai.models import Model
 
-    from sregym_agents.crucible.tools._kb_tools import TriageReport
+    from sregym_agents.crucible.tools._kb_tools import TriagePriors, TriageReport
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class SREDeps:
     trajectory_path: Path | None = None
     triage_report: TriageReport | None = None
     # v3 trained guidance
-    triage_guidance: str = ""
+    triage_priors: TriagePriors | None = None
     verification_guidance: str = ""
     stage_outputs_file: Path | None = None
 

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import ModelRetry, RunContext
 
 from libs.agent_mw import FixedPathProvider, RetryMiddleware, TrajectoryMiddleware, TurnLoggingMiddleware
@@ -24,12 +24,17 @@ if TYPE_CHECKING:
 
     from pydantic_ai.models import Model
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 THINKING_BUDGET = 4096
 MAX_OUTPUT_TOKENS = 16_384
 VERIFICATION_THINKING_BUDGET = 2048
 COVERAGE_THINKING_BUDGET = 2048
+
+MAX_TRIAGE_AREAS = 12
+MAX_HINTS_PER_AREA = 10
 
 
 # ---------------------------------------------------------------------------
@@ -49,12 +54,64 @@ class TriageAnomaly(BaseModel):
     observation: str = Field(description="Factual description of the anomaly — no interpretation")
 
 
+class TriageArea(BaseModel):
+    """One focus area for triage -- dispatched to a specialist subagent."""
+
+    name: str
+    hints: list[str]
+
+    @field_validator("hints")
+    @classmethod
+    def max_hints(cls, v: list[str]) -> list[str]:
+        if len(v) > MAX_HINTS_PER_AREA:
+            raise ValueError(f"Maximum {MAX_HINTS_PER_AREA} hints per area")
+        return v
+
+
+class TriagePriors(BaseModel):
+    """Top-level triage priors document."""
+
+    areas: list[TriageArea]
+
+    @field_validator("areas")
+    @classmethod
+    def max_areas(cls, v: list[TriageArea]) -> list[TriageArea]:
+        if len(v) > MAX_TRIAGE_AREAS:
+            raise ValueError(f"Maximum {MAX_TRIAGE_AREAS} triage areas")
+        return v
+
+
+class TriageCoordinatorReport(BaseModel):
+    cluster_snapshot: str
+    """Condensed kubectl output, passed to specialists (internal only)."""
+    base_anomalies: list[TriageAnomaly]
+    """User-facing symptoms found during smoke test."""
+
+
+class TriageSpecialistReport(BaseModel):
+    category: str
+    """The area name."""
+    healthy: bool
+    """True if no anomalies found in this area."""
+    assessment: str
+    """High-level summary of health in this area (1-2 sentences)."""
+    anomalies: list[TriageAnomaly]
+    """Empty if healthy=True."""
+
+
+class AreaAssessment(BaseModel):
+    category: str
+    """Area name, e.g., 'Network and DNS Connectivity'."""
+    assessment: str
+    """1-2 sentence summary of what's wrong in this area."""
+
+
 class TriageReport(BaseModel):
     anomalies: list[TriageAnomaly] = Field(  # pyright: ignore[reportUnknownVariableType]
         default_factory=list, description="All observed anomalies, each tagged with a category"
     )
-    raw_cluster_snapshot: str = Field(
-        default="", description="Condensed kubectl output for downstream agents to reference"
+    area_assessments: list[AreaAssessment] = Field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list
     )
 
 
@@ -208,18 +265,25 @@ class MitigationSearchResult(BaseModel):
 
 def format_triage_report(report: TriageReport) -> str:
     """Convert a TriageReport to readable markdown."""
-    lines = ["### Triage Report"]
+    lines = ["# Triage Report\n"]
+    if report.area_assessments:
+        lines.append("## Area Assessments\n")
+        lines.extend(f"### {aa.category}\n{aa.assessment}\n" for aa in report.area_assessments)
+    lines.append("## Anomalies\n")
     if not report.anomalies:
-        lines.append("\nNo anomalies detected.")
-        return "\n".join(lines) + "\n"
-    # Group by category, preserving first-seen order.
-    grouped: dict[str, list[TriageAnomaly]] = {}
-    for a in report.anomalies:
-        grouped.setdefault(a.category, []).append(a)
-    for category, anomalies in grouped.items():
-        lines.append(f"\n**{category}**")
-        lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
-    return "\n".join(lines) + "\n"
+        lines.append("No anomalies detected.\n")
+        return "\n".join(lines)
+    lines.extend(
+        f"- **[{a.category}]** `{a.resource_kind}/{a.resource_name}` (ns: {a.namespace}): {a.observation}"
+        for a in report.anomalies
+    )
+    return "\n".join(lines)
+
+
+def load_triage_priors(path: Path) -> TriagePriors:
+    """Load and validate triage priors from YAML."""
+    raw = yaml.safe_load(path.read_text())
+    return TriagePriors.model_validate(raw)
 
 
 def _subagent_middleware(trajectory_path: Path | None = None) -> list[Any]:
@@ -332,10 +396,18 @@ async def triage_cluster(
     if not model_id:
         return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
 
+    triage_guidance = ""
+    if ctx.deps.triage_priors:
+        parts: list[str] = []
+        for area in ctx.deps.triage_priors.areas:
+            parts.append(f"## {area.name}")
+            parts.extend(f"- {hint}" for hint in area.hints)
+        triage_guidance = "\n".join(parts)
+
     prompt = ctx.deps.renderer.render(
         "triage_cluster",
         namespace=ctx.deps.namespace,
-        triage_guidance=ctx.deps.triage_guidance,
+        triage_guidance=triage_guidance,
     )
     logger.info("[triage-cluster] PROMPT:\n%s", prompt)
 

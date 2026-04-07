@@ -208,13 +208,45 @@ async def _run_stage_loop(
 
     # v3 priors (learned rules from reflection)
     is_v3 = crucible_config.prompt_version >= "v3"
-    triage_guidance = ""
+    triage_priors = None
     verification_guidance = ""
     stage_outputs_file: Path | None = None
     if is_v3:
         stage_outputs_file = Path(f"{stage}_stage_outputs.md")
-        if triage_priors_file and triage_priors_file.exists():
-            triage_guidance = triage_priors_file.read_text().strip()
+        # Try YAML triage priors first, fall back to markdown file
+        if triage_priors_file:
+            yaml_path = triage_priors_file.with_suffix(".yaml")
+            if yaml_path.exists():
+                from sregym_agents.crucible.tools._kb_tools import load_triage_priors
+
+                triage_priors = load_triage_priors(yaml_path)
+            elif triage_priors_file.exists():
+                # Legacy: read markdown and pass as-is via TriagePriors won't work,
+                # so we read markdown content and build a single-area TriagePriors
+                import re as _re
+
+                from sregym_agents.crucible.tools._kb_tools import TriagePriors as _TP
+
+                content = triage_priors_file.read_text().strip()
+                if content:
+                    areas: list[dict[str, Any]] = []
+                    current_name = None
+                    current_hints: list[str] = []
+                    for line in content.splitlines():
+                        header_match = _re.match(r"^##\s+(.+)$", line)
+                        if header_match:
+                            if current_name and current_hints:
+                                areas.append({"name": current_name, "hints": current_hints})
+                            current_name = header_match.group(1).strip()
+                            current_hints = []
+                        elif line.strip().startswith("- "):
+                            hint = line.strip()[2:].strip()
+                            if hint:
+                                current_hints.append(hint)
+                    if current_name and current_hints:
+                        areas.append({"name": current_name, "hints": current_hints})
+                    if areas:
+                        triage_priors = _TP.model_validate({"areas": areas})
         if verification_priors_file and verification_priors_file.exists():
             verification_guidance = verification_priors_file.read_text().strip()
 
@@ -259,7 +291,7 @@ async def _run_stage_loop(
             incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
             ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
-            triage_guidance=triage_guidance,
+            triage_priors=triage_priors,
             verification_guidance=verification_guidance,
             stage_outputs_file=stage_outputs_file,
         )

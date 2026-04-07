@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from sregym_agents.crucible.tools import (
+    AreaAssessment,
     TriageAnomaly,
+    TriageArea,
+    TriagePriors,
     TriageReport,
     format_triage_report,
 )
@@ -20,18 +25,16 @@ class TestTriageReport:
         )
         report = TriageReport(
             anomalies=[anomaly],
-            raw_cluster_snapshot="kubectl get pods -A output...",
         )
         json_str = report.model_dump_json()
         restored = TriageReport.model_validate_json(json_str)
         assert restored.anomalies[0].resource_name == "frontend-abc"
         assert restored.anomalies[0].category == "Non-Running Pods"
-        assert restored.raw_cluster_snapshot == "kubectl get pods -A output..."
 
     def test_empty_report(self) -> None:
         report = TriageReport()
         assert report.anomalies == []
-        assert report.raw_cluster_snapshot == ""
+        assert report.area_assessments == []
 
     def test_multiple_categories(self) -> None:
         report = TriageReport(
@@ -64,7 +67,7 @@ class TestTriageReport:
         pods = [a for a in restored.anomalies if a.category == "Non-Running Pods"]
         assert len(pods) == 2
 
-    def test_format_groups_by_category(self) -> None:
+    def test_format_with_anomalies(self) -> None:
         report = TriageReport(
             anomalies=[
                 TriageAnomaly(
@@ -77,17 +80,50 @@ class TestTriageReport:
                     namespace="ns",
                     observation="y",
                 ),
+            ],
+        )
+        md = format_triage_report(report)
+        assert "**[Non-Running Pods]**" in md
+        assert "**[Port Mismatch]**" in md
+        assert "`Pod/a`" in md
+
+    def test_format_with_area_assessments(self) -> None:
+        report = TriageReport(
+            area_assessments=[
+                AreaAssessment(category="Network", assessment="DNS resolution failing."),
+            ],
+            anomalies=[
                 TriageAnomaly(
-                    category="Non-Running Pods", resource_kind="Pod", resource_name="c", namespace="ns", observation="z"
+                    category="Network", resource_kind="Pod", resource_name="a", namespace="ns", observation="x"
                 ),
             ],
         )
         md = format_triage_report(report)
-        assert "**Non-Running Pods**" in md
-        assert "**Port Mismatch**" in md
-        # Both pods appear under the same heading
-        assert md.index("**Non-Running Pods**") < md.index("`Pod/c`")
+        assert "## Area Assessments" in md
+        assert "### Network" in md
+        assert "DNS resolution failing." in md
 
     def test_format_empty_report(self) -> None:
         md = format_triage_report(TriageReport())
         assert "No anomalies detected." in md
+
+
+class TestTriagePriors:
+    def test_valid_priors(self) -> None:
+        priors = TriagePriors(
+            areas=[
+                TriageArea(name="Network", hints=["Check DNS", "Check connectivity"]),
+                TriageArea(name="Storage", hints=["Check PVCs"]),
+            ]
+        )
+        assert len(priors.areas) == 2
+        assert priors.areas[0].name == "Network"
+
+    def test_max_areas_exceeded(self) -> None:
+        areas = [TriageArea(name=f"area-{i}", hints=["hint"]) for i in range(13)]
+        with pytest.raises(ValueError, match="Maximum 12 triage areas"):
+            TriagePriors(areas=areas)
+
+    def test_max_hints_exceeded(self) -> None:
+        with pytest.raises(ValueError, match="Maximum 10 hints per area"):
+            TriageArea(name="test", hints=[f"hint-{i}" for i in range(11)])

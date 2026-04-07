@@ -39,7 +39,7 @@ Conserve context: use --tail=50, grep, jsonpath/jq. Breadth over depth.
 OUTPUT:
 Populate the TriageReport with factual observations only.
 - No diagnosis, no hypothesis, no root cause speculation, no severity labels.
-- Put condensed kubectl output into raw_cluster_snapshot for downstream reference.
+- Do not include raw kubectl output in the report; only include structured anomalies.
 - Tag each anomaly with a descriptive category string (e.g., "Non-Running Pods",
   "Network Anomalies"). Use standard categories when they fit;
   create new categories when you observe anomalies that don't match existing ones.
