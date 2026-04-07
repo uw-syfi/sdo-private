@@ -616,6 +616,28 @@ async def _run_recovery_mitigation(
     return submission
 
 
+def _append_stage_outcome(result: StageLoopResult, stage_label: str) -> None:
+    """Append the agent's answer and benchmark result to the stage outputs file.
+
+    This gives the reflector a single file with the full picture: intermediate
+    tool outputs, the agent's conclusion, and the benchmark verdict.
+    """
+    sof = result.stage_outputs_file
+    if not sof:
+        return
+    parts: list[str] = [f"\n---\n## {stage_label} Outcome\n"]
+    if result.agent_answer:
+        parts.append(f"**Agent Answer**: {result.agent_answer}\n")
+    if result.agent_justification:
+        parts.append(f"**Justification**: {result.agent_justification}\n")
+    if result.agent_causal_chain:
+        parts.append(f"**Causal Chain**: {result.agent_causal_chain}\n")
+    if result.benchmark_block:
+        parts.append(f"\n{result.benchmark_block.strip()}\n")
+    with open(sof, "a") as f:
+        f.write("".join(parts))
+
+
 async def run(
     model: str | Model,
     app_info: dict[str, Any],
@@ -660,6 +682,7 @@ async def run(
         trajectory_path=trajectory_path,
         crucible_config=crucible_config,
     )
+    _append_stage_outcome(diag_result, "Diagnosis")
     # Recovery diagnosis: produce a validated causal chain when the benchmark
     # rejected the agent's diagnosis and we want causal chains for KB.
     if (
@@ -720,6 +743,7 @@ async def run(
         trajectory_path=trajectory_path,
         crucible_config=crucible_config,
     )
+    _append_stage_outcome(mit_result, "Mitigation")
     # Recovery mitigation: reflect on why mitigation failed when benchmark
     # rejected the agent's fix and we want lessons for KB.
     if (

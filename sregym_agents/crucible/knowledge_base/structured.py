@@ -333,6 +333,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         await self._distill_lessons()
         if self.enable_reflection:
-            await self._reflector.run(session_files, stage_outputs_file)
+            await self._reflector.run(stage_outputs_file)
         else:
             logger.info("Reflection disabled; skipping.")

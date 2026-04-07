@@ -773,12 +773,11 @@ class TestReflector:
     def _make_reflector(self, tmp_path: Path) -> Reflector:
         return Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer)
 
-    async def test_run_skips_when_no_session_content(self, tmp_path: Path, caplog):
+    async def test_run_skips_when_no_stage_outputs(self, tmp_path: Path, caplog):
         reflector = self._make_reflector(tmp_path)
-        session_files = SessionFiles(diagnosis=tmp_path / "nonexistent.md")
         with caplog.at_level(logging.INFO, logger="sregym_agents.crucible.knowledge_base"):
-            await reflector.run(session_files)
-        assert "No shared session content" in caplog.text
+            await reflector.run(stage_outputs_file=tmp_path / "nonexistent.md")
+        assert "No stage output content" in caplog.text
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
     @patch.object(Reflector, "_apply_to_stage", new_callable=AsyncMock)
@@ -786,9 +785,9 @@ class TestReflector:
         mock_reflect.return_value = "outcome: failure\n\nThe agent missed checking network policies."
 
         reflector = self._make_reflector(tmp_path)
-        session = tmp_path / "session.md"
-        session.write_text("session content")
-        await reflector.run(SessionFiles(diagnosis=session))
+        stage_outputs = tmp_path / "stage_outputs.md"
+        stage_outputs.write_text("stage output content")
+        await reflector.run(stage_outputs_file=stage_outputs)
 
         mock_reflect.assert_called_once()
         assert mock_apply.call_count == 1
@@ -800,10 +799,10 @@ class TestReflector:
         mock_reflect.side_effect = RuntimeError("LLM error")
 
         reflector = self._make_reflector(tmp_path)
-        session = tmp_path / "session.md"
-        session.write_text("session content")
+        stage_outputs = tmp_path / "stage_outputs.md"
+        stage_outputs.write_text("stage output content")
         with caplog.at_level(logging.ERROR, logger="sregym_agents.crucible.knowledge_base"):
-            await reflector.run(SessionFiles(diagnosis=session))
+            await reflector.run(stage_outputs_file=stage_outputs)
 
         assert "Failed to classify failure" in caplog.text
 
@@ -814,10 +813,10 @@ class TestReflector:
         mock_apply.side_effect = RuntimeError("write failed")
 
         reflector = self._make_reflector(tmp_path)
-        session = tmp_path / "session.md"
-        session.write_text("session content")
+        stage_outputs = tmp_path / "stage_outputs.md"
+        stage_outputs.write_text("stage output content")
         with caplog.at_level(logging.ERROR, logger="sregym_agents.crucible.knowledge_base"):
-            await reflector.run(SessionFiles(diagnosis=session))
+            await reflector.run(stage_outputs_file=stage_outputs)
 
         assert "Reflection apply error" in caplog.text
 
@@ -827,9 +826,9 @@ class TestReflector:
         mock_reflect.return_value = "outcome: success\n\nThe agent handled triage well."
 
         reflector = self._make_reflector(tmp_path)
-        session = tmp_path / "session.md"
-        session.write_text("session content")
-        await reflector.run(SessionFiles(diagnosis=session))
+        stage_outputs = tmp_path / "stage_outputs.md"
+        stage_outputs.write_text("stage output content")
+        await reflector.run(stage_outputs_file=stage_outputs)
 
         assert mock_apply.call_count == 1
         cfg = mock_apply.call_args[0][0]

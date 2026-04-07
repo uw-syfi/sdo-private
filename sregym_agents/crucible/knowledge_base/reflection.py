@@ -23,8 +23,6 @@ if TYPE_CHECKING:
 
     from sregym_agents.crucible._prompts import PromptRenderer
 
-    from .base import SessionFiles
-
 logger = logging.getLogger(__name__)
 
 
@@ -68,29 +66,25 @@ class Reflector:
 
     async def reflect(
         self,
-        session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
     ) -> str | None:
         """Classify where in the agent pipeline the failure occurred.
 
-        Returns the raw classification text, or None if there is no session
-        content to analyze.
+        Returns the raw classification text, or None if there is no stage
+        output content to analyze.
         """
         stage_outputs = ""
         if stage_outputs_file and stage_outputs_file.exists():
             stage_outputs = stage_outputs_file.read_text().strip()
 
-        shared_session_parts = session_files.read_all()
-        shared_session = "\n\n".join(shared_session_parts).strip()
-        if not shared_session:
-            logger.info("No shared session content; skipping reflection.")
+        if not stage_outputs:
+            logger.info("No stage output content; skipping reflection.")
             return None
 
         logger.info("Classifying agent failure modes...")
         prompt = self.prompts.render(
             "kb/classify_failure",
             stage_outputs=stage_outputs,
-            shared_session=shared_session,
         )
         classification = await self._call_llm(prompt)
         logger.info("Failure classification:\n%s", classification)
@@ -129,12 +123,11 @@ class Reflector:
 
     async def run(
         self,
-        session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
     ) -> None:
         """Reflect on the trajectory and apply updates."""
         try:
-            classification = await self.reflect(session_files, stage_outputs_file)
+            classification = await self.reflect(stage_outputs_file)
         except Exception as e:
             logger.error("Failed to classify failure: %s", e)
             return

@@ -5,30 +5,30 @@ The agent's job is to diagnose root causes of faults in Kubernetes applications.
 this by triaging cluster resources for anomalies, searching a knowledge base for similar
 past incidents, investigating deeply, and submitting a diagnosis.
 
-## Agent's Stage Outputs (triage report, KB retrieval results, coverage check)
+## Agent's Stage Outputs
 {{ stage_outputs }}
-
-## Shared Session (agent answer, judge feedback, benchmark result, recovery reflection)
-{{ shared_session }}
 
 ## Instructions
 
 ### Understanding the stage outputs
 
-The stage outputs above contain the agent's intermediate investigation results. If the
-outputs contain a "Recovery Diagnosis Investigation" or "Recovery Mitigation Investigation"
-section (after a `---` separator), this means:
+The stage outputs above contain the full record of this run:
 
-- **Everything before the separator** is the primary agent's investigation — this is the
-  work that led to the WRONG diagnosis. This is what you need to analyze for mistakes.
-- **Everything after the separator** is the recovery agent's investigation — this agent
-  was given the correct answer and investigated the cluster to confirm it. Its outputs
-  show what the correct investigation path looks like: what the triage found, what
-  evidence mattered, and how the correct root cause connects to the observations.
+1. **Investigation outputs** — triage reports, hypothesis coverage checks, and KB retrieval
+   results produced by the agent's tools during investigation.
+2. **Outcome** — the agent's final answer (diagnosis/justification/causal chain) and the
+   benchmark verdict (success or failure with reasoning).
+3. **Recovery investigation** (only present on failures) — if the outputs contain a
+   "Recovery Diagnosis Investigation" or "Recovery Mitigation Investigation" section, this
+   is a second agent that was given the correct answer and investigated the cluster to
+   confirm it. Its outputs show the correct investigation path: what triage found, what
+   evidence mattered, and how the correct root cause connects to the observations.
 
-Use the recovery investigation as ground truth to contrast against the primary agent's
-work. The gap between what the primary agent found/concluded and what the recovery agent
-found is exactly where the failure occurred.
+When recovery outputs are present:
+- Everything before the recovery separator is the primary agent's work — this led to the
+  WRONG answer.
+- The recovery section shows what the CORRECT investigation looks like.
+- The gap between the two is exactly where the failure occurred.
 
 ### Reflection
 
