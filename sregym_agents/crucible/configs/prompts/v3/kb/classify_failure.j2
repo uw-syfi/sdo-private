@@ -13,18 +13,41 @@ past incidents, investigating deeply, and submitting a diagnosis.
 
 ## Instructions
 
+### Understanding the stage outputs
+
+The stage outputs above contain the agent's intermediate investigation results. If the
+outputs contain a "Recovery Diagnosis Investigation" or "Recovery Mitigation Investigation"
+section (after a `---` separator), this means:
+
+- **Everything before the separator** is the primary agent's investigation — this is the
+  work that led to the WRONG diagnosis. This is what you need to analyze for mistakes.
+- **Everything after the separator** is the recovery agent's investigation — this agent
+  was given the correct answer and investigated the cluster to confirm it. Its outputs
+  show what the correct investigation path looks like: what the triage found, what
+  evidence mattered, and how the correct root cause connects to the observations.
+
+Use the recovery investigation as ground truth to contrast against the primary agent's
+work. The gap between what the primary agent found/concluded and what the recovery agent
+found is exactly where the failure occurred.
+
+### Reflection
+
 Analyze the trajectory end-to-end. Write a natural-language reflection covering:
 
 1. **What happened** — briefly summarize the agent's approach and outcome.
 2. **What went wrong (or almost went wrong)** — where did the agent's analysis break down?
    What did it miss, misinterpret, or waste time on? Be specific: cite observations from
-   the triage report, retrieval results, and investigation steps.
+   the triage report, retrieval results, and investigation steps. If recovery outputs are
+   present, contrast the primary agent's findings with the recovery agent's to pinpoint
+   exactly where the reasoning diverged.
 3. **How the agent could have done better** — for each issue, describe concretely how the
    agent should have approached that part of the problem differently. Think about the
    reasoning process, not just the answer. What questions should it have asked? What
    evidence should it have weighted differently? What should it have checked earlier?
 4. **What the triage scan should have covered** — were there resource types, relationships,
    or symptom areas that the triage missed? What should be added to the triage checklist?
+   If recovery triage found anomalies that the primary triage missed, call those out
+   explicitly.
 
 If the agent succeeded, still reflect on inefficiencies, close calls, or areas where it
 got lucky rather than being systematic.

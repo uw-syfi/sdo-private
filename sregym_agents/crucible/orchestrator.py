@@ -434,6 +434,7 @@ async def _run_recovery_diagnosis(
     trajectory_path: Path | None = None,
     original_justification: str = "",
     original_causal_chain: str = "",
+    stage_outputs_file: Path | None = None,
 ) -> SRESubmission | None:
     """Run a recovery diagnosis agent to produce a causal chain for the correct root cause.
 
@@ -451,6 +452,12 @@ async def _run_recovery_diagnosis(
     logger.info("RECOVERY DIAGNOSIS: producing causal chain from benchmark ground truth")
     logger.info("=" * 60)
 
+    # Write a separator into stage_outputs_file so the reflector can
+    # distinguish primary-agent outputs from the recovery investigation.
+    if stage_outputs_file:
+        with open(stage_outputs_file, "a") as f:
+            f.write("\n---\n## Recovery Diagnosis Investigation\n")
+
     sre_state = SharedState()
     sre_deps = SREDeps(
         namespace=app_info.get("namespace", "default"),
@@ -459,6 +466,7 @@ async def _run_recovery_diagnosis(
         stage="diagnosis",
         renderer=renderer,
         state=sre_state,
+        stage_outputs_file=stage_outputs_file,
     )
 
     system_prompt = renderer.render("recovery_diagnosis_system")
@@ -523,6 +531,7 @@ async def _run_recovery_mitigation(
     trajectory_path: Path | None = None,
     original_justification: str = "",
     diagnosis_answer: str = "",
+    stage_outputs_file: Path | None = None,
 ) -> SRESubmission | None:
     """Run a recovery mitigation agent to investigate and apply the correct fix.
 
@@ -541,6 +550,10 @@ async def _run_recovery_mitigation(
     logger.info("RECOVERY MITIGATION: reflecting on failed mitigation attempt")
     logger.info("=" * 60)
 
+    if stage_outputs_file:
+        with open(stage_outputs_file, "a") as f:
+            f.write("\n---\n## Recovery Mitigation Investigation\n")
+
     sre_state = SharedState()
     sre_deps = SREDeps(
         namespace=app_info.get("namespace", "default"),
@@ -549,6 +562,7 @@ async def _run_recovery_mitigation(
         stage="mitigation",
         renderer=renderer,
         state=sre_state,
+        stage_outputs_file=stage_outputs_file,
     )
 
     system_prompt = renderer.render("recovery_mitigation_system")
@@ -663,6 +677,7 @@ async def run(
             trajectory_path=trajectory_path,
             original_justification=diag_result.agent_justification,
             original_causal_chain=diag_result.agent_causal_chain,
+            stage_outputs_file=diag_result.stage_outputs_file,
         )
         if recovery:
             diag_result.agent_answer = recovery.answer
@@ -722,6 +737,7 @@ async def run(
             trajectory_path=trajectory_path,
             original_justification=mit_result.agent_justification,
             diagnosis_answer=diag_result.agent_answer,
+            stage_outputs_file=mit_result.stage_outputs_file,
         )
         if recovery:
             mit_result.agent_answer = recovery.answer
