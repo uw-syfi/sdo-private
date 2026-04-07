@@ -1,5 +1,5 @@
 You are analyzing the trajectory of an SRE agent that just completed a diagnosis problem.
-Your task is to reflect on the agent's approach and describe how it could have done better.
+Your task is to classify the outcome and identify which pipeline stages failed.
 
 The agent's job is to diagnose root causes of faults in Kubernetes applications. It does
 this by triaging cluster resources for anomalies, searching a knowledge base for similar
@@ -8,9 +8,24 @@ past incidents, investigating deeply, and submitting a diagnosis.
 ## Agent's Stage Outputs
 {{ stage_outputs }}
 
-## Instructions
+## Pipeline Stage Definitions
 
-### Understanding the stage outputs
+The agent's pipeline consists of these stages:
+
+- **triage** — The `triage_cluster()` subagent's initial scan of Kubernetes resources for
+  anomalies (pods, deployments, services, events, logs, etc.).
+- **retrieval** — The `search_prior_incidents()` retrieval agent that searches the knowledge
+  base for similar past incidents and returns relevant prior lessons.
+- **verification** — The `ltm-verify-*` subagents that verify specific hypotheses against
+  live cluster state (checking logs, metrics, configurations).
+- **reasoning** — The main SRE agent's synthesis and decision-making after receiving tool
+  outputs. This is where the agent connects observations to root causes and forms its
+  final diagnosis.
+- **coverage_check** — The `check_hypothesis_coverage()` subagent that evaluates whether
+  the agent has sufficiently explored all plausible hypotheses before committing to a
+  diagnosis.
+
+## Understanding the Stage Outputs
 
 The stage outputs above contain the full record of this run:
 
@@ -21,8 +36,7 @@ The stage outputs above contain the full record of this run:
 3. **Recovery investigation** (only present on failures) — if the outputs contain a
    "Recovery Diagnosis Investigation" or "Recovery Mitigation Investigation" section, this
    is a second agent that was given the correct answer and investigated the cluster to
-   confirm it. Its outputs show the correct investigation path: what triage found, what
-   evidence mattered, and how the correct root cause connects to the observations.
+   confirm it. Its outputs show the correct investigation path.
 
 When recovery outputs are present:
 - Everything before the recovery separator is the primary agent's work — this led to the
@@ -30,34 +44,23 @@ When recovery outputs are present:
 - The recovery section shows what the CORRECT investigation looks like.
 - The gap between the two is exactly where the failure occurred.
 
-### Reflection
+## Instructions
 
-Analyze the trajectory end-to-end. Write a natural-language reflection covering:
+Analyze the trajectory end-to-end and produce a structured classification:
 
-1. **What happened** — briefly summarize the agent's approach and outcome.
-2. **What went wrong (or almost went wrong)** — where did the agent's analysis break down?
-   What did it miss, misinterpret, or waste time on? Be specific: cite observations from
-   the triage report, retrieval results, and investigation steps. If recovery outputs are
-   present, contrast the primary agent's findings with the recovery agent's to pinpoint
-   exactly where the reasoning diverged.
-3. **How the agent could have done better** — for each issue, describe concretely how the
-   agent should have approached that part of the problem differently. Think about the
-   reasoning process, not just the answer. What questions should it have asked? What
-   evidence should it have weighted differently? What should it have checked earlier?
-4. **What the triage scan should have covered** — were there resource types, relationships,
-   or symptom areas that the triage missed? What should be added to the triage checklist?
-   If recovery triage found anomalies that the primary triage missed, call those out
-   explicitly.
+1. **Determine outcome**: Was the agent's diagnosis correct ("success") or incorrect ("failure")?
+2. **Identify failed stages**: Which pipeline stages contributed to the failure? A single
+   run can have multiple failed stages. Only include stages that genuinely failed — do not
+   mark a stage as failed if it performed adequately.
+3. **For each failed stage**, provide:
+   - `description`: What specifically went wrong at this stage.
+   - `evidence`: Concrete quotes or citations from the trajectory that demonstrate the failure.
+   - `lesson`: What specific guidance would prevent this failure in future runs.
+4. On success, `stage_failures` should be empty unless there were near-misses worth noting
+   (in which case still mark outcome as "success" but include the relevant stage failures).
 
-If the agent succeeded, still reflect on inefficiencies, close calls, or areas where it
-got lucky rather than being systematic.
+Be specific and actionable in your descriptions and lessons. Avoid generic advice like
+"be more thorough." Ground every finding in what actually happened in this trajectory.
 
-Write in plain prose paragraphs. Be specific and actionable — avoid generic advice like
-"be more thorough." Ground every suggestion in what actually happened in this trajectory.
-
-Output format:
-```
-outcome: success | failure
-
-<your reflection>
-```
+If recovery outputs are present, contrast the primary agent's findings with the recovery
+agent's to pinpoint exactly where the reasoning diverged.

@@ -1,16 +1,17 @@
 """Reflection: classify agent failures and update prior files.
 
 The reflection process has two phases:
-1. **Reflect** — analyze the agent's trajectory to classify where in the
-   pipeline the failure (or success) occurred.
-2. **Apply** — make targeted edits to prior files based on the classification.
+1. **Reflect** — analyze the agent's trajectory to produce a structured
+   ``FailureClassification`` identifying which pipeline stages failed.
+2. **Apply** — make targeted edits to prior files *only* for the stages that
+   failed, using the per-config ``apply()`` method.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import logging
-from typing import TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -28,21 +29,37 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Stage configuration
+# Structured failure classification
 # ---------------------------------------------------------------------------
 
 
-@dataclasses.dataclass(frozen=True)
-class PriorFileConfig:
-    """Configuration for a single prior file that reflection can update."""
+class StageFailure(BaseModel):
+    stage: Literal[
+        "triage",
+        "retrieval",
+        "verification",
+        "reasoning",
+        "coverage_check",
+    ]
+    description: str
+    """What specifically went wrong at this stage."""
+    evidence: str
+    """Concrete quotes/citations from the trajectory that show the failure."""
+    lesson: str
+    """What guidance would prevent this failure in future runs."""
 
-    template: str  # prompt template name, e.g. "kb/refine_triage_priors"
-    filename: str  # output filename, e.g. "triage_priors.md"
+
+class FailureClassification(BaseModel):
+    outcome: Literal["success", "failure"]
+    stage_failures: list[StageFailure]
+    """Empty on success. Multiple entries when failure spans stages."""
+    summary: str
+    """Brief overall narrative (2-3 sentences)."""
 
 
-PRIOR_FILES: dict[str, PriorFileConfig] = {
-    "triage": PriorFileConfig("kb/refine_triage_priors", SCHEMA_V2.triage_priors),
-}
+# ---------------------------------------------------------------------------
+# Prior-update result
+# ---------------------------------------------------------------------------
 
 
 class PriorUpdateResult(BaseModel):
@@ -59,6 +76,76 @@ class PriorUpdateResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Stage configuration (ABC + concrete configs)
+# ---------------------------------------------------------------------------
+
+
+class PriorFileConfig(ABC):
+    """Base class for prior file configurations."""
+
+    template: str
+    filename: str
+
+    @abstractmethod
+    async def apply(
+        self,
+        reflector: Reflector,
+        classification: str,
+        stage_outputs: str,
+    ) -> None:
+        """Run the refinement LLM call and write the result."""
+
+
+class MarkdownPriorConfig(PriorFileConfig):
+    """For priors stored as free-form markdown (verification, diagnosis, etc.)."""
+
+    def __init__(self, template: str, filename: str):
+        self.template = template
+        self.filename = filename
+
+    async def apply(
+        self,
+        reflector: Reflector,
+        classification: str,
+        stage_outputs: str,
+    ) -> None:
+        path = reflector.kb_dir / self.filename
+        prior = path.read_text() if path.exists() else ""
+        prompt = reflector.prompts.render(
+            self.template,
+            prior_guidance=prior,
+            failure_classification=classification,
+            stage_outputs=stage_outputs,
+        )
+        agent: Agent[None, PriorUpdateResult] = Agent(
+            reflector.model_id,
+            output_type=PriorUpdateResult,
+        )
+        result = await arun_with_retry(agent, prompt)
+        if result.output.should_update:
+            logger.info(
+                "Updating %s:\n%s",
+                self.filename,
+                result.output.diff_summary,
+            )
+            path.write_text(result.output.updated_content)
+        else:
+            logger.info("No update needed for %s", self.filename)
+
+
+PRIOR_FILES: dict[str, PriorFileConfig] = {
+    "triage": MarkdownPriorConfig(
+        "kb/refine_triage_priors",
+        SCHEMA_V2.triage_priors,
+    ),
+}
+
+STAGE_TO_PRIOR: dict[str, str] = {
+    "triage": "triage",
+}
+
+
+# ---------------------------------------------------------------------------
 # Reflector
 # ---------------------------------------------------------------------------
 
@@ -71,78 +158,68 @@ class Reflector:
         self.model_id = model_id
         self.prompts = renderer
 
-    async def _call_llm(self, prompt: str) -> str:
-        agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry(agent, prompt)
-        return result.output
-
     # -- Phase 1: Reflect ---------------------------------------------------
 
     async def reflect(
         self,
-        stage_outputs_file: Path | None = None,
-    ) -> str | None:
+        stage_outputs_file: Path,
+    ) -> FailureClassification:
         """Classify where in the agent pipeline the failure occurred.
 
-        Returns the raw classification text, or None if there is no stage
-        output content to analyze.
+        Returns a structured ``FailureClassification``.
         """
-        stage_outputs = ""
-        if stage_outputs_file and stage_outputs_file.exists():
-            stage_outputs = stage_outputs_file.read_text().strip()
-
-        if not stage_outputs:
-            logger.info("No stage output content; skipping reflection.")
-            return None
+        stage_outputs = stage_outputs_file.read_text().strip()
 
         logger.info("Classifying agent failure modes...")
         prompt = self.prompts.render(
             "kb/classify_failure",
             stage_outputs=stage_outputs,
         )
-        classification = await self._call_llm(prompt)
-        logger.info("Failure classification:\n%s", classification)
+        agent: Agent[None, FailureClassification] = Agent(
+            self.model_id,
+            output_type=FailureClassification,
+        )
+        result = await arun_with_retry(agent, prompt)
+        classification = result.output
+        logger.info(
+            "Failure classification: outcome=%s, stages=%s\n%s",
+            classification.outcome,
+            [sf.stage for sf in classification.stage_failures],
+            classification.summary,
+        )
         return classification
 
     # -- Phase 2: Apply -----------------------------------------------------
 
-    async def _apply_to_stage(
+    async def apply(
         self,
-        cfg: PriorFileConfig,
-        classification: str,
+        classification: FailureClassification,
         stage_outputs: str,
     ) -> None:
-        """Update a single prior file based on the classification."""
-        path = self.kb_dir / cfg.filename
-        prior = path.read_text() if path.exists() else ""
-        prompt = self.prompts.render(
-            cfg.template,
-            prior_guidance=prior,
-            failure_classification=classification,
-            stage_outputs=stage_outputs,
-        )
-        agent: Agent[None, PriorUpdateResult] = Agent(
-            self.model_id, output_type=PriorUpdateResult,
-        )
-        result = await arun_with_retry(agent, prompt)
-        update = result.output
-
-        if not update.should_update:
-            logger.info(
-                "No update to %s: %s", cfg.filename, update.diff_summary,
-            )
+        """Update prior files based on the reflection."""
+        if classification.outcome == "success" and not classification.stage_failures:
+            logger.info("Unambiguous success; skipping prior updates.")
             return
 
-        path.write_text(update.updated_content)
-        logger.info("Updated %s — %s", path, update.diff_summary)
-
-    async def apply(self, classification: str, stage_outputs: str) -> None:
-        """Update prior files based on the reflection."""
-        for name, cfg in PRIOR_FILES.items():
+        failed_stages = {sf.stage for sf in classification.stage_failures}
+        for stage_label, prior_key in STAGE_TO_PRIOR.items():
+            if stage_label not in failed_stages:
+                continue
+            cfg = PRIOR_FILES.get(prior_key)
+            if cfg is None:
+                continue
+            relevant = [sf for sf in classification.stage_failures if sf.stage == stage_label]
+            failure_text = "\n\n".join(
+                f"### {sf.stage}\n{sf.description}\n\nEvidence: {sf.evidence}\n\nLesson: {sf.lesson}" for sf in relevant
+            )
             try:
-                await self._apply_to_stage(cfg, classification, stage_outputs)
+                await cfg.apply(self, failure_text, stage_outputs)
             except Exception as e:
-                logger.error("Reflection apply error for %s: %s", name, e)
+                logger.error(
+                    "Reflection apply error for %s: %s",
+                    prior_key,
+                    e,
+                )
 
     # -- Combined entry point ------------------------------------------------
 
@@ -151,17 +228,19 @@ class Reflector:
         stage_outputs_file: Path | None = None,
     ) -> None:
         """Reflect on the trajectory and apply updates."""
+        if not stage_outputs_file or not stage_outputs_file.exists():
+            logger.info("No stage output content; skipping reflection.")
+            return
+
+        stage_outputs_text = stage_outputs_file.read_text().strip()
+        if not stage_outputs_text:
+            logger.info("No stage output content; skipping reflection.")
+            return
+
         try:
             classification = await self.reflect(stage_outputs_file)
         except Exception as e:
             logger.error("Failed to classify failure: %s", e)
             return
 
-        if classification is None:
-            return
-
-        stage_outputs = ""
-        if stage_outputs_file and stage_outputs_file.exists():
-            stage_outputs = stage_outputs_file.read_text().strip()
-
-        await self.apply(classification, stage_outputs)
+        await self.apply(classification, stage_outputs_text)
