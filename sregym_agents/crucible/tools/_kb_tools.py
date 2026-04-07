@@ -677,6 +677,9 @@ async def search_prior_incidents(
         )
         output_json = verified.model_dump_json(indent=2)
         logger.info("[ltm-search] no candidates to verify: %s", output_json)
+        if ctx.deps.stage_outputs_file:
+            with open(ctx.deps.stage_outputs_file, "a") as f:
+                f.write(f"\n## KB Retrieval Results\n**Query:** {observed_symptoms}\n\nNo results.\n")
         return output_json
 
     verified = await _run_verification_phase(
@@ -695,7 +698,7 @@ async def search_prior_incidents(
     logger.info("[ltm-search] verified output: %s", output_json)
     if ctx.deps.stage_outputs_file:
         with open(ctx.deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Retrieval Results\n{output_json}\n")
+            f.write(f"\n## KB Retrieval Results\n**Query:** {observed_symptoms}\n\n{output_json}\n")
     return output_json
 
 
@@ -759,4 +762,7 @@ async def search_prior_mitigations(
     output = retrieval_result.output
     output_json = output.model_dump_json(indent=2)
     logger.info("[ltm-mitigation] output: %s", output_json)
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Mitigation Retrieval Results\n**Query:** {root_cause}\n\n{output_json}\n")
     return output_json
