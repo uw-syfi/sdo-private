@@ -39,8 +39,6 @@ class StageFailure(BaseModel):
         "triage",
         "retrieval",
         "verification",
-        "reasoning",
-        "coverage_check",
     ]
     description: str
     """What specifically went wrong at this stage."""

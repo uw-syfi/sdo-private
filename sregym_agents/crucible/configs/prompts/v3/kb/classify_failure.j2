@@ -3,7 +3,7 @@ Your task is to classify the outcome and identify which pipeline stages failed.
 
 The agent's job is to diagnose root causes of faults in Kubernetes applications. It does
 this by triaging cluster resources for anomalies, searching a knowledge base for similar
-past incidents, investigating deeply, and submitting a diagnosis.
+past incidents, verifying candidates against the live cluster, and submitting a diagnosis.
 
 ## Agent's Stage Outputs
 {{ stage_outputs }}
@@ -13,36 +13,57 @@ past incidents, investigating deeply, and submitting a diagnosis.
 The agent's pipeline consists of these stages:
 
 - **triage** — The `triage_cluster()` subagent's initial scan of Kubernetes resources for
-  anomalies (pods, deployments, services, events, logs, etc.).
+  anomalies (pods, deployments, services, events, logs, etc.). This determines which
+  symptoms the agent is aware of.
 - **retrieval** — The `search_prior_incidents()` retrieval agent that searches the knowledge
-  base for similar past incidents and returns relevant prior lessons.
-- **verification** — The `ltm-verify-*` subagents that verify specific hypotheses against
-  live cluster state (checking logs, metrics, configurations).
-- **reasoning** — The main SRE agent's synthesis and decision-making after receiving tool
-  outputs. This is where the agent connects observations to root causes and forms its
-  final diagnosis.
-- **coverage_check** — The `check_hypothesis_coverage()` subagent that evaluates whether
-  the agent has sufficiently explored all plausible hypotheses before committing to a
-  diagnosis.
+  base for candidate root causes matching the observed symptoms.
+- **verification** — The `ltm-verify-*` subagents that verify each retrieved candidate
+  against live cluster state (checking logs, metrics, configurations) and determine whether
+  it applies.
 
 ## Understanding the Stage Outputs
 
-The stage outputs above contain the full record of this run:
+The stage outputs above contain the full record of this run, in chronological order:
 
-1. **Investigation outputs** — triage reports, hypothesis coverage checks, and KB retrieval
-   results produced by the agent's tools during investigation.
-2. **Outcome** — the agent's final answer (diagnosis/justification/causal chain) and the
-   benchmark verdict (success or failure with reasoning).
-3. **Recovery investigation** (only present on failures) — if the outputs contain a
-   "Recovery Diagnosis Investigation" or "Recovery Mitigation Investigation" section, this
-   is a second agent that was given the correct answer and investigated the cluster to
-   confirm it. Its outputs show the correct investigation path.
+1. **Triage Report** — The anomalies surfaced by the triage subagent. These are the
+   symptoms the agent works with for the rest of the pipeline.
+2. **KB Retrieval Candidates** — The raw candidates returned by the knowledge base search,
+   along with the query the agent used. These are hypotheses the KB considers plausible
+   given the symptoms.
+3. **KB Verification Results** — Per-candidate verification results. Each candidate has an
+   `applies` boolean, `evidence` list, `causal_chain` (if confirmed), and `reasoning`
+   explaining why it was confirmed or ruled out.
+4. **Diagnosis Outcome** — The agent's final answer (diagnosis, justification, causal chain)
+   and the benchmark verdict (success or failure with reasoning).
+5. **Recovery Diagnosis Investigation** (only present on failures) — A second agent that was
+   given the correct answer and investigated the cluster to confirm it. This shows what the
+   correct diagnosis looks like and what evidence supports it.
 
-When recovery outputs are present:
-- Everything before the recovery separator is the primary agent's work — this led to the
-  WRONG answer.
-- The recovery section shows what the CORRECT investigation looks like.
-- The gap between the two is exactly where the failure occurred.
+## Failure Classification Using Original-vs-Recovery Contrast
+
+When recovery outputs are present, use them to pinpoint exactly where the original agent's
+pipeline went wrong. Work backwards from the correct answer:
+
+1. **Check triage first.** Compare the triage anomalies with the recovery agent's diagnosis.
+   Did the triage report surface the symptoms that point to the real root cause? If not,
+   the failure started at triage — the agent never had the right signals to work with.
+   Downstream stages cannot recover from missing symptoms.
+
+2. **Check retrieval next.** Given the triage symptoms, did the KB return any candidate that
+   matches or is relevant to the correct root cause? If the triage surfaced the right
+   symptoms but the KB returned no relevant candidates, the failure is at retrieval — the
+   knowledge base lacks coverage for this failure pattern, or the query did not emphasize
+   the right symptoms.
+
+3. **Check verification last.** If the KB returned a relevant candidate, did the verification
+   subagent correctly confirm it? If a matching candidate was retrieved but ruled out
+   (`applies: false`), the failure is at verification — the subagent misinterpreted the
+   cluster evidence.
+
+**Classify at the earliest stage that went wrong.** Failures cascade: a triage failure makes
+retrieval impossible; a retrieval failure makes verification irrelevant. Only mark downstream
+stages as failed if they independently contributed to the problem (e.g., triage was imperfect
+but retrieval should still have found a match, yet didn't).
 
 ## Instructions
 
@@ -61,6 +82,3 @@ Analyze the trajectory end-to-end and produce a structured classification:
 
 Be specific and actionable in your descriptions and lessons. Avoid generic advice like
 "be more thorough." Ground every finding in what actually happened in this trajectory.
-
-If recovery outputs are present, contrast the primary agent's findings with the recovery
-agent's to pinpoint exactly where the reasoning diverged.

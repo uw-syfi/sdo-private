@@ -590,9 +590,6 @@ async def check_hypothesis_coverage(
             output.residual_rationale,
             output.reasoning,
         )
-        if ctx.deps.stage_outputs_file:
-            with open(ctx.deps.stage_outputs_file, "a") as f:
-                f.write(f"\n## Hypothesis Coverage Check\n{output_json}\n")
         return output_json
     except Exception as e:
         logger.warning("[hypothesis-coverage] failed: %s", e)
@@ -666,7 +663,17 @@ async def search_prior_incidents(
     )
     retrieval_result = await retrieval_agent.arun(prompt)
     diagnosis = retrieval_result.output
-    logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
+    retrieval_json = diagnosis.model_dump_json(indent=2)
+    logger.info("[ltm-search] retrieval output: %s", retrieval_json)
+
+    # Write retrieval candidates to stage outputs
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Retrieval Candidates\n**Query:** {observed_symptoms}\n\n")
+            if diagnosis.candidate_root_causes:
+                f.write(f"{retrieval_json}\n")
+            else:
+                f.write("No candidates found.\n")
 
     if not diagnosis.candidate_root_causes:
         verified = VerifiedDifferentialDiagnosis(
@@ -677,9 +684,6 @@ async def search_prior_incidents(
         )
         output_json = verified.model_dump_json(indent=2)
         logger.info("[ltm-search] no candidates to verify: %s", output_json)
-        if ctx.deps.stage_outputs_file:
-            with open(ctx.deps.stage_outputs_file, "a") as f:
-                f.write(f"\n## KB Retrieval Results\n**Query:** {observed_symptoms}\n\nNo results.\n")
         return output_json
 
     verified = await _run_verification_phase(
@@ -696,9 +700,11 @@ async def search_prior_incidents(
     )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)
+
+    # Write verification results to stage outputs
     if ctx.deps.stage_outputs_file:
         with open(ctx.deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Retrieval Results\n**Query:** {observed_symptoms}\n\n{output_json}\n")
+            f.write(f"\n## KB Verification Results\n{output_json}\n")
     return output_json
 
 

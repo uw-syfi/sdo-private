@@ -1017,7 +1017,7 @@ class TestPromptContracts:
             "kb/classify_failure",
             stage_outputs="(test outputs)",
         )
-        for stage in ("triage", "retrieval", "verification", "reasoning", "coverage_check"):
+        for stage in ("triage", "retrieval", "verification"):
             assert stage in rendered, f"classify_failure.j2 missing stage: {stage}"
 
     def test_refine_triage_priors_references_yaml(self):
