@@ -12,6 +12,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from libs.agent_mw import arun_with_retry
@@ -42,6 +43,19 @@ class PriorFileConfig:
 PRIOR_FILES: dict[str, PriorFileConfig] = {
     "triage": PriorFileConfig("kb/refine_triage_priors", SCHEMA_V2.triage_priors),
 }
+
+
+class PriorUpdateResult(BaseModel):
+    """Structured output from the prior-refinement LLM call."""
+
+    should_update: bool
+    """False when the existing priors already cover this run's lessons."""
+
+    diff_summary: str
+    """Numbered list of edit decisions (or why no change was needed)."""
+
+    updated_content: str
+    """The full updated prior markdown. Ignored when should_update is False."""
 
 
 # ---------------------------------------------------------------------------
@@ -107,9 +121,20 @@ class Reflector:
             failure_classification=classification,
             stage_outputs=stage_outputs,
         )
-        result = await self._call_llm(prompt)
-        path.write_text(result)
-        logger.info("Updated %s", path)
+        agent: Agent[None, PriorUpdateResult] = Agent(
+            self.model_id, output_type=PriorUpdateResult,
+        )
+        result = await arun_with_retry(agent, prompt)
+        update = result.output
+
+        if not update.should_update:
+            logger.info(
+                "No update to %s: %s", cfg.filename, update.diff_summary,
+            )
+            return
+
+        path.write_text(update.updated_content)
+        logger.info("Updated %s — %s", path, update.diff_summary)
 
     async def apply(self, classification: str, stage_outputs: str) -> None:
         """Update prior files based on the reflection."""

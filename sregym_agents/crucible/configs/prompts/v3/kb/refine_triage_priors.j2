@@ -20,9 +20,11 @@ Agent's triage report for context:
 ---
 {% endif %}
 
-Task: Update the priors based on the reflection. Emphasize what the triage scan missed or
-should have covered. Preserve guidance that was not implicated unless the reflection shows it
-is wrong or harmful.
+Task: Decide whether the priors need updating based on the reflection. If the existing priors
+already cover this run's lessons adequately, do not update — set should_update to false and
+explain why in diff_summary. Otherwise, update the priors: emphasize what the triage scan
+missed or should have covered. Preserve guidance that was not implicated unless the reflection
+shows it is wrong or harmful.
 
 Document shape (required):
 - Use one markdown `##` heading per focus area. The heading text is a short title you choose
@@ -47,7 +49,11 @@ Rules:
 - Maximum 12 `##` sections total.
 - All wording must be generic (no app-specific names, hostnames, or literal config values).
 - Do not restate the agent's built-in triage methodology; only add learned gaps from this run.
-- Output markdown only: `##` sections and bodies, no preamble or commentary before the first `##`.
+- In updated_content, output markdown only: `##` sections and bodies, no preamble or commentary before the first `##`.
+- In diff_summary, write a numbered list where each item explains one edit decision and why
+  (e.g. "1. Added section 'Pod scheduling' — triage missed pending pods that indicated resource
+  pressure\n2. Merged 'Log patterns' into 'Error signals' — overlapping scope"). If not
+  updating, explain why the existing priors are sufficient.
 
 Example shape (placeholder titles only — do not copy these as real areas):
 ## Example area title alpha
