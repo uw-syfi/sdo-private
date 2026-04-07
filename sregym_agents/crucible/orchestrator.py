@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model, infer_model
 
 if TYPE_CHECKING:
@@ -314,7 +315,21 @@ async def _run_stage_loop(
         sre_agent = CrucibleSREAgent(
             model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=sre_system
         )
-        _, sre_usage = await sre_agent.arun(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})
+        try:
+            _, sre_usage = await sre_agent.arun(
+                sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"}
+            )
+        except ModelHTTPError as exc:
+            logger.warning(
+                f"[{stage}] SRE agent failed with HTTP {exc.status_code} on iteration {iteration} "
+                f"— treating as failed iteration."
+            )
+            shared_file.append(
+                f"\n### Iteration {iteration} — SRE Agent Error ({stage})\n"
+                f"Agent encountered a transient API error (HTTP {exc.status_code}) "
+                f"and could not complete this iteration.\n"
+            )
+            continue
         usage_by_role[agent_role]["iterations"].append(sre_usage)
         usage_by_role[agent_role]["total"] = _add_usage(usage_by_role[agent_role]["total"], sre_usage)
 
@@ -396,9 +411,21 @@ async def _run_stage_loop(
         logger.info(f"[{stage}-judge] SYSTEM PROMPT:\n{judge_system}")
         logger.info(f"[{stage}-judge] USER PROMPT:\n{judge_prompt}")
         judge_agent = CrucibleJudgeAgent(model, judge_deps, trajectory_path=trajectory_path)
-        _, judge_usage = await judge_agent.arun(
-            judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"}
-        )
+        try:
+            _, judge_usage = await judge_agent.arun(
+                judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"}
+            )
+        except ModelHTTPError as exc:
+            logger.warning(
+                f"[{stage}] Judge agent failed with HTTP {exc.status_code} on iteration {iteration} "
+                f"— treating as failed iteration."
+            )
+            shared_file.append(
+                f"\n### Iteration {iteration} — Judge Agent Error ({stage})\n"
+                f"Judge encountered a transient API error (HTTP {exc.status_code}) "
+                f"and could not complete this iteration.\n"
+            )
+            continue
         usage_by_role[judge_role]["iterations"].append(judge_usage)
         usage_by_role[judge_role]["total"] = _add_usage(usage_by_role[judge_role]["total"], judge_usage)
 
