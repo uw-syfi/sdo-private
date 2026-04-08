@@ -36,9 +36,11 @@ def test_enqueue_task_writes_json_and_sets_timestamp(tmp_path: Path) -> None:
         "app_name": "app",
         "include_benchmark_results": False,
         "enable_reflection": True,
+        "recovery_phase2_enabled": True,
         "include_incident_files": True,
         "problem_id": "p1",
         "prompt_version": "v1",
+        "recovery_reflection": {"summary": "grounded"},
     }
     path = enqueue_task(kb_dir, payload, problem_id="p1")
     assert path.parent == kb_dir / "pending"
@@ -46,6 +48,8 @@ def test_enqueue_task_writes_json_and_sets_timestamp(tmp_path: Path) -> None:
     data = json.loads(path.read_text())
     assert "timestamp" in data
     assert data["model_id"] == "m"
+    assert data["recovery_phase2_enabled"] is True
+    assert data["recovery_reflection"] == {"summary": "grounded"}
 
 
 def test_enqueue_task_preserves_existing_timestamp(tmp_path: Path) -> None:
@@ -59,6 +63,7 @@ def test_enqueue_task_preserves_existing_timestamp(tmp_path: Path) -> None:
         "app_name": "app",
         "include_benchmark_results": False,
         "enable_reflection": True,
+        "recovery_phase2_enabled": False,
         "include_incident_files": True,
         "problem_id": "p1",
         "prompt_version": "v1",

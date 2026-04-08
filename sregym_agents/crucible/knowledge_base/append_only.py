@@ -6,7 +6,7 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 
@@ -17,6 +17,7 @@ from .base import KB_APPEND_FILENAME, InjectedKB, KnowledgeBase, SessionFiles, s
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.config import CrucibleConfig
+    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,12 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         result = await arun_with_retry(agent, prompt)
         return result.output
 
-    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
+    async def update(
+        self,
+        session_files: SessionFiles,
+        stage_outputs_file: Path | None = None,
+        recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
+    ) -> None:
         parts = session_files.read_all()
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")

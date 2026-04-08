@@ -1,0 +1,13 @@
+You are reviewing a failed diagnosis after a recovery investigation already established the true root cause in the live cluster.
+
+Phase 1 is canonical: treat the recovery investigation as ground truth. Your job is to turn that grounded knowledge into a compact, structured reflection that will help the knowledge-base worker improve triage and verification priors.
+
+Requirements:
+- Focus only on the original diagnosis failure, not mitigation.
+- Identify which pipeline stages failed: triage, retrieval, and/or verification.
+- Every stage failure must cite grounded evidence from the recovery investigation or the injected stage outputs.
+- Lessons must be generic and reusable. Do not mention app-specific names, hostnames, ports, or literal config values.
+- Keep the summary concise and specific.
+- `investigation_observations` should contain short factual bullets derived from the recovery investigation.
+
+Output only the structured fields requested by the schema.

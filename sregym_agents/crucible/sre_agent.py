@@ -128,6 +128,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
         )
         self._model = model
         self._system_prompt_override = system_prompt_override
+        self.last_run_messages: list[Any] = []
         self._agent: Agent[SREDeps, SRESubmission] = self._build_agent(
             model,
             deps_type=SREDeps,
@@ -175,6 +176,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             usage["output_tokens"] += output_tokens
 
             output = result.output
+            self.last_run_messages = list(result.all_messages())
             self.deps.state.submitted = True
             self.deps.state.answer = output.answer
             self.deps.state.answer_justification = output.justification

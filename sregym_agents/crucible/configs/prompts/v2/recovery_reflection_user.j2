@@ -1,0 +1,23 @@
+The recovery diagnosis already investigated the live cluster and determined why the original diagnosis was wrong.
+
+Original failed diagnosis:
+- answer: {{ original_answer }}
+{% if original_justification %}- justification: {{ original_justification }}
+{% endif %}
+{% if original_causal_chain %}- causal_chain: {{ original_causal_chain }}
+{% endif %}
+
+Application: {{ app_name }} / Namespace: {{ namespace }}
+{% if descriptions %}
+{{ descriptions }}
+{% endif %}
+
+Trajectory and stage outputs from the original run:
+---
+{{ stage_outputs }}
+---
+
+Produce a grounded recovery reflection for KB refinement:
+- `summary`: 2-4 sentences on why the original diagnosis failed
+- `stage_failures`: only the failed stages, each with `stage`, `description`, `evidence`, and `lesson`
+- `investigation_observations`: short factual observations from the recovery investigation that ground the reflection

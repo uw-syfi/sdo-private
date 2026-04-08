@@ -12,6 +12,13 @@ Reflection from the latest problem:
 ---
 {{ failure_classification }}
 ---
+{% if grounded_recovery_reflection %}
+
+Grounded recovery reflection (prefer this over ambiguous trajectory-only signals):
+---
+{{ grounded_recovery_reflection }}
+---
+{% endif %}
 {% if stage_outputs %}
 
 Agent's stage outputs for context:

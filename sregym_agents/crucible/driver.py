@@ -265,6 +265,7 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
+    recovery_reflection = usage_metrics.get("recovery_reflection")
 
     if args.logs_dir:
         assert logs_dir is not None
@@ -312,9 +313,12 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "app_name": app_info.get("app_name", "unknown"),
                 "include_benchmark_results": crucible_config.include_benchmark_results,
                 "enable_reflection": crucible_config.enable_reflection,
+                "recovery_phase2_enabled": crucible_config.recovery_phase2_enabled,
                 "include_incident_files": crucible_config.include_incident_files,
+                "per_app": crucible_config.per_app,
                 "problem_id": problem_id,
                 "prompt_version": crucible_config.prompt_version,
+                "recovery_reflection": recovery_reflection,
                 "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
             }
             task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)
@@ -327,6 +331,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             await kb.update(
                 SessionFiles(diagnosis=diagnosis_shared_file, mitigation=mitigation_shared_file),
                 stage_outputs_file=stage_outputs_file,
+                recovery_reflection=recovery_reflection,
             )
 
     logger.info("Crucible driver complete.")

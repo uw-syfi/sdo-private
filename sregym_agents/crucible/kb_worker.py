@@ -28,6 +28,7 @@ from sregym_agents.crucible.kb_update_queue import (
     move_to_failed,
 )
 from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
+from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,9 @@ async def process_task(task_path: Path) -> None:
         mitigation=Path(sf["mitigation"]) if sf.get("mitigation") else None,
     )
     stage_outputs_file = Path(task["stage_outputs_file"]) if task.get("stage_outputs_file") else None
+    recovery_reflection = (
+        RecoveryReflection.model_validate(task["recovery_reflection"]) if task.get("recovery_reflection") else None
+    )
 
     kb = create_knowledge_base(
         kb_type=task["kb_type"],
@@ -68,7 +72,11 @@ async def process_task(task_path: Path) -> None:
         task["app_name"],
         banner,
     )
-    await kb.update(session_files, stage_outputs_file=stage_outputs_file)
+    await kb.update(
+        session_files,
+        stage_outputs_file=stage_outputs_file,
+        recovery_reflection=recovery_reflection,
+    )
     logger.info(
         "\n%s\n  KB UPDATE COMPLETE: %s\n%s",
         banner,

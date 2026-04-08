@@ -6,6 +6,10 @@ import abc
 import dataclasses
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 KB_APPEND_FILENAME = "knowledge.md"
 MAX_INJECTED_INCIDENTS = 100
@@ -66,6 +70,16 @@ def find_invalid_citations(text: str, incidents_dir: Path) -> list[str]:
     return invalid
 
 
+def find_invalid_citations_unified(text: str, kb_dir: Path) -> list[str]:
+    """Return citation values that reference non-existent incident files (unified KB).
+
+    In unified mode citations include the app subdirectory, e.g.
+    ``incidents/myapp/20260324_010224.md``.  Resolve against *kb_dir* directly.
+    """
+    citations = extract_citations(text)
+    return [ref for ref in citations if not (kb_dir / ref).exists()]
+
+
 def strip_citation_wrappers(text: str) -> str:
     """Replace {{ref:incidents/foo.md}} with incidents/foo.md."""
     return CITATION_RE.sub(r"\1", text)
@@ -84,5 +98,10 @@ class KnowledgeBase(abc.ABC):
         """Copy KB files into target_dir for agent consumption."""
 
     @abc.abstractmethod
-    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
+    async def update(
+        self,
+        session_files: SessionFiles,
+        stage_outputs_file: Path | None = None,
+        recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
+    ) -> None:
         """Update the knowledge base from the completed session."""

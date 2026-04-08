@@ -53,6 +53,15 @@ def test_experiment_enable_reflection_wins_over_heuristic() -> None:
     assert cfg.enable_reflection is True
 
 
+def test_experiment_recovery_phase2_enabled() -> None:
+    agent = {
+        "prompt_version": "v1",
+        "recovery_phase2_enabled": True,
+    }
+    cfg = crucible_config_from_experiment_agent(agent, cli_args=None)
+    assert cfg.recovery_phase2_enabled is True
+
+
 def test_experiment_missing_prompt_version_raises() -> None:
     with pytest.raises(ValueError, match="prompt_version is required"):
         crucible_config_from_experiment_agent({}, cli_args=None)
@@ -90,6 +99,15 @@ def test_kb_task_heuristic_alias() -> None:
     }
     cfg = crucible_config_from_kb_task(task)
     assert cfg.enable_reflection is False
+
+
+def test_kb_task_recovery_phase2_enabled() -> None:
+    task = {
+        "prompt_version": "v1",
+        "recovery_phase2_enabled": True,
+    }
+    cfg = crucible_config_from_kb_task(task)
+    assert cfg.recovery_phase2_enabled is True
 
 
 def test_kb_task_missing_prompt_version_raises() -> None:

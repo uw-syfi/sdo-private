@@ -6,7 +6,7 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 
@@ -19,6 +19,7 @@ from .base import (
     KnowledgeBase,
     SessionFiles,
     find_invalid_citations,
+    find_invalid_citations_unified,
     sanitize_app_name,
     strip_benchmark_result,
     strip_citation_wrappers,
@@ -35,6 +36,7 @@ from .schema import (
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.config import CrucibleConfig
+    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.include_benchmark_results = config.include_benchmark_results
         self.enable_reflection = config.enable_reflection
         self.include_incident_files = config.include_incident_files
+        self.per_app = config.per_app
         self.prompts = renderer
         self.schema = SCHEMA_V2
         self._reflector = Reflector(self.kb_dir, model_id, renderer)
@@ -85,14 +88,18 @@ class StructuredKnowledgeBase(KnowledgeBase):
         sanitized = sanitize_app_name(self.app_name)
         seed_app_dir = seed_kb_dir / sanitized
 
-        # Per-app summary
+        # Per-app summary (try per-app dir first, fall back to root for unified seed)
         seed_summary = seed_app_dir / seed_schema.summary
+        if not seed_summary.exists():
+            seed_summary = seed_kb_dir / seed_schema.summary
         if not self.summary_path.exists() and seed_summary.exists():
             shutil.copy2(seed_summary, self.summary_path)
             logger.info(f"Seeded summary from {seed_summary}")
 
-        # Per-app incidents
+        # Per-app incidents (try per-app dir first, fall back to unified layout)
         seed_incidents = seed_app_dir / seed_schema.incidents_dir
+        if not seed_incidents.is_dir():
+            seed_incidents = seed_kb_dir / seed_schema.incidents_dir / sanitized
         if seed_incidents.is_dir() and not self.incidents_dir.exists():
             self.incidents_dir.mkdir(parents=True, exist_ok=True)
             for f in seed_incidents.glob("*.md"):
@@ -126,7 +133,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     @property
     def summary_path(self) -> Path:
-        return self.app_dir / self.schema.summary
+        if self.per_app:
+            return self.app_dir / self.schema.summary
+        return self.kb_dir / self.schema.summary
 
     @property
     def lessons_path(self) -> Path:
@@ -138,7 +147,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     @property
     def incidents_dir(self) -> Path:
-        return self.app_dir / self.schema.incidents_dir
+        if self.per_app:
+            return self.app_dir / self.schema.incidents_dir
+        return self.kb_dir / self.schema.incidents_dir / sanitize_app_name(self.app_name)
 
     @property
     def diagnosis_priors_path(self) -> Path:
@@ -188,7 +199,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         else:
             logger.warning("Knowledge base: no architecture file found.")
 
-        if self.include_incident_files and self.incidents_dir.is_dir():
+        if self.include_incident_files and self.per_app and self.incidents_dir.is_dir():
             incident_files = sorted(self.incidents_dir.glob("*.md"))[-MAX_INJECTED_INCIDENTS:]
             if incident_files:
                 dest_incidents = target_dir / self.schema.incidents_dir
@@ -197,6 +208,19 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     shutil.copy2(f, dest_incidents / f.name)
                 result.incidents_dir = dest_incidents
                 logger.info(f"Knowledge base: copied {len(incident_files)} incident(s) to {dest_incidents}")
+        elif self.include_incident_files and not self.per_app:
+            root_incidents = self.kb_dir / self.schema.incidents_dir
+            if root_incidents.is_dir():
+                all_incident_files = sorted(root_incidents.glob("*/*.md"))[-MAX_INJECTED_INCIDENTS:]
+                if all_incident_files:
+                    for f in all_incident_files:
+                        dest_sub = target_dir / self.schema.incidents_dir / f.parent.name
+                        dest_sub.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, dest_sub / f.name)
+                    result.incidents_dir = target_dir / self.schema.incidents_dir
+                    logger.info(
+                        f"Knowledge base: copied {len(all_incident_files)} incident(s) to {result.incidents_dir}"
+                    )
         elif not self.include_incident_files:
             logger.info("Knowledge base: incident file injection disabled by include_incident_files=false")
 
@@ -244,15 +268,23 @@ class StructuredKnowledgeBase(KnowledgeBase):
         output = result.output
 
         for attempt in range(MAX_CITATION_RETRIES):
-            invalid = find_invalid_citations(output, self.incidents_dir)
+            if self.per_app:
+                invalid = find_invalid_citations(output, self.incidents_dir)
+            else:
+                invalid = find_invalid_citations_unified(output, self.kb_dir)
             if not invalid:
                 break
             valid_files = sorted(f.name for f in self.incidents_dir.glob("*.md")) if self.incidents_dir.is_dir() else []
+            if self.per_app:
+                fmt_hint = "Use the exact format {{ref:incidents/FILENAME.md}} for each citation."
+            else:
+                app_slug = sanitize_app_name(self.app_name)
+                fmt_hint = f"Use the exact format {{{{ref:incidents/{app_slug}/FILENAME.md}}}} for each citation."
             correction = (
                 f"The following incident citations are invalid (files do not exist): {invalid}\n"
                 f"Valid incident files are: {valid_files}\n"
-                "Please output the COMPLETE updated Long-Term Summary again with corrected citations. "
-                "Use the exact format {{ref:incidents/FILENAME.md}} for each citation."
+                f"Please output the COMPLETE updated Long-Term Summary again with corrected citations. "
+                f"{fmt_hint}"
             )
             logger.warning(f"Citation validation failed (attempt {attempt + 1}/{MAX_CITATION_RETRIES}): {invalid}")
             result = await arun_with_retry(agent, correction, message_history=result.all_messages())
@@ -266,7 +298,11 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _distill_lessons(self) -> None:
         """Re-distill cross-cutting operational lessons from all per-app summaries."""
-        summary_files = sorted(self.kb_dir.glob(f"*/{self.schema.summary}"))
+        if self.per_app:
+            summary_files = sorted(self.kb_dir.glob(f"*/{self.schema.summary}"))
+        else:
+            root_summary = self.kb_dir / self.schema.summary
+            summary_files = [root_summary] if root_summary.exists() else []
         if not summary_files:
             logger.info(f"No {self.schema.summary} files found; skipping lessons extraction.")
             return
@@ -292,7 +328,12 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.lessons_path.write_text(lessons)
         logger.info(f"Operational lessons written to {self.lessons_path}")
 
-    async def update(self, session_files: SessionFiles, stage_outputs_file: Path | None = None) -> None:
+    async def update(
+        self,
+        session_files: SessionFiles,
+        stage_outputs_file: Path | None = None,
+        recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
+    ) -> None:
         """Summarize the completed session and update the knowledge base."""
         parts = session_files.read_all()
         if not parts:
@@ -320,7 +361,10 @@ class StructuredKnowledgeBase(KnowledgeBase):
         incident_ref = ""
         if self.include_incident_files:
             incident_id = self._save_incident(session_summary, content)
-            incident_ref = f"incidents/{incident_id}.md"
+            if self.per_app:
+                incident_ref = f"incidents/{incident_id}.md"
+            else:
+                incident_ref = f"incidents/{sanitize_app_name(self.app_name)}/{incident_id}.md"
         else:
             logger.info("Skipping incident file save (include_incident_files=false)")
 
@@ -339,6 +383,18 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         await self._distill_lessons()
         if self.enable_reflection:
-            await self._reflector.run(stage_outputs_file)
+            normalized_recovery_reflection: RecoveryReflection | None = None
+            if recovery_reflection is not None:
+                from sregym_agents.crucible.recovery_reflection import RecoveryReflection as _RecoveryReflection
+
+                normalized_recovery_reflection = (
+                    recovery_reflection
+                    if isinstance(recovery_reflection, _RecoveryReflection)
+                    else _RecoveryReflection.model_validate(recovery_reflection)
+                )
+            await self._reflector.run(
+                stage_outputs_file=stage_outputs_file,
+                recovery_reflection=normalized_recovery_reflection,
+            )
         else:
             logger.info("Reflection disabled; skipping.")

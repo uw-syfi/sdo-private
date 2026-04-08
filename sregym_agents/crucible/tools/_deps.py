@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,11 @@ class SRESubmission(BaseModel):
             "or what evidence was misinterpreted, and what lesson follows. "
             "Leave empty for normal diagnosis and mitigation stages."
         ),
+    )
+    message_history: list[Any] = Field(
+        default_factory=list,
+        exclude=True,
+        description="Internal only: captured agent message history for follow-on phases.",
     )
 
 

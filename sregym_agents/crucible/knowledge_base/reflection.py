@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from libs.agent_mw import arun_with_retry
 
+from ..recovery_reflection import RecoveryReflection
 from ..tools._kb_tools import TriagePriors
 from .schema import SCHEMA_V2
 
@@ -104,6 +105,7 @@ class PriorFileConfig(ABC):
         reflector: Reflector,
         classification: str,
         stage_outputs: str,
+        grounded_recovery_reflection: str = "",
     ) -> None:
         """Run the refinement LLM call and write the result."""
 
@@ -120,6 +122,7 @@ class MarkdownPriorConfig(PriorFileConfig):
         reflector: Reflector,
         classification: str,
         stage_outputs: str,
+        grounded_recovery_reflection: str = "",
     ) -> None:
         path = reflector.kb_dir / self.filename
         prior = path.read_text() if path.exists() else ""
@@ -128,6 +131,7 @@ class MarkdownPriorConfig(PriorFileConfig):
             prior_guidance=prior,
             failure_classification=classification,
             stage_outputs=stage_outputs,
+            grounded_recovery_reflection=grounded_recovery_reflection,
         )
         agent: Agent[None, PriorUpdateResult] = Agent(
             reflector.model_id,
@@ -157,6 +161,7 @@ class TriagePriorConfig(PriorFileConfig):
         reflector: Reflector,
         classification: str,
         stage_outputs: str,
+        grounded_recovery_reflection: str = "",
     ) -> None:
         import yaml
 
@@ -176,6 +181,7 @@ class TriagePriorConfig(PriorFileConfig):
             prior_priors=prior_text,
             failure_classification=classification,
             stage_outputs=stage_outputs,
+            grounded_recovery_reflection=grounded_recovery_reflection,
         )
         agent: Agent[None, TriagePriorUpdateResult] = Agent(
             reflector.model_id,
@@ -224,6 +230,21 @@ class Reflector:
         self.kb_dir = kb_dir
         self.model_id = model_id
         self.prompts = renderer
+
+    @staticmethod
+    def _format_recovery_reflection(recovery_reflection: RecoveryReflection) -> str:
+        lines = [f"Summary: {recovery_reflection.summary}"]
+        if recovery_reflection.investigation_observations:
+            lines.append("\nGrounded observations:")
+            lines.extend(f"- {obs}" for obs in recovery_reflection.investigation_observations)
+        if recovery_reflection.stage_failures:
+            lines.append("\nStage failures:")
+            for failure in recovery_reflection.stage_failures:
+                lines.append(f"### {failure.stage}")
+                lines.append(f"Description: {failure.description}")
+                lines.append(f"Evidence: {failure.evidence}")
+                lines.append(f"Lesson: {failure.lesson}")
+        return "\n".join(lines)
 
     # -- Phase 1: Reflect ---------------------------------------------------
 
@@ -288,13 +309,55 @@ class Reflector:
                     e,
                 )
 
+    async def apply_recovery_reflection(
+        self,
+        recovery_reflection: RecoveryReflection,
+        stage_outputs: str,
+    ) -> None:
+        """Update prior files using grounded recovery output from the orchestrator."""
+        if not recovery_reflection.stage_failures:
+            logger.info("Grounded recovery reflection has no failed stages; skipping prior updates.")
+            return
+
+        failed_stages = {failure.stage for failure in recovery_reflection.stage_failures}
+        reflection_text = self._format_recovery_reflection(recovery_reflection)
+        for stage_label, prior_key in STAGE_TO_PRIOR.items():
+            if stage_label not in failed_stages:
+                continue
+            cfg = PRIOR_FILES.get(prior_key)
+            if cfg is None:
+                continue
+            try:
+                await cfg.apply(
+                    self,
+                    reflection_text,
+                    stage_outputs,
+                    grounded_recovery_reflection=reflection_text,
+                )
+            except Exception as e:
+                logger.error(
+                    "Grounded reflection apply error for %s: %s",
+                    prior_key,
+                    e,
+                )
+
     # -- Combined entry point ------------------------------------------------
 
     async def run(
         self,
         stage_outputs_file: Path | None = None,
+        recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
     ) -> None:
         """Reflect on the trajectory and apply updates."""
+        if recovery_reflection is not None:
+            if not isinstance(recovery_reflection, RecoveryReflection):
+                recovery_reflection = RecoveryReflection.model_validate(recovery_reflection)
+            stage_outputs_text = ""
+            if stage_outputs_file and stage_outputs_file.exists():
+                stage_outputs_text = stage_outputs_file.read_text().strip()
+            await self.apply_recovery_reflection(recovery_reflection, stage_outputs_text)
+            return
+
         if not stage_outputs_file or not stage_outputs_file.exists():
             logger.info("No stage output content; skipping reflection.")
             return

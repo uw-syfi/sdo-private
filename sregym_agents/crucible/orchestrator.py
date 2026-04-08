@@ -13,14 +13,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model, infer_model
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
+
+from libs.agent_mw import arun_with_retry
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
+from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
     JudgeDeps,
@@ -45,6 +49,7 @@ class StageLoopResult:
     agent_justification: str = ""
     agent_causal_chain: str = ""
     agent_reflection: str = ""
+    recovery_reflection: RecoveryReflection | None = None
     stage_outputs_file: Path | None = None
 
 
@@ -567,6 +572,7 @@ async def _run_recovery_diagnosis(
         justification=sre_state.answer_justification or "",
         causal_chain=sre_state.answer_causal_chain or "",
         reflection=sre_state.answer_reflection or "",
+        message_history=agent.last_run_messages,
     )
 
     # Append recovery result to shared file for KB consumption
@@ -594,6 +600,58 @@ async def _run_recovery_diagnosis(
 
     logger.info(f"Recovery diagnosis complete: {submission.answer}")
     return submission
+
+
+async def _run_recovery_reflection_phase(
+    model: Model,
+    app_info: dict[str, Any],
+    renderer: PromptRenderer,
+    original_answer: str,
+    original_justification: str = "",
+    original_causal_chain: str = "",
+    stage_outputs_file: Path | None = None,
+    phase1_messages: list[Any] | None = None,
+) -> RecoveryReflection:
+    """Use grounded recovery context plus the original trajectory to produce a KB-focused reflection."""
+    stage_outputs = ""
+    if stage_outputs_file and stage_outputs_file.exists():
+        stage_outputs = stage_outputs_file.read_text().strip()
+
+    system_prompt = renderer.render("recovery_reflection_system")
+    user_prompt = renderer.render(
+        "recovery_reflection_user",
+        stage_outputs=stage_outputs or "(No stage outputs captured.)",
+        original_answer=original_answer,
+        original_justification=original_justification,
+        original_causal_chain=original_causal_chain,
+        app_name=app_info.get("app_name", "unknown"),
+        namespace=app_info.get("namespace", "default"),
+        descriptions=app_info.get("descriptions", ""),
+    )
+
+    agent: Agent[None, RecoveryReflection] = Agent(model, output_type=RecoveryReflection)
+
+    @agent.instructions
+    def _system() -> str:  # pyright: ignore[reportUnusedFunction]
+        return system_prompt
+
+    result = await arun_with_retry(agent, user_prompt, message_history=phase1_messages or [])
+    reflection = result.output
+
+    if stage_outputs_file:
+        with open(stage_outputs_file, "a") as f:
+            f.write("\n---\n## Recovery Reflection\n")
+            f.write(f"**Summary**: {reflection.summary}\n")
+            if reflection.investigation_observations:
+                f.write("**Grounded Observations**:\n")
+                f.writelines(f"- {observation}\n" for observation in reflection.investigation_observations)
+            for failure in reflection.stage_failures:
+                f.write(f"### {failure.stage}\n")
+                f.write(f"**Description**: {failure.description}\n")
+                f.write(f"**Evidence**: {failure.evidence}\n")
+                f.write(f"**Lesson**: {failure.lesson}\n")
+
+    return reflection
 
 
 async def _run_recovery_mitigation(
@@ -786,10 +844,24 @@ async def run(
             stage_outputs_file=diag_result.stage_outputs_file,
         )
         if recovery:
+            original_answer = diag_result.agent_answer
+            original_justification = diag_result.agent_justification
+            original_causal_chain = diag_result.agent_causal_chain
             diag_result.agent_answer = recovery.answer
             diag_result.agent_justification = recovery.justification
             diag_result.agent_causal_chain = recovery.causal_chain
             diag_result.agent_reflection = recovery.reflection
+            if crucible_config.recovery_phase2_enabled:
+                diag_result.recovery_reflection = await _run_recovery_reflection_phase(
+                    resolved_model,
+                    app_info,
+                    renderer=renderer,
+                    original_answer=original_answer,
+                    original_justification=original_justification,
+                    original_causal_chain=original_causal_chain,
+                    stage_outputs_file=diag_result.stage_outputs_file,
+                    phase1_messages=recovery.message_history,
+                )
 
     usage_by_agent = diag_result.usage_by_role
 
@@ -798,6 +870,9 @@ async def run(
         result = _build_usage_result(usage_by_agent)
         sof = diag_result.stage_outputs_file
         result["stage_outputs_file"] = str(sof) if sof else None
+        result["recovery_reflection"] = (
+            diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
+        )
         return result
 
     _init_mitigation_file(
@@ -860,4 +935,7 @@ async def run(
     # Prefer diagnosis stage outputs for the reflector (it has the full pipeline).
     sof = diag_result.stage_outputs_file or mit_result.stage_outputs_file
     result["stage_outputs_file"] = str(sof) if sof else None
+    result["recovery_reflection"] = (
+        diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
+    )
     return result

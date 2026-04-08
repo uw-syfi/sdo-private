@@ -32,6 +32,8 @@ def _write_task(pending_dir: Path, problem_id: str = "test_problem", **overrides
         "model_id": "test-model",
         "app_name": "test-app",
         "include_benchmark_results": False,
+        "enable_reflection": True,
+        "recovery_phase2_enabled": False,
         "problem_id": problem_id,
         "prompt_version": "v1",
         "timestamp": "20260401_120000",
@@ -66,6 +68,28 @@ class TestProcessTask:
         assert not task_path.exists()
         completed = tmp_path / "completed"
         assert (completed / task_path.name).exists()
+
+    @pytest.mark.asyncio
+    async def test_passes_recovery_reflection_to_kb_update(self, tmp_path: Path):
+        pending_dir = tmp_path / "pending"
+        task_path = _write_task(
+            pending_dir,
+            recovery_reflection={
+                "summary": "Grounded recovery narrative",
+                "stage_failures": [],
+                "investigation_observations": ["Observed failing readiness checks"],
+            },
+        )
+
+        mock_kb = AsyncMock()
+        with patch(
+            "sregym_agents.crucible.kb_worker.create_knowledge_base",
+            return_value=mock_kb,
+        ):
+            await process_task(task_path)
+
+        _args, kwargs = mock_kb.update.await_args
+        assert kwargs["recovery_reflection"].summary == "Grounded recovery narrative"
 
     @pytest.mark.asyncio
     async def test_moves_to_failed_on_error(self, tmp_path: Path):

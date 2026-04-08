@@ -16,7 +16,9 @@ class CrucibleConfig:
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
     enable_reflection: bool = True
+    recovery_phase2_enabled: bool = False
     include_incident_files: bool = True
+    per_app: bool = True
     prompt_version: str = "v2"
     max_diagnosis_iterations: int = 5
     max_mitigation_iterations: int = 5
@@ -69,7 +71,9 @@ def crucible_config_from_experiment_agent(
         enable_ltm_retrieval=bool(agent_settings.get("enable_ltm_retrieval", base.enable_ltm_retrieval)),
         include_benchmark_results=bool(agent_settings.get("include_benchmark_results", base.include_benchmark_results)),
         enable_reflection=_reflection_from_mapping(agent_settings),
+        recovery_phase2_enabled=bool(agent_settings.get("recovery_phase2_enabled", base.recovery_phase2_enabled)),
         include_incident_files=bool(agent_settings.get("include_incident_files", base.include_incident_files)),
+        per_app=bool(agent_settings.get("per_app", base.per_app)),
         prompt_version=prompt_version,
         max_diagnosis_iterations=int(agent_settings.get("max_diagnosis_iterations", base.max_diagnosis_iterations)),
         max_mitigation_iterations=int(agent_settings.get("max_mitigation_iterations", base.max_mitigation_iterations)),
@@ -89,6 +93,8 @@ def crucible_config_from_kb_task(kb_task: Mapping[str, Any]) -> CrucibleConfig:
         base,
         include_benchmark_results=bool(kb_task.get("include_benchmark_results", base.include_benchmark_results)),
         enable_reflection=_reflection_from_mapping(kb_task),
+        recovery_phase2_enabled=bool(kb_task.get("recovery_phase2_enabled", base.recovery_phase2_enabled)),
         include_incident_files=bool(kb_task.get("include_incident_files", base.include_incident_files)),
+        per_app=bool(kb_task.get("per_app", base.per_app)),
         prompt_version=str(prompt_version),
     )

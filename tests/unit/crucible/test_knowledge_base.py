@@ -21,6 +21,7 @@ from sregym_agents.crucible.knowledge_base.base import (
     InjectedKB,
     extract_citations,
     find_invalid_citations,
+    find_invalid_citations_unified,
     sanitize_app_name,
     strip_benchmark_result,
     strip_citation_wrappers,
@@ -34,6 +35,7 @@ from sregym_agents.crucible.knowledge_base.reflection import (
 )
 from sregym_agents.crucible.knowledge_base.schema import SCHEMA_V2
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
+from sregym_agents.crucible.recovery_reflection import RecoveryReflection, RecoveryStageFailure
 
 # Use v2 schema filenames throughout tests
 KB_SUMMARY_FILENAME = SCHEMA_V2.summary
@@ -318,6 +320,47 @@ class TestUpdate:
     def test_summary_path_uses_app_subdir(self, tmp_kb):
         kb, kb_dir, _target_dir = tmp_kb
         assert kb.summary_path == kb_dir / "test-app" / KB_SUMMARY_FILENAME
+
+    @patch.object(Reflector, "run", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    async def test_update_passes_grounded_recovery_reflection_to_reflector(
+        self,
+        mock_llm,
+        mock_merge,
+        mock_reflector_run,
+        tmp_path: Path,
+    ):
+        shared = tmp_path / "shared.md"
+        shared.write_text("real session data")
+        stage_outputs = tmp_path / "stage_outputs.md"
+        stage_outputs.write_text("stage outputs")
+        kb = StructuredKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
+
+        mock_llm.side_effect = ["session summary", "distilled lessons"]
+        mock_merge.return_value = "merged summary"
+        grounded = {
+            "summary": "Grounded recovery narrative",
+            "stage_failures": [
+                {
+                    "stage": "verification",
+                    "description": "Confirmed the wrong candidate",
+                    "evidence": "Recovery traced the real dependency chain",
+                    "lesson": "Verify upstream dependencies before confirming",
+                }
+            ],
+            "investigation_observations": ["Recovery observed an upstream dependency failure"],
+        }
+
+        await kb.update(
+            SessionFiles(diagnosis=shared),
+            stage_outputs_file=stage_outputs,
+            recovery_reflection=grounded,
+        )
+
+        _args, kwargs = mock_reflector_run.await_args
+        assert kwargs["stage_outputs_file"] == stage_outputs
+        assert kwargs["recovery_reflection"].summary == grounded["summary"]
 
 
 class TestSeedKB:
@@ -1026,9 +1069,11 @@ class TestPromptContracts:
             prior_priors="(test priors)",
             failure_classification="(test classification)",
             stage_outputs="(test outputs)",
+            grounded_recovery_reflection="(grounded reflection)",
         )
         assert "areas" in rendered
         assert "hints" in rendered
+        assert "grounded reflection" in rendered.lower()
 
     def test_refine_verification_priors_references_sections(self):
         rendered = self._v3_renderer.render(
@@ -1036,5 +1081,225 @@ class TestPromptContracts:
             prior_guidance="(test guidance)",
             failure_classification="(test classification)",
             stage_outputs="(test outputs)",
+            grounded_recovery_reflection="(grounded reflection)",
         )
         assert "##" in rendered
+        assert "grounded reflection" in rendered.lower()
+
+
+class TestGroundedRecoveryReflection:
+    def test_round_trips_json(self):
+        reflection = RecoveryReflection(
+            summary="Grounded summary",
+            investigation_observations=["Observed persistent upstream failures"],
+            stage_failures=[
+                RecoveryStageFailure(
+                    stage="verification",
+                    description="Confirmed a local symptom instead of the upstream cause",
+                    evidence="Recovery traced the failing dependency chain in cluster state",
+                    lesson="Verify upstream dependencies before accepting a candidate",
+                )
+            ],
+        )
+
+        restored = RecoveryReflection.model_validate_json(reflection.model_dump_json())
+        assert restored == reflection
+
+
+# ---------- Unified KB (per_app=False) ----------
+
+
+_unified_config = CrucibleConfig(per_app=False)
+
+
+@pytest.fixture
+def tmp_unified_kb(tmp_path: Path) -> tuple[StructuredKnowledgeBase, Path, Path]:
+    """Return (kb, kb_dir, target_dir) with per_app=False."""
+    kb_dir = tmp_path / "kb"
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    kb = StructuredKnowledgeBase(
+        kb_dir, model_id="test-model", app_name="test-app", config=_unified_config, renderer=_renderer
+    )
+    return kb, kb_dir, target_dir
+
+
+class TestUnifiedKBPaths:
+    def test_summary_path_at_root(self, tmp_unified_kb):
+        kb, kb_dir, _ = tmp_unified_kb
+        assert kb.summary_path == kb_dir / KB_SUMMARY_FILENAME
+
+    def test_incidents_dir_categorized_by_app(self, tmp_unified_kb):
+        kb, kb_dir, _ = tmp_unified_kb
+        assert kb.incidents_dir == kb_dir / KB_INCIDENTS_DIRNAME / "test-app"
+
+    def test_architecture_stays_per_app(self, tmp_unified_kb):
+        kb, kb_dir, _ = tmp_unified_kb
+        assert kb.architecture_path == kb_dir / "test-app" / KB_ARCHITECTURE_FILENAME
+
+    def test_lessons_path_unchanged(self, tmp_unified_kb):
+        kb, kb_dir, _ = tmp_unified_kb
+        assert kb.lessons_path == kb_dir / KB_LESSONS_FILENAME
+
+
+class TestUnifiedKBSaveIncident:
+    def test_saves_to_app_subdir(self, tmp_unified_kb):
+        kb, kb_dir, _ = tmp_unified_kb
+        incident_id = kb._save_incident("summary", "content")
+        assert (kb_dir / KB_INCIDENTS_DIRNAME / "test-app" / f"{incident_id}.md").exists()
+
+
+class TestUnifiedKBInject:
+    async def test_copies_root_summary(self, tmp_unified_kb):
+        kb, kb_dir, target_dir = tmp_unified_kb
+        kb.summary_path.write_text("unified summary")
+
+        result = await kb.inject(target_dir)
+
+        assert result.summary is not None
+        assert result.summary.read_text() == "unified summary"
+
+    async def test_copies_all_app_incidents(self, tmp_unified_kb):
+        kb, kb_dir, target_dir = tmp_unified_kb
+        # Create incidents for two apps
+        for app in ("app-a", "app-b"):
+            app_incidents = kb_dir / KB_INCIDENTS_DIRNAME / app
+            app_incidents.mkdir(parents=True)
+            (app_incidents / "20260101_120000.md").write_text(f"incident from {app}")
+
+        result = await kb.inject(target_dir)
+
+        assert result.incidents_dir is not None
+        assert (target_dir / KB_INCIDENTS_DIRNAME / "app-a" / "20260101_120000.md").exists()
+        assert (target_dir / KB_INCIDENTS_DIRNAME / "app-b" / "20260101_120000.md").exists()
+
+    async def test_no_incidents(self, tmp_unified_kb):
+        kb, _, target_dir = tmp_unified_kb
+        result = await kb.inject(target_dir)
+        assert result.incidents_dir is None
+
+
+class TestUnifiedKBUpdate:
+    @patch.object(StructuredKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    async def test_citation_ref_includes_app(self, mock_llm, mock_merge, tmp_path: Path):
+        shared = tmp_path / "shared.md"
+        shared.write_text("session data")
+        kb = StructuredKnowledgeBase(
+            tmp_path / "kb", model_id="m", app_name="test-app", config=_unified_config, renderer=_renderer
+        )
+        mock_llm.side_effect = ["session summary", "distilled lessons"]
+        mock_merge.return_value = "merged"
+
+        await kb.update(SessionFiles(diagnosis=shared))
+
+        _, kwargs = mock_merge.call_args
+        assert "test-app" in kwargs["incident_ref"]
+        assert kwargs["incident_ref"].startswith("incidents/test-app/")
+
+
+class TestUnifiedKBDistillLessons:
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    async def test_reads_root_summary(self, mock_llm, tmp_path: Path):
+        kb_dir = tmp_path / "kb"
+        kb = StructuredKnowledgeBase(
+            kb_dir, model_id="m", app_name="test-app", config=_unified_config, renderer=_renderer
+        )
+        kb.summary_path.write_text("unified summary content")
+        mock_llm.return_value = "lessons from unified"
+
+        await kb._distill_lessons()
+
+        assert mock_llm.call_count == 1
+        prompt_arg = mock_llm.call_args[0][0]
+        assert "unified summary content" in prompt_arg
+
+    @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
+    async def test_skips_when_no_summary(self, mock_llm, tmp_path: Path):
+        kb = StructuredKnowledgeBase(
+            tmp_path / "kb", model_id="m", app_name="test-app", config=_unified_config, renderer=_renderer
+        )
+        await kb._distill_lessons()
+        mock_llm.assert_not_called()
+
+
+class TestFindInvalidCitationsUnified:
+    def test_valid_citation(self, tmp_path: Path):
+        incidents = tmp_path / "incidents" / "myapp"
+        incidents.mkdir(parents=True)
+        (incidents / "20260324_010224.md").write_text("content")
+        text = "{{ref:incidents/myapp/20260324_010224.md}}"
+        assert find_invalid_citations_unified(text, tmp_path) == []
+
+    def test_invalid_citation(self, tmp_path: Path):
+        text = "{{ref:incidents/myapp/fake.md}}"
+        assert find_invalid_citations_unified(text, tmp_path) == ["incidents/myapp/fake.md"]
+
+
+class TestUnifiedKBSeed:
+    def test_seed_from_unified_source(self, tmp_path: Path):
+        """Seed dir with root-level summary and incidents/<app>/ layout."""
+        seed_dir = tmp_path / "seed"
+        seed_dir.mkdir()
+        (seed_dir / KB_SUMMARY_FILENAME).write_text("unified seed summary")
+        seed_incidents = seed_dir / KB_INCIDENTS_DIRNAME / "myapp"
+        seed_incidents.mkdir(parents=True)
+        (seed_incidents / "20260101_120000.md").write_text("seeded incident")
+
+        kb = StructuredKnowledgeBase(
+            tmp_path / "kb",
+            model_id="m",
+            app_name="myapp",
+            seed_kb_dir=seed_dir,
+            config=_unified_config,
+            renderer=_renderer,
+        )
+        assert kb.summary_path.read_text() == "unified seed summary"
+        assert len(list(kb.incidents_dir.glob("*.md"))) == 1
+
+    def test_seed_from_per_app_source(self, tmp_path: Path):
+        """Seed dir with per-app layout (app_dir/summary, app_dir/incidents/)."""
+        seed_dir = tmp_path / "seed"
+        (seed_dir / "myapp").mkdir(parents=True)
+        (seed_dir / "myapp" / KB_SUMMARY_FILENAME).write_text("per-app seed summary")
+        seed_incidents = seed_dir / "myapp" / KB_INCIDENTS_DIRNAME
+        seed_incidents.mkdir()
+        (seed_incidents / "20260101_120000.md").write_text("per-app incident")
+
+        kb = StructuredKnowledgeBase(
+            tmp_path / "kb",
+            model_id="m",
+            app_name="myapp",
+            seed_kb_dir=seed_dir,
+            config=_unified_config,
+            renderer=_renderer,
+        )
+        assert kb.summary_path.read_text() == "per-app seed summary"
+        assert len(list(kb.incidents_dir.glob("*.md"))) == 1
+
+
+class TestPerAppConfigFlag:
+    def test_default_is_true(self):
+        assert CrucibleConfig().per_app is True
+
+    def test_per_app_false(self):
+        cfg = CrucibleConfig(per_app=False)
+        assert cfg.per_app is False
+
+    def test_config_from_experiment_reads_per_app(self):
+        from sregym_agents.crucible.config import crucible_config_from_experiment_agent
+
+        cfg = crucible_config_from_experiment_agent({"per_app": False, "prompt_version": "v1"})
+        assert cfg.per_app is False
+
+    def test_config_from_experiment_defaults_true(self):
+        from sregym_agents.crucible.config import crucible_config_from_experiment_agent
+
+        cfg = crucible_config_from_experiment_agent({"prompt_version": "v1"})
+        assert cfg.per_app is True
+
+    def test_config_from_kb_task_reads_per_app(self):
+        from sregym_agents.crucible.config import crucible_config_from_kb_task
+
+        cfg = crucible_config_from_kb_task({"per_app": False, "prompt_version": "v1"})
+        assert cfg.per_app is False
