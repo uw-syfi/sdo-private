@@ -60,13 +60,21 @@ async def process_task(task_path: Path) -> None:
         renderer=renderer,
     )
 
+    banner = "=" * 72
     logger.info(
-        "Processing KB update for %s (%s)",
+        "\n%s\n  KB UPDATE: %s (%s)\n%s",
+        banner,
         task["problem_id"],
         task["app_name"],
+        banner,
     )
     await kb.update(session_files, stage_outputs_file=stage_outputs_file)
-    logger.info("KB update complete for %s", task["problem_id"])
+    logger.info(
+        "\n%s\n  KB UPDATE COMPLETE: %s\n%s",
+        banner,
+        task["problem_id"],
+        banner,
+    )
 
     kb_dir = Path(task["kb_dir"])
     move_to_completed(task_path, kb_dir)
