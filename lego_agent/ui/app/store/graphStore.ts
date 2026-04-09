@@ -22,6 +22,8 @@ export interface GraphState {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   selectNode: (id: string | null) => void;
+  addNodes: (nodes: Node<AgentNodeData>[]) => void;
+  removeNodes: (ids: string[]) => void;
   updateNodeStatus: (id: string, status: AgentStatus) => void;
   updateNodeThought: (id: string, thought: string) => void;
   addNodeLog: (id: string, log: LogItem) => void;
@@ -47,6 +49,9 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   selectNode: (id) => set({ selectedNodeId: id }),
+
+  addNodes: (nodes) => set((state) => ({ nodes: [...state.nodes, ...nodes] })),
+  removeNodes: (ids) => set((state) => ({ nodes: state.nodes.filter((n) => !ids.includes(n.id)) })),
 
   updateNodeStatus: (id, status) => set((state) => ({
     nodes: state.nodes.map((node) =>

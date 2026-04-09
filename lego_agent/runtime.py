@@ -290,6 +290,9 @@ class FanOut(Runnable):
             else:
                 prompts_to_run.append(str(item))
 
+        # Emit count so the UI can expand the FAN_OUT group with N real nodes.
+        print(f"__LEGO_FANOUT_INIT__ {len(prompts_to_run)}", flush=True)
+
         async def _run_parallel() -> list[Any]:
             semaphore = asyncio.Semaphore(self.max_workers)
 

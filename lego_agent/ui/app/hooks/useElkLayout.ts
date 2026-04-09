@@ -33,8 +33,8 @@ export const useElkLayout = () => {
     
     // Initialize ELK nodes and parent map
     nodes.forEach((node) => {
-      if (node.parentNode) {
-          parentMap.set(node.id, node.parentNode);
+      if (node.parentId) {
+          parentMap.set(node.id, node.parentId);
       }
       
       const isJudgeLoop = node.data?.pattern === 'judge_loop';
@@ -57,8 +57,8 @@ export const useElkLayout = () => {
     // Build tree
     nodes.forEach((node) => {
       const elkNode = nodeMap.get(node.id);
-      if (node.parentNode) {
-        const parent = nodeMap.get(node.parentNode);
+      if (node.parentId) {
+        const parent = nodeMap.get(node.parentId);
         if (parent) {
           parent.children.push(elkNode);
         } else {
@@ -123,7 +123,7 @@ export const useElkLayout = () => {
       // 3. Flatten back to ReactFlow nodes
       const nextNodes: Node[] = [];
       
-      const processNode = (elkNode: any, parentX = 0, parentY = 0) => {
+      const processNode = (elkNode: any) => {
         // Find original node to preserve data
         const originalNode = nodes.find((n) => n.id === elkNode.id);
         if (originalNode) {
@@ -143,7 +143,7 @@ export const useElkLayout = () => {
         
         // Recurse
         if (elkNode.children) {
-            elkNode.children.forEach((child: any) => processNode(child, elkNode.x, elkNode.y));
+            elkNode.children.forEach((child: any) => processNode(child));
         }
       };
 
