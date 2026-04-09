@@ -1,0 +1,116 @@
+{# Contract: produce a playbook v1 from a successful diagnosis trajectory #}
+You are synthesizing a new diagnostic playbook for a fault class that the SRE
+diagnosis agent just handled correctly. The agent's reasoning chain is the gold
+standard for this class — your job is to distill it into a reusable procedure
+that a future agent can follow deterministically.
+
+Class: {{ class_name }}
+Slug: {{ slug }}
+Timestamp (use verbatim in meta.last_updated): {{ current_iso }}
+Incident reference (cite under References > successes): {{ incident_ref }}
+
+Oracle answer (the benchmark's confirmed correct root cause for this incident):
+---
+{{ oracle_answer }}
+---
+
+Agent stage outputs (source of truth — quote concrete commands, tool calls,
+log lines, and observed shapes from here whenever you can):
+---
+{{ stage_outputs }}
+---
+{% if validation_feedback %}
+
+Your previous attempt was REJECTED by the deterministic validator for the
+following reasons. Fix every one of them in this revision:
+---
+{{ validation_feedback }}
+---
+{% endif %}
+
+Task: produce ONE markdown playbook document, and nothing else (no preamble,
+no commentary, no code fences around the whole thing). The document MUST
+match the exact structure below. A deterministic Python validator will reject
+your output if any of these constraints are violated:
+
+- Every `##` section listed below must be present, in order, with the exact
+  heading text.
+- The `<!-- meta -->` block must contain the keys `slug`, `class_name`,
+  `seen`, `created_from`, `last_updated`, each on its own line as `key: value`.
+- Symptoms, Triage Procedure, Verification Procedure, and Required Evidence
+  must each be non-empty.
+- Required Evidence must contain at least one `- [ ]` checkbox item, and
+  every item there must be a `- [ ]` checkbox.
+- The following vague phrases are FORBIDDEN anywhere in the document:
+  "appropriate values", "as needed", "relevant configuration", "if applicable",
+  "as appropriate". Write concrete commands, file paths, env var names, and
+  expected values instead.
+
+Authoring rules specific to a v1-from-success playbook:
+- Triage and Verification steps must cite specific tool calls or commands the
+  successful run actually used (e.g. `kubectl logs <pod> -n <ns>`,
+  `docker compose ps`, `cat /etc/<file>`). Prefer the exact form the agent ran.
+- Required Evidence items must be concrete checks (e.g.
+  "- [ ] Confirmed env var DB_HOST is missing from deployment spec"), not
+  vague observations.
+- Known Distractors and Failure Patterns may legitimately be empty in v1. If
+  you have nothing real to put there, emit the section header followed by a
+  single literal placeholder bullet `- (none observed yet)`. Do NOT invent
+  fake distractors or failure patterns.
+- The References section MUST list `{{ incident_ref }}` under `successes:`
+  and have an empty `failures:` line.
+- The meta block MUST be filled exactly as:
+    slug: {{ slug }}
+    class_name: {{ class_name }}
+    seen: 1
+    created_from: success
+    last_updated: {{ current_iso }}
+
+Required document shape (fill in the angle-bracketed parts; keep section
+headings byte-identical):
+
+# Playbook: {{ class_name }}
+
+<!-- meta -->
+slug: {{ slug }}
+class_name: {{ class_name }}
+seen: 1
+created_from: success
+last_updated: {{ current_iso }}
+<!-- /meta -->
+
+## Summary
+<1-2 sentence description of the fault class, grounded in what the agent
+actually saw in this incident.>
+
+## Symptoms
+- <symptom with concrete shape — quote the actual log line, error string, or
+  failing command output from stage_outputs whenever possible>
+
+## Triage Procedure
+1. **Action:** <concrete command from the successful run>
+   **Expected shape:** <what the output should look like>
+   **If absent:** <what to try next>
+2. ...
+
+## Verification Procedure
+1. **Action:** <e.g., diff deployment env vars against the canonical set>
+   **Required Evidence:** <e.g., the explicit list of missing variable names>
+   **Forcing function:** <do not conclude this class without observing X>
+2. ...
+
+## Required Evidence (Submission Gate)
+- [ ] <specific evidence item 1 — name the file, env var, command, or value>
+- [ ] <specific evidence item 2>
+
+## Known Distractors
+- (none observed yet)
+
+## Failure Patterns
+- (none observed yet)
+
+## References
+- successes: {{ incident_ref }}
+- failures:
+
+Output the markdown document only. Begin with `# Playbook: {{ class_name }}`.

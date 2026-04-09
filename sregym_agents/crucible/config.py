@@ -16,6 +16,7 @@ class CrucibleConfig:
     enable_ltm_retrieval: bool = False
     include_benchmark_results: bool = False
     enable_reflection: bool = True
+    enable_playbooks: bool = False
     recovery_phase2_enabled: bool = False
     include_incident_files: bool = True
     per_app: bool = True
@@ -71,6 +72,7 @@ def crucible_config_from_experiment_agent(
         enable_ltm_retrieval=bool(agent_settings.get("enable_ltm_retrieval", base.enable_ltm_retrieval)),
         include_benchmark_results=bool(agent_settings.get("include_benchmark_results", base.include_benchmark_results)),
         enable_reflection=_reflection_from_mapping(agent_settings),
+        enable_playbooks=bool(agent_settings.get("enable_playbooks", base.enable_playbooks)),
         recovery_phase2_enabled=bool(agent_settings.get("recovery_phase2_enabled", base.recovery_phase2_enabled)),
         include_incident_files=bool(agent_settings.get("include_incident_files", base.include_incident_files)),
         per_app=bool(agent_settings.get("per_app", base.per_app)),
@@ -93,6 +95,7 @@ def crucible_config_from_kb_task(kb_task: Mapping[str, Any]) -> CrucibleConfig:
         base,
         include_benchmark_results=bool(kb_task.get("include_benchmark_results", base.include_benchmark_results)),
         enable_reflection=_reflection_from_mapping(kb_task),
+        enable_playbooks=bool(kb_task.get("enable_playbooks", base.enable_playbooks)),
         recovery_phase2_enabled=bool(kb_task.get("recovery_phase2_enabled", base.recovery_phase2_enabled)),
         include_incident_files=bool(kb_task.get("include_incident_files", base.include_incident_files)),
         per_app=bool(kb_task.get("per_app", base.per_app)),

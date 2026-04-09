@@ -136,6 +136,13 @@ class CandidateRootCause(BaseModel):
         )
     )
     mitigation_hint: str = Field(description="Generic mitigation approach for this root cause class")
+    slug: str | None = Field(
+        default=None,
+        description=(
+            "Sticky slug identifier of this root cause class as recorded in the long-term"
+            " summary. Populated by search_prior_incidents when a matching playbook exists."
+        ),
+    )
 
 
 class DifferentialDiagnosis(BaseModel):
@@ -294,6 +301,64 @@ def _subagent_middleware(trajectory_path: Path | None = None) -> list[Any]:
     return mw
 
 
+def _attach_slugs_to_candidates(
+    candidates: list[CandidateRootCause],
+    lt_summary_file: Path | None,
+) -> None:
+    """Mutate ``candidates`` to attach a ``slug`` from the long-term summary if matched.
+
+    Performs an exact-match against ``### Root Cause:`` headers, then a slug-derived
+    fuzzy match (slugify both sides) for minor wording differences.
+    """
+    if not lt_summary_file or not lt_summary_file.exists():
+        return
+    try:
+        from sregym_agents.crucible.knowledge_base.merge_result import extract_class_slugs
+        from sregym_agents.crucible.knowledge_base.playbook import slugify
+    except Exception as exc:
+        logger.warning("Slug attachment skipped: %s", exc)
+        return
+
+    try:
+        summary_text = lt_summary_file.read_text()
+    except OSError as exc:
+        logger.warning("Slug attachment: failed to read %s: %s", lt_summary_file, exc)
+        return
+
+    class_slugs = extract_class_slugs(summary_text)
+    if not class_slugs:
+        return
+
+    fuzzy_index: dict[str, str] = {}
+    for class_name, slug in class_slugs.items():
+        fuzzy_index.setdefault(slugify(class_name), slug)
+
+    for candidate in candidates:
+        if candidate.root_cause_class in class_slugs:
+            candidate.slug = class_slugs[candidate.root_cause_class]
+            continue
+        derived = slugify(candidate.root_cause_class)
+        if derived in fuzzy_index:
+            candidate.slug = fuzzy_index[derived]
+
+
+def _load_playbook_text(playbooks_dir: Path | None, slug: str | None) -> str:
+    """Load playbook markdown for ``slug`` (alias-aware). Returns empty string on miss."""
+    if not playbooks_dir or not slug:
+        return ""
+    try:
+        from sregym_agents.crucible.knowledge_base.playbook import PlaybookStore
+
+        store = PlaybookStore(playbooks_dir)
+        playbook = store.load(slug)
+    except Exception as exc:
+        logger.warning("Failed to load playbook for slug %s: %s", slug, exc)
+        return ""
+    if playbook is None:
+        return ""
+    return playbook.to_markdown()
+
+
 async def _run_verification_phase(
     candidates: list[CandidateRootCause],
     diagnosis: DifferentialDiagnosis,
@@ -305,6 +370,7 @@ async def _run_verification_phase(
     trajectory_path: Path | None = None,
     triage_report: TriageReport | None = None,
     verification_guidance: str = "",
+    playbooks_dir: Path | None = None,
 ) -> VerifiedDifferentialDiagnosis:
     """Spawn one verification subagent per candidate in parallel and return aggregated results."""
     triage_context = ""
@@ -312,6 +378,7 @@ async def _run_verification_phase(
         triage_context = format_triage_report(triage_report)
 
     async def _verify_one(idx: int, candidate: CandidateRootCause) -> CandidateVerification:
+        playbook_text = _load_playbook_text(playbooks_dir, candidate.slug)
         prompt = renderer.render(
             "ltm_verify_candidate",
             namespace=namespace,
@@ -324,6 +391,7 @@ async def _run_verification_phase(
             distinguishing_check=candidate.distinguishing_check,
             mitigation_hint=candidate.mitigation_hint,
             verification_guidance=verification_guidance,
+            playbook=playbook_text,
         )
         logger.info("[ltm-verify-%d] PROMPT:\n%s", idx, prompt)
 
@@ -686,6 +754,8 @@ async def search_prior_incidents(
         logger.info("[ltm-search] no candidates to verify: %s", output_json)
         return output_json
 
+    _attach_slugs_to_candidates(diagnosis.candidate_root_causes, ctx.deps.lt_summary_file)
+
     verified = await _run_verification_phase(
         candidates=diagnosis.candidate_root_causes,
         diagnosis=diagnosis,
@@ -697,6 +767,7 @@ async def search_prior_incidents(
         trajectory_path=ctx.deps.trajectory_path,
         triage_report=ctx.deps.triage_report,
         verification_guidance=ctx.deps.verification_guidance,
+        playbooks_dir=ctx.deps.playbooks_dir,
     )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)

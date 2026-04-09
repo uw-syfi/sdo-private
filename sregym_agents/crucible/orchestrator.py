@@ -170,6 +170,7 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
         triage_priors=injected.triage_priors.resolve() if injected.triage_priors else None,
         arbitration_priors=injected.arbitration_priors.resolve() if injected.arbitration_priors else None,
         verification_priors=injected.verification_priors.resolve() if injected.verification_priors else None,
+        playbooks_dir=injected.playbooks_dir.resolve() if injected.playbooks_dir else None,
     )
 
 
@@ -194,6 +195,7 @@ async def _run_stage_loop(
     incidents_dir = injected_kb.incidents_dir if injected_kb else None
     triage_priors_file = injected_kb.triage_priors if injected_kb else None
     verification_priors_file = injected_kb.verification_priors if injected_kb else None
+    playbooks_dir = injected_kb.playbooks_dir if injected_kb else None
     stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
@@ -295,6 +297,7 @@ async def _run_stage_loop(
             state=sre_state,
             lt_summary_file=lt_summary_file if crucible_config.enable_ltm_retrieval else None,
             incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
+            playbooks_dir=playbooks_dir if crucible_config.enable_ltm_retrieval else None,
             ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
             trajectory_path=trajectory_path,
             triage_priors=triage_priors,
@@ -873,6 +876,7 @@ async def run(
         result["recovery_reflection"] = (
             diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
         )
+        result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
         return result
 
     _init_mitigation_file(
@@ -938,4 +942,5 @@ async def run(
     result["recovery_reflection"] = (
         diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
     )
+    result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
     return result

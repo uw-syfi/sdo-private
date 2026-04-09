@@ -27,6 +27,7 @@ class InjectedKB:
     triage_priors: Path | None = None
     arbitration_priors: Path | None = None
     verification_priors: Path | None = None
+    playbooks_dir: Path | None = None
 
 
 @dataclasses.dataclass
@@ -103,5 +104,6 @@ class KnowledgeBase(abc.ABC):
         session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
+        diagnosis_succeeded: bool = False,
     ) -> None:
         """Update the knowledge base from the completed session."""

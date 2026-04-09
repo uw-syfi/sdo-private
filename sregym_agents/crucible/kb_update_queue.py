@@ -38,12 +38,14 @@ class KbUpdateTaskDict(TypedDict):
     app_name: str
     include_benchmark_results: bool
     enable_reflection: bool
+    enable_playbooks: bool
     recovery_phase2_enabled: bool
     include_incident_files: bool
     per_app: bool
     problem_id: str
     prompt_version: str
     recovery_reflection: dict[str, Any] | None
+    diagnosis_succeeded: bool
     timestamp: str
 
 

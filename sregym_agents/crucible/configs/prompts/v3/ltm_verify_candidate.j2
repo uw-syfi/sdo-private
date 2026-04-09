@@ -6,6 +6,24 @@ namespace — not just the resource mentioned in error logs.
 VERIFICATION GUIDANCE (learned from past incidents):
 {{ verification_guidance }}
 {% endif %}
+{% if playbook %}
+
+## Playbook for this failure class
+
+A class-specific playbook is attached below. It encodes triage steps, verification
+procedures, required evidence, known distractors, and prior failure patterns
+distilled from past incidents of this exact class. **You MUST follow it.**
+
+{{ playbook }}
+
+### Submission gate (binding)
+
+Before you may set `applies=True`, you MUST produce evidence for **every** item under
+"Required Evidence (Submission Gate)" in the playbook above. Cite the concrete tool
+call output that proves each item — do not paraphrase. If you cannot produce that
+evidence after honest investigation, return `applies=False` and list the missing
+evidence items in `reasoning`.
+{% endif %}
 
 ## Current Incident Context
 Namespace: {{ namespace }}

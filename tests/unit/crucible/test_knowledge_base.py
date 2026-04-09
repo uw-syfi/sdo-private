@@ -26,6 +26,7 @@ from sregym_agents.crucible.knowledge_base.base import (
     strip_benchmark_result,
     strip_citation_wrappers,
 )
+from sregym_agents.crucible.knowledge_base.merge_result import MergeResult
 from sregym_agents.crucible.knowledge_base.reflection import (
     PRIOR_FILES,
     STAGE_TO_PRIOR,
@@ -36,6 +37,17 @@ from sregym_agents.crucible.knowledge_base.reflection import (
 from sregym_agents.crucible.knowledge_base.schema import SCHEMA_V2
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 from sregym_agents.crucible.recovery_reflection import RecoveryReflection, RecoveryStageFailure
+
+
+def _merge_result(text: str = "merged summary") -> MergeResult:
+    """Helper: build a noop MergeResult carrying the given summary text."""
+    return MergeResult(
+        primary_action="noop",
+        primary_slug=None,
+        primary_class_name=None,
+        new_summary_text=text,
+    )
+
 
 # Use v2 schema filenames throughout tests
 KB_SUMMARY_FILENAME = SCHEMA_V2.summary
@@ -256,7 +268,7 @@ class TestUpdate:
             "session summary",  # _summarize_session
             "distilled lessons",  # _extract_operational_lessons
         ]
-        mock_merge.return_value = "merged summary"
+        mock_merge.return_value = _merge_result("merged summary")
 
         await kb.update(SessionFiles(diagnosis=shared))
 
@@ -286,7 +298,7 @@ class TestUpdate:
             "session summary",  # _summarize_session
             "distilled lessons",  # _extract_operational_lessons
         ]
-        mock_merge.return_value = "merged summary"
+        mock_merge.return_value = _merge_result("merged summary")
 
         await kb.update(SessionFiles(diagnosis=shared))
 
@@ -338,7 +350,7 @@ class TestUpdate:
         kb = StructuredKnowledgeBase(tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer)
 
         mock_llm.side_effect = ["session summary", "distilled lessons"]
-        mock_merge.return_value = "merged summary"
+        mock_merge.return_value = _merge_result("merged summary")
         grounded = {
             "summary": "Grounded recovery narrative",
             "stage_failures": [
@@ -757,8 +769,9 @@ class TestCitationValidation:
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
         (kb.incidents_dir / "20260324_010224.md").write_text("incident")
 
-        bad_output = "root cause (1 incidents, {{ref:incidents/fake_20240730.md}})"
-        good_output = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}})"
+        envelope = '\n<merge_result>{"primary_action": "noop", "primary_class_name": null}</merge_result>'
+        bad_output = "root cause (1 incidents, {{ref:incidents/fake_20240730.md}})" + envelope
+        good_output = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}})" + envelope
 
         # Mock arun_with_retry to return bad then good output
         mock_result_bad = AsyncMock()
@@ -782,7 +795,7 @@ class TestCitationValidation:
             )
 
         # Should have stripped the wrapper and used the corrected citation
-        assert result == "root cause (1 incidents, incidents/20260324_010224.md)"
+        assert result.new_summary_text == "root cause (1 incidents, incidents/20260324_010224.md)"
         # arun_with_retry should have been called twice (initial + 1 correction)
         assert mock_retry.call_count == 2
 
@@ -796,7 +809,8 @@ class TestCitationValidation:
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
         (kb.incidents_dir / "20260324_010224.md").write_text("incident")
 
-        good_output = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}})"
+        envelope = '\n<merge_result>{"primary_action": "noop", "primary_class_name": null}</merge_result>'
+        good_output = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}})" + envelope
 
         mock_result = AsyncMock()
         mock_result.output = good_output
@@ -814,7 +828,7 @@ class TestCitationValidation:
                 "session summary", "", incident_ref="incidents/20260324_010224.md"
             )
 
-        assert result == "root cause (1 incidents, incidents/20260324_010224.md)"
+        assert result.new_summary_text == "root cause (1 incidents, incidents/20260324_010224.md)"
         assert mock_retry.call_count == 1
 
 
@@ -1189,7 +1203,7 @@ class TestUnifiedKBUpdate:
             tmp_path / "kb", model_id="m", app_name="test-app", config=_unified_config, renderer=_renderer
         )
         mock_llm.side_effect = ["session summary", "distilled lessons"]
-        mock_merge.return_value = "merged"
+        mock_merge.return_value = _merge_result("merged")
 
         await kb.update(SessionFiles(diagnosis=shared))
 

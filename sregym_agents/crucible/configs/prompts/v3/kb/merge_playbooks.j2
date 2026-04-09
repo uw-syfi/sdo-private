@@ -1,0 +1,152 @@
+{# Contract: merge N playbooks describing the same fault class into one consolidated playbook #}
+You are consolidating multiple diagnostic playbooks that have been determined
+to describe the SAME underlying fault class. The merge step has chosen a
+"winner" class identity; your job is to produce ONE merged playbook under that
+identity that subsumes every input playbook without contradiction or loss of
+distinct knowledge.
+
+Winner class name: {{ winner_class_name }}
+Winner slug: {{ winner_slug }}
+Timestamp (use verbatim in meta.last_updated): {{ current_iso }}
+Combined seen count (use verbatim in meta.seen): {{ combined_seen }}
+
+Winner playbook (the current document under the winning class identity):
+---
+{{ winner_playbook }}
+---
+
+Loser playbooks (each one is a full playbook markdown for an entry being
+absorbed into the winner):
+{% for lp in loser_playbooks %}
+--- loser playbook {{ loop.index }} ---
+{{ lp }}
+{% endfor %}
+---
+
+Stage outputs from the most recent run that triggered this merge (context
+for resolving any contradictions in favor of more recently observed signal):
+---
+{{ stage_outputs }}
+---
+{% if recovery_summary %}
+
+Recovery summary from the most recent run (further context for resolving
+contradictions):
+---
+{{ recovery_summary }}
+---
+{% endif %}
+
+Combined references (emit these verbatim under the References section —
+the merge layer has already taken the union):
+- successes:
+{% for ref in combined_references.successes %}
+  - {{ ref }}
+{% endfor %}
+- failures:
+{% for ref in combined_references.failures %}
+  - {{ ref }}
+{% endfor %}
+{% if validation_feedback %}
+
+Your previous attempt was REJECTED by the deterministic validator for the
+following reasons. Fix every one of them in this revision:
+---
+{{ validation_feedback }}
+---
+{% endif %}
+
+Task: produce ONE merged markdown playbook document, and nothing else (no
+preamble, no commentary, no code fences around the whole thing). The document
+MUST match the exact structure below. A deterministic Python validator will
+reject your output if any of these constraints are violated:
+
+- Every `##` section listed below must be present, in order, with the exact
+  heading text.
+- The `<!-- meta -->` block must contain the keys `slug`, `class_name`,
+  `seen`, `created_from`, `last_updated`, each on its own line as `key: value`.
+- Symptoms, Triage Procedure, Verification Procedure, and Required Evidence
+  must each be non-empty.
+- Required Evidence must contain at least one `- [ ]` checkbox item, and
+  every item there must be a `- [ ]` checkbox.
+- The following vague phrases are FORBIDDEN anywhere in the document:
+  "appropriate values", "as needed", "relevant configuration", "if applicable",
+  "as appropriate". Write concrete commands, file paths, env var names, and
+  expected values instead.
+
+Authoring rules specific to a merge:
+- The N input playbooks describe the SAME fault class. Produce one
+  consolidated document that subsumes all of them.
+- Resolve contradictions in favor of the more concrete and the more recently
+  observed signal — prefer specific commands and quoted log lines over vague
+  wording, and prefer the latest run's evidence (stage_outputs and, if
+  present, recovery_summary) when two playbooks disagree on shape.
+- Do NOT lose distinct Known Distractors or Failure Patterns. Carry every
+  distinct entry from every input playbook into the merged document.
+  Deduplicate ONLY true duplicates (same name AND same lesson). When
+  deduplicating, keep the more concrete wording.
+- Do NOT lose any References. Use the precomputed `combined_references` lists
+  above verbatim — emit one bullet per entry under each subheading.
+- If the winner playbook is `(none)`, treat the loser playbooks as the only
+  source material and synthesize from them.
+- The meta block MUST be filled exactly as:
+    slug: {{ winner_slug }}
+    class_name: {{ winner_class_name }}
+    seen: {{ combined_seen }}
+    created_from: recovery
+    last_updated: {{ current_iso }}
+  (Consolidations are conservative: assume worst-case provenance and tag
+  `created_from: recovery` even if some inputs were `success`.)
+
+Required document shape (keep section headings byte-identical):
+
+# Playbook: {{ winner_class_name }}
+
+<!-- meta -->
+slug: {{ winner_slug }}
+class_name: {{ winner_class_name }}
+seen: {{ combined_seen }}
+created_from: recovery
+last_updated: {{ current_iso }}
+<!-- /meta -->
+
+## Summary
+<1-2 sentence description of the unified fault class.>
+
+## Symptoms
+- <merged symptom list — quote concrete log lines / error strings>
+
+## Triage Procedure
+1. **Action:** <concrete command>
+   **Expected shape:** <what the output should look like>
+   **If absent:** <what to try next>
+2. ...
+
+## Verification Procedure
+1. **Action:** <verification action>
+   **Required Evidence:** <explicit signal>
+   **Forcing function:** <do not conclude this class without observing X>
+2. ...
+
+## Required Evidence (Submission Gate)
+- [ ] <merged, deduplicated evidence item>
+- [ ] <merged, deduplicated evidence item>
+
+## Known Distractors
+- **<name>:** <why it looks similar>. **Rule out:** <test>. **Seen in:** <trace ref>.
+
+## Failure Patterns
+- **<name>:** "<quoted incorrect reasoning>". **Oracle:** <correct answer>. **Lesson:** <how to avoid>. **Trace:** <ref>.
+
+## References
+- successes:
+{% for ref in combined_references.successes %}
+  - {{ ref }}
+{% endfor %}
+- failures:
+{% for ref in combined_references.failures %}
+  - {{ ref }}
+{% endfor %}
+
+Output the merged markdown document only. Begin with
+`# Playbook: {{ winner_class_name }}`.

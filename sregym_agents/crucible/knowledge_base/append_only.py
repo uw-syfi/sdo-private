@@ -70,6 +70,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
+        diagnosis_succeeded: bool = False,
     ) -> None:
         parts = session_files.read_all()
         if not parts:

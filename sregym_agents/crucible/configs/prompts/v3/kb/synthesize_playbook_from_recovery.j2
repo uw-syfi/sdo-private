@@ -1,0 +1,150 @@
+{# Contract: produce a playbook v1 from a recovery (oracle-assisted) run after diagnosis failed #}
+You are synthesizing a new diagnostic playbook for a fault class that the SRE
+diagnosis agent FAILED to handle on its first attempt. A separate recovery
+agent — which was given the oracle answer as a hint — then re-ran the
+investigation and produced grounded observations of what the correct
+procedure looks like. Your job is to turn those grounded recovery
+observations into a reusable playbook, AND to capture the original failure
+as Failure Patterns and Known Distractors so the next run avoids the same
+trap.
+
+Class: {{ class_name }}
+Slug: {{ slug }}
+Timestamp (use verbatim in meta.last_updated): {{ current_iso }}
+Incident reference (cite under References > failures): {{ incident_ref }}
+
+Oracle answer (the benchmark's confirmed correct root cause):
+---
+{{ oracle_answer }}
+---
+
+Recovery summary (the oracle-assisted re-run's bottom-line):
+---
+{{ recovery_summary }}
+---
+
+Recovery observations (THE source of truth for Triage and Verification —
+these are the concrete things the recovery agent actually checked and saw):
+---
+{% for obs in recovery_observations %}
+- {{ obs }}
+{% endfor %}
+---
+
+Recovery stage failures (each one becomes a Failure Pattern entry):
+---
+{% for sf in recovery_stage_failures %}
+- stage: {{ sf.stage }}
+  description: {{ sf.description }}
+  evidence: {{ sf.evidence }}
+  lesson: {{ sf.lesson }}
+{% endfor %}
+---
+
+Original (failed) agent stage outputs — mine these for Known Distractors:
+i.e. signals that misled the agent into the wrong root cause.
+---
+{{ stage_outputs }}
+---
+{% if validation_feedback %}
+
+Your previous attempt was REJECTED by the deterministic validator for the
+following reasons. Fix every one of them in this revision:
+---
+{{ validation_feedback }}
+---
+{% endif %}
+
+Task: produce ONE markdown playbook document, and nothing else (no preamble,
+no commentary, no code fences around the whole thing). The document MUST
+match the exact structure below. A deterministic Python validator will reject
+your output if any of these constraints are violated:
+
+- Every `##` section listed below must be present, in order, with the exact
+  heading text.
+- The `<!-- meta -->` block must contain the keys `slug`, `class_name`,
+  `seen`, `created_from`, `last_updated`, each on its own line as `key: value`.
+- Symptoms, Triage Procedure, Verification Procedure, and Required Evidence
+  must each be non-empty.
+- Required Evidence must contain at least one `- [ ]` checkbox item, and
+  every item there must be a `- [ ]` checkbox.
+- The following vague phrases are FORBIDDEN anywhere in the document:
+  "appropriate values", "as needed", "relevant configuration", "if applicable",
+  "as appropriate". Write concrete commands, file paths, env var names, and
+  expected values instead.
+
+Authoring rules specific to a v1-from-recovery playbook:
+- Triage Procedure and Verification Procedure steps must come from the
+  recovery_observations list. Translate each observation into a concrete
+  Action / Expected shape / If absent (Triage) or Action / Required
+  Evidence / Forcing function (Verification) entry. Do not invent steps
+  the recovery run did not actually perform.
+- Required Evidence items must be exactly what recovery checked — name the
+  files, env vars, commands, container names, or numeric values. Each item
+  is a `- [ ]` checkbox.
+- For EVERY entry in `recovery_stage_failures`, emit one Failure Pattern
+  bullet of the shape:
+    - **<stage>:** "<description>". **Oracle:** <correct answer>.
+      **Lesson:** <lesson>. **Trace:** {{ incident_ref }}.
+  Use the stage's `description` as the quoted incorrect reasoning, the
+  stage's `evidence` to ground the oracle correction, and the stage's
+  `lesson` verbatim.
+- Known Distractors come from the original failed `stage_outputs`: identify
+  signals that looked relevant but pointed at the wrong class. If there are
+  no honest distractors, emit `- (none observed yet)` as a single bullet.
+- The References section MUST list `{{ incident_ref }}` under `failures:`
+  and leave `successes:` empty.
+- The meta block MUST be filled exactly as:
+    slug: {{ slug }}
+    class_name: {{ class_name }}
+    seen: 1
+    created_from: recovery
+    last_updated: {{ current_iso }}
+
+Required document shape (keep section headings byte-identical):
+
+# Playbook: {{ class_name }}
+
+<!-- meta -->
+slug: {{ slug }}
+class_name: {{ class_name }}
+seen: 1
+created_from: recovery
+last_updated: {{ current_iso }}
+<!-- /meta -->
+
+## Summary
+<1-2 sentence description of the fault class, grounded in what recovery
+actually observed.>
+
+## Symptoms
+- <symptom with concrete shape — quote the actual log line, error string, or
+  failing command output from recovery_observations or stage_outputs>
+
+## Triage Procedure
+1. **Action:** <concrete command from recovery_observations>
+   **Expected shape:** <what the output looks like in this fault class>
+   **If absent:** <what to try next>
+2. ...
+
+## Verification Procedure
+1. **Action:** <verification action recovery actually performed>
+   **Required Evidence:** <the explicit signal recovery used to confirm>
+   **Forcing function:** <do not conclude this class without observing X>
+2. ...
+
+## Required Evidence (Submission Gate)
+- [ ] <evidence item recovery actually checked>
+- [ ] <evidence item recovery actually checked>
+
+## Known Distractors
+- **<name>:** <why it looked similar in the failed run>. **Rule out:** <test>. **Seen in:** {{ incident_ref }}.
+
+## Failure Patterns
+- **<stage from recovery_stage_failures>:** "<description>". **Oracle:** <correction grounded in evidence>. **Lesson:** <lesson>. **Trace:** {{ incident_ref }}.
+
+## References
+- successes:
+- failures: {{ incident_ref }}
+
+Output the markdown document only. Begin with `# Playbook: {{ class_name }}`.
