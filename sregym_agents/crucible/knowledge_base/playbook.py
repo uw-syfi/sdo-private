@@ -34,7 +34,6 @@ REQUIRED_SECTIONS: tuple[str, ...] = (
     "Required Evidence",
     "Known Distractors",
     "Failure Patterns",
-    "References",
 )
 
 REQUIRED_META_KEYS: tuple[str, ...] = (
@@ -214,25 +213,6 @@ def _parse_numbered_steps(body: str) -> list[str]:
     return steps
 
 
-def _parse_references(body: str) -> dict[str, list[str]]:
-    """Parse the References section into ``{successes: [...], failures: [...]}``."""
-    refs: dict[str, list[str]] = {"successes": [], "failures": []}
-    for raw_line in body.splitlines():
-        line = raw_line.strip()
-        if line.startswith("- "):
-            line = line[2:].strip()
-        for key in ("successes", "failures"):
-            prefix = f"{key}:"
-            if line.startswith(prefix):
-                tail = line[len(prefix) :].strip()
-                if not tail:
-                    refs[key] = []
-                else:
-                    refs[key] = [part.strip() for part in tail.split(",") if part.strip()]
-                break
-    return refs
-
-
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -315,7 +295,6 @@ class Playbook(BaseModel):
     required_evidence: list[str] = Field(default_factory=list)
     known_distractors: list[str] = Field(default_factory=list)
     failure_patterns: list[str] = Field(default_factory=list)
-    references: dict[str, list[str]] = Field(default_factory=lambda: {"successes": [], "failures": []})
     markdown: str = ""
 
     @classmethod
@@ -351,7 +330,6 @@ class Playbook(BaseModel):
             required_evidence=_parse_bullet_list(sections.get("Required Evidence", "")),
             known_distractors=_parse_bullet_list(sections.get("Known Distractors", "")),
             failure_patterns=_parse_bullet_list(sections.get("Failure Patterns", "")),
-            references=_parse_references(sections.get("References", "")),
             markdown=text,
         )
 
@@ -399,12 +377,6 @@ class Playbook(BaseModel):
         lines.append("")
         lines.append("## Failure Patterns")
         lines.extend(f"- {item}" for item in self.failure_patterns)
-        lines.append("")
-        lines.append("## References")
-        successes = ", ".join(self.references.get("successes", []))
-        failures = ", ".join(self.references.get("failures", []))
-        lines.append(f"- successes: {successes}")
-        lines.append(f"- failures: {failures}")
         lines.append("")
         return "\n".join(lines)
 

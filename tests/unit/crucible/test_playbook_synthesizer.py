@@ -54,10 +54,6 @@ def _valid_playbook_markdown(
         "\n"
         "## Failure Patterns\n"
         "- Pod exit code 1 with stderr referencing unset variable.\n"
-        "\n"
-        "## References\n"
-        "- successes: run_42\n"
-        "- failures: run_17\n"
     )
 
 
@@ -104,7 +100,6 @@ class TestSynthesizeFromSuccess:
                 slug="foo",
                 stage_outputs="stages",
                 oracle_answer="answer",
-                incident_ref="incident_1",
             )
 
         assert result is not None
@@ -140,7 +135,6 @@ class TestSynthesizeFromSuccess:
                 slug="foo",
                 stage_outputs="stages",
                 oracle_answer="answer",
-                incident_ref="incident_1",
             )
 
         assert result is not None
@@ -177,7 +171,6 @@ class TestSynthesizeFromSuccess:
                 slug="foo",
                 stage_outputs="stages",
                 oracle_answer="answer",
-                incident_ref="incident_1",
             )
 
         assert result is None
@@ -203,7 +196,6 @@ class TestSynthesizeFromSuccess:
                 slug="foo",
                 stage_outputs="stages",
                 oracle_answer="answer",
-                incident_ref="incident_1",
             )
 
         assert result is None
@@ -231,7 +223,6 @@ class TestSynthesizeFromRecovery:
                 stage_outputs="stages",
                 recovery_reflection=reflection,
                 oracle_answer="answer",
-                incident_ref="incident_2",
             )
 
         assert result is not None
@@ -245,7 +236,7 @@ class TestSynthesizeFromRecovery:
         assert kwargs["slug"] == "bar"
         assert kwargs["stage_outputs"] == "stages"
         assert kwargs["oracle_answer"] == "answer"
-        assert kwargs["incident_ref"] == "incident_2"
+        assert "incident_ref" not in kwargs
         assert kwargs["recovery_summary"] == "x"
         assert kwargs["recovery_observations"] == ["obs1"]
         assert kwargs["recovery_stage_failures"] == []
@@ -273,7 +264,6 @@ class TestRefine:
                 stage_outputs="fail-stages",
                 recovery_reflection=reflection,
                 oracle_answer="answer",
-                incident_ref="incident_3",
             )
 
         assert result is not None
@@ -288,7 +278,7 @@ class TestRefine:
         assert kwargs["class_name"] == "Baz"
         assert kwargs["slug"] == "baz"
         assert kwargs["failed_stage_outputs"] == "fail-stages"
-        assert kwargs["incident_ref"] == "incident_3"
+        assert "incident_ref" not in kwargs
 
 
 class TestConsolidate:
@@ -315,7 +305,6 @@ class TestConsolidate:
                 combined_seen=5,
                 stage_outputs="stages",
                 recovery_summary="summary",
-                combined_references={},
             )
 
         assert result is not None
@@ -328,13 +317,12 @@ class TestConsolidate:
         assert isinstance(kwargs["loser_playbooks"], list)
         assert len(kwargs["loser_playbooks"]) == 1
         assert "slug: loser" in kwargs["loser_playbooks"][0]
-        # References default to empty lists for both keys.
-        assert kwargs["combined_references"] == {"successes": [], "failures": []}
+        assert "combined_references" not in kwargs
         assert kwargs["combined_seen"] == 5
         assert kwargs["winner_slug"] == "winner"
         assert kwargs["winner_class_name"] == "Winner"
 
-    async def test_consolidate_with_winner_and_references(self) -> None:
+    async def test_consolidate_with_winner(self) -> None:
         synth, mock_renderer = _make_synthesizer()
         winner_md = _valid_playbook_markdown(slug="winner", class_name="Winner")
         winner = Playbook.parse(winner_md)
@@ -361,10 +349,6 @@ class TestConsolidate:
                 combined_seen=7,
                 stage_outputs="stages",
                 recovery_summary="summary",
-                combined_references={
-                    "successes": ["run_1", "run_2"],
-                    "failures": ["run_9"],
-                },
             )
 
         assert result is not None
@@ -375,8 +359,7 @@ class TestConsolidate:
         assert len(kwargs["loser_playbooks"]) == 2
         assert "slug: loser1" in kwargs["loser_playbooks"][0]
         assert "slug: loser2" in kwargs["loser_playbooks"][1]
-        assert kwargs["combined_references"]["successes"] == ["run_1", "run_2"]
-        assert kwargs["combined_references"]["failures"] == ["run_9"]
+        assert "combined_references" not in kwargs
 
 
 class TestValidationFeedback:
@@ -404,7 +387,6 @@ class TestValidationFeedback:
                 slug="foo",
                 stage_outputs="stages",
                 oracle_answer="answer",
-                incident_ref="incident_1",
             )
 
         calls = mock_renderer.render.call_args_list

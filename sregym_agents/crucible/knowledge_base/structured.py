@@ -444,7 +444,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
         diagnosis_succeeded: bool,
         stage_outputs_file: Path | None,
         recovery_reflection: RecoveryReflection | None,
-        incident_ref: str,
     ) -> None:
         """Synthesize, refine, or consolidate playbooks based on the merge outcome."""
         if self._playbook_store is None or self._playbook_synthesizer is None:
@@ -462,7 +461,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     reorg,
                     stage_outputs=stage_outputs,
                     recovery_reflection=recovery_reflection,
-                    incident_ref=incident_ref,
                 )
             except Exception as e:
                 logger.error(f"Playbook reorganization {reorg.type} failed: {e}", exc_info=True)
@@ -483,7 +481,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     slug=slug,
                     stage_outputs=stage_outputs,
                     oracle_answer=oracle_answer,
-                    incident_ref=incident_ref,
                 )
             elif recovery_reflection is not None:
                 logger.info(f"Playbook lifecycle: synthesizing new playbook from recovery for slug={slug}")
@@ -493,7 +490,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     stage_outputs=stage_outputs,
                     recovery_reflection=recovery_reflection,
                     oracle_answer=oracle_answer,
-                    incident_ref=incident_ref,
                 )
             else:
                 logger.warning(
@@ -515,7 +511,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 stage_outputs=stage_outputs,
                 recovery_reflection=recovery_reflection,
                 oracle_answer=oracle_answer,
-                incident_ref=incident_ref,
             )
 
         if pb is None:
@@ -530,7 +525,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
         *,
         stage_outputs: str,
         recovery_reflection: RecoveryReflection | None,
-        incident_ref: str,
     ) -> None:
         """Apply a single reorganization (consolidate or split) to the playbook store."""
         assert self._playbook_store is not None
@@ -567,22 +561,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
             return
 
         combined_seen = (winner_pb.seen if winner_pb else 0) + sum(lp.seen for lp in loser_pbs)
-        combined_refs: dict[str, list[str]] = {"successes": [], "failures": []}
-        if winner_pb is not None:
-            combined_refs["successes"].extend(winner_pb.references.get("successes", []))
-            combined_refs["failures"].extend(winner_pb.references.get("failures", []))
-        for lp in loser_pbs:
-            combined_refs["successes"].extend(lp.references.get("successes", []))
-            combined_refs["failures"].extend(lp.references.get("failures", []))
-        # Deduplicate while preserving order.
-        for key in ("successes", "failures"):
-            seen: set[str] = set()
-            unique: list[str] = []
-            for ref in combined_refs[key]:
-                if ref not in seen:
-                    seen.add(ref)
-                    unique.append(ref)
-            combined_refs[key] = unique
 
         recovery_summary = recovery_reflection.summary if recovery_reflection is not None else ""
 
@@ -594,7 +572,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
             combined_seen=combined_seen,
             stage_outputs=stage_outputs,
             recovery_summary=recovery_summary,
-            combined_references=combined_refs,
         )
 
         if consolidated is None:
@@ -689,7 +666,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     diagnosis_succeeded=diagnosis_succeeded,
                     stage_outputs_file=stage_outputs_file,
                     recovery_reflection=normalized_recovery_reflection,
-                    incident_ref=incident_ref,
                 )
             except Exception as e:
                 logger.error(f"Playbook lifecycle failed: {e}", exc_info=True)

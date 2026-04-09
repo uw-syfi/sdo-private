@@ -5,12 +5,12 @@ diagnosis wrong on the latest incident. A recovery agent — given the oracle
 answer as a hint — re-investigated and produced grounded observations of
 what the correct procedure should have been. Your job is to rewrite the
 playbook so that, had it looked like your revision, the agent would have
-caught THIS specific failure.
+caught this kind of failure — for any future incident in this class, not
+just the one in front of you.
 
 Class: {{ class_name }}
 Slug: {{ slug }}
 Timestamp (use verbatim in meta.last_updated): {{ current_iso }}
-Incident reference for this new failure (cite under References > failures): {{ incident_ref }}
 
 Existing playbook (the current state of the document):
 ---
@@ -22,7 +22,8 @@ Oracle answer for the latest incident:
 {{ oracle_answer }}
 ---
 
-What the agent did wrong on this incident (failed stage outputs):
+What the agent did wrong on this incident (failed stage outputs — extract
+the SHAPE of the wrong reasoning, not the literal incident tokens):
 ---
 {{ failed_stage_outputs }}
 ---
@@ -32,15 +33,17 @@ Recovery summary (oracle-assisted re-run bottom-line):
 {{ recovery_summary }}
 ---
 
-Recovery observations (what the recovery agent actually checked and saw —
-THE source of truth for any new Triage / Verification steps):
+Recovery observations (use these to understand the SHAPE of the correct
+investigation. Extract the abstract pattern; do NOT copy any literal
+namespaces, deployment names, env var names, or values into the playbook):
 ---
 {% for obs in recovery_observations %}
 - {{ obs }}
 {% endfor %}
 ---
 
-Recovery stage failures (each becomes a new Failure Pattern entry to add):
+Recovery stage failures (each becomes a new Failure Pattern entry to add —
+extract the abstract pattern, not the incident-specific tokens):
 ---
 {% for sf in recovery_stage_failures %}
 - stage: {{ sf.stage }}
@@ -58,6 +61,7 @@ following reasons. Fix every one of them in this revision:
 ---
 {% endif %}
 
+{% include "kb/_abstraction_rules.j2" %}
 Task: produce ONE revised markdown playbook document, and nothing else (no
 preamble, no commentary, no code fences around the whole thing). The document
 MUST match the shape of the existing playbook. A deterministic Python
@@ -65,7 +69,7 @@ validator will reject your output if any of these constraints are violated:
 
 - Every `##` section (Summary, Symptoms, Triage Procedure, Verification
   Procedure, Required Evidence (Submission Gate), Known Distractors, Failure
-  Patterns, References) must be present, in order, with the exact heading text.
+  Patterns) must be present, in order, with the exact heading text.
 - The `<!-- meta -->` block must contain the keys `slug`, `class_name`,
   `seen`, `created_from`, `last_updated`, each on its own line as `key: value`.
 - Symptoms, Triage Procedure, Verification Procedure, and Required Evidence
@@ -74,24 +78,33 @@ validator will reject your output if any of these constraints are violated:
   every item there must be a `- [ ]` checkbox.
 - The following vague phrases are FORBIDDEN anywhere in the document:
   "appropriate values", "as needed", "relevant configuration", "if applicable",
-  "as appropriate". Write concrete commands, file paths, env var names, and
-  expected values instead.
+  "as appropriate". Use parameterized placeholders (`<ENV_VAR>`,
+  `<NAMESPACE>`, `<DEPLOYMENT>`, ...) for incident-specific tokens — those
+  are precise, not vague — and write concrete commands and shapes around
+  them.
 
-Refinement rules (the user wants you to be FREE to rewrite, not just append):
+Refinement rules (you are FREE to rewrite, not just append):
 - You MAY rewrite any section — Summary, Symptoms, Triage, Verification,
   Required Evidence, Distractors — wherever the existing wording would have
   let this failure through. Free rewrite is encouraged where it improves
   precision.
-- You MUST preserve every existing reference under References. Do not delete
-  any existing successes: or failures: entries. Add `{{ incident_ref }}` to
-  the failures list (append, do not replace).
+- If the existing playbook contains any incident-specific tokens (literal
+  namespaces, deployment names, env var names, error strings, port numbers,
+  pod hashes, references to specific incidents) baked into ANY section, you
+  MUST rewrite those sections to use parameterized placeholders per the
+  abstraction rules above. The existing playbook's specifics are evidence,
+  not prescription — strip them out of the document entirely. If the
+  existing playbook contained a `## References` section, drop it; the
+  current schema does not include one.
 - You MUST preserve all existing Failure Patterns and Known Distractors that
-  remain accurate. ADD a new Failure Pattern entry for each item in
-  `recovery_stage_failures`, of the shape:
-    - **<stage>:** "<description>". **Oracle:** <correction>. **Lesson:** <lesson>. **Trace:** {{ incident_ref }}.
+  remain accurate (rewriting them in the abstract, parameterized form if
+  they were too incident-specific). ADD a new Failure Pattern entry for each
+  item in `recovery_stage_failures`, of the shape:
+    - **<stage>:** "<abstracted description, parameterized>". **Oracle:** <abstracted correction>. **Lesson:** <general lesson>.
 - New Triage / Verification / Required Evidence content must be grounded in
-  `recovery_observations` and the oracle answer — do not invent steps recovery
-  did not perform. Use concrete commands, file paths, env var names.
+  `recovery_observations` and the oracle answer — do not invent steps
+  recovery did not perform — but written as the abstract pattern those
+  observations reveal, with concrete tokens parameterized.
 - The class_name and slug must remain unchanged from the existing playbook.
 - In the `<!-- meta -->` block:
     - `slug:` stays as {{ slug }}

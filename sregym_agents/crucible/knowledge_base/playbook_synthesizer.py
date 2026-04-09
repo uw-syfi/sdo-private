@@ -55,7 +55,6 @@ class PlaybookSynthesizer:
         slug: str,
         stage_outputs: str,
         oracle_answer: str,
-        incident_ref: str,
     ) -> Playbook | None:
         """Synthesize a new playbook from a successful diagnosis trajectory."""
         current_iso = datetime.now(timezone.utc).isoformat()
@@ -67,7 +66,6 @@ class PlaybookSynthesizer:
                 "current_iso": current_iso,
                 "stage_outputs": stage_outputs,
                 "oracle_answer": oracle_answer,
-                "incident_ref": incident_ref,
             },
             log_label=f"synthesize_from_success[{slug}]",
         )
@@ -80,7 +78,6 @@ class PlaybookSynthesizer:
         stage_outputs: str,
         recovery_reflection: RecoveryReflection,
         oracle_answer: str,
-        incident_ref: str,
     ) -> Playbook | None:
         """Synthesize a new playbook from a recovery trajectory."""
         current_iso = datetime.now(timezone.utc).isoformat()
@@ -92,7 +89,6 @@ class PlaybookSynthesizer:
                 "current_iso": current_iso,
                 "stage_outputs": stage_outputs,
                 "oracle_answer": oracle_answer,
-                "incident_ref": incident_ref,
                 "recovery_summary": recovery_reflection.summary,
                 "recovery_observations": recovery_reflection.investigation_observations,
                 "recovery_stage_failures": recovery_reflection.stage_failures,
@@ -107,7 +103,6 @@ class PlaybookSynthesizer:
         stage_outputs: str,
         recovery_reflection: RecoveryReflection,
         oracle_answer: str,
-        incident_ref: str,
     ) -> Playbook | None:
         """Refine an existing playbook using a fresh recovery trajectory."""
         current_iso = datetime.now(timezone.utc).isoformat()
@@ -117,7 +112,6 @@ class PlaybookSynthesizer:
                 "class_name": existing.class_name,
                 "slug": existing.slug,
                 "current_iso": current_iso,
-                "incident_ref": incident_ref,
                 "existing_playbook": existing.to_markdown(),
                 "oracle_answer": oracle_answer,
                 "failed_stage_outputs": stage_outputs,
@@ -138,16 +132,11 @@ class PlaybookSynthesizer:
         combined_seen: int,
         stage_outputs: str,
         recovery_summary: str,
-        combined_references: dict[str, list[str]],
     ) -> Playbook | None:
         """Consolidate multiple near-duplicate playbooks into a single winner."""
         current_iso = datetime.now(timezone.utc).isoformat()
         winner_md = winner_playbook.to_markdown() if winner_playbook else "(none)"
         loser_mds = [lp.to_markdown() for lp in loser_playbooks]
-        refs_with_defaults: dict[str, list[str]] = {
-            "successes": list(combined_references.get("successes", [])),
-            "failures": list(combined_references.get("failures", [])),
-        }
         return await self._call_with_validation(
             template_name="kb/merge_playbooks",
             template_vars={
@@ -159,7 +148,6 @@ class PlaybookSynthesizer:
                 "loser_playbooks": loser_mds,
                 "stage_outputs": stage_outputs,
                 "recovery_summary": recovery_summary,
-                "combined_references": refs_with_defaults,
             },
             log_label=f"consolidate[{winner_slug}]",
         )

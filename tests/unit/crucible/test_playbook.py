@@ -58,10 +58,6 @@ def _valid_playbook_markdown(
         "\n"
         "## Failure Patterns\n"
         "- Pod exit code 1 with stderr referencing unset variable.\n"
-        "\n"
-        "## References\n"
-        "- successes: run_42\n"
-        "- failures: run_17\n"
     )
 
 
@@ -194,7 +190,6 @@ class TestPlaybookParseRoundtrip:
         assert len(pb.required_evidence) == 1
         assert len(pb.known_distractors) == 1
         assert len(pb.failure_patterns) == 1
-        assert pb.references == {"successes": ["run_42"], "failures": ["run_17"]}
 
     def test_roundtrip_to_markdown_reparses(self):
         original = Playbook.parse(_valid_playbook_markdown())
@@ -211,7 +206,6 @@ class TestPlaybookParseRoundtrip:
         assert reparsed.required_evidence == original.required_evidence
         assert reparsed.known_distractors == original.known_distractors
         assert reparsed.failure_patterns == original.failure_patterns
-        assert reparsed.references == original.references
 
     def test_required_evidence_submission_gate_qualifier_stripped(self):
         text = _valid_playbook_markdown().replace(
