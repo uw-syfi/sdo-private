@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,9 @@ from sregym_agents.crucible._prompts import PromptRenderer
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from sregym_agents.crucible.tools._kb_tools import TriageReport
+    from pydantic_ai.models import Model
+
+    from sregym_agents.crucible.tools._kb_tools import TriagePriors, TriageReport
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,11 @@ class SRESubmission(BaseModel):
             "or what evidence was misinterpreted, and what lesson follows. "
             "Leave empty for normal diagnosis and mitigation stages."
         ),
+    )
+    message_history: list[Any] = Field(
+        default_factory=list,
+        exclude=True,
+        description="Internal only: captured agent message history for follow-on phases.",
     )
 
 
@@ -112,14 +119,14 @@ class SREDeps:
     state: SharedState = field(default_factory=SharedState)
     lt_summary_file: Path | None = None
     incidents_dir: Path | None = None
-    ltm_model_id: str | None = None
+    ltm_model_id: Model | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
     trajectory_path: Path | None = None
     triage_report: TriageReport | None = None
     # v3 trained guidance
-    triage_guidance: str = ""
-    arbitration_guidance: str = ""
+    triage_priors: TriagePriors | None = None
+    verification_guidance: str = ""
     stage_outputs_file: Path | None = None
 
 

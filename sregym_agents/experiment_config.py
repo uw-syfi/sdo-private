@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 try:
     import tomllib
@@ -20,6 +21,8 @@ except ModuleNotFoundError:
 
 import yaml
 
+_VARIANT_ORDERS = ("flat", "round_robin", "grouped")
+
 
 @dataclasses.dataclass
 class VariantConfig:
@@ -27,7 +30,20 @@ class VariantConfig:
     count: int = 0
     offset: int = 0
     seed: int = 42
-    round_robin: bool = True
+    order: str = "round_robin"  # one of _VARIANT_ORDERS
+    max_per_class: int | None = None
+    spec_names: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+
+    def __post_init__(self) -> None:
+        if self.order not in _VARIANT_ORDERS:
+            raise ValueError(f"variants.order must be one of {'|'.join(_VARIANT_ORDERS)}, got {self.order!r}")
+        if self.max_per_class is not None:
+            if self.order != "grouped":
+                raise ValueError("variants.max_per_class is only valid when variants.order='grouped'")
+            if self.max_per_class <= 0:
+                raise ValueError("variants.max_per_class must be > 0")
+        if self.spec_names and not self.enabled:
+            raise ValueError("variants.spec_names requires variants.enabled = true")
 
 
 @dataclasses.dataclass
@@ -51,7 +67,7 @@ class ExperimentConfig:
 
     # Problem selection (mutually exclusive with variants)
     tasklist: str = ""  # named set or path to YAML
-    problems: list[str] = dataclasses.field(default_factory=list)
+    problems: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     # Variant mode
     variants: VariantConfig = dataclasses.field(default_factory=VariantConfig)
@@ -60,13 +76,36 @@ class ExperimentConfig:
     env: RunnerEnv = dataclasses.field(default_factory=RunnerEnv)
 
     # Agent-specific config (keyed by agent name)
-    agent_config: dict = dataclasses.field(default_factory=dict)
+    agent_config: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
     def __post_init__(self) -> None:
         if self.variants.enabled and (self.tasklist or self.problems):
             raise ValueError("runner.variants.enabled is mutually exclusive with runner.tasklist and runner.problems")
         if self.tasklist and self.problems:
             raise ValueError("runner.tasklist and runner.problems are mutually exclusive")
+
+
+def variant_config_from_raw(variants_raw: dict[str, Any]) -> VariantConfig:
+    """Build a VariantConfig from a TOML-like dict, accepting the legacy
+    ``round_robin`` field on read for backward compatibility with snapshots
+    written by older versions of the runner.
+    """
+    if "order" in variants_raw:
+        order = variants_raw["order"]
+    elif "round_robin" in variants_raw:
+        order = "round_robin" if variants_raw["round_robin"] else "flat"
+    else:
+        order = "round_robin"
+
+    return VariantConfig(
+        enabled=variants_raw.get("enabled", False),
+        count=variants_raw.get("count", 0),
+        offset=variants_raw.get("offset", 0),
+        seed=variants_raw.get("seed", 42),
+        order=order,
+        max_per_class=variants_raw.get("max_per_class"),
+        spec_names=list(variants_raw.get("spec_names", [])),
+    )
 
 
 def load_experiment_config(path: Path) -> ExperimentConfig:
@@ -78,13 +117,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
     variants_raw = runner.pop("variants", {})
     env_raw = runner.pop("env", {})
 
-    variants = VariantConfig(
-        enabled=variants_raw.get("enabled", False),
-        count=variants_raw.get("count", 0),
-        offset=variants_raw.get("offset", 0),
-        seed=variants_raw.get("seed", 42),
-        round_robin=variants_raw.get("round_robin", True),
-    )
+    variants = variant_config_from_raw(variants_raw)
 
     env = RunnerEnv(
         judge_model_id=env_raw.get("judge_model_id", ""),
@@ -123,8 +156,8 @@ def resolve_config(
     if env_overrides is None:
         env_overrides = dict(os.environ)
 
-    updates: dict = {}
-    env_updates: dict = {}
+    updates: dict[str, Any] = {}
+    env_updates: dict[str, str] = {}
 
     if "MODEL" in env_overrides:
         updates["model"] = env_overrides["MODEL"]
@@ -250,8 +283,11 @@ def config_to_main_args(
         args.extend(["--variant-count", str(config.variants.count)])
         args.extend(["--variant-offset", str(config.variants.offset)])
         args.extend(["--variant-seed", str(config.variants.seed)])
-        if not config.variants.round_robin:
-            args.append("--no-variant-round-robin")
+        args.extend(["--variant-order", config.variants.order])
+        if config.variants.max_per_class is not None:
+            args.extend(["--variant-max-per-class", str(config.variants.max_per_class)])
+        for name in config.variants.spec_names:
+            args.extend(["--variant-spec", name])
     elif config.sequence_len > 0:
         args.extend(["--sequence-len", str(config.sequence_len)])
         args.extend(["--sequence-seed", str(config.sequence_seed)])
@@ -289,7 +325,7 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
     return env
 
 
-def _toml_value(value) -> str:
+def _toml_value(value: bool | int | str | list[Any]) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
@@ -297,10 +333,8 @@ def _toml_value(value) -> str:
     if isinstance(value, str):
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
-    if isinstance(value, list):
-        items = ", ".join(_toml_value(item) for item in value)
-        return f"[{items}]"
-    raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
+    items = ", ".join(_toml_value(item) for item in value)
+    return f"[{items}]"
 
 
 def _serialize_config(config: ExperimentConfig) -> str:
@@ -326,7 +360,11 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"count = {_toml_value(config.variants.count)}")
     lines.append(f"offset = {_toml_value(config.variants.offset)}")
     lines.append(f"seed = {_toml_value(config.variants.seed)}")
-    lines.append(f"round_robin = {_toml_value(config.variants.round_robin)}")
+    lines.append(f"order = {_toml_value(config.variants.order)}")
+    if config.variants.max_per_class is not None:
+        lines.append(f"max_per_class = {_toml_value(config.variants.max_per_class)}")
+    if config.variants.spec_names:
+        lines.append(f"spec_names = {_toml_value(config.variants.spec_names)}")
 
     lines.append("")
     lines.append("[runner.env]")

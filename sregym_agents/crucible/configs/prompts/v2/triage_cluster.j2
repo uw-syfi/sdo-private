@@ -55,5 +55,5 @@ Conserve context: use --tail=50, grep, jsonpath/jq. Breadth over depth.
 OUTPUT:
 Populate the TriageReport with factual observations only.
 - No diagnosis, no hypothesis, no root cause speculation, no severity labels.
-- Put condensed kubectl output into raw_cluster_snapshot for downstream reference.
+- Do not include raw kubectl output in the report; only include structured anomalies.
 - If no anomalies found for a category, leave it as an empty list.

@@ -16,8 +16,7 @@ Application: {{ app_name }} / Namespace: {{ namespace }}
 {% endif %}
 
 Investigate the cluster to build a complete causal chain from the true root cause to the
-observed symptoms, and reflect on why the original agent went wrong. Submit:
+observed symptoms. Submit:
 - `answer`: the correct root cause (specific resource + field + wrong value)
 - `causal_chain`: misconfigured field → mechanism → observed symptom
 - `justification`: concrete kubectl evidence
-- `reflection`: 2-3 sentences analyzing what investigative mistake the original agent made (what was missed or misinterpreted) and what diagnostic lesson follows

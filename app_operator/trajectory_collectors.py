@@ -46,6 +46,10 @@ def collect_gemini_sessions(
             if not project_dir.is_dir() or project_dir.name == "bin":
                 continue
 
+            # Skip directories not touched since the run started (fast path).
+            if project_dir.stat().st_mtime < run_start_ts:
+                continue
+
             chats_dir = project_dir / "chats"
             if not chats_dir.exists():
                 continue

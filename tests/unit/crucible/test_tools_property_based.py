@@ -20,10 +20,10 @@ from sregym_agents.crucible.tools import (
     MAX_OUTPUT_CHARS,
     MUTATING_KUBECTL_VERBS,
     SREDeps,
-    _check_mutating_kubectl,
-    _run_bash_sync,
+    check_mutating_kubectl,
     grep,
     read_file,
+    run_bash_sync,
     str_replace_file,
     write_file,
 )
@@ -91,12 +91,12 @@ def _is_valid_regex(pattern: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# _run_bash_sync
+# run_bash_sync
 # ---------------------------------------------------------------------------
 
 
 class TestRunBashSyncProperties:
-    """_run_bash_sync must always return a string, never raise."""
+    """run_bash_sync must always return a string, never raise."""
 
     @staticmethod
     def _make_popen_mock(stdout: str = "ok", stderr: str = "", returncode: int = 0):
@@ -112,7 +112,7 @@ class TestRunBashSyncProperties:
     def test_never_raises_with_mocked_subprocess(self, cmd: str):
         popen_mock = self._make_popen_mock()
         with patch("subprocess.Popen", return_value=popen_mock):
-            output = _run_bash_sync(cmd)
+            output = run_bash_sync(cmd)
         assert isinstance(output, str)
 
     @given(cmd=arbitrary_text)
@@ -125,7 +125,7 @@ class TestRunBashSyncProperties:
             patch("os.killpg"),
             patch("os.getpgid", return_value=12345),
         ):
-            output = _run_bash_sync(cmd)
+            output = run_bash_sync(cmd)
         assert isinstance(output, str)
         assert "timed out" in output.lower()
 
@@ -133,7 +133,7 @@ class TestRunBashSyncProperties:
     @settings(max_examples=50, deadline=None)
     def test_returns_error_string_on_exception(self, cmd: str):
         with patch("subprocess.Popen", side_effect=OSError("mock error")):
-            output = _run_bash_sync(cmd)
+            output = run_bash_sync(cmd)
         assert isinstance(output, str)
         assert "Error" in output
 
@@ -148,28 +148,28 @@ class TestRunBashSyncProperties:
             patch("sregym_agents.crucible.tools._bash_tools.Path") as mock_path,
         ):
             mock_path.return_value.write_text = MagicMock()
-            output = _run_bash_sync(cmd)
+            output = run_bash_sync(cmd)
         assert "truncated" in output.lower() or "Output truncated" in output
 
 
 # ---------------------------------------------------------------------------
-# _check_mutating_kubectl
+# check_mutating_kubectl
 # ---------------------------------------------------------------------------
 
 
 class TestCheckMutatingKubectlProperties:
-    """_check_mutating_kubectl must never raise for any input."""
+    """check_mutating_kubectl must never raise for any input."""
 
     @given(cmd=arbitrary_text)
     @settings(max_examples=200)
     def test_never_raises(self, cmd: str):
-        result = _check_mutating_kubectl(cmd)
+        result = check_mutating_kubectl(cmd)
         assert result is None or isinstance(result, str)
 
     @given(cmd=st.text(min_size=1, max_size=200).filter(lambda s: "kubectl" not in s.lower()))
     @settings(max_examples=100)
     def test_non_kubectl_returns_none_or_parse_error(self, cmd: str):
-        result = _check_mutating_kubectl(cmd)
+        result = check_mutating_kubectl(cmd)
         # If shlex can't parse it, we get a parse error; otherwise None
         if result is not None:
             assert "malformed quoting" in result
@@ -178,7 +178,7 @@ class TestCheckMutatingKubectlProperties:
     @settings(max_examples=50)
     def test_mutating_verb_immediately_after_kubectl_caught(self, verb: str, args: str):
         cmd = f"kubectl {verb} {args}"
-        result = _check_mutating_kubectl(cmd)
+        result = check_mutating_kubectl(cmd)
         assert result is not None
         assert verb in result
 
@@ -186,7 +186,7 @@ class TestCheckMutatingKubectlProperties:
     @settings(max_examples=50)
     def test_readonly_verb_immediately_after_kubectl_allowed(self, verb: str, args: str):
         cmd = f"kubectl {verb} {args}"
-        result = _check_mutating_kubectl(cmd)
+        result = check_mutating_kubectl(cmd)
         assert result is None
 
 

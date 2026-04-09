@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 import pytest
+from pydantic_ai.models import infer_model
 
 from sregym_agents.crucible.orchestrator import (
     StageLoopResult,
@@ -18,7 +19,9 @@ from sregym_agents.crucible.orchestrator import (
     _replace_hypothesis_placeholder,
     _run_recovery_diagnosis,
     _run_recovery_mitigation,
+    _run_recovery_reflection_phase,
 )
+from sregym_agents.crucible.recovery_reflection import RecoveryReflection, RecoveryStageFailure
 from sregym_agents.crucible.tools import SharedFile, SharedState, SRESubmission
 
 # ---------------------------------------------------------------------------
@@ -285,7 +288,7 @@ class TestRunRecoveryDiagnosis:
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -319,7 +322,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -359,7 +362,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -399,7 +402,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -437,7 +440,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -471,7 +474,7 @@ class TestRunRecoveryDiagnosis:
         )
 
         result = await _run_recovery_diagnosis(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
@@ -480,6 +483,44 @@ class TestRunRecoveryDiagnosis:
         )
 
         assert result is None
+
+
+@pytest.mark.asyncio
+class TestRunRecoveryReflectionPhase:
+    @patch("sregym_agents.crucible.orchestrator.arun_with_retry", new_callable=AsyncMock)
+    async def test_uses_phase1_message_history_and_stage_outputs(self, mock_arun, tmp_path: Path, renderer):
+        stage_outputs_file = tmp_path / "stage_outputs.md"
+        stage_outputs_file.write_text("## Diagnosis Outcome\nObserved a failing upstream dependency")
+        message_history = [{"role": "user", "content": "phase-1 history"}]
+        expected = RecoveryReflection(
+            summary="Grounded recovery narrative",
+            investigation_observations=["Observed failing upstream dependency"],
+            stage_failures=[
+                RecoveryStageFailure(
+                    stage="verification",
+                    description="Confirmed the downstream symptom too early",
+                    evidence="Recovery investigation found the upstream dependency failure",
+                    lesson="Trace dependency chains before confirming a candidate",
+                )
+            ],
+        )
+        mock_arun.return_value.output = expected
+
+        result = await _run_recovery_reflection_phase(
+            model=infer_model("test"),
+            app_info={"app_name": "app", "namespace": "ns"},
+            renderer=renderer,
+            original_answer="wrong answer",
+            original_justification="wrong because local symptom matched",
+            original_causal_chain="frontend -> timeout",
+            stage_outputs_file=stage_outputs_file,
+            phase1_messages=message_history,
+        )
+
+        assert result == expected
+        _args, kwargs = mock_arun.await_args
+        assert kwargs["message_history"] == message_history
+        assert "Observed a failing upstream dependency" in _args[1]
 
 
 # ---------------------------------------------------------------------------
@@ -532,7 +573,7 @@ class TestRunRecoveryMitigation:
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -564,7 +605,7 @@ class TestRunRecoveryMitigation:
         )
 
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -604,7 +645,7 @@ class TestRunRecoveryMitigation:
         )
 
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -642,7 +683,7 @@ class TestRunRecoveryMitigation:
         )
 
         await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
@@ -674,7 +715,7 @@ class TestRunRecoveryMitigation:
         )
 
         result = await _run_recovery_mitigation(
-            model="test-model",
+            model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",

@@ -141,7 +141,6 @@ TEMPLATE_VARIABLE_CONTRACT: dict[str, set[str]] = {
     "kb/extract_lessons": {"long_term_summary"},
     "kb/summarize_session": {"content", "include_benchmark_results"},
     "kb/merge_summary": {"prior_summary", "session_summary", "incident_ref"},
-    "kb/extract_triage_checklist": {"operational_lessons", "long_term_summary"},
 }
 
 

@@ -6,5 +6,5 @@
   "venvPath": ".",
   "venv": ".venv",
   "reportMissingTypeStubs": false,
-  "strict": ["libs"]
+  "strict": ["libs", "sregym_agents"]
 }

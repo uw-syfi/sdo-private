@@ -190,7 +190,7 @@ class TestToPydanticAiSettings:
     def test_gemini_thinking(self):
         mc = ModelConfig(provider="gemini", model="gemini-2.5-pro", thinking_budget=self.BUDGET)
         assert mc.to_pydantic_ai_settings() == {
-            "gemini_thinking_config": {"thinking_budget": self.BUDGET, "include_thoughts": True}
+            "google_thinking_config": {"thinking_budget": self.BUDGET, "include_thoughts": True}
         }
 
     def test_vertex_thinking(self):
@@ -215,7 +215,7 @@ class TestToPydanticAiSettings:
     def test_budget_tokens_override_beats_stored(self):
         mc = ModelConfig(provider="gemini", model="gemini-2.5-pro", thinking_budget=1000)
         result = mc.to_pydantic_ai_settings(budget_tokens=2000)
-        assert result["gemini_thinking_config"]["thinking_budget"] == 2000
+        assert result["google_thinking_config"]["thinking_budget"] == 2000
 
 
 class TestRoundTrip:

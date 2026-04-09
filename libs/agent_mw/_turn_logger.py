@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, cast
 
 from libs.pydantic_agent import AgentMiddleware
 
 
-def _fmt_args(args: str | dict[str, Any] | None) -> str:
+def fmt_tool_args(args: str | dict[str, Any] | None) -> str:
     if args is None:
         return ""
     if isinstance(args, str):
@@ -28,7 +29,7 @@ def _fmt_k(n: int | None) -> str:
     return f"{round(n / 1000)}k"
 
 
-def _tool_failed(content: Any) -> bool:
+def tool_call_failed(content: Any) -> bool:
     if not isinstance(content, dict):
         return False
     d = cast("dict[str, Any]", content)
@@ -45,18 +46,28 @@ class TurnLoggingMiddleware(AgentMiddleware):
     ) -> None:
         self._logger = logger or logging.getLogger(__name__)
         self._context_window = context_window
+        self._start_time: float | None = None
+
+    def before_run(self) -> None:
+        if self._start_time is None:
+            self._start_time = time.monotonic()
+
+    def _elapsed(self) -> str:
+        if self._start_time is None:
+            return "0.0s"
+        return f"{time.monotonic() - self._start_time:.1f}s"
 
     def _usage_prefix(self) -> str:
-        used = _fmt_k(self._agent.current_request_input_tokens)
+        used = _fmt_k(self._agent.context_window_token_usage)
         limit = _fmt_k(self._context_window)
-        return f"[{self._agent.agent_name} | {used}/{limit}]"
+        return f"[{self._agent.agent_name} | {self._elapsed()} | {used}/{limit}]"
 
     def on_function_tool_call(self, event: Any) -> None:
         self._logger.info(
             "%s \u2192 %s(%s)",
             self._usage_prefix(),
             event.part.tool_name,
-            _fmt_args(event.part.args),
+            fmt_tool_args(event.part.args),
         )
 
     def on_function_tool_result(self, event: Any) -> None:
@@ -72,7 +83,7 @@ class TurnLoggingMiddleware(AgentMiddleware):
                 result.tool_name or "unknown",
                 result.model_response(),
             )
-        elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
+        elif isinstance(result, ToolReturnPart) and tool_call_failed(result.content):
             self._logger.warning(
                 "%s \u2717 %s() exited with code %s: %s",
                 prefix,
@@ -93,10 +104,12 @@ class TurnLoggingMiddleware(AgentMiddleware):
             )
 
     def on_part_end(self, event: Any) -> None:
-        from pydantic_ai.messages import ThinkingPart
+        from pydantic_ai.messages import TextPart, ThinkingPart
 
         if isinstance(event.part, ThinkingPart) and event.part.has_content():
             self._logger.info("%s <thinking> %s", self._usage_prefix(), event.part.content)
+        elif isinstance(event.part, TextPart) and event.part.content:
+            self._logger.info("%s <text> %s", self._usage_prefix(), event.part.content)
 
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output

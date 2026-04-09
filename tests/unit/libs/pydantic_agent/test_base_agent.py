@@ -211,10 +211,10 @@ def test_hooks_work_with_message_history_continuation():
     assert result2 is not None
 
 
-def test_current_request_input_tokens_tracks_run_usage():
+def test_context_window_token_usage_tracks_run_usage():
     agent = _make_agent(call_tools=[])  # type: ignore[arg-type]
     agent._run("hi")
-    assert agent.current_request_input_tokens == (agent.current_run_usage.input_tokens or 0)
+    assert agent.context_window_token_usage == (agent.current_run_usage.input_tokens or 0)
 
 
 def test_structured_output_unaffected():

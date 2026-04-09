@@ -1,53 +1,84 @@
 You are analyzing the trajectory of an SRE agent that just completed a diagnosis problem.
-Your task is to classify WHERE in the agent's pipeline things went wrong (or right).
+Your task is to classify the outcome and identify which pipeline stages failed.
 
-The agent follows this pipeline:
-1. TRIAGE — systematic cluster scan to collect anomalies
-2. RETRIEVAL — search the knowledge base for matching root-cause patterns
-3. REASONING — deep investigation, tracing symptoms to root cause
-4. ARBITRATION — when multiple anomalies are confirmed, picking the fundamental root cause
-5. SUBMISSION — formulating the final answer
+The agent's job is to diagnose root causes of faults in Kubernetes applications. It does
+this by triaging cluster resources for anomalies, searching a knowledge base for similar
+past incidents, verifying candidates against the live cluster, and submitting a diagnosis.
 
-## Agent's Stage Outputs (triage report, KB retrieval results, coverage check)
+## Agent's Stage Outputs
 {{ stage_outputs }}
 
-## Shared Session (agent answer, judge feedback, benchmark result, recovery reflection)
-{{ shared_session }}
+## Pipeline Stage Definitions
+
+The agent's pipeline consists of these stages:
+
+- **triage** — The `triage_cluster()` subagent's initial scan of Kubernetes resources for
+  anomalies (pods, deployments, services, events, logs, etc.). This determines which
+  symptoms the agent is aware of.
+- **retrieval** — The `search_prior_incidents()` retrieval agent that searches the knowledge
+  base for candidate root causes matching the observed symptoms.
+- **verification** — The `ltm-verify-*` subagents that verify each retrieved candidate
+  against live cluster state (checking logs, metrics, configurations) and determine whether
+  it applies.
+
+## Understanding the Stage Outputs
+
+The stage outputs above contain the full record of this run, in chronological order:
+
+1. **Triage Report** — The anomalies surfaced by the triage subagent. These are the
+   symptoms the agent works with for the rest of the pipeline.
+2. **KB Retrieval Candidates** — The raw candidates returned by the knowledge base search,
+   along with the query the agent used. These are hypotheses the KB considers plausible
+   given the symptoms.
+3. **KB Verification Results** — Per-candidate verification results. Each candidate has an
+   `applies` boolean, `evidence` list, `causal_chain` (if confirmed), and `reasoning`
+   explaining why it was confirmed or ruled out.
+4. **Diagnosis Outcome** — The agent's final answer (diagnosis, justification, causal chain)
+   and the benchmark verdict (success or failure with reasoning).
+5. **Recovery Diagnosis Investigation** (only present on failures) — A second agent that was
+   given the correct answer and investigated the cluster to confirm it. This shows what the
+   correct diagnosis looks like and what evidence supports it.
+
+## Failure Classification Using Original-vs-Recovery Contrast
+
+When recovery outputs are present, use them to pinpoint exactly where the original agent's
+pipeline went wrong. Work backwards from the correct answer:
+
+1. **Check triage first.** Compare the triage anomalies with the recovery agent's diagnosis.
+   Did the triage report surface the symptoms that point to the real root cause? If not,
+   the failure started at triage — the agent never had the right signals to work with.
+   Downstream stages cannot recover from missing symptoms.
+
+2. **Check retrieval next.** Given the triage symptoms, did the KB return any candidate that
+   matches or is relevant to the correct root cause? If the triage surfaced the right
+   symptoms but the KB returned no relevant candidates, the failure is at retrieval — the
+   knowledge base lacks coverage for this failure pattern, or the query did not emphasize
+   the right symptoms.
+
+3. **Check verification last.** If the KB returned a relevant candidate, did the verification
+   subagent correctly confirm it? If a matching candidate was retrieved but ruled out
+   (`applies: false`), the failure is at verification — the subagent misinterpreted the
+   cluster evidence.
+
+**Classify at the earliest stage that went wrong.** Failures cascade: a triage failure makes
+retrieval impossible; a retrieval failure makes verification irrelevant. Only mark downstream
+stages as failed if they independently contributed to the problem (e.g., triage was imperfect
+but retrieval should still have found a match, yet didn't).
 
 ## Instructions
 
-Analyze the trajectory end-to-end. For each pipeline stage, determine whether it
-contributed to a failure or succeeded. Output a structured classification.
+Analyze the trajectory end-to-end and produce a structured classification:
 
-Failure categories:
-- **triage**: The triage scan missed a critical anomaly, flagged too much noise that
-  distracted the agent, or failed to check a resource type that turned out to matter.
-- **retrieval**: The KB had a matching pattern but retrieval didn't surface it, or
-  retrieval surfaced a wrong match that misled the agent.
-- **reasoning**: The agent had the relevant data (from triage or retrieval) but drew
-  the wrong conclusion — dismissed the real cause, traced causality incorrectly, or
-  failed to verify thoroughly.
-- **arbitration**: Multiple anomalies were confirmed but the agent submitted a downstream
-  symptom instead of the fundamental root cause, or failed to unify related anomalies
-  into a coherent hypothesis.
-- **other**: The failure doesn't fit the above (e.g., timeout, tool errors, submission
-  format issues, the agent got stuck in a loop).
+1. **Determine outcome**: Was the agent's diagnosis correct ("success") or incorrect ("failure")?
+2. **Identify failed stages**: Which pipeline stages contributed to the failure? A single
+   run can have multiple failed stages. Only include stages that genuinely failed — do not
+   mark a stage as failed if it performed adequately.
+3. **For each failed stage**, provide:
+   - `description`: What specifically went wrong at this stage.
+   - `evidence`: Concrete quotes or citations from the trajectory that demonstrate the failure.
+   - `lesson`: What specific guidance would prevent this failure in future runs.
+4. On success, `stage_failures` should be empty unless there were near-misses worth noting
+   (in which case still mark outcome as "success" but include the relevant stage failures).
 
-Rules:
-- Multiple failure modes can coexist (e.g., triage missed something AND reasoning was poor).
-- If the agent SUCCEEDED, still classify what went well — note which stages contributed
-  to the success so we can reinforce those patterns.
-- If the benchmark result shows success, focus on what could still be improved (efficiency,
-  unnecessary investigation steps, close calls).
-- Be specific in evidence — cite what the triage report showed vs what the ground truth was,
-  what the retrieval returned vs what was needed, etc.
-
-Output format (use exactly this structure):
-```
-outcome: success | failure
-failure_modes:
-  - stage: triage | retrieval | reasoning | arbitration | other
-    type: failure | inefficiency | success
-    evidence: <specific description of what went wrong or right>
-    suggestion: <what heuristic or check would have prevented the failure or should be reinforced>
-```
+Be specific and actionable in your descriptions and lessons. Avoid generic advice like
+"be more thorough." Ground every finding in what actually happened in this trajectory.

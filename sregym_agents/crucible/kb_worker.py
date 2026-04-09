@@ -1,6 +1,6 @@
 """Dedicated KB update queue worker.
 
-Watches ``<kb_dir>/pending/`` for manifest JSON files and processes them
+Watches ``<kb_dir>/pending/`` for KB update task JSON files and processes them
 one at a time, eliminating timeout and concurrency issues that arise when
 KB updates run inline in the agent process.
 
@@ -16,65 +16,86 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import signal
 import time
 from pathlib import Path
 
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.knowledge_base import create_knowledge_base
-from sregym_agents.crucible.orchestrator import CrucibleFlags
+from sregym_agents.crucible.config import crucible_config_from_kb_task
+from sregym_agents.crucible.kb_update_queue import (
+    list_pending_tasks,
+    move_to_completed,
+    move_to_failed,
+)
+from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
+from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2  # seconds
 DEFAULT_IDLE_TIMEOUT = 300  # 5 minutes
-_MANIFEST_MAX_RETRIES = 3
-_MANIFEST_RETRY_DELAY = 5.0
+_TASK_MAX_RETRIES = 3
+_TASK_RETRY_DELAY = 5.0
 
 
-async def process_manifest(manifest_path: Path) -> None:
-    """Load a manifest, create KB, call ``update()``, move to ``completed/``."""
-    manifest = json.loads(manifest_path.read_text())
+async def process_task(task_path: Path) -> None:
+    """Load a task file, create KB, call ``update()``, move to ``completed/``."""
+    task = json.loads(task_path.read_text())
 
-    prompt_version = manifest.get("prompt_version")
-    renderer = PromptRenderer(prompt_version) if prompt_version else None
+    crucible_config = crucible_config_from_kb_task(task)
+    renderer = PromptRenderer(crucible_config.prompt_version)
 
-    shared_files = [Path(p) for p in manifest["session_files"]]
-    stage_outputs_file = Path(manifest["stage_outputs_file"]) if manifest.get("stage_outputs_file") else None
-
-    flags = CrucibleFlags(
-        include_benchmark_results=manifest.get("include_benchmark_results", False),
-        enable_heuristic_refinement=manifest.get("enable_heuristic_refinement", True),
-        include_incident_files=manifest.get("include_incident_files", True),
+    sf = task["session_files"]
+    session_files = SessionFiles(
+        diagnosis=Path(sf["diagnosis"]) if sf.get("diagnosis") else None,
+        mitigation=Path(sf["mitigation"]) if sf.get("mitigation") else None,
     )
+    stage_outputs_file = Path(task["stage_outputs_file"]) if task.get("stage_outputs_file") else None
+    recovery_reflection = (
+        RecoveryReflection.model_validate(task["recovery_reflection"]) if task.get("recovery_reflection") else None
+    )
+
     kb = create_knowledge_base(
-        kb_type=manifest["kb_type"],
-        shared_files=shared_files,
-        kb_dir=Path(manifest["kb_dir"]),
-        model_id=manifest["model_id"],
-        app_name=manifest["app_name"],
-        flags=flags,
+        kb_type=task["kb_type"],
+        kb_dir=Path(task["kb_dir"]),
+        model_id=task["model_id"],
+        app_name=task["app_name"],
+        config=crucible_config,
         renderer=renderer,
     )
 
+    banner = "=" * 72
     logger.info(
-        "Processing KB update for %s (%s)",
-        manifest["problem_id"],
-        manifest["app_name"],
+        "\n%s\n  KB UPDATE: %s (%s)\n%s",
+        banner,
+        task["problem_id"],
+        task["app_name"],
+        banner,
     )
-    await kb.update(stage_outputs_file=stage_outputs_file)
-    logger.info("KB update complete for %s", manifest["problem_id"])
+    await kb.update(
+        session_files,
+        stage_outputs_file=stage_outputs_file,
+        recovery_reflection=recovery_reflection,
+    )
+    logger.info(
+        "\n%s\n  KB UPDATE COMPLETE: %s\n%s",
+        banner,
+        task["problem_id"],
+        banner,
+    )
 
-    completed_dir = manifest_path.parent.parent / "completed"
-    completed_dir.mkdir(exist_ok=True)
-    shutil.move(str(manifest_path), str(completed_dir / manifest_path.name))
+    kb_dir = Path(task["kb_dir"])
+    move_to_completed(task_path, kb_dir)
 
 
-async def run_worker(kb_dir: Path, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> None:
-    """Poll ``pending/`` and process manifests sequentially.
+async def run_worker(
+    kb_dir: Path,
+    idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
+    poll_interval: float = POLL_INTERVAL,
+) -> None:
+    """Poll ``pending/`` and process tasks sequentially.
 
-    Exits after *idle_timeout* seconds with no new manifests.
+    Exits after *idle_timeout* seconds with no new tasks.
     """
     pending_dir = kb_dir / "pending"
     pending_dir.mkdir(parents=True, exist_ok=True)
@@ -87,16 +108,16 @@ async def run_worker(kb_dir: Path, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> 
         last_activity = time.monotonic()
 
         while True:
-            manifests = sorted(pending_dir.glob("*.json"))
+            tasks = list_pending_tasks(kb_dir)
 
-            if manifests:
+            if tasks:
                 last_activity = time.monotonic()
 
-            for m in manifests:
+            for m in tasks:
                 succeeded = False
-                for attempt in range(_MANIFEST_MAX_RETRIES):
+                for attempt in range(_TASK_MAX_RETRIES):
                     try:
-                        await process_manifest(m)
+                        await process_task(m)
                         succeeded = True
                         break
                     except Exception:
@@ -104,21 +125,19 @@ async def run_worker(kb_dir: Path, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> 
                             "KB update failed for %s (attempt %d/%d)",
                             m.name,
                             attempt + 1,
-                            _MANIFEST_MAX_RETRIES,
+                            _TASK_MAX_RETRIES,
                             exc_info=True,
                         )
-                        if attempt < _MANIFEST_MAX_RETRIES - 1:
-                            await asyncio.sleep(_MANIFEST_RETRY_DELAY * (2**attempt))
+                        if attempt < _TASK_MAX_RETRIES - 1:
+                            await asyncio.sleep(_TASK_RETRY_DELAY * (2**attempt))
                 if not succeeded:
-                    failed_dir = kb_dir / "failed"
-                    failed_dir.mkdir(exist_ok=True)
-                    shutil.move(str(m), str(failed_dir / m.name))
+                    move_to_failed(m, kb_dir)
 
             if time.monotonic() - last_activity > idle_timeout:
-                logger.info("KB worker idle for %ds, exiting.", idle_timeout)
+                logger.info("KB worker idle for %.1fs, exiting.", idle_timeout)
                 break
 
-            await asyncio.sleep(POLL_INTERVAL)
+            await asyncio.sleep(poll_interval)
     finally:
         pid_path.unlink(missing_ok=True)
         logger.info("KB worker exiting, PID file cleaned up.")
@@ -127,7 +146,7 @@ async def run_worker(kb_dir: Path, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> 
 def _setup_signal_handlers() -> None:
     """Ensure SIGTERM triggers a clean shutdown via KeyboardInterrupt."""
 
-    def _handler(signum, frame):
+    def _handler(signum: int, frame: object) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _handler)
@@ -145,7 +164,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Set up logging to file only — stdout/stderr are already redirected to this
-    # file by the spawner (_ensure_kb_worker), so a StreamHandler would duplicate.
+    # file by the spawner (ensure_kb_worker in kb_update_queue), so a StreamHandler would duplicate.
     log_path = args.kb_dir / "kb_worker.log"
     root = logging.getLogger()
     root.setLevel(logging.INFO)

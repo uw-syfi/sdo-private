@@ -9,21 +9,21 @@ import logging
 import os
 import random
 import shutil
-import subprocess
 import sys
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import requests
-from filelock import FileLock
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.knowledge_base import KnowledgeBase, create_knowledge_base
-from sregym_agents.crucible.orchestrator import CrucibleConfig, CrucibleFlags
+from sregym_agents.crucible.config import crucible_config_from_experiment_agent
+from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
+from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,55 +35,7 @@ logger = logging.getLogger(__name__)
 _READY_STAGES = {"diagnosis", "mitigation"}
 
 
-def _pid_is_alive(pid: int) -> bool:
-    """Check whether a process with the given PID is running."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ProcessLookupError):
-        return False
-
-
-def _ensure_kb_worker(kb_dir: Path, model_id: str) -> None:
-    """Spawn a detached KB worker if one is not already running.
-
-    Uses a file lock to prevent race conditions when multiple driver
-    processes start simultaneously.
-    """
-    lock_path = kb_dir / "kb_worker.lock"
-    pid_path = kb_dir / "kb_worker.pid"
-
-    with FileLock(lock_path, timeout=10):
-        if pid_path.exists():
-            try:
-                pid = int(pid_path.read_text().strip())
-            except (ValueError, OSError):
-                pid = -1
-            if _pid_is_alive(pid):
-                logger.info("KB worker already running (pid=%d)", pid)
-                return
-            logger.info("Stale KB worker PID file (pid=%d), respawning.", pid)
-            pid_path.unlink(missing_ok=True)
-
-        log_path = kb_dir / "kb_worker.log"
-        log_file = open(log_path, "a")  # noqa: SIM115
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "sregym_agents.crucible.kb_worker",
-                "--kb-dir",
-                str(kb_dir),
-            ],
-            start_new_session=True,
-            stdout=log_file,
-            stderr=log_file,
-        )
-        pid_path.write_text(str(proc.pid))
-        logger.info("Spawned KB worker (pid=%d), log at %s", proc.pid, log_path)
-
-
-def _load_crucible_config() -> tuple[dict, str]:
+def _load_crucible_config() -> tuple[dict[str, Any], str]:
     """Load crucible agent config and return (config_dict, source).
 
     Reads from SREGYM_EXPERIMENT_AGENT_CONFIG env var (set by the centralized
@@ -127,7 +79,7 @@ def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
     raise TimeoutError(f"Conductor did not reach ready stage within {timeout}s")
 
 
-def _get_app_info(api_base: str) -> dict:
+def _get_app_info(api_base: str) -> dict[str, Any]:
     resp = request_with_retry("GET", f"{api_base}/get_app", timeout=10)
     return resp.json()
 
@@ -142,10 +94,10 @@ def _get_planned_stages(api_base: str) -> list[str]:
     return resp.json().get("stages", [])
 
 
-def _save_results(logs_dir: Path, problem_id: str, usage_metrics: dict) -> None:
+def _save_results(logs_dir: Path, problem_id: str, usage_metrics: dict[str, Any]) -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_file = logs_dir / f"crucible_results_{problem_id}_{timestamp}.json"
-    results = {
+    results: dict[str, Any] = {
         "problem_id": problem_id,
         "timestamp": timestamp,
         "usage_metrics": usage_metrics,
@@ -221,34 +173,14 @@ async def _async_main(args: argparse.Namespace) -> None:
     logger.info("Crucible driver starting...")
 
     crucible_cfg, config_source = _load_crucible_config()
-    agent_cfg = crucible_cfg.get("agent", {})
+    agent_cfg: dict[str, Any] = crucible_cfg.get("agent", {})
     logger.info(f"Effective agent config (source={config_source}): {agent_cfg}")
-    prompt_version = args.prompt_version or agent_cfg.get("prompt_version")
-    if not prompt_version:
-        logger.error(
-            "prompt_version is required. Set it in [agent.crucible] config "
-            "or pass --prompt-version on the command line."
-        )
+    try:
+        crucible_config = crucible_config_from_experiment_agent(agent_cfg, cli_args=args)
+    except ValueError as e:
+        logger.error("%s", e)
         sys.exit(1)
-    renderer = PromptRenderer(prompt_version)
-
-    enable_judge = agent_cfg.get("enable_judge", True)
-    if args.no_judge:
-        enable_judge = False
-    flags = CrucibleFlags(
-        enable_judge=enable_judge,
-        enable_ltm_retrieval=agent_cfg.get("enable_ltm_retrieval", False),
-        include_benchmark_results=agent_cfg.get("include_benchmark_results", False),
-        enable_heuristic_refinement=agent_cfg.get("enable_heuristic_refinement", True),
-        include_incident_files=agent_cfg.get("include_incident_files", True),
-    )
-    config = CrucibleConfig(
-        prompt_version=prompt_version,
-        max_diagnosis_iterations=agent_cfg.get("max_diagnosis_iterations", 5),
-        max_mitigation_iterations=agent_cfg.get("max_mitigation_iterations", 5),
-        wait_stage_timeout=agent_cfg.get("wait_stage_timeout", 300),
-        stage_timeout=agent_cfg.get("stage_timeout", 900),
-    )
+    renderer = PromptRenderer(crucible_config.prompt_version)
 
     api_base = _get_api_base()
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
@@ -263,7 +195,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         logger.info(f"Working directory: {os.getcwd()}")
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
-    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} flags={flags} config={config}")
+    logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} crucible_config={crucible_config}")
 
     _wait_for_stage(api_base, timeout=300)
 
@@ -286,13 +218,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         trajectory_path = Path(f"trajectory_{problem_id}_{_run_uid}.jsonl")
 
     kb: KnowledgeBase | None = None
-    lt_summary_file: Path | None = None
-    lessons_file: Path | None = None
-    architecture_file: Path | None = None
-    incidents_dir: Path | None = None
-    diagnosis_heuristics_file: Path | None = None
-    triage_heuristics_file: Path | None = None
-    arbitration_heuristics_file: Path | None = None
+    injected_kb: InjectedKB | None = None
 
     if args.kb_dir:
         model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
@@ -301,26 +227,25 @@ async def _async_main(args: argparse.Namespace) -> None:
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
         kb = create_knowledge_base(
             kb_type=kb_type,
-            shared_files=[diagnosis_shared_file, mitigation_shared_file],
             kb_dir=Path(args.kb_dir),
             model_id=model_id,
             app_name=app_info.get("app_name", "unknown"),
             seed_kb_dir=seed_kb_dir,
-            flags=flags,
+            config=crucible_config,
             renderer=renderer,
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env or "."))
-            lt_summary_file = injected.summary
-            lessons_file = injected.lessons
-            architecture_file = injected.architecture
-            incidents_dir = injected.incidents_dir
-            if agent_cfg.get("inject_heuristics", True):
-                diagnosis_heuristics_file = injected.diagnosis_heuristics
-                triage_heuristics_file = injected.triage_heuristics
-                arbitration_heuristics_file = injected.arbitration_heuristics
+            if agent_cfg.get("inject_priors", agent_cfg.get("inject_heuristics", True)):
+                injected_kb = injected
             else:
-                logger.info("Heuristic injection disabled by inject_heuristics=false")
+                logger.info("Prior injection disabled by inject_priors=false")
+                injected_kb = InjectedKB(
+                    summary=injected.summary,
+                    lessons=injected.lessons,
+                    architecture=injected.architecture,
+                    incidents_dir=injected.incidents_dir,
+                )
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
@@ -333,20 +258,14 @@ async def _async_main(args: argparse.Namespace) -> None:
         planned_stages=planned_stages,
         submit_mcp_url=submit_mcp_url,
         renderer=renderer,
-        lt_summary_file=lt_summary_file,
-        lessons_file=lessons_file,
-        architecture_file=architecture_file,
-        incidents_dir=incidents_dir,
+        injected_kb=injected_kb,
         trajectory_path=trajectory_path,
-        flags=flags,
-        config=config,
-        diagnosis_heuristics_file=diagnosis_heuristics_file,
-        triage_heuristics_file=triage_heuristics_file,
-        arbitration_heuristics_file=arbitration_heuristics_file,
+        crucible_config=crucible_config,
     )
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
+    recovery_reflection = usage_metrics.get("recovery_reflection")
 
     if args.logs_dir:
         assert logs_dir is not None
@@ -373,43 +292,47 @@ async def _async_main(args: argparse.Namespace) -> None:
             logger.info(f"Saved stage outputs to {dest}")
 
         # Collect paths to session markdown copies already saved above
-        session_files: list[str] = []
+        session_files_task: dict[str, str | None] | None = None
         if env_log_file:
             stem = Path(env_log_file).stem
-            for suffix in ["diagnosis", "mitigation"]:
-                p = Path(env_log_file).with_name(f"{stem}_{problem_id}_{suffix}.md")
-                if p.exists():
-                    session_files.append(str(p))
+            diag_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_diagnosis.md")
+            mit_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_mitigation.md")
+            if diag_p.exists():
+                session_files_task = {
+                    "diagnosis": str(diag_p),
+                    "mitigation": str(mit_p) if mit_p.exists() else None,
+                }
 
-        if session_files:
-            manifest = {
-                "session_files": session_files,
+        if session_files_task:
+            task_payload: dict[str, Any] = {
+                "session_files": session_files_task,
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
                 "model_id": args.kb_model or os.environ.get("MODEL_ID", args.model),
                 "app_name": app_info.get("app_name", "unknown"),
-                "include_benchmark_results": flags.include_benchmark_results,
-                "enable_heuristic_refinement": flags.enable_heuristic_refinement,
-                "include_incident_files": flags.include_incident_files,
+                "include_benchmark_results": crucible_config.include_benchmark_results,
+                "enable_reflection": crucible_config.enable_reflection,
+                "recovery_phase2_enabled": crucible_config.recovery_phase2_enabled,
+                "include_incident_files": crucible_config.include_incident_files,
+                "per_app": crucible_config.per_app,
                 "problem_id": problem_id,
-                "prompt_version": config.prompt_version,
+                "prompt_version": crucible_config.prompt_version,
+                "recovery_reflection": recovery_reflection,
                 "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
             }
-            pending_dir = Path(args.kb_dir) / "pending"
-            pending_dir.mkdir(parents=True, exist_ok=True)
-            manifest_path = pending_dir / f"{manifest['timestamp']}_{problem_id}.json"
-            manifest_path.write_text(json.dumps(manifest, indent=2))
-            logger.info(f"KB update manifest written to {manifest_path}")
+            task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)
+            logger.info(f"KB update task written to {task_path}")
 
-            _ensure_kb_worker(
-                Path(args.kb_dir),
-                manifest["model_id"],
-            )
+            ensure_kb_worker(Path(args.kb_dir))
         else:
             # Standalone mode (no SREGYM_LOG_FILE) — run KB update inline
             logger.info("Knowledge base: updating inline (no sregym harness detected).")
-            await kb.update(stage_outputs_file=stage_outputs_file)
+            await kb.update(
+                SessionFiles(diagnosis=diagnosis_shared_file, mitigation=mitigation_shared_file),
+                stage_outputs_file=stage_outputs_file,
+                recovery_reflection=recovery_reflection,
+            )
 
     logger.info("Crucible driver complete.")
 

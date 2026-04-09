@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.models import Model
 
 from libs.agent_mw import (
     FixedPathProvider,
@@ -24,8 +25,7 @@ from libs.agent_mw import (
     TurnLoggingMiddleware,
     arun_with_retry,
 )
-from libs.pydantic_agent import thinking_settings
-from libs.pydantic_agent._base import BaseAgent
+from libs.pydantic_agent import AgentMiddleware, BaseAgent, thinking_settings
 from sregym_agents.crucible.tools import (
     MAX_OUTPUT_TOKENS,
     THINKING_BUDGET,
@@ -53,21 +53,22 @@ _CONTEXT_WINDOWS: dict[str, int] = {
 }
 
 
-def _context_window_for(model: str) -> int:
+def _context_window_for(model: str | Model) -> int:
+    name = model.model_name if isinstance(model, Model) else model
     for prefix, window in _CONTEXT_WINDOWS.items():
-        if prefix in model:
+        if prefix in name:
             return window
     return 128_000
 
 
-async def _compact_messages(model: str, messages: list) -> tuple[str, dict]:
+async def _compact_messages(model: str | Model, messages: list[Any]) -> tuple[str, dict[str, int]]:
     """Summarize message history for context compaction. Returns (summary, usage)."""
     import json
 
-    to_summarize = messages[1:] if len(messages) > 1 else messages
+    to_summarize: list[Any] = messages[1:] if len(messages) > 1 else messages
     try:
         raw = json.loads(ModelMessagesTypeAdapter.dump_json(to_summarize))
-        parts = []
+        parts: list[str] = []
         for msg in raw:
             kind = msg.get("kind", "unknown")
             for part in msg.get("parts", []):
@@ -103,13 +104,13 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
 
     def __init__(
         self,
-        model: str,
+        model: Model,
         deps: SREDeps,
         trajectory_path: Path | None = None,
         step_limit: int | None = 500,
         system_prompt_override: str | None = None,
     ) -> None:
-        mw = [
+        mw: list[AgentMiddleware] = [
             TurnLoggingMiddleware(),
             RetryMiddleware(),
             ThinkingRepetitionMiddleware(),
@@ -127,6 +128,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
         )
         self._model = model
         self._system_prompt_override = system_prompt_override
+        self.last_run_messages: list[Any] = []
         self._agent: Agent[SREDeps, SRESubmission] = self._build_agent(
             model,
             deps_type=SREDeps,
@@ -140,19 +142,17 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 str_replace_file,
                 *([] if deps.stage == "mitigation" else [triage_cluster]),
                 search_prior_incidents if deps.stage == "diagnosis" else search_prior_mitigations,
-                # Non-KB diagnosis: self-check tool to verify hypothesis covers all triage anomalies.
-                # KB-injected agents get this from CandidateVerification.unexplained_anomalies instead.
-                *([check_hypothesis_coverage] if deps.stage == "diagnosis" and deps.lt_summary_file is None else []),
+                *([] if deps.stage == "mitigation" else [check_hypothesis_coverage]),
             ],
         )
 
         @self._agent.instructions
-        def _system(ctx) -> str:
+        def _system(ctx: RunContext[SREDeps]) -> str:  # pyright: ignore[reportUnusedFunction]
             if self._system_prompt_override:
                 return self._system_prompt_override
             return ctx.deps.renderer.render(f"{ctx.deps.stage}_agent_system")
 
-    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict]:
+    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict[str, int]]:
         """Run with context compaction. Returns (output, usage)."""
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
         context_window = _context_window_for(self._model)
@@ -176,6 +176,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             usage["output_tokens"] += output_tokens
 
             output = result.output
+            self.last_run_messages = list(result.all_messages())
             self.deps.state.submitted = True
             self.deps.state.answer = output.answer
             self.deps.state.answer_justification = output.justification
@@ -196,9 +197,10 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             except Exception as e:
                 logger.warning(f"Error writing to shared file: {e}")
 
-            if input_tokens > self.CONTEXT_COMPACT_THRESHOLD * context_window:
+            last_token_count = self.context_window_token_usage
+            if last_token_count > self.CONTEXT_COMPACT_THRESHOLD * context_window:
                 logger.warning(
-                    f"Context approaching limit ({input_tokens} > "
+                    f"Context approaching limit ({last_token_count} > "
                     f"{self.CONTEXT_COMPACT_THRESHOLD * context_window:.0f}). Compacting..."
                 )
                 summary, compact_usage = await _compact_messages(self._model, result.all_messages())

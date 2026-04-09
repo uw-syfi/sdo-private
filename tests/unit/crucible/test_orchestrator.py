@@ -312,18 +312,21 @@ class TestHypothesisTextPassedToJudgeDeps:
         ):
             import asyncio
 
-            from sregym_agents.crucible.orchestrator import CrucibleFlags, _run_stage_loop
+            from pydantic_ai.models import infer_model
+
+            from sregym_agents.crucible.config import CrucibleConfig
+            from sregym_agents.crucible.orchestrator import _run_stage_loop
 
             asyncio.run(
                 _run_stage_loop(
-                    model="test-model",
+                    model=infer_model("test"),
                     app_info={"app_name": "myapp", "namespace": "default"},
                     stage="diagnosis",
                     max_iters=3,
                     shared_file=shared,
                     submit_mcp_url="http://localhost:9954/submit/sse",
                     renderer=mock_renderer,
-                    flags=CrucibleFlags(enable_judge=True),
+                    crucible_config=CrucibleConfig(enable_judge=True),
                 )
             )
 
@@ -365,3 +368,83 @@ class TestRenderLtSummaryContent:
     def test_content_includes_summary_block(self):
         for rendered in self._render_both("disk full on node-3"):
             assert "disk full on node-3" in rendered
+
+
+# ---------------------------------------------------------------------------
+# _run_stage_loop — transient ModelHTTPError handling
+# ---------------------------------------------------------------------------
+
+
+class TestStageLoopModelHTTPError:
+    """When an agent raises ModelHTTPError after retries, the iteration should
+    be skipped rather than crashing the entire orchestrator."""
+
+    def test_sre_agent_http_error_skips_iteration(self, tmp_path: Path):
+        from pydantic_ai.exceptions import ModelHTTPError
+
+        shared_path = tmp_path / "session.md"
+        shared_path.write_text("# Session\n")
+        shared = SharedFile(shared_path)
+
+        call_count = 0
+
+        def fake_sre_constructor(model, deps, trajectory_path=None, system_prompt_override=None):
+            mock = MagicMock()
+
+            def fake_run(prompt, run_ctx=None):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ModelHTTPError(status_code=429, model_name="test", body="rate limited")
+                deps.state.answer = "disk full"
+                deps.state.answer_justification = "100% usage"
+                deps.state.submitted = True
+                return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+
+            mock.arun = AsyncMock(side_effect=fake_run)
+            return mock
+
+        def fake_judge_constructor(model, deps, trajectory_path=None):
+            mock = MagicMock()
+
+            def fake_run(prompt, run_ctx=None):
+                deps.state.verdict = "APPROVED"
+                deps.state.submitted = True
+                return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+
+            mock.arun = AsyncMock(side_effect=fake_run)
+            return mock
+
+        mock_renderer = MagicMock(spec=PromptRenderer)
+        mock_renderer.render.return_value = "rendered"
+
+        with (
+            patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
+            patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
+        ):
+            import asyncio
+
+            from pydantic_ai.models import infer_model
+
+            from sregym_agents.crucible.config import CrucibleConfig
+            from sregym_agents.crucible.orchestrator import _run_stage_loop
+
+            result = asyncio.run(
+                _run_stage_loop(
+                    model=infer_model("test"),
+                    app_info={"app_name": "myapp", "namespace": "default"},
+                    stage="diagnosis",
+                    max_iters=3,
+                    shared_file=shared,
+                    submit_mcp_url="http://localhost:9954/submit/sse",
+                    renderer=mock_renderer,
+                    crucible_config=CrucibleConfig(enable_judge=True),
+                )
+            )
+
+        # First iteration failed (429), second succeeded — should still approve
+        assert result.approved
+        assert call_count == 2
+        content = shared_path.read_text()
+        assert "SRE Agent Error" in content
+        assert "HTTP 429" in content

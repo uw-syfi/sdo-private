@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import ModelRetry, RunContext
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import FixedPathProvider, RetryMiddleware, TrajectoryMiddleware, TurnLoggingMiddleware
+from libs.pydantic_agent import InlineAgent, thinking_settings
+from sregym_agents.crucible._prompts import (
+    PromptRenderer,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
+)
 from sregym_agents.crucible.tools._bash_tools import exec_bash_any, grep, read_file, str_replace_file, write_file
+from sregym_agents.crucible.tools._deps import (
+    SREDeps,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.tools._deps import SREDeps
+    from pydantic_ai.models import Model
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +32,9 @@ THINKING_BUDGET = 4096
 MAX_OUTPUT_TOKENS = 16_384
 VERIFICATION_THINKING_BUDGET = 2048
 COVERAGE_THINKING_BUDGET = 2048
+
+MAX_TRIAGE_AREAS = 12
+MAX_HINTS_PER_AREA = 10
 
 
 # ---------------------------------------------------------------------------
@@ -35,8 +45,7 @@ COVERAGE_THINKING_BUDGET = 2048
 class TriageAnomaly(BaseModel):
     category: str = Field(
         description="Anomaly category — use a short descriptive label "
-        "(e.g., 'Non-Running Pods', 'Port Mismatch', 'Services Without Endpoints', "
-        "'ConfigMap Anomalies', 'Recent Events'). "
+        "(e.g., 'Non-Running Pods')."
         "Use standard categories when they fit; create new ones for novel anomaly types."
     )
     resource_kind: str = Field(description="Kubernetes resource kind (e.g., Pod, Service, ConfigMap)")
@@ -45,12 +54,64 @@ class TriageAnomaly(BaseModel):
     observation: str = Field(description="Factual description of the anomaly — no interpretation")
 
 
+class TriageArea(BaseModel):
+    """One focus area for triage -- dispatched to a specialist subagent."""
+
+    name: str
+    hints: list[str]
+
+    @field_validator("hints")
+    @classmethod
+    def max_hints(cls, v: list[str]) -> list[str]:
+        if len(v) > MAX_HINTS_PER_AREA:
+            raise ValueError(f"Maximum {MAX_HINTS_PER_AREA} hints per area")
+        return v
+
+
+class TriagePriors(BaseModel):
+    """Top-level triage priors document."""
+
+    areas: list[TriageArea]
+
+    @field_validator("areas")
+    @classmethod
+    def max_areas(cls, v: list[TriageArea]) -> list[TriageArea]:
+        if len(v) > MAX_TRIAGE_AREAS:
+            raise ValueError(f"Maximum {MAX_TRIAGE_AREAS} triage areas")
+        return v
+
+
+class TriageCoordinatorReport(BaseModel):
+    cluster_snapshot: str
+    """Condensed kubectl output, passed to specialists (internal only)."""
+    base_anomalies: list[TriageAnomaly]
+    """User-facing symptoms found during smoke test."""
+
+
+class TriageSpecialistReport(BaseModel):
+    category: str
+    """The area name."""
+    healthy: bool
+    """True if no anomalies found in this area."""
+    assessment: str
+    """High-level summary of health in this area (1-2 sentences)."""
+    anomalies: list[TriageAnomaly]
+    """Empty if healthy=True."""
+
+
+class AreaAssessment(BaseModel):
+    category: str
+    """Area name, e.g., 'Network and DNS Connectivity'."""
+    assessment: str
+    """1-2 sentence summary of what's wrong in this area."""
+
+
 class TriageReport(BaseModel):
-    anomalies: list[TriageAnomaly] = Field(
+    anomalies: list[TriageAnomaly] = Field(  # pyright: ignore[reportUnknownVariableType]
         default_factory=list, description="All observed anomalies, each tagged with a category"
     )
-    raw_cluster_snapshot: str = Field(
-        default="", description="Condensed kubectl output for downstream agents to reference"
+    area_assessments: list[AreaAssessment] = Field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list
     )
 
 
@@ -113,7 +174,7 @@ class VerifiedDifferentialDiagnosis(BaseModel):
     verified_candidates: list[CandidateVerification] = Field(
         description="Verification results for each candidate, ordered by original rank"
     )
-    confirmed_candidates: list[CandidateVerification] = Field(
+    confirmed_candidates: list[CandidateVerification] = Field(  # pyright: ignore[reportUnknownVariableType]
         default_factory=list,
         description="Subset of verified_candidates where applies=True, for convenience",
     )
@@ -121,17 +182,37 @@ class VerifiedDifferentialDiagnosis(BaseModel):
     caveats: str = Field(default="", description="What doesn't match; what to verify before assuming patterns apply")
 
 
-class HypothesisCoverageVerdict(BaseModel):
-    """Result of checking whether a hypothesis explains all triage anomalies."""
+HypothesisCoverageVerdictLiteral = Literal["accept", "reject", "accept_partial"]
 
-    verdict: str = Field(description="'accept' if the hypothesis explains all anomalies, 'reject' otherwise")
+
+class HypothesisCoverageVerdict(BaseModel):
+    """Result of checking a hypothesis against triage (full, partial, or rejected)."""
+
+    verdict: HypothesisCoverageVerdictLiteral = Field(
+        description=(
+            "'accept' if every anomaly is explained or noise; "
+            "'accept_partial' if the hypothesis is sound for a scoped fault but some "
+            "anomalies are plausibly separate or out of scope; "
+            "'reject' if the hypothesis is wrong or incomplete for what it claims"
+        )
+    )
     explained_anomalies: list[str] = Field(
         default_factory=list,
         description="Triage anomalies that the hypothesis explains (including pre-existing noise)",
     )
     unexplained_anomalies: list[str] = Field(
         default_factory=list,
-        description="Triage anomalies that the hypothesis does NOT explain",
+        description=(
+            "Triage anomalies not explained by the hypothesis; may be non-empty when "
+            "verdict is accept_partial (residuals that do not invalidate the hypothesis)"
+        ),
+    )
+    residual_rationale: str = Field(
+        default="",
+        description=(
+            "When verdict is accept_partial: why listed unexplained anomalies do not "
+            "block accepting this hypothesis. Empty for accept/reject unless optional notes."
+        ),
     )
     reasoning: str = Field(description="Explanation of coverage assessment")
 
@@ -184,156 +265,33 @@ class MitigationSearchResult(BaseModel):
 
 def format_triage_report(report: TriageReport) -> str:
     """Convert a TriageReport to readable markdown."""
-    lines = ["### Triage Report"]
+    lines = ["# Triage Report\n"]
+    if report.area_assessments:
+        lines.append("## Area Assessments\n")
+        lines.extend(f"### {aa.category}\n{aa.assessment}\n" for aa in report.area_assessments)
+    lines.append("## Anomalies\n")
     if not report.anomalies:
-        lines.append("\nNo anomalies detected.")
-        return "\n".join(lines) + "\n"
-    # Group by category, preserving first-seen order.
-    grouped: dict[str, list[TriageAnomaly]] = {}
-    for a in report.anomalies:
-        grouped.setdefault(a.category, []).append(a)
-    for category, anomalies in grouped.items():
-        lines.append(f"\n**{category}**")
-        lines.extend(f"- `{a.resource_kind}/{a.resource_name}` ({a.namespace}): {a.observation}" for a in anomalies)
-    return "\n".join(lines) + "\n"
-
-
-async def _ltm_stream_handler(ctx: Any, events: Any) -> None:
-    from pydantic_ai.messages import (
-        FunctionToolCallEvent,
-        FunctionToolResultEvent,
-        PartEndEvent,
-        RetryPromptPart,
-        ThinkingPart,
-        ToolReturnPart,
+        lines.append("No anomalies detected.\n")
+        return "\n".join(lines)
+    lines.extend(
+        f"- **[{a.category}]** `{a.resource_kind}/{a.resource_name}` (ns: {a.namespace}): {a.observation}"
+        for a in report.anomalies
     )
-
-    from libs.agent_mw._turn_logger import _fmt_args, _tool_failed
-
-    async for event in events:
-        if isinstance(event, FunctionToolCallEvent):
-            logger.info("[ltm-search] → %s(%s)", event.part.tool_name, _fmt_args(event.part.args))
-        elif isinstance(event, FunctionToolResultEvent):
-            result = event.result
-            if isinstance(result, RetryPromptPart):
-                logger.warning(
-                    "[ltm-search] ✗ %s() failed: %s",
-                    result.tool_name or "unknown",
-                    result.model_response(),
-                )
-            elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
-                logger.warning(
-                    "[ltm-search] ✗ %s() exited with code %s: %s",
-                    result.tool_name,
-                    result.content.get("exit_code", "?"),
-                    result.content.get("stderr", ""),
-                )
-        elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart) and event.part.has_content():
-            logger.info("[ltm-search] <thinking> %s", event.part.content)
+    return "\n".join(lines)
 
 
-def _make_verify_stream_handler(idx: int):
-    """Create a stream handler that logs with [ltm-verify-{idx}] prefix."""
-    prefix = f"[ltm-verify-{idx}]"
-
-    async def _handler(ctx: Any, events: Any) -> None:
-        from pydantic_ai.messages import (
-            FunctionToolCallEvent,
-            FunctionToolResultEvent,
-            PartEndEvent,
-            RetryPromptPart,
-            ThinkingPart,
-            ToolReturnPart,
-        )
-
-        from libs.agent_mw._turn_logger import _fmt_args, _tool_failed
-
-        async for event in events:
-            if isinstance(event, FunctionToolCallEvent):
-                logger.info("%s → %s(%s)", prefix, event.part.tool_name, _fmt_args(event.part.args))
-            elif isinstance(event, FunctionToolResultEvent):
-                result = event.result
-                if isinstance(result, RetryPromptPart):
-                    logger.warning(
-                        "%s ✗ %s() failed: %s",
-                        prefix,
-                        result.tool_name or "unknown",
-                        result.model_response(),
-                    )
-                elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
-                    logger.warning(
-                        "%s ✗ %s() exited with code %s: %s",
-                        prefix,
-                        result.tool_name,
-                        result.content.get("exit_code", "?"),
-                        result.content.get("stderr", ""),
-                    )
-            elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart) and event.part.has_content():
-                logger.info("%s <thinking> %s", prefix, event.part.content)
-
-    return _handler
+def load_triage_priors(path: Path) -> TriagePriors:
+    """Load and validate triage priors from YAML."""
+    raw = yaml.safe_load(path.read_text())
+    return TriagePriors.model_validate(raw)
 
 
-async def _triage_stream_handler(ctx: Any, events: Any) -> None:
-    """Stream handler that logs triage subagent events with [triage] prefix."""
-    from pydantic_ai.messages import (
-        FunctionToolCallEvent,
-        FunctionToolResultEvent,
-        PartEndEvent,
-        RetryPromptPart,
-        ThinkingPart,
-        ToolReturnPart,
-    )
-
-    from libs.agent_mw._turn_logger import _fmt_args, _tool_failed
-
-    async for event in events:
-        if isinstance(event, FunctionToolCallEvent):
-            logger.info("[triage] → %s(%s)", event.part.tool_name, _fmt_args(event.part.args))
-        elif isinstance(event, FunctionToolResultEvent):
-            result = event.result
-            if isinstance(result, RetryPromptPart):
-                logger.warning(
-                    "[triage] ✗ %s() failed: %s",
-                    result.tool_name or "unknown",
-                    result.model_response(),
-                )
-            elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
-                logger.warning(
-                    "[triage] ✗ %s() exited with code %s: %s",
-                    result.tool_name,
-                    result.content.get("exit_code", "?"),
-                    result.content.get("stderr", ""),
-                )
-        elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart) and event.part.has_content():
-            logger.info("[triage] <thinking> %s", event.part.content)
-
-
-def _write_trajectory_record(
-    trajectory_path: Path,
-    agent_name: str,
-    result: Any,
-    run_ctx: dict[str, Any] | None = None,
-) -> None:
-    """Write a single trajectory record for an inline agent run (same format as TrajectoryMiddleware)."""
-    from datetime import datetime
-
-    from pydantic_ai.messages import ModelMessagesTypeAdapter
-
-    u = result.usage()
-    record = {
-        "agent_name": agent_name,
-        "timestamp": datetime.now().isoformat(),
-        "run_ctx": run_ctx,
-        "messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json"),
-        "usage": {
-            "input_tokens": u.input_tokens or 0,
-            "output_tokens": u.output_tokens or 0,
-        },
-    }
-    trajectory_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(trajectory_path, "a") as f:
-        f.write(json.dumps(record) + "\n")
+def _subagent_middleware(trajectory_path: Path | None = None) -> list[Any]:
+    """Standard middleware stack for inline subagents."""
+    mw: list[Any] = [TurnLoggingMiddleware(), RetryMiddleware()]
+    if trajectory_path is not None:
+        mw.append(TrajectoryMiddleware(FixedPathProvider(trajectory_path)))
+    return mw
 
 
 async def _run_verification_phase(
@@ -342,16 +300,13 @@ async def _run_verification_phase(
     observed_symptoms: str,
     namespace: str,
     stage: str,
-    model_id: str,
+    model_id: Model | str,
     renderer: PromptRenderer,
     trajectory_path: Path | None = None,
     triage_report: TriageReport | None = None,
+    verification_guidance: str = "",
 ) -> VerifiedDifferentialDiagnosis:
     """Spawn one verification subagent per candidate in parallel and return aggregated results."""
-    from pydantic_ai import Agent
-
-    from libs.pydantic_agent import thinking_settings
-
     triage_context = ""
     if triage_report is not None:
         triage_context = format_triage_report(triage_report)
@@ -368,34 +323,28 @@ async def _run_verification_phase(
             root_cause=candidate.root_cause,
             distinguishing_check=candidate.distinguishing_check,
             mitigation_hint=candidate.mitigation_hint,
+            verification_guidance=verification_guidance,
         )
         logger.info("[ltm-verify-%d] PROMPT:\n%s", idx, prompt)
 
-        verify_agent: Agent[None, CandidateVerification] = Agent(
+        verify_agent = InlineAgent(
             model_id,
+            agent_name=f"ltm-verify-{idx}",
             output_type=CandidateVerification,
             tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
             model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
+            middleware=_subagent_middleware(trajectory_path),
         )
         try:
-            result = await arun_with_retry(
-                verify_agent,
+            result = await verify_agent.arun(
                 prompt,
-                event_stream_handler=_make_verify_stream_handler(idx),
+                run_ctx={"stage": stage, "role": "ltm-verify", "candidate_index": idx},
             )
             output = result.output
             # Ensure echoed fields match the candidate
             output.candidate_index = idx
             output.root_cause_class = candidate.root_cause_class
             output.root_cause = candidate.root_cause
-
-            if trajectory_path is not None:
-                _write_trajectory_record(
-                    trajectory_path,
-                    f"ltm-verify-{idx}",
-                    result,
-                    run_ctx={"stage": stage, "role": "ltm-verify", "candidate_index": idx},
-                )
 
             logger.info(
                 "[ltm-verify-%d] done: applies=%s, reasoning=%s",
@@ -433,6 +382,16 @@ async def _run_verification_phase(
 # ---------------------------------------------------------------------------
 
 
+SPECIALIST_THINKING_BUDGET = 1024
+
+
+def _slugify(name: str) -> str:
+    """Convert area name to a safe agent-name slug."""
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
+
+
 async def triage_cluster(
     ctx: RunContext[SREDeps],
 ) -> str:
@@ -443,30 +402,26 @@ async def triage_cluster(
     endpoints, misconfigurations, etc.). Pass the output to search_prior_incidents
     as part of your observed_symptoms.
     """
-    from pydantic_ai import Agent
-
-    from libs.pydantic_agent import thinking_settings
-
     model_id = ctx.deps.ltm_model_id
     if not model_id:
         return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
 
-    prompt = ctx.deps.renderer.render(
-        "triage_cluster",
-        namespace=ctx.deps.namespace,
-        triage_guidance=ctx.deps.triage_guidance,
-    )
-    logger.info("[triage-cluster] PROMPT:\n%s", prompt)
+    namespace = ctx.deps.namespace
+    renderer = ctx.deps.renderer
+    trajectory_path = ctx.deps.trajectory_path
 
-    triage_agent: Agent[None, TriageReport] = Agent(
+    # Phase 1: Coordinator — smoke test only
+    coordinator = InlineAgent(
         model_id,
-        output_type=TriageReport,
+        agent_name="triage-coordinator",
+        output_type=TriageCoordinatorReport,
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(model_id, THINKING_BUDGET),
+        middleware=_subagent_middleware(trajectory_path),
     )
 
-    @triage_agent.output_validator
-    def _require_tool_calls(ctx: RunContext[None], report: TriageReport) -> TriageReport:
+    @coordinator.agent.output_validator
+    def _require_tool_calls(ctx: RunContext[None], report: TriageCoordinatorReport) -> TriageCoordinatorReport:  # pyright: ignore[reportUnusedFunction]
         from pydantic_ai.messages import ToolCallPart
 
         has_calls = any(isinstance(part, ToolCallPart) for msg in ctx.messages for part in msg.parts)
@@ -478,50 +433,124 @@ async def triage_cluster(
             )
         return report
 
+    coordinator_prompt = renderer.render(
+        "triage_coordinator",
+        namespace=namespace,
+    )
+    logger.info("[triage-coordinator] PROMPT:\n%s", coordinator_prompt)
+
     try:
-        result = await arun_with_retry(
-            triage_agent,
-            prompt,
-            event_stream_handler=_triage_stream_handler,
+        coord_result = await coordinator.arun(
+            coordinator_prompt,
+            run_ctx={"stage": ctx.deps.stage, "role": "triage-coordinator"},
         )
-        report = result.output
+        coord_report = coord_result.output
+    except Exception as e:
+        logger.warning("[triage-coordinator] failed: %s", e)
+        return f"Triage failed with error: {e}. Proceed with manual investigation."
+
+    # Phase 2: Check triage priors
+    priors = ctx.deps.triage_priors
+
+    if not priors or not priors.areas:
+        # No priors yet — return coordinator results as-is
+        report = TriageReport(anomalies=list(coord_report.base_anomalies))
         ctx.deps.triage_report = report
-
-        if ctx.deps.trajectory_path is not None:
-            _write_trajectory_record(
-                ctx.deps.trajectory_path,
-                "triage",
-                result,
-                run_ctx={"stage": ctx.deps.stage, "role": "triage"},
-            )
-
         formatted = format_triage_report(report)
-        logger.info("[triage] done: %s", formatted)
+        logger.info("[triage] done (no priors): %s", formatted)
         if ctx.deps.stage_outputs_file:
             with open(ctx.deps.stage_outputs_file, "a") as f:
                 f.write(f"\n## Triage Report\n{formatted}\n")
         return formatted
-    except Exception as e:
-        logger.warning("[triage] failed: %s", e)
-        return f"Triage failed with error: {e}. Proceed with manual investigation."
+
+    # Phase 3: Parallel specialist subagents
+    async def _run_specialist(area: TriageArea) -> TriageSpecialistReport:
+        hints_text = "\n".join(f"- {h}" for h in area.hints)
+        prompt = renderer.render(
+            "triage_specialist",
+            namespace=namespace,
+            category=area.name,
+            hints=hints_text,
+            cluster_snapshot=coord_report.cluster_snapshot,
+        )
+        slug = _slugify(area.name)
+        logger.info("[triage-%s] PROMPT:\n%s", slug, prompt)
+        agent = InlineAgent(
+            model_id,
+            agent_name=f"triage-{slug}",
+            output_type=TriageSpecialistReport,
+            tools=[read_file, exec_bash_any, grep, write_file],
+            model_settings=thinking_settings(model_id, SPECIALIST_THINKING_BUDGET),
+            middleware=_subagent_middleware(trajectory_path),
+        )
+        result = await agent.arun(
+            prompt,
+            run_ctx={"stage": ctx.deps.stage, "role": f"triage-{slug}"},
+        )
+        return result.output
+
+    sem = asyncio.Semaphore(6)
+
+    async def _run_specialist_limited(area: TriageArea) -> TriageSpecialistReport:
+        async with sem:
+            try:
+                return await _run_specialist(area)
+            except Exception as e:
+                logger.warning("[triage-%s] failed: %s", _slugify(area.name), e)
+                return TriageSpecialistReport(
+                    category=area.name,
+                    healthy=True,
+                    assessment=f"Specialist failed with error: {e}",
+                    anomalies=[],
+                )
+
+    specialist_results = await asyncio.gather(
+        *[_run_specialist_limited(area) for area in priors.areas],
+    )
+
+    # Phase 4: Merge — only include unhealthy areas
+    unhealthy = [spec for spec in specialist_results if not spec.healthy]
+
+    all_anomalies = list(coord_report.base_anomalies)
+    for spec in unhealthy:
+        all_anomalies.extend(spec.anomalies)
+
+    # Deduplicate
+    seen: set[tuple[str, str, str, str]] = set()
+    deduped: list[TriageAnomaly] = []
+    for a in all_anomalies:
+        key = (a.resource_kind, a.resource_name, a.namespace, a.observation[:80])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(a)
+
+    report = TriageReport(
+        anomalies=deduped,
+        area_assessments=[AreaAssessment(category=spec.category, assessment=spec.assessment) for spec in unhealthy],
+    )
+    ctx.deps.triage_report = report
+    formatted = format_triage_report(report)
+    logger.info("[triage] done: %s", formatted)
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## Triage Report\n{formatted}\n")
+    return formatted
 
 
 async def check_hypothesis_coverage(
     ctx: RunContext[SREDeps],
     hypothesis: str,
 ) -> str:
-    """Check whether your hypothesis explains ALL anomalies in the triage report.
+    """Cross-check your hypothesis against the triage report (multi-fault aware).
 
     Call this BEFORE submitting your diagnosis. Pass your proposed root cause
-    (including the specific resource, misconfigured field, and causal chain).
-    Returns accept/reject with reasoning about which triage anomalies are
-    unexplained. If rejected, revise your hypothesis to account for the
-    unexplained anomalies before submitting.
+    (resource, misconfigured field, causal chain). Returns structured JSON:
+    `accept` when every anomaly is explained or noise; `accept_partial` when the
+    hypothesis is sound for a scoped fault but some triage lines are plausibly
+    separate faults or out of scope (see `residual_rationale`); `reject` when the
+    hypothesis is wrong or incomplete for what it claims. If rejected, revise or
+    narrow scope before resubmitting.
     """
-    from pydantic_ai import Agent
-
-    from libs.pydantic_agent import thinking_settings
-
     triage_report = ctx.deps.triage_report
     if triage_report is None:
         return "Error: no triage report available. Call triage_cluster first."
@@ -535,38 +564,32 @@ async def check_hypothesis_coverage(
         "check_hypothesis_coverage",
         triage_context=triage_context,
         hypothesis=hypothesis,
-        arbitration_guidance=ctx.deps.arbitration_guidance,
     )
     logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
 
-    coverage_agent: Agent[None, HypothesisCoverageVerdict] = Agent(
+    coverage_agent = InlineAgent(
         model_id,
+        agent_name="hypothesis-coverage",
         output_type=HypothesisCoverageVerdict,
         model_settings=thinking_settings(model_id, COVERAGE_THINKING_BUDGET),
+        middleware=_subagent_middleware(ctx.deps.trajectory_path),
     )
 
     try:
-        result = await arun_with_retry(coverage_agent, prompt)
+        result = await coverage_agent.arun(
+            prompt,
+            run_ctx={"stage": ctx.deps.stage, "role": "hypothesis-coverage"},
+        )
         output = result.output
-
-        if ctx.deps.trajectory_path is not None:
-            _write_trajectory_record(
-                ctx.deps.trajectory_path,
-                "hypothesis-coverage",
-                result,
-                run_ctx={"stage": ctx.deps.stage, "role": "hypothesis-coverage"},
-            )
 
         output_json = output.model_dump_json(indent=2)
         logger.info(
-            "[hypothesis-coverage] done: verdict=%s, unexplained=%s, reasoning=%s",
+            "[hypothesis-coverage] done: verdict=%s, unexplained=%s, residual_rationale=%s, reasoning=%s",
             output.verdict,
             output.unexplained_anomalies,
+            output.residual_rationale,
             output.reasoning,
         )
-        if ctx.deps.stage_outputs_file:
-            with open(ctx.deps.stage_outputs_file, "a") as f:
-                f.write(f"\n## Hypothesis Coverage Check\n{output_json}\n")
         return output_json
     except Exception as e:
         logger.warning("[hypothesis-coverage] failed: %s", e)
@@ -616,8 +639,6 @@ async def search_prior_incidents(
     if not ltm_model_id:
         return "Error: search_prior_incidents requires a model ID (ltm_model_id not set)."
 
-    from pydantic_ai import Agent
-
     triage_context = ""
     if ctx.deps.triage_report is not None:
         triage_context = format_triage_report(ctx.deps.triage_report)
@@ -632,17 +653,27 @@ async def search_prior_incidents(
     )
     logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
-    from libs.pydantic_agent import thinking_settings
-
-    retrieval_agent: Agent[None, DifferentialDiagnosis] = Agent(
+    retrieval_agent = InlineAgent(
         ltm_model_id,
+        agent_name="ltm-search",
         output_type=DifferentialDiagnosis,
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
+        middleware=_subagent_middleware(),
     )
-    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await retrieval_agent.arun(prompt)
     diagnosis = retrieval_result.output
-    logger.info("[ltm-search] retrieval output: %s", diagnosis.model_dump_json(indent=2))
+    retrieval_json = diagnosis.model_dump_json(indent=2)
+    logger.info("[ltm-search] retrieval output: %s", retrieval_json)
+
+    # Write retrieval candidates to stage outputs
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Retrieval Candidates\n**Query:** {observed_symptoms}\n\n")
+            if diagnosis.candidate_root_causes:
+                f.write(f"{retrieval_json}\n")
+            else:
+                f.write("No candidates found.\n")
 
     if not diagnosis.candidate_root_causes:
         verified = VerifiedDifferentialDiagnosis(
@@ -665,12 +696,15 @@ async def search_prior_incidents(
         renderer=ctx.deps.renderer,
         trajectory_path=ctx.deps.trajectory_path,
         triage_report=ctx.deps.triage_report,
+        verification_guidance=ctx.deps.verification_guidance,
     )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)
+
+    # Write verification results to stage outputs
     if ctx.deps.stage_outputs_file:
         with open(ctx.deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Retrieval Results\n{output_json}\n")
+            f.write(f"\n## KB Verification Results\n{output_json}\n")
     return output_json
 
 
@@ -713,8 +747,6 @@ async def search_prior_mitigations(
     if not ltm_model_id:
         return "Error: search_prior_mitigations requires a model ID (ltm_model_id not set)."
 
-    from pydantic_ai import Agent
-
     prompt = ctx.deps.renderer.render(
         "search_prior_mitigations",
         root_cause=root_cause,
@@ -724,16 +756,19 @@ async def search_prior_mitigations(
     )
     logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
 
-    from libs.pydantic_agent import thinking_settings
-
-    retrieval_agent: Agent[None, MitigationSearchResult] = Agent(
+    retrieval_agent = InlineAgent(
         ltm_model_id,
+        agent_name="ltm-mitigation",
         output_type=MitigationSearchResult,
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
+        middleware=_subagent_middleware(),
     )
-    retrieval_result = await arun_with_retry(retrieval_agent, prompt, event_stream_handler=_ltm_stream_handler)
+    retrieval_result = await retrieval_agent.arun(prompt)
     output = retrieval_result.output
     output_json = output.model_dump_json(indent=2)
     logger.info("[ltm-mitigation] output: %s", output_json)
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Mitigation Retrieval Results\n**Query:** {root_cause}\n\n{output_json}\n")
     return output_json
