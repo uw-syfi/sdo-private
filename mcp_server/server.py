@@ -79,5 +79,12 @@ def read_prometheus_metric(query: str = "up") -> str:
     except Exception as e:
         return f"Failed to query Prometheus: {str(e)}"
 
-if __name__ == "__main__":
+@mcp.tool()
+def hello() -> str:
+    return "hello world"
+
+def main():
     mcp.run()
+
+if __name__ == "__main__":
+    main()

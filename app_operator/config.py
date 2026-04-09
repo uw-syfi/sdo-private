@@ -478,10 +478,10 @@ class OperatorConfig:
     deployment_max_iters: int = 20
     agent_fix_timeout: int = 1800
     deploy_timeout: int = 900
-    agent_timeout: int = 300
+    agent_timeout: int = 900
     dynamic_observability_injection: bool = False
     remediation_max_retries: int = 3
-    #phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
+    phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
 
     def __post_init__(self):
         """Validate configuration values after initialization."""

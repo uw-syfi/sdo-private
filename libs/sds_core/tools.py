@@ -79,9 +79,13 @@ def _build_list_files(context: ToolContext) -> Callable[[str], dict[str, Any]]:
             # but FileSystemInterface doesn't have listdir.
             # However, app_operator/langgraph/tools.py uses target.iterdir().
             # RealFilesystem relies on Path.iterdir().
-            entries = sorted(
-                str(p.relative_to(context.repo_root)) for p in target.iterdir()
-            )
+            def _to_relative(p: Path) -> str:
+                try:
+                    return str(p.relative_to(context.repo_root))
+                except ValueError:
+                    return p.name
+
+            entries = sorted(_to_relative(p) for p in target.iterdir())
             result = "\n".join(entries)
             return {
                 "status": "success",
