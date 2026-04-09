@@ -26,7 +26,7 @@ except ModuleNotFoundError:
 from sregym_agents.experiment_config import (
     ExperimentConfig,
     RunnerEnv,
-    VariantConfig,
+    variant_config_from_raw,
 )
 
 # ---------------------------------------------------------------------------
@@ -162,13 +162,7 @@ def merge_stage_config(
     env_raw = merged.pop("env", {})
     agent_config = merged.pop("agent_config", {})
 
-    variants = VariantConfig(
-        enabled=variants_raw.get("enabled", False),
-        count=variants_raw.get("count", 0),
-        offset=variants_raw.get("offset", 0),
-        seed=variants_raw.get("seed", 42),
-        round_robin=variants_raw.get("round_robin", True),
-    )
+    variants = variant_config_from_raw(variants_raw)
 
     env = RunnerEnv(
         judge_model_id=env_raw.get("judge_model_id", ""),
