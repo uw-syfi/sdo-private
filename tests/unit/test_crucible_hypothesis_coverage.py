@@ -240,7 +240,7 @@ class TestCheckHypothesisCoverageSubagent:
         mock_arun = AsyncMock(side_effect=RuntimeError("model unavailable"))
 
         with (
-            patch("sregym_agents.crucible.tools._kb_tools.arun_with_retry", mock_arun),
+            patch("libs.pydantic_agent.InlineAgent.arun", mock_arun),
             patch.object(PromptRenderer, "render", return_value="rendered prompt"),
         ):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="some hypothesis"))

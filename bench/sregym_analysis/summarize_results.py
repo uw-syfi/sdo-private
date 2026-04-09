@@ -1220,7 +1220,7 @@ def plot_token_comparison_by_problem(
     if sort_by_name:
         data = sorted(data, key=lambda x: x[0])
     else:
-        data = sorted(data, key=lambda x: x[1] if x[1] else 0)
+        data = sorted(data, key=lambda x: x[1] or 0)
 
     pids = [d[0] for d in data]
     fig_height = max(6, len(pids) * 0.3)

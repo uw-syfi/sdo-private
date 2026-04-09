@@ -223,7 +223,7 @@ async def _run_stage_loop(
         if triage_priors_file:
             yaml_path = triage_priors_file.with_suffix(".yaml")
             if yaml_path.exists():
-                from sregym_agents.crucible.tools._kb_tools import load_triage_priors
+                from sregym_agents.crucible.tools import load_triage_priors
 
                 triage_priors = load_triage_priors(yaml_path)
             elif triage_priors_file.exists():
@@ -231,7 +231,7 @@ async def _run_stage_loop(
                 # so we read markdown content and build a single-area TriagePriors
                 import re as _re
 
-                from sregym_agents.crucible.tools._kb_tools import TriagePriors as _TP
+                from sregym_agents.crucible.tools import TriagePriors as _TP
 
                 content = triage_priors_file.read_text().strip()
                 if content:

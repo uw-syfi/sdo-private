@@ -379,7 +379,7 @@ class TestStageLoopModelHTTPError:
     """When an agent raises ModelHTTPError after retries, the iteration should
     be skipped rather than crashing the entire orchestrator."""
 
-    def test_sre_agent_http_error_skips_iteration(self, tmp_path: "Path"):
+    def test_sre_agent_http_error_skips_iteration(self, tmp_path: Path):
         from pydantic_ai.exceptions import ModelHTTPError
 
         shared_path = tmp_path / "session.md"

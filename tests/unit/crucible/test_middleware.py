@@ -150,7 +150,7 @@ class TestThinkingRepetitionMiddleware:
         mw._pending_nudge = None
         mw.on_part_end(_make_thinking_event("same thinking"))
         assert mw._force_submit is True
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])  # type: ignore[arg-type]
         )
         assert result == []
@@ -158,7 +158,7 @@ class TestThinkingRepetitionMiddleware:
     def test_no_force_submit_returns_tools_unchanged(self):
         mw = ThinkingRepetitionMiddleware()
         tools = [{"name": "exec_bash"}]
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mw.before_model_req_edit_tools(None, tools)  # type: ignore[arg-type]
         )
         assert result == tools
@@ -263,7 +263,7 @@ class TestStallDetectionMiddleware:
             for step in range(2, 20):
                 mw.before_model_req_edit_messages(_make_ctx(run_step=step), [])
         assert mw._force_submit is True
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])  # type: ignore[arg-type]
         )
         assert result == []
@@ -350,7 +350,7 @@ class TestTimeoutMiddleware:
             mw.before_model_req_edit_messages(_make_ctx(), [])  # reminder 1
             mw.before_model_req_edit_messages(_make_ctx(), [])  # force submit
         assert mw._force_submit is True
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mw.before_model_req_edit_tools(None, [{"name": "exec_bash"}])  # type: ignore[arg-type]
         )
         assert result == []
@@ -358,7 +358,7 @@ class TestTimeoutMiddleware:
     def test_no_force_submit_returns_tools_unchanged(self):
         mw = TimeoutMiddleware(timeout_seconds=3600)
         tools = [{"name": "exec_bash"}]
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mw.before_model_req_edit_tools(None, tools)  # type: ignore[arg-type]
         )
         assert result == tools

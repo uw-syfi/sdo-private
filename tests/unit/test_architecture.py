@@ -248,10 +248,10 @@ def test_all_does_not_export_private_names():
                     and isinstance(node.value, ast.List)
                 ):
                     continue
-                for elt in node.value.elts:
-                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value.startswith("_"):
-                        violations.append(
-                            f"  {init.relative_to(_REPO_ROOT)}:{elt.lineno}  '{elt.value}'  — private name in __all__"
-                        )
+                violations.extend(
+                    f"  {init.relative_to(_REPO_ROOT)}:{elt.lineno}  '{elt.value}'  — private name in __all__"
+                    for elt in node.value.elts
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value.startswith("_")
+                )
 
     assert not violations, f"{len(violations)} private-export violation(s) found:\n" + "\n".join(violations)
