@@ -8,7 +8,7 @@
 agent = "crucible"
 model = "google-vertex:gemini-2.5-flash"
 #model = "google_vertexai:gemini-2.5-flash"
-parallel = 4
+parallel = 1
 enable_summary = true
 no_inject_summary = false
 # repeat = 1
@@ -34,11 +34,26 @@ enabled = true
 count = 10
 offset = 0
 seed = 42
-# round_robin = true
+order = "grouped"  # one of: flat | round_robin | grouped | adaptive
+max_per_class = 10      # valid when order = "grouped" or "adaptive"
+# spec_names = ["liveness_probe_misconfiguration"]
+spec_names = ["service_dns_resolution_failure"]
+
+# Adaptive mode example (KB curation): keep feeding a class until the agent
+# reliably solves it, then advance.
+#
+# order = "adaptive"
+# spec_names = ["wrong_dns_policy"]
+# max_per_class = 20         # X: hard cap per class
+# consec_solves_to_stop = 3  # N: stop class after N consecutive full solves
+# seed = 42
+# # count = 50               # global cap: stop after 50 total problems (0 = no cap)
 
 [runner.env]
 judge_model_id = "vertex-ai-gemini-2.5-pro"
-crucible_seed_kb_dir = "/mnt/data/shli/sds/bench/sregym/logs/20260331_012038_crucible_no_kb/kb"
+#crucible_seed_kb_dir = "/mnt/data/shli/sds/bench/sregym/logs/20260331_012038_crucible_no_kb/kb"
+# crucible_seed_kb_dir = "/mnt/data/shli/sds/bench/sregym/logs/20260406_233420_crucible/kb"
+crucible_seed_kb_dir = ""
 worker_cpu_limit = "16"
 
 # Agent-specific config.
@@ -50,10 +65,14 @@ max_hypotheses = 3
 max_submissions = 3
 kb_type = "structured"
 include_benchmark_results = true
-enable_heuristic_refinement = false
+enable_reflection = true
 inject_heuristics = true
 include_incident_files = true
+per_app = false
 max_diagnosis_iterations = 3
 max_mitigation_iterations = 3
 wait_stage_timeout = 300
-
+enable_playbooks = true
+recovery_phase2_enabled = true
+enable_ltm_verified_direct_submit = true
+enable_playbook_shortcut = true
