@@ -53,6 +53,7 @@ class StageLoopResult:
     agent_reflection: str = ""
     recovery_reflection: RecoveryReflection | None = None
     stage_outputs_file: Path | None = None
+    confirmed_slugs: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 def _build_usage_metrics(
@@ -195,6 +196,7 @@ async def _direct_submit_confirmed(
     shared_file: SharedFile,
     submit_mcp_url: str,
     stage_outputs_file: Path | None,
+    confirmed_slugs: list[str] | None = None,
 ) -> StageLoopResult:
     """Direct-submission path triggered by ``LTMShortCircuit`` (diagnosis) or
     ``LTMMitigationShortCircuit`` (mitigation).
@@ -243,6 +245,7 @@ async def _direct_submit_confirmed(
         agent_justification=f"LTM verification short-circuit ({len(confirmed)} confirmed candidate(s))",
         agent_causal_chain="",
         stage_outputs_file=stage_outputs_file,
+        confirmed_slugs=confirmed_slugs or [],
     )
 
 
@@ -409,6 +412,7 @@ async def _run_stage_loop(
                 shared_file=shared_file,
                 submit_mcp_url=submit_mcp_url,
                 stage_outputs_file=stage_outputs_file,
+                confirmed_slugs=sig.confirmed_slugs,
             )
         except LTMMitigationShortCircuit as sig:
             # LTM mitigation phase successfully applied at least one strategy;
@@ -585,6 +589,101 @@ def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis")
         return data.get(key, {}).get("reasoning", "")
     except (json.JSONDecodeError, AttributeError):
         return ""
+
+
+def _extract_matched_candidate_index(benchmark_block: str) -> int | None:
+    """Extract ``matched_candidate_index`` from a benchmark oracle JSON.
+
+    Returns the 0-based index of the first passing candidate in the submitted
+    list, or ``None`` if the field is absent or the oracle cannot be parsed.
+    """
+    match = re.search(r"<oracle>\s*(.*?)\s*</oracle>", benchmark_block, re.DOTALL)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+        idx = data.get("Diagnosis", {}).get("matched_candidate_index")
+        return int(idx) if idx is not None else None
+    except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        return None
+
+
+async def _try_playbook_shortcut(
+    model: Model,
+    namespace: str,
+    slug: str,
+    mitigation_playbooks_dir: Path,
+    shared_file: SharedFile,
+    submit_mcp_url: str,
+    renderer: PromptRenderer,
+    usage_collector: UsageCollector,
+    trajectory_path: Path | None = None,
+) -> StageLoopResult | None:
+    """Try to execute a mitigation playbook directly, bypassing the SRE agent.
+
+    Loads the mitigation playbook for *slug*, runs it via a subagent, and on
+    success submits directly to the benchmark. Returns a ``StageLoopResult``
+    on success or ``None`` to signal fallback to the normal mitigation loop.
+    """
+    from sregym_agents.crucible.tools._kb_tools import (
+        load_mitigation_playbook_text,
+        run_single_mitigation_playbook,
+    )
+
+    playbook_text = load_mitigation_playbook_text(mitigation_playbooks_dir, slug)
+    if not playbook_text:
+        logger.info("[playbook-shortcut] No mitigation playbook found for slug=%r", slug)
+        shared_file.append(
+            f"\n### Playbook Shortcut (Mitigation)\n- Matched slug: {slug}\n- Outcome: No Playbook Found\n"
+        )
+        return None
+
+    # Resolve class_name from the playbook for the subagent prompt.
+    from sregym_agents.crucible.knowledge_base.mitigation_playbook import MitigationPlaybookStore
+
+    store = MitigationPlaybookStore(mitigation_playbooks_dir)
+    pb = store.load(slug)
+    root_cause_class = pb.class_name if pb else slug
+
+    try:
+        output = await run_single_mitigation_playbook(
+            playbook_text=playbook_text,
+            root_cause_class=root_cause_class,
+            namespace=namespace,
+            model_id=model,
+            renderer=renderer,
+            trajectory_path=trajectory_path,
+            usage_collector=usage_collector,
+            agent_name="playbook-shortcut",
+        )
+    except Exception as exc:
+        logger.warning("[playbook-shortcut] Subagent failed: %s", exc)
+        shared_file.append(
+            f"\n### Playbook Shortcut (Mitigation)\n"
+            f"- Matched slug: {slug}\n"
+            f"- Outcome: Subagent Error\n"
+            f"- Reason: {exc}\n"
+        )
+        return None
+
+    shared_file.append(
+        f"\n### Playbook Shortcut (Mitigation)\n"
+        f"- Matched slug: {slug}\n"
+        f"- Outcome: {'Applied' if output.applied else 'Not Applied'}\n"
+        + (f"- Summary: {output.mitigation_summary}\n" if output.applied else f"- Reason: {output.reasoning}\n")
+    )
+
+    if not output.applied:
+        return None
+
+    return await _direct_submit_confirmed(
+        confirmed=[output.mitigation_summary],
+        stage="mitigation",
+        iteration=0,
+        shared_file=shared_file,
+        submit_mcp_url=submit_mcp_url,
+        stage_outputs_file=None,
+    )
 
 
 async def _run_recovery_diagnosis(
@@ -1003,19 +1102,53 @@ async def run(
     logger.info("Waiting for benchmark to reach mitigation stage...")
     await _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
 
-    mit_result = await _run_stage_loop(
-        resolved_model,
-        app_info,
-        "mitigation",
-        max_mit_iters,
-        mitigation_sf,
-        submit_mcp_url,
-        renderer=renderer,
-        usage_collector=primary_collector,
-        injected_kb=injected_kb,
-        trajectory_path=trajectory_path,
-        crucible_config=crucible_config,
-    )
+    # Playbook shortcut: if the diagnosis matched a KB class with a slug and
+    # the benchmark confirmed the diagnosis, try the corresponding mitigation
+    # playbook directly before running the full SRE agent loop.
+    mit_result: StageLoopResult | None = None
+    if (
+        crucible_config.enable_playbook_shortcut
+        and diag_result.benchmark_block
+        and "success: True" in diag_result.benchmark_block
+        and diag_result.confirmed_slugs
+        and injected_kb
+        and injected_kb.mitigation_playbooks_dir
+    ):
+        idx = _extract_matched_candidate_index(diag_result.benchmark_block)
+        if idx is not None and 0 <= idx < len(diag_result.confirmed_slugs):
+            slug = diag_result.confirmed_slugs[idx]
+            if slug:
+                logger.info(
+                    "[playbook-shortcut] Attempting mitigation playbook for slug=%r (matched_candidate_index=%d)",
+                    slug,
+                    idx,
+                )
+                mit_result = await _try_playbook_shortcut(
+                    model=resolved_model,
+                    namespace=app_info.get("namespace", "default"),
+                    slug=slug,
+                    mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
+                    shared_file=mitigation_sf,
+                    submit_mcp_url=submit_mcp_url,
+                    renderer=renderer,
+                    usage_collector=primary_collector,
+                    trajectory_path=trajectory_path,
+                )
+
+    if mit_result is None:
+        mit_result = await _run_stage_loop(
+            resolved_model,
+            app_info,
+            "mitigation",
+            max_mit_iters,
+            mitigation_sf,
+            submit_mcp_url,
+            renderer=renderer,
+            usage_collector=primary_collector,
+            injected_kb=injected_kb,
+            trajectory_path=trajectory_path,
+            crucible_config=crucible_config,
+        )
     _append_stage_outcome(mit_result, "Mitigation")
     # Recovery mitigation: reflect on why mitigation failed when benchmark
     # rejected the agent's fix and we want lessons for KB.

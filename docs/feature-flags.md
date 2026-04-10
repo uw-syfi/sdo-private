@@ -76,3 +76,22 @@ Requires GitLab credentials to be configured. **Opt-in only** — do not enable 
 [features]
 git_integration = true
 ```
+
+---
+
+## Crucible Agent Flags (`[agent.crucible]`)
+
+Crucible flags live in experiment TOML files (e.g. `sregym_agents/experiments/default.toml`) under the `[agent.crucible]` section and map to `CrucibleConfig` fields.
+
+### `enable_playbook_shortcut`
+
+**Default:** `false`
+
+Before running the full SRE mitigation agent, tries to execute a matching mitigation playbook directly. The slug is resolved from the diagnosis stage via `matched_candidate_index` in the benchmark oracle, cross-referenced with slugs threaded from the `LTMShortCircuit` signal. If the playbook applies successfully, the result is submitted directly to the benchmark — bypassing the SRE agent entirely. Falls back to the normal mitigation loop if no playbook matches or execution fails.
+
+Requires `enable_ltm_retrieval = true` and `enable_playbooks = true`.
+
+```toml
+[agent.crucible]
+enable_playbook_shortcut = true
+```

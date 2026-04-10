@@ -202,10 +202,11 @@ class LTMShortCircuit(BaseException):
     the benchmark, and treats the iteration as APPROVED.
     """
 
-    def __init__(self, confirmed: list[str], iteration: int) -> None:
+    def __init__(self, confirmed: list[str], iteration: int, confirmed_slugs: list[str] | None = None) -> None:
         super().__init__(f"LTM short-circuit: {len(confirmed)} confirmed candidate(s)")
         self.confirmed = confirmed
         self.iteration = iteration
+        self.confirmed_slugs: list[str] = confirmed_slugs or []
 
 
 def _format_investigated_hypotheses_md(
@@ -545,7 +546,7 @@ def _resolve_strategy_slug(
     return fuzzy_index.get(derived)
 
 
-def _load_mitigation_playbook_text(
+def load_mitigation_playbook_text(
     mitigation_playbooks_dir: Path | None,
     slug: str | None,
 ) -> str:
@@ -568,6 +569,61 @@ def _load_mitigation_playbook_text(
     if playbook is None:
         return ""
     return playbook.to_markdown()
+
+
+async def run_single_mitigation_playbook(
+    playbook_text: str,
+    root_cause_class: str,
+    namespace: str,
+    model_id: Model | str,
+    renderer: PromptRenderer,
+    trajectory_path: Path | None = None,
+    usage_collector: UsageCollector | None = None,
+    agent_name: str = "ltm-mitigate-0",
+    failed_attempts: str = "",
+) -> MitigationApplication:
+    """Run a single mitigation playbook via an inline subagent.
+
+    Renders the ``ltm_apply_mitigation`` prompt with the given playbook text,
+    spawns a subagent to execute it against the cluster, and returns the
+    ``MitigationApplication`` result.
+    """
+    prompt = renderer.render(
+        "ltm_apply_mitigation",
+        namespace=namespace,
+        stage="mitigation",
+        strategy_index=0,
+        root_cause_class=root_cause_class,
+        mitigation_approach="",
+        playbook=playbook_text,
+        failed_attempts=failed_attempts,
+    )
+    logger.info("[%s] PROMPT:\n%s", agent_name, prompt)
+
+    mitigate_agent = InlineAgent(
+        model_id,
+        agent_name=agent_name,
+        output_type=MitigationApplication,
+        tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+        model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
+        middleware=_subagent_middleware(trajectory_path),
+        usage_collector=usage_collector,
+    )
+    result = await mitigate_agent.arun(
+        prompt,
+        run_ctx={"stage": "mitigation", "role": "ltm-mitigate", "strategy_index": 0},
+    )
+    output = result.output
+    output.strategy_index = 0
+    output.root_cause_class = root_cause_class
+    logger.info(
+        "[%s] done: applied=%s, summary=%s, reasoning=%s",
+        agent_name,
+        output.applied,
+        output.mitigation_summary,
+        output.reasoning,
+    )
+    return output
 
 
 async def _run_mitigation_phase(
@@ -605,7 +661,7 @@ async def _run_mitigation_phase(
 
     for idx, strategy in enumerate(strategies):
         slug = _resolve_strategy_slug(strategy.root_cause_class, lt_summary_file)
-        playbook_text = _load_mitigation_playbook_text(mitigation_playbooks_dir, slug)
+        playbook_text = load_mitigation_playbook_text(mitigation_playbooks_dir, slug)
         if not playbook_text:
             applications.append(
                 MitigationApplication(
@@ -620,42 +676,19 @@ async def _run_mitigation_phase(
             )
             continue
 
-        prompt = renderer.render(
-            "ltm_apply_mitigation",
-            namespace=namespace,
-            stage=stage,
-            strategy_index=idx,
-            root_cause_class=strategy.root_cause_class,
-            mitigation_approach=strategy.mitigation_approach,
-            playbook=playbook_text,
-            failed_attempts=failed_attempts,
-        )
-        logger.info("[ltm-mitigate-%d] PROMPT:\n%s", idx, prompt)
-
-        mitigate_agent = InlineAgent(
-            model_id,
-            agent_name=f"ltm-mitigate-{idx}",
-            output_type=MitigationApplication,
-            tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
-            model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
-            middleware=_subagent_middleware(trajectory_path),
-            usage_collector=usage_collector,
-        )
         try:
-            result = await mitigate_agent.arun(
-                prompt,
-                run_ctx={"stage": stage, "role": "ltm-mitigate", "strategy_index": idx},
+            output = await run_single_mitigation_playbook(
+                playbook_text=playbook_text,
+                root_cause_class=strategy.root_cause_class,
+                namespace=namespace,
+                model_id=model_id,
+                renderer=renderer,
+                trajectory_path=trajectory_path,
+                usage_collector=usage_collector,
+                agent_name=f"ltm-mitigate-{idx}",
+                failed_attempts=failed_attempts,
             )
-            output = result.output
             output.strategy_index = idx
-            output.root_cause_class = strategy.root_cause_class
-            logger.info(
-                "[ltm-mitigate-%d] done: applied=%s, summary=%s, reasoning=%s",
-                idx,
-                output.applied,
-                output.mitigation_summary,
-                output.reasoning,
-            )
         except Exception as e:
             logger.warning("[ltm-mitigate-%d] failed: %s", idx, e)
             output = MitigationApplication(
@@ -1107,12 +1140,18 @@ async def search_prior_incidents(
     if ctx.deps.enable_ltm_verified_direct_submit and verified.confirmed_candidates:
         from sregym_agents.crucible.tools._judge_tools import MAX_DIAGNOSIS_CANDIDATES
 
-        confirmed_strings = [c.root_cause for c in verified.confirmed_candidates[:MAX_DIAGNOSIS_CANDIDATES]]
+        top = verified.confirmed_candidates[:MAX_DIAGNOSIS_CANDIDATES]
+        confirmed_strings = [c.root_cause for c in top]
+        confirmed_slugs = [diagnosis.candidate_root_causes[c.candidate_index].slug or "" for c in top]
         logger.info(
             "[ltm-search] short-circuit fired with %d confirmed candidate(s); raising LTMShortCircuit",
             len(confirmed_strings),
         )
-        raise LTMShortCircuit(confirmed=confirmed_strings, iteration=ctx.deps.iteration)
+        raise LTMShortCircuit(
+            confirmed=confirmed_strings,
+            iteration=ctx.deps.iteration,
+            confirmed_slugs=confirmed_slugs,
+        )
 
     return output_json
 
