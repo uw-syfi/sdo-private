@@ -20,7 +20,8 @@ from pydantic_ai.models import Model, infer_model
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import arun_with_retry_tracked
+from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
@@ -28,6 +29,8 @@ from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
     JudgeDeps,
+    LTMMitigationShortCircuit,
+    LTMShortCircuit,
     SharedFile,
     SharedState,
     SREDeps,
@@ -43,7 +46,6 @@ class StageLoopResult:
     """Result from a single stage's agent-judge loop."""
 
     approved: bool
-    usage_by_role: dict[str, dict[str, Any]]
     benchmark_block: str = ""
     agent_answer: str = ""
     agent_justification: str = ""
@@ -51,21 +53,31 @@ class StageLoopResult:
     agent_reflection: str = ""
     recovery_reflection: RecoveryReflection | None = None
     stage_outputs_file: Path | None = None
+    confirmed_slugs: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
-def _zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+def _build_usage_metrics(
+    primary: UsageCollector,
+    recovery: UsageCollector,
+) -> dict[str, Any]:
+    """Combine primary + recovery collectors into the per-problem usage_metrics shape.
 
+    Schema::
 
-def _add_usage(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
-    return {k: a[k] + b.get(k, 0) for k in a}
-
-
-def _build_usage_result(usage_by_agent: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    total = _zero_usage()
-    for agent_data in usage_by_agent.values():
-        total = _add_usage(total, agent_data["total"])
-    return {"by_agent": usage_by_agent, "total": total}
+        {
+          "primary":  {"by_agent": {...}, "total": {...}},
+          "recovery": {"by_agent": {...}, "total": {...}},
+          "total":    {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ..., "turns": ...}
+        }
+    """
+    primary_dict = primary.to_dict()
+    recovery_dict = recovery.to_dict()
+    grand_total = TokenUsage(**primary_dict["total"]) + TokenUsage(**recovery_dict["total"])
+    return {
+        "primary": primary_dict,
+        "recovery": recovery_dict,
+        "total": grand_total.to_dict(),
+    }
 
 
 def _replace_hypothesis_placeholder(
@@ -170,6 +182,70 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
         triage_priors=injected.triage_priors.resolve() if injected.triage_priors else None,
         arbitration_priors=injected.arbitration_priors.resolve() if injected.arbitration_priors else None,
         verification_priors=injected.verification_priors.resolve() if injected.verification_priors else None,
+        playbooks_dir=injected.playbooks_dir.resolve() if injected.playbooks_dir else None,
+        mitigation_playbooks_dir=(
+            injected.mitigation_playbooks_dir.resolve() if injected.mitigation_playbooks_dir else None
+        ),
+    )
+
+
+async def _direct_submit_confirmed(
+    confirmed: list[str],
+    stage: str,
+    iteration: int,
+    shared_file: SharedFile,
+    submit_mcp_url: str,
+    stage_outputs_file: Path | None,
+    confirmed_slugs: list[str] | None = None,
+) -> StageLoopResult:
+    """Direct-submission path triggered by ``LTMShortCircuit`` (diagnosis) or
+    ``LTMMitigationShortCircuit`` (mitigation).
+
+    Appends a "LTM Direct Submission" block + bullet list of confirmed
+    candidates / applied mitigations to the shared file, posts the list to
+    the benchmark via ``submit_to_benchmark``, appends the resulting
+    ``benchmark_result`` block, and returns an APPROVED ``StageLoopResult``.
+    The judge agent is **not** invoked.
+    """
+    is_mitigation = stage == "mitigation"
+    item_label = "applied mitigation(s)" if is_mitigation else "candidate root cause(s)"
+    list_header = "**Applied mitigations:**" if is_mitigation else "**Confirmed candidates:**"
+    what_happened = (
+        f"Mitigation subagents successfully applied {len(confirmed)} {item_label} from the knowledge base."
+        if is_mitigation
+        else f"Verification subagents confirmed {len(confirmed)} {item_label} from the knowledge base."
+    )
+
+    bullet_list = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(confirmed))
+    shared_file.append(
+        f"\n### Iteration {iteration} — LTM Direct Submission ({stage})\n"
+        f"{what_happened} Skipping further SRE agent reasoning and the judge "
+        f"step; submitting directly.\n\n"
+        f"{list_header}\n{bullet_list}\n"
+    )
+    try:
+        success, message, oracle = await submit_to_benchmark(submit_mcp_url, confirmed, stage)
+        oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
+        benchmark_block = (
+            f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n{oracle_text}\n</benchmark_result>\n"
+        )
+    except Exception as e:
+        benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+
+    shared_file.append(
+        f"\n### Iteration {iteration} — Judge Verdict ({stage})\n"
+        f"- Status: APPROVED (LTM verified short-circuit — direct submission)\n"
+        f"{benchmark_block}"
+    )
+
+    return StageLoopResult(
+        approved=True,
+        benchmark_block=benchmark_block,
+        agent_answer=confirmed[0],
+        agent_justification=f"LTM verification short-circuit ({len(confirmed)} confirmed candidate(s))",
+        agent_causal_chain="",
+        stage_outputs_file=stage_outputs_file,
+        confirmed_slugs=confirmed_slugs or [],
     )
 
 
@@ -181,6 +257,7 @@ async def _run_stage_loop(
     shared_file: SharedFile,
     submit_mcp_url: str,
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
     crucible_config: CrucibleConfig | None = None,
@@ -194,6 +271,8 @@ async def _run_stage_loop(
     incidents_dir = injected_kb.incidents_dir if injected_kb else None
     triage_priors_file = injected_kb.triage_priors if injected_kb else None
     verification_priors_file = injected_kb.verification_priors if injected_kb else None
+    playbooks_dir = injected_kb.playbooks_dir if injected_kb else None
+    mitigation_playbooks_dir = injected_kb.mitigation_playbooks_dir if injected_kb else None
     stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
@@ -256,13 +335,6 @@ async def _run_stage_loop(
         if verification_priors_file and verification_priors_file.exists():
             verification_guidance = verification_priors_file.read_text().strip()
 
-    agent_role = f"{stage}-agent"
-    judge_role = f"{stage}-judge"
-    usage_by_role: dict[str, dict[str, Any]] = {
-        agent_role: {"iterations": [], "total": _zero_usage()},
-        judge_role: {"iterations": [], "total": _zero_usage()},
-    }
-
     last_answer = ""
     last_justification = ""
     last_causal_chain = ""
@@ -295,11 +367,15 @@ async def _run_stage_loop(
             state=sre_state,
             lt_summary_file=lt_summary_file if crucible_config.enable_ltm_retrieval else None,
             incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
-            ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
+            playbooks_dir=playbooks_dir if crucible_config.enable_ltm_retrieval else None,
+            mitigation_playbooks_dir=(mitigation_playbooks_dir if crucible_config.enable_ltm_retrieval else None),
+            model_id=model,
+            enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
             trajectory_path=trajectory_path,
             triage_priors=triage_priors,
             verification_guidance=verification_guidance,
             stage_outputs_file=stage_outputs_file,
+            usage_collector=usage_collector,
         )
         sre_system = renderer.render(f"{stage}_agent_system")
         sre_prompt = renderer.render(
@@ -321,8 +397,38 @@ async def _run_stage_loop(
             model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=sre_system
         )
         try:
-            _, sre_usage = await sre_agent.arun(
-                sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"}
+            await sre_agent.arun(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})
+        except LTMShortCircuit as sig:
+            # LTM verification confirmed at least one candidate; skip the rest
+            # of the SRE agent and the judge entirely and submit directly.
+            slugs_info = f", slugs={sig.confirmed_slugs}" if sig.confirmed_slugs else ""
+            logger.info(
+                f"[{stage}] KB verified {len(sig.confirmed)} hypothesis(es) — "
+                f"going straight to submission (iteration {iteration}{slugs_info})."
+            )
+            return await _direct_submit_confirmed(
+                confirmed=sig.confirmed,
+                stage=stage,
+                iteration=sig.iteration,
+                shared_file=shared_file,
+                submit_mcp_url=submit_mcp_url,
+                stage_outputs_file=stage_outputs_file,
+                confirmed_slugs=sig.confirmed_slugs,
+            )
+        except LTMMitigationShortCircuit as sig:
+            # LTM mitigation phase successfully applied at least one strategy;
+            # skip the rest of the SRE agent and the judge and submit directly.
+            logger.info(
+                f"[{stage}] LTM mitigation short-circuit on iteration {iteration} with "
+                f"{len(sig.applied)} applied strategy(ies); submitting directly."
+            )
+            return await _direct_submit_confirmed(
+                confirmed=sig.applied,
+                stage=stage,
+                iteration=sig.iteration,
+                shared_file=shared_file,
+                submit_mcp_url=submit_mcp_url,
+                stage_outputs_file=stage_outputs_file,
             )
         except ModelHTTPError as exc:
             logger.warning(
@@ -335,8 +441,6 @@ async def _run_stage_loop(
                 f"and could not complete this iteration.\n"
             )
             continue
-        usage_by_role[agent_role]["iterations"].append(sre_usage)
-        usage_by_role[agent_role]["total"] = _add_usage(usage_by_role[agent_role]["total"], sre_usage)
 
         # Capture the hypothesis from the SRE agent for blind judge review
         last_answer = sre_state.answer or ""
@@ -380,7 +484,6 @@ async def _run_stage_loop(
 
             return StageLoopResult(
                 approved=True,
-                usage_by_role=usage_by_role,
                 benchmark_block=benchmark_block,
                 agent_answer=last_answer,
                 agent_justification=last_justification,
@@ -400,6 +503,7 @@ async def _run_stage_loop(
             renderer=renderer,
             hypothesis_text=hypothesis_text,
             state=judge_state,
+            usage_collector=usage_collector,
         )
         judge_system = renderer.render(f"{stage}_judge_system")
         judge_prompt = renderer.render(
@@ -417,9 +521,7 @@ async def _run_stage_loop(
         logger.info(f"[{stage}-judge] USER PROMPT:\n{judge_prompt}")
         judge_agent = CrucibleJudgeAgent(model, judge_deps, trajectory_path=trajectory_path)
         try:
-            _, judge_usage = await judge_agent.arun(
-                judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"}
-            )
+            await judge_agent.arun(judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"})
         except ModelHTTPError as exc:
             logger.warning(
                 f"[{stage}] Judge agent failed with HTTP {exc.status_code} on iteration {iteration} "
@@ -431,8 +533,6 @@ async def _run_stage_loop(
                 f"and could not complete this iteration.\n"
             )
             continue
-        usage_by_role[judge_role]["iterations"].append(judge_usage)
-        usage_by_role[judge_role]["total"] = _add_usage(usage_by_role[judge_role]["total"], judge_usage)
 
         # Replace the hypothesis placeholder with real content
         if sre_state.answer:
@@ -451,7 +551,6 @@ async def _run_stage_loop(
             logger.info(f"Judge APPROVED {stage}.")
             return StageLoopResult(
                 approved=True,
-                usage_by_role=usage_by_role,
                 benchmark_block=judge_state.benchmark_block,
                 agent_answer=last_answer,
                 agent_justification=last_justification,
@@ -467,7 +566,6 @@ async def _run_stage_loop(
         logger.warning(f"Max {stage} iterations reached without APPROVED verdict.")
     return StageLoopResult(
         approved=False,
-        usage_by_role=usage_by_role,
         agent_answer=last_answer,
         agent_justification=last_justification,
         agent_causal_chain=last_causal_chain,
@@ -494,6 +592,101 @@ def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis")
         return ""
 
 
+def _extract_matched_candidate_index(benchmark_block: str) -> int | None:
+    """Extract ``matched_candidate_index`` from a benchmark oracle JSON.
+
+    Returns the 0-based index of the first passing candidate in the submitted
+    list, or ``None`` if the field is absent or the oracle cannot be parsed.
+    """
+    match = re.search(r"<oracle>\s*(.*?)\s*</oracle>", benchmark_block, re.DOTALL)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+        idx = data.get("Diagnosis", {}).get("matched_candidate_index")
+        return int(idx) if idx is not None else None
+    except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        return None
+
+
+async def _try_playbook_shortcut(
+    model: Model,
+    namespace: str,
+    slug: str,
+    mitigation_playbooks_dir: Path,
+    shared_file: SharedFile,
+    submit_mcp_url: str,
+    renderer: PromptRenderer,
+    usage_collector: UsageCollector,
+    trajectory_path: Path | None = None,
+) -> StageLoopResult | None:
+    """Try to execute a mitigation playbook directly, bypassing the SRE agent.
+
+    Loads the mitigation playbook for *slug*, runs it via a subagent, and on
+    success submits directly to the benchmark. Returns a ``StageLoopResult``
+    on success or ``None`` to signal fallback to the normal mitigation loop.
+    """
+    from sregym_agents.crucible.tools import (
+        load_mitigation_playbook_text,
+        run_single_mitigation_playbook,
+    )
+
+    playbook_text = load_mitigation_playbook_text(mitigation_playbooks_dir, slug)
+    if not playbook_text:
+        logger.info("[playbook-shortcut] No mitigation playbook found for slug=%r", slug)
+        shared_file.append(
+            f"\n### Playbook Shortcut (Mitigation)\n- Matched slug: {slug}\n- Outcome: No Playbook Found\n"
+        )
+        return None
+
+    # Resolve class_name from the playbook for the subagent prompt.
+    from sregym_agents.crucible.knowledge_base.mitigation_playbook import MitigationPlaybookStore
+
+    store = MitigationPlaybookStore(mitigation_playbooks_dir)
+    pb = store.load(slug)
+    root_cause_class = pb.class_name if pb else slug
+
+    try:
+        output = await run_single_mitigation_playbook(
+            playbook_text=playbook_text,
+            root_cause_class=root_cause_class,
+            namespace=namespace,
+            model_id=model,
+            renderer=renderer,
+            trajectory_path=trajectory_path,
+            usage_collector=usage_collector,
+            agent_name="playbook-shortcut",
+        )
+    except Exception as exc:
+        logger.warning("[playbook-shortcut] Subagent failed: %s", exc)
+        shared_file.append(
+            f"\n### Playbook Shortcut (Mitigation)\n"
+            f"- Matched slug: {slug}\n"
+            f"- Outcome: Subagent Error\n"
+            f"- Reason: {exc}\n"
+        )
+        return None
+
+    shared_file.append(
+        f"\n### Playbook Shortcut (Mitigation)\n"
+        f"- Matched slug: {slug}\n"
+        f"- Outcome: {'Applied' if output.applied else 'Not Applied'}\n"
+        + (f"- Summary: {output.mitigation_summary}\n" if output.applied else f"- Reason: {output.reasoning}\n")
+    )
+
+    if not output.applied:
+        return None
+
+    return await _direct_submit_confirmed(
+        confirmed=[output.mitigation_summary],
+        stage="mitigation",
+        iteration=0,
+        shared_file=shared_file,
+        submit_mcp_url=submit_mcp_url,
+        stage_outputs_file=None,
+    )
+
+
 async def _run_recovery_diagnosis(
     model: Model,
     app_info: dict[str, Any],
@@ -501,6 +694,7 @@ async def _run_recovery_diagnosis(
     original_answer: str,
     benchmark_block: str,
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     original_causal_chain: str = "",
@@ -534,9 +728,11 @@ async def _run_recovery_diagnosis(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="diagnosis",
+        model_id=model,
         renderer=renderer,
         state=sre_state,
         stage_outputs_file=stage_outputs_file,
+        usage_collector=usage_collector,
     )
 
     system_prompt = renderer.render("recovery_diagnosis_system")
@@ -606,6 +802,7 @@ async def _run_recovery_reflection_phase(
     model: Model,
     app_info: dict[str, Any],
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     original_answer: str,
     original_justification: str = "",
     original_causal_chain: str = "",
@@ -635,7 +832,13 @@ async def _run_recovery_reflection_phase(
     def _system() -> str:  # pyright: ignore[reportUnusedFunction]
         return system_prompt
 
-    result = await arun_with_retry(agent, user_prompt, message_history=phase1_messages or [])
+    result = await arun_with_retry_tracked(
+        agent,
+        user_prompt,
+        agent_name="recovery-reflection",
+        usage_collector=usage_collector,
+        message_history=phase1_messages or [],
+    )
     reflection = result.output
 
     if stage_outputs_file:
@@ -661,6 +864,7 @@ async def _run_recovery_mitigation(
     original_answer: str,
     benchmark_block: str,
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     diagnosis_answer: str = "",
@@ -693,9 +897,11 @@ async def _run_recovery_mitigation(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="mitigation",
+        model_id=model,
         renderer=renderer,
         state=sre_state,
         stage_outputs_file=stage_outputs_file,
+        usage_collector=usage_collector,
     )
 
     system_prompt = renderer.render("recovery_mitigation_system")
@@ -800,6 +1006,12 @@ async def run(
     max_mit_iters = crucible_config.max_mitigation_iterations
     wait_stage_timeout = crucible_config.wait_stage_timeout
 
+    # Two collectors per problem: primary covers diagnosis + mitigation,
+    # recovery covers the post-failure recovery agents. Recovery is fenced
+    # so we can subtract its cost from the primary playbook ablation cleanly.
+    primary_collector = UsageCollector()
+    recovery_collector = UsageCollector()
+
     diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
     diagnosis_sf.init(
         "# SRE Judged Session State\n"
@@ -819,6 +1031,7 @@ async def run(
         diagnosis_sf,
         submit_mcp_url,
         renderer=renderer,
+        usage_collector=primary_collector,
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         crucible_config=crucible_config,
@@ -838,6 +1051,7 @@ async def run(
             diag_result.agent_answer,
             diag_result.benchmark_block,
             renderer=renderer,
+            usage_collector=recovery_collector,
             trajectory_path=trajectory_path,
             original_justification=diag_result.agent_justification,
             original_causal_chain=diag_result.agent_causal_chain,
@@ -856,6 +1070,7 @@ async def run(
                     resolved_model,
                     app_info,
                     renderer=renderer,
+                    usage_collector=recovery_collector,
                     original_answer=original_answer,
                     original_justification=original_justification,
                     original_causal_chain=original_causal_chain,
@@ -863,16 +1078,15 @@ async def run(
                     phase1_messages=recovery.message_history,
                 )
 
-    usage_by_agent = diag_result.usage_by_role
-
     if "mitigation" not in planned_stages:
         logger.info("Diagnosis-only problem — orchestrator complete.")
-        result = _build_usage_result(usage_by_agent)
+        result = _build_usage_metrics(primary_collector, recovery_collector)
         sof = diag_result.stage_outputs_file
         result["stage_outputs_file"] = str(sof) if sof else None
         result["recovery_reflection"] = (
             diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
         )
+        result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
         return result
 
     _init_mitigation_file(
@@ -889,18 +1103,61 @@ async def run(
     logger.info("Waiting for benchmark to reach mitigation stage...")
     await _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
 
-    mit_result = await _run_stage_loop(
-        resolved_model,
-        app_info,
-        "mitigation",
-        max_mit_iters,
-        mitigation_sf,
-        submit_mcp_url,
-        renderer=renderer,
-        injected_kb=injected_kb,
-        trajectory_path=trajectory_path,
-        crucible_config=crucible_config,
-    )
+    # Playbook shortcut: if the diagnosis matched a KB class with a slug and
+    # the benchmark confirmed the diagnosis, try the corresponding mitigation
+    # playbook directly before running the full SRE agent loop.
+    mit_result: StageLoopResult | None = None
+    if not crucible_config.enable_playbook_shortcut:
+        logger.info("[playbook-shortcut] Disabled (enable_playbook_shortcut=false).")
+    elif not diag_result.benchmark_block or "success: True" not in diag_result.benchmark_block:
+        logger.info("[playbook-shortcut] Skipped — diagnosis was not confirmed by benchmark.")
+    elif not diag_result.confirmed_slugs:
+        logger.info("[playbook-shortcut] Skipped — no KB slugs from diagnosis stage.")
+    elif not injected_kb or not injected_kb.mitigation_playbooks_dir:
+        logger.info("[playbook-shortcut] Skipped — no mitigation playbooks directory injected.")
+    else:
+        idx = _extract_matched_candidate_index(diag_result.benchmark_block)
+        if idx is None or not (0 <= idx < len(diag_result.confirmed_slugs)):
+            logger.info(
+                "[playbook-shortcut] Skipped — matched_candidate_index=%r out of range for %d slug(s).",
+                idx,
+                len(diag_result.confirmed_slugs),
+            )
+        elif not diag_result.confirmed_slugs[idx]:
+            logger.info("[playbook-shortcut] Skipped — slug at index %d is empty.", idx)
+        else:
+            slug = diag_result.confirmed_slugs[idx]
+            logger.info(
+                "[playbook-shortcut] Found playbook slug=%r (candidate_index=%d) — attempting direct mitigation.",
+                slug,
+                idx,
+            )
+            mit_result = await _try_playbook_shortcut(
+                model=resolved_model,
+                namespace=app_info.get("namespace", "default"),
+                slug=slug,
+                mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
+                shared_file=mitigation_sf,
+                submit_mcp_url=submit_mcp_url,
+                renderer=renderer,
+                usage_collector=primary_collector,
+                trajectory_path=trajectory_path,
+            )
+
+    if mit_result is None:
+        mit_result = await _run_stage_loop(
+            resolved_model,
+            app_info,
+            "mitigation",
+            max_mit_iters,
+            mitigation_sf,
+            submit_mcp_url,
+            renderer=renderer,
+            usage_collector=primary_collector,
+            injected_kb=injected_kb,
+            trajectory_path=trajectory_path,
+            crucible_config=crucible_config,
+        )
     _append_stage_outcome(mit_result, "Mitigation")
     # Recovery mitigation: reflect on why mitigation failed when benchmark
     # rejected the agent's fix and we want lessons for KB.
@@ -916,6 +1173,7 @@ async def run(
             mit_result.agent_answer,
             mit_result.benchmark_block,
             renderer=renderer,
+            usage_collector=recovery_collector,
             trajectory_path=trajectory_path,
             original_justification=mit_result.agent_justification,
             diagnosis_answer=diag_result.agent_answer,
@@ -926,16 +1184,16 @@ async def run(
             mit_result.agent_justification = recovery.justification
             mit_result.agent_reflection = recovery.reflection
 
-    usage_by_agent = {**diag_result.usage_by_role, **mit_result.usage_by_role}
-
     logger.info("=" * 60)
     logger.info("CRUCIBLE: Orchestrator complete.")
     logger.info("=" * 60)
-    result = _build_usage_result(usage_by_agent)
+    result = _build_usage_metrics(primary_collector, recovery_collector)
     # Prefer diagnosis stage outputs for the reflector (it has the full pipeline).
     sof = diag_result.stage_outputs_file or mit_result.stage_outputs_file
     result["stage_outputs_file"] = str(sof) if sof else None
     result["recovery_reflection"] = (
         diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
     )
+    result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
+    result["mitigation_succeeded"] = "success: True" in (mit_result.benchmark_block or "")
     return result

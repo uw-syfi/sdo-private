@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai.models import Model
 
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible.tools._kb_tools import TriagePriors, TriageReport
 
 logger = logging.getLogger(__name__)
@@ -115,19 +116,26 @@ class SREDeps:
     shared_file: SharedFile
     iteration: int
     stage: str  # "diagnosis" | "mitigation"
+    model_id: Model | str
     renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     state: SharedState = field(default_factory=SharedState)
     lt_summary_file: Path | None = None
     incidents_dir: Path | None = None
-    ltm_model_id: Model | None = None
+    playbooks_dir: Path | None = None
+    mitigation_playbooks_dir: Path | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
+    # If True, search_prior_incidents raises LTMShortCircuit when verification
+    # confirms one or more candidates, so the orchestrator can submit them
+    # directly to the benchmark without further SRE agent reasoning.
+    enable_ltm_verified_direct_submit: bool = False
     trajectory_path: Path | None = None
     triage_report: TriageReport | None = None
     # v3 trained guidance
     triage_priors: TriagePriors | None = None
     verification_guidance: str = ""
     stage_outputs_file: Path | None = None
+    usage_collector: UsageCollector | None = None
 
 
 @dataclass
@@ -140,3 +148,4 @@ class JudgeDeps:
     renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     hypothesis_text: str = ""
     state: SharedState = field(default_factory=SharedState)
+    usage_collector: UsageCollector | None = None

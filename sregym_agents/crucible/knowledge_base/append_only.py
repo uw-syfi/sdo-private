@@ -10,11 +10,12 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import arun_with_retry_tracked
 
 from .base import KB_APPEND_FILENAME, InjectedKB, KnowledgeBase, SessionFiles, strip_benchmark_result
 
 if TYPE_CHECKING:
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
@@ -44,6 +45,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         self.app_name = app_name
         self.include_benchmark_results = config.include_benchmark_results
         self.prompts = renderer
+        self._usage_collector: UsageCollector | None = None
 
     @property
     def knowledge_path(self) -> Path:
@@ -62,7 +64,12 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
 
     async def _call_llm(self, prompt: str) -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name="kb-append-only",
+            usage_collector=self._usage_collector,
+        )
         return result.output
 
     async def update(
@@ -70,7 +77,11 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
+        diagnosis_succeeded: bool = False,
+        mitigation_succeeded: bool = False,
+        usage_collector: UsageCollector | None = None,
     ) -> None:
+        self._usage_collector = usage_collector
         parts = session_files.read_all()
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")

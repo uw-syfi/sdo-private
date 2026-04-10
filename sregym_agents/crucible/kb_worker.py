@@ -20,6 +20,7 @@ import signal
 import time
 from pathlib import Path
 
+from libs.pydantic_agent import UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import crucible_config_from_kb_task
 from sregym_agents.crucible.kb_update_queue import (
@@ -54,6 +55,8 @@ async def process_task(task_path: Path) -> None:
     recovery_reflection = (
         RecoveryReflection.model_validate(task["recovery_reflection"]) if task.get("recovery_reflection") else None
     )
+    diagnosis_succeeded = bool(task.get("diagnosis_succeeded", False))
+    mitigation_succeeded = bool(task.get("mitigation_succeeded", False))
 
     kb = create_knowledge_base(
         kb_type=task["kb_type"],
@@ -72,10 +75,14 @@ async def process_task(task_path: Path) -> None:
         task["app_name"],
         banner,
     )
+    kb_collector = UsageCollector()
     await kb.update(
         session_files,
         stage_outputs_file=stage_outputs_file,
         recovery_reflection=recovery_reflection,
+        diagnosis_succeeded=diagnosis_succeeded,
+        mitigation_succeeded=mitigation_succeeded,
+        usage_collector=kb_collector,
     )
     logger.info(
         "\n%s\n  KB UPDATE COMPLETE: %s\n%s",
@@ -85,7 +92,21 @@ async def process_task(task_path: Path) -> None:
     )
 
     kb_dir = Path(task["kb_dir"])
-    move_to_completed(task_path, kb_dir)
+    completed_task_path = move_to_completed(task_path, kb_dir)
+    # Persist KB-worker token usage as a sidecar next to the completed task so
+    # an offline aggregator can join it back to the per-problem usage_metrics
+    # by ``problem_id``.
+    sidecar = completed_task_path.with_suffix(".usage.json")
+    sidecar.write_text(
+        json.dumps(
+            {
+                "problem_id": task["problem_id"],
+                "app_name": task.get("app_name", "unknown"),
+                "usage_metrics": kb_collector.to_dict(),
+            },
+            indent=2,
+        )
+    )
 
 
 async def run_worker(

@@ -11,6 +11,8 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.usage import RunUsage, UsageLimits
 
+from libs.pydantic_agent._usage import TokenUsage, UsageCollector
+
 if TYPE_CHECKING:
     from pydantic_ai import Agent
     from pydantic_ai.tools import ToolDefinition
@@ -42,15 +44,26 @@ class BaseAgent(Generic[DepsT]):
         *,
         agent_name: str,
         middleware: list[AgentMiddleware] | None = None,
+        usage_collector: UsageCollector | None = None,
     ) -> None:
         self.deps = deps
         self._agent_name = agent_name
         self._usage_limits = UsageLimits()
         self._middleware: list[AgentMiddleware] = middleware or []
+        self._usage_collector = usage_collector
         self.current_run_usage: RunUsage = RunUsage()
         self.context_window_token_usage: int = 0
         for m in self._middleware:
             m.on_attach(self)
+
+    def _report_usage(self) -> None:
+        """Push the current run's usage into the attached collector, if any."""
+        if self._usage_collector is None:
+            return
+        self._usage_collector.add(
+            self._agent_name,
+            TokenUsage.from_run_usage(self.current_run_usage),
+        )
 
     @property
     def agent_name(self) -> str:
@@ -118,44 +131,50 @@ class BaseAgent(Generic[DepsT]):
         message_history = kwargs.pop("message_history", None)
         current_prompt: str | None = prompt
 
-        while True:
-            agent_run = None
-            try:
-                async with self._agent.iter(
-                    current_prompt,
-                    deps=self.deps,
-                    usage_limits=self._usage_limits,
-                    message_history=message_history,
-                    **kwargs,
-                ) as agent_run:
-                    async for node in agent_run:
-                        if self._agent.is_model_request_node(node) or self._agent.is_call_tools_node(node):
-                            async with node.stream(agent_run.ctx) as stream:
-                                ctx_baseline_tokens = agent_run.ctx.state.usage.input_tokens or 0
-                                async for event in stream:
-                                    self.current_run_usage = agent_run.ctx.state.usage
-                                    if hasattr(stream, "usage"):
-                                        self.context_window_token_usage = (
-                                            stream.usage().input_tokens or 0  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-                                        ) - ctx_baseline_tokens
-                                    self._stream_event_chain(event)
+        try:
+            while True:
+                agent_run = None
+                try:
+                    async with self._agent.iter(
+                        current_prompt,
+                        deps=self.deps,
+                        usage_limits=self._usage_limits,
+                        message_history=message_history,
+                        **kwargs,
+                    ) as agent_run:
+                        async for node in agent_run:
+                            if self._agent.is_model_request_node(node) or self._agent.is_call_tools_node(node):
+                                async with node.stream(agent_run.ctx) as stream:
+                                    ctx_baseline_tokens = agent_run.ctx.state.usage.input_tokens or 0
+                                    async for event in stream:
+                                        self.current_run_usage = agent_run.ctx.state.usage
+                                        if hasattr(stream, "usage"):
+                                            self.context_window_token_usage = (
+                                                stream.usage().input_tokens or 0  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+                                            ) - ctx_baseline_tokens
+                                        self._stream_event_chain(event)
 
-                result = agent_run.result
-                assert result is not None
-                break
-            except Exception as exc:
-                delay: float | None = None
-                for m in self._middleware:
-                    delay = m.on_run_error(exc)
-                    if delay is not None:
-                        break
-                if delay is None:
-                    raise
-                # Capture accumulated messages for resume if available
-                if agent_run is not None:
-                    message_history = list(agent_run.all_messages())
-                    current_prompt = None
-                await asyncio.sleep(delay)
+                    result = agent_run.result
+                    assert result is not None
+                    break
+                except Exception as exc:
+                    delay: float | None = None
+                    for m in self._middleware:
+                        delay = m.on_run_error(exc)
+                        if delay is not None:
+                            break
+                    if delay is None:
+                        raise
+                    # Capture accumulated messages for resume if available
+                    if agent_run is not None:
+                        message_history = list(agent_run.all_messages())
+                        current_prompt = None
+                    await asyncio.sleep(delay)
+        except BaseException:
+            # Even on a terminal failure, push whatever tokens were spent so
+            # the collector reflects the true cost of the attempt.
+            self._report_usage()
+            raise
 
         # Only fall back to cumulative usage when streaming didn't provide
         # per-request tokens (e.g. the model backend lacks stream.usage()).
@@ -166,4 +185,5 @@ class BaseAgent(Generic[DepsT]):
             self.context_window_token_usage = result.usage().input_tokens or 0
         for m in self._middleware:
             m.after_run(result, _run_ctx)
+        self._report_usage()
         return result

@@ -22,13 +22,23 @@ _MCP_INITIAL_DELAY = 1.0
 _MCP_BACKOFF_FACTOR = 2.0
 _MCP_MAX_DELAY = 60.0
 
+# Maximum number of candidate diagnoses the judge may submit at once. Mirrors
+# the cap in bench/sregym/sregym/conductor/constants.py — kept in sync by
+# value rather than import so the agent doesn't depend on the benchmark
+# package layout.
+MAX_DIAGNOSIS_CANDIDATES = 5
+
 
 async def submit_to_benchmark(
     submit_mcp_url: str,
-    submission_ans: str,
+    submission_ans: str | list[str],
     stage: str,
 ) -> tuple[bool, str, dict[str, Any] | None]:
     """Submit *submission_ans* to the benchmark MCP server.
+
+    ``submission_ans`` may be a single string (a single diagnosis answer) or
+    a list of candidate diagnosis strings (the multi-diagnosis path —
+    benchmark grades success if any candidate matches the ground truth).
 
     Returns (success, message, oracle_result_dict).
     """
@@ -140,20 +150,36 @@ async def submit_verdict(
     ctx: RunContext[JudgeDeps],
     verdict: bool,
     reasoning: str,
-    submission_ans: str,
+    submission_ans: str | list[str],
 ) -> str:
     """Record the judge's verdict and, if approved, submit to the benchmark.
 
     Args:
         verdict: True to APPROVE the agent's answer, False to REJECT it.
         reasoning: Explanation for the verdict.
-        submission_ans: The agent's answer string to forward to the benchmark on approval.
+        submission_ans: The agent's answer to forward to the benchmark on
+            approval. Either a single diagnosis string, or a list of up to
+            ``MAX_DIAGNOSIS_CANDIDATES`` (currently 5) candidate diagnosis
+            strings. Submit a list when the cluster exhibits multiple
+            plausible faults at once — the benchmark grades the submission
+            as a success if its tracked ground-truth root cause matches any
+            of the candidates, so extra candidates do not penalize the
+            agent. Prefer a single string when confidence is high.
     """
     if ctx.deps.state.submitted:
         return "Verdict already submitted. Your task is complete."
 
     if not ctx.deps.state.hypothesis_revealed:
         return "Error: you must call reveal_agent_hypothesis before submitting a verdict."
+
+    if verdict and isinstance(submission_ans, list):
+        if len(submission_ans) == 0:
+            return "Error: submission_ans list must contain at least one candidate diagnosis."
+        if len(submission_ans) > MAX_DIAGNOSIS_CANDIDATES:
+            return (
+                f"Error: submission_ans list has {len(submission_ans)} candidates; "
+                f"maximum allowed is {MAX_DIAGNOSIS_CANDIDATES}."
+            )
 
     iteration = ctx.deps.iteration
     stage = ctx.deps.stage

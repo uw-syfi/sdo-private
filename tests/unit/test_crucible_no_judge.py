@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 import pytest
 from pydantic_ai.models.test import TestModel
 
+from libs.pydantic_agent import UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.tools import SharedFile, SRESubmission
@@ -63,6 +64,7 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=mock_renderer,
+                usage_collector=UsageCollector(),
                 crucible_config=CrucibleConfig(enable_judge=False),
             )
         )
@@ -101,6 +103,7 @@ def test_no_judge_writes_benchmark_error_on_exception(shared_file: SharedFile) -
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=mock_renderer,
+                usage_collector=UsageCollector(),
                 crucible_config=CrucibleConfig(enable_judge=False),
             )
         )
@@ -119,7 +122,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
 
         def fake_run(prompt, run_ctx=None):
             deps.state.answer = "an answer"
-            return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+            return ""
 
         mock.arun = AsyncMock(side_effect=fake_run)
         return mock
@@ -130,7 +133,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
         def fake_run(prompt, run_ctx=None):
             deps.state.verdict = "APPROVED"
             deps.state.submitted = True
-            return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+            return ""
 
         mock.arun = AsyncMock(side_effect=fake_run)
         return mock
@@ -154,6 +157,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
                 shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=mock_renderer,
+                usage_collector=UsageCollector(),
                 crucible_config=CrucibleConfig(enable_judge=True),
             )
         )

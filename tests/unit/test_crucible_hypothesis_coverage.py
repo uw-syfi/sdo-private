@@ -34,7 +34,7 @@ def _make_sre_ctx(deps: SREDeps):
 def _make_deps(
     tmp_path: Path,
     triage_report: TriageReport | None = None,
-    ltm_model_id: TestModel | None = None,
+    model_id: TestModel | None = None,
 ) -> SREDeps:
     shared_file = tmp_path / "session.md"
     shared_file.write_text("")
@@ -43,7 +43,7 @@ def _make_deps(
         shared_file=shared_file,  # type: ignore[arg-type]
         iteration=1,
         stage="diagnosis",
-        ltm_model_id=ltm_model_id,
+        model_id=model_id if model_id is not None else TestModel(),
         triage_report=triage_report,
     )
 
@@ -142,20 +142,12 @@ class TestHypothesisCoverageVerdict:
 
 class TestCheckHypothesisCoverageErrors:
     def test_no_triage_report(self, tmp_path: Path) -> None:
-        deps = _make_deps(tmp_path, triage_report=None, ltm_model_id=TestModel())
+        deps = _make_deps(tmp_path, triage_report=None, model_id=TestModel())
         ctx = _make_sre_ctx(deps)
 
         result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="port conflict in geo"))
         assert "Error" in result
         assert "triage" in result.lower()
-
-    def test_no_model_id(self, tmp_path: Path) -> None:
-        deps = _make_deps(tmp_path, triage_report=_make_triage_report(), ltm_model_id=None)
-        ctx = _make_sre_ctx(deps)
-
-        result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="port conflict in geo"))
-        assert "Error" in result
-        assert "model" in result.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +167,7 @@ class TestCheckHypothesisCoverageSubagent:
         deps = _make_deps(
             tmp_path,
             triage_report=triage,
-            ltm_model_id=TestModel(custom_output_args=verdict.model_dump()),
+            model_id=TestModel(custom_output_args=verdict.model_dump()),
         )
         ctx = _make_sre_ctx(deps)
 
@@ -197,7 +189,7 @@ class TestCheckHypothesisCoverageSubagent:
         deps = _make_deps(
             tmp_path,
             triage_report=triage,
-            ltm_model_id=TestModel(custom_output_args=verdict.model_dump()),
+            model_id=TestModel(custom_output_args=verdict.model_dump()),
         )
         ctx = _make_sre_ctx(deps)
 
@@ -220,7 +212,7 @@ class TestCheckHypothesisCoverageSubagent:
         deps = _make_deps(
             tmp_path,
             triage_report=triage,
-            ltm_model_id=TestModel(custom_output_args=verdict.model_dump()),
+            model_id=TestModel(custom_output_args=verdict.model_dump()),
         )
         ctx = _make_sre_ctx(deps)
 
@@ -234,7 +226,7 @@ class TestCheckHypothesisCoverageSubagent:
 
     def test_subagent_failure_returns_graceful_error(self, tmp_path: Path) -> None:
         triage = _make_triage_report()
-        deps = _make_deps(tmp_path, triage_report=triage, ltm_model_id=TestModel())
+        deps = _make_deps(tmp_path, triage_report=triage, model_id=TestModel())
         ctx = _make_sre_ctx(deps)
 
         mock_arun = AsyncMock(side_effect=RuntimeError("model unavailable"))

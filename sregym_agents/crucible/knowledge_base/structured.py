@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import arun_with_retry_tracked
 
 from .base import (
     MAX_CITATION_RETRIES,
@@ -24,6 +24,19 @@ from .base import (
     strip_benchmark_result,
     strip_citation_wrappers,
 )
+from .merge_result import (
+    MergeEnvelopeError,
+    MergeResult,
+    Reorganization,
+    build_merge_result,
+    ensure_slug_lines,
+    extract_class_slugs,
+    parse_merge_envelope,
+)
+from .mitigation_playbook import MitigationPlaybookStore
+from .mitigation_playbook_synthesizer import MitigationPlaybookSynthesizer
+from .playbook import Playbook, PlaybookStore
+from .playbook_synthesizer import PlaybookSynthesizer
 from .reflection import Reflector
 from .schema import (
     CURRENT_SCHEMA_VERSION,
@@ -34,11 +47,38 @@ from .schema import (
 )
 
 if TYPE_CHECKING:
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 logger = logging.getLogger(__name__)
+
+MAX_MERGE_ENVELOPE_RETRIES = 2
+
+
+def _extract_oracle_answer(stage_outputs: str) -> str:
+    """Best-effort extraction of the oracle's correct answer from a stage_outputs file.
+
+    The benchmark embeds the oracle inside ``<oracle>...</oracle>`` blocks within
+    ``<benchmark_result>``. Returns an empty string if no oracle text is found.
+    """
+    if not stage_outputs:
+        return ""
+    open_tag = "<oracle>"
+    close_tag = "</oracle>"
+    pieces: list[str] = []
+    idx = 0
+    while True:
+        start = stage_outputs.find(open_tag, idx)
+        if start == -1:
+            break
+        end = stage_outputs.find(close_tag, start)
+        if end == -1:
+            break
+        pieces.append(stage_outputs[start + len(open_tag) : end].strip())
+        idx = end + len(close_tag)
+    return "\n\n---\n\n".join(pieces) if pieces else ""
 
 
 class StructuredKnowledgeBase(KnowledgeBase):
@@ -66,11 +106,25 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.model_id = model_id
         self.include_benchmark_results = config.include_benchmark_results
         self.enable_reflection = config.enable_reflection
+        self.enable_playbooks = config.enable_playbooks
         self.include_incident_files = config.include_incident_files
         self.per_app = config.per_app
         self.prompts = renderer
         self.schema = SCHEMA_V2
         self._reflector = Reflector(self.kb_dir, model_id, renderer)
+
+        self._playbook_store: PlaybookStore | None = None
+        self._playbook_synthesizer: PlaybookSynthesizer | None = None
+        self._mitigation_playbook_store: MitigationPlaybookStore | None = None
+        self._mitigation_playbook_synthesizer: MitigationPlaybookSynthesizer | None = None
+        if self.enable_playbooks:
+            self._playbook_store = PlaybookStore(self.kb_dir / "playbooks")
+            self._playbook_synthesizer = PlaybookSynthesizer(model_id, renderer)
+            self._mitigation_playbook_store = MitigationPlaybookStore(self.kb_dir / "mitigation_playbooks")
+            self._mitigation_playbook_synthesizer = MitigationPlaybookSynthesizer(model_id, renderer)
+
+        # Set per-update by ``update()``; helpers read it via ``arun_with_retry_tracked``.
+        self._usage_collector: UsageCollector | None = None
 
         if seed_kb_dir is not None:
             self._seed_from(Path(seed_kb_dir))
@@ -234,11 +288,38 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 setattr(result, prior_field, dest)
                 logger.info(f"Knowledge base: copied {filename} to {dest}")
 
+        # Playbooks directory (excludes .history/, includes .aliases.yaml)
+        if self.enable_playbooks:
+            for src_dir_name, result_attr in [
+                ("playbooks", "playbooks_dir"),
+                ("mitigation_playbooks", "mitigation_playbooks_dir"),
+            ]:
+                src_dir = self.kb_dir / src_dir_name
+                if src_dir.is_dir():
+                    dest_dir = target_dir / src_dir_name
+                    dest_dir.mkdir(exist_ok=True)
+                    copied = 0
+                    for entry in src_dir.iterdir():
+                        if entry.name == ".history":
+                            continue
+                        if entry.is_dir():
+                            continue
+                        shutil.copy2(entry, dest_dir / entry.name)
+                        copied += 1
+                    if copied:
+                        setattr(result, result_attr, dest_dir)
+                        logger.info(f"Knowledge base: copied {copied} {src_dir_name} file(s) to {dest_dir}")
+
         return result
 
-    async def _call_llm(self, prompt: str) -> str:
+    async def _call_llm(self, prompt: str, agent_name: str = "kb-llm") -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name=agent_name,
+            usage_collector=self._usage_collector,
+        )
         return result.output
 
     def _save_incident(self, session_summary: str, session_content: str) -> str:
@@ -255,16 +336,29 @@ class StructuredKnowledgeBase(KnowledgeBase):
             content=content,
             include_benchmark_results=self.include_benchmark_results,
         )
-        return await self._call_llm(prompt)
+        return await self._call_llm(prompt, agent_name="kb-summarize-session")
 
     async def _merge_into_long_term_summary(
         self, session_summary: str, prior_summary: str, incident_ref: str = ""
-    ) -> str:
+    ) -> MergeResult:
+        migrated_prior = ensure_slug_lines(prior_summary)
+        pre_merge_slugs = extract_class_slugs(migrated_prior)
+        existing_slugs = sorted(set(pre_merge_slugs.values()))
+
         prompt = self.prompts.render(
-            "kb/merge_summary", session_summary=session_summary, prior_summary=prior_summary, incident_ref=incident_ref
+            "kb/merge_summary",
+            session_summary=session_summary,
+            prior_summary=migrated_prior,
+            incident_ref=incident_ref,
+            existing_slugs=existing_slugs,
         )
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name="kb-merge-summary",
+            usage_collector=self._usage_collector,
+        )
         output = result.output
 
         for attempt in range(MAX_CITATION_RETRIES):
@@ -287,10 +381,61 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 f"{fmt_hint}"
             )
             logger.warning(f"Citation validation failed (attempt {attempt + 1}/{MAX_CITATION_RETRIES}): {invalid}")
-            result = await arun_with_retry(agent, correction, message_history=result.all_messages())
+            result = await arun_with_retry_tracked(
+                agent,
+                correction,
+                agent_name="kb-merge-summary-correction",
+                usage_collector=self._usage_collector,
+                message_history=result.all_messages(),
+            )
             output = result.output
 
-        return strip_citation_wrappers(output)
+        last_error: MergeEnvelopeError | None = None
+        for attempt in range(MAX_MERGE_ENVELOPE_RETRIES):
+            try:
+                envelope, body = parse_merge_envelope(output)
+                migrated_body = ensure_slug_lines(body)
+                post_merge_slugs = extract_class_slugs(migrated_body)
+                merge_result = build_merge_result(
+                    envelope,
+                    pre_merge_slugs=pre_merge_slugs,
+                    post_merge_slugs=post_merge_slugs,
+                    new_summary_text=strip_citation_wrappers(migrated_body),
+                )
+                return merge_result
+            except MergeEnvelopeError as exc:
+                last_error = exc
+                if attempt >= MAX_MERGE_ENVELOPE_RETRIES - 1:
+                    break
+                logger.warning(
+                    f"Merge envelope invalid (attempt {attempt + 1}/{MAX_MERGE_ENVELOPE_RETRIES}): {exc}; "
+                    "retrying with correction"
+                )
+                correction = (
+                    f"Your merge_result envelope was rejected by the validator: {exc}\n"
+                    "Re-emit the COMPLETE updated Long-Term Summary followed by a valid "
+                    "<merge_result>...</merge_result> envelope. Do not drop any existing slugs "
+                    "unless you declare them as `consolidate` losers."
+                )
+                result = await arun_with_retry_tracked(
+                    agent,
+                    correction,
+                    agent_name="kb-merge-envelope-correction",
+                    usage_collector=self._usage_collector,
+                    message_history=result.all_messages(),
+                )
+                output = result.output
+
+        logger.warning(
+            f"Merge envelope validation failed after {MAX_MERGE_ENVELOPE_RETRIES} attempts: {last_error}. "
+            "Falling back to no-op merge with pre-merge summary."
+        )
+        return MergeResult(
+            primary_action="noop",
+            primary_slug=None,
+            primary_class_name=None,
+            new_summary_text=strip_citation_wrappers(migrated_prior),
+        )
 
     async def _extract_operational_lessons(self, long_term_summary: str) -> str:
         prompt = self.prompts.render("kb/extract_lessons", long_term_summary=long_term_summary)
@@ -328,13 +473,255 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.lessons_path.write_text(lessons)
         logger.info(f"Operational lessons written to {self.lessons_path}")
 
+    async def _run_playbook_lifecycle(
+        self,
+        *,
+        merge_result: MergeResult,
+        diagnosis_succeeded: bool,
+        stage_outputs_file: Path | None,
+        recovery_reflection: RecoveryReflection | None,
+    ) -> None:
+        """Synthesize, refine, or consolidate playbooks based on the merge outcome."""
+        if self._playbook_store is None or self._playbook_synthesizer is None:
+            return
+
+        stage_outputs = ""
+        if stage_outputs_file is not None and stage_outputs_file.exists():
+            stage_outputs = stage_outputs_file.read_text()
+
+        oracle_answer = _extract_oracle_answer(stage_outputs)
+
+        for reorg in merge_result.reorganizations:
+            try:
+                await self._handle_reorganization(
+                    reorg,
+                    stage_outputs=stage_outputs,
+                    recovery_reflection=recovery_reflection,
+                )
+            except Exception as e:
+                logger.error(f"Playbook reorganization {reorg.type} failed: {e}", exc_info=True)
+
+        if merge_result.primary_action == "noop" or merge_result.primary_slug is None:
+            logger.info("Playbook lifecycle: primary action is noop; nothing to synthesize.")
+            return
+
+        slug = merge_result.primary_slug
+        class_name = merge_result.primary_class_name or slug
+        existing = self._playbook_store.load(slug)
+
+        if existing is None:
+            if diagnosis_succeeded:
+                logger.info(f"Playbook lifecycle: synthesizing new playbook from success for slug={slug}")
+                pb = await self._playbook_synthesizer.synthesize_from_success(
+                    class_name=class_name,
+                    slug=slug,
+                    stage_outputs=stage_outputs,
+                    oracle_answer=oracle_answer,
+                )
+            elif recovery_reflection is not None:
+                logger.info(f"Playbook lifecycle: synthesizing new playbook from recovery for slug={slug}")
+                pb = await self._playbook_synthesizer.synthesize_from_recovery(
+                    class_name=class_name,
+                    slug=slug,
+                    stage_outputs=stage_outputs,
+                    recovery_reflection=recovery_reflection,
+                    oracle_answer=oracle_answer,
+                )
+            else:
+                logger.warning(
+                    f"Playbook lifecycle: new class {slug!r} but diagnosis failed and no recovery available; skipping"
+                )
+                return
+        else:
+            if diagnosis_succeeded:
+                logger.info(f"Playbook lifecycle: existing playbook {slug!r} succeeded; no-op")
+                return
+            if recovery_reflection is None:
+                logger.warning(
+                    f"Playbook lifecycle: existing playbook {slug!r} failed but no recovery available; cannot refine"
+                )
+                return
+            logger.info(f"Playbook lifecycle: refining playbook for slug={slug}")
+            pb = await self._playbook_synthesizer.refine(
+                existing=existing,
+                stage_outputs=stage_outputs,
+                recovery_reflection=recovery_reflection,
+                oracle_answer=oracle_answer,
+            )
+
+        if pb is None:
+            logger.warning(f"Playbook lifecycle: synthesizer returned None for slug={slug}; skipping save")
+            return
+
+        self._playbook_store.save(pb)
+
+    async def _handle_reorganization(
+        self,
+        reorg: Reorganization,
+        *,
+        stage_outputs: str,
+        recovery_reflection: RecoveryReflection | None,
+    ) -> None:
+        """Apply a single reorganization (consolidate or split) to the playbook store."""
+        assert self._playbook_store is not None
+        assert self._playbook_synthesizer is not None
+
+        if reorg.type == "split":
+            logger.warning(f"Split reorganization not supported in v1; aliasing children to parent {reorg.winner_slug}")
+            for child_slug in reorg.loser_slugs:
+                if child_slug != reorg.winner_slug:
+                    self._playbook_store.add_alias(child_slug, reorg.winner_slug)
+            return
+
+        if reorg.type != "consolidate":
+            logger.warning(f"Unknown reorganization type: {reorg.type}")
+            return
+
+        winner_slug = reorg.winner_slug
+        winner_class_name = reorg.winner_class_name or winner_slug
+
+        winner_pb = self._playbook_store.load(winner_slug)
+        loser_pbs: list[Playbook] = []
+        for loser_slug in reorg.loser_slugs:
+            lp = self._playbook_store.load(loser_slug)
+            if lp is not None:
+                loser_pbs.append(lp)
+
+        if winner_pb is None and not loser_pbs:
+            logger.info(
+                f"Consolidation declared for {winner_slug} but no playbooks exist yet; writing alias-only entries"
+            )
+            for loser_slug in reorg.loser_slugs:
+                if loser_slug != winner_slug:
+                    self._playbook_store.add_alias(loser_slug, winner_slug)
+            return
+
+        combined_seen = (winner_pb.seen if winner_pb else 0) + sum(lp.seen for lp in loser_pbs)
+
+        recovery_summary = recovery_reflection.summary if recovery_reflection is not None else ""
+
+        consolidated = await self._playbook_synthesizer.consolidate(
+            winner_class_name=winner_class_name,
+            winner_slug=winner_slug,
+            winner_playbook=winner_pb,
+            loser_playbooks=loser_pbs,
+            combined_seen=combined_seen,
+            stage_outputs=stage_outputs,
+            recovery_summary=recovery_summary,
+        )
+
+        if consolidated is None:
+            logger.warning(
+                f"Consolidation synthesizer returned None for winner={winner_slug}; "
+                "leaving inputs intact and writing aliases only"
+            )
+            for loser_slug in reorg.loser_slugs:
+                if loser_slug != winner_slug:
+                    self._playbook_store.add_alias(loser_slug, winner_slug)
+            return
+
+        self._playbook_store.save(consolidated)
+
+        for loser_slug in reorg.loser_slugs:
+            if loser_slug == winner_slug:
+                continue
+            self._playbook_store.archive_consolidation(loser_slug, winner_slug)
+            self._playbook_store.add_alias(loser_slug, winner_slug)
+
+    async def _run_mitigation_playbook_lifecycle(
+        self,
+        *,
+        merge_result: MergeResult,
+        mitigation_succeeded: bool,
+        stage_outputs_file: Path | None,
+        recovery_reflection: RecoveryReflection | None,
+    ) -> None:
+        """Synthesize, refine, or skip mitigation playbooks based on the merge outcome.
+
+        Independent of the diagnosis playbook lifecycle — a mitigation playbook
+        can exist for a slug even when no diagnosis playbook does.
+        """
+        if self._mitigation_playbook_store is None or self._mitigation_playbook_synthesizer is None:
+            return
+
+        stage_outputs = ""
+        if stage_outputs_file is not None and stage_outputs_file.exists():
+            stage_outputs = stage_outputs_file.read_text()
+
+        oracle_answer = _extract_oracle_answer(stage_outputs)
+
+        if merge_result.primary_action == "noop" or merge_result.primary_slug is None:
+            logger.info("Mitigation playbook lifecycle: primary action is noop; nothing to synthesize.")
+            return
+
+        slug = merge_result.primary_slug
+        class_name = merge_result.primary_class_name or slug
+        existing = self._mitigation_playbook_store.load(slug)
+
+        if existing is None:
+            if mitigation_succeeded:
+                logger.info(f"Mitigation playbook lifecycle: synthesizing from success for slug={slug}")
+                pb = await self._mitigation_playbook_synthesizer.synthesize_from_success(
+                    class_name=class_name,
+                    slug=slug,
+                    stage_outputs=stage_outputs,
+                    oracle_answer=oracle_answer,
+                )
+            elif recovery_reflection is not None:
+                logger.info(f"Mitigation playbook lifecycle: synthesizing from recovery for slug={slug}")
+                pb = await self._mitigation_playbook_synthesizer.synthesize_from_recovery(
+                    class_name=class_name,
+                    slug=slug,
+                    stage_outputs=stage_outputs,
+                    recovery_reflection=recovery_reflection,
+                    oracle_answer=oracle_answer,
+                )
+            else:
+                logger.warning(
+                    f"Mitigation playbook lifecycle: new class {slug!r} but mitigation failed and "
+                    f"no recovery available; skipping"
+                )
+                return
+        else:
+            if mitigation_succeeded:
+                logger.info(f"Mitigation playbook lifecycle: existing playbook {slug!r} succeeded; no-op")
+                return
+            if recovery_reflection is None:
+                logger.warning(
+                    f"Mitigation playbook lifecycle: existing playbook {slug!r} failed but "
+                    f"no recovery available; cannot refine"
+                )
+                return
+            logger.info(f"Mitigation playbook lifecycle: refining playbook for slug={slug}")
+            pb = await self._mitigation_playbook_synthesizer.refine(
+                existing=existing,
+                stage_outputs=stage_outputs,
+                recovery_reflection=recovery_reflection,
+                oracle_answer=oracle_answer,
+            )
+
+        if pb is None:
+            logger.warning(f"Mitigation playbook lifecycle: synthesizer returned None for slug={slug}; skipping save")
+            return
+
+        self._mitigation_playbook_store.save(pb)
+
     async def update(
         self,
         session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
+        diagnosis_succeeded: bool = False,
+        mitigation_succeeded: bool = False,
+        usage_collector: UsageCollector | None = None,
     ) -> None:
         """Summarize the completed session and update the knowledge base."""
+        self._usage_collector = usage_collector
+        self._reflector.usage_collector = usage_collector
+        if self._playbook_synthesizer is not None:
+            self._playbook_synthesizer.usage_collector = usage_collector
+        if self._mitigation_playbook_synthesizer is not None:
+            self._mitigation_playbook_synthesizer.usage_collector = usage_collector
         parts = session_files.read_all()
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")
@@ -371,27 +758,52 @@ class StructuredKnowledgeBase(KnowledgeBase):
         prior_summary = self.summary_path.read_text() if self.summary_path.exists() else ""
         logger.info("Merging into long-term summary...")
         try:
-            updated = await self._merge_into_long_term_summary(
+            merge_result = await self._merge_into_long_term_summary(
                 session_summary, prior_summary, incident_ref=incident_ref
             )
         except Exception as e:
             logger.error(f"Failed to merge into long-term summary: {e}")
             return
 
-        self.summary_path.write_text(updated)
-        logger.info(f"Long-term summary updated at {self.summary_path}")
+        self.summary_path.write_text(merge_result.new_summary_text)
+        logger.info(
+            f"Long-term summary updated at {self.summary_path} "
+            f"(primary_action={merge_result.primary_action}, primary_slug={merge_result.primary_slug})"
+        )
+
+        normalized_recovery_reflection: RecoveryReflection | None = None
+        if recovery_reflection is not None:
+            from sregym_agents.crucible.recovery_reflection import RecoveryReflection as _RecoveryReflection
+
+            normalized_recovery_reflection = (
+                recovery_reflection
+                if isinstance(recovery_reflection, _RecoveryReflection)
+                else _RecoveryReflection.model_validate(recovery_reflection)
+            )
+
+        if self.enable_playbooks:
+            try:
+                await self._run_playbook_lifecycle(
+                    merge_result=merge_result,
+                    diagnosis_succeeded=diagnosis_succeeded,
+                    stage_outputs_file=stage_outputs_file,
+                    recovery_reflection=normalized_recovery_reflection,
+                )
+            except Exception as e:
+                logger.error(f"Playbook lifecycle failed: {e}", exc_info=True)
+
+            try:
+                await self._run_mitigation_playbook_lifecycle(
+                    merge_result=merge_result,
+                    mitigation_succeeded=mitigation_succeeded,
+                    stage_outputs_file=stage_outputs_file,
+                    recovery_reflection=normalized_recovery_reflection,
+                )
+            except Exception as e:
+                logger.error(f"Mitigation playbook lifecycle failed: {e}", exc_info=True)
 
         await self._distill_lessons()
         if self.enable_reflection:
-            normalized_recovery_reflection: RecoveryReflection | None = None
-            if recovery_reflection is not None:
-                from sregym_agents.crucible.recovery_reflection import RecoveryReflection as _RecoveryReflection
-
-                normalized_recovery_reflection = (
-                    recovery_reflection
-                    if isinstance(recovery_reflection, _RecoveryReflection)
-                    else _RecoveryReflection.model_validate(recovery_reflection)
-                )
             await self._reflector.run(
                 stage_outputs_file=stage_outputs_file,
                 recovery_reflection=normalized_recovery_reflection,

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
 
     from libs.pydantic_agent._middleware import AgentMiddleware
+    from libs.pydantic_agent._usage import UsageCollector
 
 OutputT = TypeVar("OutputT")
 
@@ -44,8 +45,14 @@ class InlineAgent(BaseAgent[None], Generic[OutputT]):
         tools: list[Any] | None = None,
         model_settings: Any | None = None,
         middleware: list[AgentMiddleware] | None = None,
+        usage_collector: UsageCollector | None = None,
     ) -> None:
-        super().__init__(None, agent_name=agent_name, middleware=middleware)
+        super().__init__(
+            None,
+            agent_name=agent_name,
+            middleware=middleware,
+            usage_collector=usage_collector,
+        )
         self._agent = self._build_agent(
             model,
             output_type=output_type,

@@ -1,0 +1,108 @@
+{# Contract: refine an existing mitigation playbook after the agent failed again on this class #}
+You are refining an existing mitigation playbook for a fault class. The SRE
+mitigation agent already had this playbook available and STILL failed to
+apply the correct fix on the latest incident. A recovery agent — given the
+oracle answer as a hint — re-investigated, applied the right fix, and
+produced grounded observations of what the correct procedure should have
+been. Your job is to rewrite the playbook so that, had it looked like your
+revision, the agent would have applied the right fix the first time — for
+any future incident in this class.
+
+Class: {{ class_name }}
+Slug: {{ slug }}
+Timestamp (use verbatim in meta.last_updated): {{ current_iso }}
+
+Existing mitigation playbook (the current state of the document):
+---
+{{ existing_playbook }}
+---
+
+Oracle answer for the latest incident:
+---
+{{ oracle_answer }}
+---
+
+What the agent did wrong on this incident (failed stage outputs — extract
+the SHAPE of the wrong fix attempt, not the literal incident tokens):
+---
+{{ failed_stage_outputs }}
+---
+
+Recovery summary (oracle-assisted re-run bottom-line):
+---
+{{ recovery_summary }}
+---
+
+Recovery observations (use these to understand the SHAPE of the correct
+fix-and-verify procedure. Extract the abstract pattern; do NOT copy any
+literal namespaces, deployment names, env var names, or values):
+---
+{% for obs in recovery_observations %}
+- {{ obs }}
+{% endfor %}
+---
+
+Recovery stage failures (each becomes a new Failure Pattern entry to add):
+---
+{% for sf in recovery_stage_failures %}
+- stage: {{ sf.stage }}
+  description: {{ sf.description }}
+  evidence: {{ sf.evidence }}
+  lesson: {{ sf.lesson }}
+{% endfor %}
+---
+{% if validation_feedback %}
+
+Your previous attempt was REJECTED by the deterministic validator for the
+following reasons. Fix every one of them in this revision:
+---
+{{ validation_feedback }}
+---
+{% endif %}
+
+{% include "kb/_abstraction_rules.j2" %}
+Task: produce ONE revised markdown mitigation playbook document, and nothing
+else. The document MUST match the shape of the existing playbook. A
+deterministic Python validator will reject your output if any of these
+constraints are violated:
+
+- Every `##` section (Summary, Applicability, Mitigation Procedure,
+  Post-Mitigation Verification, Required Evidence (Submission Gate), Known
+  Pitfalls, Failure Patterns) must be present, in order, with the exact
+  heading text.
+- The `<!-- meta -->` block must contain the keys `slug`, `class_name`,
+  `seen`, `created_from`, `last_updated`, each on its own line.
+- Applicability, Mitigation Procedure, Post-Mitigation Verification, and
+  Required Evidence must each be non-empty.
+- Required Evidence must contain at least one `- [ ]` checkbox item.
+- The forbidden vague phrases listed elsewhere in this prompt must not
+  appear anywhere in the document.
+
+Refinement rules (you are FREE to rewrite, not just append):
+- You MAY rewrite any section wherever the existing wording would have let
+  this failure through. Free rewrite is encouraged where it improves
+  precision.
+- If the existing playbook contains any incident-specific tokens baked into
+  ANY section, you MUST rewrite those sections to use parameterized
+  placeholders per the abstraction rules above.
+- You MUST preserve all existing Failure Patterns and Known Pitfalls that
+  remain accurate (rewriting them in the abstract, parameterized form if
+  they were too incident-specific). ADD a new Failure Pattern entry for each
+  item in `recovery_stage_failures`, of the shape:
+    - **<stage>:** "<abstracted description, parameterized>". **Oracle:** <abstracted correction>. **Lesson:** <general lesson>.
+- New Mitigation / Verification / Required Evidence content must be grounded
+  in `recovery_observations` and the oracle answer — do not invent steps
+  recovery did not perform.
+- The class_name and slug must remain unchanged from the existing playbook.
+- In the `<!-- meta -->` block:
+    - `slug:` stays as {{ slug }}
+    - `class_name:` stays as {{ class_name }}
+    - `seen:` MUST be incremented by 1 from the existing playbook's value
+    - `created_from:` keep whatever the existing playbook had
+    - `last_updated:` MUST be updated to {{ current_iso }}
+
+If the existing playbook is malformed or missing a section, repair it as
+part of this revision — the validator will check the output, not the input.
+
+Output the revised markdown document only. Begin with
+`# Mitigation Playbook: {{ class_name }}`.

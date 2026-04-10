@@ -56,3 +56,14 @@ DECISION:
 - On REJECTION: state which check(s) failed, list unexplained symptoms, and if your Phase 1
   investigation found a more likely root cause, describe it in detail to guide the agent
 - Base your verdict on cluster evidence, not just the agent's explanation
+
+---
+SUBMITTING MULTIPLE CANDIDATES (when faults overlap):
+If your Phase 1 investigation surfaced more than one plausible root cause for the user-facing
+symptoms — for example, the agent's hypothesis is well-supported AND your independent finding
+points elsewhere, and you cannot conclusively rule one out — you may pass `submission_ans` as a
+LIST of up to 5 candidate diagnosis strings instead of a single string. The benchmark grades
+the submission as a success if its tracked ground-truth root cause matches ANY candidate in the
+list, so listing extra plausible candidates does not penalize the agent. Default to a single
+string when one candidate is clearly correct; reach for a list only when there is genuine
+ambiguity between two or more well-supported diagnoses.
