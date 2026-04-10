@@ -122,6 +122,7 @@ class SREDeps:
     lt_summary_file: Path | None = None
     incidents_dir: Path | None = None
     playbooks_dir: Path | None = None
+    mitigation_playbooks_dir: Path | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
     # If True, search_prior_incidents raises LTMShortCircuit when verification

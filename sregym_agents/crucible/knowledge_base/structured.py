@@ -33,6 +33,8 @@ from .merge_result import (
     extract_class_slugs,
     parse_merge_envelope,
 )
+from .mitigation_playbook import MitigationPlaybookStore
+from .mitigation_playbook_synthesizer import MitigationPlaybookSynthesizer
 from .playbook import Playbook, PlaybookStore
 from .playbook_synthesizer import PlaybookSynthesizer
 from .reflection import Reflector
@@ -113,9 +115,13 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         self._playbook_store: PlaybookStore | None = None
         self._playbook_synthesizer: PlaybookSynthesizer | None = None
+        self._mitigation_playbook_store: MitigationPlaybookStore | None = None
+        self._mitigation_playbook_synthesizer: MitigationPlaybookSynthesizer | None = None
         if self.enable_playbooks:
             self._playbook_store = PlaybookStore(self.kb_dir / "playbooks")
             self._playbook_synthesizer = PlaybookSynthesizer(model_id, renderer)
+            self._mitigation_playbook_store = MitigationPlaybookStore(self.kb_dir / "mitigation_playbooks")
+            self._mitigation_playbook_synthesizer = MitigationPlaybookSynthesizer(model_id, renderer)
 
         # Set per-update by ``update()``; helpers read it via ``arun_with_retry_tracked``.
         self._usage_collector: UsageCollector | None = None
@@ -284,21 +290,25 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         # Playbooks directory (excludes .history/, includes .aliases.yaml)
         if self.enable_playbooks:
-            src_playbooks = self.kb_dir / "playbooks"
-            if src_playbooks.is_dir():
-                dest_playbooks = target_dir / "playbooks"
-                dest_playbooks.mkdir(exist_ok=True)
-                copied = 0
-                for entry in src_playbooks.iterdir():
-                    if entry.name == ".history":
-                        continue
-                    if entry.is_dir():
-                        continue
-                    shutil.copy2(entry, dest_playbooks / entry.name)
-                    copied += 1
-                if copied:
-                    result.playbooks_dir = dest_playbooks
-                    logger.info(f"Knowledge base: copied {copied} playbook file(s) to {dest_playbooks}")
+            for src_dir_name, result_attr in [
+                ("playbooks", "playbooks_dir"),
+                ("mitigation_playbooks", "mitigation_playbooks_dir"),
+            ]:
+                src_dir = self.kb_dir / src_dir_name
+                if src_dir.is_dir():
+                    dest_dir = target_dir / src_dir_name
+                    dest_dir.mkdir(exist_ok=True)
+                    copied = 0
+                    for entry in src_dir.iterdir():
+                        if entry.name == ".history":
+                            continue
+                        if entry.is_dir():
+                            continue
+                        shutil.copy2(entry, dest_dir / entry.name)
+                        copied += 1
+                    if copied:
+                        setattr(result, result_attr, dest_dir)
+                        logger.info(f"Knowledge base: copied {copied} {src_dir_name} file(s) to {dest_dir}")
 
         return result
 
@@ -618,12 +628,91 @@ class StructuredKnowledgeBase(KnowledgeBase):
             self._playbook_store.archive_consolidation(loser_slug, winner_slug)
             self._playbook_store.add_alias(loser_slug, winner_slug)
 
+    async def _run_mitigation_playbook_lifecycle(
+        self,
+        *,
+        merge_result: MergeResult,
+        mitigation_succeeded: bool,
+        stage_outputs_file: Path | None,
+        recovery_reflection: RecoveryReflection | None,
+    ) -> None:
+        """Synthesize, refine, or skip mitigation playbooks based on the merge outcome.
+
+        Independent of the diagnosis playbook lifecycle — a mitigation playbook
+        can exist for a slug even when no diagnosis playbook does.
+        """
+        if self._mitigation_playbook_store is None or self._mitigation_playbook_synthesizer is None:
+            return
+
+        stage_outputs = ""
+        if stage_outputs_file is not None and stage_outputs_file.exists():
+            stage_outputs = stage_outputs_file.read_text()
+
+        oracle_answer = _extract_oracle_answer(stage_outputs)
+
+        if merge_result.primary_action == "noop" or merge_result.primary_slug is None:
+            logger.info("Mitigation playbook lifecycle: primary action is noop; nothing to synthesize.")
+            return
+
+        slug = merge_result.primary_slug
+        class_name = merge_result.primary_class_name or slug
+        existing = self._mitigation_playbook_store.load(slug)
+
+        if existing is None:
+            if mitigation_succeeded:
+                logger.info(f"Mitigation playbook lifecycle: synthesizing from success for slug={slug}")
+                pb = await self._mitigation_playbook_synthesizer.synthesize_from_success(
+                    class_name=class_name,
+                    slug=slug,
+                    stage_outputs=stage_outputs,
+                    oracle_answer=oracle_answer,
+                )
+            elif recovery_reflection is not None:
+                logger.info(f"Mitigation playbook lifecycle: synthesizing from recovery for slug={slug}")
+                pb = await self._mitigation_playbook_synthesizer.synthesize_from_recovery(
+                    class_name=class_name,
+                    slug=slug,
+                    stage_outputs=stage_outputs,
+                    recovery_reflection=recovery_reflection,
+                    oracle_answer=oracle_answer,
+                )
+            else:
+                logger.warning(
+                    f"Mitigation playbook lifecycle: new class {slug!r} but mitigation failed and "
+                    f"no recovery available; skipping"
+                )
+                return
+        else:
+            if mitigation_succeeded:
+                logger.info(f"Mitigation playbook lifecycle: existing playbook {slug!r} succeeded; no-op")
+                return
+            if recovery_reflection is None:
+                logger.warning(
+                    f"Mitigation playbook lifecycle: existing playbook {slug!r} failed but "
+                    f"no recovery available; cannot refine"
+                )
+                return
+            logger.info(f"Mitigation playbook lifecycle: refining playbook for slug={slug}")
+            pb = await self._mitigation_playbook_synthesizer.refine(
+                existing=existing,
+                stage_outputs=stage_outputs,
+                recovery_reflection=recovery_reflection,
+                oracle_answer=oracle_answer,
+            )
+
+        if pb is None:
+            logger.warning(f"Mitigation playbook lifecycle: synthesizer returned None for slug={slug}; skipping save")
+            return
+
+        self._mitigation_playbook_store.save(pb)
+
     async def update(
         self,
         session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
         diagnosis_succeeded: bool = False,
+        mitigation_succeeded: bool = False,
         usage_collector: UsageCollector | None = None,
     ) -> None:
         """Summarize the completed session and update the knowledge base."""
@@ -631,6 +720,8 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self._reflector.usage_collector = usage_collector
         if self._playbook_synthesizer is not None:
             self._playbook_synthesizer.usage_collector = usage_collector
+        if self._mitigation_playbook_synthesizer is not None:
+            self._mitigation_playbook_synthesizer.usage_collector = usage_collector
         parts = session_files.read_all()
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")
@@ -700,6 +791,16 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 )
             except Exception as e:
                 logger.error(f"Playbook lifecycle failed: {e}", exc_info=True)
+
+            try:
+                await self._run_mitigation_playbook_lifecycle(
+                    merge_result=merge_result,
+                    mitigation_succeeded=mitigation_succeeded,
+                    stage_outputs_file=stage_outputs_file,
+                    recovery_reflection=normalized_recovery_reflection,
+                )
+            except Exception as e:
+                logger.error(f"Mitigation playbook lifecycle failed: {e}", exc_info=True)
 
         await self._distill_lessons()
         if self.enable_reflection:

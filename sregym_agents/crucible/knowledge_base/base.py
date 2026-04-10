@@ -29,6 +29,7 @@ class InjectedKB:
     arbitration_priors: Path | None = None
     verification_priors: Path | None = None
     playbooks_dir: Path | None = None
+    mitigation_playbooks_dir: Path | None = None
 
 
 @dataclasses.dataclass
@@ -106,6 +107,7 @@ class KnowledgeBase(abc.ABC):
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
         diagnosis_succeeded: bool = False,
+        mitigation_succeeded: bool = False,
         usage_collector: UsageCollector | None = None,
     ) -> None:
         """Update the knowledge base from the completed session."""

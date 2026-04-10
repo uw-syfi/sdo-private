@@ -317,6 +317,101 @@ class MitigationSearchResult(BaseModel):
     )
 
 
+class MitigationApplication(BaseModel):
+    """Result of executing a mitigation strategy against the cluster."""
+
+    strategy_index: int = Field(description="Index of the strategy in the retrieved list")
+    root_cause_class: str = Field(description="The strategy's root_cause_class (echoed for context)")
+    applied: bool = Field(
+        description=(
+            "True if the mitigation procedure was executed AND the post-mitigation "
+            "verification's submission gate was satisfied. False otherwise."
+        )
+    )
+    applied_steps: list[str] = Field(
+        default_factory=list,
+        description="The mitigation steps actually executed by the subagent.",
+    )
+    verification_evidence: list[str] = Field(
+        default_factory=list,
+        description="Concrete tool-call output proving each Required Evidence item.",
+    )
+    mitigation_summary: str = Field(
+        default="",
+        description=(
+            "1-line description of what was applied, suitable for benchmark submission. Empty when applied=False."
+        ),
+    )
+    reasoning: str = Field(description="Explanation of why the mitigation succeeded or failed.")
+
+
+class VerifiedMitigationSearchResult(BaseModel):
+    """Mitigation search result enriched with per-strategy execution outcomes."""
+
+    strategies: list[MitigationStrategy] = Field(
+        description="The retrieved strategies, in their original order",
+    )
+    applications: list[MitigationApplication] = Field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list,
+        description="One MitigationApplication per strategy that was actually attempted.",
+    )
+    successful_applications: list[MitigationApplication] = Field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list,
+        description="Subset of applications where applied=True (convenience).",
+    )
+    novel_cause: bool = Field(default=False)
+    general_guidance: str = Field(default="")
+
+
+class LTMMitigationShortCircuit(BaseException):
+    """Short-circuit signal raised by ``search_prior_mitigations`` when the
+    mitigation phase has successfully applied at least one strategy AND the
+    feature flag ``enable_ltm_verified_direct_submit`` is set on ``SREDeps``.
+
+    Mirrors :class:`LTMShortCircuit` for the diagnosis side. Inherits from
+    ``BaseException`` (not ``Exception``) so it bypasses pydantic-ai middleware
+    retry logic and propagates cleanly out of the SRE main agent loop to the
+    orchestrator. The orchestrator catches this signal, submits ``applied``
+    directly to the benchmark, and treats the iteration as APPROVED.
+    """
+
+    def __init__(self, applied: list[str], iteration: int) -> None:
+        super().__init__(f"LTM mitigation short-circuit: {len(applied)} applied")
+        self.applied = applied
+        self.iteration = iteration
+
+
+def _format_applied_mitigations_md(
+    verified: VerifiedMitigationSearchResult,
+    iteration: int,
+) -> str:
+    """Markdown summary of every mitigation strategy that went through the LTM
+    mitigation phase. Used to log to the shared session file every time
+    ``search_prior_mitigations`` runs."""
+    if not verified.applications:
+        return (
+            f"\n### Iteration {iteration} — LTM Mitigation Phase\n"
+            f"No mitigation playbooks matched the retrieved strategies.\n"
+        )
+    successful = verified.successful_applications
+    lines = [
+        f"\n### Iteration {iteration} — LTM Mitigation Phase",
+        (f"Applied {len(verified.applications)} strategy(ies) ({len(successful)} successful):"),
+        "",
+    ]
+    for app in verified.applications:
+        marker = "✅ APPLIED" if app.applied else "❌ failed"
+        lines.append(f"- **[{marker}] {app.root_cause_class}**")
+        if app.applied and app.mitigation_summary:
+            lines.append(f"  - summary: {app.mitigation_summary}")
+        if app.reasoning:
+            lines.append(f"  - reasoning: {app.reasoning}")
+        if app.applied and app.verification_evidence:
+            lines.extend(f"  - evidence: {ev}" for ev in app.verification_evidence)
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -409,6 +504,180 @@ def _load_playbook_text(playbooks_dir: Path | None, slug: str | None) -> str:
     if playbook is None:
         return ""
     return playbook.to_markdown()
+
+
+def _resolve_strategy_slug(
+    root_cause_class: str,
+    lt_summary_file: Path | None,
+) -> str | None:
+    """Resolve a mitigation strategy's root_cause_class to a long-term-summary slug.
+
+    Mirrors :func:`_attach_slugs_to_candidates`'s exact-then-fuzzy match. Returns
+    ``None`` if no match is found.
+    """
+    if not lt_summary_file or not lt_summary_file.exists():
+        return None
+    try:
+        from sregym_agents.crucible.knowledge_base.merge_result import extract_class_slugs
+        from sregym_agents.crucible.knowledge_base.playbook import slugify
+    except Exception as exc:
+        logger.warning("Strategy slug resolution skipped: %s", exc)
+        return None
+
+    try:
+        summary_text = lt_summary_file.read_text()
+    except OSError as exc:
+        logger.warning("Strategy slug resolution: failed to read %s: %s", lt_summary_file, exc)
+        return None
+
+    class_slugs = extract_class_slugs(summary_text)
+    if not class_slugs:
+        return None
+
+    if root_cause_class in class_slugs:
+        return class_slugs[root_cause_class]
+
+    fuzzy_index: dict[str, str] = {}
+    for class_name, slug in class_slugs.items():
+        fuzzy_index.setdefault(slugify(class_name), slug)
+
+    derived = slugify(root_cause_class)
+    return fuzzy_index.get(derived)
+
+
+def _load_mitigation_playbook_text(
+    mitigation_playbooks_dir: Path | None,
+    slug: str | None,
+) -> str:
+    """Load mitigation playbook markdown for ``slug`` (alias-aware).
+
+    Returns empty string on miss.
+    """
+    if not mitigation_playbooks_dir or not slug:
+        return ""
+    try:
+        from sregym_agents.crucible.knowledge_base.mitigation_playbook import (
+            MitigationPlaybookStore,
+        )
+
+        store = MitigationPlaybookStore(mitigation_playbooks_dir)
+        playbook = store.load(slug)
+    except Exception as exc:
+        logger.warning("Failed to load mitigation playbook for slug %s: %s", slug, exc)
+        return ""
+    if playbook is None:
+        return ""
+    return playbook.to_markdown()
+
+
+async def _run_mitigation_phase(
+    strategies: list[MitigationStrategy],
+    search_result: MitigationSearchResult,
+    namespace: str,
+    stage: str,
+    model_id: Model | str,
+    renderer: PromptRenderer,
+    trajectory_path: Path | None,
+    mitigation_playbooks_dir: Path | None,
+    lt_summary_file: Path | None,
+    failed_attempts: str = "",
+    usage_collector: UsageCollector | None = None,
+) -> VerifiedMitigationSearchResult:
+    """Execute mitigation playbooks for retrieved strategies, sequentially.
+
+    For each strategy whose ``root_cause_class`` resolves to a stored mitigation
+    playbook, spawn an inline subagent that:
+
+    1. Reads the playbook
+    2. Executes the Mitigation Procedure against the cluster
+    3. Runs the Post-Mitigation Verification
+    4. Confirms every Required Evidence checkbox is satisfied
+
+    Strategies are attempted **sequentially** (because each subagent mutates the
+    cluster) and we **early-exit on the first ``applied=True``**: once the
+    cluster is fixed there is no point trying the next strategy.
+
+    Strategies whose root_cause_class does not resolve to a playbook produce
+    a ``MitigationApplication`` with ``applied=False`` and an explanatory
+    ``reasoning``, but do not consume a subagent call.
+    """
+    applications: list[MitigationApplication] = []
+
+    for idx, strategy in enumerate(strategies):
+        slug = _resolve_strategy_slug(strategy.root_cause_class, lt_summary_file)
+        playbook_text = _load_mitigation_playbook_text(mitigation_playbooks_dir, slug)
+        if not playbook_text:
+            applications.append(
+                MitigationApplication(
+                    strategy_index=idx,
+                    root_cause_class=strategy.root_cause_class,
+                    applied=False,
+                    reasoning=(
+                        f"No mitigation playbook found for root_cause_class "
+                        f"'{strategy.root_cause_class}' (slug={slug!r})."
+                    ),
+                )
+            )
+            continue
+
+        prompt = renderer.render(
+            "ltm_apply_mitigation",
+            namespace=namespace,
+            stage=stage,
+            strategy_index=idx,
+            root_cause_class=strategy.root_cause_class,
+            mitigation_approach=strategy.mitigation_approach,
+            playbook=playbook_text,
+            failed_attempts=failed_attempts,
+        )
+        logger.info("[ltm-mitigate-%d] PROMPT:\n%s", idx, prompt)
+
+        mitigate_agent = InlineAgent(
+            model_id,
+            agent_name=f"ltm-mitigate-{idx}",
+            output_type=MitigationApplication,
+            tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+            model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
+            middleware=_subagent_middleware(trajectory_path),
+            usage_collector=usage_collector,
+        )
+        try:
+            result = await mitigate_agent.arun(
+                prompt,
+                run_ctx={"stage": stage, "role": "ltm-mitigate", "strategy_index": idx},
+            )
+            output = result.output
+            output.strategy_index = idx
+            output.root_cause_class = strategy.root_cause_class
+            logger.info(
+                "[ltm-mitigate-%d] done: applied=%s, summary=%s, reasoning=%s",
+                idx,
+                output.applied,
+                output.mitigation_summary,
+                output.reasoning,
+            )
+        except Exception as e:
+            logger.warning("[ltm-mitigate-%d] failed: %s", idx, e)
+            output = MitigationApplication(
+                strategy_index=idx,
+                root_cause_class=strategy.root_cause_class,
+                applied=False,
+                reasoning=f"Mitigation subagent raised: {e}",
+            )
+
+        applications.append(output)
+        if output.applied:
+            # Cluster is fixed; no point trying further strategies.
+            break
+
+    successful = [a for a in applications if a.applied]
+    return VerifiedMitigationSearchResult(
+        strategies=list(strategies),
+        applications=applications,
+        successful_applications=successful,
+        novel_cause=search_result.novel_cause,
+        general_guidance=search_result.general_guidance,
+    )
 
 
 async def _run_verification_phase(
@@ -909,4 +1178,45 @@ async def search_prior_mitigations(
     if ctx.deps.stage_outputs_file:
         with open(ctx.deps.stage_outputs_file, "a") as f:
             f.write(f"\n## KB Mitigation Retrieval Results\n**Query:** {root_cause}\n\n{output_json}\n")
-    return output_json
+
+    # --- Mitigation phase: execute playbook-guided mitigation subagents ---
+    if not ctx.deps.mitigation_playbooks_dir or not output.strategies:
+        return output_json
+
+    verified = await _run_mitigation_phase(
+        strategies=output.strategies,
+        search_result=output,
+        namespace=ctx.deps.namespace,
+        stage=ctx.deps.stage,
+        model_id=model_id,
+        renderer=ctx.deps.renderer,
+        trajectory_path=ctx.deps.trajectory_path,
+        mitigation_playbooks_dir=ctx.deps.mitigation_playbooks_dir,
+        lt_summary_file=ctx.deps.lt_summary_file,
+        failed_attempts=failed_attempts,
+        usage_collector=ctx.deps.usage_collector,
+    )
+
+    verified_json = verified.model_dump_json(indent=2)
+    logger.info("[ltm-mitigation] verified output: %s", verified_json)
+
+    # Log the mitigation phase results to the shared session file.
+    try:
+        ctx.deps.shared_file.append(_format_applied_mitigations_md(verified, ctx.deps.iteration))
+    except Exception as e:
+        logger.warning("[ltm-mitigation] failed to append phase results to shared file: %s", e)
+
+    if ctx.deps.stage_outputs_file:
+        with open(ctx.deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Mitigation Phase Results\n{verified_json}\n")
+
+    # Short-circuit: if the flag is on and at least one strategy applied.
+    if ctx.deps.enable_ltm_verified_direct_submit and verified.successful_applications:
+        applied_summaries = [a.mitigation_summary for a in verified.successful_applications]
+        logger.info(
+            "[ltm-mitigation] short-circuit fired with %d applied strategy(ies); raising LTMMitigationShortCircuit",
+            len(applied_summaries),
+        )
+        raise LTMMitigationShortCircuit(applied=applied_summaries, iteration=ctx.deps.iteration)
+
+    return verified_json

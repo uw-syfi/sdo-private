@@ -78,6 +78,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
         diagnosis_succeeded: bool = False,
+        mitigation_succeeded: bool = False,
         usage_collector: UsageCollector | None = None,
     ) -> None:
         self._usage_collector = usage_collector

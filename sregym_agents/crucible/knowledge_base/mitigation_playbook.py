@@ -1,9 +1,10 @@
-"""Playbook data layer: parser, validator, store, and slug helper.
+"""Mitigation playbook data layer: parser, validator, store.
 
-Playbooks are per-root-cause-class markdown documents containing concrete
-triage and verification procedures that the Crucible diagnosis agent reads
-at runtime. This module provides the diagnosis-flavored data shapes and
-storage on top of the shared primitives in ``_playbook_common.py``.
+Mitigation playbooks are per-root-cause-class markdown documents containing
+the concrete fix-and-verify procedure that the Crucible mitigation subagent
+executes at runtime. Each playbook is keyed by the same slug as the matching
+diagnosis playbook (when one exists), but the two stores are independent —
+either may exist without the other.
 """
 
 from __future__ import annotations
@@ -13,24 +14,21 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 from ._playbook_common import (
     ALLOWED_CREATED_FROM,
     META_CLOSE,
     META_OPEN,
-    REQUIRED_META_KEYS,
-    VAGUE_PHRASES,
     PlaybookStoreBase,
     extract_meta_block,
     extract_sections,
     parse_bullet_list,
     parse_numbered_steps,
-    slugify,
     validate_meta_block,
     validate_vague_phrases,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -41,29 +39,21 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_SECTIONS: tuple[str, ...] = (
     "Summary",
-    "Symptoms",
-    "Triage Procedure",
-    "Verification Procedure",
+    "Applicability",
+    "Mitigation Procedure",
+    "Post-Mitigation Verification",
     "Required Evidence",
-    "Known Distractors",
+    "Known Pitfalls",
     "Failure Patterns",
 )
 
 
-# Re-exports for backward compatibility with callers that imported these from
-# this module before the common helpers were extracted.
 __all__ = [
-    "ALLOWED_CREATED_FROM",
-    "META_CLOSE",
-    "META_OPEN",
-    "REQUIRED_META_KEYS",
     "REQUIRED_SECTIONS",
-    "VAGUE_PHRASES",
-    "Playbook",
-    "PlaybookStore",
-    "PlaybookValidationError",
-    "slugify",
-    "validate_playbook",
+    "MitigationPlaybook",
+    "MitigationPlaybookStore",
+    "MitigationPlaybookValidationError",
+    "validate_mitigation_playbook",
 ]
 
 
@@ -72,16 +62,12 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-class PlaybookValidationError(ValueError):
-    """Raised when a playbook fails structural validation.
-
-    The ``violations`` attribute carries every detected problem so that an
-    LLM-based synthesizer can pass them back as feedback for fix-and-retry.
-    """
+class MitigationPlaybookValidationError(ValueError):
+    """Raised when a mitigation playbook fails structural validation."""
 
     def __init__(self, violations: list[str]):
         self.violations = list(violations)
-        message = "Playbook validation failed: " + "; ".join(self.violations)
+        message = "Mitigation playbook validation failed: " + "; ".join(self.violations)
         super().__init__(message)
 
 
@@ -90,7 +76,7 @@ class PlaybookValidationError(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def validate_playbook(text: str) -> list[str]:
+def validate_mitigation_playbook(text: str) -> list[str]:
     """Return a list of human-readable violations. Empty list means valid."""
     meta = extract_meta_block(text)
     violations = list(validate_meta_block(meta))
@@ -100,14 +86,16 @@ def validate_playbook(text: str) -> list[str]:
         f"section: missing required '## {required}'" for required in REQUIRED_SECTIONS if required not in sections
     )
 
-    if "Symptoms" in sections and not parse_bullet_list(sections["Symptoms"]):
-        violations.append("Symptoms: must contain at least one '- ' bullet")
+    if "Applicability" in sections and not parse_bullet_list(sections["Applicability"]):
+        violations.append("Applicability: must contain at least one '- ' bullet")
 
-    if "Triage Procedure" in sections and not parse_numbered_steps(sections["Triage Procedure"]):
-        violations.append("Triage Procedure: must contain at least one numbered step")
+    if "Mitigation Procedure" in sections and not parse_numbered_steps(sections["Mitigation Procedure"]):
+        violations.append("Mitigation Procedure: must contain at least one numbered step")
 
-    if "Verification Procedure" in sections and not parse_numbered_steps(sections["Verification Procedure"]):
-        violations.append("Verification Procedure: must contain at least one numbered step")
+    if "Post-Mitigation Verification" in sections and not parse_numbered_steps(
+        sections["Post-Mitigation Verification"]
+    ):
+        violations.append("Post-Mitigation Verification: must contain at least one numbered step")
 
     if "Required Evidence" in sections:
         body = sections["Required Evidence"]
@@ -123,12 +111,12 @@ def validate_playbook(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Playbook model
+# Mitigation playbook model
 # ---------------------------------------------------------------------------
 
 
-class Playbook(BaseModel):
-    """Structured representation of a playbook markdown document."""
+class MitigationPlaybook(BaseModel):
+    """Structured representation of a mitigation playbook markdown document."""
 
     slug: str
     class_name: str
@@ -136,23 +124,23 @@ class Playbook(BaseModel):
     created_from: Literal["success", "recovery"]
     last_updated: str
     summary: str
-    symptoms: list[str] = Field(default_factory=list)
-    triage_procedure: list[str] = Field(default_factory=list)
-    verification_procedure: list[str] = Field(default_factory=list)
+    applicability: list[str] = Field(default_factory=list)
+    mitigation_procedure: list[str] = Field(default_factory=list)
+    post_mitigation_verification: list[str] = Field(default_factory=list)
     required_evidence: list[str] = Field(default_factory=list)
-    known_distractors: list[str] = Field(default_factory=list)
+    known_pitfalls: list[str] = Field(default_factory=list)
     failure_patterns: list[str] = Field(default_factory=list)
     markdown: str = ""
 
     @classmethod
-    def parse(cls, text: str) -> Playbook:
-        """Parse a markdown document into a Playbook.
+    def parse(cls, text: str) -> MitigationPlaybook:
+        """Parse a markdown document into a MitigationPlaybook.
 
-        Raises ``PlaybookValidationError`` if the document is malformed.
+        Raises ``MitigationPlaybookValidationError`` if the document is malformed.
         """
-        violations = validate_playbook(text)
+        violations = validate_mitigation_playbook(text)
         if violations:
-            raise PlaybookValidationError(violations)
+            raise MitigationPlaybookValidationError(violations)
 
         meta = extract_meta_block(text)
         assert meta is not None  # validated above
@@ -161,8 +149,7 @@ class Playbook(BaseModel):
 
         created_from_value = meta["created_from"]
         if created_from_value not in ALLOWED_CREATED_FROM:
-            # Defensive: validator should have caught this.
-            raise PlaybookValidationError([f"meta.created_from: invalid value '{created_from_value}'"])
+            raise MitigationPlaybookValidationError([f"meta.created_from: invalid value '{created_from_value}'"])
 
         return cls(
             slug=meta["slug"],
@@ -171,30 +158,28 @@ class Playbook(BaseModel):
             created_from=cast("Literal['success', 'recovery']", created_from_value),
             last_updated=meta["last_updated"],
             summary=sections.get("Summary", "").strip(),
-            symptoms=parse_bullet_list(sections.get("Symptoms", "")),
-            triage_procedure=parse_numbered_steps(sections.get("Triage Procedure", "")),
-            verification_procedure=parse_numbered_steps(sections.get("Verification Procedure", "")),
+            applicability=parse_bullet_list(sections.get("Applicability", "")),
+            mitigation_procedure=parse_numbered_steps(sections.get("Mitigation Procedure", "")),
+            post_mitigation_verification=parse_numbered_steps(sections.get("Post-Mitigation Verification", "")),
             required_evidence=parse_bullet_list(sections.get("Required Evidence", "")),
-            known_distractors=parse_bullet_list(sections.get("Known Distractors", "")),
+            known_pitfalls=parse_bullet_list(sections.get("Known Pitfalls", "")),
             failure_patterns=parse_bullet_list(sections.get("Failure Patterns", "")),
             markdown=text,
         )
 
     def to_markdown(self) -> str:
-        """Return a valid markdown string for this playbook.
+        """Return a valid markdown string for this mitigation playbook.
 
         If ``self.markdown`` is non-empty AND parses cleanly, returns it
-        verbatim (round-trip preservation). Otherwise serializes from the
-        structured fields.
+        verbatim. Otherwise serializes from the structured fields.
         """
-        if self.markdown and not validate_playbook(self.markdown):
+        if self.markdown and not validate_mitigation_playbook(self.markdown):
             return self.markdown
-
         return self._serialize()
 
     def _serialize(self) -> str:
         lines: list[str] = []
-        lines.append(f"# Playbook: {self.class_name}")
+        lines.append(f"# Mitigation Playbook: {self.class_name}")
         lines.append("")
         lines.append(META_OPEN)
         lines.append(f"slug: {self.slug}")
@@ -207,20 +192,20 @@ class Playbook(BaseModel):
         lines.append("## Summary")
         lines.append(self.summary)
         lines.append("")
-        lines.append("## Symptoms")
-        lines.extend(f"- {item}" for item in self.symptoms)
+        lines.append("## Applicability")
+        lines.extend(f"- {item}" for item in self.applicability)
         lines.append("")
-        lines.append("## Triage Procedure")
-        lines.extend(self.triage_procedure)
+        lines.append("## Mitigation Procedure")
+        lines.extend(self.mitigation_procedure)
         lines.append("")
-        lines.append("## Verification Procedure")
-        lines.extend(self.verification_procedure)
+        lines.append("## Post-Mitigation Verification")
+        lines.extend(self.post_mitigation_verification)
         lines.append("")
         lines.append("## Required Evidence (Submission Gate)")
         lines.extend(f"- [ ] {item}" for item in self.required_evidence)
         lines.append("")
-        lines.append("## Known Distractors")
-        lines.extend(f"- {item}" for item in self.known_distractors)
+        lines.append("## Known Pitfalls")
+        lines.extend(f"- {item}" for item in self.known_pitfalls)
         lines.append("")
         lines.append("## Failure Patterns")
         lines.extend(f"- {item}" for item in self.failure_patterns)
@@ -229,21 +214,21 @@ class Playbook(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Playbook store
+# Mitigation playbook store
 # ---------------------------------------------------------------------------
 
 
-class PlaybookStore(PlaybookStoreBase):
-    """Filesystem-backed store for diagnosis playbook markdown files."""
+class MitigationPlaybookStore(PlaybookStoreBase):
+    """Filesystem-backed store for mitigation playbook markdown files."""
 
-    def _parse(self, text: str) -> Playbook:
-        return Playbook.parse(text)
+    def _parse(self, text: str) -> MitigationPlaybook:
+        return MitigationPlaybook.parse(text)
 
-    def _to_markdown(self, model: Playbook) -> str:
+    def _to_markdown(self, model: MitigationPlaybook) -> str:
         return model.to_markdown()
 
-    def load(self, slug: str) -> Playbook | None:  # type: ignore[override]
-        return cast("Playbook | None", super().load(slug))
+    def load(self, slug: str) -> MitigationPlaybook | None:  # type: ignore[override]
+        return cast("MitigationPlaybook | None", super().load(slug))
 
-    def save(self, playbook: Playbook) -> Path:  # type: ignore[override]
+    def save(self, playbook: MitigationPlaybook) -> Path:  # type: ignore[override]
         return super().save(playbook)

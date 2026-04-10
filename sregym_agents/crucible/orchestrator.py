@@ -29,6 +29,7 @@ from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
     JudgeDeps,
+    LTMMitigationShortCircuit,
     LTMShortCircuit,
     SharedFile,
     SharedState,
@@ -181,6 +182,9 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
         arbitration_priors=injected.arbitration_priors.resolve() if injected.arbitration_priors else None,
         verification_priors=injected.verification_priors.resolve() if injected.verification_priors else None,
         playbooks_dir=injected.playbooks_dir.resolve() if injected.playbooks_dir else None,
+        mitigation_playbooks_dir=(
+            injected.mitigation_playbooks_dir.resolve() if injected.mitigation_playbooks_dir else None
+        ),
     )
 
 
@@ -192,21 +196,30 @@ async def _direct_submit_confirmed(
     submit_mcp_url: str,
     stage_outputs_file: Path | None,
 ) -> StageLoopResult:
-    """Direct-submission path triggered by ``LTMShortCircuit``.
+    """Direct-submission path triggered by ``LTMShortCircuit`` (diagnosis) or
+    ``LTMMitigationShortCircuit`` (mitigation).
 
     Appends a "LTM Direct Submission" block + bullet list of confirmed
-    candidates to the shared file, posts the list to the benchmark via
-    ``submit_to_benchmark``, appends the resulting ``benchmark_result``
-    block, and returns an APPROVED ``StageLoopResult``. The judge agent
-    is **not** invoked.
+    candidates / applied mitigations to the shared file, posts the list to
+    the benchmark via ``submit_to_benchmark``, appends the resulting
+    ``benchmark_result`` block, and returns an APPROVED ``StageLoopResult``.
+    The judge agent is **not** invoked.
     """
+    is_mitigation = stage == "mitigation"
+    item_label = "applied mitigation(s)" if is_mitigation else "candidate root cause(s)"
+    list_header = "**Applied mitigations:**" if is_mitigation else "**Confirmed candidates:**"
+    what_happened = (
+        f"Mitigation subagents successfully applied {len(confirmed)} {item_label} from the knowledge base."
+        if is_mitigation
+        else f"Verification subagents confirmed {len(confirmed)} {item_label} from the knowledge base."
+    )
+
     bullet_list = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(confirmed))
     shared_file.append(
         f"\n### Iteration {iteration} — LTM Direct Submission ({stage})\n"
-        f"Verification subagents confirmed {len(confirmed)} candidate root cause(s) "
-        f"from the knowledge base. Skipping further SRE agent reasoning and the judge "
-        f"step; submitting these candidates directly.\n\n"
-        f"**Confirmed candidates:**\n{bullet_list}\n"
+        f"{what_happened} Skipping further SRE agent reasoning and the judge "
+        f"step; submitting directly.\n\n"
+        f"{list_header}\n{bullet_list}\n"
     )
     try:
         success, message, oracle = await submit_to_benchmark(submit_mcp_url, confirmed, stage)
@@ -256,6 +269,7 @@ async def _run_stage_loop(
     triage_priors_file = injected_kb.triage_priors if injected_kb else None
     verification_priors_file = injected_kb.verification_priors if injected_kb else None
     playbooks_dir = injected_kb.playbooks_dir if injected_kb else None
+    mitigation_playbooks_dir = injected_kb.mitigation_playbooks_dir if injected_kb else None
     stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
@@ -351,6 +365,7 @@ async def _run_stage_loop(
             lt_summary_file=lt_summary_file if crucible_config.enable_ltm_retrieval else None,
             incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
             playbooks_dir=playbooks_dir if crucible_config.enable_ltm_retrieval else None,
+            mitigation_playbooks_dir=(mitigation_playbooks_dir if crucible_config.enable_ltm_retrieval else None),
             model_id=model,
             enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
             trajectory_path=trajectory_path,
@@ -389,6 +404,21 @@ async def _run_stage_loop(
             )
             return await _direct_submit_confirmed(
                 confirmed=sig.confirmed,
+                stage=stage,
+                iteration=sig.iteration,
+                shared_file=shared_file,
+                submit_mcp_url=submit_mcp_url,
+                stage_outputs_file=stage_outputs_file,
+            )
+        except LTMMitigationShortCircuit as sig:
+            # LTM mitigation phase successfully applied at least one strategy;
+            # skip the rest of the SRE agent and the judge and submit directly.
+            logger.info(
+                f"[{stage}] LTM mitigation short-circuit on iteration {iteration} with "
+                f"{len(sig.applied)} applied strategy(ies); submitting directly."
+            )
+            return await _direct_submit_confirmed(
+                confirmed=sig.applied,
                 stage=stage,
                 iteration=sig.iteration,
                 shared_file=shared_file,
@@ -1023,4 +1053,5 @@ async def run(
         diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
     )
     result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
+    result["mitigation_succeeded"] = "success: True" in (mit_result.benchmark_block or "")
     return result

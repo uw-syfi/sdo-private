@@ -46,6 +46,7 @@ class KbUpdateTaskDict(TypedDict):
     prompt_version: str
     recovery_reflection: dict[str, Any] | None
     diagnosis_succeeded: bool
+    mitigation_succeeded: bool
     timestamp: str
 
 

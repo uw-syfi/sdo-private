@@ -267,6 +267,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
     recovery_reflection = usage_metrics.get("recovery_reflection")
     diagnosis_succeeded = bool(usage_metrics.get("diagnosis_succeeded", False))
+    mitigation_succeeded = bool(usage_metrics.get("mitigation_succeeded", False))
 
     if args.logs_dir:
         assert logs_dir is not None
@@ -322,6 +323,7 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "prompt_version": crucible_config.prompt_version,
                 "recovery_reflection": recovery_reflection,
                 "diagnosis_succeeded": diagnosis_succeeded,
+                "mitigation_succeeded": mitigation_succeeded,
                 "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
             }
             task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)
@@ -336,6 +338,7 @@ async def _async_main(args: argparse.Namespace) -> None:
                 stage_outputs_file=stage_outputs_file,
                 recovery_reflection=recovery_reflection,
                 diagnosis_succeeded=diagnosis_succeeded,
+                mitigation_succeeded=mitigation_succeeded,
             )
 
     logger.info("Crucible driver complete.")

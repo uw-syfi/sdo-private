@@ -56,6 +56,7 @@ async def process_task(task_path: Path) -> None:
         RecoveryReflection.model_validate(task["recovery_reflection"]) if task.get("recovery_reflection") else None
     )
     diagnosis_succeeded = bool(task.get("diagnosis_succeeded", False))
+    mitigation_succeeded = bool(task.get("mitigation_succeeded", False))
 
     kb = create_knowledge_base(
         kb_type=task["kb_type"],
@@ -80,6 +81,7 @@ async def process_task(task_path: Path) -> None:
         stage_outputs_file=stage_outputs_file,
         recovery_reflection=recovery_reflection,
         diagnosis_succeeded=diagnosis_succeeded,
+        mitigation_succeeded=mitigation_succeeded,
         usage_collector=kb_collector,
     )
     logger.info(
