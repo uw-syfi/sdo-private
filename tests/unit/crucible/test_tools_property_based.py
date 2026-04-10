@@ -73,6 +73,7 @@ def _make_sre_ctx(d: Path) -> MagicMock:
         shared_file=d / "shared.md",  # type: ignore[arg-type]
         iteration=1,
         stage="diagnosis",
+        model_id="test",
     )
     return ctx
 

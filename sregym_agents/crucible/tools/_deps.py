@@ -116,12 +116,12 @@ class SREDeps:
     shared_file: SharedFile
     iteration: int
     stage: str  # "diagnosis" | "mitigation"
+    model_id: Model | str
     renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     state: SharedState = field(default_factory=SharedState)
     lt_summary_file: Path | None = None
     incidents_dir: Path | None = None
     playbooks_dir: Path | None = None
-    ltm_model_id: Model | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
     # If True, search_prior_incidents raises LTMShortCircuit when verification

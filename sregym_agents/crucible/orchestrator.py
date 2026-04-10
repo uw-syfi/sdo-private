@@ -351,7 +351,7 @@ async def _run_stage_loop(
             lt_summary_file=lt_summary_file if crucible_config.enable_ltm_retrieval else None,
             incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
             playbooks_dir=playbooks_dir if crucible_config.enable_ltm_retrieval else None,
-            ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
+            model_id=model,
             enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
             trajectory_path=trajectory_path,
             triage_priors=triage_priors,
@@ -598,6 +598,7 @@ async def _run_recovery_diagnosis(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="diagnosis",
+        model_id=model,
         renderer=renderer,
         state=sre_state,
         stage_outputs_file=stage_outputs_file,
@@ -766,6 +767,7 @@ async def _run_recovery_mitigation(
         shared_file=shared_file,
         iteration=0,  # recovery — not a regular iteration
         stage="mitigation",
+        model_id=model,
         renderer=renderer,
         state=sre_state,
         stage_outputs_file=stage_outputs_file,

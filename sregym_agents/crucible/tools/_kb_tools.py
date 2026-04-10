@@ -524,10 +524,7 @@ async def triage_cluster(
     endpoints, misconfigurations, etc.). Pass the output to search_prior_incidents
     as part of your observed_symptoms.
     """
-    model_id = ctx.deps.ltm_model_id
-    if not model_id:
-        return "Error: triage_cluster requires a model ID (ltm_model_id not set)."
-
+    model_id = ctx.deps.model_id
     namespace = ctx.deps.namespace
     renderer = ctx.deps.renderer
     trajectory_path = ctx.deps.trajectory_path
@@ -679,10 +676,7 @@ async def check_hypothesis_coverage(
     if triage_report is None:
         return "Error: no triage report available. Call triage_cluster first."
 
-    model_id = ctx.deps.ltm_model_id
-    if not model_id:
-        return "Error: check_hypothesis_coverage requires a model ID (ltm_model_id not set)."
-
+    model_id = ctx.deps.model_id
     triage_context = format_triage_report(triage_report)
     prompt = ctx.deps.renderer.render(
         "check_hypothesis_coverage",
@@ -760,10 +754,7 @@ async def search_prior_incidents(
         return result
     ctx.deps.ltm_call_count += 1
 
-    ltm_model_id = ctx.deps.ltm_model_id
-    if not ltm_model_id:
-        return "Error: search_prior_incidents requires a model ID (ltm_model_id not set)."
-
+    model_id = ctx.deps.model_id
     triage_context = ""
     if ctx.deps.triage_report is not None:
         triage_context = format_triage_report(ctx.deps.triage_report)
@@ -779,11 +770,11 @@ async def search_prior_incidents(
     logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
     retrieval_agent = InlineAgent(
-        ltm_model_id,
+        model_id,
         agent_name="ltm-search",
         output_type=DifferentialDiagnosis,
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
-        model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
+        model_settings=thinking_settings(model_id, THINKING_BUDGET),
         middleware=_subagent_middleware(),
         usage_collector=ctx.deps.usage_collector,
     )
@@ -818,7 +809,7 @@ async def search_prior_incidents(
             observed_symptoms=observed_symptoms,
             namespace=ctx.deps.namespace,
             stage=ctx.deps.stage,
-            model_id=ltm_model_id,
+            model_id=model_id,
             renderer=ctx.deps.renderer,
             trajectory_path=ctx.deps.trajectory_path,
             triage_report=ctx.deps.triage_report,
@@ -892,10 +883,7 @@ async def search_prior_mitigations(
         return result
     ctx.deps.ltm_call_count += 1
 
-    ltm_model_id = ctx.deps.ltm_model_id
-    if not ltm_model_id:
-        return "Error: search_prior_mitigations requires a model ID (ltm_model_id not set)."
-
+    model_id = ctx.deps.model_id
     prompt = ctx.deps.renderer.render(
         "search_prior_mitigations",
         root_cause=root_cause,
@@ -906,11 +894,11 @@ async def search_prior_mitigations(
     logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
 
     retrieval_agent = InlineAgent(
-        ltm_model_id,
+        model_id,
         agent_name="ltm-mitigation",
         output_type=MitigationSearchResult,
         tools=[read_file, exec_bash_any, grep],
-        model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
+        model_settings=thinking_settings(model_id, THINKING_BUDGET),
         middleware=_subagent_middleware(),
         usage_collector=ctx.deps.usage_collector,
     )

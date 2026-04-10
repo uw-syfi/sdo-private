@@ -99,7 +99,7 @@ def _make_deps(
     tmp_path: Path,
     lt_summary_file: Path | None = None,
     incidents_dir: Path | None = None,
-    ltm_model_id: TestModel | None = None,
+    model_id: TestModel | None = None,
     trajectory_path: Path | None = None,
 ) -> SREDeps:
     shared_path = tmp_path / "session.md"
@@ -111,7 +111,7 @@ def _make_deps(
         stage="diagnosis",
         lt_summary_file=lt_summary_file,
         incidents_dir=incidents_dir,
-        ltm_model_id=ltm_model_id,
+        model_id=model_id if model_id is not None else TestModel(),
         trajectory_path=trajectory_path,
     )
 
@@ -164,7 +164,7 @@ def test_search_empty_symptoms(tmp_path: Path) -> None:
     """Blank observed_symptoms returns an error."""
     summary = tmp_path / "summary.md"
     summary.write_text("# Summary")
-    deps = _make_deps(tmp_path, lt_summary_file=summary, ltm_model_id=TestModel())
+    deps = _make_deps(tmp_path, lt_summary_file=summary, model_id=TestModel())
     ctx = _make_sre_ctx(deps)
 
     result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="   "))
@@ -190,7 +190,7 @@ def test_search_calls_subagent(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(custom_output_args=diagnosis.model_dump()),
+        model_id=TestModel(custom_output_args=diagnosis.model_dump()),
     )
     ctx = _make_sre_ctx(deps)
 
@@ -212,7 +212,7 @@ def test_search_budget_exhausted(tmp_path: Path) -> None:
     """After budget is exhausted, return budget-exhausted response without spawning LLM."""
     summary = tmp_path / "summary.md"
     summary.write_text("# Summary")
-    deps = _make_deps(tmp_path, lt_summary_file=summary, ltm_model_id=TestModel())
+    deps = _make_deps(tmp_path, lt_summary_file=summary, model_id=TestModel())
     deps.ltm_call_count = 1  # already at budget (default budget is 1)
     ctx = _make_sre_ctx(deps)
 
@@ -235,7 +235,7 @@ def test_search_increments_counter(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(custom_output_args=diagnosis.model_dump()),
+        model_id=TestModel(custom_output_args=diagnosis.model_dump()),
     )
     deps.ltm_call_budget = 2  # use budget of 2 so we can test exhaustion after 2 calls
     ctx = _make_sre_ctx(deps)
@@ -326,6 +326,9 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
     # SREDeps should NOT have ltm paths set
     assert captured_deps[0].lt_summary_file is None
     assert captured_deps[0].incidents_dir is None
+    # Regression: model_id must be set even when LTM retrieval is off, because
+    # triage_cluster and check_hypothesis_coverage need it to spawn subagents.
+    assert captured_deps[0].model_id is not None
 
     # The user prompt render should include lt_summary_content
     render_calls = [c for c in mock_renderer.render.call_args_list if "diagnosis_agent_user" in str(c)]
@@ -376,7 +379,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
     # SREDeps should have ltm paths set
     assert captured_deps[0].lt_summary_file == lt_file.resolve()
     assert captured_deps[0].incidents_dir == inc_dir.resolve()
-    assert captured_deps[0].ltm_model_id is not None
+    assert captured_deps[0].model_id is not None
 
     # The user prompt render should have empty lt_summary_content
     render_calls = [c for c in mock_renderer.render.call_args_list if "diagnosis_agent_user" in str(c)]
@@ -543,7 +546,7 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(),
+        model_id=TestModel(),
     )
     ctx = _make_sre_ctx(deps)
 
@@ -625,7 +628,7 @@ def test_search_no_candidates_skips_verification(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(),
+        model_id=TestModel(),
     )
     ctx = _make_sre_ctx(deps)
 
@@ -666,7 +669,7 @@ def test_search_verification_failure_graceful(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(),
+        model_id=TestModel(),
     )
     ctx = _make_sre_ctx(deps)
 
@@ -730,7 +733,7 @@ def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(),
+        model_id=TestModel(),
     )
     ctx = _make_sre_ctx(deps)
 
@@ -796,7 +799,7 @@ def test_verification_writes_trajectory(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(),
+        model_id=TestModel(),
         trajectory_path=trajectory_file,
     )
     ctx = _make_sre_ctx(deps)
@@ -928,7 +931,7 @@ def test_search_mitigations_empty_root_cause(tmp_path: Path) -> None:
     """Blank root_cause returns an error."""
     summary = tmp_path / "summary.md"
     summary.write_text("# Summary")
-    deps = _make_deps(tmp_path, lt_summary_file=summary, ltm_model_id=TestModel())
+    deps = _make_deps(tmp_path, lt_summary_file=summary, model_id=TestModel())
     ctx = _make_sre_ctx(deps)
 
     result = asyncio.run(search_prior_mitigations(ctx, root_cause="   "))
@@ -946,7 +949,7 @@ def test_search_mitigations_budget_exhausted(tmp_path: Path) -> None:
     """After budget is exhausted, return budget-exhausted response without spawning LLM."""
     summary = tmp_path / "summary.md"
     summary.write_text("# Summary")
-    deps = _make_deps(tmp_path, lt_summary_file=summary, ltm_model_id=TestModel())
+    deps = _make_deps(tmp_path, lt_summary_file=summary, model_id=TestModel())
     deps.ltm_call_count = 1
     ctx = _make_sre_ctx(deps)
 
@@ -968,7 +971,7 @@ def test_search_mitigations_shared_budget(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(),
+        model_id=TestModel(),
     )
     deps.ltm_call_budget = 2
     ctx = _make_sre_ctx(deps)
@@ -1028,7 +1031,7 @@ def test_search_mitigations_calls_subagent(tmp_path: Path) -> None:
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        ltm_model_id=TestModel(custom_output_args=mock_result.model_dump()),
+        model_id=TestModel(custom_output_args=mock_result.model_dump()),
     )
     ctx = _make_sre_ctx(deps)
 

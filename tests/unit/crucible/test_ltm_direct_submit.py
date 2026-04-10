@@ -83,7 +83,7 @@ def _make_sre_deps(
         renderer=PromptRenderer("v3"),
         state=SharedState(),
         lt_summary_file=tmp_path / "lt_summary.md",
-        ltm_model_id="test",  # type: ignore[arg-type]
+        model_id="test",  # type: ignore[arg-type]
         ltm_call_budget=1,
         usage_collector=UsageCollector(),
         enable_ltm_verified_direct_submit=enable_ltm_verified_direct_submit,
