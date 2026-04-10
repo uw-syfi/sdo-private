@@ -1128,8 +1128,7 @@ async def run(
         else:
             slug = diag_result.confirmed_slugs[idx]
             logger.info(
-                "[playbook-shortcut] Found playbook slug=%r (candidate_index=%d)"
-                " — attempting direct mitigation.",
+                "[playbook-shortcut] Found playbook slug=%r (candidate_index=%d) — attempting direct mitigation.",
                 slug,
                 idx,
             )
