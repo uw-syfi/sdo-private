@@ -59,6 +59,7 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
             deps,
             agent_name=f"judge-{deps.stage}",
             middleware=mw,
+            usage_collector=deps.usage_collector,
         )
         self._agent: Agent[JudgeDeps, str] = self._build_agent(
             model,
@@ -81,9 +82,12 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
         def _system(ctx: RunContext[JudgeDeps]) -> str:  # pyright: ignore[reportUnusedFunction]
             return ctx.deps.renderer.render(f"{ctx.deps.stage}_judge_system")
 
-    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict[str, int]]:
-        """Run with submit reminders. Returns (output, usage)."""
-        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> str:
+        """Run with submit reminders. Returns the verdict string.
+
+        Token usage is auto-reported via ``self._usage_collector`` (set from
+        ``deps.usage_collector``); read it from the collector if needed.
+        """
         message_history: list[ModelMessage] | None = None
         current_prompt = user_prompt
         reminder_count = 0
@@ -105,12 +109,7 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
                     logger.warning(
                         f"Judge model returned unexpected output without submitting; treating as unsubmitted. ({exc})"
                     )
-                usage["input_tokens"] += self.current_run_usage.input_tokens or 0
-                usage["output_tokens"] += self.current_run_usage.output_tokens or 0
                 break
-            u = result.usage()
-            usage["input_tokens"] += u.input_tokens or 0
-            usage["output_tokens"] += u.output_tokens or 0
 
             if self.deps.state.submitted:
                 break
@@ -127,5 +126,4 @@ class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
                 "Please call `submit_verdict` with your final verdict before finishing."
             )
 
-        output = result.output if result is not None else ""
-        return output, usage
+        return result.output if result is not None else ""

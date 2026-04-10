@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import ModelRetry, RunContext
 
 from libs.agent_mw import FixedPathProvider, RetryMiddleware, TrajectoryMiddleware, TurnLoggingMiddleware
-from libs.pydantic_agent import InlineAgent, thinking_settings
+from libs.pydantic_agent import InlineAgent, UsageCollector, thinking_settings
 from sregym_agents.crucible._prompts import (
     PromptRenderer,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
 )
@@ -371,6 +371,7 @@ async def _run_verification_phase(
     triage_report: TriageReport | None = None,
     verification_guidance: str = "",
     playbooks_dir: Path | None = None,
+    usage_collector: UsageCollector | None = None,
 ) -> VerifiedDifferentialDiagnosis:
     """Spawn one verification subagent per candidate in parallel and return aggregated results."""
     triage_context = ""
@@ -402,6 +403,7 @@ async def _run_verification_phase(
             tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
             model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
             middleware=_subagent_middleware(trajectory_path),
+            usage_collector=usage_collector,
         )
         try:
             result = await verify_agent.arun(
@@ -486,6 +488,7 @@ async def triage_cluster(
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(model_id, THINKING_BUDGET),
         middleware=_subagent_middleware(trajectory_path),
+        usage_collector=ctx.deps.usage_collector,
     )
 
     @coordinator.agent.output_validator
@@ -550,6 +553,7 @@ async def triage_cluster(
             tools=[read_file, exec_bash_any, grep, write_file],
             model_settings=thinking_settings(model_id, SPECIALIST_THINKING_BUDGET),
             middleware=_subagent_middleware(trajectory_path),
+            usage_collector=ctx.deps.usage_collector,
         )
         result = await agent.arun(
             prompt,
@@ -641,6 +645,7 @@ async def check_hypothesis_coverage(
         output_type=HypothesisCoverageVerdict,
         model_settings=thinking_settings(model_id, COVERAGE_THINKING_BUDGET),
         middleware=_subagent_middleware(ctx.deps.trajectory_path),
+        usage_collector=ctx.deps.usage_collector,
     )
 
     try:
@@ -728,6 +733,7 @@ async def search_prior_incidents(
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
         middleware=_subagent_middleware(),
+        usage_collector=ctx.deps.usage_collector,
     )
     retrieval_result = await retrieval_agent.arun(prompt)
     diagnosis = retrieval_result.output
@@ -768,6 +774,7 @@ async def search_prior_incidents(
         triage_report=ctx.deps.triage_report,
         verification_guidance=ctx.deps.verification_guidance,
         playbooks_dir=ctx.deps.playbooks_dir,
+        usage_collector=ctx.deps.usage_collector,
     )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)
@@ -834,6 +841,7 @@ async def search_prior_mitigations(
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(ltm_model_id, THINKING_BUDGET),
         middleware=_subagent_middleware(),
+        usage_collector=ctx.deps.usage_collector,
     )
     retrieval_result = await retrieval_agent.arun(prompt)
     output = retrieval_result.output

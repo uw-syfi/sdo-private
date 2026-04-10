@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 import pytest
 from pydantic_ai.models import infer_model
 
+from libs.pydantic_agent import UsageCollector
 from sregym_agents.crucible.orchestrator import (
     StageLoopResult,
     _extract_benchmark_reasoning,
@@ -132,13 +133,12 @@ class TestReplaceHypothesisPlaceholderCausalChain:
 
 class TestStageLoopResultCausalChain:
     def test_defaults_to_empty(self):
-        r = StageLoopResult(approved=True, usage_by_role={})
+        r = StageLoopResult(approved=True)
         assert r.agent_causal_chain == ""
 
     def test_carries_causal_chain(self):
         r = StageLoopResult(
             approved=True,
-            usage_by_role={},
             agent_causal_chain="X → Y → Z",
         )
         assert r.agent_causal_chain == "X → Y → Z"
@@ -151,13 +151,12 @@ class TestStageLoopResultCausalChain:
 
 class TestStageLoopResultReflection:
     def test_defaults_to_empty(self):
-        r = StageLoopResult(approved=True, usage_by_role={})
+        r = StageLoopResult(approved=True)
         assert r.agent_reflection == ""
 
     def test_carries_reflection(self):
         r = StageLoopResult(
             approved=True,
-            usage_by_role={},
             agent_reflection="Agent missed downstream logs",
         )
         assert r.agent_reflection == "Agent missed downstream logs"
@@ -294,6 +293,7 @@ class TestRunRecoveryDiagnosis:
             original_answer="wrong answer",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
             renderer=renderer,
+            usage_collector=UsageCollector(),
         )
         assert result is None
 
@@ -309,7 +309,7 @@ class TestRunRecoveryDiagnosis:
             deps.state.answer = "correct root cause"
             deps.state.answer_justification = "evidence"
             deps.state.answer_causal_chain = "field → mechanism → symptom"
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -328,6 +328,7 @@ class TestRunRecoveryDiagnosis:
             original_answer="wrong answer",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
         )
 
         assert result is not None
@@ -350,7 +351,7 @@ class TestRunRecoveryDiagnosis:
             deps.state.answer_justification = "evidence"
             deps.state.answer_causal_chain = "field → mechanism → symptom"
             deps.state.answer_reflection = "Agent focused on nginx logs instead of tracing downstream."
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -368,6 +369,7 @@ class TestRunRecoveryDiagnosis:
             original_answer="wrong answer",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
             original_justification="nginx logs showed connection refused",
             original_causal_chain="nginx → compose.lua → localhost:8080",
         )
@@ -390,7 +392,7 @@ class TestRunRecoveryDiagnosis:
             deps.state.answer_justification = "evidence"
             deps.state.answer_causal_chain = "field → mechanism → symptom"
             # No reflection set
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -408,6 +410,7 @@ class TestRunRecoveryDiagnosis:
             original_answer="wrong answer",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
         )
 
         assert result is not None
@@ -428,7 +431,7 @@ class TestRunRecoveryDiagnosis:
             deps.state.submitted = True
             deps.state.answer = "root cause"
             deps.state.answer_justification = "evidence"
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -446,6 +449,7 @@ class TestRunRecoveryDiagnosis:
             original_answer="wrong answer",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
             original_justification="nginx logs showed errors",
             original_causal_chain="nginx → compose.lua → localhost",
         )
@@ -461,7 +465,7 @@ class TestRunRecoveryDiagnosis:
 
         async def fake_arun(prompt, run_ctx=None):
             # Agent doesn't set submitted
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -480,6 +484,7 @@ class TestRunRecoveryDiagnosis:
             original_answer="wrong answer",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
         )
 
         assert result is None
@@ -487,7 +492,7 @@ class TestRunRecoveryDiagnosis:
 
 @pytest.mark.asyncio
 class TestRunRecoveryReflectionPhase:
-    @patch("sregym_agents.crucible.orchestrator.arun_with_retry", new_callable=AsyncMock)
+    @patch("sregym_agents.crucible.orchestrator.arun_with_retry_tracked", new_callable=AsyncMock)
     async def test_uses_phase1_message_history_and_stage_outputs(self, mock_arun, tmp_path: Path, renderer):
         stage_outputs_file = tmp_path / "stage_outputs.md"
         stage_outputs_file.write_text("## Diagnosis Outcome\nObserved a failing upstream dependency")
@@ -510,6 +515,7 @@ class TestRunRecoveryReflectionPhase:
             model=infer_model("test"),
             app_info={"app_name": "app", "namespace": "ns"},
             renderer=renderer,
+            usage_collector=UsageCollector(),
             original_answer="wrong answer",
             original_justification="wrong because local symptom matched",
             original_causal_chain="frontend -> timeout",
@@ -579,6 +585,7 @@ class TestRunRecoveryMitigation:
             original_answer="wrong fix",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
             renderer=renderer,
+            usage_collector=UsageCollector(),
         )
         assert result is None
 
@@ -593,7 +600,7 @@ class TestRunRecoveryMitigation:
             deps.state.answer = "patch ConfigMap X"
             deps.state.answer_justification = "correct value restores service"
             deps.state.answer_reflection = "Agent fixed the wrong field."
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -611,6 +618,7 @@ class TestRunRecoveryMitigation:
             original_answer="wrong fix",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
             diagnosis_answer="ConfigMap X has wrong value",
         )
 
@@ -633,7 +641,7 @@ class TestRunRecoveryMitigation:
             deps.state.submitted = True
             deps.state.answer = "correct fix"
             deps.state.answer_justification = "evidence"
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -651,6 +659,7 @@ class TestRunRecoveryMitigation:
             original_answer="wrong fix",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
         )
 
         assert result is not None
@@ -671,7 +680,7 @@ class TestRunRecoveryMitigation:
             deps.state.submitted = True
             deps.state.answer = "correct fix"
             deps.state.answer_justification = "evidence"
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -689,6 +698,7 @@ class TestRunRecoveryMitigation:
             original_answer="wrong fix",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
             original_justification="applied kubectl patch",
             diagnosis_answer="ConfigMap X has wrong value",
         )
@@ -703,7 +713,7 @@ class TestRunRecoveryMitigation:
         shared.write_text("# Header\n")
 
         async def fake_arun(prompt, run_ctx=None):
-            return "", {}
+            return ""
 
         mock_instance = mock_cls.return_value
         mock_instance.arun = AsyncMock(side_effect=fake_arun)
@@ -721,6 +731,7 @@ class TestRunRecoveryMitigation:
             original_answer="wrong fix",
             benchmark_block=block,
             renderer=renderer,
+            usage_collector=UsageCollector(),
         )
 
         assert result is None

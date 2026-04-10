@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import arun_with_retry_tracked
 
 from .base import (
     MAX_CITATION_RETRIES,
@@ -45,6 +45,7 @@ from .schema import (
 )
 
 if TYPE_CHECKING:
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
@@ -115,6 +116,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
         if self.enable_playbooks:
             self._playbook_store = PlaybookStore(self.kb_dir / "playbooks")
             self._playbook_synthesizer = PlaybookSynthesizer(model_id, renderer)
+
+        # Set per-update by ``update()``; helpers read it via ``arun_with_retry_tracked``.
+        self._usage_collector: UsageCollector | None = None
 
         if seed_kb_dir is not None:
             self._seed_from(Path(seed_kb_dir))
@@ -298,9 +302,14 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
         return result
 
-    async def _call_llm(self, prompt: str) -> str:
+    async def _call_llm(self, prompt: str, agent_name: str = "kb-llm") -> str:
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name=agent_name,
+            usage_collector=self._usage_collector,
+        )
         return result.output
 
     def _save_incident(self, session_summary: str, session_content: str) -> str:
@@ -317,7 +326,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
             content=content,
             include_benchmark_results=self.include_benchmark_results,
         )
-        return await self._call_llm(prompt)
+        return await self._call_llm(prompt, agent_name="kb-summarize-session")
 
     async def _merge_into_long_term_summary(
         self, session_summary: str, prior_summary: str, incident_ref: str = ""
@@ -334,7 +343,12 @@ class StructuredKnowledgeBase(KnowledgeBase):
             existing_slugs=existing_slugs,
         )
         agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name="kb-merge-summary",
+            usage_collector=self._usage_collector,
+        )
         output = result.output
 
         for attempt in range(MAX_CITATION_RETRIES):
@@ -357,7 +371,13 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 f"{fmt_hint}"
             )
             logger.warning(f"Citation validation failed (attempt {attempt + 1}/{MAX_CITATION_RETRIES}): {invalid}")
-            result = await arun_with_retry(agent, correction, message_history=result.all_messages())
+            result = await arun_with_retry_tracked(
+                agent,
+                correction,
+                agent_name="kb-merge-summary-correction",
+                usage_collector=self._usage_collector,
+                message_history=result.all_messages(),
+            )
             output = result.output
 
         last_error: MergeEnvelopeError | None = None
@@ -387,7 +407,13 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     "<merge_result>...</merge_result> envelope. Do not drop any existing slugs "
                     "unless you declare them as `consolidate` losers."
                 )
-                result = await arun_with_retry(agent, correction, message_history=result.all_messages())
+                result = await arun_with_retry_tracked(
+                    agent,
+                    correction,
+                    agent_name="kb-merge-envelope-correction",
+                    usage_collector=self._usage_collector,
+                    message_history=result.all_messages(),
+                )
                 output = result.output
 
         logger.warning(
@@ -598,8 +624,13 @@ class StructuredKnowledgeBase(KnowledgeBase):
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
         diagnosis_succeeded: bool = False,
+        usage_collector: UsageCollector | None = None,
     ) -> None:
         """Summarize the completed session and update the knowledge base."""
+        self._usage_collector = usage_collector
+        self._reflector.usage_collector = usage_collector
+        if self._playbook_synthesizer is not None:
+            self._playbook_synthesizer.usage_collector = usage_collector
         parts = session_files.read_all()
         if not parts:
             logger.warning("No shared files found; skipping knowledge base update.")

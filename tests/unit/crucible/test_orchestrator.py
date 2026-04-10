@@ -11,75 +11,63 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
+from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.orchestrator import (
-    _add_usage,
-    _build_usage_result,
+    _build_usage_metrics,
     _replace_hypothesis_placeholder,
     _wait_for_mitigation_stage,
-    _zero_usage,
 )
 from sregym_agents.crucible.tools import SharedFile
 
 # ---------------------------------------------------------------------------
-# _zero_usage
+# _build_usage_metrics
 # ---------------------------------------------------------------------------
 
 
-def test_initial_usage_has_all_token_fields_set_to_zero():
-    result = _zero_usage()
-    assert result == {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+class TestBuildUsageMetrics:
+    def test_grand_total_sums_primary_and_recovery(self):
+        primary = UsageCollector()
+        primary.add("sre-diagnosis", TokenUsage(input_tokens=10, output_tokens=5, cached_input_tokens=1))
+        primary.add("judge-diagnosis", TokenUsage(input_tokens=20, output_tokens=8, cached_input_tokens=0))
 
+        recovery = UsageCollector()
+        recovery.add("sre-diagnosis", TokenUsage(input_tokens=7, output_tokens=2, cached_input_tokens=3))
 
-# ---------------------------------------------------------------------------
-# _add_usage
-# ---------------------------------------------------------------------------
+        result = _build_usage_metrics(primary, recovery)
 
-
-class TestAddUsage:
-    def test_tokens_from_two_usage_dicts_are_summed_per_field(self):
-        a = {"input_tokens": 10, "output_tokens": 5, "cached_input_tokens": 2}
-        b = {"input_tokens": 3, "output_tokens": 7, "cached_input_tokens": 1}
-        result = _add_usage(a, b)
-        assert result == {"input_tokens": 13, "output_tokens": 12, "cached_input_tokens": 3}
-
-    def test_missing_fields_in_second_usage_dict_leave_first_values_unchanged(self):
-        a = {"input_tokens": 10, "output_tokens": 5, "cached_input_tokens": 2}
-        b = {"input_tokens": 3}
-        result = _add_usage(a, b)
-        assert result == {"input_tokens": 13, "output_tokens": 5, "cached_input_tokens": 2}
-
-
-# ---------------------------------------------------------------------------
-# _build_usage_result
-# ---------------------------------------------------------------------------
-
-
-class TestBuildUsageResult:
-    def test_total_sums_tokens_from_sre_agent_and_judge_together(self):
-        usage_by_agent = {
-            "diagnosis-agent": {
-                "iterations": [],
-                "total": {"input_tokens": 10, "output_tokens": 5, "cached_input_tokens": 1},
-            },
-            "diagnosis-judge": {
-                "iterations": [],
-                "total": {"input_tokens": 20, "output_tokens": 8, "cached_input_tokens": 0},
-            },
+        assert result["primary"]["total"] == {
+            "input_tokens": 30,
+            "output_tokens": 13,
+            "cached_input_tokens": 1,
         }
-        result = _build_usage_result(usage_by_agent)
-        assert result["total"]["input_tokens"] == 30
-        assert result["total"]["output_tokens"] == 13
-        assert result["total"]["cached_input_tokens"] == 1
-
-    def test_result_contains_per_agent_breakdown_and_combined_total(self):
-        usage_by_agent = {
-            "agent": {"iterations": [], "total": _zero_usage()},
+        assert result["recovery"]["total"] == {
+            "input_tokens": 7,
+            "output_tokens": 2,
+            "cached_input_tokens": 3,
         }
-        result = _build_usage_result(usage_by_agent)
-        assert "by_agent" in result
-        assert "total" in result
-        assert result["by_agent"] == usage_by_agent
+        assert result["total"] == {
+            "input_tokens": 37,
+            "output_tokens": 15,
+            "cached_input_tokens": 4,
+        }
+
+    def test_keys_kept_separate_between_primary_and_recovery(self):
+        primary = UsageCollector()
+        primary.add("sre-diagnosis", TokenUsage(input_tokens=10))
+        recovery = UsageCollector()
+        recovery.add("sre-diagnosis", TokenUsage(input_tokens=99))
+
+        result = _build_usage_metrics(primary, recovery)
+
+        assert result["primary"]["by_agent"]["sre-diagnosis"]["total"]["input_tokens"] == 10
+        assert result["recovery"]["by_agent"]["sre-diagnosis"]["total"]["input_tokens"] == 99
+
+    def test_empty_collectors_yield_zero_total(self):
+        result = _build_usage_metrics(UsageCollector(), UsageCollector())
+        assert result["primary"]["by_agent"] == {}
+        assert result["recovery"]["by_agent"] == {}
+        assert result["total"] == {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +272,7 @@ class TestHypothesisTextPassedToJudgeDeps:
             def fake_run(prompt, run_ctx=None):
                 deps.state.answer = "disk full"
                 deps.state.answer_justification = "100% usage"
-                return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+                return ""
 
             mock.arun = AsyncMock(side_effect=fake_run)
             return mock
@@ -298,7 +286,7 @@ class TestHypothesisTextPassedToJudgeDeps:
             def fake_run(prompt, run_ctx=None):
                 deps.state.verdict = "APPROVED"
                 deps.state.submitted = True
-                return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+                return ""
 
             mock.arun = AsyncMock(side_effect=fake_run)
             return mock
@@ -326,6 +314,7 @@ class TestHypothesisTextPassedToJudgeDeps:
                     shared_file=shared,
                     submit_mcp_url="http://localhost:9954/submit/sse",
                     renderer=mock_renderer,
+                    usage_collector=UsageCollector(),
                     crucible_config=CrucibleConfig(enable_judge=True),
                 )
             )
@@ -399,7 +388,7 @@ class TestStageLoopModelHTTPError:
                 deps.state.answer = "disk full"
                 deps.state.answer_justification = "100% usage"
                 deps.state.submitted = True
-                return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+                return ""
 
             mock.arun = AsyncMock(side_effect=fake_run)
             return mock
@@ -410,7 +399,7 @@ class TestStageLoopModelHTTPError:
             def fake_run(prompt, run_ctx=None):
                 deps.state.verdict = "APPROVED"
                 deps.state.submitted = True
-                return None, {"input_tokens": 5, "output_tokens": 3, "cached_input_tokens": 0}
+                return ""
 
             mock.arun = AsyncMock(side_effect=fake_run)
             return mock
@@ -438,6 +427,7 @@ class TestStageLoopModelHTTPError:
                     shared_file=shared,
                     submit_mcp_url="http://localhost:9954/submit/sse",
                     renderer=mock_renderer,
+                    usage_collector=UsageCollector(),
                     crucible_config=CrucibleConfig(enable_judge=True),
                 )
             )

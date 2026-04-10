@@ -25,7 +25,7 @@ from libs.agent_mw import (
     TurnLoggingMiddleware,
     arun_with_retry,
 )
-from libs.pydantic_agent import AgentMiddleware, BaseAgent, thinking_settings
+from libs.pydantic_agent import AgentMiddleware, BaseAgent, TokenUsage, UsageCollector, thinking_settings
 from sregym_agents.crucible.tools import (
     MAX_OUTPUT_TOKENS,
     THINKING_BUDGET,
@@ -61,8 +61,15 @@ def _context_window_for(model: str | Model) -> int:
     return 128_000
 
 
-async def _compact_messages(model: str | Model, messages: list[Any]) -> tuple[str, dict[str, int]]:
-    """Summarize message history for context compaction. Returns (summary, usage)."""
+async def _compact_messages(
+    model: str | Model,
+    messages: list[Any],
+    usage_collector: UsageCollector | None = None,
+) -> str:
+    """Summarize message history for context compaction.
+
+    Reports compaction tokens to ``usage_collector`` if provided.
+    """
     import json
 
     to_summarize: list[Any] = messages[1:] if len(messages) > 1 else messages
@@ -89,14 +96,10 @@ async def _compact_messages(model: str | Model, messages: list[Any]) -> tuple[st
     )
     compactor: Agent[None, str] = Agent(model, output_type=str)
     compact_result = await arun_with_retry(compactor, summary_prompt)
-    u = compact_result.usage()
-    usage = {
-        "input_tokens": u.input_tokens or 0,
-        "output_tokens": u.output_tokens or 0,
-        "cached_input_tokens": 0,
-    }
+    if usage_collector is not None:
+        usage_collector.add("compact-messages", TokenUsage.from_run_usage(compact_result.usage()))
     logger.info(f"Context compacted: {len(history_text)} chars → {len(compact_result.output)} chars")
-    return compact_result.output, usage
+    return compact_result.output
 
 
 class CrucibleSREAgent(BaseAgent[SREDeps]):
@@ -125,6 +128,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
             deps,
             agent_name=f"sre-{deps.stage}",
             middleware=mw,
+            usage_collector=deps.usage_collector,
         )
         self._model = model
         self._system_prompt_override = system_prompt_override
@@ -152,9 +156,12 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 return self._system_prompt_override
             return ctx.deps.renderer.render(f"{ctx.deps.stage}_agent_system")
 
-    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> tuple[str, dict[str, int]]:
-        """Run with context compaction. Returns (output, usage)."""
-        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> str:
+        """Run with context compaction. Returns the submitted answer string.
+
+        Token usage is auto-reported via ``self._usage_collector`` (set from
+        ``deps.usage_collector``); read it from the collector if needed.
+        """
         context_window = _context_window_for(self._model)
         initial_prompt = user_prompt
         current_prompt = user_prompt
@@ -165,15 +172,7 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                 result = await self._arun(current_prompt, _run_ctx=run_ctx)
             except (UnexpectedModelBehavior, UsageLimitExceeded) as exc:
                 logger.warning(f"Model returned unexpected output; treating as unsubmitted. ({exc})")
-                usage["input_tokens"] += self.current_run_usage.input_tokens or 0
-                usage["output_tokens"] += self.current_run_usage.output_tokens or 0
                 break
-
-            u = result.usage()
-            input_tokens = u.input_tokens or 0
-            output_tokens = u.output_tokens or 0
-            usage["input_tokens"] += input_tokens
-            usage["output_tokens"] += output_tokens
 
             output = result.output
             self.last_run_messages = list(result.all_messages())
@@ -203,9 +202,9 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
                     f"Context approaching limit ({last_token_count} > "
                     f"{self.CONTEXT_COMPACT_THRESHOLD * context_window:.0f}). Compacting..."
                 )
-                summary, compact_usage = await _compact_messages(self._model, result.all_messages())
-                for k, v in compact_usage.items():
-                    usage[k] = usage.get(k, 0) + v
+                summary = await _compact_messages(
+                    self._model, result.all_messages(), usage_collector=self._usage_collector
+                )
                 current_prompt = initial_prompt + "\n\nHere's a summary of the previous conversation:\n\n" + summary
                 logger.warning("Context compacted. Restarting with summary.")
                 continue
@@ -215,4 +214,4 @@ class CrucibleSREAgent(BaseAgent[SREDeps]):
         answer = self.deps.state.answer or ""
         if answer:
             logger.info(f"Agent answer: {answer}")
-        return answer, usage
+        return answer

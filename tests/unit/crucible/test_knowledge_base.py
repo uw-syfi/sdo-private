@@ -785,7 +785,7 @@ class TestCitationValidation:
         with (
             patch("sregym_agents.crucible.knowledge_base.structured.Agent"),
             patch(
-                "sregym_agents.crucible.knowledge_base.structured.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.structured.arun_with_retry_tracked",
                 new_callable=AsyncMock,
                 side_effect=[mock_result_bad, mock_result_good],
             ) as mock_retry,
@@ -819,7 +819,7 @@ class TestCitationValidation:
         with (
             patch("sregym_agents.crucible.knowledge_base.structured.Agent"),
             patch(
-                "sregym_agents.crucible.knowledge_base.structured.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.structured.arun_with_retry_tracked",
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ) as mock_retry,

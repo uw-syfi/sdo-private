@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai.models import Model
 
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible.tools._kb_tools import TriagePriors, TriageReport
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,7 @@ class SREDeps:
     triage_priors: TriagePriors | None = None
     verification_guidance: str = ""
     stage_outputs_file: Path | None = None
+    usage_collector: UsageCollector | None = None
 
 
 @dataclass
@@ -141,3 +143,4 @@ class JudgeDeps:
     renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     hypothesis_text: str = ""
     state: SharedState = field(default_factory=SharedState)
+    usage_collector: UsageCollector | None = None

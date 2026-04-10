@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.exceptions import ModelHTTPError
 
-from libs.pydantic_agent import AgentMiddleware
+from libs.pydantic_agent import AgentMiddleware, TokenUsage
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
     from pydantic_ai.agent import AgentRunResult
+
+    from libs.pydantic_agent import UsageCollector
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +162,43 @@ async def arun_with_retry(
             await asyncio.sleep(delay)
 
     raise RuntimeError("unreachable")  # pragma: no cover
+
+
+async def arun_with_retry_tracked(
+    agent: Agent[Any, Any],
+    prompt: str | None,
+    *,
+    agent_name: str,
+    usage_collector: UsageCollector | None,
+    max_retries: int = 5,
+    initial_delay: float = 1.0,
+    backoff_factor: float = 2.0,
+    max_delay: float = 60.0,
+    jitter: bool = True,
+    **run_kwargs: Any,
+) -> AgentRunResult[Any]:
+    """Like :func:`arun_with_retry` but reports token usage to a collector.
+
+    Wrapper around plain pydantic-ai ``Agent`` runs (not ``BaseAgent``
+    subclasses, which auto-report). After the run completes, builds a
+    :class:`TokenUsage` from ``result.usage()`` and adds it to
+    ``usage_collector`` under the ``agent_name`` bucket. If
+    ``usage_collector`` is ``None``, behaves identically to
+    ``arun_with_retry``.
+    """
+    result = await arun_with_retry(
+        agent,
+        prompt,
+        max_retries=max_retries,
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        max_delay=max_delay,
+        jitter=jitter,
+        **run_kwargs,
+    )
+    if usage_collector is not None:
+        usage_collector.add(agent_name, TokenUsage.from_run_usage(result.usage()))
+    return result
 
 
 def run_with_retry_sync(

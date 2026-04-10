@@ -89,7 +89,7 @@ class TestSynthesizeFromSuccess:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -124,7 +124,7 @@ class TestSynthesizeFromSuccess:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -159,7 +159,7 @@ class TestSynthesizeFromSuccess:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -185,7 +185,7 @@ class TestSynthesizeFromSuccess:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -211,7 +211,7 @@ class TestSynthesizeFromRecovery:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -253,7 +253,7 @@ class TestRefine:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -291,7 +291,7 @@ class TestConsolidate:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -335,7 +335,7 @@ class TestConsolidate:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
@@ -376,7 +376,7 @@ class TestValidationFeedback:
 
         with (
             patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry",
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
                 mock_arun,
             ),
             patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,

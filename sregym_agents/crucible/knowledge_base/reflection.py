@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import arun_with_retry_tracked
 
 from ..recovery_reflection import RecoveryReflection
 from ..tools._kb_tools import TriagePriors
@@ -25,6 +25,7 @@ from .schema import SCHEMA_V2
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,12 @@ class MarkdownPriorConfig(PriorFileConfig):
             reflector.model_id,
             output_type=PriorUpdateResult,
         )
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name=f"reflector-{self.filename}",
+            usage_collector=reflector.usage_collector,
+        )
         if result.output.should_update:
             logger.info(
                 "Updating %s:\n%s",
@@ -187,7 +193,12 @@ class TriagePriorConfig(PriorFileConfig):
             reflector.model_id,
             output_type=TriagePriorUpdateResult,
         )
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name="reflector-triage-priors",
+            usage_collector=reflector.usage_collector,
+        )
         if result.output.should_update:
             logger.info(
                 "Updating %s:\n%s",
@@ -230,6 +241,9 @@ class Reflector:
         self.kb_dir = kb_dir
         self.model_id = model_id
         self.prompts = renderer
+        # Set per-update by the owning ``StructuredKnowledgeBase``; LLM calls
+        # report through ``arun_with_retry_tracked`` to this collector.
+        self.usage_collector: UsageCollector | None = None
 
     @staticmethod
     def _format_recovery_reflection(recovery_reflection: RecoveryReflection) -> str:
@@ -267,7 +281,12 @@ class Reflector:
             self.model_id,
             output_type=FailureClassification,
         )
-        result = await arun_with_retry(agent, prompt)
+        result = await arun_with_retry_tracked(
+            agent,
+            prompt,
+            agent_name="reflector-classify-failure",
+            usage_collector=self.usage_collector,
+        )
         classification = result.output
         logger.info(
             "Failure classification: outcome=%s, stages=%s\n%s",

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import arun_with_retry_tracked
 
 from .playbook import (
     Playbook,
@@ -33,6 +33,7 @@ from .playbook import (
 )
 
 if TYPE_CHECKING:
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
@@ -47,6 +48,9 @@ class PlaybookSynthesizer:
     def __init__(self, model_id: str, renderer: PromptRenderer) -> None:
         self.model_id = model_id
         self.prompts = renderer
+        # Set per-update by the owning ``StructuredKnowledgeBase``; LLM calls
+        # report through ``arun_with_retry_tracked`` to this collector.
+        self.usage_collector: UsageCollector | None = None
 
     async def synthesize_from_success(
         self,
@@ -169,7 +173,12 @@ class PlaybookSynthesizer:
             vars_with_feedback = {**template_vars, "validation_feedback": feedback}
             prompt = self.prompts.render(template_name, **vars_with_feedback)
             try:
-                result = await arun_with_retry(agent, prompt)
+                result = await arun_with_retry_tracked(
+                    agent,
+                    prompt,
+                    agent_name=f"playbook-{template_name.split('/')[-1]}",
+                    usage_collector=self.usage_collector,
+                )
             except Exception as exc:
                 logger.error(f"Playbook {log_label}: LLM call failed on attempt {attempt + 1}: {exc}")
                 return None

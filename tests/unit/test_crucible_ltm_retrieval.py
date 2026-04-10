@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 import pytest
 from pydantic_ai.models.test import TestModel
 
+from libs.pydantic_agent import UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.tools import (
@@ -277,7 +278,7 @@ def _fake_sre_constructor_factory(shared_file):
 
         def fake_run(prompt, run_ctx=None):
             deps.state.answer = "some answer"
-            return None, {"input_tokens": 10, "output_tokens": 5, "cached_input_tokens": 0}
+            return ""
 
         mock.arun = AsyncMock(side_effect=fake_run)
         return mock
@@ -317,6 +318,7 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 injected_kb=InjectedKB(summary=lt_file),
                 renderer=mock_renderer,
+                usage_collector=UsageCollector(),
                 crucible_config=CrucibleConfig(enable_judge=False, enable_ltm_retrieval=False),
             )
         )
@@ -366,6 +368,7 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 injected_kb=InjectedKB(summary=lt_file, incidents_dir=inc_dir),
                 renderer=mock_renderer,
+                usage_collector=UsageCollector(),
                 crucible_config=CrucibleConfig(enable_judge=False, enable_ltm_retrieval=True),
             )
         )

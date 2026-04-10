@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 KB_APPEND_FILENAME = "knowledge.md"
@@ -105,5 +106,6 @@ class KnowledgeBase(abc.ABC):
         stage_outputs_file: Path | None = None,
         recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
         diagnosis_succeeded: bool = False,
+        usage_collector: UsageCollector | None = None,
     ) -> None:
         """Update the knowledge base from the completed session."""

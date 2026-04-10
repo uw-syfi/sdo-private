@@ -20,7 +20,8 @@ from pydantic_ai.models import Model, infer_model
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
 
-from libs.agent_mw import arun_with_retry
+from libs.agent_mw import arun_with_retry_tracked
+from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
@@ -43,7 +44,6 @@ class StageLoopResult:
     """Result from a single stage's agent-judge loop."""
 
     approved: bool
-    usage_by_role: dict[str, dict[str, Any]]
     benchmark_block: str = ""
     agent_answer: str = ""
     agent_justification: str = ""
@@ -53,19 +53,28 @@ class StageLoopResult:
     stage_outputs_file: Path | None = None
 
 
-def _zero_usage() -> dict[str, int]:
-    return {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+def _build_usage_metrics(
+    primary: UsageCollector,
+    recovery: UsageCollector,
+) -> dict[str, Any]:
+    """Combine primary + recovery collectors into the per-problem usage_metrics shape.
 
+    Schema::
 
-def _add_usage(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
-    return {k: a[k] + b.get(k, 0) for k in a}
-
-
-def _build_usage_result(usage_by_agent: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    total = _zero_usage()
-    for agent_data in usage_by_agent.values():
-        total = _add_usage(total, agent_data["total"])
-    return {"by_agent": usage_by_agent, "total": total}
+        {
+          "primary":  {"by_agent": {...}, "total": {...}},
+          "recovery": {"by_agent": {...}, "total": {...}},
+          "total":    {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ...}
+        }
+    """
+    primary_dict = primary.to_dict()
+    recovery_dict = recovery.to_dict()
+    grand_total = TokenUsage(**primary_dict["total"]) + TokenUsage(**recovery_dict["total"])
+    return {
+        "primary": primary_dict,
+        "recovery": recovery_dict,
+        "total": grand_total.to_dict(),
+    }
 
 
 def _replace_hypothesis_placeholder(
@@ -182,6 +191,7 @@ async def _run_stage_loop(
     shared_file: SharedFile,
     submit_mcp_url: str,
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
     crucible_config: CrucibleConfig | None = None,
@@ -258,13 +268,6 @@ async def _run_stage_loop(
         if verification_priors_file and verification_priors_file.exists():
             verification_guidance = verification_priors_file.read_text().strip()
 
-    agent_role = f"{stage}-agent"
-    judge_role = f"{stage}-judge"
-    usage_by_role: dict[str, dict[str, Any]] = {
-        agent_role: {"iterations": [], "total": _zero_usage()},
-        judge_role: {"iterations": [], "total": _zero_usage()},
-    }
-
     last_answer = ""
     last_justification = ""
     last_causal_chain = ""
@@ -303,6 +306,7 @@ async def _run_stage_loop(
             triage_priors=triage_priors,
             verification_guidance=verification_guidance,
             stage_outputs_file=stage_outputs_file,
+            usage_collector=usage_collector,
         )
         sre_system = renderer.render(f"{stage}_agent_system")
         sre_prompt = renderer.render(
@@ -324,9 +328,7 @@ async def _run_stage_loop(
             model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=sre_system
         )
         try:
-            _, sre_usage = await sre_agent.arun(
-                sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"}
-            )
+            await sre_agent.arun(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})
         except ModelHTTPError as exc:
             logger.warning(
                 f"[{stage}] SRE agent failed with HTTP {exc.status_code} on iteration {iteration} "
@@ -338,8 +340,6 @@ async def _run_stage_loop(
                 f"and could not complete this iteration.\n"
             )
             continue
-        usage_by_role[agent_role]["iterations"].append(sre_usage)
-        usage_by_role[agent_role]["total"] = _add_usage(usage_by_role[agent_role]["total"], sre_usage)
 
         # Capture the hypothesis from the SRE agent for blind judge review
         last_answer = sre_state.answer or ""
@@ -383,7 +383,6 @@ async def _run_stage_loop(
 
             return StageLoopResult(
                 approved=True,
-                usage_by_role=usage_by_role,
                 benchmark_block=benchmark_block,
                 agent_answer=last_answer,
                 agent_justification=last_justification,
@@ -403,6 +402,7 @@ async def _run_stage_loop(
             renderer=renderer,
             hypothesis_text=hypothesis_text,
             state=judge_state,
+            usage_collector=usage_collector,
         )
         judge_system = renderer.render(f"{stage}_judge_system")
         judge_prompt = renderer.render(
@@ -420,9 +420,7 @@ async def _run_stage_loop(
         logger.info(f"[{stage}-judge] USER PROMPT:\n{judge_prompt}")
         judge_agent = CrucibleJudgeAgent(model, judge_deps, trajectory_path=trajectory_path)
         try:
-            _, judge_usage = await judge_agent.arun(
-                judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"}
-            )
+            await judge_agent.arun(judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"})
         except ModelHTTPError as exc:
             logger.warning(
                 f"[{stage}] Judge agent failed with HTTP {exc.status_code} on iteration {iteration} "
@@ -434,8 +432,6 @@ async def _run_stage_loop(
                 f"and could not complete this iteration.\n"
             )
             continue
-        usage_by_role[judge_role]["iterations"].append(judge_usage)
-        usage_by_role[judge_role]["total"] = _add_usage(usage_by_role[judge_role]["total"], judge_usage)
 
         # Replace the hypothesis placeholder with real content
         if sre_state.answer:
@@ -454,7 +450,6 @@ async def _run_stage_loop(
             logger.info(f"Judge APPROVED {stage}.")
             return StageLoopResult(
                 approved=True,
-                usage_by_role=usage_by_role,
                 benchmark_block=judge_state.benchmark_block,
                 agent_answer=last_answer,
                 agent_justification=last_justification,
@@ -470,7 +465,6 @@ async def _run_stage_loop(
         logger.warning(f"Max {stage} iterations reached without APPROVED verdict.")
     return StageLoopResult(
         approved=False,
-        usage_by_role=usage_by_role,
         agent_answer=last_answer,
         agent_justification=last_justification,
         agent_causal_chain=last_causal_chain,
@@ -504,6 +498,7 @@ async def _run_recovery_diagnosis(
     original_answer: str,
     benchmark_block: str,
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     original_causal_chain: str = "",
@@ -540,6 +535,7 @@ async def _run_recovery_diagnosis(
         renderer=renderer,
         state=sre_state,
         stage_outputs_file=stage_outputs_file,
+        usage_collector=usage_collector,
     )
 
     system_prompt = renderer.render("recovery_diagnosis_system")
@@ -609,6 +605,7 @@ async def _run_recovery_reflection_phase(
     model: Model,
     app_info: dict[str, Any],
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     original_answer: str,
     original_justification: str = "",
     original_causal_chain: str = "",
@@ -638,7 +635,13 @@ async def _run_recovery_reflection_phase(
     def _system() -> str:  # pyright: ignore[reportUnusedFunction]
         return system_prompt
 
-    result = await arun_with_retry(agent, user_prompt, message_history=phase1_messages or [])
+    result = await arun_with_retry_tracked(
+        agent,
+        user_prompt,
+        agent_name="recovery-reflection",
+        usage_collector=usage_collector,
+        message_history=phase1_messages or [],
+    )
     reflection = result.output
 
     if stage_outputs_file:
@@ -664,6 +667,7 @@ async def _run_recovery_mitigation(
     original_answer: str,
     benchmark_block: str,
     renderer: PromptRenderer,
+    usage_collector: UsageCollector,
     trajectory_path: Path | None = None,
     original_justification: str = "",
     diagnosis_answer: str = "",
@@ -699,6 +703,7 @@ async def _run_recovery_mitigation(
         renderer=renderer,
         state=sre_state,
         stage_outputs_file=stage_outputs_file,
+        usage_collector=usage_collector,
     )
 
     system_prompt = renderer.render("recovery_mitigation_system")
@@ -803,6 +808,12 @@ async def run(
     max_mit_iters = crucible_config.max_mitigation_iterations
     wait_stage_timeout = crucible_config.wait_stage_timeout
 
+    # Two collectors per problem: primary covers diagnosis + mitigation,
+    # recovery covers the post-failure recovery agents. Recovery is fenced
+    # so we can subtract its cost from the primary playbook ablation cleanly.
+    primary_collector = UsageCollector()
+    recovery_collector = UsageCollector()
+
     diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
     diagnosis_sf.init(
         "# SRE Judged Session State\n"
@@ -822,6 +833,7 @@ async def run(
         diagnosis_sf,
         submit_mcp_url,
         renderer=renderer,
+        usage_collector=primary_collector,
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         crucible_config=crucible_config,
@@ -841,6 +853,7 @@ async def run(
             diag_result.agent_answer,
             diag_result.benchmark_block,
             renderer=renderer,
+            usage_collector=recovery_collector,
             trajectory_path=trajectory_path,
             original_justification=diag_result.agent_justification,
             original_causal_chain=diag_result.agent_causal_chain,
@@ -859,6 +872,7 @@ async def run(
                     resolved_model,
                     app_info,
                     renderer=renderer,
+                    usage_collector=recovery_collector,
                     original_answer=original_answer,
                     original_justification=original_justification,
                     original_causal_chain=original_causal_chain,
@@ -866,11 +880,9 @@ async def run(
                     phase1_messages=recovery.message_history,
                 )
 
-    usage_by_agent = diag_result.usage_by_role
-
     if "mitigation" not in planned_stages:
         logger.info("Diagnosis-only problem — orchestrator complete.")
-        result = _build_usage_result(usage_by_agent)
+        result = _build_usage_metrics(primary_collector, recovery_collector)
         sof = diag_result.stage_outputs_file
         result["stage_outputs_file"] = str(sof) if sof else None
         result["recovery_reflection"] = (
@@ -901,6 +913,7 @@ async def run(
         mitigation_sf,
         submit_mcp_url,
         renderer=renderer,
+        usage_collector=primary_collector,
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         crucible_config=crucible_config,
@@ -920,6 +933,7 @@ async def run(
             mit_result.agent_answer,
             mit_result.benchmark_block,
             renderer=renderer,
+            usage_collector=recovery_collector,
             trajectory_path=trajectory_path,
             original_justification=mit_result.agent_justification,
             diagnosis_answer=diag_result.agent_answer,
@@ -930,12 +944,10 @@ async def run(
             mit_result.agent_justification = recovery.justification
             mit_result.agent_reflection = recovery.reflection
 
-    usage_by_agent = {**diag_result.usage_by_role, **mit_result.usage_by_role}
-
     logger.info("=" * 60)
     logger.info("CRUCIBLE: Orchestrator complete.")
     logger.info("=" * 60)
-    result = _build_usage_result(usage_by_agent)
+    result = _build_usage_metrics(primary_collector, recovery_collector)
     # Prefer diagnosis stage outputs for the reflector (it has the full pipeline).
     sof = diag_result.stage_outputs_file or mit_result.stage_outputs_file
     result["stage_outputs_file"] = str(sof) if sof else None
