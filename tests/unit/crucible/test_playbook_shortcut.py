@@ -126,7 +126,8 @@ class TestSlugResolution:
         block = _make_benchmark_block(matched_candidate_index=1)
         idx = _extract_matched_candidate_index(block)
         slugs = ["slug-a", "slug-b", "slug-c"]
-        assert idx is not None and 0 <= idx < len(slugs)
+        assert idx is not None
+        assert 0 <= idx < len(slugs)
         assert slugs[idx] == "slug-b"
 
     def test_index_out_of_range_is_guarded(self):
@@ -140,7 +141,8 @@ class TestSlugResolution:
         block = _make_benchmark_block(matched_candidate_index=0)
         idx = _extract_matched_candidate_index(block)
         slugs = [""]
-        assert idx is not None and 0 <= idx < len(slugs)
+        assert idx is not None
+        assert 0 <= idx < len(slugs)
         assert not slugs[idx]  # empty string is falsy
 
 
@@ -194,14 +196,14 @@ class TestTryPlaybookShortcut:
 
         with (
             patch(
-                "sregym_agents.crucible.tools._kb_tools.load_mitigation_playbook_text",
+                "sregym_agents.crucible.tools.load_mitigation_playbook_text",
                 return_value="# Playbook\nsome content",
             ),
             patch(
                 "sregym_agents.crucible.knowledge_base.mitigation_playbook.MitigationPlaybookStore",
             ) as mock_store_cls,
             patch(
-                "sregym_agents.crucible.tools._kb_tools.run_single_mitigation_playbook",
+                "sregym_agents.crucible.tools.run_single_mitigation_playbook",
                 new_callable=AsyncMock,
                 return_value=applied_output,
             ),
@@ -251,14 +253,14 @@ class TestTryPlaybookShortcut:
 
         with (
             patch(
-                "sregym_agents.crucible.tools._kb_tools.load_mitigation_playbook_text",
+                "sregym_agents.crucible.tools.load_mitigation_playbook_text",
                 return_value="# Playbook\nsome content",
             ),
             patch(
                 "sregym_agents.crucible.knowledge_base.mitigation_playbook.MitigationPlaybookStore",
             ) as mock_store_cls,
             patch(
-                "sregym_agents.crucible.tools._kb_tools.run_single_mitigation_playbook",
+                "sregym_agents.crucible.tools.run_single_mitigation_playbook",
                 new_callable=AsyncMock,
                 return_value=not_applied,
             ),
@@ -294,14 +296,14 @@ class TestTryPlaybookShortcut:
 
         with (
             patch(
-                "sregym_agents.crucible.tools._kb_tools.load_mitigation_playbook_text",
+                "sregym_agents.crucible.tools.load_mitigation_playbook_text",
                 return_value="# Playbook\nsome content",
             ),
             patch(
                 "sregym_agents.crucible.knowledge_base.mitigation_playbook.MitigationPlaybookStore",
             ) as mock_store_cls,
             patch(
-                "sregym_agents.crucible.tools._kb_tools.run_single_mitigation_playbook",
+                "sregym_agents.crucible.tools.run_single_mitigation_playbook",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("subagent boom"),
             ),

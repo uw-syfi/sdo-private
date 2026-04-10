@@ -626,7 +626,7 @@ async def _try_playbook_shortcut(
     success submits directly to the benchmark. Returns a ``StageLoopResult``
     on success or ``None`` to signal fallback to the normal mitigation loop.
     """
-    from sregym_agents.crucible.tools._kb_tools import (
+    from sregym_agents.crucible.tools import (
         load_mitigation_playbook_text,
         run_single_mitigation_playbook,
     )

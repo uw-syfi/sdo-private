@@ -26,25 +26,31 @@ def _write_toml(tmp_path: Path, content: str) -> Path:
 
 
 def test_spec_names_loaded_from_toml(tmp_path: Path) -> None:
-    toml = _write_toml(tmp_path, """
+    toml = _write_toml(
+        tmp_path,
+        """
         [runner]
         spec_names = ["service_dns_resolution_failure", "wrong_dns_policy"]
 
         [runner.variants]
         enabled = false
-    """)
+    """,
+    )
     config = load_experiment_config(toml)
     assert config.spec_names == ["service_dns_resolution_failure", "wrong_dns_policy"]
 
 
 def test_spec_names_defaults_to_empty(tmp_path: Path) -> None:
-    toml = _write_toml(tmp_path, """
+    toml = _write_toml(
+        tmp_path,
+        """
         [runner]
         agent = "crucible"
 
         [runner.variants]
         enabled = false
-    """)
+    """,
+    )
     config = load_experiment_config(toml)
     assert config.spec_names == []
 
@@ -86,7 +92,7 @@ def test_config_to_main_args_emits_problem_spec(tmp_path: Path) -> None:
     assert "--problem-spec" in args
     idx = args.index("--problem-spec")
     assert args[idx + 1] == "service_dns_resolution_failure"
-    remaining = args[idx + 2:]
+    remaining = args[idx + 2 :]
     assert "--problem-spec" in remaining
     assert remaining[remaining.index("--problem-spec") + 1] == "wrong_dns_policy"
 

@@ -58,6 +58,7 @@ class _FakeInlineAgent:
         tools: list[Any] | None = None,
         model_settings: Any | None = None,
         middleware: list[Any] | None = None,
+        usage_collector: Any | None = None,
     ) -> None:
         self.model = model
         self._agent_name = agent_name
