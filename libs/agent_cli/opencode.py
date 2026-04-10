@@ -100,6 +100,7 @@ class OpencodeCodingAgent(CLICodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        mcp_servers: list[object] | None = None,
     ):
         """Initialize the Opencode coding agent.
 
@@ -107,7 +108,13 @@ class OpencodeCodingAgent(CLICodingAgent):
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
+            mcp_servers: Optional list of MCP server configurations.
+
+        Raises:
+            ValueError: If mcp_servers is non-empty (not supported).
         """
+        if mcp_servers:
+            raise ValueError("OpencodeCodingAgent does not support programmatic MCP server configuration via CLI flags")
         if not model:
             model = OPENCODE_DEFAULT_MODEL
         super().__init__("opencode", model, recorder, event_handler)

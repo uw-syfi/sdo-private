@@ -14,6 +14,7 @@ from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorder
 
 from .base import CodingAgent
 from .events import AgentEventHandler
+from .mcp_config import McpServerConfig
 from .utils import get_interactive_env
 
 
@@ -184,6 +185,7 @@ class CLICodingAgent(CodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        mcp_servers: list[McpServerConfig] | None = None,
     ):
         """Initialize the CLI coding agent.
 
@@ -192,6 +194,7 @@ class CLICodingAgent(CodingAgent):
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
+            mcp_servers: Optional list of MCP server configurations.
 
         Raises:
             RuntimeError: If binary is not found in PATH or is not working.
@@ -201,6 +204,7 @@ class CLICodingAgent(CodingAgent):
         self.model = model
         self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
+        self.mcp_servers: list[McpServerConfig] = mcp_servers or []
 
         # Search for binary in the captured environment's PATH
         binary_path = shutil.which(binary_name, path=self.env.get("PATH"))

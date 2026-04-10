@@ -15,6 +15,7 @@ from .claude_events import (
 )
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
+from .mcp_config import HttpMcpServer, McpServerConfig
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
@@ -135,6 +136,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        mcp_servers: list[McpServerConfig] | None = None,
     ):
         """Initialize the Claude Code coding agent.
 
@@ -142,8 +144,9 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             model: Optional model name to use with Claude Code. If None, uses default.
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
+            mcp_servers: Optional list of MCP server configurations.
         """
-        super().__init__("claude", model, recorder, event_handler)
+        super().__init__("claude", model, recorder, event_handler, mcp_servers)
 
     @property
     def claude_path(self) -> str:
@@ -154,6 +157,19 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
     def _log_prefix(self) -> str:
         """Return the log prefix for this agent."""
         return "[Claude]"
+
+    def _build_mcp_config_json(self) -> str:
+        """Build the JSON string for --mcp-config."""
+        servers: dict[str, dict[str, Any]] = {}
+        for s in self.mcp_servers:
+            if isinstance(s, HttpMcpServer):
+                servers[s.name] = {"url": s.url}
+            else:
+                entry: dict[str, Any] = {"command": s.command, "args": s.args}
+                if s.env:
+                    entry["env"] = s.env
+                servers[s.name] = entry
+        return json.dumps({"mcpServers": servers})
 
     def _get_command(self, prompt: str) -> list[str]:
         cmd = [
@@ -167,6 +183,14 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         ]
         if self.model:
             cmd.extend(["--model", self.model])
+        if self.mcp_servers:
+            cmd.extend(
+                [
+                    "--mcp-config",
+                    self._build_mcp_config_json(),
+                    "--strict-mcp-config",
+                ]
+            )
         return cmd
 
     def _create_session(

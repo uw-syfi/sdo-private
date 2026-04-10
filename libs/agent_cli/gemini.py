@@ -157,6 +157,7 @@ class GeminiCodingAgent(CLICodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        mcp_servers: list[object] | None = None,
     ):
         """Initialize the Gemini coding agent.
 
@@ -164,7 +165,13 @@ class GeminiCodingAgent(CLICodingAgent):
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
+            mcp_servers: Optional list of MCP server configurations.
+
+        Raises:
+            ValueError: If mcp_servers is non-empty (not supported).
         """
+        if mcp_servers:
+            raise ValueError("GeminiCodingAgent does not support programmatic MCP server configuration via CLI flags")
         super().__init__("gemini", model, recorder, event_handler)
 
     @property
