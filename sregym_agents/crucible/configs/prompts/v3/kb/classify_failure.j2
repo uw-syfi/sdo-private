@@ -26,7 +26,9 @@ The agent's pipeline consists of these stages:
 The stage outputs above contain the full record of this run, in chronological order:
 
 1. **Triage Report** — The anomalies surfaced by the triage subagent. These are the
-   symptoms the agent works with for the rest of the pipeline.
+   symptoms the agent works with for the rest of the pipeline. If triage didn't surface a
+   problem area (e.g., ConfigMap anomalies) that points to the real root cause, the agent 
+   is unlikely to succeed.
 2. **KB Retrieval Candidates** — The raw candidates returned by the knowledge base search,
    along with the query the agent used. These are hypotheses the KB considers plausible
    given the symptoms.

@@ -21,7 +21,7 @@ except ModuleNotFoundError:
 
 import yaml
 
-_VARIANT_ORDERS = ("flat", "round_robin", "grouped")
+_VARIANT_ORDERS = ("flat", "round_robin", "grouped", "adaptive")
 
 
 @dataclasses.dataclass
@@ -32,16 +32,26 @@ class VariantConfig:
     seed: int = 42
     order: str = "round_robin"  # one of _VARIANT_ORDERS
     max_per_class: int | None = None
+    consec_solves_to_stop: int | None = None
     spec_names: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     def __post_init__(self) -> None:
         if self.order not in _VARIANT_ORDERS:
             raise ValueError(f"variants.order must be one of {'|'.join(_VARIANT_ORDERS)}, got {self.order!r}")
         if self.max_per_class is not None:
-            if self.order != "grouped":
-                raise ValueError("variants.max_per_class is only valid when variants.order='grouped'")
+            if self.order not in ("grouped", "adaptive"):
+                raise ValueError("variants.max_per_class is only valid when variants.order in {'grouped', 'adaptive'}")
             if self.max_per_class <= 0:
                 raise ValueError("variants.max_per_class must be > 0")
+        if self.order == "adaptive":
+            if self.max_per_class is None:
+                raise ValueError("variants.max_per_class is required when variants.order='adaptive'")
+            if self.consec_solves_to_stop is None:
+                raise ValueError("variants.consec_solves_to_stop is required when variants.order='adaptive'")
+            if self.consec_solves_to_stop <= 0:
+                raise ValueError("variants.consec_solves_to_stop must be > 0")
+        elif self.consec_solves_to_stop is not None:
+            raise ValueError("variants.consec_solves_to_stop is only valid when variants.order='adaptive'")
         if self.spec_names and not self.enabled:
             raise ValueError("variants.spec_names requires variants.enabled = true")
 
@@ -104,6 +114,7 @@ def variant_config_from_raw(variants_raw: dict[str, Any]) -> VariantConfig:
         seed=variants_raw.get("seed", 42),
         order=order,
         max_per_class=variants_raw.get("max_per_class"),
+        consec_solves_to_stop=variants_raw.get("consec_solves_to_stop"),
         spec_names=list(variants_raw.get("spec_names", [])),
     )
 
@@ -280,12 +291,22 @@ def config_to_main_args(
 
     if config.variants.enabled:
         args.append("--variants")
-        args.extend(["--variant-count", str(config.variants.count)])
+        # In adaptive mode --variant-count is ignored and the runner does not
+        # require it; emit it only when set, to keep the CLI clean.
+        if config.variants.order != "adaptive" or config.variants.count > 0:
+            args.extend(["--variant-count", str(config.variants.count)])
         args.extend(["--variant-offset", str(config.variants.offset)])
         args.extend(["--variant-seed", str(config.variants.seed)])
         args.extend(["--variant-order", config.variants.order])
         if config.variants.max_per_class is not None:
             args.extend(["--variant-max-per-class", str(config.variants.max_per_class)])
+        if config.variants.consec_solves_to_stop is not None:
+            args.extend(
+                [
+                    "--variant-adaptive-consec-solves",
+                    str(config.variants.consec_solves_to_stop),
+                ]
+            )
         for name in config.variants.spec_names:
             args.extend(["--variant-spec", name])
     elif config.sequence_len > 0:
@@ -363,6 +384,8 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"order = {_toml_value(config.variants.order)}")
     if config.variants.max_per_class is not None:
         lines.append(f"max_per_class = {_toml_value(config.variants.max_per_class)}")
+    if config.variants.consec_solves_to_stop is not None:
+        lines.append(f"consec_solves_to_stop = {_toml_value(config.variants.consec_solves_to_stop)}")
     if config.variants.spec_names:
         lines.append(f"spec_names = {_toml_value(config.variants.spec_names)}")
 
