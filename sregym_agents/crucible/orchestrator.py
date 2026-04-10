@@ -29,6 +29,7 @@ from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
     JudgeDeps,
+    LTMShortCircuit,
     SharedFile,
     SharedState,
     SREDeps,
@@ -64,7 +65,7 @@ def _build_usage_metrics(
         {
           "primary":  {"by_agent": {...}, "total": {...}},
           "recovery": {"by_agent": {...}, "total": {...}},
-          "total":    {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ...}
+          "total":    {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ..., "turns": ...}
         }
     """
     primary_dict = primary.to_dict()
@@ -180,6 +181,55 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
         arbitration_priors=injected.arbitration_priors.resolve() if injected.arbitration_priors else None,
         verification_priors=injected.verification_priors.resolve() if injected.verification_priors else None,
         playbooks_dir=injected.playbooks_dir.resolve() if injected.playbooks_dir else None,
+    )
+
+
+async def _direct_submit_confirmed(
+    confirmed: list[str],
+    stage: str,
+    iteration: int,
+    shared_file: SharedFile,
+    submit_mcp_url: str,
+    stage_outputs_file: Path | None,
+) -> StageLoopResult:
+    """Direct-submission path triggered by ``LTMShortCircuit``.
+
+    Appends a "LTM Direct Submission" block + bullet list of confirmed
+    candidates to the shared file, posts the list to the benchmark via
+    ``submit_to_benchmark``, appends the resulting ``benchmark_result``
+    block, and returns an APPROVED ``StageLoopResult``. The judge agent
+    is **not** invoked.
+    """
+    bullet_list = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(confirmed))
+    shared_file.append(
+        f"\n### Iteration {iteration} — LTM Direct Submission ({stage})\n"
+        f"Verification subagents confirmed {len(confirmed)} candidate root cause(s) "
+        f"from the knowledge base. Skipping further SRE agent reasoning and the judge "
+        f"step; submitting these candidates directly.\n\n"
+        f"**Confirmed candidates:**\n{bullet_list}\n"
+    )
+    try:
+        success, message, oracle = await submit_to_benchmark(submit_mcp_url, confirmed, stage)
+        oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
+        benchmark_block = (
+            f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n{oracle_text}\n</benchmark_result>\n"
+        )
+    except Exception as e:
+        benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+
+    shared_file.append(
+        f"\n### Iteration {iteration} — Judge Verdict ({stage})\n"
+        f"- Status: APPROVED (LTM verified short-circuit — direct submission)\n"
+        f"{benchmark_block}"
+    )
+
+    return StageLoopResult(
+        approved=True,
+        benchmark_block=benchmark_block,
+        agent_answer=confirmed[0],
+        agent_justification=f"LTM verification short-circuit ({len(confirmed)} confirmed candidate(s))",
+        agent_causal_chain="",
+        stage_outputs_file=stage_outputs_file,
     )
 
 
@@ -302,6 +352,7 @@ async def _run_stage_loop(
             incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
             playbooks_dir=playbooks_dir if crucible_config.enable_ltm_retrieval else None,
             ltm_model_id=model if crucible_config.enable_ltm_retrieval else None,
+            enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
             trajectory_path=trajectory_path,
             triage_priors=triage_priors,
             verification_guidance=verification_guidance,
@@ -329,6 +380,21 @@ async def _run_stage_loop(
         )
         try:
             await sre_agent.arun(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})
+        except LTMShortCircuit as sig:
+            # LTM verification confirmed at least one candidate; skip the rest
+            # of the SRE agent and the judge entirely and submit directly.
+            logger.info(
+                f"[{stage}] LTM short-circuit on iteration {iteration} with "
+                f"{len(sig.confirmed)} confirmed candidate(s); submitting directly."
+            )
+            return await _direct_submit_confirmed(
+                confirmed=sig.confirmed,
+                stage=stage,
+                iteration=sig.iteration,
+                shared_file=shared_file,
+                submit_mcp_url=submit_mcp_url,
+                stage_outputs_file=stage_outputs_file,
+            )
         except ModelHTTPError as exc:
             logger.warning(
                 f"[{stage}] SRE agent failed with HTTP {exc.status_code} on iteration {iteration} "

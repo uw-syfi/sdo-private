@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 class CrucibleConfig:
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
+    enable_ltm_verified_direct_submit: bool = False
     include_benchmark_results: bool = False
     enable_reflection: bool = True
     enable_playbooks: bool = False
@@ -70,6 +71,9 @@ def crucible_config_from_experiment_agent(
         base,
         enable_judge=enable_judge,
         enable_ltm_retrieval=bool(agent_settings.get("enable_ltm_retrieval", base.enable_ltm_retrieval)),
+        enable_ltm_verified_direct_submit=bool(
+            agent_settings.get("enable_ltm_verified_direct_submit", base.enable_ltm_verified_direct_submit)
+        ),
         include_benchmark_results=bool(agent_settings.get("include_benchmark_results", base.include_benchmark_results)),
         enable_reflection=_reflection_from_mapping(agent_settings),
         enable_playbooks=bool(agent_settings.get("enable_playbooks", base.enable_playbooks)),

@@ -26,12 +26,14 @@ class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_input_tokens: int = 0
+    turns: int = 0
 
     def __add__(self, other: TokenUsage) -> TokenUsage:
         return TokenUsage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
             cached_input_tokens=self.cached_input_tokens + other.cached_input_tokens,
+            turns=self.turns + other.turns,
         )
 
     def to_dict(self) -> dict[str, int]:
@@ -39,6 +41,7 @@ class TokenUsage:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cached_input_tokens": self.cached_input_tokens,
+            "turns": self.turns,
         }
 
     @classmethod
@@ -48,6 +51,7 @@ class TokenUsage:
             input_tokens=getattr(run_usage, "input_tokens", 0) or 0,
             output_tokens=getattr(run_usage, "output_tokens", 0) or 0,
             cached_input_tokens=getattr(run_usage, "cached_input_tokens", 0) or 0,
+            turns=getattr(run_usage, "requests", 0) or 0,
         )
 
 

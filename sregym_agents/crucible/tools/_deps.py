@@ -124,6 +124,10 @@ class SREDeps:
     ltm_model_id: Model | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
+    # If True, search_prior_incidents raises LTMShortCircuit when verification
+    # confirms one or more candidates, so the orchestrator can submit them
+    # directly to the benchmark without further SRE agent reasoning.
+    enable_ltm_verified_direct_submit: bool = False
     trajectory_path: Path | None = None
     triage_report: TriageReport | None = None
     # v3 trained guidance

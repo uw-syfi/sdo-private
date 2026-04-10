@@ -189,6 +189,58 @@ class VerifiedDifferentialDiagnosis(BaseModel):
     caveats: str = Field(default="", description="What doesn't match; what to verify before assuming patterns apply")
 
 
+class LTMShortCircuit(BaseException):
+    """Short-circuit signal raised by ``search_prior_incidents`` when LTM
+    verification has confirmed at least one candidate root cause and the
+    feature flag ``enable_ltm_verified_direct_submit`` is set on
+    ``SREDeps``.
+
+    Inherits ``BaseException`` (not ``Exception``) so it bypasses
+    pydantic-ai middleware retry logic (which catches ``Exception``) and
+    propagates cleanly out of the SRE main agent loop to the orchestrator.
+    The orchestrator catches this signal, submits ``confirmed`` directly to
+    the benchmark, and treats the iteration as APPROVED.
+    """
+
+    def __init__(self, confirmed: list[str], iteration: int) -> None:
+        super().__init__(f"LTM short-circuit: {len(confirmed)} confirmed candidate(s)")
+        self.confirmed = confirmed
+        self.iteration = iteration
+
+
+def _format_investigated_hypotheses_md(
+    verified: VerifiedDifferentialDiagnosis,
+    iteration: int,
+    stage: str,
+) -> str:
+    """Markdown summary of every candidate that went through LTM verification.
+
+    Includes both confirmed (``applies=True``) and ruled-out (``applies=False``)
+    entries with reasoning. Used to log to the shared session file every time
+    ``search_prior_incidents`` runs, regardless of whether the short-circuit
+    feature flag fires.
+    """
+    if not verified.verified_candidates:
+        return (
+            f"\n### Iteration {iteration} — LTM Investigated Hypotheses ({stage})\n"
+            f"No candidates returned from KB retrieval.\n"
+        )
+    lines = [
+        f"\n### Iteration {iteration} — LTM Investigated Hypotheses ({stage})",
+        f"Verified {len(verified.verified_candidates)} candidate(s) ({len(verified.confirmed_candidates)} confirmed):",
+        "",
+    ]
+    for c in verified.verified_candidates:
+        marker = "✅ CONFIRMED" if c.applies else "❌ ruled out"
+        lines.append(f"- **[{marker}] {c.root_cause_class}** — {c.root_cause}")
+        if c.reasoning:
+            lines.append(f"  - reasoning: {c.reasoning}")
+        if c.applies and c.causal_chain:
+            lines.append(f"  - causal chain: {c.causal_chain}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 HypothesisCoverageVerdictLiteral = Literal["accept", "reject", "accept_partial"]
 
 
@@ -756,33 +808,52 @@ async def search_prior_incidents(
             novel_cause_signals=diagnosis.novel_cause_signals,
             caveats=diagnosis.caveats,
         )
-        output_json = verified.model_dump_json(indent=2)
-        logger.info("[ltm-search] no candidates to verify: %s", output_json)
-        return output_json
+        logger.info("[ltm-search] no candidates to verify")
+    else:
+        _attach_slugs_to_candidates(diagnosis.candidate_root_causes, ctx.deps.lt_summary_file)
 
-    _attach_slugs_to_candidates(diagnosis.candidate_root_causes, ctx.deps.lt_summary_file)
+        verified = await _run_verification_phase(
+            candidates=diagnosis.candidate_root_causes,
+            diagnosis=diagnosis,
+            observed_symptoms=observed_symptoms,
+            namespace=ctx.deps.namespace,
+            stage=ctx.deps.stage,
+            model_id=ltm_model_id,
+            renderer=ctx.deps.renderer,
+            trajectory_path=ctx.deps.trajectory_path,
+            triage_report=ctx.deps.triage_report,
+            verification_guidance=ctx.deps.verification_guidance,
+            playbooks_dir=ctx.deps.playbooks_dir,
+            usage_collector=ctx.deps.usage_collector,
+        )
 
-    verified = await _run_verification_phase(
-        candidates=diagnosis.candidate_root_causes,
-        diagnosis=diagnosis,
-        observed_symptoms=observed_symptoms,
-        namespace=ctx.deps.namespace,
-        stage=ctx.deps.stage,
-        model_id=ltm_model_id,
-        renderer=ctx.deps.renderer,
-        trajectory_path=ctx.deps.trajectory_path,
-        triage_report=ctx.deps.triage_report,
-        verification_guidance=ctx.deps.verification_guidance,
-        playbooks_dir=ctx.deps.playbooks_dir,
-        usage_collector=ctx.deps.usage_collector,
-    )
     output_json = verified.model_dump_json(indent=2)
     logger.info("[ltm-search] verified output: %s", output_json)
 
-    # Write verification results to stage outputs
+    # Always log investigated hypotheses to the shared session file so the
+    # rest of the loop and any human reader can see what KB verification
+    # considered, regardless of whether short-circuit fires.
+    try:
+        ctx.deps.shared_file.append(_format_investigated_hypotheses_md(verified, ctx.deps.iteration, ctx.deps.stage))
+    except Exception as e:
+        logger.warning("[ltm-search] failed to append investigated hypotheses to shared file: %s", e)
+
+    # Write verification results to stage outputs file (separate from shared)
     if ctx.deps.stage_outputs_file:
         with open(ctx.deps.stage_outputs_file, "a") as f:
             f.write(f"\n## KB Verification Results\n{output_json}\n")
+
+    # Short-circuit only when the flag is on AND verification confirmed something.
+    if ctx.deps.enable_ltm_verified_direct_submit and verified.confirmed_candidates:
+        from sregym_agents.crucible.tools._judge_tools import MAX_DIAGNOSIS_CANDIDATES
+
+        confirmed_strings = [c.root_cause for c in verified.confirmed_candidates[:MAX_DIAGNOSIS_CANDIDATES]]
+        logger.info(
+            "[ltm-search] short-circuit fired with %d confirmed candidate(s); raising LTMShortCircuit",
+            len(confirmed_strings),
+        )
+        raise LTMShortCircuit(confirmed=confirmed_strings, iteration=ctx.deps.iteration)
+
     return output_json
 
 
