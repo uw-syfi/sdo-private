@@ -401,9 +401,10 @@ async def _run_stage_loop(
         except LTMShortCircuit as sig:
             # LTM verification confirmed at least one candidate; skip the rest
             # of the SRE agent and the judge entirely and submit directly.
+            slugs_info = f", slugs={sig.confirmed_slugs}" if sig.confirmed_slugs else ""
             logger.info(
-                f"[{stage}] LTM short-circuit on iteration {iteration} with "
-                f"{len(sig.confirmed)} confirmed candidate(s); submitting directly."
+                f"[{stage}] KB verified {len(sig.confirmed)} hypothesis(es) — "
+                f"going straight to submission (iteration {iteration}{slugs_info})."
             )
             return await _direct_submit_confirmed(
                 confirmed=sig.confirmed,
@@ -1106,34 +1107,43 @@ async def run(
     # the benchmark confirmed the diagnosis, try the corresponding mitigation
     # playbook directly before running the full SRE agent loop.
     mit_result: StageLoopResult | None = None
-    if (
-        crucible_config.enable_playbook_shortcut
-        and diag_result.benchmark_block
-        and "success: True" in diag_result.benchmark_block
-        and diag_result.confirmed_slugs
-        and injected_kb
-        and injected_kb.mitigation_playbooks_dir
-    ):
+    if not crucible_config.enable_playbook_shortcut:
+        logger.info("[playbook-shortcut] Disabled (enable_playbook_shortcut=false).")
+    elif not diag_result.benchmark_block or "success: True" not in diag_result.benchmark_block:
+        logger.info("[playbook-shortcut] Skipped — diagnosis was not confirmed by benchmark.")
+    elif not diag_result.confirmed_slugs:
+        logger.info("[playbook-shortcut] Skipped — no KB slugs from diagnosis stage.")
+    elif not injected_kb or not injected_kb.mitigation_playbooks_dir:
+        logger.info("[playbook-shortcut] Skipped — no mitigation playbooks directory injected.")
+    else:
         idx = _extract_matched_candidate_index(diag_result.benchmark_block)
-        if idx is not None and 0 <= idx < len(diag_result.confirmed_slugs):
+        if idx is None or not (0 <= idx < len(diag_result.confirmed_slugs)):
+            logger.info(
+                "[playbook-shortcut] Skipped — matched_candidate_index=%r out of range for %d slug(s).",
+                idx,
+                len(diag_result.confirmed_slugs),
+            )
+        elif not diag_result.confirmed_slugs[idx]:
+            logger.info("[playbook-shortcut] Skipped — slug at index %d is empty.", idx)
+        else:
             slug = diag_result.confirmed_slugs[idx]
-            if slug:
-                logger.info(
-                    "[playbook-shortcut] Attempting mitigation playbook for slug=%r (matched_candidate_index=%d)",
-                    slug,
-                    idx,
-                )
-                mit_result = await _try_playbook_shortcut(
-                    model=resolved_model,
-                    namespace=app_info.get("namespace", "default"),
-                    slug=slug,
-                    mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
-                    shared_file=mitigation_sf,
-                    submit_mcp_url=submit_mcp_url,
-                    renderer=renderer,
-                    usage_collector=primary_collector,
-                    trajectory_path=trajectory_path,
-                )
+            logger.info(
+                "[playbook-shortcut] Found playbook slug=%r (candidate_index=%d)"
+                " — attempting direct mitigation.",
+                slug,
+                idx,
+            )
+            mit_result = await _try_playbook_shortcut(
+                model=resolved_model,
+                namespace=app_info.get("namespace", "default"),
+                slug=slug,
+                mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
+                shared_file=mitigation_sf,
+                submit_mcp_url=submit_mcp_url,
+                renderer=renderer,
+                usage_collector=primary_collector,
+                trajectory_path=trajectory_path,
+            )
 
     if mit_result is None:
         mit_result = await _run_stage_loop(
