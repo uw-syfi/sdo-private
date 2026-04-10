@@ -242,6 +242,71 @@ class TestSynthesizeFromRecovery:
         assert kwargs["recovery_stage_failures"] == []
 
 
+class TestSlugOverride:
+    """LLM-corrupted slugs are silently corrected to the known template slug."""
+
+    async def test_synthesize_corrects_corrupted_slug(self) -> None:
+        synth, _ = _make_synthesizer()
+        # LLM drops an underscore: "for_a_service" → "for a_service"
+        corrupted_md = _valid_playbook_markdown(
+            slug="coredns_nxdomain_responses_for a_service",
+            class_name="CoreDNS NXDOMAIN for a service",
+        )
+        expected_slug = "coredns_nxdomain_responses_for_a_service"
+        mock_arun = AsyncMock(return_value=_make_mock_result(corrupted_md))
+
+        with (
+            patch(
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
+                mock_arun,
+            ),
+            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
+        ):
+            MockAgent.return_value = MagicMock()
+            result = await synth.synthesize_from_success(
+                class_name="CoreDNS NXDOMAIN for a service",
+                slug=expected_slug,
+                stage_outputs="stages",
+                oracle_answer="answer",
+            )
+
+        assert result is not None
+        assert result.slug == expected_slug
+
+    async def test_refine_corrects_corrupted_slug(self) -> None:
+        synth, _ = _make_synthesizer()
+        existing_md = _valid_playbook_markdown(
+            slug="coredns_nxdomain_responses_for_a_service",
+            class_name="CoreDNS NXDOMAIN for a service",
+        )
+        existing = Playbook.parse(existing_md)
+        # LLM drops an underscore in the refined output
+        corrupted_md = _valid_playbook_markdown(
+            slug="coredns_nxdomain_responses_for a_service",
+            class_name="CoreDNS NXDOMAIN for a service",
+        )
+        mock_arun = AsyncMock(return_value=_make_mock_result(corrupted_md))
+        reflection = _make_recovery_reflection()
+
+        with (
+            patch(
+                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
+                mock_arun,
+            ),
+            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
+        ):
+            MockAgent.return_value = MagicMock()
+            result = await synth.refine(
+                existing=existing,
+                stage_outputs="fail-stages",
+                recovery_reflection=reflection,
+                oracle_answer="answer",
+            )
+
+        assert result is not None
+        assert result.slug == "coredns_nxdomain_responses_for_a_service"
+
+
 class TestRefine:
     async def test_refine_passes_existing_markdown(self) -> None:
         synth, mock_renderer = _make_synthesizer()

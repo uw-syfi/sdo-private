@@ -70,6 +70,7 @@ class MitigationPlaybookSynthesizer:
                 "stage_outputs": stage_outputs,
                 "oracle_answer": oracle_answer,
             },
+            expected_slug=slug,
             log_label=f"synthesize_from_success[{slug}]",
         )
 
@@ -96,6 +97,7 @@ class MitigationPlaybookSynthesizer:
                 "recovery_observations": recovery_reflection.investigation_observations,
                 "recovery_stage_failures": recovery_reflection.stage_failures,
             },
+            expected_slug=slug,
             log_label=f"synthesize_from_recovery[{slug}]",
         )
 
@@ -122,6 +124,7 @@ class MitigationPlaybookSynthesizer:
                 "recovery_observations": recovery_reflection.investigation_observations,
                 "recovery_stage_failures": recovery_reflection.stage_failures,
             },
+            expected_slug=existing.slug,
             log_label=f"refine[{existing.slug}]",
         )
 
@@ -130,6 +133,7 @@ class MitigationPlaybookSynthesizer:
         *,
         template_name: str,
         template_vars: dict[str, Any],
+        expected_slug: str,
         log_label: str,
     ) -> MitigationPlaybook | None:
         """Render, call the LLM, and validate; retry on validation failure."""
@@ -156,7 +160,9 @@ class MitigationPlaybookSynthesizer:
             violations = validate_mitigation_playbook(text)
             if not violations:
                 try:
-                    return MitigationPlaybook.parse(text)
+                    playbook = MitigationPlaybook.parse(text)
+                    playbook = playbook.model_copy(update={"slug": expected_slug})
+                    return playbook
                 except MitigationPlaybookValidationError as exc:
                     last_violations = exc.violations
                     feedback = "\n".join(f"- {v}" for v in last_violations)

@@ -71,6 +71,7 @@ class PlaybookSynthesizer:
                 "stage_outputs": stage_outputs,
                 "oracle_answer": oracle_answer,
             },
+            expected_slug=slug,
             log_label=f"synthesize_from_success[{slug}]",
         )
 
@@ -97,6 +98,7 @@ class PlaybookSynthesizer:
                 "recovery_observations": recovery_reflection.investigation_observations,
                 "recovery_stage_failures": recovery_reflection.stage_failures,
             },
+            expected_slug=slug,
             log_label=f"synthesize_from_recovery[{slug}]",
         )
 
@@ -123,6 +125,7 @@ class PlaybookSynthesizer:
                 "recovery_observations": recovery_reflection.investigation_observations,
                 "recovery_stage_failures": recovery_reflection.stage_failures,
             },
+            expected_slug=existing.slug,
             log_label=f"refine[{existing.slug}]",
         )
 
@@ -153,6 +156,7 @@ class PlaybookSynthesizer:
                 "stage_outputs": stage_outputs,
                 "recovery_summary": recovery_summary,
             },
+            expected_slug=winner_slug,
             log_label=f"consolidate[{winner_slug}]",
         )
 
@@ -161,6 +165,7 @@ class PlaybookSynthesizer:
         *,
         template_name: str,
         template_vars: dict[str, Any],
+        expected_slug: str,
         log_label: str,
     ) -> Playbook | None:
         """Render, call the LLM, and validate; retry on validation failure."""
@@ -187,7 +192,9 @@ class PlaybookSynthesizer:
             violations = validate_playbook(text)
             if not violations:
                 try:
-                    return Playbook.parse(text)
+                    playbook = Playbook.parse(text)
+                    playbook = playbook.model_copy(update={"slug": expected_slug})
+                    return playbook
                 except PlaybookValidationError as exc:
                     # Should be unreachable if validate_playbook agreed, but be defensive.
                     last_violations = exc.violations
