@@ -79,6 +79,253 @@ git_integration = true
 
 ---
 
+## SREGym Runner Settings (`[runner]`)
+
+Runner settings live in experiment TOML files (e.g. `sregym_agents/experiments/default.toml`) under `[runner]` and are passed as CLI arguments to `bench/sregym/main.py` by `scripts/run_sregym.py`.
+
+### `agent`
+
+**Default:** `"crucible"`
+
+Name of the registered agent to run (from `sregym_agents/agents.yaml`).
+
+---
+
+### `model`
+
+**Default:** `"google-vertex:gemini-2.5-flash"`
+
+Model ID for the agent. Can be overridden at launch time with the `MODEL` environment variable.
+
+---
+
+### `parallel`
+
+**Default:** `4`
+
+Number of problems to run concurrently. Can be overridden with the `PARALLEL` environment variable.
+
+---
+
+### `enable_summary`
+
+**Default:** `true`
+
+Enables knowledge base (KB) mode. Passes `--enable-summary` to `main.py`, which activates the KB worker and per-run summarization pipeline. Set to `false` to run without any KB.
+
+---
+
+### `no_inject_summary`
+
+**Default:** `true`
+
+Update the KB after each run but do not inject it into the agent's context before the run. Useful when bootstrapping a fresh KB. Set to `false` to inject existing KB content at the start of each run.
+
+---
+
+### `repeat`
+
+**Default:** `1`
+
+Run each problem N times. Useful for measuring variance across repeated runs.
+
+---
+
+### `sequence_len`
+
+**Default:** `0` (disabled)
+
+Draw a random sequence of N problems from the full problem set and run them in order. Set to `0` to disable. Cannot be used with variants mode. `sequence_seed` controls the RNG.
+
+---
+
+### `sequence_seed`
+
+**Default:** `42`
+
+RNG seed for `sequence_len` sampling.
+
+---
+
+### Problem selection (mutually exclusive)
+
+Three mutually exclusive ways to specify which problems to run (all are also mutually exclusive with `[runner.variants]`):
+
+- **`tasklist`** — Named pre-built set (maps to `bench/sregym/sregym/conductor/tasklist.<name>.yml`) or path to a custom YAML file.
+- **`problems`** — Inline list of specific problem IDs (all get diagnosis + mitigation stages).
+- **`spec_names`** — List of spec/category prefixes; runs all problems whose ID equals or starts with `<spec>_`.
+
+```toml
+[runner]
+# Option 1: named tasklist
+tasklist = "count_train"
+
+# Option 2: specific problems
+problems = ["faulty_image_correlated", "incorrect_port_assignment"]
+
+# Option 3: by spec prefix
+spec_names = ["service_dns_resolution_failure"]
+```
+
+---
+
+## SREGym Variant Mode (`[runner.variants]`)
+
+Variant mode draws problems by sampling across fault classes rather than using a fixed tasklist. Mutually exclusive with `tasklist`, `problems`, and `spec_names`.
+
+### `enabled`
+
+**Default:** `false`
+
+Enable variant sampling mode.
+
+---
+
+### `count`
+
+**Default:** `0`
+
+Total number of variants to run. Set to `0` for no global cap (adaptive mode only; otherwise required).
+
+---
+
+### `offset`
+
+**Default:** `0`
+
+Starting offset into the variant list — skip the first N variants. Useful for resuming mid-sequence without repetition.
+
+---
+
+### `seed`
+
+**Default:** `42`
+
+RNG seed for variant sampling.
+
+---
+
+### `order`
+
+**Default:** `"round_robin"`
+
+How to schedule variants across fault classes. One of:
+
+- `flat` — draw variants in a flat random order ignoring class boundaries.
+- `round_robin` — cycle through classes one problem at a time.
+- `grouped` — exhaust each class up to `max_per_class` before moving to the next.
+- `adaptive` — keep feeding a class until the agent reliably solves it (`consec_solves_to_stop` consecutive full solves), then advance. Requires `max_per_class` and `consec_solves_to_stop`.
+
+---
+
+### `max_per_class`
+
+**Default:** none (required for `grouped` and `adaptive`)
+
+Hard cap on problems per fault class. For `adaptive`, this is the absolute ceiling before a class is dropped regardless of solve rate.
+
+---
+
+### `consec_solves_to_stop`
+
+**Default:** none (required for `adaptive`)
+
+Stop feeding a fault class after N consecutive full solves (diagnosis + mitigation both succeed). Used only with `order = "adaptive"`.
+
+---
+
+### `spec_names` (variants)
+
+**Default:** `[]` (all classes)
+
+Restrict variant sampling to specific fault class specs. Requires `enabled = true`.
+
+```toml
+[runner.variants]
+enabled = true
+order = "adaptive"
+count = 50
+seed = 42
+max_per_class = 20
+consec_solves_to_stop = 3
+spec_names = ["wrong_dns_policy"]
+```
+
+---
+
+## SREGym Environment (`[runner.env]`)
+
+These values are injected as environment variables into the `main.py` worker process.
+
+### `judge_model_id`
+
+**Default:** `""` (inherits `MODEL`)
+
+Model ID for the judge agent (`JUDGE_MODEL_ID` env var). Allows using a different, often more capable model for judgment than for the SRE agent.
+
+```toml
+[runner.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+```
+
+---
+
+### `crucible_seed_kb_dir`
+
+**Default:** `""` (no seed)
+
+Path to a pre-built KB directory to seed into a fresh experiment (`CRUCIBLE_SEED_KB_DIR` env var). The KB is copied into the new experiment's KB dir before the first run, letting the agent start with accumulated knowledge. Can also be overridden with the `CRUCIBLE_SEED_KB_DIR` environment variable.
+
+```toml
+[runner.env]
+crucible_seed_kb_dir = "/path/to/bench/sregym/logs/20260331_012038_crucible/kb"
+```
+
+---
+
+### `worker_cpu_limit`
+
+**Default:** `""` (no limit)
+
+CPU limit string passed to each worker container (`SREGYM_WORKER_CPU_LIMIT` env var). Useful for constraining resource usage in multi-tenant environments.
+
+```toml
+[runner.env]
+worker_cpu_limit = "16"
+```
+
+---
+
+## SREGym Pipeline Config (`[[stages]]`)
+
+A pipeline TOML uses `[[stages]]` instead of `[runner]` to chain multiple experiments automatically, passing each stage's KB as the seed for the next. Detected by the presence of a `stages` key; handled transparently by `run_sregym.py`.
+
+```toml
+[pipeline]
+name = "my-pipeline"
+
+[defaults]
+# shared [runner] settings for all stages
+agent = "crucible"
+model = "google-vertex:gemini-2.5-flash"
+parallel = 4
+
+[[stages]]
+name = "bootstrap"
+chain_kb = false   # no prior KB to chain from; default is true
+
+[[stages]]
+name = "refine"
+chain_kb = true    # seeds from bootstrap stage's KB output
+```
+
+Each stage entry supports:
+- **`name`** — human-readable label for logs and directory naming.
+- **`chain_kb`** (**default:** `true`) — automatically set `crucible_seed_kb_dir` to the previous stage's KB output directory. Set to `false` for independent stages that should not inherit a KB.
+- **`[stages.runner]`** — per-stage overrides (deep-merged over `[defaults]`).
+
+---
+
 ## Crucible Agent Flags (`[agent.crucible]`)
 
 Crucible flags live in experiment TOML files (e.g. `sregym_agents/experiments/default.toml`) under the `[agent.crucible]` section and map to `CrucibleConfig` fields.
