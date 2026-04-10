@@ -17,10 +17,14 @@ from sregym_agents.crucible.tools._bash_tools import (
     exec_bash_readonly,
     exec_bash_readonly_impl,
     grep,
+    grep_impl,
     read_file,
+    read_file_impl,
     run_bash_sync,
     str_replace_file,
+    str_replace_file_impl,
     write_file,
+    write_file_impl,
 )
 from sregym_agents.crucible.tools._deps import (
     JudgeDeps,
@@ -32,9 +36,12 @@ from sregym_agents.crucible.tools._deps import (
 )
 from sregym_agents.crucible.tools._judge_tools import (
     reveal_agent_hypothesis,
+    reveal_agent_hypothesis_impl,
     submit_independent_findings,
+    submit_independent_findings_impl,
     submit_to_benchmark,
     submit_verdict,
+    submit_verdict_impl,
 )
 from sregym_agents.crucible.tools._kb_tools import (
     COVERAGE_THINKING_BUDGET,
@@ -62,13 +69,17 @@ from sregym_agents.crucible.tools._kb_tools import (
     VerifiedDifferentialDiagnosis,
     VerifiedMitigationSearchResult,
     check_hypothesis_coverage,
+    check_hypothesis_coverage_impl,
     format_triage_report,
     load_mitigation_playbook_text,
     load_triage_priors,
     run_single_mitigation_playbook,
     search_prior_incidents,
+    search_prior_incidents_impl,
     search_prior_mitigations,
+    search_prior_mitigations_impl,
     triage_cluster,
+    triage_cluster_impl,
 )
 
 __all__ = [
@@ -85,10 +96,14 @@ __all__ = [
     "exec_bash_readonly",
     "exec_bash_readonly_impl",
     "grep",
+    "grep_impl",
     "read_file",
+    "read_file_impl",
     "run_bash_sync",
     "str_replace_file",
+    "str_replace_file_impl",
     "write_file",
+    "write_file_impl",
     # _deps
     "JudgeDeps",
     "SharedFile",
@@ -98,9 +113,12 @@ __all__ = [
     "TriageDeps",
     # _judge_tools
     "reveal_agent_hypothesis",
+    "reveal_agent_hypothesis_impl",
     "submit_independent_findings",
+    "submit_independent_findings_impl",
     "submit_to_benchmark",
     "submit_verdict",
+    "submit_verdict_impl",
     # _kb_tools
     "AreaAssessment",
     "COVERAGE_THINKING_BUDGET",
@@ -127,11 +145,15 @@ __all__ = [
     "TriageSpecialistReport",
     "VerifiedDifferentialDiagnosis",
     "check_hypothesis_coverage",
+    "check_hypothesis_coverage_impl",
     "format_triage_report",
     "load_mitigation_playbook_text",
     "load_triage_priors",
     "run_single_mitigation_playbook",
     "search_prior_incidents",
+    "search_prior_incidents_impl",
     "search_prior_mitigations",
+    "search_prior_mitigations_impl",
     "triage_cluster",
+    "triage_cluster_impl",
 ]

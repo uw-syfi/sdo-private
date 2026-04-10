@@ -816,20 +816,20 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
 
 
-async def triage_cluster(
-    ctx: RunContext[SREDeps],
+async def triage_cluster_impl(
+    deps: SREDeps,
 ) -> str:
     """Systematically audit the Kubernetes namespace for unhealthy components.
 
-    Call this FIRST, before search_prior_incidents. Returns a structured triage
-    report listing all anomalous resources (non-running pods, services without
-    endpoints, misconfigurations, etc.). Pass the output to search_prior_incidents
-    as part of your observed_symptoms.
+    Args:
+        deps: SRE dependency context.
+
+    Returns a structured triage report listing all anomalous resources.
     """
-    model_id = ctx.deps.model_id
-    namespace = ctx.deps.namespace
-    renderer = ctx.deps.renderer
-    trajectory_path = ctx.deps.trajectory_path
+    model_id = deps.model_id
+    namespace = deps.namespace
+    renderer = deps.renderer
+    trajectory_path = deps.trajectory_path
 
     # Phase 1: Coordinator — smoke test only
     coordinator = InlineAgent(
@@ -839,7 +839,7 @@ async def triage_cluster(
         tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(model_id, THINKING_BUDGET),
         middleware=_subagent_middleware(trajectory_path),
-        usage_collector=ctx.deps.usage_collector,
+        usage_collector=deps.usage_collector,
     )
 
     @coordinator.agent.output_validator
@@ -864,7 +864,7 @@ async def triage_cluster(
     try:
         coord_result = await coordinator.arun(
             coordinator_prompt,
-            run_ctx={"stage": ctx.deps.stage, "role": "triage-coordinator"},
+            run_ctx={"stage": deps.stage, "role": "triage-coordinator"},
         )
         coord_report = coord_result.output
     except Exception as e:
@@ -872,16 +872,16 @@ async def triage_cluster(
         return f"Triage failed with error: {e}. Proceed with manual investigation."
 
     # Phase 2: Check triage priors
-    priors = ctx.deps.triage_priors
+    priors = deps.triage_priors
 
     if not priors or not priors.areas:
         # No priors yet — return coordinator results as-is
         report = TriageReport(anomalies=list(coord_report.base_anomalies))
-        ctx.deps.triage_report = report
+        deps.triage_report = report
         formatted = format_triage_report(report)
         logger.info("[triage] done (no priors): %s", formatted)
-        if ctx.deps.stage_outputs_file:
-            with open(ctx.deps.stage_outputs_file, "a") as f:
+        if deps.stage_outputs_file:
+            with open(deps.stage_outputs_file, "a") as f:
                 f.write(f"\n## Triage Report\n{formatted}\n")
         return formatted
 
@@ -904,11 +904,11 @@ async def triage_cluster(
             tools=[read_file, exec_bash_any, grep, write_file],
             model_settings=thinking_settings(model_id, SPECIALIST_THINKING_BUDGET),
             middleware=_subagent_middleware(trajectory_path),
-            usage_collector=ctx.deps.usage_collector,
+            usage_collector=deps.usage_collector,
         )
         result = await agent.arun(
             prompt,
-            run_ctx={"stage": ctx.deps.stage, "role": f"triage-{slug}"},
+            run_ctx={"stage": deps.stage, "role": f"triage-{slug}"},
         )
         return result.output
 
@@ -951,13 +951,79 @@ async def triage_cluster(
         anomalies=deduped,
         area_assessments=[AreaAssessment(category=spec.category, assessment=spec.assessment) for spec in unhealthy],
     )
-    ctx.deps.triage_report = report
+    deps.triage_report = report
     formatted = format_triage_report(report)
     logger.info("[triage] done: %s", formatted)
-    if ctx.deps.stage_outputs_file:
-        with open(ctx.deps.stage_outputs_file, "a") as f:
+    if deps.stage_outputs_file:
+        with open(deps.stage_outputs_file, "a") as f:
             f.write(f"\n## Triage Report\n{formatted}\n")
     return formatted
+
+
+async def triage_cluster(
+    ctx: RunContext[SREDeps],
+) -> str:
+    """Systematically audit the Kubernetes namespace for unhealthy components.
+
+    Call this FIRST, before search_prior_incidents. Returns a structured triage
+    report listing all anomalous resources (non-running pods, services without
+    endpoints, misconfigurations, etc.). Pass the output to search_prior_incidents
+    as part of your observed_symptoms.
+    """
+    return await triage_cluster_impl(ctx.deps)
+
+
+async def check_hypothesis_coverage_impl(
+    deps: SREDeps,
+    hypothesis: str,
+) -> str:
+    """Cross-check a hypothesis against the triage report (multi-fault aware).
+
+    Args:
+        deps: SRE dependency context.
+        hypothesis: Proposed root cause to check against triage findings.
+    """
+    triage_report = deps.triage_report
+    if triage_report is None:
+        return "Error: no triage report available. Call triage_cluster first."
+
+    model_id = deps.model_id
+    triage_context = format_triage_report(triage_report)
+    prompt = deps.renderer.render(
+        "check_hypothesis_coverage",
+        triage_context=triage_context,
+        hypothesis=hypothesis,
+    )
+    logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
+
+    coverage_agent = InlineAgent(
+        model_id,
+        agent_name="hypothesis-coverage",
+        output_type=HypothesisCoverageVerdict,
+        model_settings=thinking_settings(model_id, COVERAGE_THINKING_BUDGET),
+        middleware=_subagent_middleware(deps.trajectory_path),
+        usage_collector=deps.usage_collector,
+    )
+
+    try:
+        result = await coverage_agent.arun(
+            prompt,
+            run_ctx={"stage": deps.stage, "role": "hypothesis-coverage"},
+        )
+        output = result.output
+
+        output_json = output.model_dump_json(indent=2)
+        logger.info(
+            "[hypothesis-coverage] done: verdict=%s, unexplained=%s, residual_rationale=%s, reasoning=%s",
+            output.verdict,
+            output.unexplained_anomalies,
+            output.residual_rationale,
+            output.reasoning,
+        )
+        return output_json
+    except Exception as e:
+        logger.warning("[hypothesis-coverage] failed: %s", e)
+        return f"Coverage check failed with error: {e}. Submit your best hypothesis."
 
 
 async def check_hypothesis_coverage(
@@ -974,47 +1040,140 @@ async def check_hypothesis_coverage(
     hypothesis is wrong or incomplete for what it claims. If rejected, revise or
     narrow scope before resubmitting.
     """
-    triage_report = ctx.deps.triage_report
-    if triage_report is None:
-        return "Error: no triage report available. Call triage_cluster first."
+    return await check_hypothesis_coverage_impl(ctx.deps, hypothesis)
 
-    model_id = ctx.deps.model_id
-    triage_context = format_triage_report(triage_report)
-    prompt = ctx.deps.renderer.render(
-        "check_hypothesis_coverage",
+
+async def search_prior_incidents_impl(
+    deps: SREDeps,
+    observed_symptoms: str,
+) -> str:
+    """Search past incidents and return verified candidate root causes.
+
+    Args:
+        deps: SRE dependency context.
+        observed_symptoms: Factual description of current observations or hypothesis.
+    """
+    empty_result = (
+        '{"verified_candidates": [], "confirmed_candidates": [],'
+        ' "novel_cause_signals": "", "caveats": "No incident history available."}'
+    )
+    if not deps.lt_summary_file:
+        logger.info("[ltm-search] skipped (no summary file): %s", empty_result)
+        return empty_result
+
+    if not observed_symptoms.strip():
+        result = "Error: observed_symptoms must not be empty."
+        logger.info("[ltm-search] skipped (empty symptoms): %s", result)
+        return result
+
+    if deps.ltm_call_count >= deps.ltm_call_budget:
+        result = (
+            '{"verified_candidates": [], "confirmed_candidates": [],'
+            ' "novel_cause_signals": "",'
+            ' "caveats": "Search budget exhausted. Proceed with independent investigation."}'
+        )
+        logger.info("[ltm-search] skipped (budget exhausted): %s", result)
+        return result
+    deps.ltm_call_count += 1
+
+    model_id = deps.model_id
+    triage_context = ""
+    if deps.triage_report is not None:
+        triage_context = format_triage_report(deps.triage_report)
+
+    prompt = deps.renderer.render(
+        "search_prior_incidents",
+        stage=deps.stage,
+        observed_symptoms=observed_symptoms,
         triage_context=triage_context,
-        hypothesis=hypothesis,
+        lt_summary_file=str(deps.lt_summary_file),
+        incidents_dir=str(deps.incidents_dir) if deps.incidents_dir else "",
     )
-    logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
+    logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
-    coverage_agent = InlineAgent(
+    retrieval_agent = InlineAgent(
         model_id,
-        agent_name="hypothesis-coverage",
-        output_type=HypothesisCoverageVerdict,
-        model_settings=thinking_settings(model_id, COVERAGE_THINKING_BUDGET),
-        middleware=_subagent_middleware(ctx.deps.trajectory_path),
-        usage_collector=ctx.deps.usage_collector,
+        agent_name="ltm-search",
+        output_type=DifferentialDiagnosis,
+        tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+        model_settings=thinking_settings(model_id, THINKING_BUDGET),
+        middleware=_subagent_middleware(),
+        usage_collector=deps.usage_collector,
     )
+    retrieval_result = await retrieval_agent.arun(prompt)
+    diagnosis = retrieval_result.output
+    retrieval_json = diagnosis.model_dump_json(indent=2)
+    logger.info("[ltm-search] retrieval output: %s", retrieval_json)
 
+    # Write retrieval candidates to stage outputs
+    if deps.stage_outputs_file:
+        with open(deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Retrieval Candidates\n**Query:** {observed_symptoms}\n\n")
+            if diagnosis.candidate_root_causes:
+                f.write(f"{retrieval_json}\n")
+            else:
+                f.write("No candidates found.\n")
+
+    if not diagnosis.candidate_root_causes:
+        verified = VerifiedDifferentialDiagnosis(
+            verified_candidates=[],
+            confirmed_candidates=[],
+            novel_cause_signals=diagnosis.novel_cause_signals,
+            caveats=diagnosis.caveats,
+        )
+        logger.info("[ltm-search] no candidates to verify")
+    else:
+        _attach_slugs_to_candidates(diagnosis.candidate_root_causes, deps.lt_summary_file)
+
+        verified = await _run_verification_phase(
+            candidates=diagnosis.candidate_root_causes,
+            diagnosis=diagnosis,
+            observed_symptoms=observed_symptoms,
+            namespace=deps.namespace,
+            stage=deps.stage,
+            model_id=model_id,
+            renderer=deps.renderer,
+            trajectory_path=deps.trajectory_path,
+            triage_report=deps.triage_report,
+            verification_guidance=deps.verification_guidance,
+            playbooks_dir=deps.playbooks_dir,
+            usage_collector=deps.usage_collector,
+        )
+
+    output_json = verified.model_dump_json(indent=2)
+    logger.info("[ltm-search] verified output: %s", output_json)
+
+    # Always log investigated hypotheses to the shared session file so the
+    # rest of the loop and any human reader can see what KB verification
+    # considered, regardless of whether short-circuit fires.
     try:
-        result = await coverage_agent.arun(
-            prompt,
-            run_ctx={"stage": ctx.deps.stage, "role": "hypothesis-coverage"},
-        )
-        output = result.output
-
-        output_json = output.model_dump_json(indent=2)
-        logger.info(
-            "[hypothesis-coverage] done: verdict=%s, unexplained=%s, residual_rationale=%s, reasoning=%s",
-            output.verdict,
-            output.unexplained_anomalies,
-            output.residual_rationale,
-            output.reasoning,
-        )
-        return output_json
+        deps.shared_file.append(_format_investigated_hypotheses_md(verified, deps.iteration, deps.stage))
     except Exception as e:
-        logger.warning("[hypothesis-coverage] failed: %s", e)
-        return f"Coverage check failed with error: {e}. Submit your best hypothesis."
+        logger.warning("[ltm-search] failed to append investigated hypotheses to shared file: %s", e)
+
+    # Write verification results to stage outputs file (separate from shared)
+    if deps.stage_outputs_file:
+        with open(deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Verification Results\n{output_json}\n")
+
+    # Short-circuit only when the flag is on AND verification confirmed something.
+    if deps.enable_ltm_verified_direct_submit and verified.confirmed_candidates:
+        from sregym_agents.crucible.tools._judge_tools import MAX_DIAGNOSIS_CANDIDATES
+
+        top = verified.confirmed_candidates[:MAX_DIAGNOSIS_CANDIDATES]
+        confirmed_strings = [c.root_cause for c in top]
+        confirmed_slugs = [diagnosis.candidate_root_causes[c.candidate_index].slug or "" for c in top]
+        logger.info(
+            "[ltm-search] short-circuit fired with %d confirmed candidate(s); raising LTMShortCircuit",
+            len(confirmed_strings),
+        )
+        raise LTMShortCircuit(
+            confirmed=confirmed_strings,
+            iteration=deps.iteration,
+            confirmed_slugs=confirmed_slugs,
+        )
+
+    return output_json
 
 
 async def search_prior_incidents(
@@ -1033,127 +1192,108 @@ async def search_prior_incidents(
     Args:
         observed_symptoms: Factual description of current observations or hypothesis.
     """
-    empty_result = (
-        '{"verified_candidates": [], "confirmed_candidates": [],'
-        ' "novel_cause_signals": "", "caveats": "No incident history available."}'
-    )
-    if not ctx.deps.lt_summary_file:
-        logger.info("[ltm-search] skipped (no summary file): %s", empty_result)
+    return await search_prior_incidents_impl(ctx.deps, observed_symptoms)
+
+
+async def search_prior_mitigations_impl(
+    deps: SREDeps,
+    root_cause: str,
+    failed_attempts: str = "",
+) -> str:
+    """Search past incidents for mitigation strategies matching a confirmed root cause.
+
+    Args:
+        deps: SRE dependency context.
+        root_cause: The confirmed root cause diagnosis to find mitigations for.
+        failed_attempts: Description of mitigation attempts that already failed (optional).
+    """
+    empty_result = '{"strategies": [], "novel_cause": false, "general_guidance": "No incident history available."}'
+    if not deps.lt_summary_file:
+        logger.info("[ltm-mitigation] skipped (no summary file): %s", empty_result)
         return empty_result
 
-    if not observed_symptoms.strip():
-        result = "Error: observed_symptoms must not be empty."
-        logger.info("[ltm-search] skipped (empty symptoms): %s", result)
+    if not root_cause.strip():
+        result = "Error: root_cause must not be empty."
+        logger.info("[ltm-mitigation] skipped (empty root_cause): %s", result)
         return result
 
-    if ctx.deps.ltm_call_count >= ctx.deps.ltm_call_budget:
+    if deps.ltm_call_count >= deps.ltm_call_budget:
         result = (
-            '{"verified_candidates": [], "confirmed_candidates": [],'
-            ' "novel_cause_signals": "",'
-            ' "caveats": "Search budget exhausted. Proceed with independent investigation."}'
+            '{"strategies": [], "novel_cause": false,'
+            ' "general_guidance": "Search budget exhausted. Proceed with independent mitigation."}'
         )
-        logger.info("[ltm-search] skipped (budget exhausted): %s", result)
+        logger.info("[ltm-mitigation] skipped (budget exhausted): %s", result)
         return result
-    ctx.deps.ltm_call_count += 1
+    deps.ltm_call_count += 1
 
-    model_id = ctx.deps.model_id
-    triage_context = ""
-    if ctx.deps.triage_report is not None:
-        triage_context = format_triage_report(ctx.deps.triage_report)
-
-    prompt = ctx.deps.renderer.render(
-        "search_prior_incidents",
-        stage=ctx.deps.stage,
-        observed_symptoms=observed_symptoms,
-        triage_context=triage_context,
-        lt_summary_file=str(ctx.deps.lt_summary_file),
-        incidents_dir=str(ctx.deps.incidents_dir) if ctx.deps.incidents_dir else "",
+    model_id = deps.model_id
+    prompt = deps.renderer.render(
+        "search_prior_mitigations",
+        root_cause=root_cause,
+        failed_attempts=failed_attempts,
+        lt_summary_file=str(deps.lt_summary_file),
+        incidents_dir=str(deps.incidents_dir) if deps.incidents_dir else "",
     )
-    logger.info("[ltm-search] PROMPT:\n%s", prompt)
+    logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
 
     retrieval_agent = InlineAgent(
         model_id,
-        agent_name="ltm-search",
-        output_type=DifferentialDiagnosis,
-        tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+        agent_name="ltm-mitigation",
+        output_type=MitigationSearchResult,
+        tools=[read_file, exec_bash_any, grep],
         model_settings=thinking_settings(model_id, THINKING_BUDGET),
         middleware=_subagent_middleware(),
-        usage_collector=ctx.deps.usage_collector,
+        usage_collector=deps.usage_collector,
     )
     retrieval_result = await retrieval_agent.arun(prompt)
-    diagnosis = retrieval_result.output
-    retrieval_json = diagnosis.model_dump_json(indent=2)
-    logger.info("[ltm-search] retrieval output: %s", retrieval_json)
+    output = retrieval_result.output
+    output_json = output.model_dump_json(indent=2)
+    logger.info("[ltm-mitigation] output: %s", output_json)
+    if deps.stage_outputs_file:
+        with open(deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Mitigation Retrieval Results\n**Query:** {root_cause}\n\n{output_json}\n")
 
-    # Write retrieval candidates to stage outputs
-    if ctx.deps.stage_outputs_file:
-        with open(ctx.deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Retrieval Candidates\n**Query:** {observed_symptoms}\n\n")
-            if diagnosis.candidate_root_causes:
-                f.write(f"{retrieval_json}\n")
-            else:
-                f.write("No candidates found.\n")
+    # --- Mitigation phase: execute playbook-guided mitigation subagents ---
+    if not deps.mitigation_playbooks_dir or not output.strategies:
+        return output_json
 
-    if not diagnosis.candidate_root_causes:
-        verified = VerifiedDifferentialDiagnosis(
-            verified_candidates=[],
-            confirmed_candidates=[],
-            novel_cause_signals=diagnosis.novel_cause_signals,
-            caveats=diagnosis.caveats,
-        )
-        logger.info("[ltm-search] no candidates to verify")
-    else:
-        _attach_slugs_to_candidates(diagnosis.candidate_root_causes, ctx.deps.lt_summary_file)
+    verified = await _run_mitigation_phase(
+        strategies=output.strategies,
+        search_result=output,
+        namespace=deps.namespace,
+        stage=deps.stage,
+        model_id=model_id,
+        renderer=deps.renderer,
+        trajectory_path=deps.trajectory_path,
+        mitigation_playbooks_dir=deps.mitigation_playbooks_dir,
+        lt_summary_file=deps.lt_summary_file,
+        failed_attempts=failed_attempts,
+        usage_collector=deps.usage_collector,
+    )
 
-        verified = await _run_verification_phase(
-            candidates=diagnosis.candidate_root_causes,
-            diagnosis=diagnosis,
-            observed_symptoms=observed_symptoms,
-            namespace=ctx.deps.namespace,
-            stage=ctx.deps.stage,
-            model_id=model_id,
-            renderer=ctx.deps.renderer,
-            trajectory_path=ctx.deps.trajectory_path,
-            triage_report=ctx.deps.triage_report,
-            verification_guidance=ctx.deps.verification_guidance,
-            playbooks_dir=ctx.deps.playbooks_dir,
-            usage_collector=ctx.deps.usage_collector,
-        )
+    verified_json = verified.model_dump_json(indent=2)
+    logger.info("[ltm-mitigation] verified output: %s", verified_json)
 
-    output_json = verified.model_dump_json(indent=2)
-    logger.info("[ltm-search] verified output: %s", output_json)
-
-    # Always log investigated hypotheses to the shared session file so the
-    # rest of the loop and any human reader can see what KB verification
-    # considered, regardless of whether short-circuit fires.
+    # Log the mitigation phase results to the shared session file.
     try:
-        ctx.deps.shared_file.append(_format_investigated_hypotheses_md(verified, ctx.deps.iteration, ctx.deps.stage))
+        deps.shared_file.append(_format_applied_mitigations_md(verified, deps.iteration))
     except Exception as e:
-        logger.warning("[ltm-search] failed to append investigated hypotheses to shared file: %s", e)
+        logger.warning("[ltm-mitigation] failed to append phase results to shared file: %s", e)
 
-    # Write verification results to stage outputs file (separate from shared)
-    if ctx.deps.stage_outputs_file:
-        with open(ctx.deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Verification Results\n{output_json}\n")
+    if deps.stage_outputs_file:
+        with open(deps.stage_outputs_file, "a") as f:
+            f.write(f"\n## KB Mitigation Phase Results\n{verified_json}\n")
 
-    # Short-circuit only when the flag is on AND verification confirmed something.
-    if ctx.deps.enable_ltm_verified_direct_submit and verified.confirmed_candidates:
-        from sregym_agents.crucible.tools._judge_tools import MAX_DIAGNOSIS_CANDIDATES
-
-        top = verified.confirmed_candidates[:MAX_DIAGNOSIS_CANDIDATES]
-        confirmed_strings = [c.root_cause for c in top]
-        confirmed_slugs = [diagnosis.candidate_root_causes[c.candidate_index].slug or "" for c in top]
+    # Short-circuit: if the flag is on and at least one strategy applied.
+    if deps.enable_ltm_verified_direct_submit and verified.successful_applications:
+        applied_summaries = [a.mitigation_summary for a in verified.successful_applications]
         logger.info(
-            "[ltm-search] short-circuit fired with %d confirmed candidate(s); raising LTMShortCircuit",
-            len(confirmed_strings),
+            "[ltm-mitigation] short-circuit fired with %d applied strategy(ies); raising LTMMitigationShortCircuit",
+            len(applied_summaries),
         )
-        raise LTMShortCircuit(
-            confirmed=confirmed_strings,
-            iteration=ctx.deps.iteration,
-            confirmed_slugs=confirmed_slugs,
-        )
+        raise LTMMitigationShortCircuit(applied=applied_summaries, iteration=deps.iteration)
 
-    return output_json
+    return verified_json
 
 
 async def search_prior_mitigations(
@@ -1172,90 +1312,4 @@ async def search_prior_mitigations(
         root_cause: The confirmed root cause diagnosis to find mitigations for.
         failed_attempts: Description of mitigation attempts that already failed (optional).
     """
-    empty_result = '{"strategies": [], "novel_cause": false, "general_guidance": "No incident history available."}'
-    if not ctx.deps.lt_summary_file:
-        logger.info("[ltm-mitigation] skipped (no summary file): %s", empty_result)
-        return empty_result
-
-    if not root_cause.strip():
-        result = "Error: root_cause must not be empty."
-        logger.info("[ltm-mitigation] skipped (empty root_cause): %s", result)
-        return result
-
-    if ctx.deps.ltm_call_count >= ctx.deps.ltm_call_budget:
-        result = (
-            '{"strategies": [], "novel_cause": false,'
-            ' "general_guidance": "Search budget exhausted. Proceed with independent mitigation."}'
-        )
-        logger.info("[ltm-mitigation] skipped (budget exhausted): %s", result)
-        return result
-    ctx.deps.ltm_call_count += 1
-
-    model_id = ctx.deps.model_id
-    prompt = ctx.deps.renderer.render(
-        "search_prior_mitigations",
-        root_cause=root_cause,
-        failed_attempts=failed_attempts,
-        lt_summary_file=str(ctx.deps.lt_summary_file),
-        incidents_dir=str(ctx.deps.incidents_dir) if ctx.deps.incidents_dir else "",
-    )
-    logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
-
-    retrieval_agent = InlineAgent(
-        model_id,
-        agent_name="ltm-mitigation",
-        output_type=MitigationSearchResult,
-        tools=[read_file, exec_bash_any, grep],
-        model_settings=thinking_settings(model_id, THINKING_BUDGET),
-        middleware=_subagent_middleware(),
-        usage_collector=ctx.deps.usage_collector,
-    )
-    retrieval_result = await retrieval_agent.arun(prompt)
-    output = retrieval_result.output
-    output_json = output.model_dump_json(indent=2)
-    logger.info("[ltm-mitigation] output: %s", output_json)
-    if ctx.deps.stage_outputs_file:
-        with open(ctx.deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Mitigation Retrieval Results\n**Query:** {root_cause}\n\n{output_json}\n")
-
-    # --- Mitigation phase: execute playbook-guided mitigation subagents ---
-    if not ctx.deps.mitigation_playbooks_dir or not output.strategies:
-        return output_json
-
-    verified = await _run_mitigation_phase(
-        strategies=output.strategies,
-        search_result=output,
-        namespace=ctx.deps.namespace,
-        stage=ctx.deps.stage,
-        model_id=model_id,
-        renderer=ctx.deps.renderer,
-        trajectory_path=ctx.deps.trajectory_path,
-        mitigation_playbooks_dir=ctx.deps.mitigation_playbooks_dir,
-        lt_summary_file=ctx.deps.lt_summary_file,
-        failed_attempts=failed_attempts,
-        usage_collector=ctx.deps.usage_collector,
-    )
-
-    verified_json = verified.model_dump_json(indent=2)
-    logger.info("[ltm-mitigation] verified output: %s", verified_json)
-
-    # Log the mitigation phase results to the shared session file.
-    try:
-        ctx.deps.shared_file.append(_format_applied_mitigations_md(verified, ctx.deps.iteration))
-    except Exception as e:
-        logger.warning("[ltm-mitigation] failed to append phase results to shared file: %s", e)
-
-    if ctx.deps.stage_outputs_file:
-        with open(ctx.deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Mitigation Phase Results\n{verified_json}\n")
-
-    # Short-circuit: if the flag is on and at least one strategy applied.
-    if ctx.deps.enable_ltm_verified_direct_submit and verified.successful_applications:
-        applied_summaries = [a.mitigation_summary for a in verified.successful_applications]
-        logger.info(
-            "[ltm-mitigation] short-circuit fired with %d applied strategy(ies); raising LTMMitigationShortCircuit",
-            len(applied_summaries),
-        )
-        raise LTMMitigationShortCircuit(applied=applied_summaries, iteration=ctx.deps.iteration)
-
-    return verified_json
+    return await search_prior_mitigations_impl(ctx.deps, root_cause, failed_attempts)
