@@ -28,6 +28,9 @@ no_inject_summary = false
 #     "faulty_image_correlated",
 #     "incorrect_port_assignment",
 # ]
+#
+# Filter by spec/category prefix (matches IDs equal to or starting with "<spec>_"):
+# spec_names = ["service_dns_resolution_failure"]
 
 [runner.variants]
 enabled = true

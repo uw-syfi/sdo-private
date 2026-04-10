@@ -78,6 +78,7 @@ class ExperimentConfig:
     # Problem selection (mutually exclusive with variants)
     tasklist: str = ""  # named set or path to YAML
     problems: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    spec_names: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     # Variant mode
     variants: VariantConfig = dataclasses.field(default_factory=VariantConfig)
@@ -93,6 +94,10 @@ class ExperimentConfig:
             raise ValueError("runner.variants.enabled is mutually exclusive with runner.tasklist and runner.problems")
         if self.tasklist and self.problems:
             raise ValueError("runner.tasklist and runner.problems are mutually exclusive")
+        if self.spec_names and self.variants.enabled:
+            raise ValueError("runner.spec_names cannot be used with runner.variants.enabled")
+        if self.spec_names and (self.tasklist or self.problems):
+            raise ValueError("runner.spec_names is mutually exclusive with runner.tasklist and runner.problems")
 
 
 def variant_config_from_raw(variants_raw: dict[str, Any]) -> VariantConfig:
@@ -149,6 +154,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         sequence_seed=runner.get("sequence_seed", 42),
         tasklist=runner.get("tasklist", ""),
         problems=runner.get("problems", []),
+        spec_names=runner.get("spec_names", []),
         variants=variants,
         env=env,
         agent_config=agent_config,
@@ -289,6 +295,9 @@ def config_to_main_args(
     if tasklist_path is not None:
         args.extend(["--tasklist", str(tasklist_path)])
 
+    for name in config.spec_names:
+        args.extend(["--problem-spec", name])
+
     if config.variants.enabled:
         args.append("--variants")
         # In adaptive mode --variant-count is ignored and the runner does not
@@ -374,6 +383,8 @@ def _serialize_config(config: ExperimentConfig) -> str:
         lines.append(f"tasklist = {_toml_value(config.tasklist)}")
     if config.problems:
         lines.append(f"problems = {_toml_value(config.problems)}")
+    if config.spec_names:
+        lines.append(f"spec_names = {_toml_value(config.spec_names)}")
 
     lines.append("")
     lines.append("[runner.variants]")
