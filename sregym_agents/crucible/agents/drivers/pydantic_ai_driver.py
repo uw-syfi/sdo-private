@@ -147,7 +147,7 @@ async def _compact_messages(
     compact_result = await arun_with_retry(compactor, summary_prompt)
     if usage_collector is not None:
         usage_collector.add("compact-messages", TokenUsage.from_run_usage(compact_result.usage()))
-    logger.info(f"Context compacted: {len(history_text)} chars → {len(compact_result.output)} chars")
+    logger.info("Context compacted: %d chars → %d chars", len(history_text), len(compact_result.output))
     return compact_result.output
 
 
@@ -251,7 +251,7 @@ class PydanticAIDriver(AgentDriver):
             except ModelHTTPError:
                 return AgentResult(completed=False)
             except (UnexpectedModelBehavior, UsageLimitExceeded) as exc:
-                logger.warning(f"Model returned unexpected output; treating as unsubmitted. ({exc})")
+                logger.warning("Model returned unexpected output; treating as unsubmitted. (%s)", exc)
                 return AgentResult(completed=False, output=None)
 
             result_output = result.output
@@ -262,8 +262,9 @@ class PydanticAIDriver(AgentDriver):
                 last_token_count = agent.context_window_token_usage
                 if last_token_count > CONTEXT_COMPACT_THRESHOLD * context_window:
                     logger.warning(
-                        f"Context approaching limit ({last_token_count} > "
-                        f"{CONTEXT_COMPACT_THRESHOLD * context_window:.0f}). Compacting..."
+                        "Context approaching limit (%s > %.0f). Compacting...",
+                        last_token_count,
+                        CONTEXT_COMPACT_THRESHOLD * context_window,
                     )
                     summary = await _compact_messages(
                         self._model, result.all_messages(), usage_collector=usage_collector
