@@ -594,6 +594,21 @@ class TestAgentCLIDriverJsonParsing:
         assert result is not None
         assert result.name == "fallback"
 
+    def test_deeply_nested_json(self):
+        from pydantic import BaseModel
+
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
+
+        class MyModel(BaseModel):
+            name: str
+            meta: dict
+
+        text = 'Result: {"name": "deep", "meta": {"inner": {"level": 3}}}'
+        result = AgentCLIDriver._parse_json_from_text(text, MyModel)
+        assert result is not None
+        assert result.name == "deep"
+        assert result.meta == {"inner": {"level": 3}}
+
     def test_no_json_returns_none(self):
         from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 

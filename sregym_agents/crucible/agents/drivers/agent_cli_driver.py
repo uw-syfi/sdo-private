@@ -294,15 +294,44 @@ class AgentCLIDriver(AgentDriver):
             except Exception:
                 pass
 
-        # Fallback: find the largest JSON object in the text
-        for m in re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text):
-            try:
-                data = json.loads(m.group())
-                if hasattr(output_type, "model_validate"):
-                    return output_type.model_validate(data)  # type: ignore[return-value]
-                return output_type(**data)  # type: ignore[return-value]
-            except Exception:
-                continue
+        # Fallback: find JSON objects via brace balancing
+        i = 0
+        while i < len(text):
+            if text[i] == '{':
+                depth = 0
+                start = i
+                in_string = False
+                escape = False
+                j = i
+                for j in range(i, len(text)):
+                    ch = text[j]
+                    if escape:
+                        escape = False
+                        continue
+                    if ch == '\\' and in_string:
+                        escape = True
+                        continue
+                    if ch == '"' and not escape:
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            candidate = text[start:j + 1]
+                            try:
+                                data = json.loads(candidate)
+                                if hasattr(output_type, "model_validate"):
+                                    return output_type.model_validate(data)  # type: ignore[return-value]
+                                return output_type(**data)  # type: ignore[return-value]
+                            except Exception:
+                                break
+                i = j + 1 if depth == 0 else i + 1
+            else:
+                i += 1
         return None
 
     @staticmethod
