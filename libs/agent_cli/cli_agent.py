@@ -188,6 +188,8 @@ class CLIGenerationSession:
 class CLICodingAgent(CodingAgent):
     """Base class for CLI-based coding agents."""
 
+    CLI_CHECK_TIMEOUT_SECONDS = 15
+
     def __init__(
         self,
         binary_name: str,
@@ -240,6 +242,7 @@ class CLICodingAgent(CodingAgent):
                 check=False,
                 env=self.env,
                 stdin=subprocess.DEVNULL,
+                timeout=self.CLI_CHECK_TIMEOUT_SECONDS,
             )
             if result.returncode != 0:
                 raise RuntimeError(
@@ -247,6 +250,11 @@ class CLICodingAgent(CodingAgent):
                     f"'{self.binary_path} --help' exited with code {result.returncode}. "
                     f"Stderr: {result.stderr}"
                 )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(
+                f"{self.binary_name} CLI tool at '{self.binary_path}' did not respond to "
+                f"'--help' within {self.CLI_CHECK_TIMEOUT_SECONDS}s."
+            ) from e
         except FileNotFoundError as e:
             raise RuntimeError(
                 f"{self.binary_name} CLI tool not found at '{self.binary_path}'. "

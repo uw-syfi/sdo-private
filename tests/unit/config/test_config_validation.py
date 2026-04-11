@@ -164,6 +164,12 @@ class TestAgentConfigValidation:
         assert "gemini" in error_msg
         assert "claude" in error_msg
 
+    @pytest.mark.parametrize("backend", ["rlm"])
+    def test_legacy_architecture_backends_rejected(self, backend):
+        """Standalone legacy architecture backends should no longer be user-selectable."""
+        with pytest.raises(ValueError, match="Invalid backend"):
+            AgentConfig(backend=backend)
+
 
 class TestConfigIntegration:
     """Tests for full Config object validation."""

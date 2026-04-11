@@ -1,6 +1,8 @@
 """Subprocess runner with threading, timeout handling, and progress monitoring."""
 
 import contextlib
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -64,6 +66,7 @@ class SubprocessRunner:
         self.tool_args = tool_args
 
         self.process: subprocess.Popen | None = None
+        self._pgid: int | None = None
         self.stdout_lines: list[str] = []
         self.stderr_lines: list[str] = []
         self._log_file = None
@@ -125,7 +128,9 @@ class SubprocessRunner:
                 pass
 
         try:
-            # Start subprocess
+            # Start subprocess in its own process group so that all descendants
+            # (e.g. `docker compose exec` children of deploy.sh/health_check.sh)
+            # can be killed as a group when the attempt times out or is cancelled.
             self.process = self.popen_func(
                 self.command,
                 cwd=self.cwd,
@@ -133,7 +138,12 @@ class SubprocessRunner:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,  # Line buffered
+                start_new_session=True,
             )
+            try:
+                self._pgid = os.getpgid(self.process.pid)
+            except (OSError, AttributeError, TypeError):
+                self._pgid = None
 
             # Start threads to read stdout and stderr
             stdout_thread = threading.Thread(target=self._read_pipe, args=(self.process.stdout, self.stdout_lines))
@@ -281,11 +291,11 @@ class SubprocessRunner:
 
             # Check timeout
             if elapsed >= self.timeout and self.process.poll() is None:
-                self.process.terminate()
+                self._kill_process_group(signal.SIGTERM)
                 try:
                     self.process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
+                    self._kill_process_group(signal.SIGKILL)
                 return {
                     "success": False,
                     "exit_code": -1,
@@ -299,11 +309,11 @@ class SubprocessRunner:
 
             # Check shutdown
             if self.check_shutdown and self.check_shutdown():
-                self.process.terminate()
+                self._kill_process_group(signal.SIGTERM)
                 try:
                     self.process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
+                    self._kill_process_group(signal.SIGKILL)
                 return {
                     "success": False,
                     "exit_code": -1,
@@ -326,15 +336,33 @@ class SubprocessRunner:
             "stderr": "",
         }
 
+    def _kill_process_group(self, sig: int) -> None:
+        """Send signal to the entire process group, falling back to direct process signal."""
+        if self._pgid is not None:
+            try:
+                os.killpg(self._pgid, sig)
+                return
+            except OSError:
+                pass
+        if self.process is None:
+            return
+        try:
+            if sig == signal.SIGTERM:
+                self.process.terminate()
+            else:
+                self.process.kill()
+        except OSError:
+            pass
+
     def _ensure_process_terminated(self):
         """Ensure process is terminated (cleanup)."""
         if self.process and self.process.poll() is None:
             try:
-                self.process.terminate()
+                self._kill_process_group(signal.SIGTERM)
                 self.process.wait(timeout=2)
             except (subprocess.TimeoutExpired, OSError):
                 try:
-                    self.process.kill()
+                    self._kill_process_group(signal.SIGKILL)
                 except OSError:
                     pass
 

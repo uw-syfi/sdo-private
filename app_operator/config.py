@@ -46,6 +46,7 @@ class DSPyOptimizationConfig:
         teacher_model: Model to use for generating training examples
         num_examples: Number of examples for few-shot optimization
         validation_split: Fraction of data reserved for validation (0.0-1.0)
+        phase_signal_weight: Weight for prompt-aligned phase score blending (0.0-1.0)
         metric_weights: Weights for different metrics (must sum to 1.0)
     """
 
@@ -68,6 +69,7 @@ class DSPyOptimizationConfig:
     n_candidates: int = 4
     selection_mode: str = "hybrid"
     selection_top_k: int = 3
+    phase_signal_weight: float = 0.35
     metric_weights: dict[str, float] = field(
         default_factory=lambda: {
             "success": 0.5,
@@ -92,6 +94,18 @@ class DSPyOptimizationConfig:
         if self.selection_mode not in self.VALID_SELECTION_MODES:
             raise ValueError(f"selection_mode must be one of {self.VALID_SELECTION_MODES}, got '{self.selection_mode}'")
         validate_field(self.selection_top_k, "selection_top_k", int, min_val=1)
+        validate_type(
+            self.phase_signal_weight,
+            "phase_signal_weight",
+            (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.phase_signal_weight,
+            "phase_signal_weight",
+            min_val=0.0,
+            max_val=1.0,
+        )
 
         # validation_split: numeric in [0.0, 1.0)
         validate_type(
@@ -507,6 +521,20 @@ class RuntimeConfig:
 
 
 @dataclass
+class RLMConfig:
+    """Configuration for the CLI-agent RLM scaffold."""
+
+    VALID_MODES = {"compatibility", "paper_faithful"}
+
+    mode: str = "compatibility"
+
+    def __post_init__(self):
+        validate_field(self.mode, "mode", str)
+        if self.mode not in self.VALID_MODES:
+            raise ValueError(f"mode must be one of {sorted(self.VALID_MODES)}, got '{self.mode}'")
+
+
+@dataclass
 class GEPAConfig:
     """Configuration for GEPA prompt optimization.
 
@@ -580,6 +608,7 @@ class Config:
     operator: OperatorConfig = field(default_factory=OperatorConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    rlm: RLMConfig = field(default_factory=RLMConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     gepa: GEPAConfig = field(default_factory=GEPAConfig)
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
@@ -614,6 +643,7 @@ class Config:
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
+        rlm_data = data.get("rlm", {})
         features_data = data.get("features", {})
         gepa_data = data.get("gepa", {})
         dspy_data = data.get("dspy", {})
@@ -630,6 +660,7 @@ class Config:
         cls._validate_operator_phase_fields(operator_data)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
+        cls._validate_fields(rlm_data, "rlm", RLMConfig)
         cls._validate_fields(features_data, "features", FeaturesConfig)
         cls._validate_fields(gepa_data, "gepa", GEPAConfig)
         cls._validate_dspy_fields(dspy_data)
@@ -666,6 +697,7 @@ class Config:
             operator=cls._parse_operator_config(operator_data),
             deployment=DeploymentConfig(**deployment_data),
             runtime=RuntimeConfig(**runtime_data),
+            rlm=RLMConfig(**rlm_data),
             features=FeaturesConfig(**features_data),
             gepa=GEPAConfig(**gepa_data),
             dspy=dspy_config,
