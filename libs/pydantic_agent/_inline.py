@@ -79,5 +79,6 @@ class InlineAgent(BaseAgent[None], Generic[OutputT]):
         prompt: str,
         *,
         run_ctx: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> Any:
-        return await self._arun(prompt, _run_ctx=run_ctx)
+        return await self._arun(prompt, _run_ctx=run_ctx, **kwargs)
