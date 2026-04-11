@@ -2,3 +2,9 @@ Analyze the repository and generate the deployment script.
 
 Generate:
 1. .sds/deploy.sh - Script to deploy the application with `.sds/deploy.sh start` command.
+
+Critical constraints:
+- Use Docker Compose with `--project-name "$PROJECT_NAME"` where `PROJECT_NAME` is the target directory basename.
+- `start` must run `docker compose --project-name "$PROJECT_NAME" up --build -d`.
+- If waiting for health checks, use bounded retries (max retry count or timeout).
+- Never use an unbounded `until ./.sds/health_check.sh; do ...; done` loop.

@@ -23,6 +23,9 @@ CRITICAL REQUIREMENTS:
    - CRITICAL: The `start` command MUST use `docker compose up --build -d`, not
      plain `up -d`.  Without `--build`, Docker reuses cached images and never
      compiles the current source code.  Every deployment must build from source.
+   - The `logs` command must be non-follow by default (i.e. do NOT pass `-f`/`--follow`
+     unless explicitly requested); logs should print recent output and exit immediately
+     so the operator is not blocked waiting for streaming log output.
    {% else %}
    - Use `docker compose ps` or `docker ps`.
    - Check container status.

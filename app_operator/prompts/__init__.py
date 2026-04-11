@@ -7,6 +7,7 @@ from app_operator.prompts._core import (
     reset_loader,
 )
 from app_operator.prompts.deployer import (
+    create_consolidation_prompt,
     create_fix_prompt,
     create_fix_system_prompt,
     create_generate_script_prompt,
@@ -32,6 +33,7 @@ __all__ = [
     "PromptLoader",
     "SEED_TEMPLATE_MAP",
     "analyze_repository",
+    "create_consolidation_prompt",
     "create_fix_prompt",
     "create_fix_system_prompt",
     "create_generate_script_prompt",

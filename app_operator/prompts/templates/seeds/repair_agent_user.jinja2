@@ -1,1 +1,20 @@
-A deployment has failed. Analyze the error and fix the deployment scripts.
+You are a DevOps engineer. A deployment has failed.
+
+Repository: {{ repo_path }}
+Attempt: {{ attempt }} of {{ max_attempts }}
+
+Analyze the error and fix the deployment scripts:
+- {{ deploy_script }}
+- {{ health_check_script }}
+
+{{ error_context }}
+
+Use compose-compatible checks (`docker compose` with fallback to `docker-compose`) and avoid hardcoded compose paths.
+Do not require host-only tools (like jq) unless you guard them with `command -v`.
+Keep required health gates layered and tool-agnostic: prefer compose status, host-side endpoints,
+service discovery, and app-level end-to-end checks over dependency shell probes.
+Do not rely on `docker compose exec` dependency probes using `mongo`, `mongosh`, `memcached-tool`,
+or dependency-local `nc` as the primary health gate.
+Do not run streaming log commands (`logs -f`, `tail -f`) without a hard timeout; use one-shot logs.
+
+Output a brief summary of what was wrong and what you fixed, wrapped in <summary></summary> tags.
