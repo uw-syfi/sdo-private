@@ -27,6 +27,16 @@ class TestAgentResult:
         assert r.completed is True
         assert r.interrupt_data is None
         assert r.messages == []
+        assert r.state is None
+
+    def test_state_field(self):
+        sentinel = {"key": "value"}
+        r = AgentResult(output="ok", state=sentinel)
+        assert r.state is sentinel
+
+    def test_state_default_none(self):
+        r = AgentResult(output="ok")
+        assert r.state is None
 
     def test_typed_output(self):
         r: AgentResult[int] = AgentResult(output=42)

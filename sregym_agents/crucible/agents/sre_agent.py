@@ -273,5 +273,5 @@ class SREAgent:
                 logger.warning(f"Error writing to shared file: {e}")
 
         # Attach state and last_run_messages to result for orchestrator access
-        result.state = state  # type: ignore[attr-defined]
+        result.state = state
         return result

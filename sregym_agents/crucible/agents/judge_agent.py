@@ -166,5 +166,5 @@ class JudgeAgent:
 
         # Attach state for orchestrator access
         assert last_result is not None  # loop always runs at least once
-        last_result.state = state  # type: ignore[attr-defined]
+        last_result.state = state
         return last_result

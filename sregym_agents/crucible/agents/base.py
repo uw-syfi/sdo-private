@@ -33,6 +33,8 @@ class AgentResult(Generic[T]):
     completed: bool = True
     interrupt_data: Any = None
     messages: list[Any] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    state: Any = None
+    """Shared mutable state carried across orchestrator iterations."""
 
     def unwrap(self, agent_name: str = "") -> T:
         """Return output or raise if the run didn't complete successfully.

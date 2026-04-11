@@ -352,7 +352,7 @@ async def _run_stage_loop(
             continue
 
         # Extract state from the result (attached by SREAgent.run())
-        sre_state: SharedState = getattr(sre_result, "state", SharedState())
+        sre_state: SharedState = sre_result.state or SharedState()
 
         # Capture the hypothesis from the SRE agent for blind judge review
         last_answer = sre_state.answer or ""
@@ -421,7 +421,7 @@ async def _run_stage_loop(
 
         # Handle failed judge run
         if not judge_result.completed:
-            judge_state: SharedState = getattr(judge_result, "state", SharedState())
+            judge_state: SharedState = judge_result.state or SharedState()
             if not judge_state.submitted:
                 logger.warning(f"[{stage}] Judge agent failed on iteration {iteration} — treating as failed iteration.")
                 shared_file.append(
@@ -430,7 +430,7 @@ async def _run_stage_loop(
                 )
                 continue
 
-        judge_state = getattr(judge_result, "state", SharedState())
+        judge_state = judge_result.state or SharedState()
 
         # Replace the hypothesis placeholder with real content
         if sre_state.answer:
