@@ -84,8 +84,7 @@ def _middleware_for_agent(
 
 
 # ---------------------------------------------------------------------------
-# Context window helpers (duplicated from sre_agent.py so the driver is
-# self-contained; will replace the original in Phase 2).
+# Context window helpers
 # ---------------------------------------------------------------------------
 
 _CONTEXT_WINDOWS: dict[str, int] = {
