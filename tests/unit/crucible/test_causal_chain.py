@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 import pytest
 
 from libs.pydantic_agent import UsageCollector
-from sregym_agents.crucible.backend import RecoveryAgent
-from sregym_agents.crucible.backend.base import AgentResult
+from sregym_agents.crucible.agents import RecoveryAgent
+from sregym_agents.crucible.agents.base import AgentResult
 from sregym_agents.crucible.orchestrator import (
     StageLoopResult,
     _extract_benchmark_reasoning,

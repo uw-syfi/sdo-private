@@ -16,11 +16,11 @@ import httpx
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.backend.base import AgentDriver, RunSubagent
+    from sregym_agents.crucible.agents.base import AgentDriver, RunSubagent
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
-from sregym_agents.crucible.backend import (
+from sregym_agents.crucible.agents import (
     JudgeAgent,
     RecoveryAgent,
     ShortCircuitSignal,

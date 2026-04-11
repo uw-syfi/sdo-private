@@ -13,7 +13,7 @@ from .base import KB_APPEND_FILENAME, InjectedKB, KnowledgeBase, SessionFiles, s
 if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.backend.base import AgentDriver
+    from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 

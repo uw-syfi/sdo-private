@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from sregym_agents.crucible.backend.base import (
+from sregym_agents.crucible.agents.base import (
     AgentDriver,
     AgentResult,
     RunSubagent,
@@ -113,7 +113,7 @@ class TestRunSubagentProtocol:
 
 class TestMiddlewareSelection:
     def test_sre_middleware_heavy(self):
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _middleware_for_agent
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
 
         mw = _middleware_for_agent("sre-diagnosis")
         names = [type(m).__name__ for m in mw]
@@ -126,7 +126,7 @@ class TestMiddlewareSelection:
         assert "SoftLimitExtension" in names
 
     def test_recovery_middleware_heavy(self):
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _middleware_for_agent
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
 
         mw = _middleware_for_agent("recovery-diagnosis")
         names = [type(m).__name__ for m in mw]
@@ -134,7 +134,7 @@ class TestMiddlewareSelection:
         assert "StallDetectionMiddleware" in names
 
     def test_judge_middleware_medium(self):
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _middleware_for_agent
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
 
         mw = _middleware_for_agent("judge-diagnosis")
         names = [type(m).__name__ for m in mw]
@@ -148,7 +148,7 @@ class TestMiddlewareSelection:
         assert "StallDetectionMiddleware" not in names
 
     def test_subagent_middleware_light(self):
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _middleware_for_agent
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
 
         mw = _middleware_for_agent("triage-coordinator")
         names = [type(m).__name__ for m in mw]
@@ -157,7 +157,7 @@ class TestMiddlewareSelection:
     def test_trajectory_inserted_first_for_sre(self):
         from pathlib import Path
 
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _middleware_for_agent
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
 
         mw = _middleware_for_agent("sre-diagnosis", trajectory_path=Path("/tmp/traj.jsonl"))
         assert type(mw[0]).__name__ == "TrajectoryMiddleware"
@@ -165,7 +165,7 @@ class TestMiddlewareSelection:
     def test_trajectory_appended_for_subagent(self):
         from pathlib import Path
 
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _middleware_for_agent
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
 
         mw = _middleware_for_agent("triage-coordinator", trajectory_path=Path("/tmp/traj.jsonl"))
         assert type(mw[-1]).__name__ == "TrajectoryMiddleware"
@@ -176,17 +176,17 @@ class TestMiddlewareSelection:
 
 class TestContextWindowDetection:
     def test_claude_model(self):
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _context_window_for
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _context_window_for
 
         assert _context_window_for("anthropic:claude-sonnet-4-6") == 200_000
 
     def test_gemini_model(self):
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _context_window_for
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _context_window_for
 
         assert _context_window_for("gemini-2.5-pro") == 1_000_000
 
     def test_unknown_model_default(self):
-        from sregym_agents.crucible.backend.pydantic_ai_driver import _context_window_for
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _context_window_for
 
         assert _context_window_for("some-unknown-model") == 128_000
 
@@ -196,7 +196,7 @@ class TestContextWindowDetection:
 
 class TestExtractBenchmarkReasoning:
     def test_extracts_diagnosis(self):
-        from sregym_agents.crucible.backend.agents import RecoveryAgent
+        from sregym_agents.crucible.agents import RecoveryAgent
 
         block = (
             "<benchmark_result>\nsuccess: False\n"
@@ -206,7 +206,7 @@ class TestExtractBenchmarkReasoning:
         assert RecoveryAgent._extract_benchmark_reasoning(block) == "the real cause"
 
     def test_extracts_mitigation(self):
-        from sregym_agents.crucible.backend.agents import RecoveryAgent
+        from sregym_agents.crucible.agents import RecoveryAgent
 
         block = (
             "<benchmark_result>\nsuccess: False\n"
@@ -216,12 +216,12 @@ class TestExtractBenchmarkReasoning:
         assert RecoveryAgent._extract_benchmark_reasoning(block, stage="mitigation") == "apply the fix"
 
     def test_empty_on_no_oracle(self):
-        from sregym_agents.crucible.backend.agents import RecoveryAgent
+        from sregym_agents.crucible.agents import RecoveryAgent
 
         assert RecoveryAgent._extract_benchmark_reasoning("no oracle here") == ""
 
     def test_empty_on_invalid_json(self):
-        from sregym_agents.crucible.backend.agents import RecoveryAgent
+        from sregym_agents.crucible.agents import RecoveryAgent
 
         block = "<oracle>\nnot json\n</oracle>"
         assert RecoveryAgent._extract_benchmark_reasoning(block) == ""
@@ -246,7 +246,7 @@ class TestRoleAgentConstruction:
         return renderer
 
     def test_sre_agent_construction(self):
-        from sregym_agents.crucible.backend.agents import SREAgent, SREAgentConfig
+        from sregym_agents.crucible.agents import SREAgent, SREAgentConfig
 
         agent = SREAgent(
             driver=self._mock_driver(),
@@ -258,7 +258,7 @@ class TestRoleAgentConstruction:
         assert agent._model_id == "test-model"
 
     def test_sre_agent_tool_assembly_diagnosis(self):
-        from sregym_agents.crucible.backend.agents import SREAgent
+        from sregym_agents.crucible.agents import SREAgent
 
         agent = SREAgent(
             driver=self._mock_driver(),
@@ -275,7 +275,7 @@ class TestRoleAgentConstruction:
         assert "search_prior_mitigations" not in tool_names
 
     def test_sre_agent_tool_assembly_mitigation(self):
-        from sregym_agents.crucible.backend.agents import SREAgent
+        from sregym_agents.crucible.agents import SREAgent
 
         agent = SREAgent(
             driver=self._mock_driver(),
@@ -291,7 +291,7 @@ class TestRoleAgentConstruction:
         assert "check_hypothesis_coverage" not in tool_names
 
     def test_judge_agent_construction(self):
-        from sregym_agents.crucible.backend.agents import JudgeAgent
+        from sregym_agents.crucible.agents import JudgeAgent
 
         agent = JudgeAgent(
             driver=self._mock_driver(),
@@ -301,7 +301,7 @@ class TestRoleAgentConstruction:
         assert agent.MAX_SUBMIT_REMINDERS == 3
 
     def test_judge_agent_tool_assembly(self):
-        from sregym_agents.crucible.backend.agents import JudgeAgent
+        from sregym_agents.crucible.agents import JudgeAgent
 
         agent = JudgeAgent(
             driver=self._mock_driver(),
@@ -316,7 +316,7 @@ class TestRoleAgentConstruction:
         assert "reveal_agent_hypothesis" in tool_names
 
     def test_recovery_agent_construction(self):
-        from sregym_agents.crucible.backend.agents import RecoveryAgent
+        from sregym_agents.crucible.agents import RecoveryAgent
 
         agent = RecoveryAgent(
             driver=self._mock_driver(),
@@ -334,20 +334,20 @@ class TestRoleAgentConstruction:
 
 class TestAgentCLIDriverConstruction:
     def test_valid_provider(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         driver = AgentCLIDriver(provider="claude", model="test-model")
         assert driver._provider == "claude"
         assert driver._model == "test-model"
 
     def test_invalid_provider_raises(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         with pytest.raises(ValueError, match="currently only supports Claude Code"):
             AgentCLIDriver(provider="unsupported-provider")
 
     def test_aliases_accepted(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         AgentCLIDriver(provider="claude-code")
         AgentCLIDriver(provider="anthropic")
@@ -355,7 +355,7 @@ class TestAgentCLIDriverConstruction:
 
 class TestAgentCLIDriverToolRole:
     def test_sre_deps(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         class FakeSREDeps:
             __name__ = "SREDeps"
@@ -366,18 +366,18 @@ class TestAgentCLIDriverToolRole:
         assert AgentCLIDriver._determine_tool_role(obj) == "sre"
 
     def test_judge_deps(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         obj = type("JudgeDeps", (), {})()
         assert AgentCLIDriver._determine_tool_role(obj) == "judge"
 
     def test_none_deps(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         assert AgentCLIDriver._determine_tool_role(None) is None
 
     def test_unknown_deps(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         obj = type("SomethingElse", (), {})()
         assert AgentCLIDriver._determine_tool_role(obj) is None
@@ -385,7 +385,7 @@ class TestAgentCLIDriverToolRole:
 
 class TestAgentCLIDriverMCPArgs:
     def _make_driver(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         return AgentCLIDriver(provider="claude", model="test-model")
 
@@ -466,7 +466,7 @@ class TestAgentCLIDriverMCPArgs:
 
 class TestAgentCLIDriverPrompt:
     def _make_driver(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         return AgentCLIDriver(provider="claude", model="test-model")
 
@@ -503,30 +503,30 @@ class TestAgentCLIDriverPrompt:
 
 class TestAgentCLIDriverStreamJsonParsing:
     def test_result_event(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         output = '{"type": "text", "text": "thinking..."}\n{"type": "result", "result": "final answer"}\n'
         assert AgentCLIDriver._extract_result_from_stream_json(output) == "final answer"
 
     def test_text_events_fallback(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         output = '{"type": "text", "text": "hello "}\n{"type": "text", "text": "world"}\n'
         assert AgentCLIDriver._extract_result_from_stream_json(output) == "hello world"
 
     def test_non_json_fallback(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         output = "plain text output\n"
         assert AgentCLIDriver._extract_result_from_stream_json(output) == "plain text output"
 
     def test_empty_output(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         assert AgentCLIDriver._extract_result_from_stream_json("") == ""
 
     def test_last_result_wins(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         output = '{"type": "result", "result": "first"}\n{"type": "result", "result": "second"}\n'
         assert AgentCLIDriver._extract_result_from_stream_json(output) == "second"
@@ -536,7 +536,7 @@ class TestAgentCLIDriverJsonParsing:
     def test_json_tags(self):
         from pydantic import BaseModel
 
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         class MyModel(BaseModel):
             name: str
@@ -551,7 +551,7 @@ class TestAgentCLIDriverJsonParsing:
     def test_raw_json_fallback(self):
         from pydantic import BaseModel
 
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         class MyModel(BaseModel):
             name: str
@@ -562,7 +562,7 @@ class TestAgentCLIDriverJsonParsing:
         assert result.name == "fallback"
 
     def test_no_json_returns_none(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         result = AgentCLIDriver._parse_json_from_text("no json here", str)
         assert result is None
@@ -570,7 +570,7 @@ class TestAgentCLIDriverJsonParsing:
 
 class TestAgentCLIDriverInterruptReconstruction:
     def test_diagnosis_short_circuit(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
         from sregym_agents.crucible.tools._kb_tools import LTMShortCircuit
 
         signal = {
@@ -586,7 +586,7 @@ class TestAgentCLIDriverInterruptReconstruction:
         assert result.iteration == 3
 
     def test_mitigation_short_circuit(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
         from sregym_agents.crucible.tools._kb_tools import LTMMitigationShortCircuit
 
         signal = {
@@ -600,7 +600,7 @@ class TestAgentCLIDriverInterruptReconstruction:
         assert result.iteration == 2
 
     def test_unknown_signal_passthrough(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         signal = {"some": "data"}
         result = AgentCLIDriver._reconstruct_interrupt(signal)
@@ -609,7 +609,7 @@ class TestAgentCLIDriverInterruptReconstruction:
 
 class TestAgentCLIDriverResultFile:
     def test_read_valid(self, tmp_path):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         path = tmp_path / "result.json"
         path.write_text('{"type": "answer", "data": {"answer": "test"}}')
@@ -618,13 +618,13 @@ class TestAgentCLIDriverResultFile:
         assert result["type"] == "answer"
 
     def test_read_missing(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         result = AgentCLIDriver._read_result_file("/nonexistent/path")
         assert result is None
 
     def test_read_empty(self, tmp_path):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         path = tmp_path / "result.json"
         path.write_text("")
@@ -632,7 +632,7 @@ class TestAgentCLIDriverResultFile:
         assert result is None
 
     def test_read_invalid_json(self, tmp_path):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         path = tmp_path / "result.json"
         path.write_text("not json")
@@ -642,7 +642,7 @@ class TestAgentCLIDriverResultFile:
 
 class TestAgentCLIDriverParseResultData:
     def test_parse_sre_submission(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
         from sregym_agents.crucible.tools._deps import SRESubmission
 
         data = {
@@ -664,7 +664,7 @@ class TestAgentCLIDriverMCPConfigJson:
     def test_format(self):
         import json as _json
 
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         driver = AgentCLIDriver(provider="claude", model="test-model")
         config = driver._build_mcp_config_json(["run", "python", "-m", "foo", "--bar"])
@@ -683,7 +683,7 @@ class TestAgentCLIDriverMCPConfigJson:
 
 class TestAgentCLIDriverCommand:
     def test_basic_command(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         driver = AgentCLIDriver(provider="claude", model="test-model")
         cmd = driver._build_command("/usr/bin/claude", "test prompt", None)
@@ -697,7 +697,7 @@ class TestAgentCLIDriverCommand:
         assert "test prompt" in cmd
 
     def test_command_with_mcp(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         driver = AgentCLIDriver(provider="claude", model="test-model")
         mcp_json = '{"mcpServers": {}}'
@@ -707,7 +707,7 @@ class TestAgentCLIDriverCommand:
         assert "--strict-mcp-config" in cmd
 
     def test_command_without_mcp(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         driver = AgentCLIDriver(provider="claude", model="test-model")
         cmd = driver._build_command("/usr/bin/claude", "prompt", None)
@@ -718,7 +718,7 @@ class TestAgentCLIDriverGetJsonSchema:
     def test_pydantic_model(self):
         from pydantic import BaseModel
 
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         class M(BaseModel):
             name: str
@@ -731,7 +731,7 @@ class TestAgentCLIDriverGetJsonSchema:
     def test_dataclass(self):
         import dataclasses
 
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         @dataclasses.dataclass
         class D:
@@ -743,7 +743,7 @@ class TestAgentCLIDriverGetJsonSchema:
         assert "x" in schema["properties"]
 
     def test_fallback(self):
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         schema = AgentCLIDriver._get_json_schema(str)
         assert schema["type"] == "string"
@@ -800,15 +800,15 @@ class TestMCPServerIPC:
 
 class TestPackageExports:
     def test_all_exports_importable(self):
-        from sregym_agents.crucible import backend
+        from sregym_agents.crucible import agents
 
-        assert hasattr(backend, "AgentDriver")
-        assert hasattr(backend, "AgentResult")
-        assert hasattr(backend, "RunSubagent")
-        assert hasattr(backend, "ShortCircuitSignal")
-        assert hasattr(backend, "PydanticAIDriver")
-        assert hasattr(backend, "AgentCLIDriver")
-        assert hasattr(backend, "SREAgent")
-        assert hasattr(backend, "JudgeAgent")
-        assert hasattr(backend, "RecoveryAgent")
-        assert hasattr(backend, "SREAgentConfig")
+        assert hasattr(agents, "AgentDriver")
+        assert hasattr(agents, "AgentResult")
+        assert hasattr(agents, "RunSubagent")
+        assert hasattr(agents, "ShortCircuitSignal")
+        assert hasattr(agents, "PydanticAIDriver")
+        assert hasattr(agents, "AgentCLIDriver")
+        assert hasattr(agents, "SREAgent")
+        assert hasattr(agents, "JudgeAgent")
+        assert hasattr(agents, "RecoveryAgent")
+        assert hasattr(agents, "SREAgentConfig")

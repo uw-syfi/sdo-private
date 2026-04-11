@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import requests
 
 if TYPE_CHECKING:
-    from sregym_agents.crucible.backend.base import AgentDriver
+    from sregym_agents.crucible.agents.base import AgentDriver
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
@@ -49,14 +49,14 @@ def create_driver(
     or an ``AgentCLIDriver`` for ``backend="agent-cli"``.
     """
     if config.backend == "agent-cli":
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         return AgentCLIDriver(
             provider=config.agent_cli_provider,
             model=model,
         )
 
-    from sregym_agents.crucible.backend import PydanticAIDriver
+    from sregym_agents.crucible.agents import PydanticAIDriver
     from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
 
     return PydanticAIDriver(
@@ -256,7 +256,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
         seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
-        from sregym_agents.crucible.backend import PydanticAIDriver as _KBDriver
+        from sregym_agents.crucible.agents import PydanticAIDriver as _KBDriver
 
         kb_driver = _KBDriver(model_id)
         kb = create_knowledge_base(

@@ -31,7 +31,7 @@ from .playbook import (
 if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.backend.base import AgentDriver
+    from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 logger = logging.getLogger(__name__)

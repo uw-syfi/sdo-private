@@ -250,7 +250,7 @@ def shared_file(tmp_path: Path) -> SharedFile:
 
 def test_flag_false_injects_summary(shared_file: SharedFile, tmp_path: Path) -> None:
     """When enable_ltm_retrieval=False, orchestrator passes lt_summary_content to prompt."""
-    from sregym_agents.crucible.backend.base import AgentResult
+    from sregym_agents.crucible.agents.base import AgentResult
     from sregym_agents.crucible.knowledge_base import InjectedKB
     from sregym_agents.crucible.orchestrator import _run_stage_loop
     from sregym_agents.crucible.tools import SharedState, SRESubmission
@@ -311,7 +311,7 @@ def test_flag_false_injects_summary(shared_file: SharedFile, tmp_path: Path) -> 
 
 def test_flag_true_omits_summary(shared_file: SharedFile, tmp_path: Path) -> None:
     """When enable_ltm_retrieval=True, orchestrator passes empty lt_summary_content."""
-    from sregym_agents.crucible.backend.base import AgentResult
+    from sregym_agents.crucible.agents.base import AgentResult
     from sregym_agents.crucible.knowledge_base import InjectedKB
     from sregym_agents.crucible.orchestrator import _run_stage_loop
     from sregym_agents.crucible.tools import SharedState, SRESubmission

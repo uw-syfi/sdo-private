@@ -331,7 +331,7 @@ class TestRunStageLoopShortCircuit:
     def test_short_circuit_bypasses_judge_and_submits_list(self, tmp_path: Path):
         import asyncio
 
-        from sregym_agents.crucible.backend.base import AgentResult
+        from sregym_agents.crucible.agents.base import AgentResult
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 
         shared_path = tmp_path / "session.md"
@@ -404,7 +404,7 @@ class TestRunStageLoopShortCircuit:
         """When the flag is off, the SRE agent runs normally and the judge is invoked."""
         import asyncio
 
-        from sregym_agents.crucible.backend.base import AgentResult
+        from sregym_agents.crucible.agents.base import AgentResult
         from sregym_agents.crucible.orchestrator import _run_stage_loop
         from sregym_agents.crucible.tools import SRESubmission
 

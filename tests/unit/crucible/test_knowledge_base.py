@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 import pytest
 
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.backend.base import AgentResult as _AgentResult
+from sregym_agents.crucible.agents.base import AgentResult as _AgentResult
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
 from sregym_agents.crucible.knowledge_base.append_only import AppendOnlyKnowledgeBase

@@ -267,7 +267,7 @@ class TestHypothesisTextPassedToJudge:
     def test_hypothesis_text_formatted_from_sre_state(self, tmp_path: Path):
         import asyncio
 
-        from sregym_agents.crucible.backend.base import AgentResult
+        from sregym_agents.crucible.agents.base import AgentResult
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import _run_stage_loop
         from sregym_agents.crucible.tools import SharedState, SRESubmission
@@ -379,7 +379,7 @@ class TestStageLoopModelHTTPError:
     def test_sre_agent_error_skips_iteration(self, tmp_path: Path):
         import asyncio
 
-        from sregym_agents.crucible.backend.base import AgentResult
+        from sregym_agents.crucible.agents.base import AgentResult
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import _run_stage_loop
         from sregym_agents.crucible.tools import SharedState, SRESubmission

@@ -27,7 +27,7 @@ import socket
 import tempfile
 from typing import Any, TypeVar
 
-from sregym_agents.crucible.backend.base import AgentDriver, AgentResult
+from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)

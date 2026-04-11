@@ -24,7 +24,7 @@ from libs.agent_mw import (
     TurnLoggingMiddleware,
 )
 from libs.pydantic_agent import AgentMiddleware, InlineAgent
-from sregym_agents.crucible.backend.base import AgentDriver, AgentResult
+from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 
 if TYPE_CHECKING:
     from pathlib import Path

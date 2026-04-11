@@ -58,7 +58,7 @@ async def process_task(task_path: Path) -> None:
     diagnosis_succeeded = bool(task.get("diagnosis_succeeded", False))
     mitigation_succeeded = bool(task.get("mitigation_succeeded", False))
 
-    from sregym_agents.crucible.backend import PydanticAIDriver
+    from sregym_agents.crucible.agents import PydanticAIDriver
 
     kb_driver = PydanticAIDriver(task["model_id"])
     kb = create_knowledge_base(

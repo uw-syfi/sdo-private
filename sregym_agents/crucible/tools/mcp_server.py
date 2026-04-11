@@ -294,11 +294,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def _create_run_subagent(backend: str, model: str, provider: str):
     """Create a ``run_subagent`` closure for KB tool subagent dispatch."""
     if backend == "agent-cli":
-        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         driver: Any = AgentCLIDriver(provider=provider, model=model)
     else:
-        from sregym_agents.crucible.backend.pydantic_ai_driver import PydanticAIDriver
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import PydanticAIDriver
 
         driver = PydanticAIDriver(model)
 

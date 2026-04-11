@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 if TYPE_CHECKING:
     import pytest
 
-from sregym_agents.crucible.backend.base import AgentResult
+from sregym_agents.crucible.agents.base import AgentResult
 from sregym_agents.crucible.knowledge_base.mitigation_playbook import MitigationPlaybook
 from sregym_agents.crucible.knowledge_base.mitigation_playbook_synthesizer import (
     MitigationPlaybookSynthesizer,
