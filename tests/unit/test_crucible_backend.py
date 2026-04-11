@@ -43,6 +43,29 @@ class TestAgentResult:
         r = AgentResult(output="ok", messages=msgs)
         assert r.messages == msgs
 
+    def test_unwrap_success(self):
+        r = AgentResult(output="hello", completed=True)
+        assert r.unwrap() == "hello"
+
+    def test_unwrap_with_agent_name(self):
+        r = AgentResult(output=42, completed=True)
+        assert r.unwrap("my-agent") == 42
+
+    def test_unwrap_not_completed(self):
+        r = AgentResult(completed=False)
+        with pytest.raises(RuntimeError, match="did not produce output"):
+            r.unwrap()
+
+    def test_unwrap_no_output(self):
+        r: AgentResult[str] = AgentResult(completed=True, output=None)
+        with pytest.raises(RuntimeError, match="did not produce output"):
+            r.unwrap()
+
+    def test_unwrap_error_includes_agent_name(self):
+        r = AgentResult(completed=False)
+        with pytest.raises(RuntimeError, match="my-agent"):
+            r.unwrap("my-agent")
+
 
 # ── ShortCircuitSignal ───────────────────────────────────────────────────
 

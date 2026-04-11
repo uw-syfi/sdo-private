@@ -319,9 +319,7 @@ def _create_run_subagent(backend: str, model: str, provider: str):
             model_settings=model_settings,
             usage_collector=usage_collector,
         )
-        if result.output is None:
-            raise RuntimeError(f"Subagent {agent_name} produced no output")
-        return result.output
+        return result.unwrap(agent_name)
 
     return _run_subagent
 

@@ -104,9 +104,7 @@ class SREAgent:
                 model_settings=model_settings,
                 usage_collector=usage_collector,
             )
-            if result.output is None:  # pyright: ignore[reportUnknownMemberType]
-                raise RuntimeError(f"Subagent {agent_name} produced no output")
-            return result.output  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+            return result.unwrap(agent_name)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
 
         return _run_subagent
 

@@ -34,6 +34,17 @@ class AgentResult(Generic[T]):
     interrupt_data: Any = None
     messages: list[Any] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
+    def unwrap(self, agent_name: str = "") -> T:
+        """Return output or raise if the run didn't complete successfully.
+
+        Args:
+            agent_name: Optional agent name for a more informative error message.
+        """
+        if not self.completed or self.output is None:
+            label = f"Agent {agent_name!r}" if agent_name else "Agent"
+            raise RuntimeError(f"{label} did not produce output")
+        return self.output
+
 
 class AgentDriver(ABC):
     """Abstract LLM execution engine — no crucible knowledge.
