@@ -770,10 +770,18 @@ class TestAgentCLIDriverGetJsonSchema:
         class D:
             x: str
             y: int
+            z: float
+            flag: bool
+            items: list
 
         schema = AgentCLIDriver._get_json_schema(D)
         assert schema["type"] == "object"
-        assert "x" in schema["properties"]
+        props = schema["properties"]
+        assert props["x"] == {"type": "string"}
+        assert props["y"] == {"type": "integer"}
+        assert props["z"] == {"type": "number"}
+        assert props["flag"] == {"type": "boolean"}
+        assert props["items"] == {"type": "array"}
 
     def test_fallback(self):
         from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver

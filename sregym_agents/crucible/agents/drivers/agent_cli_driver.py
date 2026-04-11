@@ -17,6 +17,7 @@ kills the CLI process group immediately.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -225,9 +226,29 @@ class AgentCLIDriver(AgentDriver):
         if hasattr(output_type, "model_json_schema"):
             return output_type.model_json_schema()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
         if hasattr(output_type, "__dataclass_fields__"):
+            py_to_json: dict[str, str] = {
+                "str": "string",
+                "int": "integer",
+                "float": "number",
+                "bool": "boolean",
+                "list": "array",
+            }
+            type_to_json: dict[type, str] = {
+                str: "string",
+                int: "integer",
+                float: "number",
+                bool: "boolean",
+                list: "array",
+            }
             fields: dict[str, Any] = {}
-            for field_name in output_type.__dataclass_fields__:  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-                fields[field_name] = {"type": "string"}
+            for f in dataclasses.fields(output_type):  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+                if isinstance(f.type, type):
+                    json_type = type_to_json.get(f.type, "string")
+                elif isinstance(f.type, str):
+                    json_type = py_to_json.get(f.type, "string")
+                else:
+                    json_type = "string"
+                fields[f.name] = {"type": json_type}
             return {"type": "object", "properties": fields}
         return {"type": "string"}
 
