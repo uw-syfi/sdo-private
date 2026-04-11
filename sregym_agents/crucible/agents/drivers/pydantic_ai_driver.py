@@ -134,7 +134,7 @@ async def _compact_messages(
                     parts.append(f"[{kind}/{part_kind}]: {content}")
         history_text = "\n\n".join(parts)
     except Exception as exc:
-        logger.warning(f"Message serialization failed: {exc}")
+        logger.warning("Message serialization failed: %s", exc)
         history_text = str(to_summarize)
 
     summary_prompt = (
@@ -227,8 +227,7 @@ class PydanticAIDriver(AgentDriver):
         # If deps provided, set them on the underlying agent so tools can
         # access ctx.deps.  InlineAgent sets deps=None by default.
         if deps is not None:
-            agent.deps = deps
-            agent._agent._deps_type = type(deps)  # pyright: ignore[reportPrivateUsage]
+            agent.set_deps(deps)
 
         enable_compaction = agent_name.startswith(("sre-", "recovery-"))
         context_window = _context_window_for(self._model) if enable_compaction else 0

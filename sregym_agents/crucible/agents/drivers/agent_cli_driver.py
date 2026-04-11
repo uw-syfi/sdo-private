@@ -536,74 +536,66 @@ class AgentCLIDriver(AgentDriver):
 
         # ----- Execute -----
         try:
-            raw_output, signal_data = await self._run_cli_process(
-                cmd,
-                effective_timeout,
-                env,
-                signal_socket_path=signal_socket_path,
+            try:
+                raw_output, signal_data = await self._run_cli_process(
+                    cmd,
+                    effective_timeout,
+                    env,
+                    signal_socket_path=signal_socket_path,
+                )
+            except (asyncio.TimeoutError, RuntimeError) as exc:
+                logger.warning("CLI agent failed: %s", exc)
+                return AgentResult(completed=False)
+
+            # ----- Signal check -----
+            if signal_data and signal_data.get("short_circuit"):
+                return AgentResult(
+                    completed=False,
+                    interrupt_data=self._reconstruct_interrupt(signal_data),
+                )
+
+            # ----- Result file check -----
+            if result_file_path:
+                result_data = self._read_result_file(result_file_path)
+
+                if result_data:
+                    if result_data.get("short_circuit"):
+                        return AgentResult(
+                            completed=False,
+                            interrupt_data=self._reconstruct_interrupt(result_data),
+                        )
+                    if result_data.get("type") == "answer" and output_type is not str:
+                        try:
+                            output = self._parse_result_data(result_data, output_type)
+                            return AgentResult(output=output, completed=True)
+                        except Exception as exc:
+                            logger.warning("Failed to parse result file: %s", exc)
+                    if result_data.get("type") == "verdict":
+                        # Judge verdict — state is communicated via result file.
+                        # The orchestrator checks deps.state; here we pass
+                        # through since JudgeAgent will inspect result_data.
+                        pass
+
+            # ----- Parse from response text -----
+            response_text = self._extract_result_from_stream_json(raw_output)
+
+            if output_type is not str:
+                output = self._parse_json_from_text(response_text, output_type)
+                if output is not None:
+                    return AgentResult(output=output, completed=True)
+                return AgentResult(completed=True, output=None)
+
+            return AgentResult(
+                output=response_text,  # type: ignore[arg-type]
+                completed=True,
             )
-        except (asyncio.TimeoutError, RuntimeError) as exc:
-            logger.warning("CLI agent failed: %s", exc)
-            return AgentResult(completed=False)
         finally:
             if signal_socket_path:
-                import shutil as _shutil
-
-                try:
-                    _shutil.rmtree(os.path.dirname(signal_socket_path), ignore_errors=True)
-                except OSError:
-                    pass
-
-        # ----- Signal check -----
-        if signal_data and signal_data.get("short_circuit"):
+                shutil.rmtree(
+                    os.path.dirname(signal_socket_path), ignore_errors=True,
+                )
             if result_file_path:
                 try:
                     os.unlink(result_file_path)
                 except OSError:
                     pass
-            return AgentResult(
-                completed=False,
-                interrupt_data=self._reconstruct_interrupt(signal_data),
-            )
-
-        # ----- Result file check -----
-        if result_file_path:
-            try:
-                result_data = self._read_result_file(result_file_path)
-            finally:
-                try:
-                    os.unlink(result_file_path)
-                except OSError:
-                    pass
-
-            if result_data:
-                if result_data.get("short_circuit"):
-                    return AgentResult(
-                        completed=False,
-                        interrupt_data=self._reconstruct_interrupt(result_data),
-                    )
-                if result_data.get("type") == "answer" and output_type is not str:
-                    try:
-                        output = self._parse_result_data(result_data, output_type)
-                        return AgentResult(output=output, completed=True)
-                    except Exception as exc:
-                        logger.warning("Failed to parse result file: %s", exc)
-                if result_data.get("type") == "verdict":
-                    # Judge verdict — state is communicated via result file.
-                    # The orchestrator checks deps.state; here we pass
-                    # through since JudgeAgent will inspect result_data.
-                    pass
-
-        # ----- Parse from response text -----
-        response_text = self._extract_result_from_stream_json(raw_output)
-
-        if output_type is not str:
-            output = self._parse_json_from_text(response_text, output_type)
-            if output is not None:
-                return AgentResult(output=output, completed=True)
-            return AgentResult(completed=True, output=None)
-
-        return AgentResult(
-            output=response_text,  # type: ignore[arg-type]
-            completed=True,
-        )

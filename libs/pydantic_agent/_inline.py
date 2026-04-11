@@ -65,6 +65,15 @@ class InlineAgent(BaseAgent[None], Generic[OutputT]):
         """The underlying pydantic-ai Agent (e.g. for registering output validators)."""
         return self._agent
 
+    def set_deps(self, deps: Any) -> None:
+        """Set deps and deps_type on the underlying agent.
+
+        This keeps private-attribute access contained within InlineAgent
+        rather than forcing callers to reach into ``_agent._deps_type``.
+        """
+        self.deps = deps
+        self._agent._deps_type = type(deps)  # pyright: ignore[reportPrivateUsage]
+
     async def arun(
         self,
         prompt: str,
