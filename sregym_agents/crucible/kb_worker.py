@@ -58,6 +58,9 @@ async def process_task(task_path: Path) -> None:
     diagnosis_succeeded = bool(task.get("diagnosis_succeeded", False))
     mitigation_succeeded = bool(task.get("mitigation_succeeded", False))
 
+    from sregym_agents.crucible.backend import PydanticAIDriver
+
+    kb_driver = PydanticAIDriver(task["model_id"])
     kb = create_knowledge_base(
         kb_type=task["kb_type"],
         kb_dir=Path(task["kb_dir"]),
@@ -65,6 +68,7 @@ async def process_task(task_path: Path) -> None:
         app_name=task["app_name"],
         config=crucible_config,
         renderer=renderer,
+        driver=kb_driver,
     )
 
     banner = "=" * 72

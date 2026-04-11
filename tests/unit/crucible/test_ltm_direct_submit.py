@@ -152,16 +152,9 @@ class TestFormatInvestigatedHypotheses:
 # ---------------------------------------------------------------------------
 
 
-def _patch_retrieval(diagnosis: DifferentialDiagnosis):
-    """Patch the inline retrieval agent so it returns the given diagnosis."""
-    fake_result = MagicMock()
-    fake_result.output = diagnosis
-    fake_inline_agent = MagicMock()
-    fake_inline_agent.arun = AsyncMock(return_value=fake_result)
-    return patch(
-        "sregym_agents.crucible.tools._kb_tools.InlineAgent",
-        return_value=fake_inline_agent,
-    )
+def _set_run_subagent_for_retrieval(deps: SREDeps, diagnosis: DifferentialDiagnosis):
+    """Set deps.run_subagent to return the given diagnosis directly."""
+    deps.run_subagent = AsyncMock(return_value=diagnosis)
 
 
 def _patch_verification(verified: VerifiedDifferentialDiagnosis):
@@ -191,7 +184,8 @@ class TestSearchPriorIncidentsLogging:
             novel_cause_signals="",
         )
 
-        with _patch_retrieval(diag), _patch_verification(verified):
+        _set_run_subagent_for_retrieval(deps, diag)
+        with _patch_verification(verified):
             result = await search_prior_incidents(ctx, "symptom A")
 
         # Returned the JSON serialization (not raised)
@@ -223,7 +217,8 @@ class TestSearchPriorIncidentsLogging:
             novel_cause_signals="",
         )
 
-        with _patch_retrieval(diag), _patch_verification(verified):
+        _set_run_subagent_for_retrieval(deps, diag)
+        with _patch_verification(verified):
             with pytest.raises(LTMShortCircuit) as excinfo:
                 await search_prior_incidents(ctx, "symptom A")
 
@@ -253,7 +248,8 @@ class TestSearchPriorIncidentsLogging:
             novel_cause_signals="",
         )
 
-        with _patch_retrieval(diag), _patch_verification(verified):
+        _set_run_subagent_for_retrieval(deps, diag)
+        with _patch_verification(verified):
             result = await search_prior_incidents(ctx, "symptom A")
 
         assert "verified_candidates" in result
@@ -273,8 +269,8 @@ class TestSearchPriorIncidentsLogging:
             caveats="",
         )
 
-        with _patch_retrieval(diag):
-            result = await search_prior_incidents(ctx, "symptom A")
+        _set_run_subagent_for_retrieval(deps, diag)
+        result = await search_prior_incidents(ctx, "symptom A")
 
         assert "verified_candidates" in result
         shared_text = (tmp_path / "shared.md").read_text()
@@ -298,7 +294,8 @@ class TestSearchPriorIncidentsLogging:
             novel_cause_signals="",
         )
 
-        with _patch_retrieval(diag), _patch_verification(verified):
+        _set_run_subagent_for_retrieval(deps, diag)
+        with _patch_verification(verified):
             with pytest.raises(LTMShortCircuit) as excinfo:
                 await search_prior_incidents(ctx, "symptom A")
 
@@ -334,46 +331,42 @@ class TestRunStageLoopShortCircuit:
     def test_short_circuit_bypasses_judge_and_submits_list(self, tmp_path: Path):
         import asyncio
 
-        from pydantic_ai.models import infer_model
-
+        from sregym_agents.crucible.backend.base import AgentResult
         from sregym_agents.crucible.orchestrator import _run_stage_loop
 
         shared_path = tmp_path / "session.md"
         shared_path.write_text("# Session\n")
         shared = SharedFile(shared_path)
 
-        # Stub SRE agent: arun raises LTMShortCircuit
-        def fake_sre_constructor(model, deps, trajectory_path=None, system_prompt_override=None):
-            mock = MagicMock()
+        # Mock SRE agent: run raises LTMShortCircuit via interrupt_data
+        mock_sre = MagicMock()
+        mock_sre._config = MagicMock()
+        mock_sre._config.stage_outputs_file = None
 
-            async def fake_arun(prompt, run_ctx=None):
-                raise LTMShortCircuit(confirmed=["cand A", "cand B"], iteration=1)
+        async def fake_sre_run(**kwargs):
+            sc = LTMShortCircuit(confirmed=["cand A", "cand B"], iteration=1)
+            result = AgentResult(output=None, completed=False, interrupt_data=sc)
+            result.state = SharedState()  # type: ignore[attr-defined]
+            return result
 
-            mock.arun = fake_arun
-            return mock
+        mock_sre.run = AsyncMock(side_effect=fake_sre_run)
 
-        # Judge constructor — record calls so we can assert it's never called
-        judge_calls = []
-
-        def fake_judge_constructor(model, deps, trajectory_path=None):
-            judge_calls.append(deps)
-            return MagicMock()
+        # Mock judge agent — should never be called
+        mock_judge = MagicMock()
+        mock_judge.run = AsyncMock()
 
         mock_renderer = MagicMock(spec=PromptRenderer)
         mock_renderer.render.return_value = "rendered"
 
-        with (
-            patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
-            patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
-            patch(
-                "sregym_agents.crucible.orchestrator.submit_to_benchmark",
-                new_callable=AsyncMock,
-                return_value=(True, "ok", {"Diagnosis": {"success": True}}),
-            ) as mock_submit,
-        ):
+        with patch(
+            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
+            new_callable=AsyncMock,
+            return_value=(True, "ok", {"Diagnosis": {"success": True}}),
+        ) as mock_submit:
             result = asyncio.run(
                 _run_stage_loop(
-                    model=infer_model("test"),
+                    sre_agent=mock_sre,
+                    judge_agent=mock_judge,
                     app_info={"app_name": "myapp", "namespace": "default"},
                     stage="diagnosis",
                     max_iters=3,
@@ -391,8 +384,8 @@ class TestRunStageLoopShortCircuit:
 
         assert result.approved is True
         assert result.agent_answer == "cand A"
-        # Judge was never instantiated
-        assert judge_calls == []
+        # Judge was never called
+        mock_judge.run.assert_not_called()
         # Benchmark was called with the list
         mock_submit.assert_awaited_once()
         args = mock_submit.call_args.args
@@ -411,54 +404,61 @@ class TestRunStageLoopShortCircuit:
         """When the flag is off, the SRE agent runs normally and the judge is invoked."""
         import asyncio
 
-        from pydantic_ai.models import infer_model
-
+        from sregym_agents.crucible.backend.base import AgentResult
         from sregym_agents.crucible.orchestrator import _run_stage_loop
+        from sregym_agents.crucible.tools import SRESubmission
 
         shared_path = tmp_path / "session.md"
         shared_path.write_text("# Session\n")
         shared = SharedFile(shared_path)
 
-        def fake_sre_constructor(model, deps, trajectory_path=None, system_prompt_override=None):
-            mock = MagicMock()
+        # Mock SRE agent
+        mock_sre = MagicMock()
+        mock_sre._config = MagicMock()
+        mock_sre._config.stage_outputs_file = None
 
-            async def fake_arun(prompt, run_ctx=None):
-                deps.state.answer = "free-form diagnosis"
-                deps.state.answer_justification = "saw X"
-                deps.state.answer_causal_chain = "X → Y"
+        async def fake_sre_run(**kwargs):
+            state = SharedState()
+            state.answer = "free-form diagnosis"
+            state.answer_justification = "saw X"
+            state.answer_causal_chain = "X \u2192 Y"
+            result = AgentResult(
+                output=SRESubmission(answer="free-form diagnosis", justification="saw X", causal_chain="X \u2192 Y"),
+                completed=True,
+            )
+            result.state = state  # type: ignore[attr-defined]
+            return result
 
-            mock.arun = fake_arun
-            return mock
+        mock_sre.run = AsyncMock(side_effect=fake_sre_run)
 
+        # Mock judge agent
         judge_calls = []
 
-        def fake_judge_constructor(model, deps, trajectory_path=None):
-            judge_calls.append(deps)
-            mock = MagicMock()
+        async def fake_judge_run(**kwargs):
+            judge_calls.append(True)
+            state = SharedState()
+            state.verdict = "APPROVED"
+            state.submitted = True
+            state.benchmark_block = "<benchmark_result>fake</benchmark_result>"
+            result = AgentResult(output="approved", completed=True)
+            result.state = state  # type: ignore[attr-defined]
+            return result
 
-            async def fake_arun(prompt, run_ctx=None):
-                deps.state.verdict = "APPROVED"
-                deps.state.submitted = True
-                deps.state.benchmark_block = "<benchmark_result>fake</benchmark_result>"
-
-            mock.arun = fake_arun
-            return mock
+        mock_judge = MagicMock()
+        mock_judge.run = AsyncMock(side_effect=fake_judge_run)
 
         mock_renderer = MagicMock(spec=PromptRenderer)
         mock_renderer.render.return_value = "rendered"
 
-        with (
-            patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=fake_sre_constructor),
-            patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent", side_effect=fake_judge_constructor),
-            patch(
-                "sregym_agents.crucible.orchestrator.submit_to_benchmark",
-                new_callable=AsyncMock,
-                return_value=(True, "ok", None),
-            ),
+        with patch(
+            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
+            new_callable=AsyncMock,
+            return_value=(True, "ok", None),
         ):
             result = asyncio.run(
                 _run_stage_loop(
-                    model=infer_model("test"),
+                    sre_agent=mock_sre,
+                    judge_agent=mock_judge,
                     app_info={"app_name": "myapp", "namespace": "default"},
                     stage="diagnosis",
                     max_iters=3,
@@ -476,7 +476,7 @@ class TestRunStageLoopShortCircuit:
 
         assert result.approved is True
         assert result.agent_answer == "free-form diagnosis"
-        # Judge was instantiated and ran
+        # Judge was called
         assert len(judge_calls) == 1
         # No LTM direct submission block in shared file
         shared_text = shared_path.read_text()

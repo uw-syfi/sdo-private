@@ -164,7 +164,7 @@ class TestTryPlaybookShortcut:
         pb_dir.mkdir()
 
         result = await _try_playbook_shortcut(
-            model=MagicMock(),
+            run_subagent=AsyncMock(),
             namespace="ns",
             slug="nonexistent-slug",
             mitigation_playbooks_dir=pb_dir,
@@ -220,7 +220,7 @@ class TestTryPlaybookShortcut:
             mock_store_cls.return_value = mock_store
 
             result = await _try_playbook_shortcut(
-                model=MagicMock(),
+                run_subagent=AsyncMock(),
                 namespace="ns",
                 slug="test-slug",
                 mitigation_playbooks_dir=tmp_path,
@@ -272,7 +272,7 @@ class TestTryPlaybookShortcut:
             mock_store_cls.return_value = mock_store
 
             result = await _try_playbook_shortcut(
-                model=MagicMock(),
+                run_subagent=AsyncMock(),
                 namespace="ns",
                 slug="test-slug",
                 mitigation_playbooks_dir=tmp_path,
@@ -315,7 +315,7 @@ class TestTryPlaybookShortcut:
             mock_store_cls.return_value = mock_store
 
             result = await _try_playbook_shortcut(
-                model=MagicMock(),
+                run_subagent=AsyncMock(),
                 namespace="ns",
                 slug="test-slug",
                 mitigation_playbooks_dir=tmp_path,

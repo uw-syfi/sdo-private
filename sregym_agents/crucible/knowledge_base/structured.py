@@ -8,10 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import Agent
-
-from libs.agent_mw import arun_with_retry_tracked
-
 from .base import (
     MAX_CITATION_RETRIES,
     MAX_INJECTED_INCIDENTS,
@@ -49,6 +45,7 @@ from .schema import (
 if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
+    from sregym_agents.crucible.backend.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
@@ -93,6 +90,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         *,
         config: CrucibleConfig | None = None,
         renderer: PromptRenderer,
+        driver: AgentDriver,
     ):
         from sregym_agents.crucible.config import CrucibleConfig as _CrucibleConfig
 
@@ -111,7 +109,8 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.per_app = config.per_app
         self.prompts = renderer
         self.schema = SCHEMA_V2
-        self._reflector = Reflector(self.kb_dir, model_id, renderer)
+        self._driver = driver
+        self._reflector = Reflector(self.kb_dir, model_id, renderer, driver=driver)
 
         self._playbook_store: PlaybookStore | None = None
         self._playbook_synthesizer: PlaybookSynthesizer | None = None
@@ -119,9 +118,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self._mitigation_playbook_synthesizer: MitigationPlaybookSynthesizer | None = None
         if self.enable_playbooks:
             self._playbook_store = PlaybookStore(self.kb_dir / "playbooks")
-            self._playbook_synthesizer = PlaybookSynthesizer(model_id, renderer)
+            self._playbook_synthesizer = PlaybookSynthesizer(model_id, renderer, driver=driver)
             self._mitigation_playbook_store = MitigationPlaybookStore(self.kb_dir / "mitigation_playbooks")
-            self._mitigation_playbook_synthesizer = MitigationPlaybookSynthesizer(model_id, renderer)
+            self._mitigation_playbook_synthesizer = MitigationPlaybookSynthesizer(model_id, renderer, driver=driver)
 
         # Set per-update by ``update()``; helpers read it via ``arun_with_retry_tracked``.
         self._usage_collector: UsageCollector | None = None
@@ -313,14 +312,13 @@ class StructuredKnowledgeBase(KnowledgeBase):
         return result
 
     async def _call_llm(self, prompt: str, agent_name: str = "kb-llm") -> str:
-        agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry_tracked(
-            agent,
-            prompt,
+        result = await self._driver.run(
+            prompt=prompt,
+            output_type=str,
             agent_name=agent_name,
             usage_collector=self._usage_collector,
         )
-        return result.output
+        return result.output or ""
 
     def _save_incident(self, session_summary: str, session_content: str) -> str:
         self.incidents_dir.mkdir(parents=True, exist_ok=True)
@@ -352,14 +350,15 @@ class StructuredKnowledgeBase(KnowledgeBase):
             incident_ref=incident_ref,
             existing_slugs=existing_slugs,
         )
-        agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry_tracked(
-            agent,
-            prompt,
+
+        dr_result = await self._driver.run(
+            prompt=prompt,
+            output_type=str,
             agent_name="kb-merge-summary",
             usage_collector=self._usage_collector,
         )
-        output = result.output
+        output = dr_result.output or ""
+        messages = dr_result.messages
 
         for attempt in range(MAX_CITATION_RETRIES):
             if self.per_app:
@@ -381,14 +380,15 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 f"{fmt_hint}"
             )
             logger.warning(f"Citation validation failed (attempt {attempt + 1}/{MAX_CITATION_RETRIES}): {invalid}")
-            result = await arun_with_retry_tracked(
-                agent,
-                correction,
+            dr_result = await self._driver.run(
+                prompt=correction,
+                output_type=str,
                 agent_name="kb-merge-summary-correction",
                 usage_collector=self._usage_collector,
-                message_history=result.all_messages(),
+                message_history=messages,
             )
-            output = result.output
+            output = dr_result.output or ""
+            messages = dr_result.messages
 
         last_error: MergeEnvelopeError | None = None
         for attempt in range(MAX_MERGE_ENVELOPE_RETRIES):
@@ -396,13 +396,12 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 envelope, body = parse_merge_envelope(output)
                 migrated_body = ensure_slug_lines(body)
                 post_merge_slugs = extract_class_slugs(migrated_body)
-                merge_result = build_merge_result(
+                return build_merge_result(
                     envelope,
                     pre_merge_slugs=pre_merge_slugs,
                     post_merge_slugs=post_merge_slugs,
                     new_summary_text=strip_citation_wrappers(migrated_body),
                 )
-                return merge_result
             except MergeEnvelopeError as exc:
                 last_error = exc
                 if attempt >= MAX_MERGE_ENVELOPE_RETRIES - 1:
@@ -417,14 +416,15 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     "<merge_result>...</merge_result> envelope. Do not drop any existing slugs "
                     "unless you declare them as `consolidate` losers."
                 )
-                result = await arun_with_retry_tracked(
-                    agent,
-                    correction,
+                dr_result = await self._driver.run(
+                    prompt=correction,
+                    output_type=str,
                     agent_name="kb-merge-envelope-correction",
                     usage_collector=self._usage_collector,
-                    message_history=result.all_messages(),
+                    message_history=messages,
                 )
-                output = result.output
+                output = dr_result.output or ""
+                messages = dr_result.messages
 
         logger.warning(
             f"Merge envelope validation failed after {MAX_MERGE_ENVELOPE_RETRIES} attempts: {last_error}. "

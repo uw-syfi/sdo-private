@@ -7,10 +7,9 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
-from pydantic_ai import ModelRetry, RunContext
+from pydantic_ai import RunContext  # noqa: TC002 — needed at runtime for pydantic-ai tool introspection
 
-from libs.agent_mw import FixedPathProvider, RetryMiddleware, TrajectoryMiddleware, TurnLoggingMiddleware
-from libs.pydantic_agent import InlineAgent, UsageCollector, thinking_settings
+from libs.pydantic_agent import UsageCollector, thinking_settings
 from sregym_agents.crucible._prompts import (
     PromptRenderer,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
 )
@@ -22,7 +21,7 @@ from sregym_agents.crucible.tools._deps import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pydantic_ai.models import Model
+    from sregym_agents.crucible.backend.base import RunSubagent
 
 import yaml
 
@@ -441,14 +440,6 @@ def load_triage_priors(path: Path) -> TriagePriors:
     return TriagePriors.model_validate(raw)
 
 
-def _subagent_middleware(trajectory_path: Path | None = None) -> list[Any]:
-    """Standard middleware stack for inline subagents."""
-    mw: list[Any] = [TurnLoggingMiddleware(), RetryMiddleware()]
-    if trajectory_path is not None:
-        mw.append(TrajectoryMiddleware(FixedPathProvider(trajectory_path)))
-    return mw
-
-
 def _attach_slugs_to_candidates(
     candidates: list[CandidateRootCause],
     lt_summary_file: Path | None,
@@ -575,14 +566,14 @@ async def run_single_mitigation_playbook(
     playbook_text: str,
     root_cause_class: str,
     namespace: str,
-    model_id: Model | str,
+    run_subagent: RunSubagent,
     renderer: PromptRenderer,
-    trajectory_path: Path | None = None,
+    model_id: Any = None,
     usage_collector: UsageCollector | None = None,
     agent_name: str = "ltm-mitigate-0",
     failed_attempts: str = "",
 ) -> MitigationApplication:
-    """Run a single mitigation playbook via an inline subagent.
+    """Run a single mitigation playbook via a subagent.
 
     Renders the ``ltm_apply_mitigation`` prompt with the given playbook text,
     spawns a subagent to execute it against the cluster, and returns the
@@ -600,20 +591,15 @@ async def run_single_mitigation_playbook(
     )
     logger.info("[%s] PROMPT:\n%s", agent_name, prompt)
 
-    mitigate_agent = InlineAgent(
-        model_id,
-        agent_name=agent_name,
+    ms = dict(thinking_settings(model_id, VERIFICATION_THINKING_BUDGET)) if model_id else None
+    output: MitigationApplication = await run_subagent(
+        prompt=prompt,
         output_type=MitigationApplication,
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
-        model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
-        middleware=_subagent_middleware(trajectory_path),
+        agent_name=agent_name,
+        model_settings=ms,
         usage_collector=usage_collector,
     )
-    result = await mitigate_agent.arun(
-        prompt,
-        run_ctx={"stage": "mitigation", "role": "ltm-mitigate", "strategy_index": 0},
-    )
-    output = result.output
     output.strategy_index = 0
     output.root_cause_class = root_cause_class
     logger.info(
@@ -631,11 +617,11 @@ async def _run_mitigation_phase(
     search_result: MitigationSearchResult,
     namespace: str,
     stage: str,
-    model_id: Model | str,
+    run_subagent: RunSubagent,
     renderer: PromptRenderer,
-    trajectory_path: Path | None,
     mitigation_playbooks_dir: Path | None,
     lt_summary_file: Path | None,
+    model_id: Any = None,
     failed_attempts: str = "",
     usage_collector: UsageCollector | None = None,
 ) -> VerifiedMitigationSearchResult:
@@ -681,9 +667,9 @@ async def _run_mitigation_phase(
                 playbook_text=playbook_text,
                 root_cause_class=strategy.root_cause_class,
                 namespace=namespace,
-                model_id=model_id,
+                run_subagent=run_subagent,
                 renderer=renderer,
-                trajectory_path=trajectory_path,
+                model_id=model_id,
                 usage_collector=usage_collector,
                 agent_name=f"ltm-mitigate-{idx}",
                 failed_attempts=failed_attempts,
@@ -719,9 +705,9 @@ async def _run_verification_phase(
     observed_symptoms: str,
     namespace: str,
     stage: str,
-    model_id: Model | str,
+    run_subagent: RunSubagent,
     renderer: PromptRenderer,
-    trajectory_path: Path | None = None,
+    model_id: Any = None,
     triage_report: TriageReport | None = None,
     verification_guidance: str = "",
     playbooks_dir: Path | None = None,
@@ -750,21 +736,16 @@ async def _run_verification_phase(
         )
         logger.info("[ltm-verify-%d] PROMPT:\n%s", idx, prompt)
 
-        verify_agent = InlineAgent(
-            model_id,
-            agent_name=f"ltm-verify-{idx}",
-            output_type=CandidateVerification,
-            tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
-            model_settings=thinking_settings(model_id, VERIFICATION_THINKING_BUDGET),
-            middleware=_subagent_middleware(trajectory_path),
-            usage_collector=usage_collector,
-        )
+        ms = dict(thinking_settings(model_id, VERIFICATION_THINKING_BUDGET)) if model_id else None
         try:
-            result = await verify_agent.arun(
-                prompt,
-                run_ctx={"stage": stage, "role": "ltm-verify", "candidate_index": idx},
+            output: CandidateVerification = await run_subagent(
+                prompt=prompt,
+                output_type=CandidateVerification,
+                tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+                agent_name=f"ltm-verify-{idx}",
+                model_settings=ms,
+                usage_collector=usage_collector,
             )
-            output = result.output
             # Ensure echoed fields match the candidate
             output.candidate_index = idx
             output.root_cause_class = candidate.root_cause_class
@@ -816,6 +797,9 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
 
 
+_TRIAGE_COORDINATOR_MAX_RETRIES = 2
+
+
 async def triage_cluster_impl(
     deps: SREDeps,
 ) -> str:
@@ -826,47 +810,47 @@ async def triage_cluster_impl(
 
     Returns a structured triage report listing all anomalous resources.
     """
+    run_subagent = deps.run_subagent
+    if run_subagent is None:
+        return "Error: run_subagent not configured on SREDeps. Cannot run triage."
+
     model_id = deps.model_id
     namespace = deps.namespace
     renderer = deps.renderer
-    trajectory_path = deps.trajectory_path
 
     # Phase 1: Coordinator — smoke test only
-    coordinator = InlineAgent(
-        model_id,
-        agent_name="triage-coordinator",
-        output_type=TriageCoordinatorReport,
-        tools=[read_file, exec_bash_any, grep],
-        model_settings=thinking_settings(model_id, THINKING_BUDGET),
-        middleware=_subagent_middleware(trajectory_path),
-        usage_collector=deps.usage_collector,
-    )
-
-    @coordinator.agent.output_validator
-    def _require_tool_calls(ctx: RunContext[None], report: TriageCoordinatorReport) -> TriageCoordinatorReport:  # pyright: ignore[reportUnusedFunction]
-        from pydantic_ai.messages import ToolCallPart
-
-        has_calls = any(isinstance(part, ToolCallPart) for msg in ctx.messages for part in msg.parts)
-        if not has_calls:
-            raise ModelRetry(
-                "You MUST use exec_bash_any to run kubectl commands before "
-                "producing the triage report. You have not called any tools yet. "
-                "Run the recommended kubectl commands now."
-            )
-        return report
-
     coordinator_prompt = renderer.render(
         "triage_coordinator",
         namespace=namespace,
     )
     logger.info("[triage-coordinator] PROMPT:\n%s", coordinator_prompt)
 
+    ms = dict(thinking_settings(model_id, THINKING_BUDGET)) if model_id else None
     try:
-        coord_result = await coordinator.arun(
-            coordinator_prompt,
-            run_ctx={"stage": deps.stage, "role": "triage-coordinator"},
-        )
-        coord_report = coord_result.output
+        coord_report: TriageCoordinatorReport | None = None
+        current_prompt = coordinator_prompt
+        for attempt in range(_TRIAGE_COORDINATOR_MAX_RETRIES + 1):
+            coord_report = await run_subagent(
+                prompt=current_prompt,
+                output_type=TriageCoordinatorReport,
+                tools=[read_file, exec_bash_any, grep],
+                agent_name="triage-coordinator",
+                model_settings=ms,
+                usage_collector=deps.usage_collector,
+            )
+            if coord_report.cluster_snapshot.strip():
+                break
+            if attempt < _TRIAGE_COORDINATOR_MAX_RETRIES:
+                logger.warning(
+                    "[triage-coordinator] empty cluster_snapshot (attempt %d/%d), retrying",
+                    attempt + 1,
+                    _TRIAGE_COORDINATOR_MAX_RETRIES + 1,
+                )
+                current_prompt = (
+                    coordinator_prompt + "\n\nYou MUST use exec_bash_any to run kubectl commands before "
+                    "producing the triage report. Run the recommended kubectl commands now."
+                )
+        assert coord_report is not None
     except Exception as e:
         logger.warning("[triage-coordinator] failed: %s", e)
         return f"Triage failed with error: {e}. Proceed with manual investigation."
@@ -897,20 +881,15 @@ async def triage_cluster_impl(
         )
         slug = _slugify(area.name)
         logger.info("[triage-%s] PROMPT:\n%s", slug, prompt)
-        agent = InlineAgent(
-            model_id,
-            agent_name=f"triage-{slug}",
+        ms_spec = dict(thinking_settings(model_id, SPECIALIST_THINKING_BUDGET)) if model_id else None
+        return await run_subagent(
+            prompt=prompt,
             output_type=TriageSpecialistReport,
             tools=[read_file, exec_bash_any, grep, write_file],
-            model_settings=thinking_settings(model_id, SPECIALIST_THINKING_BUDGET),
-            middleware=_subagent_middleware(trajectory_path),
+            agent_name=f"triage-{slug}",
+            model_settings=ms_spec,
             usage_collector=deps.usage_collector,
         )
-        result = await agent.arun(
-            prompt,
-            run_ctx={"stage": deps.stage, "role": f"triage-{slug}"},
-        )
-        return result.output
 
     sem = asyncio.Semaphore(6)
 
@@ -987,6 +966,10 @@ async def check_hypothesis_coverage_impl(
     if triage_report is None:
         return "Error: no triage report available. Call triage_cluster first."
 
+    run_subagent = deps.run_subagent
+    if run_subagent is None:
+        return "Error: run_subagent not configured on SREDeps."
+
     model_id = deps.model_id
     triage_context = format_triage_report(triage_report)
     prompt = deps.renderer.render(
@@ -996,21 +979,15 @@ async def check_hypothesis_coverage_impl(
     )
     logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
 
-    coverage_agent = InlineAgent(
-        model_id,
-        agent_name="hypothesis-coverage",
-        output_type=HypothesisCoverageVerdict,
-        model_settings=thinking_settings(model_id, COVERAGE_THINKING_BUDGET),
-        middleware=_subagent_middleware(deps.trajectory_path),
-        usage_collector=deps.usage_collector,
-    )
-
+    ms = dict(thinking_settings(model_id, COVERAGE_THINKING_BUDGET)) if model_id else None
     try:
-        result = await coverage_agent.arun(
-            prompt,
-            run_ctx={"stage": deps.stage, "role": "hypothesis-coverage"},
+        output: HypothesisCoverageVerdict = await run_subagent(
+            prompt=prompt,
+            output_type=HypothesisCoverageVerdict,
+            agent_name="hypothesis-coverage",
+            model_settings=ms,
+            usage_collector=deps.usage_collector,
         )
-        output = result.output
 
         output_json = output.model_dump_json(indent=2)
         logger.info(
@@ -1076,6 +1053,11 @@ async def search_prior_incidents_impl(
         return result
     deps.ltm_call_count += 1
 
+    run_subagent = deps.run_subagent
+    if run_subagent is None:
+        logger.warning("[ltm-search] run_subagent not configured; returning empty result")
+        return empty_result
+
     model_id = deps.model_id
     triage_context = ""
     if deps.triage_report is not None:
@@ -1091,17 +1073,15 @@ async def search_prior_incidents_impl(
     )
     logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
-    retrieval_agent = InlineAgent(
-        model_id,
-        agent_name="ltm-search",
+    ms = dict(thinking_settings(model_id, THINKING_BUDGET)) if model_id else None
+    diagnosis: DifferentialDiagnosis = await run_subagent(
+        prompt=prompt,
         output_type=DifferentialDiagnosis,
         tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
-        model_settings=thinking_settings(model_id, THINKING_BUDGET),
-        middleware=_subagent_middleware(),
+        agent_name="ltm-search",
+        model_settings=ms,
         usage_collector=deps.usage_collector,
     )
-    retrieval_result = await retrieval_agent.arun(prompt)
-    diagnosis = retrieval_result.output
     retrieval_json = diagnosis.model_dump_json(indent=2)
     logger.info("[ltm-search] retrieval output: %s", retrieval_json)
 
@@ -1131,9 +1111,9 @@ async def search_prior_incidents_impl(
             observed_symptoms=observed_symptoms,
             namespace=deps.namespace,
             stage=deps.stage,
-            model_id=model_id,
+            run_subagent=run_subagent,
             renderer=deps.renderer,
-            trajectory_path=deps.trajectory_path,
+            model_id=model_id,
             triage_report=deps.triage_report,
             verification_guidance=deps.verification_guidance,
             playbooks_dir=deps.playbooks_dir,
@@ -1226,6 +1206,11 @@ async def search_prior_mitigations_impl(
         return result
     deps.ltm_call_count += 1
 
+    run_subagent = deps.run_subagent
+    if run_subagent is None:
+        logger.warning("[ltm-mitigation] run_subagent not configured; returning empty result")
+        return empty_result
+
     model_id = deps.model_id
     prompt = deps.renderer.render(
         "search_prior_mitigations",
@@ -1236,17 +1221,15 @@ async def search_prior_mitigations_impl(
     )
     logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
 
-    retrieval_agent = InlineAgent(
-        model_id,
-        agent_name="ltm-mitigation",
+    ms = dict(thinking_settings(model_id, THINKING_BUDGET)) if model_id else None
+    output: MitigationSearchResult = await run_subagent(
+        prompt=prompt,
         output_type=MitigationSearchResult,
         tools=[read_file, exec_bash_any, grep],
-        model_settings=thinking_settings(model_id, THINKING_BUDGET),
-        middleware=_subagent_middleware(),
+        agent_name="ltm-mitigation",
+        model_settings=ms,
         usage_collector=deps.usage_collector,
     )
-    retrieval_result = await retrieval_agent.arun(prompt)
-    output = retrieval_result.output
     output_json = output.model_dump_json(indent=2)
     logger.info("[ltm-mitigation] output: %s", output_json)
     if deps.stage_outputs_file:
@@ -1262,11 +1245,11 @@ async def search_prior_mitigations_impl(
         search_result=output,
         namespace=deps.namespace,
         stage=deps.stage,
-        model_id=model_id,
+        run_subagent=run_subagent,
         renderer=deps.renderer,
-        trajectory_path=deps.trajectory_path,
         mitigation_playbooks_dir=deps.mitigation_playbooks_dir,
         lt_summary_file=deps.lt_summary_file,
+        model_id=model_id,
         failed_attempts=failed_attempts,
         usage_collector=deps.usage_collector,
     )

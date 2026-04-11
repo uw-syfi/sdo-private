@@ -225,6 +225,9 @@ async def _async_main(args: argparse.Namespace) -> None:
         seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
         seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
+        from sregym_agents.crucible.backend import PydanticAIDriver as _KBDriver
+
+        kb_driver = _KBDriver(model_id)
         kb = create_knowledge_base(
             kb_type=kb_type,
             kb_dir=Path(args.kb_dir),
@@ -233,6 +236,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             seed_kb_dir=seed_kb_dir,
             config=crucible_config,
             renderer=renderer,
+            driver=kb_driver,
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env or "."))
@@ -249,6 +253,15 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
+    from sregym_agents.crucible.backend import PydanticAIDriver
+    from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
+
+    driver = PydanticAIDriver(
+        args.model,
+        trajectory_path=trajectory_path,
+        interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
+    )
+
     usage_metrics = await orchestrator.run(
         model=args.model,
         app_info=app_info,
@@ -261,6 +274,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         crucible_config=crucible_config,
+        driver=driver,
     )
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")

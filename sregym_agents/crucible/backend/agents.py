@@ -92,6 +92,38 @@ class SREAgent:
             tools.append(check_hypothesis_coverage)
         return tools
 
+    @property
+    def config(self) -> SREAgentConfig:
+        """Public access to the agent's static configuration."""
+        return self._config
+
+    def make_run_subagent(self, usage_collector: UsageCollector | None = None) -> Any:
+        """Create a ``run_subagent`` closure over ``self._driver``."""
+        driver = self._driver
+
+        async def _run_subagent(
+            *,
+            prompt: str,
+            output_type: type,
+            tools: list[Any] | None = None,
+            agent_name: str = "",
+            model_settings: dict[str, Any] | None = None,
+            usage_collector: UsageCollector | None = usage_collector,
+        ) -> Any:
+            result = await driver.run(  # pyright: ignore[reportUnknownVariableType]
+                prompt=prompt,
+                output_type=output_type,
+                tools=tools,
+                agent_name=agent_name,
+                model_settings=model_settings,
+                usage_collector=usage_collector,
+            )
+            if result.output is None:  # pyright: ignore[reportUnknownMemberType]
+                raise RuntimeError(f"Subagent {agent_name} produced no output")
+            return result.output  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+
+        return _run_subagent
+
     def _build_deps(
         self,
         *,
@@ -124,6 +156,7 @@ class SREAgent:
             verification_guidance=cfg.verification_guidance,
             stage_outputs_file=cfg.stage_outputs_file,
             usage_collector=usage_collector,
+            run_subagent=self.make_run_subagent(usage_collector),
         )
 
     def _render_prompts(

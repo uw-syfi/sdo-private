@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from sregym_agents.crucible._prompts import PromptRenderer
+    from sregym_agents.crucible.backend.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
 
 __all__ = [
@@ -38,6 +39,7 @@ def create_knowledge_base(
     *,
     config: CrucibleConfig | None = None,
     renderer: PromptRenderer,
+    driver: AgentDriver,
 ) -> KnowledgeBase:
     """Factory function to create a knowledge base implementation."""
     if kb_type == "structured":
@@ -48,6 +50,7 @@ def create_knowledge_base(
             seed_kb_dir,
             config=config,
             renderer=renderer,
+            driver=driver,
         )
     if kb_type == "append-only":
         return AppendOnlyKnowledgeBase(
@@ -56,5 +59,6 @@ def create_knowledge_base(
             app_name,
             config=config,
             renderer=renderer,
+            driver=driver,
         )
     raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")

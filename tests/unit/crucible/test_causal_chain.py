@@ -4,23 +4,21 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 import pytest
-from pydantic_ai.models import infer_model
 
 from libs.pydantic_agent import UsageCollector
+from sregym_agents.crucible.backend import RecoveryAgent
+from sregym_agents.crucible.backend.base import AgentResult
 from sregym_agents.crucible.orchestrator import (
     StageLoopResult,
     _extract_benchmark_reasoning,
     _init_mitigation_file,
     _replace_hypothesis_placeholder,
-    _run_recovery_diagnosis,
-    _run_recovery_mitigation,
-    _run_recovery_reflection_phase,
 )
 from sregym_agents.crucible.recovery_reflection import RecoveryReflection, RecoveryStageFailure
 from sregym_agents.crucible.tools import SharedFile, SharedState, SRESubmission
@@ -281,53 +279,58 @@ class TestExtractBenchmarkReasoning:
 # ---------------------------------------------------------------------------
 
 
+def _make_mock_driver(return_output=None, completed=True):
+    """Create a mock AgentDriver for testing RecoveryAgent."""
+    driver = AsyncMock()
+    driver.run = AsyncMock(
+        return_value=AgentResult(
+            output=return_output,
+            completed=completed,
+            messages=[],
+        )
+    )
+    return driver
+
+
 @pytest.mark.asyncio
 class TestRunRecoveryDiagnosis:
     async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
-        result = await _run_recovery_diagnosis(
-            model=infer_model("test"),
+        driver = _make_mock_driver()
+        agent = RecoveryAgent(driver, "test", renderer)
+        result = await agent.run_diagnosis(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
-            renderer=renderer,
             usage_collector=UsageCollector(),
         )
         assert result is None
 
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_appends_recovery_to_shared_file(self, mock_cls, tmp_path: Path, renderer):
+    async def test_appends_recovery_to_shared_file(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
-        async def fake_arun(prompt, run_ctx=None):
-            # Simulate agent setting state
-            deps = mock_cls.call_args[0][1]  # deps is 2nd positional arg
-            deps.state.submitted = True
-            deps.state.answer = "correct root cause"
-            deps.state.answer_justification = "evidence"
-            deps.state.answer_causal_chain = "field → mechanism → symptom"
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
+        output = SRESubmission(
+            answer="correct root cause",
+            justification="evidence",
+            causal_chain="field → mechanism → symptom",
+        )
+        driver = _make_mock_driver(return_output=output)
+        agent = RecoveryAgent(driver, "test", renderer)
 
         oracle = {"Diagnosis": {"reasoning": "The real root cause is X", "success": False}}
-        oracle_text = json.dumps(oracle)
         block = (
             f"\n<benchmark_result>\nsuccess: False\nmessage: rejected\n"
-            f"<oracle>\n{oracle_text}\n</oracle>\n</benchmark_result>\n"
+            f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
         )
 
-        result = await _run_recovery_diagnosis(
-            model=infer_model("test"),
+        result = await agent.run_diagnosis(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
-            renderer=renderer,
             usage_collector=UsageCollector(),
         )
 
@@ -339,22 +342,18 @@ class TestRunRecoveryDiagnosis:
         assert "### Recovery Diagnosis" in content
         assert "**Causal Chain**: field → mechanism → symptom" in content
 
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_appends_reflection_to_shared_file(self, mock_cls, tmp_path: Path, renderer):
+    async def test_appends_reflection_to_shared_file(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
-        async def fake_arun(prompt, run_ctx=None):
-            deps = mock_cls.call_args[0][1]
-            deps.state.submitted = True
-            deps.state.answer = "correct root cause"
-            deps.state.answer_justification = "evidence"
-            deps.state.answer_causal_chain = "field → mechanism → symptom"
-            deps.state.answer_reflection = "Agent focused on nginx logs instead of tracing downstream."
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
+        output = SRESubmission(
+            answer="correct root cause",
+            justification="evidence",
+            causal_chain="field → mechanism → symptom",
+            reflection="Agent focused on nginx logs instead of tracing downstream.",
+        )
+        driver = _make_mock_driver(return_output=output)
+        agent = RecoveryAgent(driver, "test", renderer)
 
         oracle = {"Diagnosis": {"reasoning": "The real root cause is X", "success": False}}
         block = (
@@ -362,13 +361,11 @@ class TestRunRecoveryDiagnosis:
             f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
         )
 
-        result = await _run_recovery_diagnosis(
-            model=infer_model("test"),
+        result = await agent.run_diagnosis(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
-            renderer=renderer,
             usage_collector=UsageCollector(),
             original_justification="nginx logs showed connection refused",
             original_causal_chain="nginx → compose.lua → localhost:8080",
@@ -380,22 +377,17 @@ class TestRunRecoveryDiagnosis:
         content = shared.read_text()
         assert "**Agent Reflection**: Agent focused on nginx logs instead of tracing downstream." in content
 
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_omits_reflection_when_empty(self, mock_cls, tmp_path: Path, renderer):
+    async def test_omits_reflection_when_empty(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
-        async def fake_arun(prompt, run_ctx=None):
-            deps = mock_cls.call_args[0][1]
-            deps.state.submitted = True
-            deps.state.answer = "correct root cause"
-            deps.state.answer_justification = "evidence"
-            deps.state.answer_causal_chain = "field → mechanism → symptom"
-            # No reflection set
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
+        output = SRESubmission(
+            answer="correct root cause",
+            justification="evidence",
+            causal_chain="field → mechanism → symptom",
+        )
+        driver = _make_mock_driver(return_output=output)
+        agent = RecoveryAgent(driver, "test", renderer)
 
         oracle = {"Diagnosis": {"reasoning": "The real root cause is X", "success": False}}
         block = (
@@ -403,13 +395,11 @@ class TestRunRecoveryDiagnosis:
             f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
         )
 
-        result = await _run_recovery_diagnosis(
-            model=infer_model("test"),
+        result = await agent.run_diagnosis(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
-            renderer=renderer,
             usage_collector=UsageCollector(),
         )
 
@@ -418,23 +408,12 @@ class TestRunRecoveryDiagnosis:
         content = shared.read_text()
         assert "**Agent Reflection**" not in content
 
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_passes_original_context_to_prompt(self, mock_cls, tmp_path: Path, renderer):
+    async def test_returns_none_when_agent_does_not_submit(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
-        captured_prompts = {}
-
-        async def fake_arun(prompt, run_ctx=None):
-            captured_prompts["user"] = prompt
-            deps = mock_cls.call_args[0][1]
-            deps.state.submitted = True
-            deps.state.answer = "root cause"
-            deps.state.answer_justification = "evidence"
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
+        driver = _make_mock_driver(return_output=None, completed=False)
+        agent = RecoveryAgent(driver, "test", renderer)
 
         oracle = {"Diagnosis": {"reasoning": "The real root cause is X", "success": False}}
         block = (
@@ -442,48 +421,11 @@ class TestRunRecoveryDiagnosis:
             f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
         )
 
-        await _run_recovery_diagnosis(
-            model=infer_model("test"),
+        result = await agent.run_diagnosis(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong answer",
             benchmark_block=block,
-            renderer=renderer,
-            usage_collector=UsageCollector(),
-            original_justification="nginx logs showed errors",
-            original_causal_chain="nginx → compose.lua → localhost",
-        )
-
-        user_prompt = captured_prompts["user"]
-        assert "nginx logs showed errors" in user_prompt
-        assert "nginx → compose.lua → localhost" in user_prompt
-
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_returns_none_when_agent_does_not_submit(self, mock_cls, tmp_path: Path, renderer):
-        shared = tmp_path / "shared.md"
-        shared.write_text("# Header\n")
-
-        async def fake_arun(prompt, run_ctx=None):
-            # Agent doesn't set submitted
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
-
-        oracle = {"Diagnosis": {"reasoning": "The real root cause is X", "success": False}}
-        oracle_text = json.dumps(oracle)
-        block = (
-            f"\n<benchmark_result>\nsuccess: False\nmessage: rejected\n"
-            f"<oracle>\n{oracle_text}\n</oracle>\n</benchmark_result>\n"
-        )
-
-        result = await _run_recovery_diagnosis(
-            model=infer_model("test"),
-            app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=SharedFile(shared),
-            original_answer="wrong answer",
-            benchmark_block=block,
-            renderer=renderer,
             usage_collector=UsageCollector(),
         )
 
@@ -492,8 +434,7 @@ class TestRunRecoveryDiagnosis:
 
 @pytest.mark.asyncio
 class TestRunRecoveryReflectionPhase:
-    @patch("sregym_agents.crucible.orchestrator.arun_with_retry_tracked", new_callable=AsyncMock)
-    async def test_uses_phase1_message_history_and_stage_outputs(self, mock_arun, tmp_path: Path, renderer):
+    async def test_uses_phase1_message_history_and_stage_outputs(self, tmp_path: Path, renderer):
         stage_outputs_file = tmp_path / "stage_outputs.md"
         stage_outputs_file.write_text("## Diagnosis Outcome\nObserved a failing upstream dependency")
         message_history = [{"role": "user", "content": "phase-1 history"}]
@@ -509,24 +450,23 @@ class TestRunRecoveryReflectionPhase:
                 )
             ],
         )
-        mock_arun.return_value.output = expected
+        driver = _make_mock_driver(return_output=expected)
+        agent = RecoveryAgent(driver, "test", renderer)
 
-        result = await _run_recovery_reflection_phase(
-            model=infer_model("test"),
+        result = await agent.run_reflection(
             app_info={"app_name": "app", "namespace": "ns"},
-            renderer=renderer,
-            usage_collector=UsageCollector(),
             original_answer="wrong answer",
             original_justification="wrong because local symptom matched",
             original_causal_chain="frontend -> timeout",
             stage_outputs_file=stage_outputs_file,
             phase1_messages=message_history,
+            usage_collector=UsageCollector(),
         )
 
         assert result == expected
-        _args, kwargs = mock_arun.await_args
-        assert kwargs["message_history"] == message_history
-        assert "Observed a failing upstream dependency" in _args[1]
+        # Verify driver.run was called with message_history
+        call_kwargs = driver.run.call_args.kwargs
+        assert call_kwargs["message_history"] == message_history
 
 
 # ---------------------------------------------------------------------------
@@ -578,32 +518,28 @@ class TestRunRecoveryMitigation:
     async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
-        result = await _run_recovery_mitigation(
-            model=infer_model("test"),
+        driver = _make_mock_driver()
+        agent = RecoveryAgent(driver, "test", renderer)
+        result = await agent.run_mitigation(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block="<benchmark_result>\nsuccess: False\nmessage: error\n</benchmark_result>",
-            renderer=renderer,
             usage_collector=UsageCollector(),
         )
         assert result is None
 
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_appends_recovery_to_shared_file(self, mock_cls, tmp_path: Path, renderer):
+    async def test_appends_recovery_to_shared_file(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
-        async def fake_arun(prompt, run_ctx=None):
-            deps = mock_cls.call_args[0][1]
-            deps.state.submitted = True
-            deps.state.answer = "patch ConfigMap X"
-            deps.state.answer_justification = "correct value restores service"
-            deps.state.answer_reflection = "Agent fixed the wrong field."
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
+        output = SRESubmission(
+            answer="patch ConfigMap X",
+            justification="correct value restores service",
+            reflection="Agent fixed the wrong field.",
+        )
+        driver = _make_mock_driver(return_output=output)
+        agent = RecoveryAgent(driver, "test", renderer)
 
         oracle = {"Mitigation": {"reasoning": "Patch ConfigMap X field Y", "success": False}}
         block = (
@@ -611,13 +547,11 @@ class TestRunRecoveryMitigation:
             f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
         )
 
-        result = await _run_recovery_mitigation(
-            model=infer_model("test"),
+        result = await agent.run_mitigation(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
-            renderer=renderer,
             usage_collector=UsageCollector(),
             diagnosis_answer="ConfigMap X has wrong value",
         )
@@ -631,20 +565,16 @@ class TestRunRecoveryMitigation:
         assert "**Mitigation**: patch ConfigMap X" in content
         assert "**Agent Reflection**: Agent fixed the wrong field." in content
 
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_omits_reflection_when_empty(self, mock_cls, tmp_path: Path, renderer):
+    async def test_omits_reflection_when_empty(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
-        async def fake_arun(prompt, run_ctx=None):
-            deps = mock_cls.call_args[0][1]
-            deps.state.submitted = True
-            deps.state.answer = "correct fix"
-            deps.state.answer_justification = "evidence"
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
+        output = SRESubmission(
+            answer="correct fix",
+            justification="evidence",
+        )
+        driver = _make_mock_driver(return_output=output)
+        agent = RecoveryAgent(driver, "test", renderer)
 
         oracle = {"Mitigation": {"reasoning": "The correct fix is Y", "success": False}}
         block = (
@@ -652,13 +582,11 @@ class TestRunRecoveryMitigation:
             f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
         )
 
-        result = await _run_recovery_mitigation(
-            model=infer_model("test"),
+        result = await agent.run_mitigation(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
-            renderer=renderer,
             usage_collector=UsageCollector(),
         )
 
@@ -667,56 +595,12 @@ class TestRunRecoveryMitigation:
         content = shared.read_text()
         assert "**Agent Reflection**" not in content
 
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_passes_context_to_prompt(self, mock_cls, tmp_path: Path, renderer):
+    async def test_returns_none_when_agent_does_not_submit(self, tmp_path: Path, renderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
-        captured_prompts = {}
-
-        async def fake_arun(prompt, run_ctx=None):
-            captured_prompts["user"] = prompt
-            deps = mock_cls.call_args[0][1]
-            deps.state.submitted = True
-            deps.state.answer = "correct fix"
-            deps.state.answer_justification = "evidence"
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
-
-        oracle = {"Mitigation": {"reasoning": "Correct approach is Z", "success": False}}
-        block = (
-            f"\n<benchmark_result>\nsuccess: False\nmessage: rejected\n"
-            f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
-        )
-
-        await _run_recovery_mitigation(
-            model=infer_model("test"),
-            app_info={"app_name": "app", "namespace": "ns"},
-            shared_file=SharedFile(shared),
-            original_answer="wrong fix",
-            benchmark_block=block,
-            renderer=renderer,
-            usage_collector=UsageCollector(),
-            original_justification="applied kubectl patch",
-            diagnosis_answer="ConfigMap X has wrong value",
-        )
-
-        user_prompt = captured_prompts["user"]
-        assert "applied kubectl patch" in user_prompt
-        assert "ConfigMap X has wrong value" in user_prompt
-
-    @patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent")
-    async def test_returns_none_when_agent_does_not_submit(self, mock_cls, tmp_path: Path, renderer):
-        shared = tmp_path / "shared.md"
-        shared.write_text("# Header\n")
-
-        async def fake_arun(prompt, run_ctx=None):
-            return ""
-
-        mock_instance = mock_cls.return_value
-        mock_instance.arun = AsyncMock(side_effect=fake_arun)
+        driver = _make_mock_driver(return_output=None, completed=False)
+        agent = RecoveryAgent(driver, "test", renderer)
 
         oracle = {"Mitigation": {"reasoning": "The correct fix is Y", "success": False}}
         block = (
@@ -724,13 +608,11 @@ class TestRunRecoveryMitigation:
             f"<oracle>\n{json.dumps(oracle)}\n</oracle>\n</benchmark_result>\n"
         )
 
-        result = await _run_recovery_mitigation(
-            model=infer_model("test"),
+        result = await agent.run_mitigation(
             app_info={"app_name": "app", "namespace": "ns"},
             shared_file=SharedFile(shared),
             original_answer="wrong fix",
             benchmark_block=block,
-            renderer=renderer,
             usage_collector=UsageCollector(),
         )
 

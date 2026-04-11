@@ -13,28 +13,28 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from pydantic_ai import Agent
-from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.models import Model, infer_model
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
+    from sregym_agents.crucible.backend.base import AgentDriver, RunSubagent
+    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
-from libs.agent_mw import arun_with_retry_tracked
 from libs.pydantic_agent import TokenUsage, UsageCollector
+from sregym_agents.crucible.backend import (
+    JudgeAgent,
+    PydanticAIDriver,
+    RecoveryAgent,
+    ShortCircuitSignal,
+    SREAgent,
+    SREAgentConfig,
+)
 from sregym_agents.crucible.config import CrucibleConfig
-from sregym_agents.crucible.judge_agent import CrucibleJudgeAgent
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
-from sregym_agents.crucible.recovery_reflection import RecoveryReflection
-from sregym_agents.crucible.sre_agent import CrucibleSREAgent
 from sregym_agents.crucible.tools import (
-    JudgeDeps,
     LTMMitigationShortCircuit,
     LTMShortCircuit,
     SharedFile,
     SharedState,
-    SREDeps,
-    SRESubmission,
     submit_to_benchmark,
 )
 
@@ -250,7 +250,8 @@ async def _direct_submit_confirmed(
 
 
 async def _run_stage_loop(
-    model: Model,
+    sre_agent: SREAgent,
+    judge_agent: JudgeAgent,
     app_info: dict[str, Any],
     stage: str,
     max_iters: int,
@@ -259,7 +260,6 @@ async def _run_stage_loop(
     renderer: PromptRenderer,
     usage_collector: UsageCollector,
     injected_kb: InjectedKB | None = None,
-    trajectory_path: Path | None = None,
     crucible_config: CrucibleConfig | None = None,
 ) -> StageLoopResult:
     """Run the agent->judge loop for one stage."""
@@ -268,11 +268,6 @@ async def _run_stage_loop(
     lt_summary_file = injected_kb.summary if injected_kb else None
     lessons_file = injected_kb.lessons if injected_kb else None
     architecture_file = injected_kb.architecture if injected_kb else None
-    incidents_dir = injected_kb.incidents_dir if injected_kb else None
-    triage_priors_file = injected_kb.triage_priors if injected_kb else None
-    verification_priors_file = injected_kb.verification_priors if injected_kb else None
-    playbooks_dir = injected_kb.playbooks_dir if injected_kb else None
-    mitigation_playbooks_dir = injected_kb.mitigation_playbooks_dir if injected_kb else None
     stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
     logger.info("=" * 60)
@@ -291,49 +286,8 @@ async def _run_stage_loop(
     lessons_content = _read_kb_content(lessons_file)
     architecture_content = _read_kb_content(architecture_file)
 
-    # v3 priors (learned rules from reflection)
-    is_v3 = crucible_config.prompt_version >= "v3"
-    triage_priors = None
-    verification_guidance = ""
-    stage_outputs_file: Path | None = None
-    if is_v3:
-        stage_outputs_file = Path(f"{stage}_stage_outputs.md")
-        # Try YAML triage priors first, fall back to markdown file
-        if triage_priors_file:
-            yaml_path = triage_priors_file.with_suffix(".yaml")
-            if yaml_path.exists():
-                from sregym_agents.crucible.tools import load_triage_priors
-
-                triage_priors = load_triage_priors(yaml_path)
-            elif triage_priors_file.exists():
-                # Legacy: read markdown and pass as-is via TriagePriors won't work,
-                # so we read markdown content and build a single-area TriagePriors
-                import re as _re
-
-                from sregym_agents.crucible.tools import TriagePriors as _TP
-
-                content = triage_priors_file.read_text().strip()
-                if content:
-                    areas: list[dict[str, Any]] = []
-                    current_name = None
-                    current_hints: list[str] = []
-                    for line in content.splitlines():
-                        header_match = _re.match(r"^##\s+(.+)$", line)
-                        if header_match:
-                            if current_name and current_hints:
-                                areas.append({"name": current_name, "hints": current_hints})
-                            current_name = header_match.group(1).strip()
-                            current_hints = []
-                        elif line.strip().startswith("- "):
-                            hint = line.strip()[2:].strip()
-                            if hint:
-                                current_hints.append(hint)
-                    if current_name and current_hints:
-                        areas.append({"name": current_name, "hints": current_hints})
-                    if areas:
-                        triage_priors = _TP.model_validate({"areas": areas})
-        if verification_priors_file and verification_priors_file.exists():
-            verification_guidance = verification_priors_file.read_text().strip()
+    # stage_outputs_file is set on the SREAgentConfig already
+    stage_outputs_file = sre_agent.config.stage_outputs_file
 
     last_answer = ""
     last_justification = ""
@@ -357,90 +311,49 @@ async def _run_stage_loop(
 
         # SRE agent
         shared_content = shared_file.read()
-        sre_state = SharedState()
-        sre_deps = SREDeps(
-            namespace=app_info.get("namespace", "default"),
-            shared_file=shared_file,
-            iteration=iteration,
+        sre_result = await sre_agent.run(
+            app_info=app_info,
             stage=stage,
-            renderer=renderer,
-            state=sre_state,
-            lt_summary_file=lt_summary_file if crucible_config.enable_ltm_retrieval else None,
-            incidents_dir=incidents_dir if crucible_config.enable_ltm_retrieval else None,
-            playbooks_dir=playbooks_dir if crucible_config.enable_ltm_retrieval else None,
-            mitigation_playbooks_dir=(mitigation_playbooks_dir if crucible_config.enable_ltm_retrieval else None),
-            model_id=model,
-            enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
-            trajectory_path=trajectory_path,
-            triage_priors=triage_priors,
-            verification_guidance=verification_guidance,
-            stage_outputs_file=stage_outputs_file,
-            usage_collector=usage_collector,
-        )
-        sre_system = renderer.render(f"{stage}_agent_system")
-        sre_prompt = renderer.render(
-            f"{stage}_agent_user",
-            app_name=app_info.get("app_name", "unknown"),
-            namespace=app_info.get("namespace", "default"),
-            descriptions=app_info.get("descriptions", ""),
             iteration=iteration,
+            shared_file=shared_file,
             shared_content=shared_content,
-            shared_file=str(shared_file),
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,
             lt_summary_file=str(lt_summary_file) if lt_summary_file else "",
+            usage_collector=usage_collector,
         )
-        logger.info(f"[{stage}-agent] SYSTEM PROMPT:\n{sre_system}")
-        logger.info(f"[{stage}-agent] USER PROMPT:\n{sre_prompt}")
-        sre_agent = CrucibleSREAgent(
-            model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=sre_system
-        )
-        try:
-            await sre_agent.arun(sre_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "sre"})
-        except LTMShortCircuit as sig:
-            # LTM verification confirmed at least one candidate; skip the rest
-            # of the SRE agent and the judge entirely and submit directly.
-            slugs_info = f", slugs={sig.confirmed_slugs}" if sig.confirmed_slugs else ""
-            logger.info(
-                f"[{stage}] KB verified {len(sig.confirmed)} hypothesis(es) — "
-                f"going straight to submission (iteration {iteration}{slugs_info})."
-            )
-            return await _direct_submit_confirmed(
-                confirmed=sig.confirmed,
-                stage=stage,
-                iteration=sig.iteration,
-                shared_file=shared_file,
-                submit_mcp_url=submit_mcp_url,
-                stage_outputs_file=stage_outputs_file,
-                confirmed_slugs=sig.confirmed_slugs,
-            )
-        except LTMMitigationShortCircuit as sig:
-            # LTM mitigation phase successfully applied at least one strategy;
-            # skip the rest of the SRE agent and the judge and submit directly.
-            logger.info(
-                f"[{stage}] LTM mitigation short-circuit on iteration {iteration} with "
-                f"{len(sig.applied)} applied strategy(ies); submitting directly."
-            )
-            return await _direct_submit_confirmed(
-                confirmed=sig.applied,
-                stage=stage,
-                iteration=sig.iteration,
-                shared_file=shared_file,
-                submit_mcp_url=submit_mcp_url,
-                stage_outputs_file=stage_outputs_file,
-            )
-        except ModelHTTPError as exc:
-            logger.warning(
-                f"[{stage}] SRE agent failed with HTTP {exc.status_code} on iteration {iteration} "
-                f"— treating as failed iteration."
-            )
+
+        # Handle short-circuit interrupts
+        if not sre_result.completed and sre_result.interrupt_data is not None:
+            signal = _parse_short_circuit(sre_result.interrupt_data)
+            if signal is not None:
+                slugs_info = f", slugs={signal.confirmed_slugs}" if signal.confirmed_slugs else ""
+                logger.info(
+                    f"[{stage}] Short-circuit with {len(signal.confirmed)} confirmed — "
+                    f"going straight to submission (iteration {iteration}{slugs_info})."
+                )
+                return await _direct_submit_confirmed(
+                    confirmed=signal.confirmed,
+                    stage=stage,
+                    iteration=signal.iteration,
+                    shared_file=shared_file,
+                    submit_mcp_url=submit_mcp_url,
+                    stage_outputs_file=stage_outputs_file,
+                    confirmed_slugs=signal.confirmed_slugs,
+                )
+
+        # Handle failed SRE run (model error, etc.)
+        if not sre_result.completed:
+            logger.warning(f"[{stage}] SRE agent failed on iteration {iteration} — treating as failed iteration.")
             shared_file.append(
                 f"\n### Iteration {iteration} — SRE Agent Error ({stage})\n"
-                f"Agent encountered a transient API error (HTTP {exc.status_code}) "
-                f"and could not complete this iteration.\n"
+                f"Agent encountered a transient API error and could not complete this iteration.\n"
             )
             continue
+
+        # Extract state from the result (attached by SREAgent.run())
+        sre_state: SharedState = getattr(sre_result, "state", SharedState())
 
         # Capture the hypothesis from the SRE agent for blind judge review
         last_answer = sre_state.answer or ""
@@ -493,46 +406,32 @@ async def _run_stage_loop(
 
         # Judge agent
         shared_content = shared_file.read()
-        judge_state = SharedState()
-        judge_deps = JudgeDeps(
-            namespace=app_info.get("namespace", "default"),
-            shared_file=shared_file,
-            iteration=iteration,
+        judge_result = await judge_agent.run(
+            app_info=app_info,
             stage=stage,
-            submit_mcp_url=submit_mcp_url,
-            renderer=renderer,
-            hypothesis_text=hypothesis_text,
-            state=judge_state,
-            usage_collector=usage_collector,
-        )
-        judge_system = renderer.render(f"{stage}_judge_system")
-        judge_prompt = renderer.render(
-            f"{stage}_judge_user",
-            app_name=app_info.get("app_name", "unknown"),
-            namespace=app_info.get("namespace", "default"),
             iteration=iteration,
+            shared_file=shared_file,
             shared_content=shared_content,
-            shared_file=str(shared_file),
+            submit_mcp_url=submit_mcp_url,
+            hypothesis_text=hypothesis_text,
             architecture_content=architecture_content,
             lt_summary_content=full_lt_summary_content,
             lessons_content=lessons_content,
+            usage_collector=usage_collector,
         )
-        logger.info(f"[{stage}-judge] SYSTEM PROMPT:\n{judge_system}")
-        logger.info(f"[{stage}-judge] USER PROMPT:\n{judge_prompt}")
-        judge_agent = CrucibleJudgeAgent(model, judge_deps, trajectory_path=trajectory_path)
-        try:
-            await judge_agent.arun(judge_prompt, run_ctx={"stage": stage, "iteration": iteration, "role": "judge"})
-        except ModelHTTPError as exc:
-            logger.warning(
-                f"[{stage}] Judge agent failed with HTTP {exc.status_code} on iteration {iteration} "
-                f"— treating as failed iteration."
-            )
-            shared_file.append(
-                f"\n### Iteration {iteration} — Judge Agent Error ({stage})\n"
-                f"Judge encountered a transient API error (HTTP {exc.status_code}) "
-                f"and could not complete this iteration.\n"
-            )
-            continue
+
+        # Handle failed judge run
+        if not judge_result.completed:
+            judge_state: SharedState = getattr(judge_result, "state", SharedState())
+            if not judge_state.submitted:
+                logger.warning(f"[{stage}] Judge agent failed on iteration {iteration} — treating as failed iteration.")
+                shared_file.append(
+                    f"\n### Iteration {iteration} — Judge Agent Error ({stage})\n"
+                    f"Judge encountered a transient API error and could not complete this iteration.\n"
+                )
+                continue
+
+        judge_state = getattr(judge_result, "state", SharedState())
 
         # Replace the hypothesis placeholder with real content
         if sre_state.answer:
@@ -573,7 +472,7 @@ async def _run_stage_loop(
     )
 
 
-def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:
+def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:  # pyright: ignore[reportUnusedFunction]
     """Extract the 'reasoning' field from a benchmark_result block.
 
     Args:
@@ -609,8 +508,26 @@ def _extract_matched_candidate_index(benchmark_block: str) -> int | None:
         return None
 
 
+def _parse_short_circuit(interrupt_data: Any) -> ShortCircuitSignal | None:
+    """Convert interrupt_data from an AgentResult into a ShortCircuitSignal, if applicable."""
+    if isinstance(interrupt_data, LTMShortCircuit):
+        return ShortCircuitSignal(
+            confirmed=interrupt_data.confirmed,
+            iteration=interrupt_data.iteration,
+            confirmed_slugs=interrupt_data.confirmed_slugs,
+            stage="diagnosis",
+        )
+    if isinstance(interrupt_data, LTMMitigationShortCircuit):
+        return ShortCircuitSignal(
+            confirmed=interrupt_data.applied,
+            iteration=interrupt_data.iteration,
+            stage="mitigation",
+        )
+    return None
+
+
 async def _try_playbook_shortcut(
-    model: Model,
+    run_subagent: RunSubagent,
     namespace: str,
     slug: str,
     mitigation_playbooks_dir: Path,
@@ -618,7 +535,7 @@ async def _try_playbook_shortcut(
     submit_mcp_url: str,
     renderer: PromptRenderer,
     usage_collector: UsageCollector,
-    trajectory_path: Path | None = None,
+    model_id: Any = None,
 ) -> StageLoopResult | None:
     """Try to execute a mitigation playbook directly, bypassing the SRE agent.
 
@@ -651,9 +568,9 @@ async def _try_playbook_shortcut(
             playbook_text=playbook_text,
             root_cause_class=root_cause_class,
             namespace=namespace,
-            model_id=model,
+            run_subagent=run_subagent,
             renderer=renderer,
-            trajectory_path=trajectory_path,
+            model_id=model_id,
             usage_collector=usage_collector,
             agent_name="playbook-shortcut",
         )
@@ -687,288 +604,8 @@ async def _try_playbook_shortcut(
     )
 
 
-async def _run_recovery_diagnosis(
-    model: Model,
-    app_info: dict[str, Any],
-    shared_file: SharedFile,
-    original_answer: str,
-    benchmark_block: str,
-    renderer: PromptRenderer,
-    usage_collector: UsageCollector,
-    trajectory_path: Path | None = None,
-    original_justification: str = "",
-    original_causal_chain: str = "",
-    stage_outputs_file: Path | None = None,
-) -> SRESubmission | None:
-    """Run a recovery diagnosis agent to produce a causal chain for the correct root cause.
-
-    Called when ``include_benchmark_results`` is enabled and the benchmark
-    rejected the agent's diagnosis.  The recovery agent receives the
-    benchmark's ground-truth reasoning and investigates the cluster to build
-    a validated causal chain — it does NOT resubmit to the benchmark.
-    """
-    reasoning = _extract_benchmark_reasoning(benchmark_block)
-    if not reasoning:
-        logger.warning("Recovery diagnosis: no benchmark reasoning found, skipping.")
-        return None
-
-    logger.info("=" * 60)
-    logger.info("RECOVERY DIAGNOSIS: producing causal chain from benchmark ground truth")
-    logger.info("=" * 60)
-
-    # Write a separator into stage_outputs_file so the reflector can
-    # distinguish primary-agent outputs from the recovery investigation.
-    if stage_outputs_file:
-        with open(stage_outputs_file, "a") as f:
-            f.write("\n---\n## Recovery Diagnosis Investigation\n")
-
-    sre_state = SharedState()
-    sre_deps = SREDeps(
-        namespace=app_info.get("namespace", "default"),
-        shared_file=shared_file,
-        iteration=0,  # recovery — not a regular iteration
-        stage="diagnosis",
-        model_id=model,
-        renderer=renderer,
-        state=sre_state,
-        stage_outputs_file=stage_outputs_file,
-        usage_collector=usage_collector,
-    )
-
-    system_prompt = renderer.render("recovery_diagnosis_system")
-    user_prompt = renderer.render(
-        "recovery_diagnosis_user",
-        benchmark_reasoning=reasoning,
-        original_answer=original_answer,
-        original_justification=original_justification,
-        original_causal_chain=original_causal_chain,
-        app_name=app_info.get("app_name", "unknown"),
-        namespace=app_info.get("namespace", "default"),
-        descriptions=app_info.get("descriptions", ""),
-    )
-    logger.info(f"[recovery-diagnosis] SYSTEM PROMPT:\n{system_prompt}")
-    logger.info(f"[recovery-diagnosis] USER PROMPT:\n{user_prompt}")
-
-    agent = CrucibleSREAgent(model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=system_prompt)
-    try:
-        await agent.arun(
-            user_prompt,
-            run_ctx={"stage": "diagnosis", "iteration": 0, "role": "recovery"},
-        )
-    except Exception as e:
-        logger.warning(f"Recovery diagnosis agent failed: {e}")
-        return None
-
-    if not sre_state.submitted:
-        logger.warning("Recovery diagnosis agent did not submit an answer.")
-        return None
-
-    submission = SRESubmission(
-        answer=sre_state.answer or "",
-        justification=sre_state.answer_justification or "",
-        causal_chain=sre_state.answer_causal_chain or "",
-        reflection=sre_state.answer_reflection or "",
-        message_history=agent.last_run_messages,
-    )
-
-    # Append recovery result to shared file for KB consumption
-    entry = (
-        f"\n### Recovery Diagnosis\n**Diagnosis**: {submission.answer}\n**Justification**: {submission.justification}\n"
-    )
-    if submission.causal_chain:
-        entry += f"**Causal Chain**: {submission.causal_chain}\n"
-    if submission.reflection:
-        entry += f"**Agent Reflection**: {submission.reflection}\n"
-    try:
-        shared_file.append(entry)
-    except Exception as e:
-        logger.warning(f"Error writing recovery diagnosis to shared file: {e}")
-
-    # Append recovery result to stage outputs file
-    if stage_outputs_file:
-        with open(stage_outputs_file, "a") as f:
-            f.write(f"**Diagnosis**: {submission.answer}\n")
-            f.write(f"**Justification**: {submission.justification}\n")
-            if submission.causal_chain:
-                f.write(f"**Causal Chain**: {submission.causal_chain}\n")
-            if submission.reflection:
-                f.write(f"**Agent Reflection**: {submission.reflection}\n")
-
-    logger.info(f"Recovery diagnosis complete: {submission.answer}")
-    return submission
-
-
-async def _run_recovery_reflection_phase(
-    model: Model,
-    app_info: dict[str, Any],
-    renderer: PromptRenderer,
-    usage_collector: UsageCollector,
-    original_answer: str,
-    original_justification: str = "",
-    original_causal_chain: str = "",
-    stage_outputs_file: Path | None = None,
-    phase1_messages: list[Any] | None = None,
-) -> RecoveryReflection:
-    """Use grounded recovery context plus the original trajectory to produce a KB-focused reflection."""
-    stage_outputs = ""
-    if stage_outputs_file and stage_outputs_file.exists():
-        stage_outputs = stage_outputs_file.read_text().strip()
-
-    system_prompt = renderer.render("recovery_reflection_system")
-    user_prompt = renderer.render(
-        "recovery_reflection_user",
-        stage_outputs=stage_outputs or "(No stage outputs captured.)",
-        original_answer=original_answer,
-        original_justification=original_justification,
-        original_causal_chain=original_causal_chain,
-        app_name=app_info.get("app_name", "unknown"),
-        namespace=app_info.get("namespace", "default"),
-        descriptions=app_info.get("descriptions", ""),
-    )
-
-    agent: Agent[None, RecoveryReflection] = Agent(model, output_type=RecoveryReflection)
-
-    @agent.instructions
-    def _system() -> str:  # pyright: ignore[reportUnusedFunction]
-        return system_prompt
-
-    result = await arun_with_retry_tracked(
-        agent,
-        user_prompt,
-        agent_name="recovery-reflection",
-        usage_collector=usage_collector,
-        message_history=phase1_messages or [],
-    )
-    reflection = result.output
-
-    if stage_outputs_file:
-        with open(stage_outputs_file, "a") as f:
-            f.write("\n---\n## Recovery Reflection\n")
-            f.write(f"**Summary**: {reflection.summary}\n")
-            if reflection.investigation_observations:
-                f.write("**Grounded Observations**:\n")
-                f.writelines(f"- {observation}\n" for observation in reflection.investigation_observations)
-            for failure in reflection.stage_failures:
-                f.write(f"### {failure.stage}\n")
-                f.write(f"**Description**: {failure.description}\n")
-                f.write(f"**Evidence**: {failure.evidence}\n")
-                f.write(f"**Lesson**: {failure.lesson}\n")
-
-    return reflection
-
-
-async def _run_recovery_mitigation(
-    model: Model,
-    app_info: dict[str, Any],
-    shared_file: SharedFile,
-    original_answer: str,
-    benchmark_block: str,
-    renderer: PromptRenderer,
-    usage_collector: UsageCollector,
-    trajectory_path: Path | None = None,
-    original_justification: str = "",
-    diagnosis_answer: str = "",
-    stage_outputs_file: Path | None = None,
-) -> SRESubmission | None:
-    """Run a recovery mitigation agent to investigate and apply the correct fix.
-
-    Called when ``include_benchmark_results`` is enabled and the benchmark
-    rejected the agent's mitigation.  The recovery agent receives the
-    benchmark's ground-truth reasoning, investigates the cluster, applies the
-    correct fix, verifies it, and reflects on why the original mitigation was
-    wrong — producing validated, evidence-backed KB entries.
-    """
-    reasoning = _extract_benchmark_reasoning(benchmark_block, stage="mitigation")
-    if not reasoning:
-        logger.warning("Recovery mitigation: no benchmark reasoning found, skipping.")
-        return None
-
-    logger.info("=" * 60)
-    logger.info("RECOVERY MITIGATION: reflecting on failed mitigation attempt")
-    logger.info("=" * 60)
-
-    if stage_outputs_file:
-        with open(stage_outputs_file, "a") as f:
-            f.write("\n---\n## Recovery Mitigation Investigation\n")
-
-    sre_state = SharedState()
-    sre_deps = SREDeps(
-        namespace=app_info.get("namespace", "default"),
-        shared_file=shared_file,
-        iteration=0,  # recovery — not a regular iteration
-        stage="mitigation",
-        model_id=model,
-        renderer=renderer,
-        state=sre_state,
-        stage_outputs_file=stage_outputs_file,
-        usage_collector=usage_collector,
-    )
-
-    system_prompt = renderer.render("recovery_mitigation_system")
-    user_prompt = renderer.render(
-        "recovery_mitigation_user",
-        benchmark_reasoning=reasoning,
-        original_answer=original_answer,
-        original_justification=original_justification,
-        diagnosis_answer=diagnosis_answer,
-        app_name=app_info.get("app_name", "unknown"),
-        namespace=app_info.get("namespace", "default"),
-        descriptions=app_info.get("descriptions", ""),
-    )
-    logger.info(f"[recovery-mitigation] SYSTEM PROMPT:\n{system_prompt}")
-    logger.info(f"[recovery-mitigation] USER PROMPT:\n{user_prompt}")
-
-    agent = CrucibleSREAgent(model, sre_deps, trajectory_path=trajectory_path, system_prompt_override=system_prompt)
-    try:
-        await agent.arun(
-            user_prompt,
-            run_ctx={"stage": "mitigation", "iteration": 0, "role": "recovery"},
-        )
-    except Exception as e:
-        logger.warning(f"Recovery mitigation agent failed: {e}")
-        return None
-
-    if not sre_state.submitted:
-        logger.warning("Recovery mitigation agent did not submit an answer.")
-        return None
-
-    submission = SRESubmission(
-        answer=sre_state.answer or "",
-        justification=sre_state.answer_justification or "",
-        reflection=sre_state.answer_reflection or "",
-    )
-
-    # Append recovery result to shared file for KB consumption
-    entry = (
-        f"\n### Recovery Mitigation\n"
-        f"**Mitigation**: {submission.answer}\n"
-        f"**Justification**: {submission.justification}\n"
-    )
-    if submission.reflection:
-        entry += f"**Agent Reflection**: {submission.reflection}\n"
-    try:
-        shared_file.append(entry)
-    except Exception as e:
-        logger.warning(f"Error writing recovery mitigation to shared file: {e}")
-
-    # Append recovery result to stage outputs file
-    if stage_outputs_file:
-        with open(stage_outputs_file, "a") as f:
-            f.write(f"**Mitigation**: {submission.answer}\n")
-            f.write(f"**Justification**: {submission.justification}\n")
-            if submission.reflection:
-                f.write(f"**Agent Reflection**: {submission.reflection}\n")
-
-    logger.info(f"Recovery mitigation complete: {submission.answer}")
-    return submission
-
-
 def _append_stage_outcome(result: StageLoopResult, stage_label: str) -> None:
-    """Append the agent's answer and benchmark result to the stage outputs file.
-
-    This gives the reflector a single file with the full picture: intermediate
-    tool outputs, the agent's conclusion, and the benchmark verdict.
-    """
+    """Append the agent's answer and benchmark result to the stage outputs file."""
     sof = result.stage_outputs_file
     if not sof:
         return
@@ -985,8 +622,71 @@ def _append_stage_outcome(result: StageLoopResult, stage_label: str) -> None:
         f.write("".join(parts))
 
 
+def _build_sre_agent_config(
+    injected_kb: InjectedKB | None,
+    crucible_config: CrucibleConfig,
+    trajectory_path: Path | None = None,
+) -> SREAgentConfig:
+    """Build SREAgentConfig from injected_kb and crucible_config."""
+    from sregym_agents.crucible.tools import TriagePriors as _TP
+    from sregym_agents.crucible.tools import load_triage_priors
+
+    triage_priors_file = injected_kb.triage_priors if injected_kb else None
+    verification_priors_file = injected_kb.verification_priors if injected_kb else None
+
+    # v3 priors (learned rules from reflection)
+    is_v3 = crucible_config.prompt_version >= "v3"
+    triage_priors = None
+    verification_guidance = ""
+    stage_outputs_file: Path | None = None
+    if is_v3:
+        stage_outputs_file = Path("diagnosis_stage_outputs.md")
+        if triage_priors_file:
+            yaml_path = triage_priors_file.with_suffix(".yaml")
+            if yaml_path.exists():
+                triage_priors = load_triage_priors(yaml_path)
+            elif triage_priors_file.exists():
+                import re as _re
+
+                content = triage_priors_file.read_text().strip()
+                if content:
+                    areas: list[dict[str, Any]] = []
+                    current_name = None
+                    current_hints: list[str] = []
+                    for line in content.splitlines():
+                        header_match = _re.match(r"^##\\s+(.+)$", line)
+                        if header_match:
+                            if current_name and current_hints:
+                                areas.append({"name": current_name, "hints": current_hints})
+                            current_name = header_match.group(1).strip()
+                            current_hints = []
+                        elif line.strip().startswith("- "):
+                            hint = line.strip()[2:].strip()
+                            if hint:
+                                current_hints.append(hint)
+                    if current_name and current_hints:
+                        areas.append({"name": current_name, "hints": current_hints})
+                    if areas:
+                        triage_priors = _TP.model_validate({"areas": areas})
+        if verification_priors_file and verification_priors_file.exists():
+            verification_guidance = verification_priors_file.read_text().strip()
+
+    return SREAgentConfig(
+        trajectory_path=trajectory_path,
+        enable_ltm_retrieval=crucible_config.enable_ltm_retrieval,
+        enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
+        lt_summary_file=injected_kb.summary if injected_kb else None,
+        incidents_dir=injected_kb.incidents_dir if injected_kb else None,
+        playbooks_dir=injected_kb.playbooks_dir if injected_kb else None,
+        mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir if injected_kb else None,
+        triage_priors=triage_priors,
+        verification_guidance=verification_guidance,
+        stage_outputs_file=stage_outputs_file,
+    )
+
+
 async def run(
-    model: str | Model,
+    model: str,
     app_info: dict[str, Any],
     problem_id: str,
     diagnosis_shared_file: Path,
@@ -997,20 +697,41 @@ async def run(
     injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
     crucible_config: CrucibleConfig | None = None,
+    driver: AgentDriver | None = None,
 ) -> dict[str, Any]:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
-    resolved_model: Model = model if isinstance(model, Model) else infer_model(model)
     if crucible_config is None:
         crucible_config = CrucibleConfig()
+
+    # Create driver if not provided (backward compat)
+    if driver is None:
+        driver = PydanticAIDriver(
+            model,
+            trajectory_path=trajectory_path,
+            interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
+        )
+
     max_diag_iters = crucible_config.max_diagnosis_iterations
     max_mit_iters = crucible_config.max_mitigation_iterations
     wait_stage_timeout = crucible_config.wait_stage_timeout
 
     # Two collectors per problem: primary covers diagnosis + mitigation,
-    # recovery covers the post-failure recovery agents. Recovery is fenced
-    # so we can subtract its cost from the primary playbook ablation cleanly.
+    # recovery covers the post-failure recovery agents.
     primary_collector = UsageCollector()
     recovery_collector = UsageCollector()
+
+    injected_kb = _resolve_injected_kb(injected_kb)
+
+    # Build SREAgentConfig from injected KB + crucible config
+    sre_config = _build_sre_agent_config(injected_kb, crucible_config, trajectory_path)
+
+    # Create role agents
+    sre_agent = SREAgent(driver, model, renderer, config=sre_config)
+    judge_agent_obj = JudgeAgent(driver, model, renderer, trajectory_path=trajectory_path)
+    recovery_agent = RecoveryAgent(driver, model, renderer, trajectory_path=trajectory_path)
+
+    # Create run_subagent closure for playbook shortcut
+    playbook_run_subagent = sre_agent.make_run_subagent(primary_collector)
 
     diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
     diagnosis_sf.init(
@@ -1021,10 +742,10 @@ async def run(
         "## Diagnosis\n"
     )
     logger.info(f"Initialized diagnosis shared file: {diagnosis_sf}")
-    injected_kb = _resolve_injected_kb(injected_kb)
 
     diag_result = await _run_stage_loop(
-        resolved_model,
+        sre_agent,
+        judge_agent_obj,
         app_info,
         "diagnosis",
         max_diag_iters,
@@ -1033,10 +754,10 @@ async def run(
         renderer=renderer,
         usage_collector=primary_collector,
         injected_kb=injected_kb,
-        trajectory_path=trajectory_path,
         crucible_config=crucible_config,
     )
     _append_stage_outcome(diag_result, "Diagnosis")
+
     # Recovery diagnosis: produce a validated causal chain when the benchmark
     # rejected the agent's diagnosis and we want causal chains for KB.
     if (
@@ -1044,15 +765,12 @@ async def run(
         and diag_result.benchmark_block
         and "success: False" in diag_result.benchmark_block
     ):
-        recovery = await _run_recovery_diagnosis(
-            resolved_model,
-            app_info,
-            diagnosis_sf,
-            diag_result.agent_answer,
-            diag_result.benchmark_block,
-            renderer=renderer,
+        recovery = await recovery_agent.run_diagnosis(
+            app_info=app_info,
+            shared_file=diagnosis_sf,
+            original_answer=diag_result.agent_answer,
+            benchmark_block=diag_result.benchmark_block,
             usage_collector=recovery_collector,
-            trajectory_path=trajectory_path,
             original_justification=diag_result.agent_justification,
             original_causal_chain=diag_result.agent_causal_chain,
             stage_outputs_file=diag_result.stage_outputs_file,
@@ -1066,16 +784,14 @@ async def run(
             diag_result.agent_causal_chain = recovery.causal_chain
             diag_result.agent_reflection = recovery.reflection
             if crucible_config.recovery_phase2_enabled:
-                diag_result.recovery_reflection = await _run_recovery_reflection_phase(
-                    resolved_model,
-                    app_info,
-                    renderer=renderer,
-                    usage_collector=recovery_collector,
+                diag_result.recovery_reflection = await recovery_agent.run_reflection(
+                    app_info=app_info,
                     original_answer=original_answer,
                     original_justification=original_justification,
                     original_causal_chain=original_causal_chain,
                     stage_outputs_file=diag_result.stage_outputs_file,
                     phase1_messages=recovery.message_history,
+                    usage_collector=recovery_collector,
                 )
 
     if "mitigation" not in planned_stages:
@@ -1103,9 +819,7 @@ async def run(
     logger.info("Waiting for benchmark to reach mitigation stage...")
     await _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
 
-    # Playbook shortcut: if the diagnosis matched a KB class with a slug and
-    # the benchmark confirmed the diagnosis, try the corresponding mitigation
-    # playbook directly before running the full SRE agent loop.
+    # Playbook shortcut
     mit_result: StageLoopResult | None = None
     if not crucible_config.enable_playbook_shortcut:
         logger.info("[playbook-shortcut] Disabled (enable_playbook_shortcut=false).")
@@ -1133,7 +847,7 @@ async def run(
                 idx,
             )
             mit_result = await _try_playbook_shortcut(
-                model=resolved_model,
+                run_subagent=playbook_run_subagent,
                 namespace=app_info.get("namespace", "default"),
                 slug=slug,
                 mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
@@ -1141,12 +855,16 @@ async def run(
                 submit_mcp_url=submit_mcp_url,
                 renderer=renderer,
                 usage_collector=primary_collector,
-                trajectory_path=trajectory_path,
+                model_id=model,
             )
 
     if mit_result is None:
+        # Update stage_outputs_file for mitigation stage
+        if sre_config.stage_outputs_file:
+            sre_agent.config.stage_outputs_file = Path("mitigation_stage_outputs.md")
         mit_result = await _run_stage_loop(
-            resolved_model,
+            sre_agent,
+            judge_agent_obj,
             app_info,
             "mitigation",
             max_mit_iters,
@@ -1155,26 +873,22 @@ async def run(
             renderer=renderer,
             usage_collector=primary_collector,
             injected_kb=injected_kb,
-            trajectory_path=trajectory_path,
             crucible_config=crucible_config,
         )
     _append_stage_outcome(mit_result, "Mitigation")
-    # Recovery mitigation: reflect on why mitigation failed when benchmark
-    # rejected the agent's fix and we want lessons for KB.
+
+    # Recovery mitigation
     if (
         crucible_config.include_benchmark_results
         and mit_result.benchmark_block
         and "success: False" in mit_result.benchmark_block
     ):
-        recovery = await _run_recovery_mitigation(
-            resolved_model,
-            app_info,
-            mitigation_sf,
-            mit_result.agent_answer,
-            mit_result.benchmark_block,
-            renderer=renderer,
+        recovery = await recovery_agent.run_mitigation(
+            app_info=app_info,
+            shared_file=mitigation_sf,
+            original_answer=mit_result.agent_answer,
+            benchmark_block=mit_result.benchmark_block,
             usage_collector=recovery_collector,
-            trajectory_path=trajectory_path,
             original_justification=mit_result.agent_justification,
             diagnosis_answer=diag_result.agent_answer,
             stage_outputs_file=mit_result.stage_outputs_file,
@@ -1188,7 +902,6 @@ async def run(
     logger.info("CRUCIBLE: Orchestrator complete.")
     logger.info("=" * 60)
     result = _build_usage_metrics(primary_collector, recovery_collector)
-    # Prefer diagnosis stage outputs for the reflector (it has the full pipeline).
     sof = diag_result.stage_outputs_file or mit_result.stage_outputs_file
     result["stage_outputs_file"] = str(sof) if sof else None
     result["recovery_reflection"] = (

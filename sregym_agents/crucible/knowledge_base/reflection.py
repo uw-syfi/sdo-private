@@ -14,9 +14,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
-from pydantic_ai import Agent
-
-from libs.agent_mw import arun_with_retry_tracked
 
 from ..recovery_reflection import RecoveryReflection
 from ..tools._kb_tools import TriagePriors
@@ -27,6 +24,7 @@ if TYPE_CHECKING:
 
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
+    from sregym_agents.crucible.backend.base import AgentDriver
 
 logger = logging.getLogger(__name__)
 
@@ -134,23 +132,22 @@ class MarkdownPriorConfig(PriorFileConfig):
             stage_outputs=stage_outputs,
             grounded_recovery_reflection=grounded_recovery_reflection,
         )
-        agent: Agent[None, PriorUpdateResult] = Agent(
-            reflector.model_id,
+
+        dr_result = await reflector.driver.run(
+            prompt=prompt,
             output_type=PriorUpdateResult,
-        )
-        result = await arun_with_retry_tracked(
-            agent,
-            prompt,
             agent_name=f"reflector-{self.filename}",
             usage_collector=reflector.usage_collector,
         )
-        if result.output.should_update:
+        output = dr_result.output
+
+        if output and output.should_update:
             logger.info(
                 "Updating %s:\n%s",
                 self.filename,
-                result.output.diff_summary,
+                output.diff_summary,
             )
-            path.write_text(result.output.updated_content)
+            path.write_text(output.updated_content)
         else:
             logger.info("No update needed for %s", self.filename)
 
@@ -189,25 +186,24 @@ class TriagePriorConfig(PriorFileConfig):
             stage_outputs=stage_outputs,
             grounded_recovery_reflection=grounded_recovery_reflection,
         )
-        agent: Agent[None, TriagePriorUpdateResult] = Agent(
-            reflector.model_id,
+
+        dr_result = await reflector.driver.run(
+            prompt=prompt,
             output_type=TriagePriorUpdateResult,
-        )
-        result = await arun_with_retry_tracked(
-            agent,
-            prompt,
             agent_name="reflector-triage-priors",
             usage_collector=reflector.usage_collector,
         )
-        if result.output.should_update:
+        output = dr_result.output
+
+        if output and output.should_update:
             logger.info(
                 "Updating %s:\n%s",
                 self.filename,
-                result.output.diff_summary,
+                output.diff_summary,
             )
             path.write_text(
                 yaml.dump(
-                    result.output.updated_priors.model_dump(),
+                    output.updated_priors.model_dump(),
                     default_flow_style=False,
                 )
             )
@@ -237,12 +233,17 @@ STAGE_TO_PRIOR: dict[str, str] = {
 class Reflector:
     """Classifies agent failure modes and updates prior files."""
 
-    def __init__(self, kb_dir: Path, model_id: str, renderer: PromptRenderer):
+    def __init__(
+        self,
+        kb_dir: Path,
+        model_id: str,
+        renderer: PromptRenderer,
+        driver: AgentDriver,
+    ):
         self.kb_dir = kb_dir
         self.model_id = model_id
         self.prompts = renderer
-        # Set per-update by the owning ``StructuredKnowledgeBase``; LLM calls
-        # report through ``arun_with_retry_tracked`` to this collector.
+        self.driver = driver
         self.usage_collector: UsageCollector | None = None
 
     @staticmethod
@@ -266,10 +267,7 @@ class Reflector:
         self,
         stage_outputs_file: Path,
     ) -> FailureClassification:
-        """Classify where in the agent pipeline the failure occurred.
-
-        Returns a structured ``FailureClassification``.
-        """
+        """Classify where in the agent pipeline the failure occurred."""
         stage_outputs = stage_outputs_file.read_text().strip()
 
         logger.info("Classifying agent failure modes...")
@@ -277,17 +275,17 @@ class Reflector:
             "kb/classify_failure",
             stage_outputs=stage_outputs,
         )
-        agent: Agent[None, FailureClassification] = Agent(
-            self.model_id,
+
+        dr_result = await self.driver.run(
+            prompt=prompt,
             output_type=FailureClassification,
-        )
-        result = await arun_with_retry_tracked(
-            agent,
-            prompt,
             agent_name="reflector-classify-failure",
             usage_collector=self.usage_collector,
         )
-        classification = result.output
+        classification = dr_result.output
+        if classification is None:
+            raise RuntimeError("Reflector classify-failure produced no output")
+
         logger.info(
             "Failure classification: outcome=%s, stages=%s\n%s",
             classification.outcome,

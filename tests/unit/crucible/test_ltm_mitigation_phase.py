@@ -159,16 +159,9 @@ def _make_ctx(deps: SREDeps) -> MagicMock:
     return ctx
 
 
-def _patch_retrieval(search_result: MitigationSearchResult):
-    """Patch the inline retrieval agent so it returns the given search result."""
-    fake_result = MagicMock()
-    fake_result.output = search_result
-    fake_inline_agent = MagicMock()
-    fake_inline_agent.arun = AsyncMock(return_value=fake_result)
-    return patch(
-        "sregym_agents.crucible.tools._kb_tools.InlineAgent",
-        return_value=fake_inline_agent,
-    )
+def _set_run_subagent_for_retrieval(deps: SREDeps, search_result: MitigationSearchResult):
+    """Set deps.run_subagent to return the given search result directly."""
+    deps.run_subagent = AsyncMock(return_value=search_result)
 
 
 # ---------------------------------------------------------------------------
@@ -220,14 +213,15 @@ class TestRunMitigationPhase:
         playbooks_dir = tmp_path / "mitigation_playbooks"
         playbooks_dir.mkdir(parents=True, exist_ok=True)
 
+        mock_run_subagent = AsyncMock()
+
         verified = await _run_mitigation_phase(
             strategies=[_strategy("hit")],
             search_result=MitigationSearchResult(strategies=[_strategy("hit")]),
             namespace="ns",
             stage="mitigation",
-            model_id="test",  # type: ignore[arg-type]
+            run_subagent=mock_run_subagent,
             renderer=PromptRenderer("v3"),
-            trajectory_path=None,
             mitigation_playbooks_dir=playbooks_dir,
             lt_summary_file=None,
             failed_attempts="",
@@ -254,33 +248,25 @@ class TestRunMitigationPhase:
             "#### Slug: missing_env\n"
         )
 
-        # Inline subagent #0 returns applied=True.
+        # run_subagent returns applied=True for the first call.
         successful_app = _application(0, "hit", applied=True)
-        fake_subagent_result = MagicMock()
-        fake_subagent_result.output = successful_app
-        fake_subagent = MagicMock()
-        fake_subagent.arun = AsyncMock(return_value=fake_subagent_result)
+        mock_run_subagent = AsyncMock(return_value=successful_app)
 
-        with patch(
-            "sregym_agents.crucible.tools._kb_tools.InlineAgent",
-            return_value=fake_subagent,
-        ) as mock_inline:
-            verified = await _run_mitigation_phase(
-                strategies=[_strategy("hit"), _strategy("second")],
-                search_result=MitigationSearchResult(strategies=[_strategy("hit"), _strategy("second")]),
-                namespace="ns",
-                stage="mitigation",
-                model_id="test",  # type: ignore[arg-type]
-                renderer=PromptRenderer("v3"),
-                trajectory_path=None,
-                mitigation_playbooks_dir=playbooks_dir,
-                lt_summary_file=lt_summary,
-                failed_attempts="",
-                usage_collector=UsageCollector(),
-            )
+        verified = await _run_mitigation_phase(
+            strategies=[_strategy("hit"), _strategy("second")],
+            search_result=MitigationSearchResult(strategies=[_strategy("hit"), _strategy("second")]),
+            namespace="ns",
+            stage="mitigation",
+            run_subagent=mock_run_subagent,
+            renderer=PromptRenderer("v3"),
+            mitigation_playbooks_dir=playbooks_dir,
+            lt_summary_file=lt_summary,
+            failed_attempts="",
+            usage_collector=UsageCollector(),
+        )
 
-        # Only ONE subagent was constructed (early exit on success).
-        assert mock_inline.call_count == 1
+        # Only ONE subagent call was made (early exit on success).
+        assert mock_run_subagent.call_count == 1
         assert len(verified.applications) == 1
         assert verified.applications[0].applied is True
         assert verified.successful_applications == verified.applications
@@ -303,34 +289,22 @@ class TestRunMitigationPhase:
         applied_app = _application(1, "second", applied=True)
 
         results = [failed_app, applied_app]
-        fake_subagent = MagicMock()
+        mock_run_subagent = AsyncMock(side_effect=lambda **kwargs: results.pop(0))
 
-        async def fake_arun(prompt, run_ctx=None):
-            r = MagicMock()
-            r.output = results.pop(0)
-            return r
+        verified = await _run_mitigation_phase(
+            strategies=[_strategy("hit"), _strategy("second")],
+            search_result=MitigationSearchResult(strategies=[_strategy("hit"), _strategy("second")]),
+            namespace="ns",
+            stage="mitigation",
+            run_subagent=mock_run_subagent,
+            renderer=PromptRenderer("v3"),
+            mitigation_playbooks_dir=playbooks_dir,
+            lt_summary_file=lt_summary,
+            failed_attempts="",
+            usage_collector=UsageCollector(),
+        )
 
-        fake_subagent.arun = fake_arun
-
-        with patch(
-            "sregym_agents.crucible.tools._kb_tools.InlineAgent",
-            return_value=fake_subagent,
-        ) as mock_inline:
-            verified = await _run_mitigation_phase(
-                strategies=[_strategy("hit"), _strategy("second")],
-                search_result=MitigationSearchResult(strategies=[_strategy("hit"), _strategy("second")]),
-                namespace="ns",
-                stage="mitigation",
-                model_id="test",  # type: ignore[arg-type]
-                renderer=PromptRenderer("v3"),
-                trajectory_path=None,
-                mitigation_playbooks_dir=playbooks_dir,
-                lt_summary_file=lt_summary,
-                failed_attempts="",
-                usage_collector=UsageCollector(),
-            )
-
-        assert mock_inline.call_count == 2
+        assert mock_run_subagent.call_count == 2
         assert len(verified.applications) == 2
         assert verified.applications[0].applied is False
         assert verified.applications[1].applied is True
@@ -362,8 +336,8 @@ class TestSearchPriorMitigations:
 
         retrieved = MitigationSearchResult(strategies=[_strategy("hit")])
 
-        with _patch_retrieval(retrieved):
-            result = await search_prior_mitigations(ctx, "diagnosed root cause")
+        _set_run_subagent_for_retrieval(deps, retrieved)
+        result = await search_prior_mitigations(ctx, "diagnosed root cause")
 
         # Plain search result, no "applications" key.
         assert "strategies" in result
@@ -389,7 +363,8 @@ class TestSearchPriorMitigations:
             successful_applications=[applied_app],
         )
 
-        with _patch_retrieval(retrieved), _patch_mitigation_phase(verified):
+        _set_run_subagent_for_retrieval(deps, retrieved)
+        with _patch_mitigation_phase(verified):
             result = await search_prior_mitigations(ctx, "root cause")
 
         # Returned the verified JSON (not raised).
@@ -416,7 +391,8 @@ class TestSearchPriorMitigations:
             successful_applications=[applied_app],
         )
 
-        with _patch_retrieval(retrieved), _patch_mitigation_phase(verified):
+        _set_run_subagent_for_retrieval(deps, retrieved)
+        with _patch_mitigation_phase(verified):
             with pytest.raises(LTMMitigationShortCircuit) as excinfo:
                 await search_prior_mitigations(ctx, "root cause")
 
@@ -444,7 +420,8 @@ class TestSearchPriorMitigations:
             successful_applications=[],
         )
 
-        with _patch_retrieval(retrieved), _patch_mitigation_phase(verified):
+        _set_run_subagent_for_retrieval(deps, retrieved)
+        with _patch_mitigation_phase(verified):
             result = await search_prior_mitigations(ctx, "root cause")
 
         assert "applications" in result
