@@ -110,7 +110,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.prompts = renderer
         self.schema = SCHEMA_V2
         self._driver = driver
-        self._reflector = Reflector(self.kb_dir, model_id, renderer, driver=driver)
+        self._reflector = Reflector(self.kb_dir, renderer, driver=driver)
 
         self._playbook_store: PlaybookStore | None = None
         self._playbook_synthesizer: PlaybookSynthesizer | None = None

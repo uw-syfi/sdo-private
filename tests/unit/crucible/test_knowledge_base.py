@@ -853,7 +853,7 @@ class TestCitationValidation:
 
 class TestReflector:
     def _make_reflector(self, tmp_path: Path) -> Reflector:
-        return Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer, driver=_mock_driver)
+        return Reflector(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
 
     async def test_run_skips_when_no_stage_outputs(self, tmp_path: Path, caplog):
         reflector = self._make_reflector(tmp_path)
@@ -978,7 +978,7 @@ class TestFailureClassification:
         assert restored.stage_failures[1].stage == "verification"
 
     async def test_apply_skips_on_success(self, tmp_path: Path, caplog):
-        reflector = Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer, driver=_mock_driver)
+        reflector = Reflector(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
         classification = FailureClassification(
             outcome="success",
             stage_failures=[],
@@ -1002,7 +1002,7 @@ class TestFailureClassification:
         mock_triage_apply,
         tmp_path: Path,
     ):
-        reflector = Reflector(tmp_path / "kb", model_id="test-model", renderer=_renderer, driver=_mock_driver)
+        reflector = Reflector(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
         classification = FailureClassification(
             outcome="failure",
             stage_failures=[

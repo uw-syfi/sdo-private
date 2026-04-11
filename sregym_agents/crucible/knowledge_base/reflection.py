@@ -236,12 +236,10 @@ class Reflector:
     def __init__(
         self,
         kb_dir: Path,
-        model_id: str,
         renderer: PromptRenderer,
         driver: AgentDriver,
     ):
         self.kb_dir = kb_dir
-        self.model_id = model_id
         self.prompts = renderer
         self.driver = driver
         self.usage_collector: UsageCollector | None = None
