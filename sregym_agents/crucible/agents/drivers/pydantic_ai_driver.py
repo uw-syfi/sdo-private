@@ -210,6 +210,7 @@ class PydanticAIDriver(AgentDriver):
 
         agent = InlineAgent(
             self._model,
+            deps=deps,
             agent_name=agent_name,
             output_type=output_type,
             tools=tools or [],
@@ -223,11 +224,6 @@ class PydanticAIDriver(AgentDriver):
             @agent.agent.instructions
             def _system_instructions() -> str:  # pyright: ignore[reportUnusedFunction]
                 return system_prompt
-
-        # If deps provided, set them on the underlying agent so tools can
-        # access ctx.deps.  InlineAgent sets deps=None by default.
-        if deps is not None:
-            agent.set_deps(deps)
 
         enable_compaction = agent_name.startswith(("sre-", "recovery-"))
         context_window = _context_window_for(self._model) if enable_compaction else 0
