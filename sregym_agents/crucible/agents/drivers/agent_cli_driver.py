@@ -114,7 +114,7 @@ class AgentCLIDriver(AgentDriver):
         prompt_version = "v2"
         renderer = getattr(deps, "renderer", None)
         if renderer is not None:
-            prompt_version = getattr(renderer, "_version", "v2")
+            prompt_version = getattr(renderer, "version", "v2")
 
         args: list[str] = [
             "run",
@@ -366,7 +366,6 @@ class AgentCLIDriver(AgentDriver):
     async def _run_cli_process(
         self,
         cmd: list[str],
-        prompt: str,
         timeout: int,
         env: dict[str, str],
         signal_socket_path: str | None = None,
@@ -378,19 +377,12 @@ class AgentCLIDriver(AgentDriver):
         """
         process = await asyncio.create_subprocess_exec(
             *cmd,
-            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self._cwd,
             env=env,
             start_new_session=True,
         )
-
-        # Write prompt to stdin (Claude Code also reads from stdin)
-        if process.stdin:
-            process.stdin.write(prompt.encode())
-            await process.stdin.drain()
-            process.stdin.close()
 
         signal_data: dict[str, Any] | None = None
         monitor_task: asyncio.Task[None] | None = None
@@ -525,7 +517,6 @@ class AgentCLIDriver(AgentDriver):
         try:
             raw_output, signal_data = await self._run_cli_process(
                 cmd,
-                full_prompt,
                 effective_timeout,
                 env,
                 signal_socket_path=signal_socket_path,

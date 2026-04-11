@@ -425,7 +425,7 @@ class TestAgentCLIDriverMCPArgs:
     def _make_sre_deps(self):
         """Build a minimal SREDeps-like object for arg construction."""
         renderer = MagicMock()
-        renderer._version = "v3"
+        renderer.version = "v3"
         deps = type(
             "SREDeps",
             (),
