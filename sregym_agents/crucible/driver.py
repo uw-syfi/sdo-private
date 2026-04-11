@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -48,9 +49,11 @@ def create_driver(
     Returns a ``PydanticAIDriver`` for ``backend="pydantic-ai"`` (default)
     or an ``AgentCLIDriver`` for ``backend="agent-cli"``.
     """
+    print(f"[crucible] Driver backend: {config.backend}")
     if config.backend == "agent-cli":
         from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
+        print(f"[crucible] Using AgentCLIDriver (provider={config.agent_cli_provider}, model={model})")
         return AgentCLIDriver(
             provider=config.agent_cli_provider,
             model=model,
@@ -59,6 +62,7 @@ def create_driver(
     from sregym_agents.crucible.agents import PydanticAIDriver
     from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
 
+    print(f"[crucible] Using PydanticAIDriver (model={model})")
     return PydanticAIDriver(
         model,
         trajectory_path=trajectory_path,
@@ -227,7 +231,12 @@ async def _async_main(args: argparse.Namespace) -> None:
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
     logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} crucible_config={crucible_config}")
-
+    print("\n" + "=" * 60)
+    print("[crucible] CONFIGURATION")
+    print("=" * 60)
+    for field in dataclasses.fields(crucible_config):
+        print(f"  {field.name}: {getattr(crucible_config, field.name)!r}")
+    print("=" * 60 + "\n")
     _wait_for_stage(api_base, timeout=300)
 
     app_info = _get_app_info(api_base)
