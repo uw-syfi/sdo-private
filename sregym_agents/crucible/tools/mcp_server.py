@@ -42,8 +42,6 @@ from sregym_agents.crucible.tools._kb_tools import (
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("crucible-tools")
-
 
 # ---------------------------------------------------------------------------
 # IPC helpers
@@ -80,6 +78,7 @@ def _write_result_file(path: str, data: dict[str, Any]) -> None:
 
 
 def register_sre_tools(
+    mcp: FastMCP,
     deps: SREDeps,
     *,
     signal_socket_path: str | None = None,
@@ -190,6 +189,7 @@ def register_sre_tools(
 
 
 def register_judge_tools(
+    mcp: FastMCP,
     deps: JudgeDeps,
     *,
     signal_socket_path: str | None = None,
@@ -328,6 +328,8 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
+    mcp = FastMCP("crucible-tools")
+
     from sregym_agents.crucible._prompts import PromptRenderer
 
     shared_file = SharedFile(Path(args.shared_file))
@@ -355,6 +357,7 @@ def main() -> None:
             run_subagent=run_subagent,
         )
         register_sre_tools(
+            mcp,
             sre_deps,
             signal_socket_path=args.signal_socket,
             result_file_path=args.result_file,
@@ -374,6 +377,7 @@ def main() -> None:
             state=shared_state,
         )
         register_judge_tools(
+            mcp,
             judge_deps,
             signal_socket_path=args.signal_socket,
             result_file_path=args.result_file,
