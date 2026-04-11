@@ -32,12 +32,10 @@ class RecoveryAgent:
         driver: AgentDriver,
         model_id: Any,
         renderer: PromptRenderer,
-        trajectory_path: Path | None = None,
     ) -> None:
         self._driver = driver
         self._model_id = model_id
         self._renderer = renderer
-        self._trajectory_path = trajectory_path
 
     def _sre_tools(self) -> list[Any]:
         from sregym_agents.crucible.tools import (

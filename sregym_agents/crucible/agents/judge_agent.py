@@ -8,8 +8,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
@@ -30,12 +28,10 @@ class JudgeAgent:
         driver: AgentDriver,
         model_id: Any,
         renderer: PromptRenderer,
-        trajectory_path: Path | None = None,
     ) -> None:
         self._driver = driver
         self._model_id = model_id
         self._renderer = renderer
-        self._trajectory_path = trajectory_path
 
     def _assemble_tools(self) -> list[Any]:
         """Return the tool list for the judge."""

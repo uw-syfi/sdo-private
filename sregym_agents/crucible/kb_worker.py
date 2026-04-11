@@ -64,7 +64,6 @@ async def process_task(task_path: Path) -> None:
     kb = create_knowledge_base(
         kb_type=task["kb_type"],
         kb_dir=Path(task["kb_dir"]),
-        model_id=task["model_id"],
         app_name=task["app_name"],
         config=crucible_config,
         renderer=renderer,

@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 class SREAgentConfig:
     """Static configuration that doesn't change per-iteration."""
 
-    trajectory_path: Path | None = None
     enable_ltm_retrieval: bool = False
     enable_ltm_verified_direct_submit: bool = False
     lt_summary_file: Path | None = None
@@ -135,7 +134,6 @@ class SREAgent:
             playbooks_dir=cfg.playbooks_dir if cfg.enable_ltm_retrieval else None,
             mitigation_playbooks_dir=(cfg.mitigation_playbooks_dir if cfg.enable_ltm_retrieval else None),
             enable_ltm_verified_direct_submit=cfg.enable_ltm_verified_direct_submit,
-            trajectory_path=cfg.trajectory_path,
             triage_priors=cfg.triage_priors,
             verification_guidance=cfg.verification_guidance,
             stage_outputs_file=cfg.stage_outputs_file,

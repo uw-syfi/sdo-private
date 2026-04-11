@@ -88,7 +88,7 @@ def _make_synthesizer(
         mock_driver.run = AsyncMock(side_effect=[_make_agent_result(t) for t in side_effect])
     else:
         mock_driver.run = AsyncMock(return_value=_make_agent_result(return_text))
-    synth = PlaybookSynthesizer(model_id="test-model", renderer=mock_renderer, driver=mock_driver)
+    synth = PlaybookSynthesizer(renderer=mock_renderer, driver=mock_driver)
     return synth, mock_renderer, mock_driver.run
 
 

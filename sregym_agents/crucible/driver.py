@@ -262,7 +262,6 @@ async def _async_main(args: argparse.Namespace) -> None:
         kb = create_knowledge_base(
             kb_type=kb_type,
             kb_dir=Path(args.kb_dir),
-            model_id=model_id,
             app_name=app_info.get("app_name", "unknown"),
             seed_kb_dir=seed_kb_dir,
             config=crucible_config,

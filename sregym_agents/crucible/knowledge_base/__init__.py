@@ -33,7 +33,6 @@ __all__ = [
 def create_knowledge_base(
     kb_type: str,
     kb_dir: Path,
-    model_id: str,
     app_name: str = "unknown",
     seed_kb_dir: Path | None = None,
     *,
@@ -45,7 +44,6 @@ def create_knowledge_base(
     if kb_type == "structured":
         return StructuredKnowledgeBase(
             kb_dir,
-            model_id,
             app_name,
             seed_kb_dir,
             config=config,
@@ -55,7 +53,6 @@ def create_knowledge_base(
     if kb_type == "append-only":
         return AppendOnlyKnowledgeBase(
             kb_dir,
-            model_id,
             app_name,
             config=config,
             renderer=renderer,

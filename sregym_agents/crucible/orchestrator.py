@@ -624,7 +624,6 @@ def _append_stage_outcome(result: StageLoopResult, stage_label: str) -> None:
 def _build_sre_agent_config(
     injected_kb: InjectedKB | None,
     crucible_config: CrucibleConfig,
-    trajectory_path: Path | None = None,
 ) -> SREAgentConfig:
     """Build SREAgentConfig from injected_kb and crucible_config."""
     from sregym_agents.crucible.tools import TriagePriors as _TP
@@ -671,7 +670,6 @@ def _build_sre_agent_config(
             verification_guidance = verification_priors_file.read_text().strip()
 
     return SREAgentConfig(
-        trajectory_path=trajectory_path,
         enable_ltm_retrieval=crucible_config.enable_ltm_retrieval,
         enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
         lt_summary_file=injected_kb.summary if injected_kb else None,
@@ -715,12 +713,12 @@ async def run(
     injected_kb = _resolve_injected_kb(injected_kb)
 
     # Build SREAgentConfig from injected KB + crucible config
-    sre_config = _build_sre_agent_config(injected_kb, crucible_config, trajectory_path)
+    sre_config = _build_sre_agent_config(injected_kb, crucible_config)
 
     # Create role agents
     sre_agent = SREAgent(driver, model, renderer, config=sre_config)
-    judge_agent_obj = JudgeAgent(driver, model, renderer, trajectory_path=trajectory_path)
-    recovery_agent = RecoveryAgent(driver, model, renderer, trajectory_path=trajectory_path)
+    judge_agent_obj = JudgeAgent(driver, model, renderer)
+    recovery_agent = RecoveryAgent(driver, model, renderer)
 
     # Create run_subagent closure for playbook shortcut
     playbook_run_subagent = sre_agent.make_run_subagent(primary_collector)

@@ -41,8 +41,7 @@ class MitigationPlaybookSynthesizer:
 
     MAX_VALIDATION_RETRIES = 2
 
-    def __init__(self, model_id: str, renderer: PromptRenderer, driver: AgentDriver) -> None:
-        self.model_id = model_id
+    def __init__(self, renderer: PromptRenderer, driver: AgentDriver) -> None:
         self.prompts = renderer
         self._driver = driver
         self.usage_collector: UsageCollector | None = None

@@ -84,7 +84,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
     def __init__(
         self,
         kb_dir: Path,
-        model_id: str,
         app_name: str = "unknown",
         seed_kb_dir: Path | None = None,
         *,
@@ -101,7 +100,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.app_name = app_name
         self.app_dir = self.kb_dir / sanitize_app_name(self.app_name)
         self.app_dir.mkdir(parents=True, exist_ok=True)
-        self.model_id = model_id
         self.include_benchmark_results = config.include_benchmark_results
         self.enable_reflection = config.enable_reflection
         self.enable_playbooks = config.enable_playbooks
@@ -118,9 +116,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self._mitigation_playbook_synthesizer: MitigationPlaybookSynthesizer | None = None
         if self.enable_playbooks:
             self._playbook_store = PlaybookStore(self.kb_dir / "playbooks")
-            self._playbook_synthesizer = PlaybookSynthesizer(model_id, renderer, driver=driver)
+            self._playbook_synthesizer = PlaybookSynthesizer(renderer, driver=driver)
             self._mitigation_playbook_store = MitigationPlaybookStore(self.kb_dir / "mitigation_playbooks")
-            self._mitigation_playbook_synthesizer = MitigationPlaybookSynthesizer(model_id, renderer, driver=driver)
+            self._mitigation_playbook_synthesizer = MitigationPlaybookSynthesizer(renderer, driver=driver)
 
         # Set per-update by ``update()``; helpers read it via ``arun_with_retry_tracked``.
         self._usage_collector: UsageCollector | None = None

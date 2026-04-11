@@ -76,7 +76,7 @@ def tmp_kb(tmp_path: Path) -> tuple[StructuredKnowledgeBase, Path, Path]:
     target_dir = tmp_path / "target"
     target_dir.mkdir()
     kb = StructuredKnowledgeBase(
-        kb_dir, model_id="test-model", app_name="test-app", renderer=_renderer, driver=_mock_driver
+        kb_dir, app_name="test-app", renderer=_renderer, driver=_mock_driver
     )
     return kb, kb_dir, target_dir
 
@@ -122,12 +122,12 @@ class TestSanitizeAppName:
 class TestKBDirCreatedOnInit:
     def test_kb_dir_created_on_init(self, tmp_path: Path):
         kb_dir = tmp_path / "nested" / "kb"
-        StructuredKnowledgeBase(kb_dir, model_id="m", app_name="myapp", renderer=_renderer, driver=_mock_driver)
+        StructuredKnowledgeBase(kb_dir, app_name="myapp", renderer=_renderer, driver=_mock_driver)
         assert kb_dir.is_dir()
 
     def test_app_subdir_created_on_init(self, tmp_path: Path):
         kb_dir = tmp_path / "kb"
-        kb = StructuredKnowledgeBase(kb_dir, model_id="m", app_name="My App!", renderer=_renderer, driver=_mock_driver)
+        kb = StructuredKnowledgeBase(kb_dir, app_name="My App!", renderer=_renderer, driver=_mock_driver)
         assert kb.app_dir.is_dir()
         assert kb.app_dir.name == "my_app"
 
@@ -241,7 +241,6 @@ class TestInjectIncidents:
         target_dir.mkdir()
         kb = StructuredKnowledgeBase(
             kb_dir,
-            model_id="m",
             app_name="test-app",
             config=CrucibleConfig(include_incident_files=False),
             renderer=_renderer,
@@ -260,7 +259,7 @@ class TestInjectIncidents:
 class TestUpdate:
     async def test_update_skips_missing_shared_file(self, tmp_path: Path):
         kb = StructuredKnowledgeBase(
-            tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer, driver=_mock_driver
+            tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=_mock_driver
         )
         # Should not raise
         await kb.update(SessionFiles(diagnosis=tmp_path / "nonexistent.md"))
@@ -270,7 +269,7 @@ class TestUpdate:
         shared = tmp_path / "shared.md"
         shared.write_text("<benchmark_result>only this</benchmark_result>")
         kb = StructuredKnowledgeBase(
-            tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer, driver=_mock_driver
+            tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=_mock_driver
         )
         await kb.update(SessionFiles(diagnosis=shared))
         assert not kb.summary_path.exists()
@@ -281,7 +280,7 @@ class TestUpdate:
         shared = tmp_path / "shared.md"
         shared.write_text("real session data")
         kb = StructuredKnowledgeBase(
-            tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer, driver=_mock_driver
+            tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=_mock_driver
         )
 
         mock_llm.side_effect = [
@@ -308,7 +307,6 @@ class TestUpdate:
         shared.write_text("real session data")
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="test-app",
             config=CrucibleConfig(include_incident_files=False),
             renderer=_renderer,
@@ -339,7 +337,7 @@ class TestUpdate:
             app_dir.mkdir(parents=True, exist_ok=True)
             (app_dir / KB_SUMMARY_FILENAME).write_text(content)
 
-        kb = StructuredKnowledgeBase(kb_dir, model_id="m", app_name="app-a", renderer=_renderer, driver=_mock_driver)
+        kb = StructuredKnowledgeBase(kb_dir, app_name="app-a", renderer=_renderer, driver=_mock_driver)
         mock_llm.return_value = "combined lessons"
 
         await kb._distill_lessons()
@@ -369,7 +367,7 @@ class TestUpdate:
         stage_outputs = tmp_path / "stage_outputs.md"
         stage_outputs.write_text("stage outputs")
         kb = StructuredKnowledgeBase(
-            tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer, driver=_mock_driver
+            tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=_mock_driver
         )
 
         mock_llm.side_effect = ["session summary", "distilled lessons"]
@@ -406,7 +404,6 @@ class TestSeedKB:
 
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             renderer=_renderer,
@@ -422,7 +419,6 @@ class TestSeedKB:
 
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             renderer=_renderer,
@@ -439,7 +435,6 @@ class TestSeedKB:
 
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             renderer=_renderer,
@@ -454,7 +449,6 @@ class TestSeedKB:
 
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             renderer=_renderer,
@@ -474,7 +468,6 @@ class TestSeedKB:
 
         kb = StructuredKnowledgeBase(
             kb_dir,
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             renderer=_renderer,
@@ -490,7 +483,6 @@ class TestSeedKB:
         with caplog.at_level(logging.WARNING):
             StructuredKnowledgeBase(
                 tmp_path / "kb",
-                model_id="m",
                 app_name="myapp",
                 seed_kb_dir=seed_dir,
                 renderer=_renderer,
@@ -512,7 +504,6 @@ class TestSeedKB:
 
         kb = StructuredKnowledgeBase(
             kb_dir,
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             renderer=_renderer,
@@ -527,7 +518,6 @@ class TestSeedKB:
 
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             renderer=_renderer,
@@ -538,7 +528,6 @@ class TestSeedKB:
     def test_no_seed_dir(self, tmp_path: Path):
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=None,
             renderer=_renderer,
@@ -549,7 +538,7 @@ class TestSeedKB:
 
 class TestAppendOnlyInject:
     async def test_inject_no_prior_file(self, tmp_path: Path):
-        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
         target = tmp_path / "target"
         target.mkdir()
 
@@ -562,7 +551,7 @@ class TestAppendOnlyInject:
         assert result.incidents_dir is None
 
     async def test_inject_copies_existing_file(self, tmp_path: Path):
-        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
         kb.knowledge_path.write_text("prior knowledge")
         target = tmp_path / "target"
         target.mkdir()
@@ -579,14 +568,14 @@ class TestAppendOnlyInject:
 
 class TestAppendOnlyUpdate:
     async def test_update_skips_missing_shared_file(self, tmp_path: Path):
-        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
         await kb.update(SessionFiles(diagnosis=tmp_path / "nonexistent.md"))
         assert not kb.knowledge_path.exists()
 
     async def test_update_skips_empty_content(self, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("<benchmark_result>only this</benchmark_result>")
-        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
         await kb.update(SessionFiles(diagnosis=shared))
         assert not kb.knowledge_path.exists()
 
@@ -594,7 +583,7 @@ class TestAppendOnlyUpdate:
     async def test_update_appends_summary(self, mock_llm, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
 
         mock_llm.return_value = "session summary"
         await kb.update(SessionFiles(diagnosis=shared))
@@ -608,7 +597,7 @@ class TestAppendOnlyUpdate:
     async def test_update_appends_multiple(self, mock_llm, tmp_path: Path):
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
-        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+        kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
 
         mock_llm.return_value = "summary 1"
         await kb.update(SessionFiles(diagnosis=shared))
@@ -624,24 +613,23 @@ class TestAppendOnlyUpdate:
 
 class TestCreateKnowledgeBase:
     def test_structured(self, tmp_path: Path):
-        kb = create_knowledge_base("structured", tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+        kb = create_knowledge_base("structured", tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
         assert isinstance(kb, StructuredKnowledgeBase)
 
     def test_append_only(self, tmp_path: Path):
         kb = create_knowledge_base(
-            "append-only", tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver
+            "append-only", tmp_path / "kb", renderer=_renderer, driver=_mock_driver
         )
         assert isinstance(kb, AppendOnlyKnowledgeBase)
 
     def test_invalid_raises(self, tmp_path: Path):
         with pytest.raises(ValueError, match="Unknown kb_type"):
-            create_knowledge_base("invalid", tmp_path / "kb", model_id="m", renderer=_renderer, driver=_mock_driver)
+            create_knowledge_base("invalid", tmp_path / "kb", renderer=_renderer, driver=_mock_driver)
 
     def test_include_incident_files_forwarded(self, tmp_path: Path):
         kb = create_knowledge_base(
             "structured",
             tmp_path / "kb",
-            model_id="m",
             config=CrucibleConfig(include_incident_files=False),
             renderer=_renderer,
             driver=_mock_driver,
@@ -653,7 +641,6 @@ class TestCreateKnowledgeBase:
         kb = create_knowledge_base(
             "structured",
             tmp_path / "kb",
-            model_id="m",
             config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
             driver=_mock_driver,
@@ -665,7 +652,6 @@ class TestCreateKnowledgeBase:
         kb = create_knowledge_base(
             "append-only",
             tmp_path / "kb",
-            model_id="m",
             config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
             driver=_mock_driver,
@@ -683,7 +669,6 @@ class TestIncludeBenchmarkResults:
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="test-app",
             config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
@@ -703,7 +688,6 @@ class TestIncludeBenchmarkResults:
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="test-app",
             config=CrucibleConfig(include_benchmark_results=False),
             renderer=_renderer,
@@ -722,7 +706,6 @@ class TestIncludeBenchmarkResults:
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = AppendOnlyKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
             driver=_mock_driver,
@@ -740,7 +723,6 @@ class TestIncludeBenchmarkResults:
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = AppendOnlyKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             config=CrucibleConfig(include_benchmark_results=False),
             renderer=_renderer,
             driver=_mock_driver,
@@ -757,7 +739,6 @@ class TestIncludeBenchmarkResults:
         shared.write_text("   ")
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="test-app",
             config=CrucibleConfig(include_benchmark_results=True),
             renderer=_renderer,
@@ -815,7 +796,7 @@ class TestCitationValidation:
             ]
         )
         kb = StructuredKnowledgeBase(
-            tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer, driver=mock_driver
+            tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=mock_driver
         )
 
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
@@ -837,7 +818,7 @@ class TestCitationValidation:
         mock_driver = _make_mock_driver()
         mock_driver.run = AsyncMock(return_value=_AgentResult(output=good_output, completed=True, messages=[]))
         kb = StructuredKnowledgeBase(
-            tmp_path / "kb", model_id="m", app_name="test-app", renderer=_renderer, driver=mock_driver
+            tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=mock_driver
         )
 
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
@@ -1153,7 +1134,6 @@ def tmp_unified_kb(tmp_path: Path) -> tuple[StructuredKnowledgeBase, Path, Path]
     target_dir.mkdir()
     kb = StructuredKnowledgeBase(
         kb_dir,
-        model_id="test-model",
         app_name="test-app",
         config=_unified_config,
         renderer=_renderer,
@@ -1225,7 +1205,6 @@ class TestUnifiedKBUpdate:
         shared.write_text("session data")
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="test-app",
             config=_unified_config,
             renderer=_renderer,
@@ -1246,7 +1225,7 @@ class TestUnifiedKBDistillLessons:
     async def test_reads_root_summary(self, mock_llm, tmp_path: Path):
         kb_dir = tmp_path / "kb"
         kb = StructuredKnowledgeBase(
-            kb_dir, model_id="m", app_name="test-app", config=_unified_config, renderer=_renderer, driver=_mock_driver
+            kb_dir, app_name="test-app", config=_unified_config, renderer=_renderer, driver=_mock_driver
         )
         kb.summary_path.write_text("unified summary content")
         mock_llm.return_value = "lessons from unified"
@@ -1261,7 +1240,6 @@ class TestUnifiedKBDistillLessons:
     async def test_skips_when_no_summary(self, mock_llm, tmp_path: Path):
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="test-app",
             config=_unified_config,
             renderer=_renderer,
@@ -1296,7 +1274,6 @@ class TestUnifiedKBSeed:
 
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             config=_unified_config,
@@ -1317,7 +1294,6 @@ class TestUnifiedKBSeed:
 
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
-            model_id="m",
             app_name="myapp",
             seed_kb_dir=seed_dir,
             config=_unified_config,

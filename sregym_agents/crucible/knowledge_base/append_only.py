@@ -26,7 +26,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
     def __init__(
         self,
         kb_dir: Path,
-        model_id: str,
         app_name: str = "unknown",
         *,
         config: CrucibleConfig | None = None,
@@ -39,7 +38,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
             config = _CrucibleConfig()
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
-        self.model_id = model_id
         self.app_name = app_name
         self.include_benchmark_results = config.include_benchmark_results
         self.prompts = renderer

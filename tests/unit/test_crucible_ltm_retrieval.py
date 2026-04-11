@@ -76,7 +76,6 @@ def _make_deps(
     lt_summary_file: Path | None = None,
     incidents_dir: Path | None = None,
     model_id: TestModel | None = None,
-    trajectory_path: Path | None = None,
     run_subagent: AsyncMock | None = None,
 ) -> SREDeps:
     shared_path = tmp_path / "session.md"
@@ -89,7 +88,6 @@ def _make_deps(
         lt_summary_file=lt_summary_file,
         incidents_dir=incidents_dir,
         model_id=model_id if model_id is not None else TestModel(),
-        trajectory_path=trajectory_path,
         run_subagent=run_subagent,
     )
 
