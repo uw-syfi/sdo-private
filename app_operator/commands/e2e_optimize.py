@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[reportMissingImports]
 
+from app_operator.config import DSPyOptimizationConfig
 from app_operator.config import load_config as load_app_config
 from app_operator.dspy_integration import EvalExecuteOptimizer
 from app_operator.experiment_naming import normalize_experiment_token
@@ -76,15 +78,21 @@ def load_config(config_path: Path) -> dict[str, Any]:
     if "output_prefix" not in config:
         config["output_prefix"] = None  # Default: no prefix (write to optimized/)
 
+    dspy_opt_overrides = _validate_dspy_optimization_overrides(config.get("dspy_optimization"))
+    if dspy_opt_overrides:
+        config["dspy_optimization"] = dspy_opt_overrides
+
     return config
 
 
 def _infer_llm_provider(model: str | None, agent_provider: str) -> str:
     """Infer the LLM API provider from the model string for rate limit detection.
 
-    The experiment config ``provider`` field (rlm, subagent, hybrid) identifies
-    the agent architecture, not the LLM API.  Rate limit detection needs the
-    actual LLM API provider (gemini, openai, anthropic, etc.).
+    The experiment config ``provider`` field can name the agent architecture
+    rather than the LLM API. Today ``hybrid`` is the supported architecture;
+    legacy configs may still mention ``rlm`` or ``subagent``. Rate limit
+    detection needs the actual LLM API provider (gemini, openai, anthropic,
+    etc.).
 
     Args:
         model: litellm model string, e.g. ``"vertex_ai/gemini-2.5-pro"``.
@@ -94,7 +102,9 @@ def _infer_llm_provider(model: str | None, agent_provider: str) -> str:
     Returns:
         LLM provider string suitable for ``detect_rate_limit_error()``.
     """
-    # Agent architecture names that are NOT LLM providers
+    # Agent architecture names that are NOT LLM providers.
+    # ``rlm`` and ``subagent`` are retained here for historical experiment
+    # configs even though ``hybrid`` is the only supported public backend.
     _architecture_names = {"rlm", "subagent", "hybrid"}
 
     if model:
@@ -121,6 +131,51 @@ def _validate_app_paths(apps: list[Path], role: str) -> bool:
     for app in missing:
         logger.error(f"{role} app path does not exist: {app}")
     return False
+
+
+def _validate_dspy_optimization_overrides(overrides: Any) -> dict[str, Any]:
+    """Validate optional [dspy_optimization] table from e2e config."""
+    if overrides is None:
+        return {}
+    if not isinstance(overrides, dict):
+        raise ValueError("[dspy_optimization] must be a TOML table")
+
+    valid_keys = {field.name for field in fields(DSPyOptimizationConfig)}
+    invalid_keys = sorted(set(overrides.keys()) - valid_keys)
+    if invalid_keys:
+        raise ValueError(f"Invalid [dspy_optimization] keys: {invalid_keys}. Valid keys: {sorted(valid_keys)}")
+
+    # Merge onto defaults to reuse existing type/range validation.
+    defaults = DSPyOptimizationConfig()
+    merged = {field.name: getattr(defaults, field.name) for field in fields(DSPyOptimizationConfig)}
+    merged.update(overrides)
+    DSPyOptimizationConfig(**merged)
+    return dict(overrides)
+
+
+def _apply_dspy_optimization_overrides(
+    current_optimization: Any,
+    overrides: dict[str, Any],
+) -> DSPyOptimizationConfig:
+    """Return effective DSPy optimization config after applying experiment overrides."""
+    if not overrides:
+        if isinstance(current_optimization, DSPyOptimizationConfig):
+            return current_optimization
+        # Build a validated config from whatever fields the loaded object exposes.
+        base = DSPyOptimizationConfig()
+        merged = {field.name: getattr(base, field.name) for field in fields(DSPyOptimizationConfig)}
+        for field in fields(DSPyOptimizationConfig):
+            if hasattr(current_optimization, field.name):
+                merged[field.name] = getattr(current_optimization, field.name)
+        return DSPyOptimizationConfig(**merged)
+
+    base = DSPyOptimizationConfig()
+    merged = {field.name: getattr(base, field.name) for field in fields(DSPyOptimizationConfig)}
+    for field in fields(DSPyOptimizationConfig):
+        if hasattr(current_optimization, field.name):
+            merged[field.name] = getattr(current_optimization, field.name)
+    merged.update(overrides)
+    return DSPyOptimizationConfig(**merged)
 
 
 def _replace_in_agent_section(
@@ -266,6 +321,11 @@ def _init_experiment(source_app: Path, work_dir: Path, name_suffix: str) -> Path
     if sds_dir.exists():
         shutil.rmtree(sds_dir)
 
+    # Seed .sds/ from .sds-seed/ in the source app if present
+    sds_seed_dir = source_app / ".sds-seed"
+    if sds_seed_dir.exists():
+        shutil.copytree(sds_seed_dir, sds_dir)
+
     # Init git (use -b only on git >= 2.28; fall back to symbolic-ref)
     init_result = subprocess.run(
         ["git", "init", "-b", "main"],
@@ -377,28 +437,52 @@ def run_command(args: argparse.Namespace) -> int:
     try:
         config_path = Path(args.config)
         config = load_config(config_path)
-    except (OSError, KeyError, ValueError) as e:
+    except (OSError, KeyError, ValueError, TypeError) as e:
         logger.error(f"Failed to load config: {e}")
         return 1
 
     work_dir = Path(config.get("work_dir", args.work_dir)).resolve()
     iterations = config["iterations"]
     prompts = config["prompts"]
-    train_apps = [Path(p).resolve() for p in config["training"]["apps"]]
-    val_apps = [Path(p).resolve() for p in config.get("validation", {}).get("apps", [])]
+    train_app_paths = config["training"]["apps"]
+    val_app_paths = config.get("validation", {}).get("apps", [])
     inter_run_delay = config["inter_run_delay"]
     max_retries = config["max_retries"]
     rate_limit_backoff = config["rate_limit_backoff"]
     output_prefix = config["output_prefix"]
     provider_override = config.get("provider")  # Optional per-experiment provider
     model_override = config.get("model")  # Optional per-experiment model
+    dspy_opt_overrides = config.get("dspy_optimization", {})
 
+    if isinstance(iterations, bool) or not isinstance(iterations, int):
+        logger.error(f"iterations must be an integer, got {type(iterations).__name__}")
+        return 1
     if iterations < 1:
         logger.error(f"iterations must be >= 1, got {iterations}")
+        return 1
+    if not isinstance(prompts, list):
+        logger.error(f"prompts must be a list, got {type(prompts).__name__}")
         return 1
     if not prompts:
         logger.error("prompts must contain at least one prompt name")
         return 1
+    if not isinstance(train_app_paths, list):
+        logger.error(f"training.apps must be a list, got {type(train_app_paths).__name__}")
+        return 1
+    if not train_app_paths:
+        logger.error("training.apps must contain at least one app path")
+        return 1
+    if not isinstance(val_app_paths, list):
+        logger.error(f"validation.apps must be a list when provided, got {type(val_app_paths).__name__}")
+        return 1
+
+    try:
+        train_apps = [Path(p).resolve() for p in train_app_paths]
+        val_apps = [Path(p).resolve() for p in val_app_paths]
+    except TypeError as e:
+        logger.error(f"App paths must be strings or path-like values: {e}")
+        return 1
+
     if not _validate_app_paths(train_apps, "Training"):
         return 1
     if val_apps and not _validate_app_paths(val_apps, "Validation"):
@@ -425,160 +509,260 @@ def run_command(args: argparse.Namespace) -> int:
             logger.info(f"Provider override: {provider_override}")
         if model_override:
             logger.info(f"Model override: {model_override}")
+        if dspy_opt_overrides:
+            logger.info(f"DSPy optimization overrides: {dspy_opt_overrides}")
         logger.info("Dry run validation successful.")
         return 0
 
     work_dir.mkdir(parents=True, exist_ok=True)
     state_manager = StateManager(work_dir)
 
-    logger.info(f"Starting E2E optimization for {iterations} iterations")
-    logger.info(f"Prompts: {prompts}")
-    logger.info(f"Training apps: {[a.name for a in train_apps]}")
-    if output_prefix:
-        logger.info(f"Output prefix: {output_prefix} (will write to optimized/{output_prefix}/)")
-    if provider_override:
-        logger.info(f"Provider override: {provider_override}")
-    if model_override:
-        logger.info(f"Model override: {model_override}")
-    logger.info(
-        f"Rate limit handling: max_retries={max_retries}, "
-        f"backoff={rate_limit_backoff}s, inter_run_delay={inter_run_delay}s"
-    )
-
-    # Load app config to get provider for rate limit detection.
-    # provider_override is the *agent architecture* (rlm, subagent, hybrid)
-    # which is NOT the LLM API provider.  Derive the LLM provider from the
-    # model string so rate limit detection works correctly.
-    app_location = None
-    provider_model = model_override
     try:
-        app_config = load_app_config(str(base_dir))
-        agent_provider = provider_override or app_config.agent.backend
-        app_location = app_config.agent.location
-        provider_model = model_override or app_config.agent.model
-    except (OSError, KeyError, ValueError) as e:
-        logger.warning(f"Failed to load app config, assuming 'gemini' provider: {e}")
-        agent_provider = provider_override or "gemini"
-    provider = _infer_llm_provider(provider_model, agent_provider)
+        logger.info(f"Starting E2E optimization for {iterations} iterations")
+        logger.info(f"Prompts: {prompts}")
+        logger.info(f"Training apps: {[a.name for a in train_apps]}")
+        if output_prefix:
+            logger.info(f"Output prefix: {output_prefix} (will write to optimized/{output_prefix}/)")
+        if provider_override:
+            logger.info(f"Provider override: {provider_override}")
+        if model_override:
+            logger.info(f"Model override: {model_override}")
+        if dspy_opt_overrides:
+            logger.info(f"DSPy optimization overrides: {dspy_opt_overrides}")
+        logger.info(
+            f"Rate limit handling: max_retries={max_retries}, "
+            f"backoff={rate_limit_backoff}s, inter_run_delay={inter_run_delay}s"
+        )
 
-    current_version = state_manager.get_current_version()
+        # Load app config to get provider for rate limit detection.
+        # provider_override is the agent architecture label, not necessarily
+        # the LLM API provider. Derive the LLM provider from the model string
+        # so rate limit detection works correctly.
+        app_location = None
+        provider_model = model_override
+        try:
+            app_config = load_app_config(str(base_dir))
+            agent_provider = provider_override or app_config.agent.backend
+            app_location = app_config.agent.location
+            provider_model = model_override or app_config.agent.model
+        except (OSError, KeyError, ValueError) as e:
+            logger.warning(f"Failed to load app config, assuming 'gemini' provider: {e}")
+            agent_provider = provider_override or "gemini"
+        provider = _infer_llm_provider(provider_model, agent_provider)
 
-    for i in range(1, iterations + 1):
-        if state_manager.state["current_iteration"] > i:
-            logger.info(f"Skipping Iteration {i} (already completed)")
-            continue
+        current_version = state_manager.get_current_version()
 
-        logger.info(f"\n=== Iteration {i}/{iterations} ===")
+        for i in range(1, iterations + 1):
+            if state_manager.state["current_iteration"] > i:
+                logger.info(f"Skipping Iteration {i} (already completed)")
+                continue
 
-        # 1. + 2. Generate candidates, evaluate by running operator, keep best (EvalExecute)
-        logger.info("Running eval-execute optimization...")
+            logger.info(f"\n=== Iteration {i}/{iterations} ===")
 
-        if state_manager.is_optimization_done(i):
-            logger.info("Skipping optimization (already done)")
-            current_version = state_manager.get_current_version()
-        else:
-            # Load DSPy config from project root
-            try:
-                app_config = load_app_config(str(base_dir))
-                dspy_config = app_config.dspy
-                logger.info(
-                    f"Loaded DSPy config: teacher={dspy_config.optimization.teacher_model}, "
-                    f"n_candidates={dspy_config.optimization.n_candidates}"
-                )
-                app_location = app_config.agent.location
-            except (OSError, KeyError, ValueError) as e:
-                logger.warning(f"Failed to load project config, using defaults: {e}")
-                from app_operator.dspy_integration import DSPyConfig
+            # 1. + 2. Generate candidates, evaluate by running operator, keep best (EvalExecute)
+            logger.info("Running eval-execute optimization...")
 
-                dspy_config = DSPyConfig()
+            if state_manager.is_optimization_done(i):
+                logger.info("Skipping optimization (already done)")
+                current_version = state_manager.get_current_version()
+            else:
+                # Load DSPy config from project root
+                try:
+                    app_config = load_app_config(str(base_dir))
+                    dspy_config = app_config.dspy
+                    dspy_config.optimization = _apply_dspy_optimization_overrides(
+                        dspy_config.optimization,
+                        dspy_opt_overrides,
+                    )
+                    logger.info(
+                        f"Loaded DSPy config: teacher={dspy_config.optimization.teacher_model}, "
+                        f"n_candidates={dspy_config.optimization.n_candidates}, "
+                        f"selection_mode={dspy_config.optimization.selection_mode}"
+                    )
+                    app_location = app_config.agent.location
+                except (OSError, KeyError, ValueError) as e:
+                    logger.warning(f"Failed to load project config, using defaults: {e}")
+                    from app_operator.dspy_integration import DSPyConfig
 
-            try:
-                next_version = f"v{i}"
-                if output_prefix:
-                    output_dir = prompts_dir / "optimized" / output_prefix / next_version
-                else:
-                    output_dir = prompts_dir / "optimized" / next_version
+                    dspy_config = DSPyConfig()
+                    dspy_config.optimization = _apply_dspy_optimization_overrides(
+                        dspy_config.optimization,
+                        dspy_opt_overrides,
+                    )
 
-                eval_optimizer = EvalExecuteOptimizer(
-                    config=dspy_config,
-                    prompts_dir=prompts_dir,
-                    project_root=base_dir,
-                    n_candidates=dspy_config.optimization.n_candidates,
-                    vertex_location=app_location,
-                )
-                result = eval_optimizer.optimize(
-                    prompt_names=prompts,
-                    train_apps=train_apps,
-                    work_dir=work_dir,
-                    output_dir=output_dir,
-                    iteration=i,
-                    current_version=current_version,
-                    provider=provider,
-                    max_retries=max_retries,
-                    rate_limit_backoff=rate_limit_backoff,
-                    inter_run_delay=inter_run_delay,
-                    provider_override=provider_override,
-                    model_override=model_override,
-                    output_prefix=output_prefix,
-                )
-
-                if result["success"]:
+                try:
+                    next_version = f"v{i}"
                     if output_prefix:
-                        current_version = f"{output_prefix}/{next_version}"
+                        output_dir = prompts_dir / "optimized" / output_prefix / next_version
                     else:
-                        current_version = next_version
-                    logger.info(f"Optimization successful. New version: {current_version}")
-                    state_manager.mark_optimization_done(current_version)
-                else:
-                    logger.error("Optimization failed.")
+                        output_dir = prompts_dir / "optimized" / next_version
+
+                    eval_optimizer = EvalExecuteOptimizer(
+                        config=dspy_config,
+                        prompts_dir=prompts_dir,
+                        project_root=base_dir,
+                        n_candidates=dspy_config.optimization.n_candidates,
+                        vertex_location=app_location,
+                    )
+                    result = eval_optimizer.optimize(
+                        prompt_names=prompts,
+                        train_apps=train_apps,
+                        work_dir=work_dir,
+                        output_dir=output_dir,
+                        iteration=i,
+                        current_version=current_version,
+                        provider=provider,
+                        max_retries=max_retries,
+                        rate_limit_backoff=rate_limit_backoff,
+                        inter_run_delay=inter_run_delay,
+                        provider_override=provider_override,
+                        model_override=model_override,
+                        output_prefix=output_prefix,
+                    )
+
+                    if result["success"]:
+                        if output_prefix:
+                            current_version = f"{output_prefix}/{next_version}"
+                        else:
+                            current_version = next_version
+                        logger.info(f"Optimization successful. New version: {current_version}")
+                        state_manager.mark_optimization_done(current_version)
+                    else:
+                        logger.error("Optimization failed.")
+                        return 1
+
+                except (OSError, RuntimeError, ValueError) as e:
+                    logger.error(f"Optimization error: {e}")
                     return 1
 
-            except (OSError, RuntimeError, ValueError) as e:
-                logger.error(f"Optimization error: {e}")
-                return 1
+            # 3. Validation (Optional)
+            if val_apps:
+                logger.info("Running validation...")
+                for app_path in val_apps:
+                    app_name = app_path.name
+                    if state_manager.is_val_app_completed(i, app_name):
+                        logger.info(f"Skipping validation for {app_name} (already done)")
+                        continue
 
-        # 3. Validation (Optional)
-        if val_apps:
-            logger.info("Running validation...")
-            for app_path in val_apps:
-                app_name = app_path.name
-                if state_manager.is_val_app_completed(i, app_name):
-                    logger.info(f"Skipping validation for {app_name} (already done)")
-                    continue
+                    exp_path = _init_experiment(app_path, work_dir, f"iter{i}_val")
+                    _update_sds_toml(
+                        exp_path,
+                        use_seeds=False,
+                        use_optimized=True,
+                        optimized_version=current_version,
+                        project_root=base_dir,
+                        provider_override=provider_override,
+                        model_override=model_override,
+                    )
 
-                exp_path = _init_experiment(app_path, work_dir, f"iter{i}_val")
-                _update_sds_toml(
-                    exp_path,
-                    use_seeds=False,
-                    use_optimized=True,
-                    optimized_version=current_version,
-                    project_root=base_dir,
-                    provider_override=provider_override,
-                    model_override=model_override,
-                )
+                    logger.info(f"Running validation on {exp_path.name}...")
+                    cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
 
-                logger.info(f"Running validation on {exp_path.name}...")
-                cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
+                    _result, success, error_msg = run_subprocess_with_rate_limit_handling(
+                        cmd=cmd,
+                        provider=provider,
+                        max_retries=max_retries,
+                        base_delay=5,
+                        rate_limit_backoff=rate_limit_backoff,
+                        operation_name=f"Validation run: {exp_path.name}",
+                    )
+                    if not success:
+                        logger.warning(f"Validation failed for {app_name}: {error_msg or 'unknown error'}. Continuing.")
+                        continue
+                    state_manager.mark_val_app_completed(app_name)
 
-                _result, success, error_msg = run_subprocess_with_rate_limit_handling(
-                    cmd=cmd,
-                    provider=provider,
-                    max_retries=max_retries,
-                    base_delay=5,
-                    rate_limit_backoff=rate_limit_backoff,
-                    operation_name=f"Validation run: {exp_path.name}",
-                )
-                if not success:
-                    logger.warning(f"Validation failed for {app_name}: {error_msg or 'unknown error'}. Continuing.")
-                    continue
-                state_manager.mark_val_app_completed(app_name)
+                    # Add delay before next validation run
+                    if app_name != val_apps[-1].name:  # Don't delay after last app
+                        logger.info(f"Waiting {inter_run_delay}s before next run...")
+                        time.sleep(inter_run_delay)
 
-                # Add delay before next validation run
-                if app_name != val_apps[-1].name:  # Don't delay after last app
-                    logger.info(f"Waiting {inter_run_delay}s before next run...")
-                    time.sleep(inter_run_delay)
+            state_manager.advance_iteration()
+            _cleanup_disk_between_iterations(work_dir)
 
-        state_manager.advance_iteration()
+        logger.info("End-to-end optimization complete.")
+        return 0
+    except KeyboardInterrupt:
+        logger.warning("Interrupted by user. Cleaning up active experiment containers...")
+        _cleanup_experiment_containers(work_dir)
+        return 130
 
-    logger.info("End-to-end optimization complete.")
-    return 0
+
+def _cleanup_disk_between_iterations(work_dir: Path) -> None:
+    """Reclaim disk space between iterations.
+
+    Prunes dangling Docker images/build cache and removes Gemini CLI
+    session files from completed experiment directories to prevent
+    disk exhaustion across many iterations.
+    """
+    # 1. Prune dangling Docker images and build cache
+    try:
+        subprocess.run(
+            ["docker", "image", "prune", "-f"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        subprocess.run(
+            ["docker", "builder", "prune", "-f", "--filter", "until=1h"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        logger.info("Pruned dangling Docker images and stale build cache")
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as e:
+        logger.warning(f"Docker prune failed (non-fatal): {e}")
+
+    # 2. Remove Gemini CLI session files from completed experiment dirs
+    #    These can accumulate to hundreds of MBs across iterations.
+    removed = 0
+    for session_dir in work_dir.glob("iter*/.sds/trajectories/gemini_sessions"):
+        try:
+            shutil.rmtree(session_dir)
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        logger.info(f"Removed Gemini session dirs from {removed} completed run(s)")
+
+
+def _cleanup_experiment_containers(work_dir: Path) -> None:
+    """Best-effort stop of Compose projects under an experiment workdir.
+
+    This is used on user interrupts so stale containers do not contaminate
+    later experiment runs with lingering ports or orphaned services.
+    """
+    compose_files = sorted(work_dir.glob("iter*/docker-compose.yml"))
+    if not compose_files:
+        logger.info("No experiment compose projects found to clean up.")
+        return
+
+    for compose_file in compose_files:
+        project_dir = compose_file.parent
+        project_name = project_dir.name
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "compose",
+                    "-f",
+                    str(compose_file),
+                    "--project-name",
+                    project_name,
+                    "down",
+                    "--volumes",
+                    "--remove-orphans",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as e:
+            logger.warning(f"Cleanup failed for {project_name} (non-fatal): {e}")
+            continue
+
+        if result.returncode == 0:
+            logger.info(f"Cleaned up Compose project {project_name}")
+            continue
+
+        stderr = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        logger.warning(f"Cleanup exited non-zero for {project_name}: {stderr}")
