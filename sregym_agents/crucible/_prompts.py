@@ -30,6 +30,7 @@ class PromptRenderer:
     """
 
     def __init__(self, prompt_version: str) -> None:
+        self._version = prompt_version
         self._env = _make_env(prompt_version)
 
     def render(self, template_name: str, **kwargs: object) -> str:

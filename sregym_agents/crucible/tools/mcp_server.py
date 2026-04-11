@@ -19,7 +19,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import socket
 from pathlib import Path
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -44,11 +46,45 @@ mcp = FastMCP("crucible-tools")
 
 
 # ---------------------------------------------------------------------------
+# IPC helpers
+# ---------------------------------------------------------------------------
+
+
+def _send_signal(socket_path: str, data: dict[str, Any]) -> None:
+    """Send a JSON signal to the driver via Unix domain socket."""
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(socket_path)
+        sock.sendall(json.dumps(data).encode())
+        sock.close()
+    except Exception as exc:
+        logger.warning("Failed to send signal via socket %s: %s", socket_path, exc)
+
+
+def _write_result_file(path: str, data: dict[str, Any]) -> None:
+    """Write a JSON result to the result file (atomic)."""
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        import os
+
+        os.replace(tmp, path)
+    except Exception as exc:
+        logger.warning("Failed to write result file %s: %s", path, exc)
+
+
+# ---------------------------------------------------------------------------
 # Tool registration helpers
 # ---------------------------------------------------------------------------
 
 
-def register_sre_tools(deps: SREDeps) -> None:
+def register_sre_tools(
+    deps: SREDeps,
+    *,
+    signal_socket_path: str | None = None,
+    result_file_path: str | None = None,
+) -> None:
     """Register SRE KB tools on the MCP server."""
 
     @mcp.tool(name="triage_cluster")
@@ -72,14 +108,17 @@ def register_sre_tools(deps: SREDeps) -> None:
         try:
             return await search_prior_incidents_impl(deps, observed_symptoms)
         except LTMShortCircuit as exc:
-            return json.dumps(
-                {
-                    "short_circuit": True,
-                    "confirmed": exc.confirmed,
-                    "confirmed_slugs": exc.confirmed_slugs,
-                    "iteration": exc.iteration,
-                }
-            )
+            signal = {
+                "short_circuit": True,
+                "confirmed": exc.confirmed,
+                "confirmed_slugs": exc.confirmed_slugs,
+                "iteration": exc.iteration,
+            }
+            if signal_socket_path:
+                _send_signal(signal_socket_path, signal)
+            if result_file_path:
+                _write_result_file(result_file_path, signal)
+            return json.dumps(signal)
 
     @mcp.tool(name="search_prior_mitigations")
     async def search_prior_mitigations(  # pyright: ignore[reportUnusedFunction]
@@ -95,13 +134,16 @@ def register_sre_tools(deps: SREDeps) -> None:
         try:
             return await search_prior_mitigations_impl(deps, root_cause, failed_attempts)
         except LTMMitigationShortCircuit as exc:
-            return json.dumps(
-                {
-                    "short_circuit": True,
-                    "applied": exc.applied,
-                    "iteration": exc.iteration,
-                }
-            )
+            signal = {
+                "short_circuit": True,
+                "applied": exc.applied,
+                "iteration": exc.iteration,
+            }
+            if signal_socket_path:
+                _send_signal(signal_socket_path, signal)
+            if result_file_path:
+                _write_result_file(result_file_path, signal)
+            return json.dumps(signal)
 
     @mcp.tool(name="check_hypothesis_coverage")
     async def check_hypothesis_coverage(hypothesis: str) -> str:  # pyright: ignore[reportUnusedFunction]
@@ -114,8 +156,45 @@ def register_sre_tools(deps: SREDeps) -> None:
         """
         return await check_hypothesis_coverage_impl(deps, hypothesis)
 
+    # submit_answer — structured output for AgentCLIDriver
+    if result_file_path:
 
-def register_judge_tools(deps: JudgeDeps) -> None:
+        @mcp.tool(name="submit_answer")
+        def submit_answer(  # pyright: ignore[reportUnusedFunction]
+            answer: str,
+            justification: str,
+            causal_chain: str = "",
+            reflection: str = "",
+        ) -> str:
+            """Submit your final answer when you have completed your investigation.
+
+            Args:
+                answer: Concise diagnosis or description of applied mitigation.
+                justification: Evidence and reasoning supporting the answer.
+                causal_chain: Full causal chain (diagnosis only). Leave empty for mitigation.
+                reflection: Recovery analysis (recovery only). Usually leave empty.
+            """
+            _write_result_file(
+                result_file_path,
+                {
+                    "type": "answer",
+                    "data": {
+                        "answer": answer,
+                        "justification": justification,
+                        "causal_chain": causal_chain,
+                        "reflection": reflection,
+                    },
+                },
+            )
+            return "Answer submitted successfully."
+
+
+def register_judge_tools(
+    deps: JudgeDeps,
+    *,
+    signal_socket_path: str | None = None,
+    result_file_path: str | None = None,
+) -> None:
     """Register judge tools on the MCP server."""
 
     @mcp.tool(name="submit_independent_findings")
@@ -145,7 +224,18 @@ def register_judge_tools(deps: JudgeDeps) -> None:
             reasoning: Explanation for the verdict.
             submission_ans: The agent's answer to forward to the benchmark.
         """
-        return await submit_verdict_impl(deps, verdict, reasoning, submission_ans)
+        result = await submit_verdict_impl(deps, verdict, reasoning, submission_ans)
+        if result_file_path:
+            _write_result_file(
+                result_file_path,
+                {
+                    "type": "verdict",
+                    "submitted": True,
+                    "verdict": "APPROVED" if verdict else "REJECTED",
+                    "answer": submission_ans if isinstance(submission_ans, str) else list(submission_ans),
+                },
+            )
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +277,53 @@ def _build_parser() -> argparse.ArgumentParser:
     # Judge-specific
     parser.add_argument("--submit-mcp-url", default=None, help="Benchmark MCP submission URL (judge mode).")
     parser.add_argument("--hypothesis-text", default="", help="Agent hypothesis text (judge mode).")
+    # IPC
+    parser.add_argument("--signal-socket", default=None, help="Unix socket path for short-circuit signaling.")
+    parser.add_argument("--result-file", default=None, help="Path to write structured output / verdict state.")
+    # Backend for subagent dispatch
+    parser.add_argument(
+        "--backend",
+        default="agent-cli",
+        choices=["pydantic-ai", "agent-cli"],
+        help="Backend for subagent dispatch within KB tools.",
+    )
+    parser.add_argument("--provider", default="claude", help="CLI agent provider (agent-cli backend only).")
     return parser
+
+
+def _create_run_subagent(backend: str, model: str, provider: str):
+    """Create a ``run_subagent`` closure for KB tool subagent dispatch."""
+    if backend == "agent-cli":
+        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+
+        driver: Any = AgentCLIDriver(provider=provider, model=model)
+    else:
+        from sregym_agents.crucible.backend.pydantic_ai_driver import PydanticAIDriver
+
+        driver = PydanticAIDriver(model)
+
+    async def _run_subagent(
+        *,
+        prompt: str,
+        output_type: type,
+        tools: list[Any] | None = None,
+        agent_name: str = "",
+        model_settings: dict[str, Any] | None = None,
+        usage_collector: Any | None = None,
+    ) -> Any:
+        result = await driver.run(
+            prompt=prompt,
+            output_type=output_type,
+            tools=tools,
+            agent_name=agent_name,
+            model_settings=model_settings,
+            usage_collector=usage_collector,
+        )
+        if result.output is None:
+            raise RuntimeError(f"Subagent {agent_name} produced no output")
+        return result.output
+
+    return _run_subagent
 
 
 def main() -> None:
@@ -199,6 +335,9 @@ def main() -> None:
     shared_file = SharedFile(Path(args.shared_file))
     shared_state = SharedState()
     renderer = PromptRenderer(args.prompt_version)
+
+    # Create run_subagent closure for KB tool subagent dispatch
+    run_subagent = _create_run_subagent(args.backend, args.model, args.provider)
 
     if args.tools in ("sre", "all"):
         sre_deps = SREDeps(
@@ -215,8 +354,13 @@ def main() -> None:
             mitigation_playbooks_dir=Path(args.mitigation_playbooks_dir) if args.mitigation_playbooks_dir else None,
             ltm_call_budget=args.ltm_call_budget,
             enable_ltm_verified_direct_submit=args.enable_ltm_verified_direct_submit,
+            run_subagent=run_subagent,
         )
-        register_sre_tools(sre_deps)
+        register_sre_tools(
+            sre_deps,
+            signal_socket_path=args.signal_socket,
+            result_file_path=args.result_file,
+        )
 
     if args.tools in ("judge", "all"):
         if not args.submit_mcp_url:
@@ -231,7 +375,11 @@ def main() -> None:
             hypothesis_text=args.hypothesis_text,
             state=shared_state,
         )
-        register_judge_tools(judge_deps)
+        register_judge_tools(
+            judge_deps,
+            signal_socket_path=args.signal_socket,
+            result_file_path=args.result_file,
+        )
 
     mcp.run(transport="stdio")
 

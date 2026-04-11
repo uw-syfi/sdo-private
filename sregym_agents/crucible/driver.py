@@ -45,16 +45,20 @@ def create_driver(
 ) -> AgentDriver:
     """Create an AgentDriver based on the configured backend.
 
-    Returns a ``PydanticAIDriver`` for ``backend="pydantic-ai"`` (default).
-    Phase 4 will add the ``AgentCLIDriver`` path for ``backend="agent-cli"``.
+    Returns a ``PydanticAIDriver`` for ``backend="pydantic-ai"`` (default)
+    or an ``AgentCLIDriver`` for ``backend="agent-cli"``.
     """
+    if config.backend == "agent-cli":
+        from sregym_agents.crucible.backend.agent_cli_driver import AgentCLIDriver
+
+        return AgentCLIDriver(
+            provider=config.agent_cli_provider,
+            model=model,
+        )
+
     from sregym_agents.crucible.backend import PydanticAIDriver
     from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
 
-    if config.backend == "agent-cli":
-        raise NotImplementedError(
-            "agent-cli backend is not yet available. It will be added in Phase 4 of the backend refactor."
-        )
     return PydanticAIDriver(
         model,
         trajectory_path=trajectory_path,

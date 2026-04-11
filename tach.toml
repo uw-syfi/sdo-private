@@ -123,4 +123,5 @@ path = "sregym_agents"
 depends_on = [
     "libs.pydantic_agent",
     "libs.agent_mw",
+    "libs.agent_cli",
 ]
