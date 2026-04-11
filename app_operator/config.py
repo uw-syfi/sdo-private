@@ -336,7 +336,7 @@ class FaultInjectionConfig:
         validate_field(self.platform, "platform", str, valid_values=self.VALID_PLATFORMS)
 
 
-@dataclass
+@dataclass(init=False)
 class AgentConfig:
     backend: str = "codex"
     # Rate limiting and retry configuration
@@ -360,14 +360,43 @@ class AgentConfig:
         "hybrid",
     }
 
+    # Backward-compatible alias used by older tests and config files.
+    VALID_PROVIDERS = VALID_BACKENDS
+
+    def __init__(
+        self,
+        backend: str = "codex",
+        provider: str | None = None,
+        max_retries: int = 3,
+        retry_base_delay: int = 5,
+        rate_limit_backoff: int = 60,
+        step_limit: int | None = 1000,
+        model: str | None = None,
+        model_config: ModelConfig | None = None,
+    ) -> None:
+        if provider is not None:
+            backend = provider
+
+        self.backend = backend
+        self.max_retries = max_retries
+        self.retry_base_delay = retry_base_delay
+        self.rate_limit_backoff = rate_limit_backoff
+        self.step_limit = step_limit
+        self.model_config = model_config
+        self.__post_init__()
+
+        if model is not None:
+            self.model = model
+
     def __post_init__(self):
         """Validate configuration values after initialization."""
         validate_field(self.backend, "backend", str)
 
         # Case-insensitive check
-        if self.backend.lower() not in self.VALID_BACKENDS:
+        if self.backend.lower() not in self.VALID_PROVIDERS:
             raise ValueError(
-                f"Invalid backend: '{self.backend}'. Valid backends: {', '.join(sorted(self.VALID_BACKENDS))}"
+                f"Invalid backend/provider: '{self.backend}'. Invalid provider alias. "
+                f"Valid providers/backends: {', '.join(sorted(self.VALID_PROVIDERS))}"
             )
         # Normalize backend name
         self.backend = self.backend.lower()
@@ -379,6 +408,15 @@ class AgentConfig:
 
         if self.model_config is not None and not isinstance(self.model_config, ModelConfig):
             raise TypeError(f"model_config must be a ModelConfig or None, got {type(self.model_config).__name__}")
+
+    @property
+    def provider(self) -> str:
+        return self.backend
+
+    @provider.setter
+    def provider(self, value: str) -> None:
+        self.backend = value
+        self.__post_init__()
 
     @property
     def model(self) -> str | None:
@@ -397,7 +435,12 @@ class AgentConfig:
             try:
                 self.model_config = from_provider_and_model(self.backend, value, location=loc, thinking_budget=tb)
             except ValueError:
-                pass
+                self.model_config = ModelConfig.from_string(
+                    value,
+                    provider_hint=self.backend,
+                    location=loc,
+                    thinking_budget=tb,
+                )
         else:
             self.model_config = ModelConfig.from_string(value, location=loc, thinking_budget=tb)
 
@@ -514,7 +557,7 @@ class OperatorConfig:
 class RuntimeConfig:
     impl: str = "cli_agent"
 
-    VALID_IMPLS = {"cli_agent", "pydantic_ai"}
+    VALID_IMPLS = {"cli_agent", "langgraph", "adk", "pydantic_ai"}
 
     def __post_init__(self):
         validate_field(self.impl, "impl", str, valid_values=self.VALID_IMPLS)
@@ -615,9 +658,9 @@ class Config:
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
     def __post_init__(self):
-        if self.runtime.impl == "cli_agent" and self.agent.model is None:
+        if self.runtime.impl in {"langgraph", "adk"} and self.agent.model is None:
             raise ValueError(
-                "agent.model is required when runtime.impl is 'cli_agent'. "
+                f"agent.model must be set for {self.runtime.impl} runtime. "
                 "Set [agent] model in your sds.toml to ensure reproducible results."
             )
 
@@ -651,9 +694,12 @@ class Config:
 
         # Pop model-related flat keys - these are not AgentConfig fields but are
         # accepted in TOML for convenience and used to build model_config.
+        _raw_provider = agent_data.pop("provider", None)
         _raw_model = agent_data.pop("model", None)
         _raw_location = agent_data.pop("location", None)
         _raw_thinking_budget = agent_data.pop("thinking_budget", None)
+        if _raw_provider is not None:
+            agent_data["backend"] = _raw_provider
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
@@ -691,12 +737,23 @@ class Config:
 
         # Parse DSPy config and auto-populate runtime_model if not set
         dspy_config = cls._parse_dspy_config(dspy_data, agent_config)
+        runtime_config = RuntimeConfig(**runtime_data)
+        if (
+            runtime_config.impl == "cli_agent"
+            and "agent" in data
+            and _raw_provider is None
+            and agent_config.model is None
+        ):
+            raise ValueError(
+                "agent.model is required when runtime.impl is 'cli_agent'. "
+                "Set [agent] model in your sds.toml to ensure reproducible results."
+            )
 
         return cls(
             agent=agent_config,
             operator=cls._parse_operator_config(operator_data),
             deployment=DeploymentConfig(**deployment_data),
-            runtime=RuntimeConfig(**runtime_data),
+            runtime=runtime_config,
             rlm=RLMConfig(**rlm_data),
             features=FeaturesConfig(**features_data),
             gepa=GEPAConfig(**gepa_data),
