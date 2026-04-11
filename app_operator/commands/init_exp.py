@@ -64,6 +64,11 @@ def run_command(args: argparse.Namespace) -> int:
         if sds_dir.exists():
             shutil.rmtree(sds_dir, ignore_errors=True)
 
+        # Seed .sds/ from .sds-seed/ in the source app if present
+        sds_seed_dir = app_path / ".sds-seed"
+        if sds_seed_dir.exists():
+            shutil.copytree(sds_seed_dir, sds_dir)
+
         # Initialize new git repo
         subprocess.run(
             ["git", "init", "-b", "main"],

@@ -8,8 +8,11 @@ from dotenv import load_dotenv
 
 from app_operator.commands import (
     analyze_prompts,
+    chat,
+    classify_runs,
     e2e_optimize,
     init_exp,
+    lineage_report,
     optimize_prompts,
     plot_exp,
     run,
@@ -86,6 +89,10 @@ Examples:
     run_parser = subparsers.add_parser("run", help="Run Codex-assisted deployment on a repository")
     run.add_arguments(run_parser)
 
+    # 'chat' command
+    chat_parser = subparsers.add_parser("chat", help="Start an interactive hybrid terminal chat for a repository")
+    chat.add_arguments(chat_parser)
+
     # 'init-exp' command
     init_exp_parser = subparsers.add_parser("init-exp", help="Initialize a new experiment from an existing application")
     init_exp.add_arguments(init_exp_parser)
@@ -112,6 +119,19 @@ Examples:
     plot_exp_parser = subparsers.add_parser("plot-exp", help="Plot and compare experiment results")
     plot_exp.add_arguments(plot_exp_parser)
 
+    # 'classify-runs' command
+    classify_runs_parser = subparsers.add_parser(
+        "classify-runs", help="Classify experiment runs into quality categories"
+    )
+    classify_runs.add_arguments(classify_runs_parser)
+
+    # 'lineage-report' command
+    lineage_report_parser = subparsers.add_parser(
+        "lineage-report",
+        help="Render and validate prompt lineage DAG metadata",
+    )
+    lineage_report.add_arguments(lineage_report_parser)
+
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
 
@@ -123,6 +143,8 @@ Examples:
 
     if args.command == "run":
         return run.run_command(args)
+    if args.command == "chat":
+        return chat.run_command(args)
     if args.command == "init-exp":
         return init_exp.run_command(args)
     if args.command == "analyze-prompts":
@@ -135,6 +157,10 @@ Examples:
         return run_exp.run_command(args)
     if args.command == "plot-exp":
         return plot_exp.run_command(args)
+    if args.command == "classify-runs":
+        return classify_runs.run_command(args)
+    if args.command == "lineage-report":
+        return lineage_report.run_command(args)
     parser.print_help()
     return 1
 

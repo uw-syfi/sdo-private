@@ -25,7 +25,25 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _HEALTH_LOG_EXIT_CODE_RE = re.compile(r"^Exit Code:\s*(-?\d+)", re.MULTILINE)
+_HEALTH_LOG_VALIDATION_RE = re.compile(r"^Validation:\s*(PASSED|FAILED)", re.MULTILINE)
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+_HEALTH_LOG_TOTAL_CHECKS_RE = re.compile(r"^Total Checks:\s*(\d+)", re.MULTILINE)
+
+# Detect warning_check() used for HTTP endpoint probes — a hard check downgraded to a
+# warning.  The pattern matches any non-comment shell line that calls warning_check and
+# also includes a curl/wget probe targeting localhost.
+_WARNING_CHECK_ENDPOINT_RE = re.compile(
+    r"^\s*warning_check\b[^\n]*(?:curl|wget)\b[^\n]*https?://localhost",
+    re.MULTILINE,
+)
+_SKIPPED_CRITICAL_CHECK_RE = re.compile(
+    r"skip(?:ping)?\s+.*(?:data-tier|data tier|database|cache|mongodb|memcached).*(?:check|probe)",
+    re.IGNORECASE,
+)
+_REMOVED_CRITICAL_CHECK_RE = re.compile(
+    r"removed.*(?:data-tier|data tier|database|cache|mongodb|memcached).*(?:check|probe)",
+    re.IGNORECASE,
+)
 
 _HEALTH_STDOUT_FAILURE_PATTERNS = (
     "not running",
@@ -47,13 +65,14 @@ _HEALTH_FAILURE_REGEXES = (
 )
 
 _MONITOR_CRITICAL_PATTERNS = (
-    "critical",
-    "unhealthy",
-    "not healthy",
-    "not running",
-    "service is down",
-    "inaccessible",
-    "outage",
+    # Use regex to avoid matching "non-critical" or "critical: none"
+    re.compile(r"(?<!non-)critical(?!\s*:\s*none)", re.IGNORECASE),
+    re.compile(r"\bunhealthy\b", re.IGNORECASE),
+    re.compile(r"\bnot healthy\b", re.IGNORECASE),
+    re.compile(r"\bnot running\b", re.IGNORECASE),
+    re.compile(r"\bservice is down\b", re.IGNORECASE),
+    re.compile(r"\binaccessible\b", re.IGNORECASE),
+    re.compile(r"\boutage\b", re.IGNORECASE),
 )
 
 _EXEC_SUMMARY_RE = re.compile(r"<exec_summary>(.*?)</exec_summary>", re.DOTALL)
@@ -75,6 +94,7 @@ class RunClassification:
     health_contradictions: list[str] = field(default_factory=list)
     monitor_concerns: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    health_check_coverage_dropped: bool = False
 
 
 def classify_run(run_dir: Path) -> RunClassification:
@@ -129,20 +149,50 @@ def classify_run(run_dir: Path) -> RunClassification:
         result.monitor_concerns.extend(concerns)
 
     # --- 5. Check for telemetry inconsistency ---
-    # Trajectory call list records deployment attempts with context.attempt;
-    # compare against actual deploy log file count.
-    traj_deploy_call_count = _count_trajectory_deploy_calls(traj) if traj else 0
+    # Sum deployment entries across ALL trajectory files for this run.
+    # The operator may restart mid-deployment and create a new trajectory file,
+    # so the latest trajectory alone may not account for all deploy_attempt_*.log files.
+    traj_deploy_call_count = _count_trajectory_deploy_calls(run_dir)
 
     # --- 6. Apply classification rules ---
     is_traj_success = _is_success_status(result.trajectory_status)
 
     if not is_traj_success:
-        # Trajectory says failure
         if result.final_health_passed:
-            result.label = "telemetry_inconsistent"
-            result.reasons.append(
-                f"Trajectory status '{result.trajectory_status}' indicates failure but final health check passed"
-            )
+            if result.trajectory_status is None:
+                # Trajectory couldn't be loaded (disk full, corrupt, missing)
+                # but health check passed — deployment actually succeeded.
+                result.label = "recovered_success"
+                result.reasons.append(
+                    "Health check passed but trajectory data unavailable (possibly due to disk space or write failure)"
+                )
+            elif result.health_contradictions:
+                # Health check reports exit 0 but stdout contains failure signals,
+                # AND trajectory says failed — the deployment actually failed; the
+                # health check is a false positive.
+                result.label = "false_positive"
+                result.reasons.append(
+                    "Health check exit code 0 but stdout contains failure signals: "
+                    + "; ".join(result.health_contradictions)
+                )
+            else:
+                # Trajectory says failed but health check passed cleanly with no
+                # contradictions.  Check whether the health check coverage regressed
+                # (i.e. the agent weakened the script rather than fixing the app).
+                health_script = run_dir / ".sds" / "health_check.sh"
+                if _health_check_coverage_dropped(health_logs, recheck_logs, health_script):
+                    result.label = "health_policy_regression"
+                    result.health_check_coverage_dropped = True
+                    result.reasons.append(
+                        "Health check coverage regressed: checks were removed or downgraded "
+                        "to warnings, masking the underlying failure"
+                    )
+                else:
+                    result.label = "recovered_success"
+                    result.reasons.append(
+                        f"Trajectory status '{result.trajectory_status}' indicates failure "
+                        "but final health check passed cleanly; treating as recovered success"
+                    )
         else:
             result.label = "true_failure"
             result.reasons.append(f"Trajectory status '{result.trajectory_status}' and health check agree on failure")
@@ -173,6 +223,16 @@ def classify_run(run_dir: Path) -> RunClassification:
         result.reasons.append(
             f"Trajectory records {traj_deploy_call_count} deployment call(s) "
             f"but {result.log_deploy_attempts} deploy log file(s) exist"
+        )
+        return result
+
+    health_script = run_dir / ".sds" / "health_check.sh"
+    if _health_check_coverage_dropped(health_logs, recheck_logs, health_script):
+        result.label = "health_policy_regression"
+        result.health_check_coverage_dropped = True
+        result.reasons.append(
+            "Health check coverage regressed: checks were removed, skipped, or downgraded "
+            "to warnings instead of validating the underlying deployment"
         )
         return result
 
@@ -249,7 +309,14 @@ def _parse_health_log(log_path: Path) -> tuple[int | None, bool | None, list[str
     if m:
         exit_code = int(m.group(1))
 
-    passed = exit_code == 0 if exit_code is not None else None
+    # Prefer the explicit validation verdict written by validate_health_check_result
+    # over the raw exit code — the validator applies heuristic + agent checks that
+    # the raw exit code alone cannot capture (e.g. exit 0 with inconsistent output).
+    validation_match = _HEALTH_LOG_VALIDATION_RE.search(content)
+    if validation_match:
+        passed = validation_match.group(1) == "PASSED"
+    else:
+        passed = exit_code == 0 if exit_code is not None else None
 
     # Look for contradictions: exit code 0 but stdout has failure signals
     contradictions: list[str] = []
@@ -285,20 +352,32 @@ def _parse_monitor_log(log_path: Path) -> list[str]:
     if m:
         summary_text = m.group(1).strip()
         for pattern in _MONITOR_CRITICAL_PATTERNS:
-            if pattern in summary_text:
-                concerns.append(f"monitor summary: '{pattern}'")
+            if pattern.search(summary_text):
+                concerns.append(f"monitor summary: '{pattern.pattern}'")
                 break  # One concern per summary is enough
 
     return concerns
 
 
-def _count_trajectory_deploy_calls(traj: dict) -> int:
-    """Count deployment-phase calls in a trajectory's call list."""
-    count = 0
-    for call in traj.get("calls", []):
-        if call.get("phase") == "deployment":
-            count += 1
-    return count
+def _count_trajectory_deploy_calls(run_dir: Path) -> int:
+    """Count total deployment invocations across all trajectory files for a run.
+
+    When the operator restarts mid-deployment it creates a new trajectory file,
+    so the latest file alone may under-count attempts recorded in earlier files.
+    Summing ``deployment[]`` lengths across all files gives the true total, which
+    should equal the number of ``deploy_attempt_*.log`` files on disk.
+    """
+    traj_dir = run_dir / ".sds" / "trajectories"
+    if not traj_dir.exists():
+        return 0
+    total = 0
+    for traj_file in traj_dir.glob("trajectory_*.json"):
+        try:
+            traj = json.loads(traj_file.read_text())
+            total += len(traj.get("deployment", []))
+        except Exception:
+            pass
+    return total
 
 
 def _is_success_status(status: str | None) -> bool:
@@ -331,3 +410,68 @@ def _had_prior_health_failures(
                 return True
 
     return False
+
+
+def _extract_total_checks(log_path: Path) -> int | None:
+    """Extract the 'Total Checks' count from a health check log."""
+    try:
+        m = _HEALTH_LOG_TOTAL_CHECKS_RE.search(log_path.read_text())
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def _health_check_script_weakened(health_script: Path) -> bool:
+    """Return True when health_check.sh shows static signs of weakening.
+
+    Detects the pattern where HTTP endpoint probes (curl/wget to localhost)
+    are silently downgraded from hard failures (``check``) to advisory
+    warnings (``warning_check``), so a failing endpoint no longer causes the
+    health check to exit non-zero.
+    """
+    if not health_script.exists():
+        return False
+    try:
+        content = health_script.read_text()
+    except Exception:
+        return False
+    return bool(
+        _WARNING_CHECK_ENDPOINT_RE.search(content)
+        or _SKIPPED_CRITICAL_CHECK_RE.search(content)
+        or _REMOVED_CRITICAL_CHECK_RE.search(content)
+    )
+
+
+def _health_check_coverage_dropped(
+    health_logs: list[Path],
+    recheck_logs: list[Path],
+    health_script: Path,
+) -> bool:
+    """Return True if health check coverage regressed during this run.
+
+    Two independent signals are checked:
+
+    1. **Check-count drop**: When there are multiple health check log files
+       (including rechecks) the total-checks counter in the first log is
+       compared with the final one.  A drop of more than 15 % indicates that
+       checks were removed between attempts.
+
+    2. **Static script analysis**: If health_check.sh uses ``warning_check``
+       for HTTP endpoint probes (curl/wget to localhost) those hard failures
+       have been silently downgraded to warnings — a clear sign of weakening.
+
+    3. **Explicit critical-check skipping**: If the script removes or skips
+       data-tier connectivity probes (database/cache) and replaces them with
+       container-status-only checks, the run must not count as a trustworthy
+       success.
+    """
+    # Signal 1: count drop across health/recheck logs
+    all_logs = list(health_logs) + list(recheck_logs)
+    if len(all_logs) >= 2:
+        first_count = _extract_total_checks(all_logs[0])
+        last_count = _extract_total_checks(all_logs[-1])
+        if first_count is not None and last_count is not None and first_count > 0 and last_count < first_count * 0.85:
+            return True
+
+    # Signal 2: static analysis of the final health_check.sh
+    return bool(_health_check_script_weakened(health_script))
