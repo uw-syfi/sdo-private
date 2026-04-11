@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible.backend import (
     JudgeAgent,
-    PydanticAIDriver,
     RecoveryAgent,
     ShortCircuitSignal,
     SREAgent,
@@ -697,19 +696,12 @@ async def run(
     injected_kb: InjectedKB | None = None,
     trajectory_path: Path | None = None,
     crucible_config: CrucibleConfig | None = None,
-    driver: AgentDriver | None = None,
+    *,
+    driver: AgentDriver,
 ) -> dict[str, Any]:
     """Main orchestrator: runs diagnosis (and optionally mitigation) with judge-agent loop."""
     if crucible_config is None:
         crucible_config = CrucibleConfig()
-
-    # Create driver if not provided (backward compat)
-    if driver is None:
-        driver = PydanticAIDriver(
-            model,
-            trajectory_path=trajectory_path,
-            interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
-        )
 
     max_diag_iters = crucible_config.max_diagnosis_iterations
     max_mit_iters = crucible_config.max_mitigation_iterations

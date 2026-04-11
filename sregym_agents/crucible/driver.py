@@ -14,14 +14,17 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
+
+if TYPE_CHECKING:
+    from sregym_agents.crucible.backend.base import AgentDriver
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.config import crucible_config_from_experiment_agent
+from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
 from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
 
@@ -33,6 +36,30 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 _READY_STAGES = {"diagnosis", "mitigation"}
+
+
+def create_driver(
+    model: str,
+    config: CrucibleConfig,
+    trajectory_path: Path | None = None,
+) -> AgentDriver:
+    """Create an AgentDriver based on the configured backend.
+
+    Returns a ``PydanticAIDriver`` for ``backend="pydantic-ai"`` (default).
+    Phase 4 will add the ``AgentCLIDriver`` path for ``backend="agent-cli"``.
+    """
+    from sregym_agents.crucible.backend import PydanticAIDriver
+    from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
+
+    if config.backend == "agent-cli":
+        raise NotImplementedError(
+            "agent-cli backend is not yet available. It will be added in Phase 4 of the backend refactor."
+        )
+    return PydanticAIDriver(
+        model,
+        trajectory_path=trajectory_path,
+        interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
+    )
 
 
 def _load_crucible_config() -> tuple[dict[str, Any], str]:
@@ -253,14 +280,7 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
-    from sregym_agents.crucible.backend import PydanticAIDriver
-    from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
-
-    driver = PydanticAIDriver(
-        args.model,
-        trajectory_path=trajectory_path,
-        interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
-    )
+    driver = create_driver(args.model, crucible_config, trajectory_path=trajectory_path)
 
     usage_metrics = await orchestrator.run(
         model=args.model,

@@ -218,8 +218,8 @@ class SREAgent:
         and ``interrupt_data`` to decide on short-circuit or continuation.
 
         Post-run side effects (writing to shared_file, updating state)
-        are handled by the existing ``CrucibleSREAgent.arun()`` via deps
-        and tools.  This method delegates fully to ``driver.run()``.
+        are handled via deps and tools.  This method delegates fully to
+        ``driver.run()``.
         """
         from sregym_agents.crucible.tools import SharedState, SRESubmission
 
