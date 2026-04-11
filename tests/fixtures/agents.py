@@ -64,7 +64,7 @@ class StubAgent(CodingAgent):
         self.calls.append(call)
         self.generate_calls.append(call)
         prompt_lower = prompt.lower()
-        if "assess" in prompt_lower and "health" in prompt_lower:
+        if "health_verdict" in prompt_lower or ("assess" in prompt_lower and "health" in prompt_lower):
             return HEALTH_VERDICT_HEALTHY
         return self.response
 
@@ -166,7 +166,7 @@ class TrackingAgent(CodingAgent):
             self.fix_request_count += 1
 
         prompt_lower = prompt.lower()
-        if "assess" in prompt_lower and "health" in prompt_lower:
+        if "health_verdict" in prompt_lower or ("assess" in prompt_lower and "health" in prompt_lower):
             return HEALTH_VERDICT_HEALTHY
         return self.response
 

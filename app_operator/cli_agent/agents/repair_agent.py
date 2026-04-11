@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app_operator.cli_agent.agents.context import AgentContext
     from app_operator.types import CommandResult, HealthVerdict
 
+from app_operator.agent_response_files import apply_agent_response_file_writes
 from app_operator.config import DeploymentConfig
 from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.exceptions import AgentError
@@ -101,6 +102,10 @@ class RepairAgent:
             )
             duration = time.time() - start_time
             logger.info(f"Agent generation (fix) took {duration / 60:.2f} minutes")
+
+            applied_paths = apply_agent_response_file_writes(response, self.ctx.repo_path, self.ctx.filesystem)
+            if applied_paths:
+                logger.info("Applied %d file updates from agent response", len(applied_paths))
 
             # Extract summary and save to log
             match = re.search(r"<summary>(.*?)</summary>", response, re.DOTALL)

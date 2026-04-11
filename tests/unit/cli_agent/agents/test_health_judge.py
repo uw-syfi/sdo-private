@@ -260,6 +260,19 @@ def test_assess_health_template_no_xml_when_structured_output_true(repo_path, he
     assert "**script_was_fixed**" in rendered
 
 
+def test_assess_health_template_forbids_runtime_mutations(repo_path, health_check_script):
+    loader = PromptLoader()
+    rendered = loader.render(
+        "deployer/assess_health.jinja2",
+        repo_path=repo_path,
+        health_check_script=health_check_script,
+        platform="docker",
+        structured_output=False,
+    )
+    assert "NEVER install packages" in rendered
+    assert "transient startup log noise" in rendered
+
+
 # --- Robustness tests ---
 
 
