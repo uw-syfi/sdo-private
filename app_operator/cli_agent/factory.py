@@ -40,6 +40,8 @@ def create_agent_from_config(
             kwargs["location"] = config.agent.location
         if backend in ("rlm", "subagent", "hybrid"):
             kwargs["dspy_config"] = config.dspy  # type: ignore[reportArgumentType]
+        if backend == "hybrid":
+            kwargs["rlm_mode"] = config.rlm.mode
         return AGENT_REGISTRY[backend](**kwargs)
 
     available = sorted(AGENT_REGISTRY.keys())

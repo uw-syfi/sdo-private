@@ -5,7 +5,7 @@ Model (RLM) paradigm: deployment artifacts are stored as REPL variables that
 the LLM can programmatically query via ``execute_code`` actions, reducing
 token usage ~50–75% on large logs.
 
-Register with ``provider = "rlm"`` in ``sds.toml``.
+This class is retained as an internal building block for hybrid-style flows.
 """
 
 import re
@@ -17,14 +17,13 @@ from app_operator.cli_agent._rlm_utils import _FILE_GEN_RE, _FIX_ERROR_RE
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.prompts import DSPyConfigProtocol
-from libs.agent_cli.base import CodingAgent, register_provider
+from libs.agent_cli.base import CodingAgent
 from libs.agent_cli.events import AgentEventHandler
 from libs.agent_cli.llm_client import LiteLLMClient
 from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 
-@register_provider("rlm")
 class RLMCodingAgent(CodingAgent):
     """Coding agent that uses the RLM paradigm for efficient context handling.
 
@@ -44,6 +43,7 @@ class RLMCodingAgent(CodingAgent):
         event_handler: AgentEventHandler | None = None,
         location: str | None = None,
         dspy_config: DSPyConfigProtocol | None = None,
+        rlm_mode: str = "compatibility",
     ):
         """Initialise the RLM coding agent.
 
@@ -64,6 +64,7 @@ class RLMCodingAgent(CodingAgent):
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
+        self.rlm_mode = rlm_mode
         self._client = LiteLLMClient(self.model, self.location, recorder)
 
     def generate(
@@ -102,7 +103,9 @@ class RLMCodingAgent(CodingAgent):
             max_recursion_depth=5,
             llm_provider=self.model,
             vertex_location=self.location,
+            max_consecutive_errors=3,
             dspy_config=self.dspy_config,
+            rlm_mode=self.rlm_mode,
         )
         return agent.run_task(task=prompt, context=context, repo_path=str(repo_path))
 

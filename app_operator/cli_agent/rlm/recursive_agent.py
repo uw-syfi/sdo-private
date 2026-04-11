@@ -4,8 +4,10 @@ Implements a deployment agent that uses RLM to handle long error logs
 and iteration history efficiently.
 """
 
+import copy
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -42,11 +44,14 @@ class RecursiveDeploymentAgent:
         vertex_location: str | None = None,
         max_iterations: int = 10,
         consecutive_explore_limit: int = 5,
-        max_consecutive_errors: int | None = None,
+        max_consecutive_errors: int | None = 3,
         compaction: bool = False,
         compaction_threshold: float = 0.85,
         model_context_tokens: int = 32_768,
         dspy_config: DSPyConfigProtocol | None = None,
+        specialist_dispatcher: Callable[[str, str], str] | None = None,
+        available_specialists: dict[str, str] | None = None,
+        rlm_mode: str = "compatibility",
     ):
         """Initialize RLM deployment agent.
 
@@ -61,7 +66,7 @@ class RecursiveDeploymentAgent:
             consecutive_explore_limit: Number of consecutive non-final-answer steps
                 before nudging the LLM to wrap up.
             max_consecutive_errors: Stop the loop after this many consecutive code
-                execution errors. None disables the limit.
+                execution errors. Set to None to disable the limit.
             compaction: Enable automatic conversation history compaction when the
                 context approaches the model's token limit.
             compaction_threshold: Fraction of model_context_tokens at which to
@@ -80,10 +85,18 @@ class RecursiveDeploymentAgent:
         self.compaction_threshold = compaction_threshold
         self.model_context_tokens = model_context_tokens
         self.dspy_config = dspy_config
+        self.specialist_dispatcher = specialist_dispatcher
+        self.available_specialists = dict(available_specialists or {})
+        self.rlm_mode = rlm_mode
         self.rlm_env: RLMEnvironment | None = None
         self._system_prompt: str = ""
         self._messages: list[dict[str, str]] = []
         self._llm_client = LiteLLMClient(llm_provider, vertex_location, trajectory)
+        self._shared_call_history: list[RLMCall] | None = None
+        self._initial_depth = 0
+        self._metadata_feedback_count = 0
+        self._feedback_turns = 0
+        self._finalization_type = "final_answer"
 
     def _record_rlm_call(self, call: RLMCall) -> None:
         """Callback to record RLM calls in trajectory."""
@@ -167,14 +180,22 @@ class RecursiveDeploymentAgent:
         ANSWER: <deployment fix>
         """
         try:
+            final_var_match = re.match(r"^\s*FINAL_VAR:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$", response.strip())
+            if final_var_match:
+                return {
+                    "action": ActionType.FINAL_ANSWER,
+                    "final_var": final_var_match.group(1),
+                }
+
             # Extract action with regex — avoids IndexError when ACTION: is missing
             action_match = re.search(r"^ACTION:\s*(\S+)", response, re.MULTILINE | re.IGNORECASE)
             if not action_match:
-                logger.warning("[RLM] No ACTION: line found, continuing loop as no-op")
+                logger.warning("[RLM] No ACTION: line found, requesting strict format retry")
                 return {
                     "action": ActionType.EXECUTE_CODE,
                     "code": "",
-                    "description": "no-op",
+                    "description": "invalid-format",
+                    "invalid_format": True,
                 }
 
             action = action_match.group(1).strip().lower()
@@ -220,6 +241,17 @@ class RecursiveDeploymentAgent:
                     "context": filtered_context,
                 }
 
+            if action == "specialist_call":
+                specialist_match = re.search(r"^SPECIALIST:\s*(.+)$", response, re.MULTILINE)
+                task_match = re.search(r"^TASK:\s*(.+)$", response, re.MULTILINE)
+                specialist = specialist_match.group(1).strip() if specialist_match else ""
+                task = task_match.group(1).strip() if task_match else ""
+                return {
+                    "action": ActionType.SPECIALIST_CALL,
+                    "specialist": specialist,
+                    "task": task,
+                }
+
             if action == "final_answer":
                 answer_match = re.search(r"^ANSWER:\s*(.*)", response, re.MULTILINE | re.DOTALL)
                 if answer_match:
@@ -238,6 +270,100 @@ class RecursiveDeploymentAgent:
 
             # Fallback: treat entire response as final answer
             return {"action": ActionType.FINAL_ANSWER, "answer": response}
+
+    def _build_recursive_subtask_context(self, filtered_context: dict[str, Any] | None) -> RLMContext:
+        """Build a context for a nested recursive subtask."""
+        if self.rlm_env is None:
+            raise RuntimeError("RLM environment is not initialized")
+
+        parent_context = self.rlm_env.context
+        if not filtered_context:
+            return copy.deepcopy(parent_context)
+
+        child_context = RLMContext(
+            attempt_number=parent_context.attempt_number,
+            total_tokens_used=parent_context.total_tokens_used,
+        )
+        extra_variables: dict[str, Any] = {}
+        known_fields = set(RLMContext.__dataclass_fields__.keys()) - {"extra_variables"}
+
+        for key, value in filtered_context.items():
+            if key in known_fields:
+                setattr(child_context, key, value)
+            else:
+                extra_variables[key] = value
+
+        child_context.extra_variables = extra_variables
+        return child_context
+
+    @staticmethod
+    def _recursive_task_guidance(filtered_context: dict[str, Any] | None) -> str:
+        """Return a lightweight wrapper prompt for nested recursive tasks."""
+        available = ", ".join(sorted(filtered_context)) if filtered_context else "all inherited context variables"
+        return (
+            "Solve this focused recursive subtask using the REPL environment.\n"
+            f"Context loaded for this subtask: {available}.\n"
+            "Use execute_code to inspect variables. "
+            "Use sub_rlm(...) from within code if you need deeper decomposition.\n"
+            "Keep intermediate state in REPL variables and return ACTION: final_answer when the subtask is complete."
+        )
+
+    def _paper_faithful_task_guidance(self) -> str:
+        """Return a minimal wrapper prompt for paper-faithful mode."""
+        return (
+            "Paper-faithful RLM mode is enabled.\n"
+            "The full task is stored in `task_prompt`.\n"
+            "Inspect it programmatically instead of relying on this wrapper.\n"
+            "Use execute_code to inspect and transform context.\n"
+            "Use sub_rlm(...) from within code for recursive decomposition.\n"
+            "Avoid shortcutting through specialist summaries.\n"
+            "Keep intermediate state in REPL variables and return final_answer only when complete."
+        )
+
+    def _metadata_feedback(self, variable_name: str, label: str) -> str:
+        """Build compact feedback that points the model back to REPL state."""
+        if self.rlm_env is None:
+            raise RuntimeError("RLM environment is not initialized")
+        self._metadata_feedback_count += 1
+        self._feedback_turns += 1
+        return self.rlm_env.describe_value(variable_name, label)
+
+    def _spawn_recursive_child(self) -> "RecursiveDeploymentAgent":
+        """Create a child RLM agent for a nested recursive subtask."""
+        child = RecursiveDeploymentAgent(
+            trajectory=self.trajectory,
+            max_recursion_depth=self.max_recursion_depth,
+            llm_provider=self.llm_provider,
+            vertex_location=self.vertex_location,
+            max_iterations=self.max_iterations,
+            consecutive_explore_limit=self.consecutive_explore_limit,
+            max_consecutive_errors=self.max_consecutive_errors,
+            compaction=self.compaction,
+            compaction_threshold=self.compaction_threshold,
+            model_context_tokens=self.model_context_tokens,
+            dspy_config=self.dspy_config,
+            specialist_dispatcher=self.specialist_dispatcher,
+            available_specialists=self.available_specialists,
+            rlm_mode=self.rlm_mode,
+        )
+        child._llm_client = self._llm_client
+        child._shared_call_history = self._shared_call_history
+        child._initial_depth = self.rlm_env.current_depth if self.rlm_env is not None else 0
+        return child
+
+    def _call_recursive_subtask(self, sub_prompt: str, filtered_context: dict[str, Any] | None = None) -> str:
+        """Run a recursive subtask in a nested RLM loop with isolated state/history."""
+        if self.rlm_env is None:
+            raise RuntimeError("RLM environment is not initialized")
+
+        child = self._spawn_recursive_child()
+        child_context = self._build_recursive_subtask_context(filtered_context)
+        return child.run_task(
+            task=sub_prompt,
+            context=child_context,
+            repo_path=self.rlm_env.cwd,
+            task_guidance=self._recursive_task_guidance(filtered_context),
+        )
 
     def _call_llm_isolated(self, sub_prompt: str, filtered_context: dict | None = None) -> str:
         """Make an isolated LLM call for recursive sub-tasks.
@@ -346,7 +472,7 @@ class RecursiveDeploymentAgent:
         ]
         logger.info("[RLM] Conversation history compacted")
 
-    def run_task(self, task: str, context: RLMContext, repo_path: str) -> str:
+    def run_task(self, task: str, context: RLMContext, repo_path: str, task_guidance: str | None = None) -> str:
         """Run any task using the RLM loop.
 
         This is the generic entry-point used by ``RLMCodingAgent.generate()``.
@@ -357,18 +483,29 @@ class RecursiveDeploymentAgent:
             task: Free-form task description / rendered prompt from the operator.
             context: Pre-built ``RLMContext`` with available file contents.
             repo_path: Repository path (string) for trajectory metadata.
+            task_guidance: Optional task-mode wrapper prompt. When omitted, uses
+                the deployment-fix wrapper prompt.
 
         Returns:
             Final answer produced by the LLM after the RLM loop.
         """
         logger.info("[RLM] Starting run_task")
+        self._metadata_feedback_count = 0
+        self._feedback_turns = 0
+        self._finalization_type = "final_answer"
 
         self.rlm_env = RLMEnvironment(
             context=context,
             max_recursion_depth=self.max_recursion_depth,
             record_callback=self._record_rlm_call,
             cwd=repo_path,
+            available_specialists=self.available_specialists,
+            task_prompt=task,
+            sub_rlm_fn=self._call_recursive_subtask,
+            initial_depth=self._initial_depth,
+            shared_call_history=self._shared_call_history,
         )
+        self._shared_call_history = self.rlm_env.call_history
         self._system_prompt = self.rlm_env.get_system_prompt()
         self._messages: list[dict[str, str]] = [
             {"role": "system", "content": self._system_prompt},
@@ -377,17 +514,32 @@ class RecursiveDeploymentAgent:
         if self.trajectory:
             self.trajectory.add_user_message(self._system_prompt)
 
-        rendered_wrapper = render_fix_error_task_prompt(
-            repo_path=repo_path,
-            available_variables=", ".join(sorted(context.to_dict().keys())),
-            error_log_size=str(len(context.error_log)),
-            attempt=str(context.attempt_number),
-            max_attempts=str(self.max_iterations),
-            has_original_script=str(bool(context.original_script)),
-            dspy_config=self.dspy_config,
-            recorder=self.trajectory if hasattr(self.trajectory, "record_prompt_kwargs") else None,
-        )
-        current_prompt = f"Task:\n{task}\n\n{rendered_wrapper}"
+        rendered_wrapper = task_guidance
+        if rendered_wrapper is None:
+            if self.rlm_mode == "paper_faithful":
+                rendered_wrapper = self._paper_faithful_task_guidance()
+            else:
+                rendered_wrapper = render_fix_error_task_prompt(
+                    repo_path=repo_path,
+                    available_variables=", ".join(sorted(context.to_dict().keys())),
+                    available_specialists=", ".join(sorted(self.available_specialists)),
+                    error_log_size=str(len(context.error_log)),
+                    attempt=str(context.attempt_number),
+                    max_attempts=str(self.max_iterations),
+                    has_original_script=str(bool(context.original_script)),
+                    dspy_config=self.dspy_config,
+                    recorder=self.trajectory if hasattr(self.trajectory, "record_prompt_kwargs") else None,
+                )
+        if task_guidance is None:
+            # Per RLM paper Algorithm 1: only constant-size metadata about the
+            # task goes into the LLM context window; the full task lives as
+            # `task_prompt` in the REPL so the LLM can query it programmatically.
+            task_preview = task[:200] + "..." if len(task) > 200 else task
+            current_prompt = (
+                f"Task loaded as `task_prompt` ({len(task)} chars). Preview: {task_preview}\n\n{rendered_wrapper}"
+            )
+        else:
+            current_prompt = f"Task:\n{task}\n\n{rendered_wrapper}"
 
         consecutive_explore_count = 0
         consecutive_errors = 0
@@ -415,6 +567,24 @@ class RecursiveDeploymentAgent:
                 self.trajectory.add_assistant_message(response, duration=0.0)
 
             parsed = self._parse_rlm_response(response)
+
+            if parsed.get("invalid_format"):
+                specialist_retry = (
+                    "ACTION: specialist_call\nSPECIALIST: <name>\nTASK: <focused task>\n\n"
+                    if self.available_specialists
+                    else ""
+                )
+                current_prompt = (
+                    "Invalid format. Reply with EXACTLY one block using one of:\n"
+                    "ACTION: execute_code\nDESCRIPTION: <one line>\nCODE:\n<python code>\n\n"
+                    'ACTION: recursive_call\nSUBTASK: <task>\nCONTEXT: {"key": "value"}\n\n'
+                    + specialist_retry
+                    + "ACTION: final_answer\nANSWER: <final response>\n\n"
+                    + "FINAL_VAR: <repl_variable_name>\n\n"
+                    "Rules: first line must start with ACTION:, and do not use markdown code fences."
+                )
+                continue
+
             action = parsed["action"]
 
             if action == ActionType.FINAL_ANSWER:
@@ -432,20 +602,42 @@ class RecursiveDeploymentAgent:
                     if self.max_consecutive_errors is not None and consecutive_errors >= self.max_consecutive_errors:
                         logger.warning(f"[RLM] {consecutive_errors} consecutive errors, stopping loop")
                         return result
-                current_prompt = f"Result:\n{result}\n\nContinue or provide FINAL_ANSWER."
+                feedback = self._metadata_feedback("last_result", "Code execution result")
+                current_prompt = f"{feedback}\n\nContinue or provide FINAL_ANSWER."
 
             elif action == ActionType.RECURSIVE_CALL:
                 filtered_ctx = parsed.get("context", {})
                 result = self.rlm_env.recursive_call(
                     sub_prompt=parsed.get("subtask", ""),
                     filtered_context=filtered_ctx,
-                    llm_function=lambda p, ctx=filtered_ctx: self._call_llm_isolated(p, ctx),
+                    llm_function=self._call_recursive_subtask,
                 )
-                current_prompt = f"Recursive result:\n{result}\n\nContinue or provide FINAL_ANSWER."
+                self.rlm_env.set_repl_value("last_recursive_result", result)
+                feedback = self._metadata_feedback("last_recursive_result", "Recursive subcall result")
+                current_prompt = f"{feedback}\n\nContinue or provide FINAL_ANSWER."
+
+            elif action == ActionType.SPECIALIST_CALL:
+                specialist = parsed.get("specialist", "").strip()
+                task_text = parsed.get("task", "").strip()
+                result = self._run_specialist_call(specialist, task_text)
+                self.rlm_env.set_repl_value("last_specialist_name", specialist)
+                self.rlm_env.set_repl_value("last_specialist_result", result)
+                feedback = self._metadata_feedback("last_specialist_result", f"Specialist result from `{specialist}`")
+                current_prompt = f"{feedback}\n\nContinue or provide FINAL_ANSWER."
 
             elif action == ActionType.FINAL_ANSWER:
                 # Auto-validate deploy.sh if it exists before accepting the answer
-                answer = parsed.get("answer", response)
+                final_var = parsed.get("final_var")
+                if final_var:
+                    self._finalization_type = "final_var"
+                    answer_value = self.rlm_env.get_repl_value(final_var)
+                    if answer_value is None:
+                        answer = f"Unknown final variable: {final_var}"
+                    else:
+                        answer = str(answer_value)
+                else:
+                    self._finalization_type = "final_answer"
+                    answer = parsed.get("answer", response)
                 answer = self._auto_validate_deploy_sh(repo_path, answer)
 
                 if self.trajectory:
@@ -456,6 +648,57 @@ class RecursiveDeploymentAgent:
 
         logger.warning(f"[RLM] Max iterations ({self.max_iterations}) reached without FINAL_ANSWER")
         return response
+
+    def _run_specialist_call(self, specialist: str, task: str) -> str:
+        """Dispatch a named specialist call and cache the returned summary."""
+        import time
+
+        if self.rlm_env is None:
+            raise RuntimeError("RLM environment is not initialized")
+
+        if not specialist:
+            return "[Specialist unavailable] Missing SPECIALIST name."
+
+        if specialist not in self.available_specialists:
+            return f"[Specialist unavailable] Unknown specialist: {specialist}"
+
+        field_map = {
+            "trajectory": "trajectory_summary",
+            "error_log": "error_summary",
+            "script": "script_summary",
+            "repo": "repo_summary",
+        }
+        field_name = field_map.get(specialist)
+        if field_name:
+            cached = getattr(self.rlm_env.context, field_name, "")
+            if cached:
+                return cached
+
+        if self.specialist_dispatcher is None:
+            return f"[Specialist unavailable] No dispatcher configured for {specialist}."
+
+        try:
+            result = self.specialist_dispatcher(specialist, task)
+        except (ConnectionError, TimeoutError, RuntimeError) as e:
+            logger.warning(f"[RLM] Specialist {specialist} failed: {e}")
+            result = f"[Specialist unavailable] {specialist}: {e}"
+
+        if field_name and result:
+            self.rlm_env.update_summary(specialist, result)
+
+        call = RLMCall(
+            action_type=ActionType.SPECIALIST_CALL,
+            depth=self.rlm_env.current_depth,
+            input_prompt=task or specialist,
+            code_or_subtask=specialist,
+            output=result,
+            tokens_saved=0,
+            timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        self.rlm_env.call_history.append(call)
+        if self.rlm_env.record_callback:
+            self.rlm_env.record_callback(call)
+        return result
 
     def fix_deployment_error(
         self,
@@ -545,5 +788,8 @@ class RecursiveDeploymentAgent:
         baseline_context_tokens = stats.get("baseline_context_tokens", 0)
         stats["actual_prompt_tokens"] = actual_prompt_tokens
         stats["total_tokens_saved"] = baseline_context_tokens - actual_prompt_tokens
+        stats["metadata_feedback_count"] = self._metadata_feedback_count
+        stats["feedback_turns"] = self._feedback_turns
+        stats["finalization_type"] = self._finalization_type
         stats["token_usage"] = token_usage.copy()
         return stats

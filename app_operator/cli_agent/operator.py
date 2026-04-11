@@ -196,8 +196,11 @@ class AppOperator(OperatorBase):
             else:
                 logger.info("Health monitoring disabled by configuration, skipping")
 
-            run_succeeded = True
-            return 0
+            if not self.monitor.healthy:
+                logger.warning("Monitor reported unhealthy status after deployment")
+
+            run_succeeded = self.monitor.healthy
+            return 0 if run_succeeded else 1
 
         except KeyboardInterrupt:
             # Graceful shutdown initiated by signal handler
