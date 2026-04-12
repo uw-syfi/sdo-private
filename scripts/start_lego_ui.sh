@@ -7,8 +7,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Start Backend
 echo "Starting LegoAgent Backend on port 8000..."
 cd "$REPO_ROOT"
-# Use uvicorn directly with --reload for hot reloading
-uv run uvicorn lego_agent.server:app --reload --host 0.0.0.0 --port 8000 &
+# Use uvicorn with --reload-dir to only watch lego_agent source files.
+# Without this, uvicorn detects generated_script.py in lego_agent_runs/ and
+# restarts the server mid-execution, closing the WebSocket before the script runs.
+uv run uvicorn lego_agent.server:app --reload --reload-dir lego_agent --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # Start Frontend
