@@ -270,8 +270,6 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     if args.kb_dir:
         model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
-        seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
-        seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
         from sregym_agents.crucible.agents import PydanticAIDriver as _KBDriver
 
@@ -280,7 +278,6 @@ async def _async_main(args: argparse.Namespace) -> None:
             kb_type=kb_type,
             kb_dir=Path(args.kb_dir),
             app_name=app_info.get("app_name", "unknown"),
-            seed_kb_dir=seed_kb_dir,
             config=crucible_config,
             renderer=renderer,
             driver=kb_driver,

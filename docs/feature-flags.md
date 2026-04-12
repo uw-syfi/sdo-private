@@ -274,7 +274,7 @@ judge_model_id = "vertex-ai-gemini-2.5-pro"
 
 **Default:** `""` (no seed)
 
-Path to a pre-built KB directory to seed into a fresh experiment (`CRUCIBLE_SEED_KB_DIR` env var). The KB is copied into the new experiment's KB dir before the first run, letting the agent start with accumulated knowledge. Can also be overridden with the `CRUCIBLE_SEED_KB_DIR` environment variable.
+Path to a pre-built KB directory to seed into a fresh experiment. The launcher copies this directory into the new experiment's KB dir before any worker starts, letting the agent begin with accumulated knowledge.
 
 ```toml
 [runner.env]

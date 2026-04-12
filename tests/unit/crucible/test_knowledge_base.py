@@ -15,7 +15,7 @@ import pytest
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentResult as _AgentResult
 from sregym_agents.crucible.config import CrucibleConfig
-from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base
+from sregym_agents.crucible.knowledge_base import SessionFiles, create_knowledge_base, seed_kb
 from sregym_agents.crucible.knowledge_base.append_only import AppendOnlyKnowledgeBase
 from sregym_agents.crucible.knowledge_base.base import (
     KB_APPEND_FILENAME,
@@ -390,143 +390,70 @@ class TestUpdate:
 
 
 class TestSeedKB:
-    def test_seed_copies_per_app_summary(self, tmp_path: Path, mock_driver):
+    """Test the public `seed_kb` function that copies a seed KB into a dest dir."""
+
+    def test_copies_nested_per_app_summary(self, tmp_path: Path):
         seed_dir = tmp_path / "seed"
         (seed_dir / "myapp").mkdir(parents=True)
         (seed_dir / "myapp" / KB_SUMMARY_FILENAME).write_text("seeded summary")
 
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert kb.summary_path.read_text() == "seeded summary"
+        dest = tmp_path / "kb"
+        seed_kb(dest, seed_dir)
 
-    def test_seed_copies_incidents(self, tmp_path: Path, mock_driver):
+        assert (dest / "myapp" / KB_SUMMARY_FILENAME).read_text() == "seeded summary"
+
+    def test_copies_incidents_tree(self, tmp_path: Path):
         seed_dir = tmp_path / "seed"
         incidents = seed_dir / "myapp" / KB_INCIDENTS_DIRNAME
         incidents.mkdir(parents=True)
         (incidents / "20260101_120000.md").write_text("incident content")
 
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        copied = list(kb.incidents_dir.glob("*.md"))
+        dest = tmp_path / "kb"
+        seed_kb(dest, seed_dir)
+
+        copied = list((dest / "myapp" / KB_INCIDENTS_DIRNAME).glob("*.md"))
         assert len(copied) == 1
         assert copied[0].read_text() == "incident content"
 
-    def test_seed_copies_lessons(self, tmp_path: Path, mock_driver):
+    def test_copies_root_level_file(self, tmp_path: Path):
         seed_dir = tmp_path / "seed"
         seed_dir.mkdir(parents=True)
         (seed_dir / KB_LESSONS_FILENAME).write_text("seeded lessons")
 
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert kb.lessons_path.read_text() == "seeded lessons"
+        dest = tmp_path / "kb"
+        seed_kb(dest, seed_dir)
 
-    def test_seed_copies_architecture(self, tmp_path: Path, mock_driver):
-        seed_dir = tmp_path / "seed"
-        (seed_dir / "myapp").mkdir(parents=True)
-        (seed_dir / "myapp" / KB_ARCHITECTURE_FILENAME).write_text("arch info")
+        assert (dest / KB_LESSONS_FILENAME).read_text() == "seeded lessons"
 
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert kb.architecture_path.read_text() == "arch info"
-
-    def test_seed_does_not_overwrite_existing_architecture(self, tmp_path: Path, mock_driver):
-        seed_dir = tmp_path / "seed"
-        (seed_dir / "myapp").mkdir(parents=True)
-        (seed_dir / "myapp" / KB_ARCHITECTURE_FILENAME).write_text("seeded arch")
-
-        kb_dir = tmp_path / "kb"
-        app_dir = kb_dir / "myapp"
-        app_dir.mkdir(parents=True)
-        (app_dir / KB_ARCHITECTURE_FILENAME).write_text("existing arch")
-
-        kb = StructuredKnowledgeBase(
-            kb_dir,
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert kb.architecture_path.read_text() == "existing arch"
-
-    def test_seed_warns_missing_architecture(self, tmp_path: Path, caplog, mock_driver):
-        seed_dir = tmp_path / "seed"
-        (seed_dir / "myapp").mkdir(parents=True)
-        # App dir exists but no architecture.md
-
-        with caplog.at_level(logging.WARNING):
-            StructuredKnowledgeBase(
-                tmp_path / "kb",
-                app_name="myapp",
-                seed_kb_dir=seed_dir,
-                renderer=_renderer,
-                driver=mock_driver,
-            )
-
-        assert any(KB_ARCHITECTURE_FILENAME in r.message for r in caplog.records)
-
-    def test_seed_does_not_overwrite_existing(self, tmp_path: Path, mock_driver):
+    def test_does_not_overwrite_existing(self, tmp_path: Path):
         seed_dir = tmp_path / "seed"
         (seed_dir / "myapp").mkdir(parents=True)
         (seed_dir / "myapp" / KB_SUMMARY_FILENAME).write_text("seeded summary")
 
-        # Pre-create the KB with existing summary
-        kb_dir = tmp_path / "kb"
-        app_dir = kb_dir / "myapp"
-        app_dir.mkdir(parents=True)
-        (app_dir / KB_SUMMARY_FILENAME).write_text("existing summary")
+        dest = tmp_path / "kb"
+        (dest / "myapp").mkdir(parents=True)
+        (dest / "myapp" / KB_SUMMARY_FILENAME).write_text("existing summary")
 
-        kb = StructuredKnowledgeBase(
-            kb_dir,
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert kb.summary_path.read_text() == "existing summary"
+        seed_kb(dest, seed_dir)
 
-    def test_seed_no_matching_app(self, tmp_path: Path, mock_driver):
-        seed_dir = tmp_path / "seed"
-        (seed_dir / "otherapp").mkdir(parents=True)
-        (seed_dir / "otherapp" / KB_SUMMARY_FILENAME).write_text("other summary")
+        assert (dest / "myapp" / KB_SUMMARY_FILENAME).read_text() == "existing summary"
 
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert not kb.summary_path.exists()
+    def test_no_seed_dir_is_noop(self, tmp_path: Path):
+        dest = tmp_path / "kb"
+        seed_kb(dest, None)
+        assert not dest.exists() or not any(dest.iterdir())
 
-    def test_no_seed_dir(self, tmp_path: Path, mock_driver):
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=None,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert not kb.summary_path.exists()
+    def test_empty_string_seed_is_noop(self, tmp_path: Path):
+        dest = tmp_path / "kb"
+        seed_kb(dest, "")
+        assert not dest.exists() or not any(dest.iterdir())
+
+    def test_missing_seed_dir_warns(self, tmp_path: Path, caplog):
+        dest = tmp_path / "kb"
+        missing = tmp_path / "does-not-exist"
+        with caplog.at_level(logging.WARNING):
+            seed_kb(dest, missing)
+        assert any("does-not-exist" in r.message for r in caplog.records)
 
 
 class TestAppendOnlyInject:
@@ -1255,48 +1182,6 @@ class TestFindInvalidCitationsUnified:
     def test_invalid_citation(self, tmp_path: Path):
         text = "{{ref:incidents/myapp/fake.md}}"
         assert find_invalid_citations_unified(text, tmp_path) == ["incidents/myapp/fake.md"]
-
-
-class TestUnifiedKBSeed:
-    def test_seed_from_unified_source(self, tmp_path: Path, mock_driver):
-        """Seed dir with root-level summary and incidents/<app>/ layout."""
-        seed_dir = tmp_path / "seed"
-        seed_dir.mkdir()
-        (seed_dir / KB_SUMMARY_FILENAME).write_text("unified seed summary")
-        seed_incidents = seed_dir / KB_INCIDENTS_DIRNAME / "myapp"
-        seed_incidents.mkdir(parents=True)
-        (seed_incidents / "20260101_120000.md").write_text("seeded incident")
-
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            config=_unified_config,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert kb.summary_path.read_text() == "unified seed summary"
-        assert len(list(kb.incidents_dir.glob("*.md"))) == 1
-
-    def test_seed_from_per_app_source(self, tmp_path: Path, mock_driver):
-        """Seed dir with per-app layout (app_dir/summary, app_dir/incidents/)."""
-        seed_dir = tmp_path / "seed"
-        (seed_dir / "myapp").mkdir(parents=True)
-        (seed_dir / "myapp" / KB_SUMMARY_FILENAME).write_text("per-app seed summary")
-        seed_incidents = seed_dir / "myapp" / KB_INCIDENTS_DIRNAME
-        seed_incidents.mkdir()
-        (seed_incidents / "20260101_120000.md").write_text("per-app incident")
-
-        kb = StructuredKnowledgeBase(
-            tmp_path / "kb",
-            app_name="myapp",
-            seed_kb_dir=seed_dir,
-            config=_unified_config,
-            renderer=_renderer,
-            driver=mock_driver,
-        )
-        assert kb.summary_path.read_text() == "per-app seed summary"
-        assert len(list(kb.incidents_dir.glob("*.md"))) == 1
 
 
 class TestPerAppConfigFlag:
