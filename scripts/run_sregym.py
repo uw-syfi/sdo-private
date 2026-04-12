@@ -31,6 +31,7 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+from sregym_agents.crucible.knowledge_base import seed_kb  # noqa: E402
 from sregym_agents.experiment_config import (  # noqa: E402
     ExperimentConfig,
     config_to_env,
@@ -125,6 +126,8 @@ def run_single_experiment(target: Path, extra_args: list[str]) -> None:
 
     _print_experiment_info(config, env)
     print()
+
+    seed_kb(exp_dir / "kb", config.env.crucible_seed_kb_dir or None)
 
     os.chdir(_SREGYM_DIR)
     argv = ["uv", "run", "main.py"] + cli_args
@@ -253,6 +256,8 @@ def run_pipeline(
         if stage_cfg.chain_kb and prev_kb_dir:
             print(f"  KB seed: {prev_kb_dir}")
         print("=" * 60)
+
+        seed_kb(stage_exp_dir / "kb", exp_config.env.crucible_seed_kb_dir or None)
 
         try:
             returncode = _run_stage(exp_config, stage_exp_dir, tasklist_path)

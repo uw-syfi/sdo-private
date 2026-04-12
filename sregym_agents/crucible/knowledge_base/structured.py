@@ -37,7 +37,6 @@ from .reflection import Reflector
 from .schema import (
     CURRENT_SCHEMA_VERSION,
     SCHEMA_V2,
-    get_schema,
     migrate_to_current,
     write_schema_version,
 )
@@ -85,7 +84,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self,
         kb_dir: Path,
         app_name: str = "unknown",
-        seed_kb_dir: Path | None = None,
         *,
         config: CrucibleConfig | None = None,
         renderer: PromptRenderer,
@@ -119,64 +117,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
         # Set per-update by ``update()``; helpers read it via ``arun_with_retry_tracked``.
         self._usage_collector: UsageCollector | None = None
 
-        if seed_kb_dir is not None:
-            self._seed_from(Path(seed_kb_dir))
-
         # Migrate existing KB to current schema (renames files in place).
         migrate_to_current(self.kb_dir)
         write_schema_version(self.kb_dir, CURRENT_SCHEMA_VERSION)
-
-    def _seed_from(self, seed_kb_dir: Path) -> None:
-        """Copy KB files from a seed directory if local files don't exist yet.
-
-        Reads the seed KB using its own schema version (never modifies the seed).
-        """
-        seed_schema = get_schema(seed_kb_dir)
-        sanitized = sanitize_app_name(self.app_name)
-        seed_app_dir = seed_kb_dir / sanitized
-
-        # Per-app summary (try per-app dir first, fall back to root for unified seed)
-        seed_summary = seed_app_dir / seed_schema.summary
-        if not seed_summary.exists():
-            seed_summary = seed_kb_dir / seed_schema.summary
-        if not self.summary_path.exists() and seed_summary.exists():
-            shutil.copy2(seed_summary, self.summary_path)
-            logger.info(f"Seeded summary from {seed_summary}")
-
-        # Per-app incidents (try per-app dir first, fall back to unified layout)
-        seed_incidents = seed_app_dir / seed_schema.incidents_dir
-        if not seed_incidents.is_dir():
-            seed_incidents = seed_kb_dir / seed_schema.incidents_dir / sanitized
-        if seed_incidents.is_dir() and not self.incidents_dir.exists():
-            self.incidents_dir.mkdir(parents=True, exist_ok=True)
-            for f in seed_incidents.glob("*.md"):
-                shutil.copy2(f, self.incidents_dir / f.name)
-            logger.info(f"Seeded incidents from {seed_incidents}")
-
-        # Per-app architecture
-        seed_architecture = seed_app_dir / seed_schema.architecture
-        if not self.architecture_path.exists() and seed_architecture.exists():
-            shutil.copy2(seed_architecture, self.architecture_path)
-            logger.info(f"Seeded architecture from {seed_architecture}")
-        elif seed_app_dir.is_dir() and not seed_architecture.exists():
-            logger.warning(f"Seed app dir {seed_app_dir} exists but {seed_schema.architecture} is absent")
-
-        # Root-level operational lessons
-        seed_lessons = seed_kb_dir / seed_schema.lessons
-        if not self.lessons_path.exists() and seed_lessons.exists():
-            shutil.copy2(seed_lessons, self.lessons_path)
-            logger.info(f"Seeded lessons from {seed_lessons}")
-
-        # Root-level priors (seed may use old filenames; we write to current schema)
-        for prior_field in ("diagnosis_priors", "triage_priors", "arbitration_priors", "verification_priors"):
-            seed_filename = getattr(seed_schema, prior_field, "")
-            if not seed_filename:
-                continue
-            dest_path = self.kb_dir / getattr(self.schema, prior_field)
-            seed_file = seed_kb_dir / seed_filename
-            if not dest_path.exists() and seed_file.exists():
-                shutil.copy2(seed_file, dest_path)
-                logger.info(f"Seeded {seed_filename} -> {dest_path.name}")
 
     @property
     def summary_path(self) -> Path:

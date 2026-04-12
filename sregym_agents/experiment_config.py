@@ -178,7 +178,7 @@ def resolve_config(
 ) -> ExperimentConfig:
     """Apply environment variable overrides on top of the loaded config.
 
-    Recognized env vars: MODEL, PARALLEL, JUDGE_MODEL_ID, CRUCIBLE_SEED_KB_DIR,
+    Recognized env vars: MODEL, PARALLEL, JUDGE_MODEL_ID,
     SREGYM_WORKER_CPU_LIMIT, SREGYM_PRELOAD_INFRA_IMAGES.
     """
     if env_overrides is None:
@@ -193,8 +193,6 @@ def resolve_config(
         updates["parallel"] = int(env_overrides["PARALLEL"])
     if "JUDGE_MODEL_ID" in env_overrides:
         env_updates["judge_model_id"] = env_overrides["JUDGE_MODEL_ID"]
-    if "CRUCIBLE_SEED_KB_DIR" in env_overrides:
-        env_updates["crucible_seed_kb_dir"] = env_overrides["CRUCIBLE_SEED_KB_DIR"]
     if "SREGYM_WORKER_CPU_LIMIT" in env_overrides:
         env_updates["worker_cpu_limit"] = env_overrides["SREGYM_WORKER_CPU_LIMIT"]
     if "SREGYM_REUSE_CLUSTER" in env_overrides:
@@ -355,8 +353,6 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
     # Runner env vars
     if config.env.judge_model_id:
         env["JUDGE_MODEL_ID"] = config.env.judge_model_id
-    if config.env.crucible_seed_kb_dir:
-        env["CRUCIBLE_SEED_KB_DIR"] = config.env.crucible_seed_kb_dir
     if config.env.worker_cpu_limit:
         env["SREGYM_WORKER_CPU_LIMIT"] = config.env.worker_cpu_limit
     if config.env.reuse_cluster:
