@@ -13,10 +13,9 @@ value.  Subagents without a result file use prompt-instructed JSON with
 
 Short-circuit interrupts are delivered via the result file: the MCP
 server writes ``{"short_circuit": true, ...}`` when an LTM interrupt
-fires; the driver reconstructs the interrupt after the CLI exits.
-Fast-kill on short-circuit is currently not wired (a regression vs the
-previous socket-based path); it will be restored via an event-handler
-hook once ``CLIGenerationSession`` exposes process ownership.
+fires.  The event handler also watches tool-result events for the same
+payload and, on hit, SIGTERMs the CLI's process group to abort the run
+early instead of letting it burn tokens until the stage timeout.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ import json
 import logging
 import os
 import re
+import signal as signal_module
 import subprocess
 import tempfile
 from typing import Any, TypeVar
@@ -49,17 +49,47 @@ _NATIVE_TOOL_NAMES = frozenset(
 )
 
 
-class _LoggingEventHandler:
-    """``AgentEventHandler`` impl that logs tool calls / results / thinking.
+# MCP tool names whose results can contain a short-circuit payload.
+_SHORT_CIRCUIT_TOOLS = frozenset(
+    {
+        "search_prior_incidents",
+        "search_prior_mitigations",
+    }
+)
 
-    Used to give the crucible driver real-time visibility into the CLI
-    agent's trajectory via standard Python logging.  Matches the
-    ``libs.agent_cli.events.AgentEventHandler`` protocol structurally.
+
+class _AgentCLIEventHandler:
+    """``AgentEventHandler`` that logs events and fast-kills on short-circuit.
+
+    Serves two roles:
+
+    1. Real-time trajectory logging (tool calls, results, thinking) via
+       the standard Python logger.
+    2. Short-circuit detection.  When the CLI calls an LTM tool whose
+       result is a JSON payload with ``"short_circuit": true``, the
+       handler SIGTERMs the CLI's process group.  This aborts the run
+       instead of letting the CLI burn tokens until the stage timeout.
+
+    The handler must be wired to the CLI subprocess via
+    ``bind_process()``, registered as ``on_process_started`` on
+    ``CodingAgent.generate()``.  After a kill, ``short_circuit_fired``
+    is ``True`` so callers can distinguish intentional termination from
+    a genuine CLI failure.
     """
 
     def __init__(self, agent_name: str = "") -> None:
         self._prefix = f"[{agent_name}] " if agent_name else ""
         self._turn = 0
+        self._process: subprocess.Popen[str] | None = None
+        self.short_circuit_fired = False
+
+    # ----- CodingAgent.on_process_started wiring -----
+
+    def bind_process(self, proc: subprocess.Popen[str]) -> None:
+        """Record the spawned CLI subprocess so we can kill it on short-circuit."""
+        self._process = proc
+
+    # ----- AgentEventHandler protocol -----
 
     def on_thinking(self, text: str) -> None:
         text = text.strip()
@@ -91,10 +121,37 @@ class _LoggingEventHandler:
         duration: float | None = None,
     ) -> None:
         output = stdout or stderr or ""
-        if len(output) > 300:
-            output = output[:300] + "..."
+        # Log before potentially killing, so the short-circuiting result
+        # still appears in the trajectory.
+        log_output = output[:300] + "..." if len(output) > 300 else output
         dur = f" ({duration:.2f}s)" if duration is not None else ""
-        logger.info("%stool_result(%s)%s: %s", self._prefix, tool, dur, output)
+        logger.info("%stool_result(%s)%s: %s", self._prefix, tool, dur, log_output)
+
+        if tool in _SHORT_CIRCUIT_TOOLS and output and self._looks_like_short_circuit(output):
+            self._kill_process_group()
+
+    # ----- helpers -----
+
+    @staticmethod
+    def _looks_like_short_circuit(output: str) -> bool:
+        try:
+            data: Any = json.loads(output)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return isinstance(data, dict) and bool(data.get("short_circuit"))  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+
+    def _kill_process_group(self) -> None:
+        if self.short_circuit_fired or self._process is None:
+            return
+        self.short_circuit_fired = True
+        logger.info("%sshort-circuit detected — terminating CLI process group", self._prefix)
+        if self._process.poll() is not None:
+            return
+        try:
+            pgid = os.getpgid(self._process.pid)
+            os.killpg(pgid, signal_module.SIGTERM)
+        except (ProcessLookupError, OSError) as exc:
+            logger.debug("Failed to kill CLI process group: %s", exc)
 
 
 class AgentCLIDriver(AgentDriver):
@@ -377,7 +434,11 @@ class AgentCLIDriver(AgentDriver):
     # Coding-agent instantiation
     # ------------------------------------------------------------------
 
-    def _build_coding_agent(self, agent_name: str, mcp_args: list[str] | None) -> Any:
+    def _build_coding_agent(
+        self,
+        mcp_args: list[str] | None,
+        handler: _AgentCLIEventHandler,
+    ) -> Any:
         """Construct a ``CodingAgent`` from the registry for this provider.
 
         Resolves via ``libs.agent_cli.base.AGENT_REGISTRY`` so the driver
@@ -399,7 +460,7 @@ class AgentCLIDriver(AgentDriver):
 
         return agent_cls(
             model=self._model,
-            event_handler=_LoggingEventHandler(agent_name),
+            event_handler=handler,
             mcp_servers=mcp_servers,
         )
 
@@ -453,22 +514,31 @@ class AgentCLIDriver(AgentDriver):
             has_result_file=result_file_path is not None,
         )
 
-        # ----- Coding agent -----
-        coding_agent = self._build_coding_agent(agent_name, mcp_args)
+        # ----- Coding agent + event handler -----
+        handler = _AgentCLIEventHandler(agent_name)
+        coding_agent = self._build_coding_agent(mcp_args, handler)
         effective_timeout = timeout or 900
 
         # ----- Execute -----
         try:
+            response_text: str | None = None
             try:
                 response_text = await asyncio.to_thread(
                     coding_agent.generate,
                     full_prompt,
                     cwd=self._cwd,
                     timeout=effective_timeout,
+                    on_process_started=handler.bind_process,
                 )
             except (asyncio.TimeoutError, subprocess.TimeoutExpired, RuntimeError) as exc:
-                logger.warning("CLI agent failed: %s", exc)
-                return AgentResult(completed=False)
+                # A short-circuit kill propagates up as RuntimeError (CLI
+                # exited nonzero after SIGTERM).  Swallow it here — the
+                # MCP server already wrote the short-circuit payload to
+                # the result file, which the block below will pick up.
+                if not handler.short_circuit_fired:
+                    logger.warning("CLI agent failed: %s", exc)
+                    # Still fall through to result-file check in case the
+                    # MCP server wrote something useful before the crash.
 
             # ----- Result file check -----
             has_result = False
@@ -489,12 +559,15 @@ class AgentCLIDriver(AgentDriver):
                             logger.warning("Failed to parse result file: %s", exc)
                     # type == "verdict" is handled by JudgeAgent via deps.state
 
-            # ----- No result from structured path; parse from response text -----
+            # No response and no result file → run really failed.
+            if response_text is None:
+                return AgentResult(completed=False)
+
+            # ----- Parse from response text -----
             if output_type is not str:
                 output = self._parse_json_from_text(response_text, output_type)
                 if output is not None:
                     return AgentResult(output=output, completed=True)
-                # Accepted: no structured output found
                 if not has_result:
                     logger.warning(
                         "CLI agent produced no structured output and no result file — treating as failed run."
