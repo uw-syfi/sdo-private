@@ -79,6 +79,9 @@ class TestTrajectoryRecorderProtocol:
             def record_token_usage(self, usage):
                 pass
 
+            def record_prompt_artifact(self, artifact):
+                pass
+
             def finalize(self, status="completed"):
                 return Path("/dev/null")
 

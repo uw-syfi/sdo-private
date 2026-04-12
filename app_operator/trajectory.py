@@ -340,6 +340,11 @@ class TrajectoryRecorder:
         self.trajectory["metadata"]["fault_injection"] = metadata
         self._write_to_file()
 
+    def record_prompt_artifact(self, artifact: dict[str, Any]) -> None:
+        """Record a prompt artifact (e.g. DSPy-optimized prompt data) in the trajectory."""
+        self.trajectory["metadata"]["prompt_artifact"] = artifact
+        self._write_to_file()
+
     def record_token_usage(self, usage: TokenUsage) -> None:
         """Record cumulative LLM token usage for this run.
 

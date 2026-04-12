@@ -393,10 +393,10 @@ class AgentConfig:
         validate_field(self.backend, "backend", str)
 
         # Case-insensitive check
-        if self.backend.lower() not in self.VALID_PROVIDERS:
+        if self.backend.lower() not in self.VALID_BACKENDS:
             raise ValueError(
                 f"Invalid backend/provider: '{self.backend}'. Invalid provider alias. "
-                f"Valid providers/backends: {', '.join(sorted(self.VALID_PROVIDERS))}"
+                f"Valid providers/backends: {', '.join(sorted(self.VALID_BACKENDS))}"
             )
         # Normalize backend name
         self.backend = self.backend.lower()

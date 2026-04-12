@@ -210,7 +210,7 @@ class CLICodingAgent(CodingAgent):
         Raises:
             RuntimeError: If binary is not found in PATH or is not working.
         """
-        self.env = _get_interactive_env()
+        self.env = get_interactive_env()
         self.binary_name = binary_name
         self.model = model
         self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
