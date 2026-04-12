@@ -241,8 +241,10 @@ class Chain(Runnable):
     def run(self, input_data: Any) -> Any:
         current_data = input_data
         for i, step in enumerate(self.steps):
+            print(f"__LEGO_STEP_START__ {i}", flush=True)
             print(f"\n{Colors.BOLD}--- Step {i + 1}/{len(self.steps)} ({type(step).__name__}) ---{Colors.ENDC}")
             current_data = step.run(current_data)
+            print(f"__LEGO_STEP_END__ {i}", flush=True)
         return current_data
 
 
@@ -262,15 +264,31 @@ class FanOut(Runnable):
         self.timeout = timeout
 
     def run(self, input_data: Any) -> list[Any]:
+        # Resolve items: if empty or a non-list expression string (LLM-generated
+        # template that we can't evaluate), fall back to splitting input_data by
+        # newlines so the fan_out scatters over the previous step's output.
+        items = self.items
+        if not isinstance(items, list) or not items:
+            if input_data:
+                items = [line for line in str(input_data).strip().splitlines() if line.strip()]
+            else:
+                items = []
+
+        instruction = getattr(self.agent, "instruction", None)
+
         prompts_to_run = []
-        if input_data:
-            for item in self.items:
-                if isinstance(item, str) and "{input}" in item:
-                    prompts_to_run.append(item.format(input=str(input_data)))
-                else:
-                    prompts_to_run.append(f"{item}\n\nContext:\n{input_data}")
-        else:
-            prompts_to_run = self.items
+        for item in items:
+            if instruction and "{input}" in instruction:
+                # Agent has an {input} placeholder in its instruction — pass
+                # the item as the full prompt so the agent fills in context.
+                prompts_to_run.append(instruction.replace("{input}", str(item)))
+            elif isinstance(item, str) and "{input}" in item:
+                prompts_to_run.append(item.format(input=str(input_data)))
+            else:
+                prompts_to_run.append(str(item))
+
+        # Emit count so the UI can expand the FAN_OUT group with N real nodes.
+        print(f"__LEGO_FANOUT_INIT__ {len(prompts_to_run)}", flush=True)
 
         async def _run_parallel() -> list[Any]:
             semaphore = asyncio.Semaphore(self.max_workers)

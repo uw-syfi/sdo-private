@@ -22,6 +22,8 @@ export interface GraphState {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   selectNode: (id: string | null) => void;
+  addNodes: (nodes: Node<AgentNodeData>[]) => void;
+  removeNodes: (ids: string[]) => void;
   updateNodeStatus: (id: string, status: AgentStatus) => void;
   updateNodeThought: (id: string, thought: string) => void;
   addNodeLog: (id: string, log: LogItem) => void;
@@ -48,6 +50,9 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   selectNode: (id) => set({ selectedNodeId: id }),
 
+  addNodes: (nodes) => set((state) => ({ nodes: [...state.nodes, ...nodes] })),
+  removeNodes: (ids) => set((state) => ({ nodes: state.nodes.filter((n) => !ids.includes(n.id)) })),
+
   updateNodeStatus: (id, status) => set((state) => ({
     nodes: state.nodes.map((node) =>
       node.id === id
@@ -65,10 +70,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   })),
 
   addNodeLog: (id, log) => set((state) => ({
-    nodes: state.nodes.map((node) =>
-      node.id === id
-        ? { ...node, data: { ...node.data, logs: [...(node.data.logs || []), log] } }
-        : node
-    ),
+    nodes: state.nodes.map((node) => {
+      if (node.id !== id) return node;
+      const existing = node.data.logs || [];
+      // Upsert: update the entry if this log ID was already added (happens when
+      // script_execution events are coalesced — same ID, growing data field).
+      const idx = existing.findIndex(l => l.id === log.id);
+      const logs = idx >= 0
+        ? existing.map((l, i) => i === idx ? log : l)
+        : [...existing, log];
+      return { ...node, data: { ...node.data, logs } };
+    }),
   })),
 }));
