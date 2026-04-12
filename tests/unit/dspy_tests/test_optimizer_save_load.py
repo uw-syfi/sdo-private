@@ -3,9 +3,9 @@
 import json
 from unittest.mock import Mock
 
-from app_operator.dspy_integration.optimizer import PromptOptimizer
+from app_operator.dspy_integration._loader import load_optimized_module, reset_cache
 from app_operator.dspy_integration.config import DSPyConfig
-from app_operator.dspy_integration.loader import load_optimized_module, reset_cache
+from app_operator.dspy_integration.optimizer import PromptOptimizer
 
 
 class TestOptimizerSaveModule:
@@ -18,7 +18,7 @@ class TestOptimizerSaveModule:
 
         # Create a mock module with demos
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = [
             {"repo_path": "/repo1", "error_context": "Error 1", "fix_summary": "Fix 1"},
             {"repo_path": "/repo2", "error_context": "Error 2", "fix_summary": "Fix 2"},
@@ -36,7 +36,7 @@ class TestOptimizerSaveModule:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = [
             {"repo_path": "/repo1", "fix_summary": "Fix 1"},
         ]
@@ -56,11 +56,12 @@ class TestOptimizerSaveModule:
     def test_save_dspy_module_no_demos_raises(self, tmp_path):
         """Should raise RuntimeError when module has no demos and no optimized instruction."""
         import pytest
+
         config = DSPyConfig()
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = []
 
         output_file = tmp_path / "deployer_fix_error.dspy.json"
@@ -74,7 +75,7 @@ class TestOptimizerSaveModule:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = [{"input": "err", "output": "fix"}]
 
         output_file = tmp_path / "deployer_fix_error.dspy.json"
@@ -100,9 +101,7 @@ class TestOptimizerSaveOptimizedPrompts:
             "deployer_fix_error": {
                 "success": True,
                 "validation_score": 0.85,
-                "optimized_module": Mock(
-                    predictor=Mock(spec=['demos'], demos=[{"input": "err", "output": "fix"}])
-                ),
+                "optimized_module": Mock(predictor=Mock(spec=["demos"], demos=[{"input": "err", "output": "fix"}])),
             }
         }
 
@@ -118,7 +117,7 @@ class TestOptimizerSaveOptimizedPrompts:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = [{"input": "err", "output": "fix"}]
 
         results = {
@@ -142,7 +141,7 @@ class TestOptimizerSaveOptimizedPrompts:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = [{"input": "err", "output": "fix"}]
 
         results = {
@@ -206,7 +205,7 @@ class TestRoundTripSaveLoad:
 
         # Create and save a module
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = [
             {"repo_path": "/repo1", "error_context": "Error", "fix_summary": "Fixed"},
         ]
@@ -218,16 +217,12 @@ class TestRoundTripSaveLoad:
         optimizer._save_dspy_module(mock_module, output_file, "deployer_fix_error")
 
         # Load the module
-        loaded_module = load_optimized_module(
-            "deployer_fix_error",
-            tmp_path / "optimized",
-            "v1"
-        )
+        loaded_module = load_optimized_module("deployer_fix_error", tmp_path / "optimized", "v1")
 
         assert loaded_module is not None
-        assert hasattr(loaded_module, 'demos')
-        assert len(loaded_module.demos) == 1
-        assert loaded_module.demos[0]["repo_path"] == "/repo1"
+        assert hasattr(loaded_module, "demos")
+        assert len(loaded_module.demos) == 1  # type: ignore[union-attr]
+        assert loaded_module.demos[0]["repo_path"] == "/repo1"  # type: ignore[index]
 
     def test_save_multiple_prompts_and_load(self, tmp_path):
         """Should save and load multiple prompts."""
@@ -235,11 +230,11 @@ class TestRoundTripSaveLoad:
         optimizer = PromptOptimizer(config, tmp_path)
 
         mock_module1 = Mock()
-        mock_module1.predictor = Mock(spec=['demos'])
+        mock_module1.predictor = Mock(spec=["demos"])
         mock_module1.predictor.demos = [{"data": "prompt1"}]
 
         mock_module2 = Mock()
-        mock_module2.predictor = Mock(spec=['demos'])
+        mock_module2.predictor = Mock(spec=["demos"])
         mock_module2.predictor.demos = [{"data": "prompt2"}]
 
         results = {
@@ -252,37 +247,29 @@ class TestRoundTripSaveLoad:
                 "success": True,
                 "validation_score": 0.9,
                 "optimized_module": mock_module2,
-            }
+            },
         }
 
         output_dir = tmp_path / "optimized" / "v1"
         optimizer._save_optimized_prompts(results, output_dir)
 
         # Load both modules
-        module1 = load_optimized_module(
-            "deployer_fix_error",
-            tmp_path / "optimized",
-            "v1"
-        )
-        module2 = load_optimized_module(
-            "monitor_analyze_health",
-            tmp_path / "optimized",
-            "v1"
-        )
+        module1 = load_optimized_module("deployer_fix_error", tmp_path / "optimized", "v1")
+        module2 = load_optimized_module("monitor_analyze_health", tmp_path / "optimized", "v1")
 
         assert module1 is not None
         assert module2 is not None
 
         # Check that demos were loaded
-        assert len(module1.demos) == 1
-        assert len(module2.demos) == 1
+        assert len(module1.demos) == 1  # type: ignore[union-attr]
+        assert len(module2.demos) == 1  # type: ignore[union-attr]
 
         # Demos should preserve the data
-        if isinstance(module1.demos[0], dict):
-            assert module1.demos[0]["data"] == "prompt1"
+        if isinstance(module1.demos[0], dict):  # type: ignore[index]
+            assert module1.demos[0]["data"] == "prompt1"  # type: ignore[index]
 
-        if isinstance(module2.demos[0], dict):
-            assert module2.demos[0]["data"] == "prompt2"
+        if isinstance(module2.demos[0], dict):  # type: ignore[index]
+            assert module2.demos[0]["data"] == "prompt2"  # type: ignore[index]
 
     def test_load_latest_version(self, tmp_path):
         """Should load 'latest' version correctly."""
@@ -291,7 +278,7 @@ class TestRoundTripSaveLoad:
 
         # Create v1
         mock_module = Mock()
-        mock_module.predictor = Mock(spec=['demos'])
+        mock_module.predictor = Mock(spec=["demos"])
         mock_module.predictor.demos = [{"version": "v1"}]
 
         output_dir_v1 = tmp_path / "optimized" / "v1"
@@ -301,7 +288,7 @@ class TestRoundTripSaveLoad:
 
         # Create v2
         mock_module2 = Mock()
-        mock_module2.predictor = Mock(spec=['demos'])
+        mock_module2.predictor = Mock(spec=["demos"])
         mock_module2.predictor.demos = [{"version": "v2"}]
 
         output_dir_v2 = tmp_path / "optimized" / "v2"
@@ -310,11 +297,7 @@ class TestRoundTripSaveLoad:
         optimizer._save_dspy_module(mock_module2, output_file2, "deployer_fix_error")
 
         # Load latest (should be v2)
-        loaded = load_optimized_module(
-            "deployer_fix_error",
-            tmp_path / "optimized",
-            "latest"
-        )
+        loaded = load_optimized_module("deployer_fix_error", tmp_path / "optimized", "latest")
 
         assert loaded is not None
-        assert loaded.demos[0]["version"] == "v2"
+        assert loaded.demos[0]["version"] == "v2"  # type: ignore[index]

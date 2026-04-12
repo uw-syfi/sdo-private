@@ -24,7 +24,6 @@ class FileSystemInterface(ABC):
         Returns:
             bool: True if the path exists, False otherwise.
         """
-        pass
 
     @abstractmethod
     def is_dir(self, path: Path) -> bool:
@@ -36,10 +35,9 @@ class FileSystemInterface(ABC):
         Returns:
             bool: True if the path is a directory, False otherwise.
         """
-        pass
 
     @abstractmethod
-    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
+    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True) -> None:
         """Create a directory.
 
         Args:
@@ -47,10 +45,9 @@ class FileSystemInterface(ABC):
             parents: If True, create parent directories as needed.
             exist_ok: If True, don't raise an error if the directory exists.
         """
-        pass
 
     @abstractmethod
-    def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
+    def write_text(self, path: Path, content: str, encoding: str = "utf-8") -> None:
         """Write text to a file.
 
         Args:
@@ -58,7 +55,6 @@ class FileSystemInterface(ABC):
             content: The text content to write.
             encoding: The text encoding to use.
         """
-        pass
 
     @abstractmethod
     def read_text(self, path: Path, encoding: str = "utf-8") -> str:
@@ -71,35 +67,31 @@ class FileSystemInterface(ABC):
         Returns:
             str: The file contents.
         """
-        pass
 
     @abstractmethod
-    def chmod(self, path: Path, mode: int):
+    def chmod(self, path: Path, mode: int) -> None:
         """Change file permissions.
 
         Args:
             path: The file path.
             mode: The permission mode (e.g., 0o755).
         """
-        pass
 
     @abstractmethod
-    def remove(self, path: Path):
+    def remove(self, path: Path) -> None:
         """Remove a file.
 
         Args:
             path: The file path to remove.
         """
-        pass
 
     @abstractmethod
-    def remove_tree(self, path: Path):
+    def remove_tree(self, path: Path) -> None:
         """Remove a directory tree recursively.
 
         Args:
             path: The directory path to remove.
         """
-        pass
 
     @abstractmethod
     def glob(self, path: Path, pattern: str) -> list[Path]:
@@ -112,7 +104,6 @@ class FileSystemInterface(ABC):
         Returns:
             list[Path]: List of matching paths.
         """
-        pass
 
     @abstractmethod
     def rglob(self, path: Path, pattern: str) -> list[Path]:
@@ -125,7 +116,6 @@ class FileSystemInterface(ABC):
         Returns:
             list[Path]: List of matching paths.
         """
-        pass
 
     @abstractmethod
     def is_file(self, path: Path) -> bool:
@@ -137,7 +127,17 @@ class FileSystemInterface(ABC):
         Returns:
             bool: True if the path is a file, False otherwise.
         """
-        pass
+
+    @abstractmethod
+    def iterdir(self, path: Path) -> list[Path]:
+        """Iterate over the contents of a directory.
+
+        Args:
+            path: The directory path to iterate.
+
+        Returns:
+            list[Path]: List of paths within the directory (non-recursive).
+        """
 
 
 class RealFilesystem(FileSystemInterface):
@@ -149,22 +149,22 @@ class RealFilesystem(FileSystemInterface):
     def is_dir(self, path: Path) -> bool:
         return path.is_dir()
 
-    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
+    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True) -> None:
         path.mkdir(parents=parents, exist_ok=exist_ok)
 
-    def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
+    def write_text(self, path: Path, content: str, encoding: str = "utf-8") -> None:
         path.write_text(content, encoding=encoding)
 
     def read_text(self, path: Path, encoding: str = "utf-8") -> str:
         return path.read_text(encoding=encoding)
 
-    def chmod(self, path: Path, mode: int):
+    def chmod(self, path: Path, mode: int) -> None:
         path.chmod(mode)
 
-    def remove(self, path: Path):
+    def remove(self, path: Path) -> None:
         path.unlink()
 
-    def remove_tree(self, path: Path):
+    def remove_tree(self, path: Path) -> None:
         shutil.rmtree(path)
 
     def glob(self, path: Path, pattern: str) -> list[Path]:
@@ -175,6 +175,9 @@ class RealFilesystem(FileSystemInterface):
 
     def is_file(self, path: Path) -> bool:
         return path.is_file()
+
+    def iterdir(self, path: Path) -> list[Path]:
+        return list(path.iterdir())
 
 
 class InMemoryFilesystem(FileSystemInterface):
@@ -187,17 +190,17 @@ class InMemoryFilesystem(FileSystemInterface):
     attempting to collect it as a test class.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the test filesystem."""
         self.files: dict[str, str] = {}  # path -> content
         self.permissions: dict[str, int] = {}  # path -> mode
-        self.directories: set = set()  # set of directory paths
+        self.directories: set[str] = set()  # set of directory paths
         self.should_fail: dict[str, Exception] = {}  # path -> exception to raise
 
         # Initialize root directory to support relative paths
         self.directories.add(self._normalize_path(Path(".")))
 
-    def simulate_permission_error(self, path: Path):
+    def simulate_permission_error(self, path: Path) -> None:
         """Configure the filesystem to raise PermissionError for a path.
 
         Args:
@@ -206,7 +209,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         self.should_fail[path_str] = PermissionError(f"Permission denied: '{path}'")
 
-    def simulate_disk_full(self, path: Path):
+    def simulate_disk_full(self, path: Path) -> None:
         """Configure the filesystem to raise disk full error for a path.
 
         Args:
@@ -215,7 +218,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         self.should_fail[path_str] = OSError(f"No space left on device: '{path}'")
 
-    def simulate_readonly(self, path: Path):
+    def simulate_readonly(self, path: Path) -> None:
         """Configure the filesystem to be read-only for a path.
 
         Args:
@@ -224,7 +227,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         self.should_fail[path_str] = OSError(f"Read-only file system: '{path}'")
 
-    def clear_failures(self):
+    def clear_failures(self) -> None:
         """Clear all simulated failures."""
         self.should_fail.clear()
 
@@ -246,7 +249,7 @@ class InMemoryFilesystem(FileSystemInterface):
         path_str = self._normalize_path(path)
         return path_str in self.directories
 
-    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True):
+    def mkdir(self, path: Path, parents: bool = True, exist_ok: bool = True) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -270,7 +273,7 @@ class InMemoryFilesystem(FileSystemInterface):
         # Create directory and parents if needed
         if parents:
             current = path
-            to_create = []
+            to_create: list[str] = []
             while True:
                 current_str = self._normalize_path(current)
                 if current_str == "." or current_str in self.directories:
@@ -284,7 +287,7 @@ class InMemoryFilesystem(FileSystemInterface):
         else:
             self.directories.add(path_str)
 
-    def write_text(self, path: Path, content: str, encoding: str = "utf-8"):
+    def write_text(self, path: Path, content: str, encoding: str = "utf-8") -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -317,7 +320,7 @@ class InMemoryFilesystem(FileSystemInterface):
 
         return self.files[path_str]
 
-    def chmod(self, path: Path, mode: int):
+    def chmod(self, path: Path, mode: int) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -328,7 +331,7 @@ class InMemoryFilesystem(FileSystemInterface):
 
         self.permissions[path_str] = mode
 
-    def remove(self, path: Path):
+    def remove(self, path: Path) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -344,7 +347,7 @@ class InMemoryFilesystem(FileSystemInterface):
         if path_str in self.permissions:
             del self.permissions[path_str]
 
-    def remove_tree(self, path: Path):
+    def remove_tree(self, path: Path) -> None:
         path_str = self._normalize_path(path)
 
         if path_str in self.should_fail:
@@ -373,7 +376,7 @@ class InMemoryFilesystem(FileSystemInterface):
         for stored in list(self.files) + list(self.directories):
             if not stored.startswith(prefix):
                 continue
-            relative = stored[len(prefix):]
+            relative = stored[len(prefix) :]
             if fnmatch.fnmatch(relative, pattern):
                 results.append(Path(stored))
         return results
@@ -385,20 +388,37 @@ class InMemoryFilesystem(FileSystemInterface):
         for stored in list(self.files) + list(self.directories):
             if not stored.startswith(prefix):
                 continue
-            relative = stored[len(prefix):]
+            relative = stored[len(prefix) :]
             # rglob matches pattern against any suffix of the relative path
             # e.g. rglob("*") matches all files/dirs recursively
             parts = relative.split("/")
             # Match the pattern against the full relative path using **/ prefix
-            if fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(
-                relative, "**/" + pattern
+            if (
+                fnmatch.fnmatch(relative, pattern)
+                or fnmatch.fnmatch(relative, "**/" + pattern)
+                or fnmatch.fnmatch(parts[-1], pattern)
             ):
-                results.append(Path(stored))
-            # Also check if just the filename matches (like pathlib rglob)
-            elif fnmatch.fnmatch(parts[-1], pattern):
                 results.append(Path(stored))
         return results
 
     def is_file(self, path: Path) -> bool:
         path_str = self._normalize_path(path)
         return path_str in self.files
+
+    def iterdir(self, path: Path) -> list[Path]:
+        dir_str = self._normalize_path(path)
+        if dir_str not in self.directories:
+            raise FileNotFoundError(f"No such directory: '{path}'")
+        prefix = dir_str + "/"
+        seen: set[str] = set()
+        results: list[Path] = []
+        for stored in list(self.files) + list(self.directories):
+            if not stored.startswith(prefix):
+                continue
+            # Only direct children: no additional '/' after the prefix
+            relative = stored[len(prefix) :]
+            child_name = relative.split("/")[0]
+            if child_name and child_name not in seen:
+                seen.add(child_name)
+                results.append(Path(dir_str) / child_name)
+        return results

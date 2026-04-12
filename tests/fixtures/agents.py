@@ -6,7 +6,15 @@ scenarios without requiring actual agent execution.
 
 import time
 from typing import Any
+
 from libs.agent_cli.base import CodingAgent
+
+HEALTH_VERDICT_HEALTHY = (
+    "<health_verdict>healthy</health_verdict>\n"
+    "<health_assessment>All services healthy.</health_assessment>\n"
+    "<diagnosis></diagnosis>\n"
+    "<script_fixed>false</script_fixed>"
+)
 
 
 class StubAgent(CodingAgent):
@@ -15,6 +23,10 @@ class StubAgent(CodingAgent):
     Use this for tests that need an agent but don't care about its behavior.
     Supports optional model, recorder, and response attributes used by
     various test scenarios (e.g. operator persistence, cleanup tests).
+
+    When the prompt contains "assess" and "health" (i.e. health assessment),
+    returns a well-formed health verdict XML so the deployer/monitor flow
+    succeeds without extra mocking.
     """
 
     def __init__(self, response: str = "stub response", model=None):
@@ -26,12 +38,16 @@ class StubAgent(CodingAgent):
         """
         self.response = response
         self.model = model
-        self.recorder = None
+        self.recorder = None  # type: ignore[assignment]
         self.calls: list[dict[str, Any]] = []
         self.generate_calls: list[dict[str, Any]] = []
 
     def generate(self, prompt: str, cwd=None, timeout=300, silent=False, **kwargs) -> str:
         """Return a stub response and record the call.
+
+        When the prompt looks like a health assessment request, returns a
+        well-formed health verdict XML so the deployer/monitor flow succeeds
+        without extra mocking.
 
         Args:
             prompt: The prompt (recorded but otherwise ignored).
@@ -47,6 +63,9 @@ class StubAgent(CodingAgent):
         call.update(kwargs)
         self.calls.append(call)
         self.generate_calls.append(call)
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return HEALTH_VERDICT_HEALTHY
         return self.response
 
     def run(self, *args, **kwargs):
@@ -55,7 +74,6 @@ class StubAgent(CodingAgent):
 
     def start_event_stream(self, *args, **kwargs):
         """No-op event stream for operator tests."""
-        pass
 
 
 class ErrorAgent(CodingAgent):
@@ -72,7 +90,7 @@ class ErrorAgent(CodingAgent):
         """
         self.error_message = error_message
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:  # type: ignore[override]
         """Raise a RuntimeError.
 
         Args:
@@ -99,7 +117,7 @@ class TimeoutAgent(CodingAgent):
         """
         self.sleep_duration = sleep_duration
 
-    def generate(self, prompt: str, timeout: int = 300, **kwargs) -> str:
+    def generate(self, prompt: str, timeout: int = 300, **kwargs) -> str:  # type: ignore[override]
         """Sleep longer than the timeout.
 
         Args:
@@ -131,7 +149,7 @@ class TrackingAgent(CodingAgent):
         self.generation_count = 0
         self.response = response
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:  # type: ignore[override]
         """Track the call and return a response.
 
         Args:
@@ -147,6 +165,9 @@ class TrackingAgent(CodingAgent):
         if "fix" in prompt.lower():
             self.fix_request_count += 1
 
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return HEALTH_VERDICT_HEALTHY
         return self.response
 
     def reset(self):
@@ -186,7 +207,7 @@ class ConfigurableAgent(CodingAgent):
         """
         self.default_response = response
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:  # type: ignore[override]
         """Return a configured response based on the prompt.
 
         Args:
@@ -234,7 +255,7 @@ class ScriptGeneratingAgent(CodingAgent):
         ]
         self.call_count = 0
 
-    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300, **kwargs) -> str:
+    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300, **kwargs) -> str:  # type: ignore[override]
         """Generate scripts based on the prompt.
 
         Args:

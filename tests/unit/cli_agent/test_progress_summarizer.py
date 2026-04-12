@@ -1,7 +1,8 @@
 """Tests for progress_summarizer module."""
+
 from unittest.mock import Mock
 
-from app_operator.cli_agent.progress_summarizer import ProgressSummarizer
+from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
 
 
 class TestProgressSummarizer:
@@ -21,12 +22,7 @@ class TestProgressSummarizer:
         """Test initialization with custom parameters."""
         agent_fn = Mock()
         time_fn = Mock(return_value=100.0)
-        summarizer = ProgressSummarizer(
-            agent_fn,
-            initial_delay=10.0,
-            summary_interval=20.0,
-            time_func=time_fn
-        )
+        summarizer = ProgressSummarizer(agent_fn, initial_delay=10.0, summary_interval=20.0, time_func=time_fn)
         assert summarizer.initial_delay == 10.0
         assert summarizer.summary_interval == 20.0
         assert summarizer.time_func == time_fn
@@ -71,11 +67,7 @@ class TestProgressSummarizer:
         def time_func():
             return current_time[0]
 
-        summarizer = ProgressSummarizer(
-            agent_fn,
-            initial_delay=15.0,
-            time_func=time_func
-        )
+        summarizer = ProgressSummarizer(agent_fn, initial_delay=15.0, time_func=time_func)
         summarizer.start(start_time=100.0)
 
         # Time at 110.0 (only 10s elapsed, less than 15s initial delay)
@@ -90,12 +82,7 @@ class TestProgressSummarizer:
         def time_func():
             return current_time[0]
 
-        summarizer = ProgressSummarizer(
-            agent_fn,
-            initial_delay=15.0,
-            summary_interval=30.0,
-            time_func=time_func
-        )
+        summarizer = ProgressSummarizer(agent_fn, initial_delay=15.0, summary_interval=30.0, time_func=time_func)
         summarizer.start(start_time=100.0)
 
         # Time at 130.0 (30s elapsed, satisfies both initial delay and interval)
@@ -110,12 +97,7 @@ class TestProgressSummarizer:
         def time_func():
             return current_time[0]
 
-        summarizer = ProgressSummarizer(
-            agent_fn,
-            initial_delay=10.0,
-            summary_interval=30.0,
-            time_func=time_func
-        )
+        summarizer = ProgressSummarizer(agent_fn, initial_delay=10.0, summary_interval=30.0, time_func=time_func)
         summarizer.start(start_time=100.0)
 
         # After both initial delay and interval (30s elapsed, >10s initial, >=30s interval)
@@ -141,12 +123,7 @@ class TestProgressSummarizer:
         def time_func():
             return current_time[0]
 
-        summarizer = ProgressSummarizer(
-            agent_fn,
-            initial_delay=10.0,
-            summary_interval=30.0,
-            time_func=time_func
-        )
+        summarizer = ProgressSummarizer(agent_fn, initial_delay=10.0, summary_interval=30.0, time_func=time_func)
         summarizer.start(start_time=100.0)
         summarizer.last_summary_time = 100.0
 
@@ -220,7 +197,7 @@ class TestProgressSummarizer:
 
     def test_summarize_handles_agent_exception_gracefully(self):
         """Test summarize() handles agent exceptions without crashing."""
-        agent_fn = Mock(side_effect=Exception("Agent error"))
+        agent_fn = Mock(side_effect=RuntimeError("Agent error"))
         summarizer = ProgressSummarizer(agent_fn)
         summarizer.start(start_time=100.0)
 
@@ -353,12 +330,7 @@ class TestProgressSummarizer:
         def time_func():
             return current_time[0]
 
-        summarizer = ProgressSummarizer(
-            agent_fn,
-            initial_delay=10.0,
-            summary_interval=30.0,
-            time_func=time_func
-        )
+        summarizer = ProgressSummarizer(agent_fn, initial_delay=10.0, summary_interval=30.0, time_func=time_func)
 
         # Start
         summarizer.start(start_time=100.0)

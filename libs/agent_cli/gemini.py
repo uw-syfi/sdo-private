@@ -1,26 +1,27 @@
-from .base import register_provider
 import json
+import logging
 import time
 from pathlib import Path
+from typing import Any
 
-import logging
-
-from .cli_agent import CLICodingAgent, CLIGenerationSession
-from .gemini_events import GeminiEvent, MessageEvent, ToolUseEvent, ToolResultEvent
-from .events import AgentEventHandler
 import libs.agent_cli.trajectory as _trajectory_module
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+
+from .base import register_provider
+from .cli_agent import CLICodingAgent, CLIGenerationSession
+from .events import AgentEventHandler
+from .gemini_events import GeminiEvent, MessageEvent, ToolResultEvent, ToolUseEvent
 
 _logger = logging.getLogger(__name__)
 
 
 class GeminiGenerationSession(CLIGenerationSession):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         # Initialize state required for stream processing
-        self.tool_map = {}
-        self.tool_start_times = {}
-        self.tool_args = {}
+        self.tool_map: dict[str, str] = {}
+        self.tool_start_times: dict[str, float] = {}
+        self.tool_args: dict[str, Any] = {}
         # Capture call_id and run_id for correlation
         self.call_id = _trajectory_module.get_current_call_id()
         self.run_id = _trajectory_module.get_run_id()
@@ -106,28 +107,27 @@ class GeminiGenerationSession(CLIGenerationSession):
                 if self.event_handler:
                     self.event_handler.on_tool_call(event.tool_name, event.parameters)
 
-        elif isinstance(event, ToolResultEvent):
-            if event.tool_id:
-                # Inject resolved name into the event for rendering
-                event.tool_name_resolved = self.tool_map.get(event.tool_id, "Tool")
+        elif isinstance(event, ToolResultEvent) and event.tool_id:
+            # Inject resolved name into the event for rendering
+            event.tool_name_resolved = self.tool_map.get(event.tool_id, "Tool")
 
-                start_time = self.tool_start_times.get(event.tool_id)
-                duration = time.time() - start_time if start_time else None
-                args = self.tool_args.get(event.tool_id, {})
+            start_time = self.tool_start_times.get(event.tool_id)
+            duration = time.time() - start_time if start_time else None
+            args = self.tool_args.get(event.tool_id, {})
 
-                self.recorder.add_tool_call(
+            self.recorder.add_tool_call(
+                tool=event.tool_name_resolved,
+                args=args,
+                stdout=event.output,
+                duration=duration,
+            )
+
+            if self.event_handler:
+                self.event_handler.on_tool_result(
                     tool=event.tool_name_resolved,
-                    args=args,
                     stdout=event.output,
                     duration=duration,
                 )
-
-                if self.event_handler:
-                    self.event_handler.on_tool_result(
-                        tool=event.tool_name_resolved,
-                        stdout=event.output,
-                        duration=duration,
-                    )
 
     def _render_event(self, event: GeminiEvent):
         """Render the event to stdout."""
@@ -166,32 +166,6 @@ class GeminiCodingAgent(CLICodingAgent):
             event_handler: Optional event handler for UI updates.
         """
         super().__init__("gemini", model, recorder, event_handler)
-
-    def inject_mcp_server(self, repo_path: Path, sds_root: Path) -> None:
-        """Inject docker_controller MCP server into the target app's .gemini/settings.json."""
-        gemini_dir = repo_path / ".gemini"
-        gemini_dir.mkdir(parents=True, exist_ok=True)
-        settings_path = gemini_dir / "settings.json"
-
-        settings: dict = {}
-        if settings_path.exists():
-            try:
-                with open(settings_path) as f:
-                    settings = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                _logger.warning(f"Could not read {settings_path}, starting fresh: {e}")
-
-        mcp_server_path = str(sds_root / "mcp_server" / "server.py")
-        settings.setdefault("mcpServers", {})["docker_controller"] = {
-            "command": "uv",
-            "args": ["run", mcp_server_path],
-        }
-
-        with open(settings_path, "w") as f:
-            json.dump(settings, f, indent=2)
-            f.write("\n")
-
-        _logger.info(f"Injected docker_controller MCP server into {settings_path}")
 
     @property
     def gemini_path(self) -> str:

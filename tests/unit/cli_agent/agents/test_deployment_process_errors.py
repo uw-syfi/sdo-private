@@ -5,6 +5,7 @@ and edge cases in process execution.
 """
 
 import time
+
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from tests.fixtures.agents import StubAgent
 
@@ -42,17 +43,14 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         # Run with very short timeout
-        result = deployer.run_deploy_command("start", timeout=0.1)
+        result = deployer.run_deploy_command("start", timeout=0.1)  # type: ignore[arg-type]
 
         # Should have timed out
         assert result["success"] is False
         assert result["exit_code"] == -1
 
         # Should have captured partial output
-        assert (
-            "Starting deployment" in result["stdout"]
-            or "Starting deployment" in result["stderr"]
-        )
+        assert "Starting deployment" in result["stdout"] or "Starting deployment" in result["stderr"]
         assert "timed out" in result["stderr"]
 
     def test_deployment_completes_just_before_timeout(self, tmp_path):
@@ -65,9 +63,7 @@ class TestDeploymentProcessTimeouts:
 
         # Create a deploy script that completes quickly
         deploy_script = sds_dir / "deploy.sh"
-        deploy_script.write_text(
-            "#!/bin/bash\necho 'Quick deployment'\nsleep 0.2\necho 'Done'\nexit 0\n"
-        )
+        deploy_script.write_text("#!/bin/bash\necho 'Quick deployment'\nsleep 0.2\necho 'Done'\nexit 0\n")
         deploy_script.chmod(0o755)
 
         agent = StubAgent()
@@ -111,7 +107,7 @@ class TestDeploymentProcessTimeouts:
         deployer = DeploymentAgent(repo, agent)
 
         start_time = time.time()
-        result = deployer.run_deploy_command("start", timeout=0.5)
+        result = deployer.run_deploy_command("start", timeout=0.5)  # type: ignore[arg-type]
         elapsed = time.time() - start_time
 
         # Should have timed out quickly (not waited 100 seconds)
@@ -164,7 +160,7 @@ class TestHealthCheckProcessErrors:
 
         # Run with short timeout
         start_time = time.time()
-        result = run_health_check(repo, health_script, timeout=0.5)
+        result = run_health_check(repo, health_script, timeout=0.5)  # type: ignore[arg-type]
         elapsed = time.time() - start_time
 
         # Should timeout quickly
@@ -185,9 +181,7 @@ class TestProcessExecutionEdgeCases:
 
         # Script that fails with specific exit code
         deploy_script = sds_dir / "deploy.sh"
-        deploy_script.write_text(
-            "#!/bin/bash\necho 'Failing with exit code 42'\nexit 42\n"
-        )
+        deploy_script.write_text("#!/bin/bash\necho 'Failing with exit code 42'\nexit 42\n")
         deploy_script.chmod(0o755)
 
         agent = StubAgent()
@@ -207,9 +201,7 @@ class TestProcessExecutionEdgeCases:
         sds_dir.mkdir()
 
         deploy_script = sds_dir / "deploy.sh"
-        deploy_script.write_text(
-            "#!/bin/bash\necho 'stdout message'\necho 'stderr message' >&2\nexit 0\n"
-        )
+        deploy_script.write_text("#!/bin/bash\necho 'stdout message'\necho 'stderr message' >&2\nexit 0\n")
         deploy_script.chmod(0o755)
 
         agent = StubAgent()
@@ -238,10 +230,7 @@ class TestProcessExecutionEdgeCases:
         result = deployer.run_deploy_command("start", timeout=5)
 
         assert result["success"] is False
-        assert (
-            "No such file" in result["stderr"]
-            or "not found" in result["stderr"].lower()
-        )
+        assert "No such file" in result["stderr"] or "not found" in result["stderr"].lower()
 
     def test_script_not_executable(self, tmp_path):
         """Script without execute permission should fail."""
@@ -263,7 +252,4 @@ class TestProcessExecutionEdgeCases:
 
         # Should fail with permission error
         assert result["success"] is False
-        assert (
-            "Permission denied" in result["stderr"]
-            or "permission" in result["stderr"].lower()
-        )
+        assert "Permission denied" in result["stderr"] or "permission" in result["stderr"].lower()

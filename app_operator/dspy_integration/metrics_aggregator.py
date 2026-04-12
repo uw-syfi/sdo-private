@@ -3,13 +3,13 @@
 Analyzes trajectory data to compute performance metrics.
 """
 
+import statistics
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
-from collections import defaultdict
-import statistics
 
-from app_operator.dspy_integration.data_loader import TrajectoryDataLoader, TrajectoryExample
-from app_operator.dspy_integration.cost import calculate_cost
+from app_operator.dspy_integration._cost import calculate_cost
+from app_operator.dspy_integration._data_loader import TrajectoryDataLoader, TrajectoryExample
 
 
 class MetricsAggregator:
@@ -57,7 +57,7 @@ class MetricsAggregator:
 
         metrics = {
             "total_examples": len(examples),
-            "total_runs": len(set(ex.run_id for ex in examples)),
+            "total_runs": len({ex.run_id for ex in examples}),
             "by_phase": {},
             "overall": self._compute_phase_metrics(examples, model),
         }
@@ -102,12 +102,8 @@ class MetricsAggregator:
         min_iterations = min(iterations_list) if iterations_list else 0
 
         # Split runs into successful vs failed (a run succeeded if any example in it succeeded)
-        successful_run_iters = [
-            exs[0].iterations for exs in runs.values() if any(
-                ex.success for ex in exs)]
-        failed_run_iters = [
-            exs[0].iterations for exs in runs.values() if not any(
-                ex.success for ex in exs)]
+        successful_run_iters = [exs[0].iterations for exs in runs.values() if any(ex.success for ex in exs)]
+        failed_run_iters = [exs[0].iterations for exs in runs.values() if not any(ex.success for ex in exs)]
 
         # Duration metrics
         durations = [ex.duration_seconds for ex in examples]
@@ -173,8 +169,8 @@ class MetricsAggregator:
                 "message": "No token usage data available",
             }
 
-        total_input = sum(ex.token_usage.get("input", 0) for ex in examples)
-        total_output = sum(ex.token_usage.get("output", 0) for ex in examples)
+        total_input = sum((ex.token_usage or {}).get("input", 0) for ex in examples)
+        total_output = sum((ex.token_usage or {}).get("output", 0) for ex in examples)
         total_tokens = total_input + total_output
 
         avg_input = total_input / len(examples) if examples else 0
@@ -191,7 +187,7 @@ class MetricsAggregator:
         }
 
         # Propagate estimation flag if any example used estimated counts
-        if any(ex.token_usage.get("estimated") for ex in examples):
+        if any((ex.token_usage or {}).get("estimated") for ex in examples):
             metrics["estimated"] = True
 
         # Calculate costs if model is provided
@@ -294,9 +290,7 @@ class MetricsAggregator:
         optimized_sr = optimized.get("success_rate")
         if baseline_sr is not None and optimized_sr is not None:
             if baseline_sr > 0:
-                improvements["success_rate_improvement"] = round(
-                    ((optimized_sr - baseline_sr) / baseline_sr) * 100, 2
-                )
+                improvements["success_rate_improvement"] = round(((optimized_sr - baseline_sr) / baseline_sr) * 100, 2)
             else:
                 improvements["success_rate_improvement"] = None
 
@@ -304,17 +298,12 @@ class MetricsAggregator:
         baseline_iter = baseline.get("iterations", {}).get("avg", 0)
         optimized_iter = optimized.get("iterations", {}).get("avg", 0)
         if baseline_iter > 0:
-            improvements["iteration_reduction_pct"] = round(
-                ((baseline_iter - optimized_iter) / baseline_iter) * 100, 2
-            )
+            improvements["iteration_reduction_pct"] = round(((baseline_iter - optimized_iter) / baseline_iter) * 100, 2)
 
         # Token usage (lower is better)
         baseline_tokens_info = baseline.get("tokens", {})
         optimized_tokens_info = optimized.get("tokens", {})
-        if (
-            baseline_tokens_info.get("available")
-            and optimized_tokens_info.get("available")
-        ):
+        if baseline_tokens_info.get("available") and optimized_tokens_info.get("available"):
             baseline_tokens = baseline_tokens_info.get("total", 0)
             optimized_tokens = optimized_tokens_info.get("total", 0)
             if baseline_tokens > 0:
@@ -333,9 +322,7 @@ class MetricsAggregator:
                     improvements["cost_reduction_pct"] = round(
                         ((baseline_total - optimized_total) / baseline_total) * 100, 2
                     )
-                    improvements["cost_savings_usd"] = round(
-                        baseline_total - optimized_total, 4
-                    )
+                    improvements["cost_savings_usd"] = round(baseline_total - optimized_total, 4)
 
         # Fallback rate (lower is better)
         baseline_fr = baseline.get("fallback_rate")

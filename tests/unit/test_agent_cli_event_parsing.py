@@ -1,11 +1,11 @@
 from libs.agent_cli.claude_events import (
     ClaudeEvent,
-    TextEvent,
-    ToolUseEvent,
-    ToolResultEvent,
     MultiEvent,
-    SystemEvent,
     ResultEvent,
+    SystemEvent,
+    TextEvent,
+    ToolResultEvent,
+    ToolUseEvent,
 )
 
 
@@ -20,9 +20,7 @@ class TestClaudeEventFromDict:
     def test_assistant_text_event(self):
         data = {
             "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": "Hello world"}]
-            },
+            "message": {"content": [{"type": "text", "text": "Hello world"}]},
         }
         event = ClaudeEvent.from_dict(data)
         assert isinstance(event, MultiEvent)
@@ -95,9 +93,7 @@ class TestClaudeEventFromDict:
     def test_user_message_without_tool_result_returns_none(self):
         data = {
             "type": "user",
-            "message": {
-                "content": [{"type": "text", "text": "user says something"}]
-            },
+            "message": {"content": [{"type": "text", "text": "user says something"}]},
         }
         event = ClaudeEvent.from_dict(data)
         assert event is None

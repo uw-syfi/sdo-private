@@ -1,9 +1,12 @@
-import pytest
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
+from app_operator.config import AgentConfig, Config
 from libs.agent_cli.base import CodingAgent
+from libs.model_config import ModelConfig
 
 # --- Fake Agent ---
 # Note: FakeCodingAgent is intentionally NOT replaced by the shared StubAgent
@@ -45,7 +48,12 @@ class FakeCodingAgent(CodingAgent):
         if "fix the deployment scripts" in prompt or "analyze the error" in prompt:
             return self._handle_fix()
 
-        # 3. Handle Monitoring Analysis
+        # 3. Handle Health Assessment (AppHealthJudge)
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return self._handle_health_assessment()
+
+        # 4. Handle Monitoring Analysis
         if "analyze the following health check results" in prompt:
             return self._handle_analysis()
 
@@ -120,10 +128,19 @@ fi
 </summary>
 I have analyzed the logs and fixed the deployment script."""
 
+    def _handle_health_assessment(self) -> str:
+        return (
+            "<health_verdict>healthy</health_verdict>\n"
+            "<health_assessment>All services healthy.</health_assessment>\n"
+            "<diagnosis></diagnosis>\n"
+            "<script_fixed>false</script_fixed>"
+        )
+
     def _handle_analysis(self) -> str:
         return """<exec_summary>System is healthy.</exec_summary>
 The system appears to be running smoothly.
 """
+
 
 # --- Tests ---
 
@@ -153,6 +170,9 @@ def test_cold_start_success(temp_repo):
         health_check_max_count=1,  # Run monitoring once
         health_check_interval=0,  # Fast execution
         max_deployment_attempts=1,
+        config=Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        ),
     )
 
     # Run the operator
@@ -190,6 +210,9 @@ def test_deployment_fix_loop(temp_repo):
         health_check_max_count=1,
         health_check_interval=0,  # Fast execution
         max_deployment_attempts=3,
+        config=Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        ),
     )
 
     exit_code = operator.run()
@@ -222,6 +245,9 @@ def test_monitoring_execution(temp_repo):
         health_check_interval=0,  # fast as possible
         health_check_max_count=3,
         max_deployment_attempts=1,
+        config=Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        ),
     )
 
     exit_code = operator.run()

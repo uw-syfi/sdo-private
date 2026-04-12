@@ -5,29 +5,35 @@ This module provides real-time trajectory capture during SDS execution,
 recording all agent interactions, prompts, responses, and tool calls
 into a structured trajectory.json file.
 """
+
 from __future__ import annotations
-from libs.agent_cli.trajectory import (
-    NullTrajectoryRecorder,  # noqa: F401
-    TrajectoryRecorderProtocol,  # noqa: F401
-    register_context_providers as _register_context_providers,
-)
 
 import json
 import shutil
-import time
 import threading
+import time
 from contextlib import contextmanager
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
 )
-from enum import Enum
 
 from app_operator.logger import logger
 from app_operator.trajectory_collectors import collect_gemini_sessions
-from app_operator.prompts.trajectory_prompts import get_system_prompt
-from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
+
+if TYPE_CHECKING:
+    from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
+
+from libs.agent_cli.trajectory import (
+    NullTrajectoryRecorder,  # noqa: F401
+    TrajectoryRecorderProtocol,  # noqa: F401
+)
+from libs.agent_cli.trajectory import (
+    register_context_providers as _register_context_providers,
+)
 
 DEFAULT_MAX_OUTPUT_LENGTH = 10000  # characters captured per tool output
 
@@ -89,9 +95,7 @@ class TrajectoryRecorder:
 
         # Create timestamped filename for this run
         self._run_timestamp = time.strftime("%Y%m%d-%H%M%S")
-        self.trajectory_file = (
-            self.trajectories_dir / f"trajectory_{self._run_timestamp}.json"
-        )
+        self.trajectory_file = self.trajectories_dir / f"trajectory_{self._run_timestamp}.json"
 
         # Also maintain a symlink to the latest trajectory
         self._latest_link = self.sds_dir / "trajectory.json"
@@ -170,9 +174,7 @@ class TrajectoryRecorder:
             self._call_counter += 1
             return self._call_counter
 
-    def start_phase(
-        self, phase: Phase, context: dict[str, Any] | None = None
-    ) -> None:
+    def start_phase(self, phase: Phase, context: dict[str, Any] | None = None) -> None:
         """Start a new phase/conversation.
 
         Args:
@@ -202,16 +204,19 @@ class TrajectoryRecorder:
             }
             self.trajectory["calls"].append(call_record)
 
-            # Add system message with context
-            agent_name = self.trajectory["metadata"].get("agent_name", "AI Agent")
-            system_content = get_system_prompt(phase.value, context, agent_name)
-            self._current_conversation.append(
-                TrajectoryMessage(
-                    role=MessageRole.SYSTEM.value,
-                    content=system_content,
-                    timestamp=call_start_time,
-                ).to_dict()
-            )
+    def add_system_message(self, content: str) -> None:
+        """Add a system prompt message to the current conversation."""
+        with self._conversation_lock:
+            if self._current_phase is not None:
+                self._current_conversation.append(
+                    TrajectoryMessage(
+                        role=MessageRole.SYSTEM.value,
+                        content=content,
+                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    ).to_dict()
+                )
+            else:
+                logger.warning("Attempted to record system message outside of a phase")
 
     def add_user_message(self, content: str) -> None:
         """Add a user/prompt message to the current conversation."""
@@ -227,9 +232,7 @@ class TrajectoryRecorder:
             else:
                 logger.warning("Attempted to record user message outside of a phase")
 
-    def add_assistant_message(
-        self, content: str, duration: float | None = None
-    ) -> None:
+    def add_assistant_message(self, content: str, duration: float | None = None) -> None:
         """Add an assistant response to the current conversation."""
         with self._conversation_lock:
             if self._current_phase is not None:
@@ -242,9 +245,7 @@ class TrajectoryRecorder:
                     ).to_dict()
                 )
             else:
-                logger.warning(
-                    "Attempted to record assistant message outside of a phase"
-                )
+                logger.warning("Attempted to record assistant message outside of a phase")
 
     def add_tool_call(
         self,
@@ -269,13 +270,11 @@ class TrajectoryRecorder:
 
                     if len(stdout) > stdout_limit:
                         truncated_stdout = (
-                            f"[truncated, showing last {stdout_limit} chars]\n..."
-                            + stdout[-stdout_limit:]
+                            f"[truncated, showing last {stdout_limit} chars]\n..." + stdout[-stdout_limit:]
                         )
                     if len(stderr) > stderr_limit:
                         truncated_stderr = (
-                            f"[truncated, showing last {stderr_limit} chars]\n..."
-                            + stderr[-stderr_limit:]
+                            f"[truncated, showing last {stderr_limit} chars]\n..." + stderr[-stderr_limit:]
                         )
 
                 self._current_conversation.append(
@@ -283,8 +282,8 @@ class TrajectoryRecorder:
                         role=MessageRole.TOOL_CALL.value,
                         tool=tool,
                         args=args,
-                        stdout=truncated_stdout if truncated_stdout else None,
-                        stderr=truncated_stderr if truncated_stderr else None,
+                        stdout=truncated_stdout or None,
+                        stderr=truncated_stderr or None,
                         exit_code=exit_code,
                         timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                         duration_seconds=duration,
@@ -318,11 +317,7 @@ class TrajectoryRecorder:
         Args:
             kwargs: The keyword arguments passed to the prompt renderer.
         """
-        filtered = {
-            k: str(v) if isinstance(v, Path) else v
-            for k, v in kwargs.items()
-            if not k.startswith("_")
-        }
+        filtered = {k: str(v) if isinstance(v, Path) else v for k, v in kwargs.items() if not k.startswith("_")}
         self._current_prompt_kwargs = filtered
 
     def record_rendered_prompt(self, rendered_prompt: str) -> None:
@@ -450,7 +445,7 @@ class TrajectoryRecorder:
 
             # Update symlink to latest trajectory
             self._update_latest_link()
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             # Log error but don't crash
             logger.warning(f"Failed to write trajectory file: {e}")
 
@@ -469,9 +464,7 @@ class TrajectoryRecorder:
             try:
                 shutil.copy2(self.trajectory_file, self._latest_link)
             except OSError as e:
-                logger.warning(
-                    f"Failed to update latest trajectory link: {e}"
-                )
+                logger.warning(f"Failed to update latest trajectory link: {e}")
 
     def save(self) -> Path:
         """Save the trajectory to file (alias for _write_to_file).
@@ -529,7 +522,7 @@ class TrajectoryRecorder:
         self.start_phase(phase, context)
         try:
             yield self
-        except Exception:
+        except BaseException:
             self.end_phase("failed")
             raise
         else:

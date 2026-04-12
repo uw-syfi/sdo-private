@@ -1,0 +1,126 @@
+exclude = [
+    "apps",
+    "tests",
+]
+source_roots = [
+    ".",
+]
+ignore_type_checking_imports = true
+
+# --- Layer 0: libs (no internal deps) ---
+
+[[modules]]
+path = "libs.model_config"
+depends_on = []
+
+[[modules]]
+path = "libs.sds_core"
+depends_on = []
+
+[[modules]]
+path = "libs.pydantic_agent"
+depends_on = [
+    "libs.model_config",
+]
+
+[[modules]]
+path = "libs.agent_mw"
+depends_on = [
+    "libs.pydantic_agent",
+]
+
+[[modules]]
+path = "libs.agent_cli"
+depends_on = [
+    "libs.sds_core",
+]
+
+# --- Layer 1: shared infrastructure ---
+
+[[modules]]
+path = "app_operator.prompts"
+depends_on = []
+
+[[modules]]
+path = "app_operator.trajectory"
+depends_on = [
+    "app_operator.prompts",
+    "libs.agent_cli",
+]
+
+# --- Layer 2: integration modules ---
+
+[[modules]]
+path = "app_operator.dspy_integration"
+depends_on = [
+    "app_operator.prompts",
+    "app_operator.trajectory",
+]
+
+[[modules]]
+path = "app_operator.fault_injection"
+depends_on = []
+
+# --- Layer 3: runtimes (independent of each other) ---
+
+[[modules]]
+path = "app_operator.cli_agent"
+depends_on = [
+    "app_operator.prompts",
+    "app_operator.trajectory",
+    "libs.agent_cli",
+]
+
+[[modules]]
+path = "app_operator.gepa"
+depends_on = [
+    "app_operator.cli_agent",
+    "app_operator.prompts",
+    "app_operator.trajectory",
+]
+
+# --- Layer 3.5: UI ---
+
+[[modules]]
+path = "app_operator.ui"
+depends_on = []
+
+# --- Layer 4: commands ---
+
+[[modules]]
+path = "app_operator.commands"
+depends_on = [
+    "app_operator.dspy_integration",
+]
+
+# --- Layer 5: entry point ---
+
+[[modules]]
+path = "app_operator.__main__"
+depends_on = [
+    "app_operator.commands",
+]
+
+# --- app_operator_dspy (independent of app_operator) ---
+
+[[modules]]
+path = "app_operator_dspy"
+depends_on = []
+
+# --- lego_agent (independent of app_operator) ---
+
+[[modules]]
+path = "lego_agent"
+depends_on = [
+    "libs.model_config",
+    "libs.sds_core",
+]
+
+# --- sregym_agents (independent of app_operator) ---
+
+[[modules]]
+path = "sregym_agents"
+depends_on = [
+    "libs.pydantic_agent",
+    "libs.agent_mw",
+]

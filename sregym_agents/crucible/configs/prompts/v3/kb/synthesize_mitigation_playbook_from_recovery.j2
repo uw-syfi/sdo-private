@@ -1,0 +1,151 @@
+{# Contract: produce a mitigation playbook v1 from a recovery (oracle-assisted) run after mitigation failed #}
+You are synthesizing a new mitigation playbook for a fault class that the SRE
+mitigation agent FAILED to resolve on its first attempt. A separate recovery
+mitigation agent — which was given the oracle answer as a hint — then
+re-applied the fix and produced grounded observations of what the correct
+patch-and-verify procedure looks like. Your job is to turn those grounded
+recovery observations into a reusable mitigation playbook, AND to capture the
+original failure as Failure Patterns and Known Pitfalls so the next run avoids
+the same trap.
+
+Class: {{ class_name }}
+Slug: {{ slug }}
+Timestamp (use verbatim in meta.last_updated): {{ current_iso }}
+
+Oracle answer (the benchmark's confirmed correct fix):
+---
+{{ oracle_answer }}
+---
+
+Recovery summary (the oracle-assisted re-run's bottom-line):
+---
+{{ recovery_summary }}
+---
+
+Recovery observations (use these to understand the SHAPE of the correct
+fix-and-verify procedure — the kinds of patch commands, the kinds of checks
+that confirm the cluster is healthy. Extract the abstract pattern; do NOT
+copy literal namespaces, deployment names, env var names, or values into the
+playbook):
+---
+{% for obs in recovery_observations %}
+- {{ obs }}
+{% endfor %}
+---
+
+Recovery stage failures (each one becomes a Failure Pattern entry — extract
+the abstract pattern of how the original mitigation went wrong, not the
+literal incident-specific tokens):
+---
+{% for sf in recovery_stage_failures %}
+- stage: {{ sf.stage }}
+  description: {{ sf.description }}
+  evidence: {{ sf.evidence }}
+  lesson: {{ sf.lesson }}
+{% endfor %}
+---
+
+Original (failed) agent stage outputs — mine these for the SHAPE of the
+pitfalls that misled the agent into applying the wrong fix. Translate the
+pitfalls into general patterns; do not copy the literal incident tokens:
+---
+{{ stage_outputs }}
+---
+{% if validation_feedback %}
+
+Your previous attempt was REJECTED by the deterministic validator for the
+following reasons. Fix every one of them in this revision:
+---
+{{ validation_feedback }}
+---
+{% endif %}
+
+{% include "kb/_abstraction_rules.j2" %}
+Task: produce ONE markdown mitigation playbook document, and nothing else.
+The document MUST match the exact structure below. A deterministic Python
+validator will reject your output if any of these constraints are violated:
+
+- Every `##` section listed below must be present, in order, with the exact
+  heading text.
+- The `<!-- meta -->` block must contain the keys `slug`, `class_name`,
+  `seen`, `created_from`, `last_updated`, each on its own line as `key: value`.
+- Applicability, Mitigation Procedure, Post-Mitigation Verification, and
+  Required Evidence must each be non-empty.
+- Required Evidence must contain at least one `- [ ]` checkbox item, and
+  every item there must be a `- [ ]` checkbox.
+- The following vague phrases are FORBIDDEN anywhere in the document:
+  "appropriate values", "as needed", "relevant configuration", "if applicable",
+  "as appropriate". Use parameterized placeholders for incident-specific
+  tokens.
+
+Authoring rules specific to a v1-from-recovery mitigation playbook:
+- Mitigation Procedure and Post-Mitigation Verification steps must be
+  GROUNDED in the recovery_observations list, but written as the abstract
+  pattern that the observation reveals. Translate each observation into a
+  concrete Action / Expected outcome entry, parameterizing the specific
+  resource names, env var names, and values that recovery saw with
+  `<DEPLOYMENT>`, `<NAMESPACE>`, `<ENV_VAR>`, etc.
+- Required Evidence items must describe the SHAPE of what recovery checked
+  AFTER applying the fix (e.g. "All target Deployment pods are Running with
+  restartCount=0"), not the literal pod or container name from this one
+  recovery run. Each item is a `- [ ]` checkbox.
+- For EVERY entry in `recovery_stage_failures`, emit one Failure Pattern
+  bullet of the shape:
+    - **<stage>:** "<abstracted description of the incorrect fix attempt,
+      parameterized over the specific tokens>". **Oracle:** <abstracted
+      correction grounded in evidence>. **Lesson:** <lesson, rewritten in
+      general terms so it applies to any future incident in this class>.
+- Known Pitfalls come from the original failed `stage_outputs`: identify
+  patterns that looked like the right fix but were not, and describe them as
+  general patterns. If there are no honest pitfalls, emit
+  `- (none observed yet)` as a single bullet.
+- The meta block MUST be filled exactly as:
+    slug: {{ slug }}
+    class_name: {{ class_name }}
+    seen: 1
+    created_from: recovery
+    last_updated: {{ current_iso }}
+
+Required document shape (keep section headings byte-identical):
+
+# Mitigation Playbook: {{ class_name }}
+
+<!-- meta -->
+slug: {{ slug }}
+class_name: {{ class_name }}
+seen: 1
+created_from: recovery
+last_updated: {{ current_iso }}
+<!-- /meta -->
+
+## Summary
+<1-2 sentence description of the fix CLASS in general terms.>
+
+## Applicability
+- <bullet describing the precondition/diagnosis this mitigation addresses,
+  phrased as a SHAPE.>
+
+## Mitigation Procedure
+1. **Action:** <patch command from recovery_observations, parameterized>
+   **Expected outcome:** <cluster state after this step>
+2. ...
+
+## Post-Mitigation Verification
+1. **Action:** <verification recovery actually performed, parameterized>
+   **Expected outcome:** <the SHAPE of the steady-state signal>
+2. ...
+
+## Required Evidence (Submission Gate)
+- [ ] <a parameterized POST-FIX check from the recovery run>
+- [ ] <second parameterized check>
+
+## Known Pitfalls
+- **<pitfall pattern, parameterized>:** <why it looks like the right fix>.
+  **Avoid:** <parameterized check that distinguishes the real fix>.
+
+## Failure Patterns
+- **<stage from recovery_stage_failures>:** "<abstracted incorrect fix
+  attempt, parameterized>". **Oracle:** <abstracted correction>.
+  **Lesson:** <general lesson>.
+
+Output the markdown document only. Begin with `# Mitigation Playbook: {{ class_name }}`.

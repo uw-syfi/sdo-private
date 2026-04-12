@@ -1,10 +1,11 @@
 """Tests for token cost calculation."""
 
 import pytest
-from app_operator.dspy_integration.cost import (
+
+from app_operator.dspy_integration._cost import (
+    MODEL_PRICING,
     calculate_cost,
     get_model_pricing,
-    MODEL_PRICING,
 )
 
 
@@ -86,7 +87,7 @@ class TestCalculateCost:
 
     def test_all_models_have_pricing(self):
         """Test that all models in MODEL_PRICING can be calculated."""
-        for model in MODEL_PRICING.keys():
+        for model in MODEL_PRICING:
             cost = calculate_cost(model, 1_000, 1_000)
             assert cost > 0.0
 
@@ -121,7 +122,7 @@ class TestGetModelPricing:
 
     def test_pricing_structure(self):
         """Test that all pricing entries have correct structure."""
-        for model, pricing in MODEL_PRICING.items():
+        for _model, pricing in MODEL_PRICING.items():
             assert isinstance(pricing, dict)
             assert "input" in pricing
             assert "output" in pricing

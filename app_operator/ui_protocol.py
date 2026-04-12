@@ -2,9 +2,7 @@ from typing import Protocol
 
 
 class OperatorUI(Protocol):
-    def set_stage(
-        self, stage: str, detail: str | None = None, status: str | None = None
-    ) -> None:
+    def set_stage(self, stage: str, detail: str | None = None, status: str | None = None) -> None:
         """Update the current operating stage."""
         ...
 
@@ -31,9 +29,7 @@ class OperatorUI(Protocol):
         """Handle tool execution result."""
         ...
 
-    def close(
-        self, status: str | None = None, exit_code: int | None = None
-    ) -> None:
+    def close(self, status: str | None = None, exit_code: int | None = None) -> None:
         """Close the UI."""
         ...
 
@@ -41,9 +37,7 @@ class OperatorUI(Protocol):
 class NullOperatorUI:
     """No-op implementation of OperatorUI."""
 
-    def set_stage(
-        self, stage: str, detail: str | None = None, status: str | None = None
-    ) -> None:
+    def set_stage(self, stage: str, detail: str | None = None, status: str | None = None) -> None:
         pass
 
     def log(self, message: str, level: str = "info") -> None:
@@ -65,7 +59,5 @@ class NullOperatorUI:
     ) -> None:
         pass
 
-    def close(
-        self, status: str | None = None, exit_code: int | None = None
-    ) -> None:
+    def close(self, status: str | None = None, exit_code: int | None = None) -> None:
         pass

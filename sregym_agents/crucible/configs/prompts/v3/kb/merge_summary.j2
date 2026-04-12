@@ -1,0 +1,105 @@
+You are maintaining a per-application knowledge base of SRE incidents.
+
+Current Long-Term Summary:
+{{ prior_summary or "(Empty)" }}
+{% if existing_slugs %}
+
+Existing slugs (each slug is a sticky identifier for a root cause class; preserve every one of these in the updated summary, either in place or by declaring a `consolidate` reorganization):
+{% for s in existing_slugs %}- {{ s }}
+{% endfor %}
+{% endif %}
+
+New Session Summary:
+{{ session_summary }}
+
+Task: Update the Long-Term Summary using the following root-cause-first structure:
+
+The new session's incident file is: {% raw %}{{ref:{% endraw %}{{ incident_ref }}{% raw %}}}{% endraw %}
+
+### Root Cause: <root cause class name>
+
+#### Slug: <slug>
+
+#### Symptoms
+- <observed symptom or alert 1>
+
+#### Detection
+- <distinguishing signal / investigation strategy>
+
+#### Causal Chain
+<resource-type/field-class> → <mechanism pattern> → <symptom class> (validated) or (unvalidated)
+
+#### Mitigations
+- <generic mitigation approach>
+
+#### Seen
+<count> incidents
+
+#### References
+{% raw %}{{ref:incidents/YYYYMMDD_HHMMSS.md}}{% endraw %}
+
+Rules:
+- Organize ALL incidents by root cause class. Each `### Root Cause:` is a distinct failure
+  mechanism. Use semantic similarity to match (e.g., "targetPort mismatch" and "Service port
+  misconfiguration" are the same class).
+- If matching existing root cause: increment Seen, append reference, add novel symptoms/detection
+  signals, update mitigations if the new session provides a better approach.
+- If novel: create a new `### Root Cause:` entry with all subheadings.
+- SPLITTING IS DISABLED in this version. Do NOT split an existing entry. If you think a split is
+  warranted, keep the original entry intact and note your reasoning in the Causal Chain.
+- CONSOLIDATION is allowed: if two or more existing entries describe the same underlying fault
+  class, you MAY merge them into a single entry AND declare the merge in the `<merge_result>`
+  envelope below (see rules). Never silently delete an entry without declaring it.
+- Include causal chains when available. Mark "(validated)" or "(unvalidated)" based on benchmark
+  confirmation. Upgrade unvalidated to validated when possible. Skip chains marked "N/A".
+- Citations MUST use {% raw %}`{{ref:incidents/FILENAME.md}}`{% endraw %} format exactly.
+- MIGRATION: If the prior summary uses the old symptom-first format, restructure into
+  root-cause-first format.
+
+Slug rules:
+- Every `### Root Cause:` entry MUST contain a `#### Slug: <slug>` line directly under the
+  header (before `#### Symptoms`).
+- When matching an existing class, PRESERVE its `#### Slug:` line byte-for-byte. A slug is
+  sticky: once assigned, it never changes, even if the class name is rewritten.
+- When creating a new class, derive the slug from the class name: lowercase, non-alphanumeric
+  characters replaced with underscores, truncated to 64 characters. Example:
+  "Missing CURRENCY_ADDR env var" → `missing_currency_addr_env_var`.
+- When consolidating N entries into one, KEEP the slug of the winning (surviving) entry and
+  declare the losers' slugs in the `<merge_result>` envelope.
+
+ABSTRACTION RULES:
+- Root causes, causal chains, detection signals, and mitigations must describe the CLASS of
+  misconfiguration, not specific instances. Use generic placeholders (<affected-service>,
+  <target-port>) instead of specific names or values.
+  GOOD: "A Service's targetPort doesn't match the pod's listening port → Connection refused"
+  BAD: "text-service targetPort was 9999 while listening on 9090"
+
+Output format:
+- Output the updated Long-Term Summary text first, with no preamble.
+- Then, on a new line, emit EXACTLY ONE `<merge_result>` block describing the structural
+  outcome of this merge. The block must be valid JSON between the tags.
+
+`<merge_result>` contract:
+
+<merge_result>
+{
+  "primary_action": "new" | "merged" | "noop",
+  "primary_class_name": "<class name touched by this run, or null for noop>",
+  "reorganizations": [
+    {"type": "consolidate", "winner": "<class name A>", "losers": ["<class name B>"]}
+  ]
+}
+</merge_result>
+
+Rules for the envelope:
+- `primary_action="new"`: this run introduced a brand new `### Root Cause:` entry.
+- `primary_action="merged"`: this run appended to an existing root cause class.
+- `primary_action="noop"`: the run produced no material change to the summary.
+- `primary_class_name` MUST match the exact text after `### Root Cause:` in the updated summary
+  for the class this run touched (or `null` for noop).
+- `reorganizations` lists any cross-entry structural changes. Use this only when you are
+  consolidating two or more existing entries into one. `winner` is the surviving class name;
+  `losers` is the list of absorbed class names. Leave the list empty (`[]`) if no consolidation
+  happened.
+- Every pre-existing slug listed above must either remain present in the updated summary OR
+  appear as a loser in a `consolidate` reorganization. Silently dropping an entry is not allowed.

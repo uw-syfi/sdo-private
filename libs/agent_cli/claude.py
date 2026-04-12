@@ -1,28 +1,30 @@
-from .base import register_provider
 import json
 import time
+from typing import Any
 
-from .cli_agent import CLICodingAgent, CLIGenerationSession
+from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
+
+from .base import register_provider
 from .claude_events import (
     ClaudeEvent,
-    TextEvent,
-    ToolUseEvent,
-    ToolResultEvent,
     MultiEvent,
     ResultEvent,
+    TextEvent,
+    ToolResultEvent,
+    ToolUseEvent,
 )
+from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         # Initialize state required for stream processing
-        self.tool_map = {}
-        self.tool_start_times = {}
-        self.tool_args = {}
-        self.final_result = None
+        self.tool_map: dict[str, str] = {}
+        self.tool_start_times: dict[str, float] = {}
+        self.tool_args: dict[str, Any] = {}
+        self.final_result: str | None = None
 
     def _process_stdout(self, line: str) -> None:
         """Process a line from stdout."""

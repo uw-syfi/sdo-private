@@ -1,22 +1,10 @@
 {
-  "include": [
-    "app_operator/types.py",
-    "app_operator/cli_agent/healthcheck.py",
-    "app_operator/cli_agent/subprocess_runner.py",
-    "app_operator/cli_agent/agents/deployer.py",
-    "app_operator/prompts/deployer.py",
-    "app_operator/trajectory.py",
-    "app_operator/fault_injection/reporter.py",
-    "app_operator/fault_injection/models.py",
-    "app_operator/dspy_integration/enriched_data_loader.py"
-  ],
-  "exclude": [
-    "apps/",
-    ".venv/",
-    ".claude/"
-  ],
-  "typeCheckingMode": "basic",
+  "include": ["app_operator", "lego_agent", "libs", "sregym_agents", "tests"],
+  "exclude": ["apps/", ".venv/", ".claude/"],
+  "typeCheckingMode": "standard",
   "pythonVersion": "3.12",
   "venvPath": ".",
-  "venv": ".venv"
+  "venv": ".venv",
+  "reportMissingTypeStubs": false,
+  "strict": ["libs", "sregym_agents"]
 }

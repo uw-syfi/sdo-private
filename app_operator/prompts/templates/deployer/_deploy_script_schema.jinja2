@@ -1,0 +1,14 @@
+## deploy.sh CLI Interface
+
+- **Location**: `.sds/deploy.sh`
+- **Invocation**: `deploy.sh <command>` — the command is the first positional argument (`$1`).
+  Do NOT use flags or getopts; parse `$1` directly in a `case` statement.
+- **Required commands**:
+  - `start` — build images and start all services
+  - `stop` — stop all running services
+  - `restart` — stop then start all services
+  - `status` — show current service/container status
+  - `logs` — tail recent logs from all services
+  - `build` — build images without starting services
+  - `cleanup` — stop services and remove containers/volumes
+- **Exit codes**: 0 on success, non-zero on any failure

@@ -64,8 +64,12 @@ class TestPromptReflectorFormatMetricScores:
 
     def test_with_scores(self, reflector):
         trace = ExecutionTrace(
-            prompt_used="", agent_type="deployer", phase="deployment",
-            messages=[], evaluation_result={}, success=True,
+            prompt_used="",
+            agent_type="deployer",
+            phase="deployment",
+            messages=[],
+            evaluation_result={},
+            success=True,
             metric_scores={"script_completeness": 0.70, "deployment_progress": 0.30},
         )
         result = reflector._format_metric_scores([trace])
@@ -80,8 +84,12 @@ class TestPromptReflectorFormatGeneratedScripts:
 
     def test_with_scripts(self, reflector):
         trace = ExecutionTrace(
-            prompt_used="", agent_type="deployer", phase="deployment",
-            messages=[], evaluation_result={}, success=True,
+            prompt_used="",
+            agent_type="deployer",
+            phase="deployment",
+            messages=[],
+            evaluation_result={},
+            success=True,
             generated_scripts={"deploy.sh": "#!/bin/bash\necho hello"},
         )
         result = reflector._format_generated_scripts([trace])
@@ -94,7 +102,7 @@ class TestPromptReflectorMutationGuidelines:
     """Test _mutation_guidelines() static method."""
 
     @pytest.mark.parametrize(
-        "agent_type,expected_substr",
+        ("agent_type", "expected_substr"),
         [
             ("deployer", "Deployer"),
             ("monitor", "Monitor"),
@@ -113,13 +121,15 @@ class TestPromptReflectorBuildPrompts:
         """Reflection prompt includes template name, current prompt, Jinja2 warning,
         guidelines, and metric scores."""
         trace = ExecutionTrace(
-            prompt_used="", agent_type="deployer", phase="deployment",
-            messages=[], evaluation_result={}, success=True,
+            prompt_used="",
+            agent_type="deployer",
+            phase="deployment",
+            messages=[],
+            evaluation_result={},
+            success=True,
             metric_scores={"test_metric": 0.42},
         )
-        result = reflector._build_reflection_prompt(
-            "my special prompt text", [trace], "deployer/system.jinja2"
-        )
+        result = reflector._build_reflection_prompt("my special prompt text", [trace], "deployer/system.jinja2")
         assert "deployer/system.jinja2" in result
         assert "my special prompt text" in result
         assert "Jinja2" in result
@@ -158,10 +168,7 @@ class TestCallReflectionLM:
         return reflector
 
     def test_parses_string_response(self):
-        text = (
-            "<rationale>fix docker</rationale>\n"
-            "<mutated_prompt>Deploy on {{ platform }} v2</mutated_prompt>"
-        )
+        text = "<rationale>fix docker</rationale>\n<mutated_prompt>Deploy on {{ platform }} v2</mutated_prompt>"
         reflector = self._make_reflector_with_stub(text)
         prompt, rationale = reflector._call_reflection_lm("ignored")
         assert prompt == "Deploy on {{ platform }} v2"
@@ -171,8 +178,7 @@ class TestCallReflectionLM:
         """Gemini thinking models return content as list of dicts."""
         parts = [
             {"type": "thinking", "text": "let me think..."},
-            {"type": "text", "text": "<rationale>r</rationale>\n"
-             "<mutated_prompt>result</mutated_prompt>"},
+            {"type": "text", "text": "<rationale>r</rationale>\n<mutated_prompt>result</mutated_prompt>"},
         ]
         reflector = self._make_reflector_with_stub(parts)
         prompt, rationale = reflector._call_reflection_lm("ignored")
@@ -180,8 +186,6 @@ class TestCallReflectionLM:
         assert rationale == "r"
 
     def test_missing_mutated_prompt_tag_raises(self):
-        reflector = self._make_reflector_with_stub(
-            "Here is my analysis but I forgot the tags."
-        )
+        reflector = self._make_reflector_with_stub("Here is my analysis but I forgot the tags.")
         with pytest.raises(ValueError, match="missing <mutated_prompt>"):
             reflector._call_reflection_lm("ignored")

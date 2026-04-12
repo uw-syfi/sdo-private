@@ -1,13 +1,14 @@
 """Tests for custom exception hierarchy."""
 
 import pytest
+
 from app_operator.exceptions import (
-    SdsOperatorError,
+    AgentError,
     ConfigurationError,
     DeploymentError,
     FileSystemError,
     ProcessError,
-    AgentError,
+    SdsOperatorError,
 )
 
 
@@ -108,17 +109,15 @@ def test_exceptions_can_be_caught_by_base():
 
 def test_deployment_error_attributes_preserved():
     """Test DeploymentError attributes are preserved when caught."""
-    try:
+    with pytest.raises(DeploymentError, match="test") as exc_info:
         raise DeploymentError("test", exit_code=42, attempt=3)
-    except DeploymentError as e:
-        assert e.exit_code == 42
-        assert e.attempt == 3
+    assert exc_info.value.exit_code == 42
+    assert exc_info.value.attempt == 3
 
 
 def test_process_error_timeout_attribute_preserved():
     """Test ProcessError timeout attribute is preserved when caught."""
-    try:
+    with pytest.raises(ProcessError, match="test") as exc_info:
         raise ProcessError("test", exit_code=-1, timeout=True)
-    except ProcessError as e:
-        assert e.timeout is True
-        assert e.exit_code == -1
+    assert exc_info.value.timeout is True
+    assert exc_info.value.exit_code == -1

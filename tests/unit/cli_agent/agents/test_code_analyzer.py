@@ -1,7 +1,10 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
-from tests.fixtures.agents import StubAgent, ErrorAgent
+from app_operator.config import OperatorConfig
+from tests.fixtures.agents import ErrorAgent, StubAgent
 
 
 @pytest.fixture
@@ -22,6 +25,7 @@ def test_run_generates_analysis_files_when_missing(repo_path, agent):
     When code_analysis.md and deployment_issues.md are missing, the agent should
     invoke the coding agent to generate them.
     """
+
     # Setup: agent generates the files
     def fake_generate(prompt, cwd=None, timeout=None):
         sds_dir = repo_path / ".sds"
@@ -83,3 +87,23 @@ def test_run_returns_false_if_files_not_created(repo_path, agent):
     analyzer = CodeAnalyzerAgent(repo_path, agent)
 
     assert analyzer.run() is False
+
+
+def test_run_uses_operator_config_timeout(repo_path):
+    """Test that CodeAnalyzerAgent passes operator_config.agent_timeout to generate()."""
+    captured = {}
+
+    class CapturingAgent(StubAgent):
+        def generate(self, prompt, cwd=None, timeout=None, silent=False, **kwargs):
+            captured["timeout"] = timeout
+            sds_dir = repo_path / ".sds"
+            sds_dir.mkdir(exist_ok=True)
+            (sds_dir / "code_analysis.md").touch()
+            (sds_dir / "deployment_issues.md").touch()
+            return "Done"
+
+    op_config = OperatorConfig(agent_timeout=1234)
+    analyzer = CodeAnalyzerAgent(repo_path, CapturingAgent(), operator_config=op_config)
+    analyzer.run()
+
+    assert captured["timeout"] == 1234

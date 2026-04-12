@@ -1,73 +1,26 @@
 # SDS (Self-Defining Systems)
 
-SDS autonomously explores, validates, and evolves infrastructure using agentic LLMs. It consists of an **Application Operator** and multiple microservices benchmarks (directory apps/) as target applications.
+SDS autonomously explores, validates, and evolves infrastructure using agentic LLMs.
 
-## Project Structure
+## Projects
 
-- `app_operator/` — Core operator logic: `cli_agent/` (deployer, monitor, code_analyzer + provider backends), `langgraph/`, `adk/`, `commands/`, `dspy_integration/`, `fault_injection/`, `prompts/`
-- `lego_agent/` — Autonomous script generation (Web UI + TUI + CLI): `engine.py`, `runtime.py`, `server.py`, `ui/`
-- `libs/agent_cli/` — Shared AI provider CLI integrations
+- [`app_operator/`](app_operator/AGENTS.md) — Deploy + monitor target apps with LLM agents
+- [`lego_agent/`](lego_agent/AGENTS.md) — Autonomous script generation (Web UI + TUI + CLI)
+- [`sregym_agents/`](sregym_agents/AGENTS.md) — SRE Gym competition agents
+- `libs/` — Shared libraries: `agent_cli`, `agent_mw`, `model_config`, `pydantic_agent`, `sds_core`
 - `apps/` — Target applications (hotelReservation, socialNetwork, ...)
 - `tests/` — `unit/`, `integration/`
 
-## Application Operator
-
-### Key Commands
-
-```bash
-uv run -m app_operator run /path/to/app        # deploy + monitor
-uv run -m app_operator analyze-prompts         # baseline metrics
-uv run -m app_operator optimize-prompts \
-    --prompts deployer_fix_error --optimizer BootstrapFewShot
-```
-
-### sds.toml Configuration
-
-Full schema in `app_operator/config.py`. Invalid values raise `ValueError`/`TypeError` at initialization.
-
-```toml
-[agent]
-provider = "gemini"  # gemini | codex | claude | claude-code | opencode | openai | anthropic
-model = "gemini-1.5-pro"
-
-[runtime]
-impl = "cli_agent"  # cli_agent | langgraph | adk
-
-[operator.phase]  # optional — disable phases
-code_analysis = false          # default: true
-fix_summary_consolidation = false  # default: true
-git_integration = false        # default: false — see docs/feature-flags.md
-```
-
-See [`docs/feature-flags.md`](docs/feature-flags.md) for all feature flags.
-
-### Architecture Overview
-
-- **DeploymentAgent** (`cli_agent/agents/deployer.py`): Generates deploy.sh/health_check.sh, self-healing loop.
-- **CodeAnalyzerAgent** (`cli_agent/agents/code_analyzer.py`): Proactive codebase analysis, generates `.sds/code_analysis.md`.
-- **AppMonitor** (`cli_agent/agents/app_monitor.py`): Periodic health checks.
-- **Trajectory** (`trajectory.py`): Records all agent calls with sequential IDs, saves to `.sds/trajectories/*.json`.
-- **PromptLoader** (`prompts/__init__.py`): Supports both Jinja2 (default) and DSPy-optimized rendering with fallback.
-
-See [`docs/dspy-optimization.md`](docs/dspy-optimization.md) and [`docs/fault-injection.md`](docs/fault-injection.md) for details.
-
-## LegoAgent
-
-See [`docs/lego-agent.md`](docs/lego-agent.md) for full details.
-
-```bash
-./scripts/start_lego_ui.sh                      # Web UI (recommended)
-uv run -m lego_agent                            # TUI mode
-uv run -m lego_agent --no-tui --prompt "task"  # CLI mode
-```
-
 ## Development Conventions
 
+- **Test-driven**: begin designing your work by thinking about how to test it. Test suite is part of your plan.
+- **Red/Green TDD**: write failing tests first, then implement.
 - **Python**: type hints, `autopep8` formatting, `ruff` linting, `pytest` tests
-- **Structured data**: use dataclasses instead of raw `dict` when a data shape is constructed in multiple places or consumed with field access — this prevents `KeyError` and missing-field bugs at the type level
+- **Structured data**: use dataclasses instead of raw `dict` for shapes constructed/consumed in multiple places
 - **Config**: dataclasses with `__post_init__` validation (`TypeError`/`ValueError`)
 - **Exceptions**: custom hierarchy in `app_operator/exceptions.py`
-- **Microservices**: docker-compose, Go modules, Consul service discovery
+- **Adding a new feature**: Think about tests first. Test public behavior, not internal details.
+- **Fixing bugs**: Write a reproducing test first, then fix. Test must be part of the fix.
 
 ## Usage Guide for LLM Agents
 
@@ -77,8 +30,6 @@ uv run -m lego_agent --no-tui --prompt "task"  # CLI mode
 - **Adding DSPy signatures**: Add to `dspy_integration/signatures.py`, register in `SIGNATURES` dict
 - **Extending metrics**: Modify `dspy_integration/metrics.py`, ensure weights sum to 1.0
 - **Adding fault types**: Add to `COMPOSE_FAULTS`, implement `_inject_*`, register in dispatch table, add tests
-- **Adding a new feature**: Think about tests first. Test public behavior, not internal details.
-- **Fixing bugs**: Write a reproducing test first, then fix. Test must be part of the fix.
 
 ## Remote repo access
 
@@ -90,6 +41,10 @@ Use `glab` command (if available) to access the remote repo on GitLab, including
 - Keep this file concise — detailed docs live in `docs/`.
 - When code changes impact CLI, update README.md.
 - When removing code, delete it — do not comment it out.
+- **Avoid nested event loops:** Code that already runs inside an async event loop (e.g. a pydantic-ai tool handler) must never call `run_sync()`, `asyncio.run()`, or `loop.run_until_complete()` — these create a second event loop, and any objects bound to the outer loop (httpx connection pools, anyio locks, etc.) will raise `RuntimeError: is bound to a different event loop`. Instead, make the function `async` and `await` the coroutine directly so it stays on the same loop.
+- When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `.agents/skills/analyze-experiment/references/`.
+- When adding or moving feature flags in `app_operator/config.py`, update `docs/feature-flags.md` to match.
+- When introducing a new top-level project or library (e.g. `libs/`, `sregym_agents/`), add it to `tach.toml` with the correct `depends_on` entries.
 
 ## Code Validation (after every code edit)
 
@@ -108,3 +63,10 @@ uv run pytest tests/                      # python only
 uv run pytest tests/ --cov=app_operator  # with coverage
 ```
 
+## Notes
+
+- Use `uv` and `uv run ...` for Python.
+- Keep this file concise — detailed docs live in `docs/`.
+- When code changes impact CLI, update README.md.
+- When removing code, delete it — do not comment it out.
+- Use `glab` command (if available) to access the remote repo on GitLab.

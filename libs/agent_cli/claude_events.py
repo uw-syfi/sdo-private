@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, cast
 
-from .utils import truncate_params, truncate_content
+from .utils import truncate_content, truncate_params
 
 
 class ClaudeEvent(ABC):
@@ -12,19 +12,18 @@ class ClaudeEvent(ABC):
     @abstractmethod
     def render(self, log_prefix: str) -> str | None:
         """Render the event as a string for terminal output."""
-        pass
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "ClaudeEvent" | None:
+    def from_dict(data: dict[str, Any]) -> ClaudeEvent | None:
         """Factory method to create events from JSON data."""
         event_type = data.get("type")
 
         if event_type == "system":
             return SystemEvent(data)
-        elif event_type == "assistant":
+        if event_type == "assistant":
             message = data.get("message", {})
             content_blocks = message.get("content", [])
-            events = []
+            events: list[ClaudeEvent] = []
             for block in content_blocks:
                 block_type = block.get("type")
                 if block_type == "text":
@@ -38,7 +37,7 @@ class ClaudeEvent(ABC):
                         )
                     )
             return MultiEvent(events) if events else None
-        elif event_type == "user":
+        if event_type == "user":
             message = data.get("message", {})
             content_blocks = message.get("content", [])
             for block in content_blocks:
@@ -48,7 +47,7 @@ class ClaudeEvent(ABC):
                         tool_id=block.get("tool_use_id"),
                     )
             return None
-        elif event_type == "result":
+        if event_type == "result":
             return ResultEvent(data.get("result", ""))
 
         return None
@@ -107,7 +106,7 @@ class ToolResultEvent(ClaudeEvent):
         # Convert output to string if it's not already
         if isinstance(output, list):
             # Handle list content (e.g., from tool_result blocks with multiple items)
-            self.output = "\n".join(str(item) for item in output)
+            self.output = "\n".join(str(item) for item in cast("list[Any]", output))
         else:
             self.output = str(output) if output else ""
         self.tool_id = tool_id
@@ -116,9 +115,8 @@ class ToolResultEvent(ClaudeEvent):
     def render(self, log_prefix: str) -> str:
         if not self.output:
             return f"{log_prefix} \033[32m{self.tool_name_resolved} ran successfully\033[0m"
-        else:
-            truncated = truncate_content(self.output)
-            return f"{log_prefix} \033[32m[Tool Result] {truncated}\033[0m"
+        truncated = truncate_content(self.output)
+        return f"{log_prefix} \033[32m[Tool Result] {truncated}\033[0m"
 
 
 class ResultEvent(ClaudeEvent):

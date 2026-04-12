@@ -1,0 +1,94 @@
+"""Middleware that logs model responses and tool calls to the console."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from libs.pydantic_agent import AgentMiddleware
+
+if TYPE_CHECKING:
+    from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
+
+
+def _fmt_args(args: str | dict[str, Any] | None) -> str:
+    if args is None:
+        return ""
+    if isinstance(args, str):
+        return args
+    parts = []
+    for k, v in args.items():
+        if k in ("content", "new_str"):
+            parts.append(f"{k}=<{len(str(v))} chars>")
+        else:
+            parts.append(f"{k}={str(v)!r}")
+    return ", ".join(parts)
+
+
+def _fmt_k(n: int | None) -> str:
+    if n is None:
+        return "?k"
+    return f"{round(n / 1000)}k"
+
+
+def _tool_failed(content: Any) -> bool:
+    """Return True if a tool returned a failure result dict."""
+    return isinstance(content, dict) and not content.get("success", True)
+
+
+class ConsoleLoggingMiddleware(AgentMiddleware):
+    def __init__(
+        self,
+        context_window: int | None,
+        recorder: PydanticAITrajectoryRecorder,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self._context_window = context_window
+        self._recorder = recorder
+        self._logger = logger or logging.getLogger(__name__)
+
+    def _usage_prefix(self) -> str:
+        used = _fmt_k(self._recorder.total_usage.input_tokens)
+        limit = _fmt_k(self._context_window)
+        return f"[{self._agent.agent_name} | {used}/{limit}]"
+
+    def on_function_tool_call(self, event: Any) -> None:
+        self._logger.info(
+            "%s \u2192 %s(%s)",
+            self._usage_prefix(),
+            event.part.tool_name,
+            _fmt_args(event.part.args),
+        )
+
+    def on_function_tool_result(self, event: Any) -> None:
+        from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
+
+        result = event.result
+        prefix = self._usage_prefix()
+
+        if isinstance(result, RetryPromptPart):
+            self._logger.warning(
+                "%s \u2717 %s() failed: %s",
+                prefix,
+                result.tool_name or "unknown",
+                result.model_response(),
+            )
+        elif isinstance(result, ToolReturnPart) and _tool_failed(result.content):
+            self._logger.warning(
+                "%s \u2717 %s() exited with code %s: %s",
+                prefix,
+                result.tool_name,
+                result.content.get("exit_code", "?"),
+                result.content.get("stderr", ""),
+            )
+
+    def on_part_end(self, event: Any) -> None:
+        from pydantic_ai.messages import ThinkingPart
+
+        if isinstance(event.part, ThinkingPart) and event.part.has_content():
+            self._logger.info("%s <thinking> %s", self._usage_prefix(), event.part.content)
+
+    def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
+        output = result.output
+        text = str(output) if not isinstance(output, str) else output
+        self._logger.info("[%s] %s", self._agent.agent_name, text)

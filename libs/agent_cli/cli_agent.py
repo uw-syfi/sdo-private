@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import signal
@@ -5,12 +6,15 @@ import subprocess
 import sys
 import threading
 from abc import abstractmethod
+from typing import Any
 
 from loguru import logger
+
+from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
+
 from .base import CodingAgent
-from .utils import _get_interactive_env
 from .events import AgentEventHandler
-from libs.agent_cli.trajectory import TrajectoryRecorderProtocol, NullTrajectoryRecorder
+from .utils import get_interactive_env
 
 
 class CLIGenerationSession:
@@ -19,10 +23,10 @@ class CLIGenerationSession:
     def __init__(
         self,
         binary_name: str,
-        env: dict,
+        env: dict[str, str],
         log_prefix: str,
         cmd: list[str],
-        logger,
+        logger: Any,
         cwd: str | None = None,
         timeout: int = 300,
         silent: bool = False,
@@ -41,8 +45,8 @@ class CLIGenerationSession:
         self.event_handler = event_handler
 
         # State initialization
-        self.stdout_lines = []
-        self.stderr_lines = []
+        self.stdout_lines: list[str] = []
+        self.stderr_lines: list[str] = []
         self._at_line_start = True
 
     def _log_raw(self, message: str) -> None:
@@ -98,14 +102,14 @@ class CLIGenerationSession:
             self._log_raw("=" * 80 + "\n")
             sys.stdout.flush()
 
-        def read_stdout(pipe):
+        def read_stdout(pipe: io.TextIOWrapper) -> None:
             for line in iter(pipe.readline, ""):
                 if not line:
                     break
                 self._process_stdout(line)
             pipe.close()
 
-        def read_stderr(pipe):
+        def read_stderr(pipe: io.TextIOWrapper) -> None:
             for line in iter(pipe.readline, ""):
                 if not line:
                     break
@@ -148,7 +152,7 @@ class CLIGenerationSession:
             except ProcessLookupError:
                 pass
             process.wait()
-            raise subprocess.TimeoutExpired(self.cmd, self.timeout)
+            raise subprocess.TimeoutExpired(self.cmd, self.timeout) from None
         finally:
             if process.poll() is None:
                 try:
@@ -166,9 +170,7 @@ class CLIGenerationSession:
         self._log_raw("=" * 80 + "\n")
 
         if process.returncode != 0:
-            raise RuntimeError(
-                f"{self.binary_name} exited with code {process.returncode}: {stderr_data}"
-            )
+            raise RuntimeError(f"{self.binary_name} exited with code {process.returncode}: {stderr_data}")
 
         return stdout_data.strip()
 
@@ -194,10 +196,10 @@ class CLICodingAgent(CodingAgent):
         Raises:
             RuntimeError: If binary is not found in PATH or is not working.
         """
-        self.env = _get_interactive_env()
+        self.env = get_interactive_env()
         self.binary_name = binary_name
         self.model = model
-        self.recorder = recorder or NullTrajectoryRecorder()
+        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
 
         # Search for binary in the captured environment's PATH
@@ -209,8 +211,7 @@ class CLICodingAgent(CodingAgent):
 
         if not binary_path:
             raise RuntimeError(
-                f"{binary_name} binary not found in PATH. "
-                f"Please ensure {binary_name} is installed and available."
+                f"{binary_name} binary not found in PATH. Please ensure {binary_name} is installed and available."
             )
         self.binary_path = binary_path
         self._check_cli()
@@ -232,18 +233,17 @@ class CLICodingAgent(CodingAgent):
                     f"'{self.binary_path} --help' exited with code {result.returncode}. "
                     f"Stderr: {result.stderr}"
                 )
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             raise RuntimeError(
                 f"{self.binary_name} CLI tool not found at '{self.binary_path}'. "
                 f"Please ensure {self.binary_name} is installed and in your PATH."
-            )
+            ) from e
         except Exception as e:
-            raise RuntimeError(f"Failed to check {self.binary_name} CLI tool: {e}")
+            raise RuntimeError(f"Failed to check {self.binary_name} CLI tool: {e}") from e
 
     @abstractmethod
     def _get_command(self, prompt: str) -> list[str]:
         """Construct the command line arguments."""
-        pass
 
     @property
     def _log_prefix(self) -> str:
@@ -297,9 +297,7 @@ class CLICodingAgent(CodingAgent):
         self.recorder.add_user_message(prompt)
 
         cmd = self._get_command(prompt)
-        session = self._create_session(
-            cmd, cwd, timeout, silent, recorder=self.recorder
-        )
+        session = self._create_session(cmd, cwd, timeout, silent, recorder=self.recorder)
         result = session.run(prompt)
 
         self.recorder.add_assistant_message(result)

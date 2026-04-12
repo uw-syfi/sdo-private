@@ -4,71 +4,50 @@ These tests encode invariants of the static utility methods on ComposeManipulato
 which are pure functions with clear input/output contracts.
 """
 
-import pytest
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import given, strategies as st, assume, settings
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: None
-
-    settings = DummySettings()
-    st = DummyStrategies()
-
-from app_operator.fault_injection.base import ComposeManipulator
-
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
+from app_operator.fault_injection._base import ComposeManipulator
 
 VALID_CATEGORIES = {"database", "cache", "frontend", "backend", "proxy", "monitoring"}
+
 
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
-    @st.composite
-    def service_config_strategy(draw):
-        """Generate a service config dict with optional image key."""
-        image = draw(st.one_of(st.none(), st.text(max_size=50)))
-        config = {}
-        if image is not None:
-            config["image"] = image
-        return config
+@st.composite
+def service_config_strategy(draw):
+    """Generate a service config dict with optional image key."""
+    image = draw(st.one_of(st.none(), st.text(max_size=50)))
+    config = {}
+    if image is not None:
+        config["image"] = image
+    return config
 
-    @st.composite
-    def compose_data_strategy(draw):
-        """Generate a docker-compose data dict with a services section."""
-        service_names = draw(st.lists(
+
+@st.composite
+def compose_data_strategy(draw):
+    """Generate a docker-compose data dict with a services section."""
+    service_names = draw(
+        st.lists(
             st.text(min_size=1, max_size=30).filter(str.isidentifier),
-            min_size=0, max_size=5,
+            min_size=0,
+            max_size=5,
             unique=True,
-        ))
-        services = {}
-        for name in service_names:
-            config = draw(service_config_strategy())
-            # Optionally add ports and environment
-            ports = draw(st.lists(
+        )
+    )
+    services = {}
+    for name in service_names:
+        config = draw(service_config_strategy())
+        # Optionally add ports and environment
+        ports = draw(
+            st.lists(
                 st.text(min_size=1, max_size=20),
                 max_size=3,
-            ))
-            env = draw(st.one_of(
+            )
+        )
+        env = draw(
+            st.one_of(
                 st.just([]),
                 st.lists(st.text(min_size=1, max_size=40), max_size=5),
                 st.dictionaries(
@@ -76,24 +55,20 @@ if HYPOTHESIS_AVAILABLE:
                     st.text(max_size=20),
                     max_size=5,
                 ),
-            ))
-            if ports:
-                config["ports"] = ports
-            if env:
-                config["environment"] = env
-            services[name] = config
-        return {"services": services}
-else:
-    def service_config_strategy():
-        pass
-
-    def compose_data_strategy():
-        pass
+            )
+        )
+        if ports:
+            config["ports"] = ports
+        if env:
+            config["environment"] = env
+        services[name] = config
+    return {"services": services}
 
 
 # ---------------------------------------------------------------------------
 # classify_service
 # ---------------------------------------------------------------------------
+
 
 class TestClassifyServiceProperties:
     """Property-based tests for ComposeManipulator.classify_service."""
@@ -125,7 +100,12 @@ class TestClassifyServiceProperties:
     @given(config=service_config_strategy())
     @settings(max_examples=50, deadline=1000)
     def test_nginx_name_classified_as_proxy(self, config):
-        """A service named 'nginx' is always classified as proxy."""
+        """A service named 'nginx' is classified as proxy when the image doesn't match a higher-priority category."""
+        image = str(config.get("image", "")).lower()
+        # DB/cache patterns are checked before proxy patterns in classify_service,
+        # so an image like "redis" would override the name-based classification.
+        db_cache_patterns = ["mongo", "mysql", "postgres", "mariadb", "redis", "memcache"]
+        assume(not any(pat in image for pat in db_cache_patterns))
         result = ComposeManipulator.classify_service("nginx", config)
         assert result == "proxy"
 
@@ -133,6 +113,7 @@ class TestClassifyServiceProperties:
 # ---------------------------------------------------------------------------
 # parse_port_mapping
 # ---------------------------------------------------------------------------
+
 
 class TestParsePortMappingProperties:
     """Property-based tests for ComposeManipulator.parse_port_mapping."""
@@ -165,6 +146,7 @@ class TestParsePortMappingProperties:
     def test_non_matching_returns_none(self, text):
         """Strings containing non-digit, non-colon characters return None."""
         import re
+
         # These strings can't match \d+:\d+ or ^\d+$ since they contain non-digit chars
         assume(not re.match(r"^(\d+):(\d+)$", text))
         assume(not re.match(r"^\d+$", text))
@@ -175,6 +157,7 @@ class TestParsePortMappingProperties:
 # ---------------------------------------------------------------------------
 # get_service_ports
 # ---------------------------------------------------------------------------
+
 
 class TestGetServicePortsProperties:
     """Property-based tests for ComposeManipulator.get_service_ports."""
@@ -198,13 +181,16 @@ class TestGetServicePortsProperties:
 # get_service_environment normalization
 # ---------------------------------------------------------------------------
 
+
 class TestGetServiceEnvironmentProperties:
     """Property-based tests for ComposeManipulator.get_service_environment."""
 
     @given(
         keys=st.lists(
             st.text(min_size=1, max_size=20).filter(lambda s: "=" not in s and s.strip()),
-            min_size=1, max_size=5, unique=True,
+            min_size=1,
+            max_size=5,
+            unique=True,
         ),
         values=st.lists(st.text(max_size=20), min_size=1, max_size=5),
     )
@@ -212,10 +198,10 @@ class TestGetServiceEnvironmentProperties:
     def test_dict_and_list_formats_normalize_to_same_result(self, keys, values):
         """Dict and list environment formats normalize to the same KEY=VALUE pairs."""
         # Build a consistent key-value mapping
-        pairs = list(zip(keys, values))[:min(len(keys), len(values))]
+        pairs = list(zip(keys, values, strict=False))[: min(len(keys), len(values))]
         assume(pairs)
 
-        env_dict = {k: v for k, v in pairs}
+        env_dict = dict(pairs)
         env_list = [f"{k}={v}" for k, v in pairs]
 
         service_name = "svc"

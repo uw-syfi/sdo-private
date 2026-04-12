@@ -1,7 +1,11 @@
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.ui import OperatorUI
+from app_operator.config import AgentConfig, Config
+from app_operator.ui_protocol import OperatorUI
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -28,7 +32,10 @@ def app_operator_with_ui(repo_path, mock_agent, mock_ui):
         patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
         patch("app_operator.cli_agent.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
     ):
-        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui)
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
+        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui, config=config)
         yield (
             op,
             mock_deployer_cls,
@@ -39,9 +46,7 @@ def app_operator_with_ui(repo_path, mock_agent, mock_ui):
 
 
 def test_run_success_flow_updates_ui_stages(app_operator_with_ui):
-    op, mock_deployer_cls, mock_monitor_cls, mock_analyzer_cls, mock_ui = (
-        app_operator_with_ui
-    )
+    op, mock_deployer_cls, mock_monitor_cls, mock_analyzer_cls, mock_ui = app_operator_with_ui
 
     # Setup mocks
     mock_deployer_cls.return_value.run.return_value = True
@@ -51,11 +56,13 @@ def test_run_success_flow_updates_ui_stages(app_operator_with_ui):
 
     assert exit_code == 0
 
-    # Verify agents were initialized with ui
-    # We check that ui kwarg was passed
-    assert mock_analyzer_cls.call_args[1]["ui"] == mock_ui
-    assert mock_deployer_cls.call_args[1]["ui"] == mock_ui
-    assert mock_monitor_cls.call_args[1]["ui"] == mock_ui
+    # Verify agents were initialized with ui via AgentContext
+    ctx = mock_analyzer_cls.call_args[1]["ctx"]
+    assert ctx.ui == mock_ui
+    ctx = mock_deployer_cls.call_args[1]["ctx"]
+    assert ctx.ui == mock_ui
+    ctx = mock_monitor_cls.call_args[1]["ctx"]
+    assert ctx.ui == mock_ui
 
     # Verify agent event handler attached
     assert op.agent.event_handler == mock_ui

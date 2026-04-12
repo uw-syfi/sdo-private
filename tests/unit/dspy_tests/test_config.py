@@ -1,10 +1,11 @@
 """Tests for DSPy configuration validation."""
 
 import pytest
+
 from app_operator.dspy_integration.config import (
+    DSPyAutoRollbackConfig,
     DSPyConfig,
     DSPyOptimizationConfig,
-    DSPyAutoRollbackConfig,
 )
 
 
@@ -18,12 +19,30 @@ class TestDSPyOptimizationConfig:
         assert config.teacher_model == "claude-sonnet-4-5"
         assert config.num_examples == 30
         assert config.validation_split == 0.2
+        assert config.selection_mode == "hybrid"
+        assert config.selection_top_k == 3
         assert config.metric_weights == {
             "success": 0.5,
             "efficiency": 0.25,
             "tokens": 0.15,
             "health_check": 0.1,
         }
+
+    def test_valid_selection_mode(self):
+        """Test valid selection modes."""
+        for mode in ["score", "hybrid", "llm"]:
+            config = DSPyOptimizationConfig(selection_mode=mode)
+            assert config.selection_mode == mode
+
+    def test_invalid_selection_mode(self):
+        """Test invalid selection mode raises ValueError."""
+        with pytest.raises(ValueError, match="selection_mode must be one of"):
+            DSPyOptimizationConfig(selection_mode="invalid")
+
+    def test_invalid_selection_top_k(self):
+        """Test invalid selection_top_k raises ValueError."""
+        with pytest.raises(ValueError, match="selection_top_k must be >= 1"):
+            DSPyOptimizationConfig(selection_top_k=0)
 
     def test_valid_optimizer(self):
         """Test valid optimizer configurations."""
@@ -53,7 +72,7 @@ class TestDSPyOptimizationConfig:
     def test_invalid_num_examples_type(self):
         """Test invalid num_examples type raises TypeError."""
         with pytest.raises(TypeError, match="num_examples must be int"):
-            DSPyOptimizationConfig(num_examples="30")
+            DSPyOptimizationConfig(num_examples="30")  # type: ignore[arg-type]
 
     def test_invalid_num_examples_value(self):
         """Test invalid num_examples value raises ValueError."""
@@ -66,7 +85,7 @@ class TestDSPyOptimizationConfig:
     def test_invalid_validation_split_type(self):
         """Test invalid validation_split type raises TypeError."""
         with pytest.raises(TypeError, match="validation_split must be numeric"):
-            DSPyOptimizationConfig(validation_split="0.2")
+            DSPyOptimizationConfig(validation_split="0.2")  # type: ignore[arg-type]
 
     def test_invalid_validation_split_range(self):
         """Test validation_split out of range raises ValueError."""
@@ -90,7 +109,7 @@ class TestDSPyOptimizationConfig:
     def test_invalid_metric_weights_type(self):
         """Test invalid metric_weights type raises TypeError."""
         with pytest.raises(TypeError, match="metric_weights must be dict"):
-            DSPyOptimizationConfig(metric_weights=[0.6, 0.25, 0.15])
+            DSPyOptimizationConfig(metric_weights=[0.6, 0.25, 0.15])  # type: ignore[arg-type]
 
     def test_invalid_metric_weights_keys(self):
         """Test invalid metric_weights keys raises ValueError."""
@@ -110,33 +129,23 @@ class TestDSPyOptimizationConfig:
     def test_invalid_metric_weight_value_type(self):
         """Test invalid metric weight value type raises TypeError."""
         with pytest.raises(TypeError, match="metric_weights\\['success'\\] must be numeric"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": "0.6", "efficiency": 0.25, "tokens": 0.15}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": "0.6", "efficiency": 0.25, "tokens": 0.15})  # type: ignore[arg-type]
 
     def test_invalid_metric_weight_value_range(self):
         """Test metric weight out of range raises ValueError."""
         with pytest.raises(ValueError, match="metric_weights\\['success'\\] must be in range"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": -0.1, "efficiency": 0.6, "tokens": 0.5}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": -0.1, "efficiency": 0.6, "tokens": 0.5})
 
         with pytest.raises(ValueError, match="metric_weights\\['efficiency'\\] must be in range"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": 0.5, "efficiency": 1.5, "tokens": 0.0}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": 0.5, "efficiency": 1.5, "tokens": 0.0})
 
     def test_metric_weights_sum_validation(self):
         """Test metric weights must sum to 1.0."""
         with pytest.raises(ValueError, match="metric_weights must sum to 1.0"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": 0.5, "efficiency": 0.3, "tokens": 0.1}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": 0.5, "efficiency": 0.3, "tokens": 0.1})
 
         with pytest.raises(ValueError, match="metric_weights must sum to 1.0"):
-            DSPyOptimizationConfig(
-                metric_weights={"success": 0.7, "efficiency": 0.3, "tokens": 0.2}
-            )
+            DSPyOptimizationConfig(metric_weights={"success": 0.7, "efficiency": 0.3, "tokens": 0.2})
 
     def test_metric_weights_sum_tolerance(self):
         """Test metric weights sum allows small floating point error."""
@@ -164,12 +173,12 @@ class TestDSPyAutoRollbackConfig:
     def test_invalid_enabled_type(self):
         """Test invalid enabled type raises TypeError."""
         with pytest.raises(TypeError, match="enabled must be bool"):
-            DSPyAutoRollbackConfig(enabled="true")
+            DSPyAutoRollbackConfig(enabled="true")  # type: ignore[arg-type]
 
     def test_invalid_success_rate_threshold_type(self):
         """Test invalid success_rate_threshold type raises TypeError."""
         with pytest.raises(TypeError, match="success_rate_threshold must be numeric"):
-            DSPyAutoRollbackConfig(success_rate_threshold="0.05")
+            DSPyAutoRollbackConfig(success_rate_threshold="0.05")  # type: ignore[arg-type]
 
     def test_invalid_success_rate_threshold_range(self):
         """Test success_rate_threshold out of range raises ValueError."""
@@ -190,7 +199,7 @@ class TestDSPyAutoRollbackConfig:
     def test_invalid_evaluation_window_type(self):
         """Test invalid evaluation_window type raises TypeError."""
         with pytest.raises(TypeError, match="evaluation_window must be int"):
-            DSPyAutoRollbackConfig(evaluation_window="100")
+            DSPyAutoRollbackConfig(evaluation_window="100")  # type: ignore[arg-type]
 
     def test_invalid_evaluation_window_value(self):
         """Test invalid evaluation_window value raises ValueError."""
@@ -220,7 +229,7 @@ class TestDSPyConfig:
     def test_invalid_use_optimized_type(self):
         """Test invalid use_optimized type raises TypeError."""
         with pytest.raises(TypeError, match="use_optimized must be bool"):
-            DSPyConfig(use_optimized="true")
+            DSPyConfig(use_optimized="true")  # type: ignore[arg-type]
 
     def test_invalid_optimized_version(self):
         """Test invalid optimized_version raises ValueError."""
@@ -233,17 +242,17 @@ class TestDSPyConfig:
     def test_invalid_fallback_to_baseline_type(self):
         """Test invalid fallback_to_baseline type raises TypeError."""
         with pytest.raises(TypeError, match="fallback_to_baseline must be bool"):
-            DSPyConfig(fallback_to_baseline="true")
+            DSPyConfig(fallback_to_baseline="true")  # type: ignore[arg-type]
 
     def test_invalid_enable_online_learning_type(self):
         """Test invalid enable_online_learning type raises TypeError."""
         with pytest.raises(TypeError, match="enable_online_learning must be bool"):
-            DSPyConfig(enable_online_learning="false")
+            DSPyConfig(enable_online_learning="false")  # type: ignore[arg-type]
 
     def test_invalid_feedback_sample_rate_type(self):
         """Test invalid feedback_sample_rate type raises TypeError."""
         with pytest.raises(TypeError, match="feedback_sample_rate must be numeric"):
-            DSPyConfig(feedback_sample_rate="0.1")
+            DSPyConfig(feedback_sample_rate="0.1")  # type: ignore[arg-type]
 
     def test_invalid_feedback_sample_rate_range(self):
         """Test feedback_sample_rate out of range raises ValueError."""
@@ -264,12 +273,12 @@ class TestDSPyConfig:
     def test_invalid_canary_deployment_type(self):
         """Test invalid canary_deployment type raises TypeError."""
         with pytest.raises(TypeError, match="canary_deployment must be bool"):
-            DSPyConfig(canary_deployment="true")
+            DSPyConfig(canary_deployment="true")  # type: ignore[arg-type]
 
     def test_invalid_canary_percentage_type(self):
         """Test invalid canary_percentage type raises TypeError."""
         with pytest.raises(TypeError, match="canary_percentage must be numeric"):
-            DSPyConfig(canary_percentage="0.5")
+            DSPyConfig(canary_percentage="0.5")  # type: ignore[arg-type]
 
     def test_invalid_canary_percentage_range(self):
         """Test canary_percentage out of range raises ValueError."""
@@ -290,12 +299,12 @@ class TestDSPyConfig:
     def test_invalid_optimization_type(self):
         """Test invalid optimization type raises TypeError."""
         with pytest.raises(TypeError, match="optimization must be DSPyOptimizationConfig"):
-            DSPyConfig(optimization={"optimizer": "BootstrapFewShot"})
+            DSPyConfig(optimization={"optimizer": "BootstrapFewShot"})  # type: ignore[arg-type]
 
     def test_invalid_auto_rollback_type(self):
         """Test invalid auto_rollback type raises TypeError."""
         with pytest.raises(TypeError, match="auto_rollback must be DSPyAutoRollbackConfig"):
-            DSPyConfig(auto_rollback={"enabled": True})
+            DSPyConfig(auto_rollback={"enabled": True})  # type: ignore[arg-type]
 
     def test_canary_deployment_requires_use_optimized(self):
         """Test canary_deployment requires use_optimized=true."""
@@ -317,12 +326,8 @@ class TestDSPyConfig:
         """Test nested config objects are validated."""
         # This should raise from the nested DSPyOptimizationConfig
         with pytest.raises(ValueError, match="num_examples must be positive"):
-            DSPyConfig(
-                optimization=DSPyOptimizationConfig(num_examples=-5)
-            )
+            DSPyConfig(optimization=DSPyOptimizationConfig(num_examples=-5))
 
         # This should raise from the nested DSPyAutoRollbackConfig
         with pytest.raises(ValueError, match="evaluation_window must be positive"):
-            DSPyConfig(
-                auto_rollback=DSPyAutoRollbackConfig(evaluation_window=0)
-            )
+            DSPyConfig(auto_rollback=DSPyAutoRollbackConfig(evaluation_window=0))

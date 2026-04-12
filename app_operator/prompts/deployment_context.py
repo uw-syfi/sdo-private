@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.prompts import get_loader
+from app_operator.prompts._core import get_loader
 
 
 def create_system_prompt(platform: str) -> str:
@@ -10,9 +10,7 @@ def create_system_prompt(platform: str) -> str:
     # The default template doesn't need it.
     # If the seed template needs it, it will fail unless we provide it.
     # However, create_system_prompt is called without repo_path info in deployer.py
-    return get_loader().render(
-        "deployer/system.jinja2", platform=platform, repo_path="."
-    )
+    return get_loader().render("script_generator/system.jinja2", platform=platform, repo_path=".")
 
 
 def analyze_repository(
@@ -37,9 +35,7 @@ def analyze_repository(
     if filesystem.exists(repo_path / ".sds" / "code_analysis.md"):
         context_parts.append("- Found code analysis: .sds/code_analysis.md")
     if filesystem.exists(repo_path / ".sds" / "deployment_issues.md"):
-        context_parts.append(
-            "- Found deployment issues report: .sds/deployment_issues.md"
-        )
+        context_parts.append("- Found deployment issues report: .sds/deployment_issues.md")
 
     if filesystem.exists(repo_path / "docker-compose.yml"):
         context_parts.append("- Found docker-compose.yml (Docker Compose deployment)")
@@ -55,9 +51,7 @@ def analyze_repository(
     # Check for common application files
     if filesystem.exists(repo_path / "package.json"):
         context_parts.append("- Found package.json (Node.js application)")
-    if filesystem.exists(repo_path / "requirements.txt") or filesystem.exists(
-        repo_path / "pyproject.toml"
-    ):
+    if filesystem.exists(repo_path / "requirements.txt") or filesystem.exists(repo_path / "pyproject.toml"):
         context_parts.append("- Found Python dependencies (Python application)")
     if filesystem.exists(repo_path / "go.mod"):
         context_parts.append("- Found go.mod (Go application)")
@@ -69,9 +63,7 @@ def analyze_repository(
     # Check for README
     readme_files = filesystem.glob(repo_path, "README*")
     if readme_files:
-        context_parts.append(
-            f"- Found README file(s): {', '.join(f.name for f in readme_files)}"
-        )
+        context_parts.append(f"- Found README file(s): {', '.join(f.name for f in readme_files)}")
 
     # Get repository name
     repo_name = repo_path.name

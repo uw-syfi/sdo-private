@@ -1,12 +1,13 @@
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from pathlib import Path
 from typing import Any
+
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 
 class PromptLoader:
     """Helper class to load and render Jinja2 templates for prompts."""
 
-    def __init__(self, templates_dir: str | Path = None):
+    def __init__(self, templates_dir: str | Path | None = None):
         """Initialize the loader.
 
         Args:
@@ -21,9 +22,7 @@ class PromptLoader:
             self.templates_dir = Path(templates_dir)
 
         if not self.templates_dir.exists():
-            raise FileNotFoundError(
-                f"Prompts directory not found: {self.templates_dir}"
-            )
+            raise FileNotFoundError(f"Prompts directory not found: {self.templates_dir}")
 
         self.env = Environment(
             loader=FileSystemLoader(str(self.templates_dir)),
@@ -48,9 +47,7 @@ class PromptLoader:
             return template.render(**kwargs)
         except Exception as e:
             # Wrap Jinja2 errors for clearer debugging context
-            raise RuntimeError(
-                f"Failed to render template '{template_name}': {e}"
-            ) from e
+            raise RuntimeError(f"Failed to render template '{template_name}': {e}") from e
 
 
 # Global instance for easy access

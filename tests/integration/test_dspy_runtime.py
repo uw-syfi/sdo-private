@@ -8,15 +8,17 @@ Tests the end-to-end DSPy integration including:
 """
 
 import json
-import pytest
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.config import Config, DSPyConfig
-from app_operator.dspy_integration.loader import reset_cache
+from app_operator.config import AgentConfig, Config, DSPyConfig
+from app_operator.dspy_integration._loader import reset_cache
 from libs.agent_cli.base import CodingAgent
+from libs.model_config import ModelConfig
 
 # --- Fake Agent for DSPy Testing ---
 
@@ -43,6 +45,11 @@ class DSPyFakeCodingAgent(CodingAgent):
 
         if "Generate a comprehensive health_check.sh bash script" in prompt:
             return self._handle_health_generation()
+
+        # Handle Health Assessment (AppHealthJudge)
+        prompt_lower = prompt.lower()
+        if "assess" in prompt_lower and "health" in prompt_lower:
+            return self._handle_health_assessment()
 
         # Handle Monitoring Analysis
         if "analyze the following health check results" in prompt:
@@ -96,10 +103,19 @@ fi
         script.chmod(0o755)
         return "I have generated .sds/health_check.sh"
 
+    def _handle_health_assessment(self) -> str:
+        return (
+            "<health_verdict>healthy</health_verdict>\n"
+            "<health_assessment>All services healthy.</health_assessment>\n"
+            "<diagnosis></diagnosis>\n"
+            "<script_fixed>false</script_fixed>"
+        )
+
     def _handle_analysis(self) -> str:
         return """<exec_summary>System is healthy.</exec_summary>
 The system appears to be running smoothly.
 """
+
 
 # --- Fixtures ---
 
@@ -147,6 +163,7 @@ def reset_dspy_cache():
     yield
     reset_cache()
 
+
 # --- Tests ---
 
 
@@ -160,7 +177,10 @@ def test_dspy_disabled_uses_jinja2(temp_repo, dspy_config_disabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_disabled)
+    config = Config(
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
+        dspy=dspy_config_disabled,
+    )
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -205,7 +225,10 @@ def test_dspy_fallback_to_jinja2(temp_repo, dspy_config_enabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
+        dspy=dspy_config_enabled,
+    )
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -239,7 +262,10 @@ def test_dspy_enabled_uses_optimized_modules(temp_repo, dspy_config_enabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
+        dspy=dspy_config_enabled,
+    )
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -268,8 +294,9 @@ def test_canary_deployment_routing(temp_repo, tmp_path, dspy_config_canary):
     2. Routing is deterministic (hash-based)
     3. Different repos get different routing
     """
-    from app_operator.prompts import PromptLoader
     import hashlib
+
+    from app_operator.prompts import PromptLoader
 
     # Set up an optimized dir with the module file so the existence check
     # passes and the canary hash logic is actually exercised.
@@ -349,7 +376,10 @@ def test_trajectory_tracks_prompt_version(temp_repo, dspy_config_disabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_disabled)
+    config = Config(
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
+        dspy=dspy_config_disabled,
+    )
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -396,7 +426,10 @@ def test_dspy_fallback_recorded_in_trajectory(temp_repo, dspy_config_enabled):
     """
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
+        dspy=dspy_config_enabled,
+    )
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -434,7 +467,7 @@ def test_dspy_fallback_recorded_in_trajectory(temp_repo, dspy_config_enabled):
     assert "script_generation" in trajectory or "deployment" in trajectory
 
 
-@patch('app_operator.dspy_integration.loader.load_optimized_module')
+@patch("app_operator.dspy_integration._loader.load_optimized_module")
 def test_dspy_module_invocation_error_falls_back(mock_load, temp_repo, dspy_config_enabled):
     """
     Test that errors during DSPy module invocation trigger fallback.
@@ -451,7 +484,10 @@ def test_dspy_module_invocation_error_falls_back(mock_load, temp_repo, dspy_conf
 
     agent = DSPyFakeCodingAgent(temp_repo)
 
-    config = Config(dspy=dspy_config_enabled)
+    config = Config(
+        agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
+        dspy=dspy_config_enabled,
+    )
 
     operator = AppOperator(
         repo_path=str(temp_repo),
@@ -479,7 +515,7 @@ def test_dspy_version_resolution(temp_repo):
     2. Specific versions (e.g., "v1") are used directly
     3. Non-existent versions return None
     """
-    from app_operator.dspy_integration.loader import resolve_version
+    from app_operator.dspy_integration._loader import resolve_version
 
     # Create mock version directories
     optimized_dir = temp_repo / "optimized"
@@ -520,7 +556,10 @@ def test_multiple_deployments_with_canary(tmp_path, dspy_config_canary):
         repo.mkdir()
 
         agent = agent_class(repo)
-        config = Config(dspy=dspy_config_canary)
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model")),
+            dspy=dspy_config_canary,
+        )
 
         operator = AppOperator(
             repo_path=str(repo),

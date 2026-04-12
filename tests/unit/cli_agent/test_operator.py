@@ -1,8 +1,12 @@
-import pytest
-from unittest.mock import Mock, patch
 import signal
+from unittest.mock import Mock, patch
+
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.ui import OperatorUI
+from app_operator.config import AgentConfig, Config
+from app_operator.ui_protocol import OperatorUI
+from libs.model_config import ModelConfig
 
 
 @pytest.fixture
@@ -25,7 +29,10 @@ def app_operator(repo_path, mock_agent):
         patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
         patch("app_operator.cli_agent.operator.CodeAnalyzerAgent") as mock_analyzer_cls,
     ):
-        op = AppOperator(str(repo_path), agent=mock_agent)
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
+        op = AppOperator(str(repo_path), agent=mock_agent, config=config)
         yield (
             op,
             mock_deployer_cls.return_value,
@@ -35,9 +42,7 @@ def app_operator(repo_path, mock_agent):
 
 
 def test_operator_init_validates_path(tmp_path):
-    with patch(
-        "app_operator.cli_agent.operator.create_agent_from_config"
-    ) as mock_create_agent:
+    with patch("app_operator.cli_agent.operator.create_agent_from_config") as mock_create_agent:
         mock_create_agent.return_value = Mock()
         with pytest.raises(ValueError, match="does not exist"):
             AppOperator(str(tmp_path / "nonexistent"))
@@ -142,7 +147,7 @@ def test_run_handles_keyboard_interrupt(app_operator):
 def test_run_handles_exception_gracefully(app_operator):
     op, mock_deployer, _, _ = app_operator
 
-    mock_deployer.run.side_effect = Exception("Unexpected crash")
+    mock_deployer.run.side_effect = RuntimeError("Unexpected crash")
 
     exit_code = op.run()
 
@@ -160,7 +165,10 @@ def test_run_monitor_failure_marks_failed_status(repo_path, mock_agent):
         mock_deployer_cls.return_value.run.return_value = True
         mock_monitor_cls.return_value.run.side_effect = RuntimeError("monitor failed")
 
-        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui)
+        config = Config(
+            agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+        )
+        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui, config=config)
         with patch.object(op.recorder, "finalize") as mock_finalize:
             exit_code = op.run()
 

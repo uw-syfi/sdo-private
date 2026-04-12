@@ -1,8 +1,9 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketState, WebSocketDisconnect
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from lego_agent.server import WebIO, app, websocket_endpoint
 
@@ -36,23 +37,25 @@ async def test_webio_send_event(mock_websocket, input_queue):
     await io._send_event("test_type", {"key": "value"})
 
     assert len(mock_websocket.sent_messages) == 1
-    assert mock_websocket.sent_messages[0] == {
-        "type": "test_type", "key": "value"}
+    assert mock_websocket.sent_messages[0] == {"type": "test_type", "key": "value"}
 
 
 @pytest.mark.anyio
 async def test_webio_flush_thinking(mock_websocket, input_queue):
+    """Thinking chunks buffered via render_thinking_chunk are flushed before a log message."""
     io = WebIO(mock_websocket, input_queue)
-    io._thinking_buffer = "thinking..."
 
-    await io._flush_thinking()
+    # Emit a thinking chunk (buffered internally) followed by a log message that
+    # triggers a flush.  We observe the side-effect through the WebSocket messages.
+    io.render_thinking_chunk("thinking...")
 
-    assert len(mock_websocket.sent_messages) == 1
-    assert mock_websocket.sent_messages[0] == {
-        "type": "thinking",
-        "text": "thinking...",
-    }
-    assert io._thinking_buffer == ""
+    # Allow the fire-and-forget task to run
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    thinking_msgs = [m for m in mock_websocket.sent_messages if m.get("type") == "thinking"]
+    assert len(thinking_msgs) == 1
+    assert thinking_msgs[0] == {"type": "thinking", "text": "thinking..."}
 
 
 @pytest.mark.anyio
@@ -65,8 +68,7 @@ async def test_webio_ask_questions(mock_websocket, input_queue):
     answers = await io.ask_questions(["Q1"])
 
     assert answers == ["Ans1"]
-    assert {"type": "question", "questions": [
-        "Q1"]} in mock_websocket.sent_messages
+    assert {"type": "question", "questions": ["Q1"]} in mock_websocket.sent_messages
 
 
 @pytest.mark.anyio
@@ -104,12 +106,13 @@ async def test_server_logic(tmp_path):
         patch("lego_agent.server.LegoAgentEngine") as mock_engine_cls,
     ):
         mock_engine = AsyncMock()
-        mock_engine.run_async.return_value = MagicMock(
-            script_path="/tmp/script.py")
+        mock_engine.run_async.return_value = MagicMock(script_path="/tmp/script.py")
         mock_engine_cls.return_value = mock_engine
 
-        # We can't easily test the websocket_endpoint directly without a client or careful mocking of the websocket object lifecycle.
-        # But we can test the `run_engine_and_script` function if we extract it or import it.
+        # We can't easily test the websocket_endpoint directly without
+        # a client or careful mocking of the websocket object lifecycle.
+        # But we can test the run_engine_and_script function if we
+        # extract it or import it.
         from lego_agent.server import run_engine_and_script
 
         io = AsyncMock()
@@ -144,10 +147,7 @@ async def test_server_logic(tmp_path):
                 {"message": "Script generated at: /tmp/script.py", "level": "success"},
             )
             # Log execution start
-            io._send_event.assert_any_call(
-                "log", {"message": "Executing generated script...",
-                        "level": "info"}
-            )
+            io._send_event.assert_any_call("log", {"message": "Executing generated script...", "level": "info"})
             # Execution result
             io._send_event.assert_any_call("execution_result", {"exit_code": 0})
 
@@ -186,14 +186,13 @@ async def test_path_traversal_rejected(tmp_path):
         mock_engine = AsyncMock()
         mock_engine_cls.return_value = mock_engine
 
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
         # Should have sent an error about invalid work_dir
         error_msgs = [
             m
             for m in ws.sent_messages
-            if m.get("type") == "log" and m.get("level") == "error"
-            and "Invalid work_dir" in m.get("message", "")
+            if m.get("type") == "log" and m.get("level") == "error" and "Invalid work_dir" in m.get("message", "")
         ]
         assert len(error_msgs) == 1
         assert "must be within the repository root" in error_msgs[0]["message"]
@@ -231,18 +230,14 @@ async def test_valid_work_dir_accepted(tmp_path):
         patch("lego_agent.server.find_repo_root", return_value=repo_root),
         patch("lego_agent.server.load_config", return_value=mock_config),
         patch("lego_agent.server.get_loader"),
-        patch(
-            "lego_agent.server.run_engine_and_script", new_callable=AsyncMock
-        ),
+        patch("lego_agent.server.run_engine_and_script", new_callable=AsyncMock),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
         # Engine should have been started (task created)
         # No error about invalid work_dir
         error_msgs = [
-            m
-            for m in ws.sent_messages
-            if m.get("type") == "log" and "Invalid work_dir" in m.get("message", "")
+            m for m in ws.sent_messages if m.get("type") == "log" and "Invalid work_dir" in m.get("message", "")
         ]
         assert len(error_msgs) == 0
 
@@ -270,12 +265,9 @@ async def test_non_dict_message_returns_error(tmp_path):
         patch("lego_agent.server.load_config", return_value=mock_config),
         patch("lego_agent.server.get_loader"),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
-    error_msgs = [
-        m for m in ws.sent_messages
-        if m.get("type") == "error"
-    ]
+    error_msgs = [m for m in ws.sent_messages if m.get("type") == "error"]
     assert len(error_msgs) == 1
     assert "expected a JSON object" in error_msgs[0]["message"]
 
@@ -303,12 +295,9 @@ async def test_missing_type_field_returns_error(tmp_path):
         patch("lego_agent.server.load_config", return_value=mock_config),
         patch("lego_agent.server.get_loader"),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
-    error_msgs = [
-        m for m in ws.sent_messages
-        if m.get("type") == "error"
-    ]
+    error_msgs = [m for m in ws.sent_messages if m.get("type") == "error"]
     assert len(error_msgs) == 1
     assert "'type' field must be a string" in error_msgs[0]["message"]
 
@@ -336,40 +325,34 @@ async def test_non_string_type_field_returns_error(tmp_path):
         patch("lego_agent.server.load_config", return_value=mock_config),
         patch("lego_agent.server.get_loader"),
     ):
-        await websocket_endpoint(ws)
+        await websocket_endpoint(ws)  # type: ignore[arg-type]
 
-    error_msgs = [
-        m for m in ws.sent_messages
-        if m.get("type") == "error"
-    ]
+    error_msgs = [m for m in ws.sent_messages if m.get("type") == "error"]
     assert len(error_msgs) == 1
     assert "'type' field must be a string" in error_msgs[0]["message"]
 
 
 @pytest.mark.anyio
 async def test_track_task_adds_and_removes(mock_websocket, input_queue):
-    """_track_task adds a task to _pending_tasks and removes it on completion."""
+    """A fire-and-forget method increments pending_task_count and decrements it on completion."""
     io = WebIO(mock_websocket, input_queue)
 
-    assert len(io._pending_tasks) == 0
+    assert io.pending_task_count == 0
 
     io.info("hello")
-    assert len(io._pending_tasks) == 1
+    assert io.pending_task_count == 1
 
     # Let the event loop run so the task completes and done callback fires
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert len(io._pending_tasks) == 0
-    assert any(
-        m.get("type") == "log" and m.get("message") == "hello"
-        for m in mock_websocket.sent_messages
-    )
+    assert io.pending_task_count == 0
+    assert any(m.get("type") == "log" and m.get("message") == "hello" for m in mock_websocket.sent_messages)
 
 
 @pytest.mark.anyio
 async def test_track_task_multiple_methods(mock_websocket, input_queue):
-    """Multiple fire-and-forget methods are all tracked."""
+    """Multiple fire-and-forget methods are all tracked and completed on cleanup."""
     io = WebIO(mock_websocket, input_queue)
 
     io.info("msg1")
@@ -382,11 +365,11 @@ async def test_track_task_multiple_methods(mock_websocket, input_queue):
     io.render_info("info1")
     io.render_graph({"key": "val"})
 
-    assert len(io._pending_tasks) == 9
+    assert io.pending_task_count == 9
 
     await io.cleanup()
 
-    assert len(io._pending_tasks) == 0
+    assert io.pending_task_count == 0
     assert len(mock_websocket.sent_messages) == 9
 
 
@@ -395,14 +378,15 @@ async def test_cleanup_suppresses_exceptions(mock_websocket, input_queue):
     """cleanup() does not raise even if a tracked task raises."""
     io = WebIO(mock_websocket, input_queue)
 
-    async def failing_coro():
-        raise RuntimeError("boom")
+    # Patch the async send helper so that the next render call creates a failing task
+    with patch.object(io, "_send_log_async", side_effect=RuntimeError("boom")):
+        io.render_error("this will fail internally")
 
-    io._track_task(failing_coro())
+    assert io.pending_task_count == 1
 
     # Should not raise
     await io.cleanup()
-    assert len(io._pending_tasks) == 0
+    assert io.pending_task_count == 0
 
 
 @pytest.mark.anyio
@@ -410,4 +394,4 @@ async def test_cleanup_on_empty(mock_websocket, input_queue):
     """cleanup() is a no-op when there are no pending tasks."""
     io = WebIO(mock_websocket, input_queue)
     await io.cleanup()
-    assert len(io._pending_tasks) == 0
+    assert io.pending_task_count == 0

@@ -8,11 +8,13 @@ Tests for prepare_error_context and create_fix_prompt functions covering:
 """
 
 from pathlib import Path
+
 from app_operator.prompts.deployer import (
-    prepare_error_context,
     create_fix_prompt,
     create_generate_script_prompt,
+    prepare_error_context,
 )
+from app_operator.types import HealthVerdict
 
 
 class TestPrepareErrorContext:
@@ -21,9 +23,8 @@ class TestPrepareErrorContext:
     def test_basic_deployment_error(self):
         """Test basic deployment error context."""
         deploy_result = {"exit_code": 1, "success": False}
-        health_result = None
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, None)  # type: ignore[arg-type]
 
         assert "Deployment Script Result" in context
         assert "Exit Code: 1" in context
@@ -32,36 +33,44 @@ class TestPrepareErrorContext:
     def test_deployment_success_health_failure(self):
         """Test context when deployment succeeds but health check fails."""
         deploy_result = {"exit_code": 0, "success": True}
-        health_result = {"exit_code": 1, "success": False}
+        health_verdict = HealthVerdict(
+            healthy=False,
+            assessment="mongodb keeps crashing",
+            diagnosis="mongodb: OOMKill",
+            script_was_fixed=False,
+            raw_response="",
+        )
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
         assert "Deployment Script Result" in context
         assert "Status: SUCCESS" in context
-        assert "Health Check Result" in context
-        assert "Status: FAILED" in context
+        assert "Health Assessment" in context
+        assert "Status: UNHEALTHY" in context
+        assert "mongodb: OOMKill" in context
+        assert "mongodb keeps crashing" in context
 
     def test_extremely_long_error_messages(self):
-        """Test handling of extremely long error messages.
+        """Test handling of extremely long assessment text.
 
-        Even though current implementation doesn't include stdout/stderr,
-        we verify it doesn't crash with very long outputs.
+        Verify it doesn't crash with very long outputs.
         """
         deploy_result = {
             "exit_code": 1,
             "success": False,
-            "stdout": "a" * 100000,  # 100KB
+            "stdout": "a" * 100000,
             "stderr": "b" * 100000,
         }
-        health_result = {
-            "exit_code": 1,
-            "success": False,
-            "stdout": "c" * 100000,
-            "stderr": "d" * 100000,
-        }
+        health_verdict = HealthVerdict(
+            healthy=False,
+            assessment="d" * 100000,
+            diagnosis="c" * 100000,
+            script_was_fixed=False,
+            raw_response="",
+        )
 
         # Should not crash
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
         # Should still produce valid context
         assert isinstance(context, str)
@@ -75,9 +84,7 @@ class TestPrepareErrorContext:
         log_path = Path("/repo/.sds/logs/deploy.log")
         health_log_path = Path("/repo/.sds/logs/health.log")
 
-        context = prepare_error_context(
-            deploy_result, health_result, log_path, health_log_path
-        )
+        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)  # type: ignore[arg-type]
 
         assert str(log_path) in context
         assert str(health_log_path) in context
@@ -90,9 +97,7 @@ class TestPrepareErrorContext:
         log_path = Path("/repo/logs/deploy 日本語 & test.log")
         health_log_path = Path("/repo/logs/health (1).log")
 
-        context = prepare_error_context(
-            deploy_result, health_result, log_path, health_log_path
-        )
+        context = prepare_error_context(deploy_result, health_result, log_path, health_log_path)  # type: ignore[arg-type]
 
         assert str(log_path) in context
         assert str(health_log_path) in context
@@ -100,10 +105,16 @@ class TestPrepareErrorContext:
     def test_none_log_paths(self):
         """Test with None log paths (optional parameters)."""
         deploy_result = {"exit_code": 1, "success": False}
-        health_result = {"exit_code": 1, "success": False}
+        health_verdict = HealthVerdict(
+            healthy=False,
+            assessment="unhealthy",
+            diagnosis="crash",
+            script_was_fixed=False,
+            raw_response="",
+        )
 
         # Should work with None log paths
-        context = prepare_error_context(deploy_result, health_result, None, None)
+        context = prepare_error_context(deploy_result, health_verdict, None, None)  # type: ignore[arg-type]
 
         assert isinstance(context, str)
         assert "Deployment Script Result" in context
@@ -113,28 +124,33 @@ class TestPrepareErrorContext:
     def test_exit_code_zero_success_true(self):
         """Test with successful exit codes."""
         deploy_result = {"exit_code": 0, "success": True}
-        health_result = {"exit_code": 0, "success": True}
+        health_verdict = HealthVerdict(
+            healthy=True,
+            assessment="all good",
+            diagnosis="",
+            script_was_fixed=False,
+            raw_response="",
+        )
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, health_verdict)  # type: ignore[arg-type]
 
         assert "Exit Code: 0" in context
         assert "Status: SUCCESS" in context
+        assert "Status: HEALTHY" in context
 
     def test_negative_exit_codes(self):
         """Test with negative exit codes (e.g., timeout = -1)."""
         deploy_result = {"exit_code": -1, "success": False}
-        health_result = {"exit_code": -1, "success": False}
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, None)  # type: ignore[arg-type]
 
         assert "Exit Code: -1" in context
 
     def test_very_large_exit_codes(self):
         """Test with very large exit codes."""
         deploy_result = {"exit_code": 999999, "success": False}
-        health_result = None
 
-        context = prepare_error_context(deploy_result, health_result)
+        context = prepare_error_context(deploy_result, None)  # type: ignore[arg-type]
 
         assert "Exit Code: 999999" in context
 
@@ -182,8 +198,8 @@ class TestCreateFixPrompt:
         assert "previous fix attempt" not in prompt.lower()
         assert "attempt #1" not in prompt
 
-    def test_second_attempt_references_previous(self):
-        """Test second attempt references previous fix attempt."""
+    def test_second_attempt_includes_hypothesis_instructions(self):
+        """Test second attempt includes instructions to write hypothesis to progress doc."""
         repo_path = Path("/test/repo")
         deploy_script = Path("/test/repo/.sds/deploy.sh")
         health_script = Path("/test/repo/.sds/health_check.sh")
@@ -197,48 +213,51 @@ class TestCreateFixPrompt:
             health_check_script_path=health_script,
         )
 
-        # Should mention previous attempt for attempt > 1
-        assert "attempt #2" in prompt.lower()
-        assert "previous" in prompt.lower()
+        # Should include hypothesis step instructions
+        assert "hypothesis" in prompt.lower()
+        assert "deployment_progress.md" in prompt
 
-    def test_fix_summary_consolidation_disabled_omits_summary_path(self):
-        """Test that fix_summary_consolidation=False omits consolidated summary path."""
-        repo_path = Path("/test/repo")
-        deploy_script = Path("/test/repo/.sds/deploy.sh")
-        health_script = Path("/test/repo/.sds/health_check.sh")
+    def test_deployment_progress_path_none_omits_progress_section(self, tmp_path):
+        """Test that deployment_progress_path=None omits progress doc instructions."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
 
         prompt = create_fix_prompt(
-            repo_path,
+            tmp_path,
             attempt=2,
             max_attempts=5,
             error_context="error",
-            deploy_script_path=deploy_script,
-            health_check_script_path=health_script,
-            fix_summary_consolidation=False,
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+            deployment_progress_path=None,
         )
 
-        assert "fix_summary.md" not in prompt
-        assert "fix_summary_1.log" in prompt
-        assert "attempt #2" in prompt.lower()
+        # No "read history" step when path is None (file doesn't exist)
+        assert (
+            "Read `" not in prompt or "deployment_progress.md" not in prompt.split("Read `")[1].split("`")[0]
+            if "Read `" in prompt
+            else True
+        )
 
-    def test_fix_summary_consolidation_enabled_includes_summary_path(self):
-        """Test that fix_summary_consolidation=True (default) includes consolidated summary path."""
-        repo_path = Path("/test/repo")
-        deploy_script = Path("/test/repo/.sds/deploy.sh")
-        health_script = Path("/test/repo/.sds/health_check.sh")
+    def test_deployment_progress_path_includes_progress_path_in_prompt(self, tmp_path):
+        """Test that deployment_progress_path is included in the prompt when the file exists."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        progress_path = sds / "deployment_progress.md"
+        progress_path.write_text("# Deployment Progress\n")
 
         prompt = create_fix_prompt(
-            repo_path,
+            tmp_path,
             attempt=2,
             max_attempts=5,
             error_context="error",
-            deploy_script_path=deploy_script,
-            health_check_script_path=health_script,
-            fix_summary_consolidation=True,
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+            deployment_progress_path=progress_path,
         )
 
-        assert "fix_summary.md" in prompt
-        assert "fix_summary_1.log" in prompt
+        assert str(progress_path) in prompt
+        assert "refuted" in prompt.lower()
 
     def test_special_characters_in_paths(self):
         """Test paths with special characters."""
@@ -307,6 +326,74 @@ class TestCreateFixPrompt:
         # Should include the error context
         assert "Permission denied" in prompt
 
+    def test_fix_prompt_includes_reconciliation_when_code_analysis_exists(self, tmp_path):
+        """When code_analysis.md exists, prompt contains architecture reconciliation instructions."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        (sds / "code_analysis.md").write_text("# Code Analysis Report\n")
+        prompt = create_fix_prompt(
+            repo_path=tmp_path,
+            attempt=1,
+            max_attempts=3,
+            error_context="container crashed",
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+        )
+        assert "Architecture Reconciliation" in prompt
+        assert "code_analysis.md" in prompt
+
+    def test_fix_prompt_omits_reconciliation_when_no_code_analysis(self, tmp_path):
+        """When code_analysis.md is absent, no reconciliation instructions appear."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        # code_analysis.md deliberately not created
+        prompt = create_fix_prompt(
+            repo_path=tmp_path,
+            attempt=1,
+            max_attempts=3,
+            error_context="container crashed",
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+        )
+        assert "Architecture Reconciliation" not in prompt
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+
+    def test_fix_prompt_includes_todo_instructions_when_issues_file_exists(self, tmp_path):
+        """When deployment_issues.md exists, prompt contains TODO tracking instructions."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        (sds / "deployment_issues.md").write_text("# Deployment Issues\n\n## TODO\n- [ ] #1 — cert path wrong\n")
+        prompt = create_fix_prompt(
+            repo_path=tmp_path,
+            attempt=1,
+            max_attempts=3,
+            error_context="container crashed",
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+        )
+        assert "deployment_issues.md" in prompt
+        assert "TODO" in prompt
+        assert "[x]" in prompt
+
+    def test_fix_prompt_omits_todo_instructions_when_no_issues_file(self, tmp_path):
+        """When deployment_issues.md is absent (code_analysis disabled), no TODO instructions appear."""
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        # deployment_issues.md deliberately not created
+        prompt = create_fix_prompt(
+            repo_path=tmp_path,
+            attempt=1,
+            max_attempts=3,
+            error_context="container crashed",
+            deploy_script_path=sds / "deploy.sh",
+            health_check_script_path=sds / "health_check.sh",
+        )
+        assert "TODO" not in prompt
+        assert "[x]" not in prompt
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+
     def test_max_attempts_boundary_values(self):
         """Test with boundary values for attempt/max_attempts."""
         repo_path = Path("/test/repo")
@@ -344,7 +431,6 @@ class TestCreateGenerateScriptPrompt:
     def test_basic_script_generation_prompt(self):
         """Test basic script generation prompt."""
         prompt = create_generate_script_prompt(
-            system_prompt="You are a helpful assistant",
             script_name="deploy.sh",
             repo_context="A Node.js application",
             target_dir="/repo/.sds",
@@ -358,7 +444,6 @@ class TestCreateGenerateScriptPrompt:
     def test_special_characters_in_repo_context(self):
         """Test repo context with special characters."""
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context="App with <special> & 'chars' \"quotes\" \\backslash",
             target_dir="/repo/.sds",
@@ -372,7 +457,6 @@ class TestCreateGenerateScriptPrompt:
     def test_unicode_in_script_name(self):
         """Test script name with unicode characters."""
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="デプロイ.sh",
             repo_context="Context",
             target_dir="/repo/.sds",
@@ -381,25 +465,9 @@ class TestCreateGenerateScriptPrompt:
 
         assert "デプロイ.sh" in prompt
 
-    def test_very_long_system_prompt(self):
-        """Test with very long system prompt."""
-        long_system_prompt = "System: " + "x" * 50000
-
-        prompt = create_generate_script_prompt(
-            system_prompt=long_system_prompt,
-            script_name="deploy.sh",
-            repo_context="Context",
-            target_dir="/repo/.sds",
-            platform="docker",
-        )
-
-        # Should handle long prompts
-        assert isinstance(prompt, str)
-
     def test_empty_repo_context(self):
         """Test with empty repo context."""
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context="",
             target_dir="/repo/.sds",
@@ -422,7 +490,6 @@ class TestCreateGenerateScriptPrompt:
         """
 
         prompt = create_generate_script_prompt(
-            system_prompt="System",
             script_name="deploy.sh",
             repo_context=repo_context,
             target_dir="/repo/.sds",
@@ -443,7 +510,6 @@ class TestCreateGenerateScriptPrompt:
 
         for platform in platforms:
             prompt = create_generate_script_prompt(
-                system_prompt="System",
                 script_name="deploy.sh",
                 repo_context="Context",
                 target_dir="/repo/.sds",

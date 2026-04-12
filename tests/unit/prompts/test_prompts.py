@@ -1,5 +1,6 @@
 import pytest
-from app_operator.prompts import get_loader, reset_loader, PromptLoader
+
+from app_operator.prompts import PromptLoader, get_loader, reset_loader
 
 
 @pytest.fixture
@@ -83,20 +84,19 @@ def test_fix_error_prompt(loader):
         attempt=2,
         max_attempts=5,
         error_context="ERROR_CONTEXT",
-        previous_summary_note="PREV_NOTE",
         deploy_script=".sds/deploy.sh",
         health_check_script=".sds/health_check.sh",
+        platform="auto",
     )
-    # Verify context injection (attempt count, error details, previous summary)
+    # Verify context injection (attempt count, error details, hypothesis step)
     assert "Current attempt: 2 of 5" in rendered
     assert "ERROR_CONTEXT" in rendered
-    assert "PREV_NOTE" in rendered
+    assert "hypothesis" in rendered.lower()
+    assert "deployment_progress.md" in rendered
 
 
 def test_summarize_prompt(loader):
-    rendered = loader.render(
-        "deployer/summarize.jinja2", output_snippet="OUTPUT_SNIPPET"
-    )
+    rendered = loader.render("deployer/summarize.jinja2", output_snippet="OUTPUT_SNIPPET")
     # Verify input injection and XML formatting requirements
     assert "OUTPUT_SNIPPET" in rendered
     assert "<output_msg>" in rendered
@@ -116,13 +116,109 @@ def test_code_analyzer_user(loader):
 
 
 def test_monitor_analyze_health(loader):
-    rendered = loader.render(
-        "monitor/analyze_health.jinja2", repo_path="/repo", context="HEALTH_CONTEXT"
-    )
+    rendered = loader.render("monitor/analyze_health.jinja2", repo_path="/repo", context="HEALTH_CONTEXT")
     # Verify context injection and output format tags
     assert "Repository: /repo" in rendered
     assert "HEALTH_CONTEXT" in rendered
     assert "<exec_summary>" in rendered
+
+
+def test_fix_error_template_with_code_analysis(loader):
+    """Template renders architecture reconciliation block when has_code_analysis=True."""
+    rendered = loader.render(
+        "deployer/fix_error.jinja2",
+        repo_path="/repo",
+        attempt=1,
+        max_attempts=3,
+        error_context="error",
+        previous_summary_note="",
+        deploy_script=".sds/deploy.sh",
+        health_check_script=".sds/health_check.sh",
+        platform="auto",
+        has_code_analysis=True,
+    )
+    assert "code_analysis.md" in rendered
+    assert "Architecture Reconciliation" in rendered
+    # Spot-check key reconciliation categories are mentioned
+    assert "Missing services" in rendered
+    assert "Phantom services" in rendered
+    assert "Database mismatches" in rendered
+    assert "Port mismatches" in rendered
+
+
+def test_fix_error_template_without_code_analysis(loader):
+    """Template omits reconciliation block when has_code_analysis=False."""
+    rendered = loader.render(
+        "deployer/fix_error.jinja2",
+        repo_path="/repo",
+        attempt=1,
+        max_attempts=3,
+        error_context="error",
+        previous_summary_note="",
+        deploy_script=".sds/deploy.sh",
+        health_check_script=".sds/health_check.sh",
+        platform="auto",
+        has_code_analysis=False,
+    )
+    assert "Architecture Reconciliation" not in rendered
+    assert "Phantom services" not in rendered
+
+
+def test_fix_error_template_with_deployment_issues(loader):
+    """Template renders TODO instructions when has_deployment_issues=True."""
+    rendered = loader.render(
+        "deployer/fix_error.jinja2",
+        repo_path="/repo",
+        attempt=1,
+        max_attempts=3,
+        error_context="error",
+        previous_summary_note="",
+        deploy_script=".sds/deploy.sh",
+        health_check_script=".sds/health_check.sh",
+        platform="auto",
+        has_deployment_issues=True,
+    )
+    assert "deployment_issues.md" in rendered
+    assert "- [x]" in rendered
+    assert "Confidence" in rendered
+
+
+def test_fix_error_template_without_deployment_issues(loader):
+    """Template omits TODO block when has_deployment_issues=False."""
+    rendered = loader.render(
+        "deployer/fix_error.jinja2",
+        repo_path="/repo",
+        attempt=1,
+        max_attempts=3,
+        error_context="error",
+        previous_summary_note="",
+        deploy_script=".sds/deploy.sh",
+        health_check_script=".sds/health_check.sh",
+        platform="auto",
+        has_deployment_issues=False,
+    )
+    assert "TODO" not in rendered
+    assert "- [x]" not in rendered
+
+
+def test_code_analyzer_system_prompt_requires_issue_ids(loader):
+    """System prompt instructs model to assign numeric IDs to issues."""
+    rendered = loader.render("code_analyzer/system.jinja2")
+    assert "#1" in rendered or "numeric id" in rendered.lower()
+
+
+def test_code_analyzer_system_prompt_requires_confidence_with_reason(loader):
+    """System prompt instructs model to include a confidence field with justification."""
+    rendered = loader.render("code_analyzer/system.jinja2")
+    assert "Confidence" in rendered
+    assert "justif" in rendered.lower() or "reason" in rendered.lower() or "justifying" in rendered.lower()
+
+
+def test_code_analyzer_system_prompt_requires_todo_section(loader):
+    """System prompt instructs model to output a ## TODO checklist."""
+    rendered = loader.render("code_analyzer/system.jinja2")
+    assert "## TODO" in rendered
+    assert "- [ ]" in rendered
 
 
 def test_reset_loader():

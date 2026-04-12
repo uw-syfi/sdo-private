@@ -27,24 +27,24 @@ class TestOperatorPhaseConfig:
     def test_type_validation_bool_required(self):
         """Test that code_analysis must be a bool."""
         with pytest.raises(TypeError, match="code_analysis must be bool"):
-            OperatorPhaseConfig(code_analysis="true")
+            OperatorPhaseConfig(code_analysis="true")  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="code_analysis must be bool"):
-            OperatorPhaseConfig(code_analysis=1)
+            OperatorPhaseConfig(code_analysis=1)  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="code_analysis must be bool"):
-            OperatorPhaseConfig(code_analysis=None)
+            OperatorPhaseConfig(code_analysis=None)  # type: ignore[arg-type]
 
     def test_fix_summary_consolidation_type_validation(self):
         """Test that fix_summary_consolidation must be a bool."""
         with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
-            OperatorPhaseConfig(fix_summary_consolidation="true")
+            OperatorPhaseConfig(fix_summary_consolidation="true")  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
-            OperatorPhaseConfig(fix_summary_consolidation=1)
+            OperatorPhaseConfig(fix_summary_consolidation=1)  # type: ignore[arg-type]
 
         with pytest.raises(TypeError, match="fix_summary_consolidation must be bool"):
-            OperatorPhaseConfig(fix_summary_consolidation=None)
+            OperatorPhaseConfig(fix_summary_consolidation=None)  # type: ignore[arg-type]
 
 
 class TestOperatorPhaseConfigParsing:
@@ -53,12 +53,8 @@ class TestOperatorPhaseConfigParsing:
     def test_nested_phase_section_parsing(self):
         """Test parsing nested [operator.phase] section."""
         data = {
-            "operator": {
-                "interval": 60,
-                "phase": {
-                    "code_analysis": False
-                }
-            }
+            "agent": {"backend": "codex", "model": "test-model"},
+            "operator": {"interval": 60, "phase": {"code_analysis": False}},
         }
         config = Config.from_dict(data)
         assert config.operator.interval == 60
@@ -67,11 +63,8 @@ class TestOperatorPhaseConfigParsing:
     def test_nested_phase_fix_summary_consolidation_parsing(self):
         """Test parsing fix_summary_consolidation from nested [operator.phase] section."""
         data = {
-            "operator": {
-                "phase": {
-                    "fix_summary_consolidation": False
-                }
-            }
+            "agent": {"backend": "codex", "model": "test-model"},
+            "operator": {"phase": {"fix_summary_consolidation": False}},
         }
         config = Config.from_dict(data)
         assert config.operator.phase.fix_summary_consolidation is False
@@ -79,82 +72,49 @@ class TestOperatorPhaseConfigParsing:
 
     def test_operator_without_phase_section(self):
         """Test that operator config works without phase section."""
-        data = {
-            "operator": {
-                "interval": 60
-            }
-        }
+        data = {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"interval": 60}}
         config = Config.from_dict(data)
         assert config.operator.interval == 60
         assert config.operator.phase.code_analysis is True  # Default
 
     def test_empty_operator_section(self):
         """Test that empty operator section uses defaults."""
-        data = {"operator": {}}
+        data = {"agent": {"backend": "codex", "model": "test-model"}, "operator": {}}
         config = Config.from_dict(data)
         assert config.operator.interval == 30  # Default
         assert config.operator.phase.code_analysis is True  # Default
 
     def test_no_operator_section(self):
         """Test that missing operator section uses defaults."""
-        data = {}
+        data = {"agent": {"backend": "codex", "model": "test-model"}}
         config = Config.from_dict(data)
         assert config.operator.interval == 30  # Default
         assert config.operator.phase.code_analysis is True  # Default
 
     def test_phase_section_only(self):
         """Test that phase section can be specified alone."""
-        data = {
-            "operator": {
-                "phase": {
-                    "code_analysis": False
-                }
-            }
-        }
+        data = {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
         config = Config.from_dict(data)
         assert config.operator.interval == 30  # Default
         assert config.operator.phase.code_analysis is False
 
     def test_unrecognized_phase_field_error(self):
         """Test that unrecognized fields in phase section raise error."""
-        data = {
-            "operator": {
-                "phase": {
-                    "code_analysis": False,
-                    "unknown_field": True
-                }
-            }
-        }
+        data = {"operator": {"phase": {"code_analysis": False, "unknown_field": True}}}
         with pytest.raises(
-            UnrecognizedFieldError,
-            match=r"Unrecognized field\(s\) in \[operator\.phase\] section: unknown_field"
+            UnrecognizedFieldError, match=r"Unrecognized field\(s\) in \[operator\.phase\] section: unknown_field"
         ):
             Config.from_dict(data)
 
     def test_multiple_unrecognized_phase_fields(self):
         """Test error message with multiple unrecognized fields."""
-        data = {
-            "operator": {
-                "phase": {
-                    "code_analysis": False,
-                    "foo": True,
-                    "bar": False
-                }
-            }
-        }
-        with pytest.raises(
-            UnrecognizedFieldError,
-            match=r"Unrecognized field\(s\) in \[operator\.phase\] section"
-        ):
+        data = {"operator": {"phase": {"code_analysis": False, "foo": True, "bar": False}}}
+        with pytest.raises(UnrecognizedFieldError, match=r"Unrecognized field\(s\) in \[operator\.phase\] section"):
             Config.from_dict(data)
 
     def test_phase_not_a_dict(self):
         """Test that phase must be a dict if present."""
-        data = {
-            "operator": {
-                "phase": "not a dict"
-            }
-        }
+        data = {"operator": {"phase": "not a dict"}}
         # Should raise an error when trying to create OperatorPhaseConfig
         with pytest.raises((TypeError, AttributeError)):
             Config.from_dict(data)
@@ -163,14 +123,8 @@ class TestOperatorPhaseConfigParsing:
         """Test that existing configs without phase section still work."""
         # Simulate old config file
         data = {
-            "agent": {
-                "provider": "codex"
-            },
-            "operator": {
-                "interval": 30,
-                "monitoring_max_iters": 5,
-                "deployment_max_iters": 20
-            }
+            "agent": {"backend": "codex", "model": "test-model"},
+            "operator": {"interval": 30, "monitoring_max_iters": 5, "deployment_max_iters": 20},
         }
         config = Config.from_dict(data)
         assert config.operator.interval == 30
@@ -181,6 +135,7 @@ class TestOperatorPhaseConfigParsing:
     def test_complete_config_with_phase(self):
         """Test complete config with all operator fields including phase."""
         data = {
+            "agent": {"backend": "codex", "model": "test-model"},
             "operator": {
                 "interval": 60,
                 "monitoring_max_iters": 10,
@@ -188,10 +143,8 @@ class TestOperatorPhaseConfigParsing:
                 "agent_fix_timeout": 3600,
                 "deploy_timeout": 1800,
                 "agent_timeout": 600,
-                "phase": {
-                    "code_analysis": False
-                }
-            }
+                "phase": {"code_analysis": False},
+            },
         }
         config = Config.from_dict(data)
         assert config.operator.interval == 60
@@ -207,22 +160,13 @@ class TestOperatorPhaseConfigParsing:
         data = {
             "operator": {
                 "interval": -1,  # Invalid
-                "phase": {
-                    "code_analysis": False
-                }
+                "phase": {"code_analysis": False},
             }
         }
         with pytest.raises(ValueError, match="interval must be positive"):
             Config.from_dict(data)
 
-    def test_git_integration_defaults_to_false(self):
-        config = Config.from_dict({})
-        assert config.operator.phase.git_integration is False
-
-    def test_git_integration_enabled_via_config(self):
-        config = Config.from_dict({"operator": {"phase": {"git_integration": True}}})
-        assert config.operator.phase.git_integration is True
-
-    def test_git_integration_rejects_non_bool(self):
-        with pytest.raises(TypeError):
-            Config.from_dict({"operator": {"phase": {"git_integration": "yes"}}})
+    def test_git_integration_in_phase_is_unrecognized(self):
+        """Test that git_integration in operator.phase is now rejected."""
+        with pytest.raises(UnrecognizedFieldError, match="git_integration"):
+            Config.from_dict({"operator": {"phase": {"git_integration": True}}})

@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from lego_agent.runtime import create_agent
 
 
@@ -7,9 +8,7 @@ from lego_agent.runtime import create_agent
 @patch("lego_agent.runtime.build_tools")
 @patch("lego_agent.runtime.RealFilesystem")
 @patch("lego_agent.runtime.LangGraphAgent")
-def test_create_agent_with_tools_filtering(
-    MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig
-):
+def test_create_agent_with_tools_filtering(MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig):
     # Setup mocks
     mock_tools = []
     tool_names = ["read_file", "write_file", "list_files"]
@@ -43,9 +42,7 @@ def test_create_agent_with_tools_filtering(
 @patch("lego_agent.runtime.build_tools")
 @patch("lego_agent.runtime.RealFilesystem")
 @patch("lego_agent.runtime.LangGraphAgent")
-def test_create_agent_default_tools(
-    MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig
-):
+def test_create_agent_default_tools(MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig):
     # Setup mocks
     mock_tools = [MagicMock(), MagicMock()]
     MockBuildTools.return_value = mock_tools

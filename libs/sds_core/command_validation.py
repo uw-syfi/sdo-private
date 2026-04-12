@@ -7,7 +7,7 @@ to provide a safety net against destructive LLM-generated commands.
 import re
 
 # Each pattern is a tuple of (compiled_regex, human-readable description).
-DANGEROUS_PATTERNS: list[tuple[re.Pattern, str]] = [
+DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/\s*($|[;&|])"),
         "rm -rf / (delete root filesystem)",
@@ -55,9 +55,7 @@ class DangerousCommandError(ValueError):
     """Raised when a command matches a known-dangerous pattern."""
 
     def __init__(self, command: str, reason: str):
-        super().__init__(
-            f"Dangerous command rejected: {reason}. Command: {command}"
-        )
+        super().__init__(f"Dangerous command rejected: {reason}. Command: {command}")
         self.command = command
         self.reason = reason
 

@@ -1,26 +1,32 @@
+from __future__ import annotations
+
 import asyncio
 import json
-import yaml
+from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
-    Callable,
     Protocol,
     runtime_checkable,
 )
-from pathlib import Path
 
-from langchain_core.runnables import RunnableConfig
+import yaml
 from langchain_core.messages import HumanMessage
-from langchain_core.tools import tool, StructuredTool
-from langgraph.prebuilt import create_react_agent
+from langchain_core.tools import StructuredTool, tool
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from langchain_core.runnables import RunnableConfig
+from langgraph.prebuilt import create_react_agent
 from loguru import logger
+
 from lego_agent.config import load_config
+from lego_agent.io import Colors
 from lego_agent.llm import build_llm
+from lego_agent.streaming import extract_tool_result, parse_chunk_content
 from libs.sds_core.filesystem import RealFilesystem
 from libs.sds_core.tools import build_tools
-from lego_agent.io import Colors
-from lego_agent.streaming import parse_chunk_content, extract_tool_result
 
 # Default timeout (seconds) for agent generation calls
 DEFAULT_AGENT_TIMEOUT = 300
@@ -62,9 +68,7 @@ class LangGraphAgent:
         self.agent_name = agent_name
 
         # Create the graph
-        self.graph = create_react_agent(
-            model=self.llm, tools=self.tools, prompt=self.instruction
-        )
+        self.graph = create_react_agent(model=self.llm, tools=self.tools, prompt=self.instruction)
 
     def _wrap_tools(self, tools: list[Callable]) -> list[StructuredTool]:
         """Wrap ADK tools into LangChain StructuredTools."""
@@ -107,9 +111,7 @@ class LangGraphAgent:
 
         async def run_stream() -> None:
             thinking_started = False
-            async for event in self.graph.astream_events(
-                {"messages": messages}, version="v1", config=config
-            ):
+            async for event in self.graph.astream_events({"messages": messages}, version="v1", config=config):
                 kind = event["event"]
 
                 if kind == "on_chat_model_stream":
@@ -136,7 +138,7 @@ class LangGraphAgent:
                     name = event["name"]
                     inputs = event["data"].get("input")
                     if thinking_started:
-                        print("", flush=True)
+                        print(flush=True)
                         thinking_started = False
                     print(
                         f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}",
@@ -162,7 +164,7 @@ class LangGraphAgent:
                     )
 
             if thinking_started:
-                print("", flush=True)
+                print(flush=True)
 
         try:
             await asyncio.wait_for(run_stream(), timeout=timeout)
@@ -176,7 +178,7 @@ class LangGraphAgent:
             return f"Error: Agent execution timed out after {timeout} seconds."
         except Exception as e:
             logger.error(f"Error in agent generation: {e}")
-            return f"Error: {str(e)}"
+            return f"Error: {e!s}"
 
     def run(self, input_data: Any) -> Any:
         """Implement Runnable protocol."""
@@ -197,7 +199,7 @@ def create_agent(
     config = load_config(target_dir, config_path)
 
     if provider:
-        config.agent.provider = provider
+        config.agent.backend = provider
     if model:
         config.agent.model = model
 
@@ -205,7 +207,6 @@ def create_agent(
 
     repo_path_obj = Path(target_dir).resolve()
     filesystem = RealFilesystem()
-    # git_integration = getattr(getattr(config.operator, 'phase', None), 'git_integration', False)
     all_tools = build_tools(repo_path_obj, filesystem)
 
     # Filter tools if requested
@@ -217,9 +218,7 @@ def create_agent(
             if tool_name in available_tools_map:
                 selected_tools.append(available_tools_map[tool_name])
             else:
-                logger.warning(
-                    f"Tool '{tool_name}' not found. Available: {list(available_tools_map.keys())}"
-                )
+                logger.warning(f"Tool '{tool_name}' not found. Available: {list(available_tools_map.keys())}")
 
         agent_tools = selected_tools
     else:
@@ -299,11 +298,8 @@ class FanOut(Runnable):
             async def _run_one(p: str) -> Any:
                 async with semaphore:
                     if isinstance(self.agent, AsyncRunnable):
-                        return await self.agent.generate_async(
-                            p, timeout=self.timeout
-                        )
-                    else:
-                        return await asyncio.to_thread(self.agent.run, p)
+                        return await self.agent.generate_async(p, timeout=self.timeout)
+                    return await asyncio.to_thread(self.agent.run, p)
 
             tasks = [_run_one(p) for p in prompts_to_run]
             return await asyncio.gather(*tasks)
@@ -324,18 +320,14 @@ class Summarize(Runnable):
         else:
             combined_input = str(input_data)
 
-        prompt = (
-            f"{self.instruction}\n\nHere are the inputs to summarize:\n{combined_input}"
-        )
+        prompt = f"{self.instruction}\n\nHere are the inputs to summarize:\n{combined_input}"
         return self.agent.run(prompt)
 
 
 class JudgeLoop(Runnable):
     """Iterative loop where a judge evaluates worker output."""
 
-    def __init__(
-        self, judge: Runnable, worker: Runnable, task: str, max_iterations: int
-    ):
+    def __init__(self, judge: Runnable, worker: Runnable, task: str, max_iterations: int):
         self.judge = judge
         self.worker = worker
         self.task = task
@@ -345,9 +337,7 @@ class JudgeLoop(Runnable):
         current_output = None
 
         for i in range(self.max_iterations):
-            print(
-                f"\n{Colors.BOLD}=== Iteration {i + 1}/{self.max_iterations} ==={Colors.ENDC}"
-            )
+            print(f"\n{Colors.BOLD}=== Iteration {i + 1}/{self.max_iterations} ==={Colors.ENDC}")
             current_output_line = (
                 "Current Output: (None - Worker has not started yet)"
                 if current_output is None
@@ -358,7 +348,8 @@ class JudgeLoop(Runnable):
                 f"Task: {self.task}\n\n"
                 f"{current_output_line}\n\n"
                 "=== YOUR ROLE: JUDGE/EVALUATOR ===\n"
-                "You are an evaluator who assesses whether the task is complete. You make decisions but DO NOT perform work.\n\n"
+                "You are an evaluator who assesses whether the task is complete. "
+                "You make decisions but DO NOT perform work.\n\n"
                 "DO:\n"
                 "- Evaluate if the task requirements are met\n"
                 "- Provide specific, actionable feedback if work is needed\n"
@@ -374,7 +365,7 @@ class JudgeLoop(Runnable):
                 start = judge_resp.find("{")
                 end = judge_resp.rfind("}")
                 if start != -1 and end != -1:
-                    json_str = judge_resp[start: end + 1]
+                    json_str = judge_resp[start : end + 1]
                     feedback_data = json.loads(json_str)
                 else:
                     feedback_data = {
@@ -392,9 +383,7 @@ class JudgeLoop(Runnable):
             if feedback_data.get("status") == "done":
                 logger.info("Judge loop done")
                 return {
-                    "final_output": current_output
-                    if current_output is not None
-                    else "",
+                    "final_output": current_output if current_output is not None else "",
                     "judge_feedback": feedback_data.get("feedback", ""),
                     "iterations": str(i + 1),
                 }
@@ -418,6 +407,7 @@ class JudgeLoop(Runnable):
             "judge_feedback": "Max iterations reached",
             "iterations": str(self.max_iterations),
         }
+
 
 # ---------------------------------------------------------------------------
 # Registry-based runnable builder
@@ -490,8 +480,8 @@ RUNNABLE_TYPES: dict[str, Callable[[dict[str, Any]], Runnable]] = {
 
 def _build_runnable(config: dict[str, Any]) -> Runnable:
     """Recursively build a Runnable from dictionary config."""
-    kind = config.get("type")
-    factory = RUNNABLE_TYPES.get(kind)
+    kind: str | None = config.get("type")
+    factory = RUNNABLE_TYPES.get(kind)  # type: ignore[reportArgumentType]
     if factory is None:
         raise ValueError(f"Unknown Runnable type: {kind}")
     return factory(config)
@@ -503,7 +493,7 @@ def run_yaml(config_path: str) -> None:
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(path, "r") as f:
+    with open(path) as f:
         config = yaml.safe_load(f)
 
     workflow_config = config.get("workflow")
@@ -511,13 +501,12 @@ def run_yaml(config_path: str) -> None:
         raise ValueError("YAML must contain a 'workflow' root object.")
 
     runner = _build_runnable(workflow_config)
-    print(
-        f"{Colors.BOLD}Starting Workflow execution from {config_path}...{Colors.ENDC}"
-    )
+    print(f"{Colors.BOLD}Starting Workflow execution from {config_path}...{Colors.ENDC}")
     result = runner.run(None)
 
     print(f"\n{Colors.BOLD}{Colors.GREEN}Workflow Complete!{Colors.ENDC}")
     print(f"Result:\n{result}")
+
 
 # Wrapper functions for script usage
 
@@ -527,16 +516,13 @@ def fan_out(agent: Runnable, items: list[str], max_workers: int = DEFAULT_FAN_OU
     return FanOut(agent, items, max_workers).run(None)
 
 
-def summarize(
-    agent: Runnable, items: list[str], instruction: str = "Summarize the inputs."
-) -> str:
+def summarize(agent: Runnable, items: list[str], instruction: str = "Summarize the inputs.") -> str:
     """Summarize a list of items using the agent."""
     return Summarize(agent, instruction).run(items)
 
 
 def judge_loop(
-    judge: Runnable, worker: Runnable, task: str,
-    max_iterations: int = DEFAULT_JUDGE_LOOP_MAX_ITERATIONS
+    judge: Runnable, worker: Runnable, task: str, max_iterations: int = DEFAULT_JUDGE_LOOP_MAX_ITERATIONS
 ) -> dict[str, str]:
     """Execute a judge-worker loop."""
     return JudgeLoop(judge, worker, task, max_iterations).run(None)

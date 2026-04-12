@@ -7,9 +7,10 @@ including success rates, iteration efficiency, and token costs.
 import json
 import sys
 from pathlib import Path
+
 from tabulate import tabulate
 
-from app_operator.dspy_integration.metrics_aggregator import MetricsAggregator
+from app_operator.dspy_integration import MetricsAggregator
 
 
 def add_arguments(parser):
@@ -153,10 +154,12 @@ def _print_table_format(metrics: dict, trajectories_dir: Path):
 
         if "by_success" in iter_data:
             by_success = iter_data["by_success"]
-            iter_table.extend([
-                ["Avg (Successful)", by_success.get("successful_avg", 0)],
-                ["Avg (Failed)", by_success.get("failed_avg", 0)],
-            ])
+            iter_table.extend(
+                [
+                    ["Avg (Successful)", by_success.get("successful_avg", 0)],
+                    ["Avg (Failed)", by_success.get("failed_avg", 0)],
+                ]
+            )
 
         print("Iterations:")
         print(tabulate(iter_table, tablefmt="simple"))
@@ -187,12 +190,14 @@ def _print_table_format(metrics: dict, trajectories_dir: Path):
 
         if "cost_usd" in token_data and "total" in token_data["cost_usd"]:
             cost_data = token_data["cost_usd"]
-            token_table.extend([
-                ["", ""],  # Separator
-                ["Total Cost", f"${cost_data.get('total', 0):.4f}"],
-                ["Avg Cost per Run", f"${cost_data.get('avg_per_run', 0):.4f}"],
-                ["Model", cost_data.get("model", "unknown")],
-            ])
+            token_table.extend(
+                [
+                    ["", ""],  # Separator
+                    ["Total Cost", f"${cost_data.get('total', 0):.4f}"],
+                    ["Avg Cost per Run", f"${cost_data.get('avg_per_run', 0):.4f}"],
+                    ["Model", cost_data.get("model", "unknown")],
+                ]
+            )
 
         print("Token Usage:")
         print(tabulate(token_table, tablefmt="simple"))
@@ -203,18 +208,22 @@ def _print_table_format(metrics: dict, trajectories_dir: Path):
         print("By Phase:")
         phase_rows = []
         for phase_name, phase_metrics in metrics["by_phase"].items():
-            phase_rows.append([
-                phase_name.capitalize(),
-                phase_metrics.get("count", 0),
-                f"{phase_metrics.get('success_rate', 0) * 100:.2f}%",
-                f"{phase_metrics.get('iterations', {}).get('avg', 0):.2f}",
-            ])
+            phase_rows.append(
+                [
+                    phase_name.capitalize(),
+                    phase_metrics.get("count", 0),
+                    f"{phase_metrics.get('success_rate', 0) * 100:.2f}%",
+                    f"{phase_metrics.get('iterations', {}).get('avg', 0):.2f}",
+                ]
+            )
 
-        print(tabulate(
-            phase_rows,
-            headers=["Phase", "Count", "Success Rate", "Avg Iterations"],
-            tablefmt="simple",
-        ))
+        print(
+            tabulate(
+                phase_rows,
+                headers=["Phase", "Count", "Success Rate", "Avg Iterations"],
+                tablefmt="simple",
+            )
+        )
         print()
 
 
@@ -247,13 +256,13 @@ def _print_comparison_table(comparison: dict):
             "Success Rate",
             f"{baseline.get('success_rate', 0) * 100:.2f}%",
             f"{optimized.get('success_rate', 0) * 100:.2f}%",
-            _format_pct_improvement(improvements.get('success_rate_improvement')),
+            _format_pct_improvement(improvements.get("success_rate_improvement")),
         ],
         [
             "Avg Iterations",
             f"{baseline.get('iterations', {}).get('avg', 0):.2f}",
             f"{optimized.get('iterations', {}).get('avg', 0):.2f}",
-            _format_pct_improvement(improvements.get('iteration_reduction_pct')),
+            _format_pct_improvement(improvements.get("iteration_reduction_pct")),
         ],
     ]
 
@@ -262,43 +271,51 @@ def _print_comparison_table(comparison: dict):
     optimized_tokens = optimized.get("tokens", {})
     if baseline_tokens.get("available") and optimized_tokens.get("available"):
         token_label = "Total Tokens (est.)" if baseline_tokens.get("estimated") else "Total Tokens"
-        comp_table.append([
-            token_label,
-            f"{baseline_tokens.get('total', 0):,}",
-            f"{optimized_tokens.get('total', 0):,}",
-            _format_pct_improvement(improvements.get('token_reduction_pct')),
-        ])
+        comp_table.append(
+            [
+                token_label,
+                f"{baseline_tokens.get('total', 0):,}",
+                f"{optimized_tokens.get('total', 0):,}",
+                _format_pct_improvement(improvements.get("token_reduction_pct")),
+            ]
+        )
 
     # Add cost comparison if available
     if "cost_reduction_pct" in improvements:
         baseline_cost = baseline.get("tokens", {}).get("cost_usd", {}).get("total", 0)
         optimized_cost = optimized.get("tokens", {}).get("cost_usd", {}).get("total", 0)
 
-        comp_table.append([
-            "Total Cost",
-            f"${baseline_cost:.4f}",
-            f"${optimized_cost:.4f}",
-            _format_pct_improvement(improvements.get('cost_reduction_pct')),
-        ])
+        comp_table.append(
+            [
+                "Total Cost",
+                f"${baseline_cost:.4f}",
+                f"${optimized_cost:.4f}",
+                _format_pct_improvement(improvements.get("cost_reduction_pct")),
+            ]
+        )
 
         if "cost_savings_usd" in improvements:
-            comp_table.append([
-                "Cost Savings",
-                "",
-                "",
-                f"${improvements['cost_savings_usd']:.4f}",
-            ])
+            comp_table.append(
+                [
+                    "Cost Savings",
+                    "",
+                    "",
+                    f"${improvements['cost_savings_usd']:.4f}",
+                ]
+            )
 
     # Add fallback rate comparison if available
     if "fallback_rate_reduction_pct" in improvements:
         baseline_fr = baseline.get("fallback_rate", 0)
         optimized_fr = optimized.get("fallback_rate", 0)
-        comp_table.append([
-            "Fallback Rate",
-            f"{baseline_fr * 100:.2f}%",
-            f"{optimized_fr * 100:.2f}%",
-            _format_pct_improvement(improvements.get('fallback_rate_reduction_pct')),
-        ])
+        comp_table.append(
+            [
+                "Fallback Rate",
+                f"{baseline_fr * 100:.2f}%",
+                f"{optimized_fr * 100:.2f}%",
+                _format_pct_improvement(improvements.get("fallback_rate_reduction_pct")),
+            ]
+        )
 
     print(tabulate(comp_table, headers="firstrow", tablefmt="grid"))
     print()
@@ -349,23 +366,31 @@ def _print_comparison_table(comparison: dict):
             b = phase_data["baseline"]
             o = phase_data["optimized"]
             ph_impr = phase_data["improvements"]
-            phase_rows.append([
-                phase_name.capitalize(),
-                f"{b.get('success_rate', 0) * 100:.2f}%",
-                f"{o.get('success_rate', 0) * 100:.2f}%",
-                _format_pct_improvement(ph_impr.get("success_rate_improvement")),
-                f"{b.get('iterations', {}).get('avg', 0):.2f}",
-                f"{o.get('iterations', {}).get('avg', 0):.2f}",
-                _format_pct_improvement(ph_impr.get("iteration_reduction_pct")),
-            ])
+            phase_rows.append(
+                [
+                    phase_name.capitalize(),
+                    f"{b.get('success_rate', 0) * 100:.2f}%",
+                    f"{o.get('success_rate', 0) * 100:.2f}%",
+                    _format_pct_improvement(ph_impr.get("success_rate_improvement")),
+                    f"{b.get('iterations', {}).get('avg', 0):.2f}",
+                    f"{o.get('iterations', {}).get('avg', 0):.2f}",
+                    _format_pct_improvement(ph_impr.get("iteration_reduction_pct")),
+                ]
+            )
 
-        print(tabulate(
-            phase_rows,
-            headers=[
-                "Phase",
-                "Success (B)", "Success (O)", "Success Δ",
-                "Iters (B)", "Iters (O)", "Iters Δ",
-            ],
-            tablefmt="grid",
-        ))
+        print(
+            tabulate(
+                phase_rows,
+                headers=[
+                    "Phase",
+                    "Success (B)",
+                    "Success (O)",
+                    "Success Δ",
+                    "Iters (B)",
+                    "Iters (O)",
+                    "Iters Δ",
+                ],
+                tablefmt="grid",
+            )
+        )
         print()

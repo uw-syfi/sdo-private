@@ -5,13 +5,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from loguru import logger
 from starlette.websockets import WebSocketState
 
+from lego_agent.config import Config, load_config
 from lego_agent.engine import LegoAgentEngine
-from lego_agent.prompts import get_loader, PromptLoader
+from lego_agent.prompts import PromptLoader, get_loader
 from lego_agent.utils import find_repo_root
-from loguru import logger
-from lego_agent.config import load_config, Config
 
 DEFAULT_LOOP_BOUND = 10  # default execution loop bound for generated scripts
 DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding
@@ -36,14 +36,19 @@ class WebIO:
         task.add_done_callback(self._pending_tasks.discard)
         return task
 
+    @property
+    def pending_task_count(self) -> int:
+        """Return the number of currently tracked pending tasks."""
+        return len(self._pending_tasks)
+
     async def cleanup(self) -> None:
         """Await all pending tasks, suppressing exceptions."""
         if self._pending_tasks:
             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
 
-    async def _send_event(self, type: str, data: dict[str, Any]) -> None:
+    async def _send_event(self, event_type: str, data: dict[str, Any]) -> None:
         if self.websocket.client_state == WebSocketState.CONNECTED:
-            await self.websocket.send_json({"type": type, **data})
+            await self.websocket.send_json({"type": event_type, **data})
 
     async def _flush_thinking(self) -> None:
         if self._thinking_buffer:
@@ -74,10 +79,7 @@ class WebIO:
             try:
                 return int(ans)
             except ValueError:
-                await self._send_event(
-                    "log", {"message": "Invalid integer, try again",
-                            "level": "error"}
-                )
+                await self._send_event("log", {"message": "Invalid integer, try again", "level": "error"})
 
     def info(self, message: str) -> None:
         # We can't await here easily if not async, but UserIO protocol is mixed.
@@ -121,9 +123,7 @@ class WebIO:
 
     async def _send_tool_end_async(self, name: str, output: str, status: str) -> None:
         await self._flush_thinking()
-        await self._send_event(
-            "tool_end", {"name": name, "output": output, "status": status}
-        )
+        await self._send_event("tool_end", {"name": name, "output": output, "status": status})
 
     def render_error(self, message: str) -> None:
         self._track_task(self._send_log_async(message, "error"))
@@ -157,9 +157,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     try:
         config = load_config(str(repo_root), None)
     except Exception as e:
-        await io._send_event(
-            "log", {"message": f"Failed to load config: {e}", "level": "error"}
-        )
+        await io._send_event("log", {"message": f"Failed to load config: {e}", "level": "error"})
         await websocket.close()
         return
 
@@ -194,10 +192,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             if not isinstance(event_type, str):
                 await io._send_event(
                     "error",
-                    {
-                        "message":
-                        "Invalid message: 'type' field must be a string"
-                    },
+                    {"message": "Invalid message: 'type' field must be a string"},
                 )
                 continue
 
@@ -225,9 +220,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         break
 
                 # Resolve work dir
-                exec_work_dir = (
-                    Path(user_work_dir).resolve() if user_work_dir else work_dir
-                )
+                exec_work_dir = Path(user_work_dir).resolve() if user_work_dir else work_dir
 
                 # Validate work_dir is within repo root to prevent path traversal
                 try:
@@ -262,10 +255,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         await current_task
                     except asyncio.CancelledError:
                         pass
-                    await io._send_event(
-                        "log", {"message": "Agent stopped by user",
-                                "level": "error"}
-                    )
+                    await io._send_event("log", {"message": "Agent stopped by user", "level": "error"})
                     await io._send_event("execution_result", {"exit_code": -1})
 
             elif event_type == "list_dirs":
@@ -312,9 +302,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 except (OSError, ValueError) as e:
                     logger.debug("Path validation failed for %r: %s", path_str, e)
 
-                await io._send_event(
-                    "path_validation", {"path": path_str, "valid": valid}
-                )
+                await io._send_event("path_validation", {"path": path_str, "valid": valid})
 
             elif event_type == "answer":
                 # Put answer into queue for the waiting engine
@@ -360,12 +348,10 @@ async def run_engine_and_script(
         )
 
         # 2. Execute Script
-        await io._send_event(
-            "log", {"message": "Executing generated script...", "level": "info"}
-        )
+        await io._send_event("log", {"message": "Executing generated script...", "level": "info"})
 
         env = os.environ.copy()
-        env["PYTHONPATH"] = f"{str(repo_root)}:{env.get('PYTHONPATH', '')}"
+        env["PYTHONPATH"] = f"{repo_root!s}:{env.get('PYTHONPATH', '')}"
 
         # Ensure work_dir exists
         if not work_dir.exists():
@@ -386,14 +372,9 @@ async def run_engine_and_script(
                 if not line:
                     break
                 decoded = line.decode().rstrip()
-                await io._send_event(
-                    "script_execution", {"stream": name, "data": decoded}
-                )
+                await io._send_event("script_execution", {"stream": name, "data": decoded})
 
-        await asyncio.gather(
-            read_stream(process.stdout, "stdout"), read_stream(
-                process.stderr, "stderr")
-        )
+        await asyncio.gather(read_stream(process.stdout, "stdout"), read_stream(process.stderr, "stderr"))
 
         return_code = await process.wait()
 
@@ -419,6 +400,7 @@ async def run_engine_and_script(
     except Exception as e:
         logger.error(f"Execution failed: {e}", exc_info=True)
         await io._send_event("log", {"message": f"Error: {e}", "level": "error"})
+
 
 if __name__ == "__main__":
     import uvicorn

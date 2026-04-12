@@ -1,0 +1,85 @@
+{# Shared abstraction rules for playbook synthesis / refinement / merge.
+
+   Included from synthesize_playbook_from_success.j2,
+   synthesize_playbook_from_recovery.j2, refine_playbook.j2, and
+   merge_playbooks.j2. The block is intentionally parameter-free so it can
+   be {% include %}-ed from any of those templates without disturbing the
+   StrictUndefined Jinja environment.
+#}
+ABSTRACTION RULES (CRITICAL — the playbook is for the fault CLASS, not for
+the one incident in front of you):
+
+A diagnostic playbook must apply to ANY future incident in the same fault
+class. The reader of this playbook will be facing a DIFFERENT incident, in a
+different namespace, with different deployment names, different env var
+names, different port numbers, different error strings, different pod
+hashes. Anything you hard-code from the current incident becomes a
+miscalibration the next time the same class fires.
+
+For every Symptoms / Triage Procedure / Verification Procedure / Required
+Evidence item, write the INVARIANT PATTERN — the shape of the symptom, the
+kind of check, the kind of evidence — and PARAMETERIZE the incident-specific
+tokens with placeholders.
+
+Use these placeholder forms whenever an incident-specific value would
+otherwise appear inline in the procedure:
+  - `<NAMESPACE>` for any Kubernetes namespace
+  - `<DEPLOYMENT>`, `<POD>`, `<SERVICE>`, `<CONTAINER>` for resource names
+  - `<ENV_VAR>` for environment variable names
+  - `<PORT>` for port numbers
+  - `<EXPECTED_VALUE>` / `<OBSERVED_VALUE>` for variable values
+  - `<ERROR_STRING>` for matched error text or log line content
+  - `<TARGET_SERVICE>` / `<COMPONENT>` for application-specific component names
+  - `<FILE>` / `<PATH>` for file system paths
+You may invent additional `<UPPER_SNAKE>` placeholders when none of the
+above fit. Make the placeholder name describe the role, not the value.
+
+NO INCIDENT-SPECIFIC TOKENS ANYWHERE IN THE DOCUMENT. The playbook must NOT
+mention any of the following from the current incident:
+  - specific namespace names (e.g. `astronomy-shop`)
+  - specific deployment / pod / service / container names (e.g. `frontend`)
+  - specific environment variable names (e.g. `CHECKOUT_ADDR`)
+  - specific port numbers
+  - specific error strings or log line excerpts (e.g.
+    `'Could not parse target name ""'`)
+  - specific pod hashes or other generated identifiers
+  - any incident reference / trace ID / timestamp
+Do NOT smuggle these in as parenthetical "Example:" asides either. The
+playbook contains the abstract pattern only; the concrete evidence lives in
+the incident files, not in the playbook.
+
+GOOD (purely abstract — would apply to any missing-env-var incident, no
+matter what the variable, deployment, namespace, or error string is):
+  1. **Action:** `kubectl get deployment <DEPLOYMENT> -n <NAMESPACE> -o yaml`
+     **Expected shape:** an environment variable `<ENV_VAR>` that the
+     application requires (typically resolving to the address of a
+     downstream `<TARGET_SERVICE>`) is absent from
+     `spec.template.spec.containers[*].env`.
+     **If absent:** the env var is set; the issue is elsewhere — check for
+     wrong value, wrong host, network policy, or a different fault class.
+
+BAD (incident-specific — will not generalize to the next fault in the
+class, even though every named token is real):
+  1. **Action:** `kubectl get deployment frontend -n astronomy-shop -o yaml`
+     **Expected shape:** `CHECKOUT_ADDR` is missing from
+     `spec.template.spec.containers[0].env`.
+     **If absent:** investigate other application-level errors.
+
+The same rule applies to:
+  - **Symptoms:** describe the SHAPE of the symptom (e.g. "application logs
+    contain an error showing an empty/null reference where a configured
+    address should be"), not the literal error string or the literal pod
+    name.
+  - **Required Evidence checkboxes:** describe the kind of check
+    ("Confirmed an env var the application reads at startup is absent from
+    the failing Deployment's container env spec"), not the exact variable
+    or resource name. The checker will instantiate `<ENV_VAR>` and
+    `<DEPLOYMENT>` from the incident under investigation.
+  - **Known Distractors and Failure Patterns:** describe the misleading
+    pattern in general terms; parameterize the incident-specific tokens.
+
+This abstraction rule does NOT relax the ban on vague phrases listed in the
+constraints below. You must write PARAMETERIZED-but-precise content, not
+woolly content. `<ENV_VAR>` and `<NAMESPACE>` are parameterized and
+precise; "the relevant configuration" and "appropriate values" are vague.
+The former is required; the latter is forbidden.

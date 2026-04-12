@@ -1,6 +1,7 @@
 import subprocess
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from app_operator.healthcheck import run_health_check
 
@@ -28,13 +29,11 @@ def test_run_health_check_timeout(repo_path, health_check_script):
         stderr="Partial stderr",
     )
     # Ensure stdout/stderr are strings as we use text=True
-    timeout_exception.stdout = "Partial stdout"
-    timeout_exception.stderr = "Partial stderr"
+    timeout_exception.stdout = "Partial stdout"  # type: ignore[assignment]
+    timeout_exception.stderr = "Partial stderr"  # type: ignore[assignment]
 
     with patch("subprocess.run", side_effect=timeout_exception):
-        result = run_health_check(
-            repo_path=repo_path, health_check_script=health_check_script, timeout=10
-        )
+        result = run_health_check(repo_path=repo_path, health_check_script=health_check_script, timeout=10)
 
         assert result["success"] is False
         assert result["exit_code"] == -1
@@ -46,11 +45,9 @@ def test_run_health_check_timeout_logging(repo_path, health_check_script):
     """Test that timeout info is logged to file."""
     log_file_path = repo_path / "health_check.log"
 
-    timeout_exception = subprocess.TimeoutExpired(
-        cmd=[str(health_check_script)], timeout=10
-    )
-    timeout_exception.stdout = "Partial stdout"
-    timeout_exception.stderr = "Partial stderr"
+    timeout_exception = subprocess.TimeoutExpired(cmd=[str(health_check_script)], timeout=10)
+    timeout_exception.stdout = "Partial stdout"  # type: ignore[assignment]
+    timeout_exception.stderr = "Partial stderr"  # type: ignore[assignment]
 
     with patch("subprocess.run", side_effect=timeout_exception):
         # We need to use real file or mock open properly.

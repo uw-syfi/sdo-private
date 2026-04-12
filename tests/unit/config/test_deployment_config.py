@@ -1,29 +1,8 @@
 import pytest
-from app_operator.config import DeploymentConfig, Config
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import given, strategies as st, assume, settings
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: None
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from app_operator.config import Config, DeploymentConfig
 
 
 class TestDeploymentConfigValidation:
@@ -53,9 +32,7 @@ class TestDeploymentConfigValidation:
 
     def test_target_remote_raises_error(self):
         """Remote target should raise ValueError."""
-        with pytest.raises(
-            ValueError, match="Remote deployment is not currently supported"
-        ):
+        with pytest.raises(ValueError, match="Remote deployment is not currently supported"):
             DeploymentConfig(target="remote")
 
     def test_invalid_target(self):
@@ -65,16 +42,15 @@ class TestDeploymentConfigValidation:
 
     def test_from_dict(self):
         """Config.from_dict should parse deployment section."""
-        data = {"deployment": {"platform": "k8s", "target": "local"}}
+        data = {
+            "agent": {"backend": "codex", "model": "test-model"},
+            "deployment": {"platform": "k8s", "target": "local"},
+        }
         config = Config.from_dict(data)
         assert config.deployment.platform == "k8s"
         assert config.deployment.target == "local"
 
 
-@pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
 class TestDeploymentConfigProperty:
     """Property-based tests for DeploymentConfig validation."""
 
@@ -90,14 +66,14 @@ class TestDeploymentConfigProperty:
     def test_any_invalid_platform_rejected(self, platform):
         """Any platform string not in the valid set should raise ValueError."""
         assume(platform.lower() not in {"docker", "k8s"})
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid platform"):
             DeploymentConfig(platform=platform)
 
     @given(platform=st.sampled_from(["DOCKER", "K8S", "Docker", "K8s"]))
     @settings(max_examples=10, deadline=1000)
     def test_case_sensitivity_for_platform(self, platform):
         """Platform validation is case-sensitive; mixed-case values are rejected."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid platform"):
             DeploymentConfig(platform=platform)
 
     @given(st.just("local"))
@@ -116,5 +92,5 @@ class TestDeploymentConfigProperty:
         VALID_TARGETS, so all non-'local' values raise ValueError.
         """
         assume(target != "local")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="(Invalid target|Remote deployment)"):
             DeploymentConfig(target=target)

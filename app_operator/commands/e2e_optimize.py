@@ -8,12 +8,12 @@ This command orchestrates a full optimization cycle:
 """
 
 import argparse
-import re
-import sys
-import shutil
-import subprocess
 import json
 import os
+import re
+import shutil
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -21,11 +21,12 @@ from typing import Any
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    import tomli as tomllib  # type: ignore[reportMissingImports]
 
-from app_operator.logger import logger
-from app_operator.dspy_integration.eval_execute import EvalExecuteOptimizer
 from app_operator.config import load_config as load_app_config
+from app_operator.dspy_integration import EvalExecuteOptimizer
+from app_operator.experiment_naming import normalize_experiment_token
+from app_operator.logger import logger
 from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 
 
@@ -78,6 +79,50 @@ def load_config(config_path: Path) -> dict[str, Any]:
     return config
 
 
+def _infer_llm_provider(model: str | None, agent_provider: str) -> str:
+    """Infer the LLM API provider from the model string for rate limit detection.
+
+    The experiment config ``provider`` field (rlm, subagent, hybrid) identifies
+    the agent architecture, not the LLM API.  Rate limit detection needs the
+    actual LLM API provider (gemini, openai, anthropic, etc.).
+
+    Args:
+        model: litellm model string, e.g. ``"vertex_ai/gemini-2.5-pro"``.
+        agent_provider: The agent architecture provider (may also be an LLM
+            provider for non-RLM agents like ``"gemini"``).
+
+    Returns:
+        LLM provider string suitable for ``detect_rate_limit_error()``.
+    """
+    # Agent architecture names that are NOT LLM providers
+    _architecture_names = {"rlm", "subagent", "hybrid"}
+
+    if model:
+        model_lower = model.lower()
+        if "gemini" in model_lower or "vertex" in model_lower:
+            return "gemini"
+        if "claude" in model_lower or "anthropic" in model_lower:
+            return "anthropic"
+        if "gpt" in model_lower or "openai" in model_lower or "o1" in model_lower:
+            return "openai"
+
+    # agent_provider is already an LLM provider (e.g. "gemini", "openai")
+    if agent_provider.lower() not in _architecture_names:
+        return agent_provider
+
+    return "gemini"  # conservative default
+
+
+def _validate_app_paths(apps: list[Path], role: str) -> bool:
+    """Validate that configured app paths exist."""
+    missing = [app for app in apps if not app.exists()]
+    if not missing:
+        return True
+    for app in missing:
+        logger.error(f"{role} app path does not exist: {app}")
+    return False
+
+
 def _replace_in_agent_section(
     content: str,
     provider_override: str | None,
@@ -92,19 +137,19 @@ def _replace_in_agent_section(
 
     for line in lines:
         stripped = line.strip()
-        if re.match(r'^\[agent\]$', stripped):
+        if re.match(r"^\[agent\]$", stripped):
             in_agent = True
         elif stripped.startswith("[") and in_agent:
             in_agent = False
 
         if in_agent and provider_override and not provider_replaced:
-            m = re.match(r'^(\s*provider\s*=\s*).*$', line)
+            m = re.match(r"^(\s*provider\s*=\s*).*$", line)
             if m:
                 line = f'{m.group(1)}"{provider_override}"'
                 provider_replaced = True
 
         if in_agent and model_override and not model_replaced:
-            m = re.match(r'^(\s*model\s*=\s*).*$', line)
+            m = re.match(r"^(\s*model\s*=\s*).*$", line)
             if m:
                 line = f'{m.group(1)}"{model_override}"'
                 model_replaced = True
@@ -177,13 +222,12 @@ def _update_sds_toml(
         new_lines = []
         skip = False
         for line in lines:
-            if re.match(r'^\[dspy(\..*)?\]$', line.strip()):
+            if re.match(r"^\[dspy(\..*)?\]$", line.strip()):
                 skip = True
                 continue
-            if skip and line.strip().startswith("["):
+            if skip and line.strip().startswith("[") and not re.match(r"^\[dspy(\..*)?\]$", line.strip()):
                 # Only stop skipping if this is NOT a dspy subsection
-                if not re.match(r'^\[dspy(\..*)?\]$', line.strip()):
-                    skip = False
+                skip = False
 
             if not skip:
                 new_lines.append(line)
@@ -192,9 +236,7 @@ def _update_sds_toml(
     # Override provider/model only within the [agent] section.
     # We locate the [agent] block and do targeted substitution within it.
     if provider_override or model_override:
-        content = _replace_in_agent_section(
-            content, provider_override, model_override
-        )
+        content = _replace_in_agent_section(content, provider_override, model_override)
 
     final_content = content + "\n" + new_section_content
     sds_toml.write_text(final_content)
@@ -202,7 +244,7 @@ def _update_sds_toml(
 
 def _init_experiment(source_app: Path, work_dir: Path, name_suffix: str) -> Path:
     """Initialize a fresh experiment directory."""
-    app_name = source_app.name
+    app_name = normalize_experiment_token(source_app.name)
     exp_name = f"{app_name}_{name_suffix}"
     target_path = work_dir / exp_name
 
@@ -283,17 +325,11 @@ class StateManager:
             try:
                 for key, expected_type in schema.items():
                     if key not in data:
-                        raise ValueError(
-                            f"Missing required key: {key}")
+                        raise ValueError(f"Missing required key: {key}")
                     if not isinstance(data[key], expected_type):
-                        raise TypeError(
-                            f"Key '{key}' has wrong type: "
-                            f"expected {expected_type}, "
-                            f"got {type(data[key])}"
-                        )
+                        raise TypeError(f"Key '{key}' has wrong type: expected {expected_type}, got {type(data[key])}")
             except (ValueError, TypeError) as e:
-                logger.warning(
-                    f"Invalid state file schema ({e}), starting fresh.")
+                logger.warning(f"Invalid state file schema ({e}), starting fresh.")
                 return default_state
 
             return data
@@ -341,15 +377,11 @@ def run_command(args: argparse.Namespace) -> int:
     try:
         config_path = Path(args.config)
         config = load_config(config_path)
-    except Exception as e:
+    except (OSError, KeyError, ValueError) as e:
         logger.error(f"Failed to load config: {e}")
         return 1
 
     work_dir = Path(config.get("work_dir", args.work_dir)).resolve()
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    state_manager = StateManager(work_dir)
-
     iterations = config["iterations"]
     prompts = config["prompts"]
     train_apps = [Path(p).resolve() for p in config["training"]["apps"]]
@@ -360,6 +392,44 @@ def run_command(args: argparse.Namespace) -> int:
     output_prefix = config["output_prefix"]
     provider_override = config.get("provider")  # Optional per-experiment provider
     model_override = config.get("model")  # Optional per-experiment model
+
+    if iterations < 1:
+        logger.error(f"iterations must be >= 1, got {iterations}")
+        return 1
+    if not prompts:
+        logger.error("prompts must contain at least one prompt name")
+        return 1
+    if not _validate_app_paths(train_apps, "Training"):
+        return 1
+    if val_apps and not _validate_app_paths(val_apps, "Validation"):
+        return 1
+
+    # We need to access the prompts directory for the optimizer
+    # Assuming standard layout
+    base_dir = Path(__file__).parent.parent.parent
+    prompts_dir = base_dir / "app_operator" / "prompts"
+    if not prompts_dir.exists():
+        logger.error(f"Prompts directory not found: {prompts_dir}")
+        return 1
+
+    if args.dry_run:
+        logger.info("Dry-run mode enabled: validating config only, no runs will be executed.")
+        logger.info(f"Iterations: {iterations}")
+        logger.info(f"Prompts: {prompts}")
+        logger.info(f"Training apps: {[a.name for a in train_apps]}")
+        logger.info(f"Validation apps: {[a.name for a in val_apps]}")
+        logger.info(f"Work dir: {work_dir}")
+        if output_prefix:
+            logger.info(f"Output prefix: {output_prefix}")
+        if provider_override:
+            logger.info(f"Provider override: {provider_override}")
+        if model_override:
+            logger.info(f"Model override: {model_override}")
+        logger.info("Dry run validation successful.")
+        return 0
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    state_manager = StateManager(work_dir)
 
     logger.info(f"Starting E2E optimization for {iterations} iterations")
     logger.info(f"Prompts: {prompts}")
@@ -375,18 +445,21 @@ def run_command(args: argparse.Namespace) -> int:
         f"backoff={rate_limit_backoff}s, inter_run_delay={inter_run_delay}s"
     )
 
-    # We need to access the prompts directory for the optimizer
-    # Assuming standard layout
-    base_dir = Path(__file__).parent.parent.parent
-    prompts_dir = base_dir / "app_operator" / "prompts"
-
-    # Load app config to get provider for rate limit detection
+    # Load app config to get provider for rate limit detection.
+    # provider_override is the *agent architecture* (rlm, subagent, hybrid)
+    # which is NOT the LLM API provider.  Derive the LLM provider from the
+    # model string so rate limit detection works correctly.
+    app_location = None
+    provider_model = model_override
     try:
         app_config = load_app_config(str(base_dir))
-        provider = provider_override or app_config.agent.provider
-    except Exception as e:
+        agent_provider = provider_override or app_config.agent.backend
+        app_location = app_config.agent.location
+        provider_model = model_override or app_config.agent.model
+    except (OSError, KeyError, ValueError) as e:
         logger.warning(f"Failed to load app config, assuming 'gemini' provider: {e}")
-        provider = provider_override or "gemini"
+        agent_provider = provider_override or "gemini"
+    provider = _infer_llm_provider(provider_model, agent_provider)
 
     current_version = state_manager.get_current_version()
 
@@ -412,9 +485,10 @@ def run_command(args: argparse.Namespace) -> int:
                     f"Loaded DSPy config: teacher={dspy_config.optimization.teacher_model}, "
                     f"n_candidates={dspy_config.optimization.n_candidates}"
                 )
-            except Exception as e:
+                app_location = app_config.agent.location
+            except (OSError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to load project config, using defaults: {e}")
-                from app_operator.dspy_integration.config import DSPyConfig
+                from app_operator.dspy_integration import DSPyConfig
 
                 dspy_config = DSPyConfig()
 
@@ -430,7 +504,7 @@ def run_command(args: argparse.Namespace) -> int:
                     prompts_dir=prompts_dir,
                     project_root=base_dir,
                     n_candidates=dspy_config.optimization.n_candidates,
-                    vertex_location=app_config.agent.location,
+                    vertex_location=app_location,
                 )
                 result = eval_optimizer.optimize(
                     prompt_names=prompts,
@@ -449,16 +523,17 @@ def run_command(args: argparse.Namespace) -> int:
                 )
 
                 if result["success"]:
-                    current_version = next_version
-                    logger.info(
-                        f"Optimization successful. New version: {current_version}"
-                    )
+                    if output_prefix:
+                        current_version = f"{output_prefix}/{next_version}"
+                    else:
+                        current_version = next_version
+                    logger.info(f"Optimization successful. New version: {current_version}")
                     state_manager.mark_optimization_done(current_version)
                 else:
                     logger.error("Optimization failed.")
                     return 1
 
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Optimization error: {e}")
                 return 1
 
@@ -485,7 +560,7 @@ def run_command(args: argparse.Namespace) -> int:
                 logger.info(f"Running validation on {exp_path.name}...")
                 cmd = [sys.executable, "-m", "app_operator", "run", str(exp_path)]
 
-                result, success, error_msg = run_subprocess_with_rate_limit_handling(
+                _result, success, error_msg = run_subprocess_with_rate_limit_handling(
                     cmd=cmd,
                     provider=provider,
                     max_retries=max_retries,
@@ -493,6 +568,9 @@ def run_command(args: argparse.Namespace) -> int:
                     rate_limit_backoff=rate_limit_backoff,
                     operation_name=f"Validation run: {exp_path.name}",
                 )
+                if not success:
+                    logger.warning(f"Validation failed for {app_name}: {error_msg or 'unknown error'}. Continuing.")
+                    continue
                 state_manager.mark_val_app_completed(app_name)
 
                 # Add delay before next validation run

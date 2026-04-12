@@ -1,14 +1,15 @@
 """Subprocess runner with threading, timeout handling, and progress monitoring."""
 
+import contextlib
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from app_operator.logger import logger
-from app_operator.ui_protocol import OperatorUI
 from app_operator.types import CommandResult
+from app_operator.ui_protocol import OperatorUI
 
 
 class SubprocessRunner:
@@ -66,6 +67,7 @@ class SubprocessRunner:
         self.stdout_lines: list[str] = []
         self.stderr_lines: list[str] = []
         self._log_file = None
+        self._log_stack = contextlib.ExitStack()
         self._log_lock = threading.Lock()
 
     def run(self) -> CommandResult:
@@ -88,19 +90,18 @@ class SubprocessRunner:
         Returns:
             CommandResult with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
+
         def progress_callback():
             if summarizer.should_summarize():
                 recent_output = self.get_recent_output(num_lines=20)
                 summarizer.summarize(recent_output)
 
         def wait_fn():
-            return self._wait_for_completion(progress_callback=progress_callback,
-                                             summarizer=summarizer)
+            return self._wait_for_completion(progress_callback=progress_callback, summarizer=summarizer)
 
         return self._run_impl(wait_fn)
 
-    def _run_impl(
-            self, wait_fn: Callable[[], CommandResult]) -> CommandResult:
+    def _run_impl(self, wait_fn: Callable[[], CommandResult]) -> CommandResult:
         """Shared implementation for run() and run_with_progress_monitoring().
 
         Args:
@@ -117,8 +118,9 @@ class SubprocessRunner:
         # Open log file if provided
         if self.log_file_path:
             try:
-                self._log_file = open(self.log_file_path, "w")
-            except (OSError, IOError):
+                log_path = Path(self.log_file_path)
+                self._log_file = self._log_stack.enter_context(log_path.open("w"))
+            except OSError:
                 # Log file open failed - continue without logging
                 pass
 
@@ -134,14 +136,8 @@ class SubprocessRunner:
             )
 
             # Start threads to read stdout and stderr
-            stdout_thread = threading.Thread(
-                target=self._read_pipe, args=(
-                    self.process.stdout, self.stdout_lines)
-            )
-            stderr_thread = threading.Thread(
-                target=self._read_pipe, args=(
-                    self.process.stderr, self.stderr_lines)
-            )
+            stdout_thread = threading.Thread(target=self._read_pipe, args=(self.process.stdout, self.stdout_lines))
+            stderr_thread = threading.Thread(target=self._read_pipe, args=(self.process.stderr, self.stderr_lines))
 
             stdout_thread.daemon = True
             stderr_thread.daemon = True
@@ -160,8 +156,7 @@ class SubprocessRunner:
             result["stdout"] = "".join(self.stdout_lines)
             # Append captured stderr to any existing error message (e.g.
             # timeout msg)
-            result["stderr"] = result.get(
-                "stderr", "") + "".join(self.stderr_lines)
+            result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
 
             if self.ui and self.tool_name:
                 duration = self.time_func() - start_time_mono
@@ -190,7 +185,7 @@ class SubprocessRunner:
                     exit_code=-1,
                 )
             return result
-        except Exception as e:
+        except RuntimeError as e:
             result: CommandResult = {
                 "success": False,
                 "exit_code": -1,
@@ -206,8 +201,7 @@ class SubprocessRunner:
                 )
             return result
         finally:
-            if self._log_file:
-                self._log_file.close()
+            self._log_stack.close()
             self._ensure_process_terminated()
 
     def _read_pipe(self, pipe, buffer: list[str]):
@@ -251,9 +245,7 @@ class SubprocessRunner:
             Captured output is in self.*_lines and merged in _run_impl().
         """
         if self.process is None:
-            raise RuntimeError(
-                "process is not initialized; call start() before using this method"
-            )
+            raise RuntimeError("process is not initialized; call start() before using this method")
         start_time = self.time_func()
 
         if summarizer is not None:
@@ -279,28 +271,27 @@ class SubprocessRunner:
             elapsed = current_time - start_time
             loop_iterations += 1
 
-            # Log monitoring progress every 10 seconds (100 iterations at 0.1s
+            # Log monitoring progress every 10 seconds (1000 iterations at 0.01s
             # sleep)
-            if summarizer is not None and loop_iterations % 100 == 0:
+            if summarizer is not None and loop_iterations % 1000 == 0:
                 logger.debug(
                     f"SubprocessRunner: Monitoring loop iter={loop_iterations}, "
                     f"elapsed={elapsed:.1f}s, process_running={self.process.poll() is None}"
                 )
 
             # Check timeout
-            if elapsed >= self.timeout:
-                if self.process.poll() is None:
-                    self.process.terminate()
-                    try:
-                        self.process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        self.process.kill()
-                    return {
-                        "success": False,
-                        "exit_code": -1,
-                        "stdout": "",
-                        "stderr": f"Deployment script timed out after {self.timeout} seconds\n",
-                    }
+            if elapsed >= self.timeout and self.process.poll() is None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                return {
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": f"Deployment script timed out after {self.timeout} seconds\n",
+                }
 
             # Check if process completed
             if self.process.poll() is not None:
@@ -325,7 +316,7 @@ class SubprocessRunner:
                 progress_callback()
 
             # Yield to allow other processing
-            self.sleep_func(0.1)
+            self.sleep_func(0.01)
 
         # Process completed
         return {
@@ -341,10 +332,10 @@ class SubprocessRunner:
             try:
                 self.process.terminate()
                 self.process.wait(timeout=2)
-            except (subprocess.TimeoutExpired, Exception):
+            except (subprocess.TimeoutExpired, OSError):
                 try:
                     self.process.kill()
-                except Exception:
+                except OSError:
                     pass
 
     def get_recent_output(self, num_lines: int = 20) -> str:

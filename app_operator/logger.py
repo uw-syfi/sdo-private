@@ -1,5 +1,6 @@
 import sys
 from typing import TYPE_CHECKING
+
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -8,15 +9,18 @@ if TYPE_CHECKING:
 
 def formatter(record):
     """Custom formatter that changes format based on presence of agent_prefix or stderr."""
+    node = record["extra"].get("node")
+    node_prefix = f"<cyan>[{node}]</cyan> " if node else ""
     if "agent_prefix" in record["extra"]:
         # Check if this is a stderr line
         if record["extra"].get("stderr", False):
             return "{extra[agent_prefix]} <red>{message}</red>\n"
         return "{extra[agent_prefix]} {message}\n"
+    base = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | "
     # Check if this is a stderr line without agent_prefix
     if record["extra"].get("stderr", False):
-        return "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <red>{message}</red>\n"
-    return "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>\n"
+        return f"{base}{node_prefix}<red>{{message}}</red>\n"
+    return f"{base}{node_prefix}<level>{{message}}</level>\n"
 
 
 def setup_logger():

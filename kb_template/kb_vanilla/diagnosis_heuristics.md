@@ -1,0 +1,2 @@
+- Trace symptoms upstream — the loudest error is usually a downstream effect.
+- Your hypothesis must explain all observed symptoms, not just the most prominent one.

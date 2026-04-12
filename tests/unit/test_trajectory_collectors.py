@@ -16,9 +16,7 @@ def mock_gemini_home(tmp_path, monkeypatch):
     """Create a mock Gemini session directory."""
     mock_home = tmp_path / "mock_gemini_home"
     mock_sessions = mock_home / ".gemini" / "tmp"
-    monkeypatch.setattr(
-        "app_operator.trajectory_collectors.GEMINI_SESSION_DIR", mock_sessions
-    )
+    monkeypatch.setattr("app_operator.trajectory_collectors.GEMINI_SESSION_DIR", mock_sessions)
     return mock_sessions
 
 
@@ -33,9 +31,7 @@ def test_collect_gemini_sessions_no_sessions_dir(tmp_path):
         "app_operator.trajectory_collectors.GEMINI_SESSION_DIR",
         tmp_path / "nonexistent",
     ):
-        sessions = collect_gemini_sessions(
-            sds_dir, trajectories_dir, run_timestamp, start_time_str
-        )
+        sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     assert sessions == []
 
@@ -49,9 +45,7 @@ def test_collect_gemini_sessions_empty_dir(mock_gemini_home, tmp_path):
     run_timestamp = "20240101_120000"
     start_time_str = "2024-01-01 12:00:00"
 
-    sessions = collect_gemini_sessions(
-        sds_dir, trajectories_dir, run_timestamp, start_time_str
-    )
+    sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     assert sessions == []
 
@@ -86,9 +80,7 @@ def test_collect_gemini_sessions_success(mock_gemini_home, tmp_path):
     run_timestamp = "20240101_120000"
     start_time_str = "2024-01-01 12:00:00"
 
-    sessions = collect_gemini_sessions(
-        sds_dir, trajectories_dir, run_timestamp, start_time_str
-    )
+    sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     assert len(sessions) == 2
     # Verify files were copied
@@ -121,9 +113,7 @@ def test_collect_gemini_sessions_filters_old_sessions(mock_gemini_home, tmp_path
     run_timestamp = "20240101_120000"
     start_time_str = "2024-01-01 12:00:00"
 
-    sessions = collect_gemini_sessions(
-        sds_dir, trajectories_dir, run_timestamp, start_time_str
-    )
+    sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     # Old session should not be collected
     assert len(sessions) == 0
@@ -142,9 +132,7 @@ def test_collect_gemini_sessions_skips_bin_directory(mock_gemini_home, tmp_path)
     run_timestamp = "20240101_120000"
     start_time_str = "2024-01-01 12:00:00"
 
-    sessions = collect_gemini_sessions(
-        sds_dir, trajectories_dir, run_timestamp, start_time_str
-    )
+    sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     # bin directory should be ignored
     assert len(sessions) == 0
@@ -173,9 +161,7 @@ def test_collect_gemini_sessions_handles_multiple_projects(mock_gemini_home, tmp
     run_timestamp = "20240101_120000"
     start_time_str = "2024-01-01 12:00:00"
 
-    sessions = collect_gemini_sessions(
-        sds_dir, trajectories_dir, run_timestamp, start_time_str
-    )
+    sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     assert len(sessions) == 2
 
@@ -194,9 +180,7 @@ def test_collect_gemini_sessions_exception_handling(mock_gemini_home, tmp_path):
     # Invalid time format to trigger exception
     start_time_str = "invalid-time-format"
 
-    sessions = collect_gemini_sessions(
-        sds_dir, trajectories_dir, run_timestamp, start_time_str
-    )
+    sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     # Should return empty list on error, not crash
     assert sessions == []
@@ -223,9 +207,7 @@ def test_collect_gemini_sessions_returns_relative_paths(mock_gemini_home, tmp_pa
     run_timestamp = "20240101_120000"
     start_time_str = "2024-01-01 12:00:00"
 
-    sessions = collect_gemini_sessions(
-        sds_dir, trajectories_dir, run_timestamp, start_time_str
-    )
+    sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)
 
     # Paths should be relative to sds_dir
     assert len(sessions) == 1

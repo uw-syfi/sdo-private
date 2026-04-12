@@ -20,7 +20,7 @@ class TestFaultCategory:
 
     def test_string_comparison(self):
         assert FaultCategory.MISCONFIGURATION == "misconfiguration"
-        assert "security" == FaultCategory.SECURITY
+        assert FaultCategory.SECURITY == "security"
 
 
 class TestFaultSeverity:
@@ -54,7 +54,7 @@ class TestFault:
             description="A test fault",
         )
         with pytest.raises(AttributeError):
-            fault.name = "modified"
+            fault.name = "modified"  # type: ignore[misc]
 
     def test_with_applicable_services(self):
         fault = Fault(
@@ -63,7 +63,7 @@ class TestFault:
             category=FaultCategory.CORRELATED,
             severity=FaultSeverity.HIGH,
             description="Targets backends",
-            applicable_services=["backend"],
+            applicable_services=["backend"],  # type: ignore[arg-type]
         )
         assert fault.applicable_services == ["backend"]
 

@@ -1,13 +1,13 @@
-import pytest
 import subprocess
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from app_operator.subprocess_runner import SubprocessRunner
 
 
 class MockProcess:
-    def __init__(
-        self, returncode=0, stdout_lines=None, stderr_lines=None, duration=0.1
-    ):
+    def __init__(self, returncode=0, stdout_lines=None, stderr_lines=None, duration=0.1):
         self.returncode = returncode
         self.stdout_lines = stdout_lines or []
         self.stderr_lines = stderr_lines or []
@@ -105,9 +105,7 @@ def test_runner_shutdown(runner_setup):
     mock_proc = MockProcess()
     mock_proc.poll = MagicMock(return_value=None)
 
-    runner = SubprocessRunner(
-        command=cmd, cwd=cwd, timeout=timeout, check_shutdown=check_shutdown
-    )
+    runner = SubprocessRunner(command=cmd, cwd=cwd, timeout=timeout, check_shutdown=check_shutdown)
 
     runner.popen_func = MagicMock(return_value=mock_proc)
 
@@ -131,7 +129,7 @@ def test_ensure_process_terminated_fallback(runner_setup):
     mock_proc.wait = MagicMock(side_effect=subprocess.TimeoutExpired(cmd, 1))
 
     runner = SubprocessRunner(cmd, cwd, timeout)
-    runner.process = mock_proc
+    runner.process = mock_proc  # type: ignore[assignment]
 
     runner._ensure_process_terminated()
 
@@ -190,9 +188,7 @@ def test_runner_progress_monitoring(runner_setup):
     mock_summarizer.should_summarize.side_effect = [True, False, False, False, False]
 
     mock_proc = MockProcess()
-    mock_proc.poll = MagicMock(
-        side_effect=[None, None, 0, 0]
-    )  # Runs for 2 loops then finishes, plus cleanup check
+    mock_proc.poll = MagicMock(side_effect=[None, None, 0, 0])  # Runs for 2 loops then finishes, plus cleanup check
 
     runner = SubprocessRunner(cmd, cwd, timeout)
     runner.popen_func = MagicMock(return_value=mock_proc)

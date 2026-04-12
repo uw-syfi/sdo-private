@@ -76,14 +76,13 @@ def agent_info(request):
     """Parameterized fixture for all agent types with prompt passing info."""
     return request.param
 
+
 # ============================================================================
 # PROMPT PASSING IN COMMAND LINE TESTS
 # ============================================================================
 
 
-def test_agent_includes_prompt_in_command_when_required(
-    agent_info, mock_which, command_tracker
-):
+def test_agent_includes_prompt_in_command_when_required(agent_info, mock_which, command_tracker):
     """Test agents that require prompt in command line include it."""
     agent_name, agent_class, has_prompt_in_cmd = agent_info
     test_prompt = "Write a hello world function"
@@ -102,8 +101,7 @@ def test_agent_includes_prompt_in_command_when_required(
         # For Claude and Opencode, prompt should be in the command
         cmd_str = " ".join(command)
         assert test_prompt in cmd_str, (
-            f"{agent_name} should include prompt '{test_prompt}' in command, "
-            f"but got: {cmd_str}"
+            f"{agent_name} should include prompt '{test_prompt}' in command, but got: {cmd_str}"
         )
 
 
@@ -122,9 +120,9 @@ def test_agent_passes_prompt_via_stdin(agent_info, mock_which, command_tracker):
     # All agents should write to stdin
     assert len(stdin_writes) > 0, f"{agent_name} should write prompt to stdin"
     assert test_prompt in stdin_writes[0], (
-        f"{agent_name} should pass prompt '{test_prompt}' to stdin, "
-        f"but got: {stdin_writes}"
+        f"{agent_name} should pass prompt '{test_prompt}' to stdin, but got: {stdin_writes}"
     )
+
 
 # ============================================================================
 # COMMAND CONSTRUCTION TESTS
@@ -220,14 +218,13 @@ def test_opencode_command_structure(mock_which, command_tracker):
     cmd_str = " ".join(cmd)
     assert test_prompt in cmd_str
 
+
 # ============================================================================
 # MODEL PARAMETER TESTS
 # ============================================================================
 
 
-def test_agent_includes_model_in_command_when_specified(
-    agent_info, mock_which, command_tracker
-):
+def test_agent_includes_model_in_command_when_specified(agent_info, mock_which, command_tracker):
     """Test agents include --model flag when model is specified."""
     agent_name, agent_class, _ = agent_info
     test_model = "custom-model-v1"
@@ -254,6 +251,7 @@ def test_agent_includes_model_in_command_when_specified(
         f"{agent_name} should use model '{test_model}', but got: {cmd[model_idx + 1]}"
     )
 
+
 # ============================================================================
 # EDGE CASE TESTS
 # ============================================================================
@@ -276,14 +274,10 @@ def test_agent_handles_multiline_prompts(agent_info, mock_which, command_tracker
 
     # Verify the full multiline prompt is passed via stdin
     assert len(stdin_writes) > 0
-    assert test_prompt in stdin_writes[0], (
-        f"{agent_name} should pass full multiline prompt via stdin"
-    )
+    assert test_prompt in stdin_writes[0], f"{agent_name} should pass full multiline prompt via stdin"
 
 
-def test_agent_handles_special_characters_in_prompt(
-    agent_info, mock_which, command_tracker
-):
+def test_agent_handles_special_characters_in_prompt(agent_info, mock_which, command_tracker):
     """Test agents handle prompts with special characters."""
     agent_name, agent_class, _ = agent_info
     test_prompt = "Fix bug in \"auth.js\" where user's password isn't validated"
@@ -297,9 +291,7 @@ def test_agent_handles_special_characters_in_prompt(
 
     # Verify prompt with special characters is passed correctly
     assert len(stdin_writes) > 0
-    assert test_prompt in stdin_writes[0], (
-        f"{agent_name} should handle special characters in prompt"
-    )
+    assert test_prompt in stdin_writes[0], f"{agent_name} should handle special characters in prompt"
 
 
 def test_agent_handles_empty_prompt(agent_info, mock_which, command_tracker):
@@ -340,6 +332,4 @@ def test_claude_prompt_not_double_quoted(mock_which, command_tracker):
 
     # The prompt should appear as a bare element, not wrapped in quotes
     assert test_prompt in cmd, "Prompt should be in command list"
-    assert f'"{test_prompt}"' not in cmd, (
-        "Prompt should not be wrapped in extra quotes"
-    )
+    assert f'"{test_prompt}"' not in cmd, "Prompt should not be wrapped in extra quotes"

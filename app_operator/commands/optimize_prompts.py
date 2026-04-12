@@ -8,8 +8,7 @@ import sys
 from pathlib import Path
 
 from app_operator.config import load_config
-from app_operator.dspy_integration.optimizer import PromptOptimizer
-from app_operator.dspy_integration.signatures import SIGNATURES
+from app_operator.dspy_integration import SIGNATURES, PromptOptimizer
 
 
 def add_arguments(parser):
@@ -25,11 +24,11 @@ def add_arguments(parser):
         type=Path,
         nargs="+",
         help="One or more directories containing trajectory files "
-             "(default: .sds/trajectories in current dir). "
-             "Examples from all directories are merged before optimization. "
-             "Use shell glob expansion to select multiple baseline runs: "
-             "exp/hotelReservation/baseline-*/.sds/trajectories. "
-             "WARNING: Do not mix baseline and optimizee trajectories in training data.",
+        "(default: .sds/trajectories in current dir). "
+        "Examples from all directories are merged before optimization. "
+        "Use shell glob expansion to select multiple baseline runs: "
+        "exp/hotelReservation/baseline-*/.sds/trajectories. "
+        "WARNING: Do not mix baseline and optimizee trajectories in training data.",
     )
     parser.add_argument(
         "--output-dir",
@@ -70,7 +69,7 @@ def add_arguments(parser):
         "--use-seeds",
         action="store_true",
         help="Use minimal GEPA-style seed prompts instead of baseline templates "
-             "(start small and let optimizer discover effective patterns)",
+        "(start small and let optimizer discover effective patterns)",
     )
 
 
@@ -122,7 +121,7 @@ def run_command(args) -> int:
             config = load_config(str(Path.cwd()))
 
         dspy_config = copy.deepcopy(config.dspy)
-    except Exception as e:
+    except (OSError, KeyError, ValueError) as e:
         print(f"Error loading config: {e}", file=sys.stderr)
         return 1
 
@@ -195,7 +194,7 @@ def run_command(args) -> int:
             print("To use optimized prompts, update sds.toml:")
             print("  [dspy]")
             print("  use_optimized = true")
-            print(f"  optimized_version = \"{Path(result['output_dir']).name}\"")
+            print(f'  optimized_version = "{Path(result["output_dir"]).name}"')
 
         return 0
 
@@ -205,8 +204,10 @@ def run_command(args) -> int:
     except RuntimeError as e:
         print(f"\nError: {e}", file=sys.stderr)
         return 1
-    except Exception as e:
-        print(f"\nUnexpected error: {e}", file=sys.stderr)
+    except (OSError, AttributeError) as e:
+        # Top-level catch to prevent uncaught exception — specific types are too numerous
         import traceback
+
+        print(f"\nUnexpected error: {e}", file=sys.stderr)
         traceback.print_exc()
         return 1

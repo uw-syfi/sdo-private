@@ -33,12 +33,12 @@ class TestFaultInjectionConfig:
     # --- enabled ---
     def test_invalid_enabled_type(self):
         with pytest.raises(TypeError, match="enabled must be bool"):
-            FaultInjectionConfig(enabled="true")
+            FaultInjectionConfig(enabled="true")  # type: ignore[arg-type]
 
     # --- num_faults ---
     def test_invalid_num_faults_type(self):
         with pytest.raises(TypeError, match="num_faults must be int"):
-            FaultInjectionConfig(num_faults="2")
+            FaultInjectionConfig(num_faults="2")  # type: ignore[arg-type]
 
     def test_num_faults_too_low(self):
         with pytest.raises(ValueError, match="num_faults must be between 1 and 5"):
@@ -57,7 +57,7 @@ class TestFaultInjectionConfig:
     # --- categories ---
     def test_invalid_categories_type(self):
         with pytest.raises(TypeError, match="categories must be list"):
-            FaultInjectionConfig(categories="misconfiguration")
+            FaultInjectionConfig(categories="misconfiguration")  # type: ignore[arg-type]
 
     def test_invalid_category_value(self):
         with pytest.raises(ValueError, match="Invalid category 'invalid'"):
@@ -66,8 +66,11 @@ class TestFaultInjectionConfig:
     def test_valid_all_categories(self):
         config = FaultInjectionConfig(
             categories=[
-                "misconfiguration", "security", "metastable",
-                "correlated", "infrastructure",
+                "misconfiguration",
+                "security",
+                "metastable",
+                "correlated",
+                "infrastructure",
             ]
         )
         assert len(config.categories) == 5
@@ -75,27 +78,25 @@ class TestFaultInjectionConfig:
     # --- severities ---
     def test_invalid_severities_type(self):
         with pytest.raises(TypeError, match="severities must be list"):
-            FaultInjectionConfig(severities="low")
+            FaultInjectionConfig(severities="low")  # type: ignore[arg-type]
 
     def test_invalid_severity_value(self):
         with pytest.raises(ValueError, match="Invalid severity 'invalid'"):
             FaultInjectionConfig(severities=["invalid"])
 
     def test_valid_all_severities(self):
-        config = FaultInjectionConfig(
-            severities=["low", "medium", "high", "critical"]
-        )
+        config = FaultInjectionConfig(severities=["low", "medium", "high", "critical"])
         assert len(config.severities) == 4
 
     # --- exclude_faults ---
     def test_invalid_exclude_faults_type(self):
         with pytest.raises(TypeError, match="exclude_faults must be list"):
-            FaultInjectionConfig(exclude_faults="MISC-001")
+            FaultInjectionConfig(exclude_faults="MISC-001")  # type: ignore[arg-type]
 
     # --- seed ---
     def test_invalid_seed_type(self):
         with pytest.raises(TypeError, match="seed must be int or None"):
-            FaultInjectionConfig(seed="42")
+            FaultInjectionConfig(seed="42")  # type: ignore[arg-type]
 
     def test_seed_none(self):
         config = FaultInjectionConfig(seed=None)
@@ -104,12 +105,12 @@ class TestFaultInjectionConfig:
     # --- backup_compose ---
     def test_invalid_backup_compose_type(self):
         with pytest.raises(TypeError, match="backup_compose must be bool"):
-            FaultInjectionConfig(backup_compose="true")
+            FaultInjectionConfig(backup_compose="true")  # type: ignore[arg-type]
 
     # --- platform ---
     def test_invalid_platform_type(self):
         with pytest.raises(TypeError, match="platform must be str"):
-            FaultInjectionConfig(platform=123)
+            FaultInjectionConfig(platform=123)  # type: ignore[arg-type]
 
     def test_invalid_platform_value(self):
         with pytest.raises(ValueError, match="Invalid platform"):

@@ -1,0 +1,28 @@
+# Subagent experiment — validation set (fleetcast)
+# Provider: subagent (4 sequential context-slice analysts + root synthesis call)
+# Control: same model as rlm/hybrid to isolate the effect of the decomposition strategy.
+repeats = 3
+
+apps = [
+    "apps/fleetcast",
+]
+
+[agent]
+backend = "subagent"
+model = "vertex_ai/gemini-2.5-pro"
+location = "us-central1"
+
+[runtime]
+impl = "cli_agent"
+
+[operator]
+interval = 30
+monitoring_max_iters = 3
+deployment_max_iters = 5
+
+[deployment]
+platform = "docker"
+target = "local"
+
+[dspy]
+use_optimized = false

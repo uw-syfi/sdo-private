@@ -7,18 +7,20 @@ implementing retry logic with exponential backoff.
 
 import random
 import re
-import time
 import subprocess
-from typing import Callable, TypeVar, Any
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, TypeVar
 
+from app_operator.exceptions import SdsOperatorError
 from app_operator.logger import logger
 
 T = TypeVar("T")
 
 
 @dataclass
-class RateLimitError(Exception):
+class RateLimitError(SdsOperatorError):
     """Exception raised when a rate limit is detected."""
 
     provider: str
@@ -26,9 +28,7 @@ class RateLimitError(Exception):
     retry_after: int | None = None  # Seconds to wait before retrying
 
 
-def detect_rate_limit_error(
-    stderr: str, returncode: int, provider: str
-) -> RateLimitError | None:
+def detect_rate_limit_error(stderr: str, returncode: int, provider: str) -> RateLimitError | None:
     """Detect if an error is due to rate limiting or a transient network failure.
 
     Args:
@@ -59,7 +59,7 @@ def detect_rate_limit_error(
 
     # Gemini / Google Vertex AI
     if provider in ["gemini", "vertex"]:
-        if re.search(r'\b429\b', stderr) or "resource exhausted" in stderr_lower:
+        if re.search(r"\b429\b", stderr) or "resource exhausted" in stderr_lower:
             return RateLimitError(
                 provider=provider,
                 message="Gemini API rate limit exceeded",
@@ -73,17 +73,16 @@ def detect_rate_limit_error(
             )
 
     # OpenAI
-    if provider in ["openai", "codex"]:
-        if re.search(r'\b429\b', stderr) or "rate_limit" in stderr_lower:
-            return RateLimitError(
-                provider=provider,
-                message="OpenAI API rate limit exceeded",
-                retry_after=60,
-            )
+    if provider in ["openai", "codex"] and (re.search(r"\b429\b", stderr) or "rate_limit" in stderr_lower):
+        return RateLimitError(
+            provider=provider,
+            message="OpenAI API rate limit exceeded",
+            retry_after=60,
+        )
 
     # Anthropic / Claude
     if provider in ["anthropic", "claude", "claude-code"]:
-        if re.search(r'\b429\b', stderr) or "rate_limit" in stderr_lower:
+        if re.search(r"\b429\b", stderr) or "rate_limit" in stderr_lower:
             return RateLimitError(
                 provider=provider,
                 message="Anthropic API rate limit exceeded",
@@ -99,9 +98,7 @@ def detect_rate_limit_error(
     return None
 
 
-def exponential_backoff(
-    attempt: int, base_delay: int = 5, max_delay: int = 300
-) -> int:
+def exponential_backoff(attempt: int, base_delay: int = 5, max_delay: int = 300) -> int:
     """Calculate delay for exponential backoff.
 
     Args:
@@ -141,9 +138,7 @@ def run_with_rate_limit_handling(
         try:
             result = func()
             if attempt > 0:
-                logger.info(
-                    f"{operation_name} succeeded after {attempt} retry(ies)"
-                )
+                logger.info(f"{operation_name} succeeded after {attempt} retry(ies)")
             return result, True, None
         except RateLimitError as e:
             if attempt < max_retries:
@@ -154,13 +149,17 @@ def run_with_rate_limit_handling(
                 )
                 time.sleep(delay)
             else:
-                error_msg = f"{operation_name} failed after {max_retries + 1} attempts due to rate limiting: {e.message}"
+                error_msg = (
+                    f"{operation_name} failed after {max_retries + 1} attempts due to rate limiting: {e.message}"
+                )
                 logger.error(error_msg)
                 return None, False, error_msg
-        except Exception as e:
-            error_msg = f"{operation_name} failed with error: {str(e)}"
+        except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
+            error_msg = f"{operation_name} failed with error: {e!s}"
             logger.error(error_msg)
             return None, False, error_msg
+
+    return None, False, f"{operation_name} failed after {max_retries + 1} attempts"
 
 
 def run_subprocess_with_rate_limit_handling(
@@ -188,15 +187,11 @@ def run_subprocess_with_rate_limit_handling(
     """
     for attempt in range(max_retries + 1):
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, **subprocess_kwargs
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, **subprocess_kwargs)
 
             # Check for rate limit errors
             stderr = result.stderr or ""
-            rate_limit_error = detect_rate_limit_error(
-                stderr, result.returncode, provider
-            )
+            rate_limit_error = detect_rate_limit_error(stderr, result.returncode, provider)
 
             if rate_limit_error and attempt < max_retries:
                 delay = rate_limit_backoff + exponential_backoff(attempt, base_delay)
@@ -218,21 +213,19 @@ def run_subprocess_with_rate_limit_handling(
 
             # Success or non-rate-limit error
             if result.returncode != 0:
-                error_msg = (
-                    f"{operation_name} failed with exit code {result.returncode}"
-                )
+                error_msg = f"{operation_name} failed with exit code {result.returncode}"
                 logger.error(error_msg)
                 if stderr:
                     logger.error(f"Error output: {stderr}")
                 return result, False, error_msg
 
             if attempt > 0:
-                logger.info(
-                    f"{operation_name} succeeded after {attempt} retry(ies)"
-                )
+                logger.info(f"{operation_name} succeeded after {attempt} retry(ies)")
             return result, True, None
 
-        except Exception as e:
-            error_msg = f"{operation_name} raised exception: {str(e)}"
+        except (OSError, subprocess.SubprocessError) as e:
+            error_msg = f"{operation_name} raised exception: {e!s}"
             logger.error(error_msg)
             return None, False, error_msg
+
+    return None, False, f"{operation_name} failed after {max_retries + 1} attempts"

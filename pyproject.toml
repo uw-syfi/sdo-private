@@ -8,12 +8,12 @@ dependencies = [
     "langchain-openai>=1.1.6",
     "langchain-anthropic>=0.1.20",
     "langchain-google-genai>=4.0.0",
+    "langchain-google-vertexai>=2.0.0",
     "langgraph>=1.0.5",
     "python-dotenv>=1.0.0",
     "loguru>=0.7.2",
     "tomli>=2.0.1; python_version < '3.11'",
     "jinja2>=3.1.0",
-    "google-adk>=0.1.0",
     "click>=8.0.0",
     "textual>=0.52.0",
     "dspy-ai>=2.4.0",
@@ -23,7 +23,11 @@ dependencies = [
     "uvicorn>=0.27.0",
     "pyyaml>=6.0.3",
     "rich>=13.0.0",
-    "import-linter>=2.10",
+    "tach>=0.33",
+    "pydantic-ai>=1.0.0",
+    "deepagents>=0.5.0a1; python_version >= '3.11'",
+    "numpy>=2.2.6",
+    "matplotlib>=3.10.8",
 ]
 
 [project.optional-dependencies]
@@ -34,12 +38,11 @@ plot = [
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "autopep8>=2.0.0",
     "ruff>=0.1.0",
     "hypothesis>=6.0.0",
     "pytest-xdist>=3.5.0",
     "pytest-cov>=4.1.0",
-    "import-linter>=2.1",
+    "tach>=0.33",
 ]
 
 [project.scripts]
@@ -49,13 +52,44 @@ operator = "app_operator.__main__:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+prerelease = "if-necessary-or-explicit"
+
 [tool.uv.workspace]
-members = ["libs/agent_cli", "libs/sds_core"]
+members = ["libs/agent_cli", "libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app_operator", "lego_agent", "libs"]
+packages = ["app_operator", "app_operator_dspy", "lego_agent", "libs"]
+
+[tool.ruff]
+line-length = 120
+exclude = ["apps/", "bench/sregym/", "exp/"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "PIE", "C4", "ERA", "B", "RUF010", "RUF013", "RUF100", "PT", "SIM", "RSE", "FURB", "A", "PERF401", "RET505", "TCH", "S602"]
+ignore = ["SIM117", "SIM105", "SIM108", "PT009"]
+
+[tool.coverage.run]
+source = ["app_operator", "lego_agent", "libs"]
+omit = ["*/apps/*", "*/__main__.py", "*/ui/*"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
 norecursedirs = ["apps", ".venv", "venv", "build", "dist", ".hypothesis"]
 python_files = ["test_*.py"]
@@ -65,207 +99,8 @@ pythonpath = ["."]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.151.4",
+    "pre-commit>=4.2.0",
     "pyright>=1.1.408",
 ]
 
-[tool.importlinter]
-root_packages = ["app_operator", "lego_agent", "libs", "tests"]
-
-[[tool.importlinter.contracts]]
-name = "app_operator and lego_agent are independent siblings"
-type = "independence"
-modules = [
-    "app_operator",
-    "lego_agent",
-]
-
-[[tool.importlinter.contracts]]
-name = "libs must not import from app_operator or lego_agent"
-type = "forbidden"
-source_modules = ["libs"]
-forbidden_modules = [
-    "app_operator",
-    "lego_agent",
-]
-
-[[tool.importlinter.contracts]]
-name = "libs.sds_core is the foundation layer and must not import from libs.agent_cli"
-type = "forbidden"
-source_modules = ["libs.sds_core"]
-forbidden_modules = ["libs.agent_cli"]
-
-[[tool.importlinter.contracts]]
-name = "operator runtimes are independent siblings"
-type = "independence"
-modules = [
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-]
-
-[[tool.importlinter.contracts]]
-name = "test suites are isolated from each other"
-type = "independence"
-modules = [
-    "tests.unit",
-    "tests.integration",
-]
-
-[[tool.importlinter.contracts]]
-name = "commands layer must not import from libs directly"
-type = "forbidden"
-source_modules = ["app_operator.commands"]
-forbidden_modules = ["libs"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-name = "dspy_integration must not import from operator runtimes"
-type = "forbidden"
-source_modules = ["app_operator.dspy_integration"]
-forbidden_modules = [
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-]
-
-[[tool.importlinter.contracts]]
-name = "fault_injection must not import from operator runtimes"
-type = "forbidden"
-source_modules = ["app_operator.fault_injection"]
-forbidden_modules = [
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-]
-
-[[tool.importlinter.contracts]]
-name = "lego_agent core must not import from presentation layer"
-type = "forbidden"
-source_modules = [
-    "lego_agent.engine",
-    "lego_agent.runtime",
-]
-forbidden_modules = [
-    "lego_agent.server",
-    "lego_agent.ui",
-]
-
-[[tool.importlinter.contracts]]
-name = "app_operator shared infrastructure must not import from runtimes"
-type = "forbidden"
-source_modules = [
-    "app_operator.trajectory",
-    "app_operator.operator_base",
-    "app_operator.prompts",
-]
-forbidden_modules = [
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-]
-
-[[tool.importlinter.contracts]]
-name = "app_operator ui must not be imported by core operator logic"
-type = "forbidden"
-source_modules = [
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-    "app_operator.trajectory",
-    "app_operator.operator_base",
-]
-forbidden_modules = ["app_operator.ui"]
-
-[[tool.importlinter.contracts]]
-name = "rlm must not import from operator runtimes"
-type = "forbidden"
-source_modules = ["app_operator.rlm"]
-forbidden_modules = [
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-]
-
-[[tool.importlinter.contracts]]
-name = "commands must not import from operator runtimes directly"
-type = "forbidden"
-source_modules = ["app_operator.commands"]
-forbidden_modules = [
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-]
-
-[[tool.importlinter.contracts]]
-name = "lego_agent core must not import from lego_agent.cli"
-type = "forbidden"
-source_modules = [
-    "lego_agent.engine",
-    "lego_agent.runtime",
-]
-forbidden_modules = ["lego_agent.cli"]
-
-[[tool.importlinter.contracts]]
-name = "libs.agent_cli provider implementations are independent siblings"
-type = "independence"
-modules = [
-    "libs.agent_cli.claude",
-    "libs.agent_cli.gemini",
-    "libs.agent_cli.codex",
-    "libs.agent_cli.opencode",
-]
-
-[[tool.importlinter.contracts]]
-name = "app_operator.prompts must not import from app_operator.dspy_integration"
-type = "forbidden"
-source_modules = ["app_operator.prompts"]
-forbidden_modules = ["app_operator.dspy_integration"]
-
-[[tool.importlinter.contracts]]
-name = "application source modules must not import from tests"
-type = "forbidden"
-source_modules = [
-    "app_operator",
-    "lego_agent",
-    "libs",
-]
-forbidden_modules = ["tests"]
-
-[[tool.importlinter.contracts]]
-name = "app_operator and lego_agent must not bypass the provider abstraction"
-type = "forbidden"
-source_modules = [
-    "app_operator",
-    "lego_agent",
-]
-forbidden_modules = [
-    "libs.agent_cli.claude",
-    "libs.agent_cli.claude_events",
-    "libs.agent_cli.codex",
-    "libs.agent_cli.gemini",
-    "libs.agent_cli.gemini_events",
-    "libs.agent_cli.opencode",
-    "libs.agent_cli.opencode_events",
-    "libs.agent_cli.rlm_utils",
-]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-name = "app_operator foundational modules must not import from application layers"
-type = "forbidden"
-source_modules = [
-    "app_operator.config",
-    "app_operator.exceptions",
-    "app_operator.types",
-    "app_operator.logger",
-]
-forbidden_modules = [
-    "app_operator.commands",
-    "app_operator.cli_agent",
-    "app_operator.langgraph",
-    "app_operator.adk",
-    "app_operator.dspy_integration",
-    "app_operator.fault_injection",
-    "app_operator.rlm",
-    "app_operator.ui",
-]

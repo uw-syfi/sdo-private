@@ -20,26 +20,24 @@ class TestGEPAConfigIntegerFields:
     @pytest.mark.parametrize("field_name", POSITIVE_INT_FIELDS)
     def test_zero_rejected(self, field_name):
         with pytest.raises(ValueError, match=f"{field_name} must be positive"):
-            GEPAConfig(**{field_name: 0})
+            GEPAConfig(**{field_name: 0})  # type: ignore[arg-type]
 
     def test_string_type_rejected(self):
         with pytest.raises(TypeError, match="max_steps must be int"):
-            GEPAConfig(max_steps="5")
+            GEPAConfig(max_steps="5")  # type: ignore[arg-type]
 
 
 class TestGEPAConfigProbabilityFields:
     """Test probability field validation."""
 
-    @pytest.mark.parametrize("field_name", [
-        "mutation_probability", "diversity_probability"
-    ])
+    @pytest.mark.parametrize("field_name", ["mutation_probability", "diversity_probability"])
     def test_out_of_range_rejected(self, field_name):
         with pytest.raises(ValueError, match=f"{field_name} must be in range"):
-            GEPAConfig(**{field_name: -0.1})
+            GEPAConfig(**{field_name: -0.1})  # type: ignore[arg-type]
 
     def test_string_type_rejected(self):
         with pytest.raises(TypeError, match="mutation_probability must be numeric"):
-            GEPAConfig(mutation_probability="0.5")
+            GEPAConfig(mutation_probability="0.5")  # type: ignore[arg-type]
 
 
 class TestGEPAConfigReflectionProvider:
@@ -55,7 +53,7 @@ class TestGEPAConfigReflectionProvider:
 
     def test_non_string_rejected(self):
         with pytest.raises(TypeError, match="reflection_provider must be str"):
-            GEPAConfig(reflection_provider=123)
+            GEPAConfig(reflection_provider=123)  # type: ignore[arg-type]
 
 
 class TestGEPAConfigSeed:
@@ -63,4 +61,4 @@ class TestGEPAConfigSeed:
 
     def test_string_rejected(self):
         with pytest.raises(TypeError, match="seed must be int or None"):
-            GEPAConfig(seed="42")
+            GEPAConfig(seed="42")  # type: ignore[arg-type]

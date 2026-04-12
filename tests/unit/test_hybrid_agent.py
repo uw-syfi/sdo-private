@@ -4,8 +4,9 @@ import unittest.mock as mock
 
 import pytest
 
-from app_operator.rlm.environment import RLMContext, RLMEnvironment
 from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
+from app_operator.cli_agent.rlm.environment import RLMContext, RLMEnvironment
+from libs.model_config import ModelConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -35,6 +36,7 @@ def _setup_repo(tmp_path):
     (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
     (tmp_path / "docker-compose.yml").write_text("services:\n  web:\n    build: .\n")
     return sds
+
 
 # ---------------------------------------------------------------------------
 # RLMContext summary fields
@@ -104,6 +106,7 @@ class TestRLMContextSummaryFields:
         )
         assert "True" in result
 
+
 # ---------------------------------------------------------------------------
 # HybridCodingAgent routing
 # ---------------------------------------------------------------------------
@@ -113,10 +116,7 @@ class TestHybridRouting:
     def test_file_gen_prompt(self, tmp_path):
         agent = HybridCodingAgent(model="test-model")
         prompt = "Generate .sds/deploy.sh for the project."
-        response = (
-            "FILE: .sds/deploy.sh\n"
-            "```\n#!/bin/bash\ndocker compose up -d\n```"
-        )
+        response = "FILE: .sds/deploy.sh\n```\n#!/bin/bash\ndocker compose up -d\n```"
         with mock.patch("litellm.completion", return_value=_make_litellm_response(response)):
             result = agent.generate(prompt, cwd=str(tmp_path))
         assert "deploy.sh" in result
@@ -127,6 +127,7 @@ class TestHybridRouting:
         with mock.patch("litellm.completion", return_value=_make_litellm_response("summary text")):
             result = agent.generate(prompt, cwd=str(tmp_path))
         assert result == "summary text"
+
 
 # ---------------------------------------------------------------------------
 # HybridCodingAgent fix path
@@ -211,9 +212,7 @@ class TestHybridFixPath:
             # RLM loop: LLM reads the error_summary variable
             if call_count == 5:
                 return _make_litellm_response(
-                    "ACTION: execute_code\n"
-                    "DESCRIPTION: Read pre-computed error summary\n"
-                    "CODE:\nresult = error_summary"
+                    "ACTION: execute_code\nDESCRIPTION: Read pre-computed error summary\nCODE:\nresult = error_summary"
                 )
 
             # After seeing the result, return final answer
@@ -244,6 +243,7 @@ class TestHybridFixPath:
         # At least 4 subagent calls × 25 tokens + 1 RLM call × 40 tokens
         assert agent._total_token_usage["total_tokens"] >= 4 * 25 + 40
 
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -252,27 +252,64 @@ class TestHybridFixPath:
 class TestHybridRegistration:
     def test_hybrid_in_agent_registry(self):
         from libs.agent_cli.base import AGENT_REGISTRY
+
         assert "hybrid" in AGENT_REGISTRY
         assert AGENT_REGISTRY["hybrid"] is HybridCodingAgent
 
     def test_hybrid_valid_provider(self):
         from app_operator.config import AgentConfig
-        config = AgentConfig(provider="hybrid")
-        assert config.provider == "hybrid"
+
+        config = AgentConfig(backend="hybrid")
+        assert config.backend == "hybrid"
 
     def test_factory_creates_hybrid(self):
-        from app_operator.config import Config, AgentConfig
         from app_operator.cli_agent.factory import create_agent_from_config
-        config = Config(agent=AgentConfig(provider="hybrid"))
+        from app_operator.config import AgentConfig, Config
+
+        config = Config(agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config("/tmp", config=config)
         assert isinstance(agent, HybridCodingAgent)
 
     def test_factory_forwards_location(self):
-        from app_operator.config import Config, AgentConfig
         from app_operator.cli_agent.factory import create_agent_from_config
-        config = Config(agent=AgentConfig(provider="hybrid", location="us-west1"))
+        from app_operator.config import AgentConfig, Config
+
+        config = Config(
+            agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model", location="us-west1"))
+        )
         agent = create_agent_from_config("/tmp", config=config)
-        assert agent.location == "us-west1"
+        assert agent.location == "us-west1"  # type: ignore[attr-defined]
+
+    def test_factory_forwards_dspy_config(self):
+        from app_operator.cli_agent.factory import create_agent_from_config
+        from app_operator.config import AgentConfig, Config, DSPyConfig
+
+        dspy_cfg = DSPyConfig()
+        config = Config(
+            agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")),
+            dspy=dspy_cfg,
+        )
+        agent = create_agent_from_config("/tmp", config=config)
+        assert isinstance(agent, HybridCodingAgent)
+        assert agent.dspy_config is dspy_cfg  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# dspy_config storage
+# ---------------------------------------------------------------------------
+
+
+class TestHybridDspyConfig:
+    """Tests that HybridCodingAgent stores dspy_config."""
+
+    def test_stores_dspy_config(self):
+        cfg = mock.MagicMock()
+        agent = HybridCodingAgent(model="test-model", dspy_config=cfg)
+        assert agent.dspy_config is cfg
+
+    def test_default_dspy_config_is_none(self):
+        agent = HybridCodingAgent(model="test-model")
+        assert agent.dspy_config is None
 
 
 if __name__ == "__main__":

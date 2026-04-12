@@ -18,6 +18,7 @@ import pytest
 from libs.agent_cli.claude import ClaudeCodeCodingAgent
 from libs.agent_cli.codex import CodexCodingAgent
 from libs.agent_cli.gemini import GeminiCodingAgent
+from libs.model_config import ModelConfig
 
 
 class MockProcess:
@@ -81,6 +82,7 @@ def agent_type(request):
     """Parameterized fixture for all agent types."""
     return request.param
 
+
 # ============================================================================
 # INITIALIZATION AND BINARY DETECTION TESTS
 # ============================================================================
@@ -126,6 +128,7 @@ def test_agent_initializes_with_model(agent_type, mock_which):
             mock_run.return_value = MagicMock(returncode=0)
             agent = agent_class(model="custom-model")
             assert agent.model == "custom-model"
+
 
 # ============================================================================
 # SUCCESSFUL EXECUTION AND CLEANUP TESTS
@@ -213,9 +216,7 @@ def test_generate_success_returns_output(agent_type, mock_which):
         # Gemini expects JSON stream output
         import json
 
-        json_output = json.dumps(
-            {"type": "message", "role": "assistant", "content": expected_output}
-        )
+        json_output = json.dumps({"type": "message", "role": "assistant", "content": expected_output})
         mock_process.stdout.readline.side_effect = [f"{json_output}\n", ""]
     else:
         # Other agents expect plain text
@@ -232,6 +233,7 @@ def test_generate_success_returns_output(agent_type, mock_which):
                 result = agent.generate("test", silent=True)
 
     assert expected_output in result
+
 
 # ============================================================================
 # TIMEOUT AND PROCESS TERMINATION CLEANUP TESTS
@@ -341,6 +343,7 @@ def test_generate_timeout_closes_all_resources(agent_type, mock_which):
     assert mock_process.stdin.close.called
     assert len(wait_calls) >= 2  # wait() called twice: once with timeout, once without
 
+
 # ============================================================================
 # ERROR HANDLING AND CLEANUP TESTS
 # ============================================================================
@@ -409,6 +412,7 @@ def test_generate_broken_pipe_on_stdin_handled(agent_type, mock_which):
                 # Process succeeds even though stdin write failed
                 assert result is not None
 
+
 # ============================================================================
 # THREAD CLEANUP AND ORPHANED THREAD TESTS
 # ============================================================================
@@ -440,6 +444,7 @@ def test_generate_thread_timeout_doesnt_leak_threads(agent_type, mock_which):
 
     # Verify join() was attempted on threads
     assert thread_join_count["count"] >= 2
+
 
 # ============================================================================
 # WORKING DIRECTORY AND ENVIRONMENT CLEANUP TESTS
@@ -489,7 +494,7 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", side_effect=track_popen):
                 with patch(
-                    "libs.agent_cli.cli_agent._get_interactive_env",
+                    "libs.agent_cli.cli_agent.get_interactive_env",
                     return_value=mock_env,
                 ):
                     agent = agent_class()
@@ -498,6 +503,7 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
     # Verify environment was passed to Popen
     assert len(captured_env) > 0
     assert captured_env[0] is not None
+
 
 # ============================================================================
 # SILENT MODE TESTS
@@ -523,6 +529,7 @@ def test_generate_silent_mode_suppresses_output(agent_type, mock_which, capsys):
     # (though the function still returns the result)
     # Note: This checks the actual stdout, not mocks
     assert result is not None
+
 
 # ============================================================================
 # RESOURCE COUNTING AND LEAK DETECTION TESTS
@@ -550,6 +557,7 @@ def test_multiple_generates_dont_leak_resources(agent_type, mock_which):
                     result = agent.generate(f"test {i}", silent=True)
                     assert result is not None
 
+
 # ============================================================================
 # FACTORY AND CROSS-AGENT CONSISTENCY TESTS
 # ============================================================================
@@ -558,7 +566,7 @@ def test_multiple_generates_dont_leak_resources(agent_type, mock_which):
 def test_factory_creates_all_agent_types(mock_which):
     """Test factory can create all agent types."""
     from app_operator.cli_agent.factory import create_agent_from_config
-    from app_operator.config import Config, AgentConfig, OperatorConfig
+    from app_operator.config import AgentConfig, Config, OperatorConfig
 
     agents_to_test = [
         ("claude", ClaudeCodeCodingAgent),
@@ -572,7 +580,8 @@ def test_factory_creates_all_agent_types(mock_which):
 
             for provider_name, expected_class in agents_to_test:
                 config = Config(
-                    agent=AgentConfig(provider=provider_name), operator=OperatorConfig()
+                    agent=AgentConfig(backend=provider_name, model_config=ModelConfig.from_string("test-model")),
+                    operator=OperatorConfig(),
                 )
                 agent = create_agent_from_config("/tmp", config=config)
                 assert isinstance(agent, expected_class)
@@ -580,11 +589,11 @@ def test_factory_creates_all_agent_types(mock_which):
 
 def test_factory_defaults_to_codex(mock_which):
     """Test that invalid provider raises ValueError with validation."""
-    from app_operator.config import Config, AgentConfig, OperatorConfig
+    from app_operator.config import AgentConfig, Config, OperatorConfig
 
     # With the new validation, invalid providers should raise ValueError
-    with pytest.raises(ValueError, match="Invalid provider"):
+    with pytest.raises(ValueError, match="Invalid backend"):
         Config(
-            agent=AgentConfig(provider="unknown_provider"),
+            agent=AgentConfig(backend="unknown_provider"),
             operator=OperatorConfig(),
         )

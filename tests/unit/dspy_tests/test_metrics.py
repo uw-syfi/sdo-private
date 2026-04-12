@@ -1,19 +1,21 @@
 """Tests for DSPy metrics."""
 
-import pytest
 from unittest.mock import Mock
+
+import pytest
+
+from app_operator.dspy_integration._data_loader import TrajectoryExample
 from app_operator.dspy_integration.metrics import (
-    DeploymentSuccessMetric,
-    IterationEfficiencyMetric,
-    TokenEfficiencyMetric,
-    PredictionQualityMetric,
-    HealthCheckQualityMetric,
     CompositeMetric,
-    _parse_judge_score,
-    _extract_prediction_text,
+    DeploymentSuccessMetric,
+    HealthCheckQualityMetric,
+    IterationEfficiencyMetric,
+    PredictionQualityMetric,
+    TokenEfficiencyMetric,
     _extract_error_context,
+    _extract_prediction_text,
+    _parse_judge_score,
 )
-from app_operator.dspy_integration.data_loader import TrajectoryExample
 
 
 @pytest.fixture
@@ -213,8 +215,7 @@ class TestTokenEfficiencyMetric:
             success = True
 
         score = metric(Example(), None)
-        # Weighted tokens: 100*0.3 + 100*0.7 = 100
-        # Efficiency: 1.0 - (100/1000) = 0.9
+        # Weighted tokens: 100 * 0.3 + 100 * 0.7 = 100 -> efficiency = 1.0 - 100/1000 = 0.9
         assert abs(score - 0.9) < 0.01
 
     def test_failed_deployment_penalty(self, failed_example):
@@ -347,8 +348,9 @@ exit 0
         score_trivial = metric(TrivialHealthCheck(), "some output")
 
         # Good health check should score higher
-        assert score_good > score_trivial, \
+        assert score_good > score_trivial, (
             f"Good health check ({score_good}) should score higher than trivial ({score_trivial})"
+        )
 
     def test_missing_health_check_neutral_impact(self):
         """Test that missing health check has neutral impact (0.5)."""
@@ -490,7 +492,7 @@ class TestPredictionQualityMetric:
 
     def test_falls_back_to_neutral_on_judge_error(self):
         """Any exception from the judge returns 0.5."""
-        mock_judge = Mock(side_effect=Exception("LM error"))
+        mock_judge = Mock(side_effect=RuntimeError("LM error"))
 
         metric = PredictionQualityMetric()
         metric._judge = mock_judge
@@ -643,8 +645,7 @@ exit 0
         score_single = metric(Example2(), None)
 
         # Multiple check types should score higher than single type
-        assert score_multi > score_single, \
-            "Multiple check types should score higher than single type"
+        assert score_multi > score_single, "Multiple check types should score higher than single type"
 
     def test_line_count_matters(self):
         """Scripts with more non-trivial lines should score higher."""
@@ -714,5 +715,6 @@ exit 0
         score_long = metric(LongExample(), None)
 
         # Longer scripts should generally score higher
-        assert score_long > score_short, \
+        assert score_long > score_short, (
             f"Longer comprehensive script should score higher: {score_long} > {score_short}"
+        )

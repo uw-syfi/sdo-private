@@ -1,0 +1,129 @@
+"""CrucibleJudgeAgent: pydantic-ai judge agent for the dual-agent judge loop."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pydantic_ai import Agent, RunContext
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models import Model
+
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+from libs.agent_mw import (
+    FixedPathProvider,
+    LoopDetectionMiddleware,
+    RetryMiddleware,
+    SoftLimitExtension,
+    TimeoutMiddleware,
+    TrajectoryMiddleware,
+    TurnLoggingMiddleware,
+)
+from libs.pydantic_agent import AgentMiddleware, BaseAgent, thinking_settings
+from sregym_agents.crucible.tools import (
+    THINKING_BUDGET,
+    JudgeDeps,
+    exec_bash_any,
+    grep,
+    read_file,
+    reveal_agent_hypothesis,
+    str_replace_file,
+    submit_independent_findings,
+    submit_verdict,
+    write_file,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class CrucibleJudgeAgent(BaseAgent[JudgeDeps]):
+    MAX_SUBMIT_REMINDERS = 3
+
+    def __init__(
+        self, model: Model, deps: JudgeDeps, trajectory_path: Path | None = None, step_limit: int | None = 500
+    ) -> None:
+        mw: list[AgentMiddleware] = [
+            TurnLoggingMiddleware(),
+            RetryMiddleware(),
+            LoopDetectionMiddleware(),
+            TimeoutMiddleware(),
+            SoftLimitExtension(step_limit),
+        ]
+        if trajectory_path is not None:
+            mw.insert(0, TrajectoryMiddleware(FixedPathProvider(trajectory_path)))
+        super().__init__(
+            deps,
+            agent_name=f"judge-{deps.stage}",
+            middleware=mw,
+            usage_collector=deps.usage_collector,
+        )
+        self._agent: Agent[JudgeDeps, str] = self._build_agent(
+            model,
+            deps_type=JudgeDeps,
+            output_type=str,
+            model_settings=thinking_settings(model, THINKING_BUDGET),
+            tools=[
+                exec_bash_any,
+                read_file,
+                grep,
+                write_file,
+                str_replace_file,
+                submit_independent_findings,
+                reveal_agent_hypothesis,
+                submit_verdict,
+            ],
+        )
+
+        @self._agent.instructions
+        def _system(ctx: RunContext[JudgeDeps]) -> str:  # pyright: ignore[reportUnusedFunction]
+            return ctx.deps.renderer.render(f"{ctx.deps.stage}_judge_system")
+
+    async def arun(self, user_prompt: str, run_ctx: dict[str, Any] | None = None) -> str:
+        """Run with submit reminders. Returns the verdict string.
+
+        Token usage is auto-reported via ``self._usage_collector`` (set from
+        ``deps.usage_collector``); read it from the collector if needed.
+        """
+        message_history: list[ModelMessage] | None = None
+        current_prompt = user_prompt
+        reminder_count = 0
+        result = None
+
+        while True:
+            kwargs: dict[str, Any] = {}
+            if message_history is not None:
+                kwargs["message_history"] = message_history
+
+            try:
+                result = await self._arun(current_prompt, _run_ctx=run_ctx, **kwargs)
+            except UnexpectedModelBehavior as exc:
+                if self.deps.state.submitted:
+                    logger.warning(
+                        f"Judge model returned unexpected output after submitting; treating as complete. ({exc})"
+                    )
+                else:
+                    logger.warning(
+                        f"Judge model returned unexpected output without submitting; treating as unsubmitted. ({exc})"
+                    )
+                break
+
+            if self.deps.state.submitted:
+                break
+
+            if reminder_count >= self.MAX_SUBMIT_REMINDERS:
+                logger.warning("Max judge submit reminders reached — giving up.")
+                break
+
+            reminder_count += 1
+            logger.warning(f"Judge stopped without submitting (reminder {reminder_count}/{self.MAX_SUBMIT_REMINDERS}).")
+            message_history = list(result.all_messages())
+            current_prompt = (
+                "You have not submitted your verdict yet. "
+                "Please call `submit_verdict` with your final verdict before finishing."
+            )
+
+        return result.output if result is not None else ""

@@ -1,0 +1,22 @@
+The diagnosis agent's answer was INCORRECT. The benchmark identified the true root cause:
+
+**Benchmark Reasoning**: {{ benchmark_reasoning }}
+
+**Original (incorrect) Diagnosis**: {{ original_answer }}
+{% if original_justification %}
+**Original Justification**: {{ original_justification }}
+{% endif %}
+{% if original_causal_chain %}
+**Original Causal Chain**: {{ original_causal_chain }}
+{% endif %}
+
+Application: {{ app_name }} / Namespace: {{ namespace }}
+{% if descriptions %}
+{{ descriptions }}
+{% endif %}
+
+Investigate the cluster to build a complete causal chain from the true root cause to the
+observed symptoms. Submit:
+- `answer`: the correct root cause (specific resource + field + wrong value)
+- `causal_chain`: misconfigured field → mechanism → observed symptom
+- `justification`: concrete kubectl evidence

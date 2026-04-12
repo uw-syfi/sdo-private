@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class AgentEventHandler(Protocol):
@@ -8,7 +8,7 @@ class AgentEventHandler(Protocol):
         """Handle agent thinking output."""
         ...
 
-    def on_tool_call(self, tool: str, args: dict | str | None = None) -> None:
+    def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
         """Handle tool execution start."""
         ...
 

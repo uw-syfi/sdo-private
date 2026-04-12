@@ -7,7 +7,10 @@ correctly, performing cleanup and exiting gracefully.
 import signal
 import threading
 from unittest.mock import patch
+
 from app_operator.cli_agent.operator import AppOperator
+from app_operator.config import AgentConfig, Config
+from libs.model_config import ModelConfig
 from tests.fixtures.agents import StubAgent
 
 
@@ -46,6 +49,9 @@ class TestSignalHandling:
             health_check_max_count=1,
             max_deployment_attempts=1,
             agent=agent,
+            config=Config(
+                agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+            ),
         )
 
         # Use an event to synchronize: wait until the operator has started
@@ -94,10 +100,13 @@ class TestSignalHandling:
 
         operator = AppOperator(
             str(repo),
-            health_check_interval=0.1,
+            health_check_interval=0.1,  # type: ignore[arg-type]
             health_check_max_count=5,
             max_deployment_attempts=1,
             agent=stub_agent,
+            config=Config(
+                agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+            ),
         )
 
         # Use an event to synchronize: wait until deployment stage begins
@@ -152,6 +161,9 @@ class TestSignalHandling:
             health_check_max_count=1,
             max_deployment_attempts=1,
             agent=stub_agent,
+            config=Config(
+                agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+            ),
         )
 
         exit_code = operator.run()
@@ -173,6 +185,9 @@ class TestShutdownBehavior:
         operator = AppOperator(
             str(repo),
             agent=stub_agent,
+            config=Config(
+                agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+            ),
         )
 
         # Initially not deployed
@@ -196,6 +211,9 @@ class TestShutdownBehavior:
         operator = AppOperator(
             str(repo),
             agent=StubAgent(),
+            config=Config(
+                agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+            ),
         )
 
         # First signal
@@ -214,6 +232,9 @@ class TestShutdownBehavior:
         operator = AppOperator(
             str(repo),
             agent=StubAgent(),
+            config=Config(
+                agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+            ),
         )
 
         assert operator._shutdown_requested is False
@@ -231,6 +252,9 @@ class TestShutdownBehavior:
         operator = AppOperator(
             str(repo),
             agent=StubAgent(),
+            config=Config(
+                agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
+            ),
         )
 
         assert operator._shutdown_requested is False

@@ -5,77 +5,48 @@ ensuring correctness for all combinations of present/absent optional fields.
 """
 
 import json
-import pytest
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import given, strategies as st, assume, settings
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: None
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app_operator.trajectory import TrajectoryMessage
-
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
 
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
-    _optional_text = st.one_of(st.none(), st.text(max_size=200))
-    _optional_int = st.one_of(st.none(), st.integers(min_value=-1, max_value=255))
-    _optional_float = st.one_of(st.none(), st.floats(min_value=0.0, max_value=3600.0, allow_nan=False))
-    _optional_dict = st.one_of(
-        st.none(),
-        st.dictionaries(
-            st.text(min_size=1, max_size=20),
-            st.text(max_size=50),
-            max_size=5,
-        ),
-    )
+_optional_text = st.one_of(st.none(), st.text(max_size=200))
+_optional_int = st.one_of(st.none(), st.integers(min_value=-1, max_value=255))
+_optional_float = st.one_of(st.none(), st.floats(min_value=0.0, max_value=3600.0, allow_nan=False))
+_optional_dict = st.one_of(
+    st.none(),
+    st.dictionaries(
+        st.text(min_size=1, max_size=20),
+        st.text(max_size=50),
+        max_size=5,
+    ),
+)
 
-    @st.composite
-    def trajectory_message_strategy(draw):
-        """Generate a TrajectoryMessage with all combinations of optional fields."""
-        return TrajectoryMessage(
-            role=draw(st.text(min_size=1, max_size=30)),
-            content=draw(_optional_text),
-            tool=draw(_optional_text),
-            args=draw(_optional_dict),
-            stdout=draw(_optional_text),
-            stderr=draw(_optional_text),
-            exit_code=draw(_optional_int),
-            timestamp=draw(_optional_text),
-            duration_seconds=draw(_optional_float),
-        )
-else:
-    def trajectory_message_strategy():
-        pass
+
+@st.composite
+def trajectory_message_strategy(draw):
+    """Generate a TrajectoryMessage with all combinations of optional fields."""
+    return TrajectoryMessage(
+        role=draw(st.text(min_size=1, max_size=30)),
+        content=draw(_optional_text),
+        tool=draw(_optional_text),
+        args=draw(_optional_dict),
+        stdout=draw(_optional_text),
+        stderr=draw(_optional_text),
+        exit_code=draw(_optional_int),
+        timestamp=draw(_optional_text),
+        duration_seconds=draw(_optional_float),
+    )
 
 
 # ---------------------------------------------------------------------------
 # TrajectoryMessage.to_dict() invariants
 # ---------------------------------------------------------------------------
+
 
 class TestTrajectoryMessageToDictProperties:
     """Property-based tests for TrajectoryMessage.to_dict()."""

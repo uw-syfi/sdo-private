@@ -61,9 +61,7 @@ def extract_efficiency_metrics(
     turn_count = 0
     tool_call_count = 0
 
-    for phase_key in [
-        "deployment", "script_generation", "monitoring", "exploration"
-    ]:
+    for phase_key in ["deployment", "script_generation", "monitoring", "exploration"]:
         conversations = trajectory.get(phase_key, [])
         turn_count += len(conversations)
         for conv in conversations:
@@ -117,6 +115,7 @@ class SDSEvaluator:
         metrics: dict[str, Callable],
         agent_factory: Callable,
         templates_dir: Path,
+        runners: dict[str, Any] | None = None,
     ) -> None:
         """
         Args:
@@ -124,10 +123,14 @@ class SDSEvaluator:
                 Each takes (example, trajectory_data) -> float.
             agent_factory: Callable that creates a CodingAgent instance.
             templates_dir: Path to templates (for injecting candidate prompts).
+            runners: Optional mapping of agent_type -> AgentRunner. When
+                provided, ``_run_agent`` dispatches through these runners
+                instead of importing cli_agent agents directly.
         """
         self.metrics = metrics
         self.agent_factory = agent_factory
         self.templates_dir = templates_dir
+        self.runners = runners or {}
 
     @staticmethod
     def _check_repos_clean(examples: list[EvaluationExample]) -> None:
@@ -149,9 +152,7 @@ class SDSEvaluator:
                 text=True,
             )
             if result.returncode != 0:
-                raise ValueError(
-                    f"Not a git repository (or git failed): {repo}"
-                )
+                raise ValueError(f"Not a git repository (or git failed): {repo}")
             if result.stdout.strip():
                 raise ValueError(
                     f"Test repo {repo} has uncommitted changes. "
@@ -178,33 +179,22 @@ class SDSEvaluator:
         """
         self._check_repos_clean(examples)
 
-        all_scores: dict[str, list[float]] = {
-            name: [] for name in self.metrics
-        }
+        all_scores: dict[str, list[float]] = {name: [] for name in self.metrics}
         all_traces: list[ExecutionTrace] = []
 
         for example in examples:
-            trajectory_data, trace = self._run_single_example(
-                prompt_text, template_name, example
-            )
+            trajectory_data, trace = self._run_single_example(prompt_text, template_name, example)
             all_traces.append(trace)
 
             for metric_name, metric_fn in self.metrics.items():
                 score = metric_fn(example, trajectory_data)
                 all_scores[metric_name].append(score)
 
-        avg_scores = {
-            name: sum(scores) / len(scores) if scores else 0.0
-            for name, scores in all_scores.items()
-        }
+        avg_scores = {name: sum(scores) / len(scores) if scores else 0.0 for name, scores in all_scores.items()}
 
-        overall = (
-            sum(avg_scores.values()) / len(avg_scores) if avg_scores else 0.0
-        )
+        overall = sum(avg_scores.values()) / len(avg_scores) if avg_scores else 0.0
 
-        total_efficiency = _sum_efficiency_metrics(
-            [t.efficiency for t in all_traces if t.efficiency]
-        )
+        total_efficiency = _sum_efficiency_metrics([t.efficiency for t in all_traces if t.efficiency])
 
         return EvaluationResult(
             candidate_id=candidate_id,
@@ -234,9 +224,7 @@ class SDSEvaluator:
 
             (tmp_templates / template_name).write_text(prompt_text)
 
-            trajectory_data = self._execute_agent(
-                example, templates_dir=tmp_templates
-            )
+            trajectory_data = self._execute_agent(example, templates_dir=tmp_templates)
 
             phase_key = self._agent_type_to_phase(example.agent_type)
             messages = []
@@ -272,8 +260,7 @@ class SDSEvaluator:
                 capture_output=True,
             )
             subprocess.run(
-                ["git", "clean", "-fd", "--exclude=.sds/trajectories",
-                 "--exclude=.sds/logs"],
+                ["git", "clean", "-fd", "--exclude=.sds/trajectories", "--exclude=.sds/logs"],
                 cwd=repo_path,
                 check=True,
                 capture_output=True,
@@ -296,8 +283,10 @@ class SDSEvaluator:
         during ``_run_agent`` execution.  Do not call ``evaluate()`` from
         multiple threads concurrently.
         """
-        import app_operator.prompts as prompts_module
+        from contextlib import nullcontext
+
         from app_operator.filesystem import RealFilesystem
+        from app_operator.prompts import override_loader
         from app_operator.trajectory import TrajectoryRecorder
 
         repo_path = Path(example.repo_path)
@@ -305,20 +294,10 @@ class SDSEvaluator:
         agent = self.agent_factory()
         filesystem = RealFilesystem()
 
-        saved_loader = None
-        if templates_dir is not None:
-            with prompts_module._loader_lock:
-                saved_loader = prompts_module._loader
-                prompts_module._loader = prompts_module.PromptLoader(
-                    templates_dir=templates_dir
-                )
+        ctx = override_loader(templates_dir) if templates_dir is not None else nullcontext()
 
-        try:
-            self._run_agent(example, repo_path, agent, filesystem, recorder)
-        finally:
-            if saved_loader is not None:
-                with prompts_module._loader_lock:
-                    prompts_module._loader = saved_loader
+        with ctx:
+            self._run_agent(example, repo_path, agent, filesystem, recorder, self.runners)
 
         trajectory_path = recorder.finalize()
 
@@ -329,44 +308,13 @@ class SDSEvaluator:
             return {}
 
     @staticmethod
-    def _run_agent(example, repo_path, agent, filesystem, recorder):
+    def _run_agent(example, repo_path, agent, filesystem, recorder, runners):
         """Dispatch to the appropriate agent based on example type."""
-        if example.agent_type == "deployer":
-            from app_operator.cli_agent.agents.deployer import (
-                DeploymentAgent,
-            )
-
-            deployer = DeploymentAgent(
-                repo_path=repo_path,
-                coding_agent=agent,
-                filesystem=filesystem,
-                recorder=recorder,
-            )
-            deployer.run(max_attempts=2)
-
-        elif example.agent_type == "monitor":
-            from app_operator.cli_agent.agents.app_monitor import AppMonitor
-
-            monitor = AppMonitor(
-                repo_path=repo_path,
-                coding_agent=agent,
-                filesystem=filesystem,
-                recorder=recorder,
-            )
-            monitor.run(interval=5, max_checks=1)
-
-        elif example.agent_type == "code_analyzer":
-            from app_operator.cli_agent.agents.code_analyzer import (
-                CodeAnalyzerAgent,
-            )
-
-            analyzer = CodeAnalyzerAgent(
-                repo_path=repo_path,
-                coding_agent=agent,
-                filesystem=filesystem,
-                recorder=recorder,
-            )
-            analyzer.run()
+        runner = runners.get(example.agent_type)
+        if runner is None:
+            logger.warning(f"No runner registered for agent_type={example.agent_type!r}; skipping.")
+            return
+        runner.run(repo_path, agent, filesystem, recorder)
 
     @staticmethod
     def _agent_type_to_phase(agent_type: str) -> str:
@@ -541,19 +489,13 @@ def deployment_progress_metric(
             if stderr.strip():
                 lines = stderr.strip().split("\n")
                 total_stderr_lines += len(lines)
-                error_lines += sum(
-                    1 for line in lines
-                    if _ERROR_PATTERN_RE.search(line)
-                )
+                error_lines += sum(1 for line in lines if _ERROR_PATTERN_RE.search(line))
 
             if "deploy" in args_str:
                 deploy_executed = True
                 if stdout.strip():
                     deploy_produced_output = True
-                if (
-                    "prerequisit" in all_output
-                    and "fail" not in all_output
-                ) or "check_prerequisites" in all_output:
+                if ("prerequisit" in all_output and "fail" not in all_output) or "check_prerequisites" in all_output:
                     prereqs_passed = True
                 if (
                     "build" in all_output
@@ -652,11 +594,7 @@ def health_check_metric(
                     port_checks_detected = True
                 if _HTTP_RESPONSE_RE.search(stdout):
                     http_response_detected = True
-                if (
-                    "pass" in stdout
-                    or "fail" in stdout
-                    or "warning" in stdout
-                ):
+                if "pass" in stdout or "fail" in stdout or "warning" in stdout:
                     health_structured = True
                 if exit_code == 0:
                     health_succeeded = True
@@ -814,15 +752,14 @@ def monitoring_coverage_metric(
             if "endpoint" in all_text or "curl" in all_text or "http" in all_text:
                 multiple_aspects |= 4
 
-            if any(w in all_text for w in
-                   ["response time", "latency", "throughput", "cpu", "memory"]):
+            if any(w in all_text for w in ["response time", "latency", "throughput", "cpu", "memory"]):
                 perf_collected = True
             if "summary" in all_text or "report" in all_text or "overview" in all_text:
                 summary_generated = True
 
     if health_executed:
         score += 0.25
-    aspect_count = bin(multiple_aspects).count("1")
+    aspect_count = multiple_aspects.bit_count()
     if aspect_count >= 2:
         score += 0.25
     elif aspect_count == 1:
@@ -906,21 +843,19 @@ def analysis_accuracy_metric(
             all_content += str(msg.get("content", "")) + " "
     all_content_lower = all_content.lower()
 
-    if ("docker compose" in all_content_lower
-            or "kubernetes" in all_content_lower
-            or "k8s" in all_content_lower):
+    if "docker compose" in all_content_lower or "kubernetes" in all_content_lower or "k8s" in all_content_lower:
         score += 0.25
 
-    if any(w in all_content_lower for w in
-           ["maven", "gradle", "make", "npm", "yarn", "mvnw", "go build"]):
+    if any(w in all_content_lower for w in ["maven", "gradle", "make", "npm", "yarn", "mvnw", "go build"]):
         score += 0.25
 
     if re.search(r"\b\d{2,5}\b", all_content) and "port" in all_content_lower:
         score += 0.25
 
-    if any(w in all_content_lower for w in
-           ["mongodb", "mysql", "postgres", "redis", "memcached",
-            "database", "mongo", "consul"]):
+    if any(
+        w in all_content_lower
+        for w in ["mongodb", "mysql", "postgres", "redis", "memcached", "database", "mongo", "consul"]
+    ):
         score += 0.25
 
     return min(score, 1.0)

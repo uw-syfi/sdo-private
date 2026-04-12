@@ -1,6 +1,6 @@
 import io
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from loguru import logger
@@ -24,12 +24,10 @@ def gemini_agent(mock_llm_subprocess, mock_env):
     mock_which.return_value = "/usr/bin/gemini"
 
     with patch(
-        "libs.agent_cli.cli_agent._get_interactive_env",
+        "libs.agent_cli.cli_agent.get_interactive_env",
         return_value=mock_env,
     ):
-        with patch(
-            "libs.agent_cli.cli_agent.CLICodingAgent._check_cli"
-        ):
+        with patch("libs.agent_cli.cli_agent.CLICodingAgent._check_cli"):
             agent = GeminiCodingAgent()
             yield agent
 
@@ -41,7 +39,7 @@ def test_generate_from_fixture(gemini_agent, mock_llm_subprocess):
         pytest.skip(f"Fixture file not found at {FIXTURE_PATH}")
 
     # Read the fixture file
-    with open(FIXTURE_PATH, "r") as f:
+    with open(FIXTURE_PATH) as f:
         fixture_lines = f.readlines()
 
     # Mock the process output

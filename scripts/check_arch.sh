@@ -1,5 +1,5 @@
 #!/bin/bash
-# Check architecture rules using import-linter
+# Check architecture rules using tach
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -9,7 +9,7 @@ echo "Checking architecture rules..."
 cd "$PROJECT_ROOT"
 
 if command -v uv >/dev/null 2>&1; then
-    uv run lint-imports
+    uv run tach check
 else
     echo "Error: 'uv' is not installed."
     exit 1

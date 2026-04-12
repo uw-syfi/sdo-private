@@ -8,18 +8,19 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+
 import dspy
 
+from app_operator.dspy_integration._data_loader import TrajectoryDataLoader
+from app_operator.dspy_integration._field_mappings import (
+    get_output_field_name,
+    map_kwargs_to_fields,
+)
 from app_operator.dspy_integration.config import DSPyConfig
-from app_operator.dspy_integration.data_loader import TrajectoryDataLoader
 from app_operator.dspy_integration.metrics import (
     CompositeMetric,
 )
-from app_operator.dspy_integration.signatures import get_signature, SIGNATURES
-from app_operator.dspy_integration.field_mappings import (
-    map_kwargs_to_fields,
-    get_output_field_name,
-)
+from app_operator.dspy_integration.signatures import SIGNATURES, get_signature
 from app_operator.prompts import SEED_TEMPLATE_MAP
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,12 @@ PROMPT_PHASE_MAP: dict[str, str] = {
     "agentflow_system": "script_generation",
     "agentflow_user": "script_generation",
     "agentflow_repair": "script_generation",
+    "subagent_trajectory_analyst": "deployment",
+    "subagent_error_log_analyst": "deployment",
+    "subagent_script_analyst": "deployment",
+    "subagent_repo_analyst": "deployment",
+    "subagent_root_synthesis": "deployment",
+    "rlm_deployer_fix_error": "deployment",
 }
 
 # Reverse map: prompt name → Jinja2 template path.
@@ -74,6 +81,12 @@ PROMPT_TO_TEMPLATE: dict[str, str] = {
     "agentflow_system": "agentflow/system.jinja2",
     "agentflow_user": "agentflow/user.jinja2",
     "agentflow_repair": "agentflow/repair.jinja2",
+    "subagent_trajectory_analyst": "subagent/trajectory_analyst.jinja2",
+    "subagent_error_log_analyst": "subagent/error_log_analyst.jinja2",
+    "subagent_script_analyst": "subagent/script_analyst.jinja2",
+    "subagent_repo_analyst": "subagent/repo_analyst.jinja2",
+    "subagent_root_synthesis": "subagent/root_synthesis.jinja2",
+    "rlm_deployer_fix_error": "rlm/deployer_fix_error.jinja2",
 }
 
 _ENSURE_SERIALIZABLE_MAX_DEPTH = 50
@@ -174,9 +187,7 @@ class PromptOptimizer:
         logger.info("Loaded %d training examples", len(examples))
 
         if dry_run:
-            split_idx = int(
-                len(examples) * (1 - self.config.optimization.validation_split)
-            )
+            split_idx = int(len(examples) * (1 - self.config.optimization.validation_split))
             return {
                 "dry_run": True,
                 "prompt_names": prompt_names,
@@ -232,7 +243,8 @@ class PromptOptimizer:
             if not phase_examples:
                 logger.warning(
                     "Skipping %s: no training examples in phase '%s'",
-                    prompt_name, target_phase,
+                    prompt_name,
+                    target_phase,
                 )
                 results[prompt_name] = {
                     "success": False,
@@ -244,17 +256,17 @@ class PromptOptimizer:
             # when the phase is too small to split meaningfully.
             split_idx = max(
                 1,
-                int(
-                    len(phase_examples)
-                    * (1 - self.config.optimization.validation_split)
-                ),
+                int(len(phase_examples) * (1 - self.config.optimization.validation_split)),
             )
             prompt_train = phase_examples[:split_idx]
             prompt_val = phase_examples[split_idx:]
 
             logger.info(
                 "Optimizing prompt: %s (phase=%s, train=%d, val=%d)",
-                prompt_name, target_phase, len(prompt_train), len(prompt_val),
+                prompt_name,
+                target_phase,
+                len(prompt_train),
+                len(prompt_val),
             )
             result = self._optimize_single_prompt(
                 prompt_name,
@@ -266,9 +278,7 @@ class PromptOptimizer:
 
         # Bail out if every prompt failed — nothing worth saving
         if not any(r.get("success") for r in results.values()):
-            errors = {
-                name: r.get("error", "unknown error") for name, r in results.items()
-            }
+            errors = {name: r.get("error", "unknown error") for name, r in results.items()}
             raise RuntimeError(f"All prompts failed optimization: {errors}")
 
         # Save optimized prompts
@@ -373,9 +383,7 @@ class PromptOptimizer:
             if traj_ex.rendered_prompt:
                 fields[output_field_name] = traj_ex.rendered_prompt
             else:
-                fields[output_field_name] = self._rerender_from_kwargs(
-                    prompt_name, traj_ex.prompt_kwargs
-                )
+                fields[output_field_name] = self._rerender_from_kwargs(prompt_name, traj_ex.prompt_kwargs)
 
             example = dspy.Example(**fields).with_inputs(*input_field_names)
             dspy_examples.append(example)
@@ -390,9 +398,7 @@ class PromptOptimizer:
 
         return dspy_examples
 
-    def _rerender_from_kwargs(
-        self, prompt_name: str, prompt_kwargs: dict[str, Any]
-    ) -> str:
+    def _rerender_from_kwargs(self, prompt_name: str, prompt_kwargs: dict[str, Any]) -> str:
         """Re-render a Jinja2 template from stored prompt_kwargs.
 
         Used as fallback when rendered_prompt was not recorded in the
@@ -417,7 +423,7 @@ class PromptOptimizer:
 
             loader = PromptLoader(templates_dir=self.prompts_dir / "templates")
             return loader.render_template(template_name, prompt_kwargs)
-        except Exception as e:
+        except (ImportError, OSError, RuntimeError, ValueError) as e:
             logger.warning(
                 "Failed to re-render prompt '%s' from kwargs (template=%s): %s",
                 prompt_name,
@@ -482,9 +488,7 @@ class PromptOptimizer:
         tracking_metric = _MetricCallTracker(metric)
 
         # Select optimizer — pass len(dspy_train) so COPRO can set depth
-        optimizer = self._create_optimizer(
-            tracking_metric, num_train_examples=len(dspy_train)
-        )
+        optimizer = self._create_optimizer(tracking_metric, num_train_examples=len(dspy_train))  # type: ignore[reportArgumentType]
 
         try:
             # Convert validation examples for optimizers that need valset
@@ -493,28 +497,21 @@ class PromptOptimizer:
             # Dispatch compile args per optimizer type (DSPy 3.1.2 signatures)
             optimizer_name = self.config.optimization.optimizer
             if optimizer_name == "BootstrapFewShot":
-                optimized_module = optimizer.compile(module, trainset=dspy_train)
+                optimized_module = optimizer.compile(module, trainset=dspy_train)  # type: ignore[reportCallIssue]
             elif optimizer_name in ("BootstrapFewShotWithRandomSearch", "MIPROv2"):
                 if not dspy_val:
                     logger.warning(
-                        "%s requires a validation set but valset is empty; "
-                        "falling back to BootstrapFewShot",
+                        "%s requires a validation set but valset is empty; falling back to BootstrapFewShot",
                         optimizer_name,
                     )
                     optimizer = dspy.BootstrapFewShot(metric=tracking_metric)
-                    optimized_module = optimizer.compile(
-                        module, trainset=dspy_train
-                    )
+                    optimized_module = optimizer.compile(module, trainset=dspy_train)  # type: ignore[reportCallIssue]
                 else:
-                    optimized_module = optimizer.compile(
-                        module, trainset=dspy_train, valset=dspy_val
-                    )
+                    optimized_module = optimizer.compile(module, trainset=dspy_train, valset=dspy_val)  # type: ignore[reportCallIssue]
             elif optimizer_name == "COPRO":
-                optimized_module = optimizer.compile(
-                    module, trainset=dspy_train, eval_kwargs={"num_threads": 4}
-                )
+                optimized_module = optimizer.compile(module, trainset=dspy_train, eval_kwargs={"num_threads": 4})  # type: ignore[reportCallIssue]
             else:
-                optimized_module = optimizer.compile(module, trainset=dspy_train)
+                optimized_module = optimizer.compile(module, trainset=dspy_train)  # type: ignore[reportCallIssue]
 
             # BootstrapFewShot silently swallows per-example failures and
             # populates demos from the training set even when the teacher LM
@@ -522,20 +519,15 @@ class PromptOptimizer:
             # signal: if it was never called, every example failed before
             # evaluation (e.g. auth error, bad provider string).
             if tracking_metric.call_count == 0:
-                logger.warning(
-                    "Optimization produced 0 successful traces — teacher model likely failed"
-                )
+                logger.warning("Optimization produced 0 successful traces — teacher model likely failed")
                 return {
                     "success": False,
-                    "error": "Bootstrapping produced 0 successful traces. "
-                    "Check teacher model auth and training data.",
+                    "error": "Bootstrapping produced 0 successful traces. Check teacher model auth and training data.",
                 }
 
             # Evaluate on validation set
             if val_examples:
-                val_score = self._evaluate(
-                    optimized_module, val_examples[:5], metric, prompt_name
-                )
+                val_score = self._evaluate(optimized_module, val_examples[:5], metric, prompt_name)
             else:
                 val_score = None
 
@@ -545,7 +537,7 @@ class PromptOptimizer:
                 "optimized_module": optimized_module,
             }
 
-        except Exception as e:
+        except (RuntimeError, ValueError, AttributeError) as e:
             logger.error("Optimization failed: %s", e)
             return {
                 "success": False,
@@ -568,19 +560,18 @@ class PromptOptimizer:
 
         if optimizer_name == "BootstrapFewShot":
             return dspy.BootstrapFewShot(metric=metric)
-        elif optimizer_name == "BootstrapFewShotWithRandomSearch":
+        if optimizer_name == "BootstrapFewShotWithRandomSearch":
             return dspy.BootstrapFewShotWithRandomSearch(metric=metric)
-        elif optimizer_name == "MIPROv2":
+        if optimizer_name == "MIPROv2":
             return dspy.MIPROv2(metric=metric)
-        elif optimizer_name == "COPRO":
+        if optimizer_name == "COPRO":
             # Vertex AI caps candidateCount at 8; COPRO passes n=breadth
             # at depth > 0, so breadth must stay <= 8.
             # Use shallow depth when the training set is small to avoid
             # burning LM calls on refinement rounds that have no signal.
             depth = 2 if num_train_examples <= 10 else 3
             return dspy.COPRO(metric=metric, breadth=8, depth=depth)
-        else:
-            raise ValueError(f"Unknown optimizer: {optimizer_name}")
+        raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
     def _evaluate(
         self,
@@ -614,7 +605,7 @@ class PromptOptimizer:
                 prediction = module(**dict(dspy_ex.inputs()))
                 score = metric(traj_ex, prediction)
                 scores.append(score)
-            except Exception:
+            except (RuntimeError, ValueError, AttributeError):
                 pass
 
         return sum(scores) / len(scores) if scores else None
@@ -669,6 +660,10 @@ class PromptOptimizer:
                 optimized_module = result.get("optimized_module")
                 module_file = output_dir / f"{prompt_name}.dspy.json"
 
+                if optimized_module is None:
+                    logger.warning("No optimized module for %s despite success=True", prompt_name)
+                    continue
+
                 # Save the actual DSPy module
                 try:
                     self._save_dspy_module(optimized_module, module_file, prompt_name)
@@ -679,11 +674,11 @@ class PromptOptimizer:
                         "optimized": True,
                         "module_file": f"{prompt_name}.dspy.json",
                     }
-                except Exception as e:
+                except (OSError, RuntimeError, TypeError, ValueError) as e:
                     logger.error("Failed to save module %s: %s", prompt_name, e)
                     metadata["prompts"][prompt_name] = {
                         "optimized": False,
-                        "error": f"Save failed: {str(e)}",
+                        "error": f"Save failed: {e!s}",
                     }
             else:
                 metadata["prompts"][prompt_name] = {
@@ -741,9 +736,9 @@ class PromptOptimizer:
             }
 
             # Extract demonstrations if they exist (BootstrapFewShot)
-            if hasattr(predictor, "demos") and predictor.demos:
+            if hasattr(predictor, "demos") and predictor.demos:  # type: ignore[reportAttributeAccessIssue]
                 serializable_demos = []
-                for demo in predictor.demos:
+                for demo in predictor.demos:  # type: ignore[reportAttributeAccessIssue]
                     if isinstance(demo, dict):
                         serializable_demos.append(demo)
                     elif hasattr(demo, "__dict__"):
@@ -760,19 +755,14 @@ class PromptOptimizer:
             # Extract the optimized instruction if present (COPRO / MIPROv2
             # rewrite predictor.signature.instructions; BootstrapFewShot does
             # not touch it).
-            if hasattr(predictor, "signature") and hasattr(
-                predictor.signature, "instructions"
-            ):
-                module_state["optimized_instruction"] = predictor.signature.instructions
+            if hasattr(predictor, "signature") and hasattr(predictor.signature, "instructions"):  # type: ignore[reportAttributeAccessIssue]
+                module_state["optimized_instruction"] = predictor.signature.instructions  # type: ignore[reportAttributeAccessIssue]
                 logger.info(
                     "Saved optimized instruction (%d chars)",
-                    len(predictor.signature.instructions),
+                    len(predictor.signature.instructions),  # type: ignore[reportAttributeAccessIssue]
                 )
 
-            if (
-                not module_state["demos"]
-                and "optimized_instruction" not in module_state
-            ):
+            if not module_state["demos"] and "optimized_instruction" not in module_state:
                 raise RuntimeError(
                     f"Optimization for '{prompt_name}' produced no demos and no "
                     "optimized instruction — the optimizer may have failed silently."
@@ -785,5 +775,5 @@ class PromptOptimizer:
             with open(output_file, "w") as f:
                 json.dump(module_state, f, indent=2)
 
-        except Exception as e:
+        except (OSError, TypeError, ValueError, AttributeError) as e:
             raise RuntimeError(f"Failed to save DSPy module: {e}") from e

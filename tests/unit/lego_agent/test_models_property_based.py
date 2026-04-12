@@ -5,81 +5,54 @@ verifying robustness against arbitrary string inputs.
 """
 
 import json
+
 import pytest
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import given, strategies as st, assume, settings
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: None
-
-    settings = DummySettings()
-    st = DummyStrategies()
-
-from lego_agent.models import extract_json, parse_lego_agent_response, LegoAgentResponse
-
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
-)
+from lego_agent.models import LegoAgentResponse, extract_json, parse_lego_agent_response
 
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
-    # Prefix/suffix safe characters: no braces so they don't interfere with
-    # the brace-slice extraction heuristic in extract_json.
-    _safe_text = st.text(
-        alphabet=st.characters(blacklist_characters="{}"),
-        max_size=30,
-    )
+# Prefix/suffix safe characters: no braces so they don't interfere with
+# the brace-slice extraction heuristic in extract_json.
+_safe_text = st.text(
+    alphabet=st.characters(blacklist_characters="{}"),
+    max_size=30,
+)
 
-    @st.composite
-    def clarify_json_strategy(draw):
-        """Generate a valid clarify JSON payload embedded in arbitrary text."""
-        questions = draw(st.lists(
+
+@st.composite
+def clarify_json_strategy(draw):
+    """Generate a valid clarify JSON payload embedded in arbitrary text."""
+    questions = draw(
+        st.lists(
             st.text(min_size=1, max_size=80).filter(str.strip),
-            min_size=1, max_size=5,
-        ))
-        payload = json.dumps({"status": "clarify", "questions": questions})
-        prefix = draw(_safe_text)
-        suffix = draw(_safe_text)
-        return prefix + payload + suffix, questions
+            min_size=1,
+            max_size=5,
+        )
+    )
+    payload = json.dumps({"status": "clarify", "questions": questions})
+    prefix = draw(_safe_text)
+    suffix = draw(_safe_text)
+    return prefix + payload + suffix, questions
 
-    @st.composite
-    def ready_json_strategy(draw):
-        """Generate a valid ready JSON payload embedded in arbitrary text."""
-        yaml_config = draw(st.text(min_size=1, max_size=200).filter(str.strip))
-        payload = json.dumps({"status": "ready", "yaml_config": yaml_config})
-        prefix = draw(_safe_text)
-        suffix = draw(_safe_text)
-        return prefix + payload + suffix, yaml_config
-else:
-    def clarify_json_strategy():
-        pass
 
-    def ready_json_strategy():
-        pass
+@st.composite
+def ready_json_strategy(draw):
+    """Generate a valid ready JSON payload embedded in arbitrary text."""
+    yaml_config = draw(st.text(min_size=1, max_size=200).filter(str.strip))
+    payload = json.dumps({"status": "ready", "yaml_config": yaml_config})
+    prefix = draw(_safe_text)
+    suffix = draw(_safe_text)
+    return prefix + payload + suffix, yaml_config
 
 
 # ---------------------------------------------------------------------------
 # extract_json
 # ---------------------------------------------------------------------------
+
 
 class TestExtractJsonProperties:
     """Property-based tests for extract_json."""
@@ -95,7 +68,8 @@ class TestExtractJsonProperties:
         payload=st.dictionaries(
             st.text(min_size=1, max_size=20),
             st.text(max_size=50),
-            min_size=1, max_size=5,
+            min_size=1,
+            max_size=5,
         ),
         prefix=st.text(max_size=30),
         suffix=st.text(max_size=30),
@@ -116,7 +90,8 @@ class TestExtractJsonProperties:
         payload=st.dictionaries(
             st.text(min_size=1, max_size=20).filter(lambda s: '"' not in s),
             st.text(max_size=50).filter(lambda s: '"' not in s),
-            min_size=1, max_size=3,
+            min_size=1,
+            max_size=3,
         ),
         prefix=st.text(max_size=20).filter(lambda s: "```" not in s and "{" not in s),
         suffix=st.text(max_size=20).filter(lambda s: "```" not in s and "}" not in s),
@@ -135,6 +110,7 @@ class TestExtractJsonProperties:
 # parse_lego_agent_response robustness
 # ---------------------------------------------------------------------------
 
+
 class TestParseLegAgentResponseProperties:
     """Property-based tests for parse_lego_agent_response robustness."""
 
@@ -148,9 +124,7 @@ class TestParseLegAgentResponseProperties:
         except ValueError:
             pass  # Expected failure mode
         except (AttributeError, KeyError, TypeError) as exc:
-            pytest.fail(
-                f"parse_lego_agent_response raised {type(exc).__name__} for input {text!r}: {exc}"
-            )
+            pytest.fail(f"parse_lego_agent_response raised {type(exc).__name__} for input {text!r}: {exc}")
 
     @given(args=clarify_json_strategy())
     @settings(max_examples=50, deadline=1000)

@@ -1,0 +1,37 @@
+You are maintaining arbitration heuristics for an SRE diagnosis agent.
+These heuristics help the agent decide which root cause to submit when multiple anomalies
+are confirmed — specifically, how to identify the most fundamental cause and unify related
+anomalies into one coherent hypothesis.
+
+Current heuristics:
+---
+{{ prior_guidance or "(Empty — generate initial heuristics from the classification below)" }}
+---
+
+Failure classification from the latest problem:
+---
+{{ failure_classification }}
+---
+{% if stage_outputs %}
+
+Agent's stage outputs (especially the hypothesis coverage check) for context:
+---
+{{ stage_outputs }}
+---
+{% endif %}
+
+Task: Update the arbitration heuristics based on entries classified as arbitration failures
+or successes.
+
+Rules:
+- Each heuristic should describe a causal ordering pattern ("X is upstream of Y — if both
+  are anomalous, X is likely the root cause") or a unification strategy ("when you see A and
+  B together, they are usually caused by C").
+- Do NOT include application-specific names, port numbers, or field values.
+- If the classification shows an arbitration SUCCESS, reinforce the pattern that helped.
+- If the classification shows an arbitration FAILURE (agent submitted a downstream symptom),
+  add the causal ordering that was missed.
+- Merge near-duplicates. Remove heuristics contradicted by new evidence.
+- Preserve heuristics that were not implicated.
+- Maximum 10 heuristics total.
+- Output only the heuristic list (one `- ` bullet per item), no preamble or commentary.

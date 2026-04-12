@@ -1,5 +1,6 @@
-from unittest.mock import MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock
+
 from app_operator.filesystem import RealFilesystem
 
 

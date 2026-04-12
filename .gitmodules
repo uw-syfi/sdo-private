@@ -25,3 +25,6 @@
 [submodule "apps/sockshop"]
 	path = apps/sockshop
 	url = git@github.com:vic-lsh/sockshop.git
+[submodule "bench/sregym"]
+	path = bench/sregym
+	url = git@github.com:vic-lsh/SREGym.git

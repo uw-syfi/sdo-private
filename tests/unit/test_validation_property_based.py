@@ -5,69 +5,39 @@ edge cases that manual tests may miss.
 """
 
 import pytest
-
-# Try to import hypothesis, skip tests if not available
-try:
-    from hypothesis import given, strategies as st, assume, settings
-    HYPOTHESIS_AVAILABLE = True
-except ImportError:
-    HYPOTHESIS_AVAILABLE = False
-
-    def given(*args, **kwargs):
-        return pytest.mark.skip(reason="hypothesis not installed")
-
-    def assume(*args, **kwargs):
-        pass
-
-    class DummySettings:
-        def __call__(self, *args, **kwargs):
-            return pytest.mark.skip(reason="hypothesis not installed")
-
-    class DummyStrategies:
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: None
-
-    settings = DummySettings()
-    st = DummyStrategies()
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from app_operator.validation import (
-    validate_type,
-    validate_positive,
-    validate_non_negative,
-    validate_range,
+    validate_field,
     validate_in,
     validate_non_empty_str,
-    validate_field,
-)
-
-pytestmark = pytest.mark.skipif(
-    not HYPOTHESIS_AVAILABLE,
-    reason="hypothesis not installed - install with: uv add --dev hypothesis"
+    validate_non_negative,
+    validate_positive,
+    validate_range,
+    validate_type,
 )
 
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-if HYPOTHESIS_AVAILABLE:
-    # Values that are neither bool nor int (bool is a subclass of int)
-    non_int_strategy = st.one_of(
-        st.floats(allow_nan=False, allow_infinity=False),
-        st.text(),
-        st.binary(),
-        st.lists(st.integers()),
-        st.none(),
-    )
+# Values that are neither bool nor int (bool is a subclass of int)
+non_int_strategy = st.one_of(
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(),
+    st.binary(),
+    st.lists(st.integers()),
+    st.none(),
+)
 
-    # Pure integers (explicitly excluding bool)
-    pure_int_strategy = st.integers().filter(lambda x: not isinstance(x, bool))
-else:
-    non_int_strategy = None
-    pure_int_strategy = None
+# Pure integers (explicitly excluding bool)
+pure_int_strategy = st.integers().filter(lambda x: not isinstance(x, bool))
 
 
 # ---------------------------------------------------------------------------
 # validate_type
 # ---------------------------------------------------------------------------
+
 
 class TestValidateTypeProperties:
     """Property-based tests for validate_type."""
@@ -130,6 +100,7 @@ class TestValidateTypeProperties:
 # validate_positive
 # ---------------------------------------------------------------------------
 
+
 class TestValidatePositiveProperties:
     """Property-based tests for validate_positive."""
 
@@ -145,13 +116,14 @@ class TestValidatePositiveProperties:
     def test_non_positive_values_always_raise(self, value):
         """Values ≤ 0 always raise ValueError."""
         assume(value <= 0)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="must be positive"):
             validate_positive(value, "x")
 
 
 # ---------------------------------------------------------------------------
 # validate_non_negative
 # ---------------------------------------------------------------------------
+
 
 class TestValidateNonNegativeProperties:
     """Property-based tests for validate_non_negative."""
@@ -168,13 +140,14 @@ class TestValidateNonNegativeProperties:
     def test_negative_values_always_raise(self, value):
         """Values < 0 always raise ValueError."""
         assume(value < 0)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="must be non-negative"):
             validate_non_negative(value, "x")
 
 
 # ---------------------------------------------------------------------------
 # validate_range
 # ---------------------------------------------------------------------------
+
 
 class TestValidateRangeProperties:
     """Property-based tests for validate_range."""
@@ -192,7 +165,7 @@ class TestValidateRangeProperties:
         if in_range:
             validate_range(value, "x", min_val=lo, max_val=hi)  # should not raise
         else:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="must be in range"):
                 validate_range(value, "x", min_val=lo, max_val=hi)
 
     @given(
@@ -211,16 +184,20 @@ class TestValidateRangeProperties:
         in_range = not below and not above
         if in_range:
             validate_range(
-                value, "x",
-                min_val=lo, max_val=hi,
+                value,
+                "x",
+                min_val=lo,
+                max_val=hi,
                 min_exclusive=min_exclusive,
                 max_exclusive=max_exclusive,
             )
         else:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="must be"):
                 validate_range(
-                    value, "x",
-                    min_val=lo, max_val=hi,
+                    value,
+                    "x",
+                    min_val=lo,
+                    max_val=hi,
                     min_exclusive=min_exclusive,
                     max_exclusive=max_exclusive,
                 )
@@ -229,6 +206,7 @@ class TestValidateRangeProperties:
 # ---------------------------------------------------------------------------
 # validate_in
 # ---------------------------------------------------------------------------
+
 
 class TestValidateInProperties:
     """Property-based tests for validate_in."""
@@ -251,13 +229,14 @@ class TestValidateInProperties:
     def test_non_member_always_raises(self, values, value):
         """Values not in the set always raise ValueError."""
         assume(value not in values)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid"):
             validate_in(value, "x", values)
 
 
 # ---------------------------------------------------------------------------
 # validate_non_empty_str
 # ---------------------------------------------------------------------------
+
 
 class TestValidateNonEmptyStrProperties:
     """Property-based tests for validate_non_empty_str."""
@@ -267,7 +246,7 @@ class TestValidateNonEmptyStrProperties:
     def test_whitespace_only_always_raises(self, value):
         """Whitespace-only strings always raise ValueError."""
         assume(not value.strip())
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="must be a non-empty string"):
             validate_non_empty_str(value, "x")
 
     @given(value=st.one_of(st.integers(), st.floats(allow_nan=False), st.binary(), st.none()))
@@ -275,7 +254,7 @@ class TestValidateNonEmptyStrProperties:
     def test_non_strings_always_raise(self, value):
         """Non-string values always raise ValueError."""
         assume(not isinstance(value, str))
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="must be a non-empty string"):
             validate_non_empty_str(value, "x")
 
     @given(
@@ -290,6 +269,7 @@ class TestValidateNonEmptyStrProperties:
 # ---------------------------------------------------------------------------
 # validate_field combinator
 # ---------------------------------------------------------------------------
+
 
 class TestValidateFieldProperties:
     """Property-based tests for the validate_field combinator."""

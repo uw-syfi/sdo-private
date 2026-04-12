@@ -1,6 +1,6 @@
-from app_operator.config import load_config, Config
+from app_operator.config import Config, load_config
 from app_operator.logger import logger
-from libs.agent_cli.base import CodingAgent, AGENT_REGISTRY
+from libs.agent_cli.base import AGENT_REGISTRY, CodingAgent
 
 
 def create_agent_from_config(
@@ -27,23 +27,20 @@ def create_agent_from_config(
     if config is None:
         config = load_config(target_dir, config_path)
 
-    provider = config.agent.provider
+    backend = config.agent.backend
     model = model_override or config.agent.model
 
-    logger.info(f"Initializing coding agent provider: {provider}")
+    logger.info(f"Initializing coding agent backend: {backend}")
     if model:
         logger.info(f"Using coding agent model: {model}")
 
-    provider_lower = provider.lower()
-
-    if provider_lower in AGENT_REGISTRY:
+    if backend in AGENT_REGISTRY:
         kwargs = {"model": model}
-        if provider_lower in ("rlm", "subagent", "hybrid"):
+        if backend in ("rlm", "subagent", "hybrid"):
             kwargs["location"] = config.agent.location
-        return AGENT_REGISTRY[provider_lower](**kwargs)
+        if backend in ("rlm", "subagent", "hybrid"):
+            kwargs["dspy_config"] = config.dspy  # type: ignore[reportArgumentType]
+        return AGENT_REGISTRY[backend](**kwargs)
 
     available = sorted(AGENT_REGISTRY.keys())
-    raise ValueError(
-        f"Unknown agent provider '{provider}'. "
-        f"Available providers: {available}"
-    )
+    raise ValueError(f"Unknown agent backend '{backend}'. Available backends: {available}")
