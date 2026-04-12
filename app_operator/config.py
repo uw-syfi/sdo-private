@@ -336,7 +336,7 @@ class FaultInjectionConfig:
         validate_field(self.platform, "platform", str, valid_values=self.VALID_PLATFORMS)
 
 
-@dataclass(init=False)
+@dataclass
 class AgentConfig:
     backend: str = "codex"
     # Rate limiting and retry configuration
@@ -346,6 +346,7 @@ class AgentConfig:
     step_limit: int | None = 1000  # hard limit; soft limit = max(0, step_limit - 5)
     model_config: ModelConfig | None = None
 
+    # "rlm" is intentionally absent: RLMAgent is only reachable via backend="hybrid".
     VALID_BACKENDS = {
         "codex",
         "gemini",
@@ -359,34 +360,6 @@ class AgentConfig:
         "subagent",
         "hybrid",
     }
-
-    # Backward-compatible alias used by older tests and config files.
-    VALID_PROVIDERS = VALID_BACKENDS
-
-    def __init__(
-        self,
-        backend: str = "codex",
-        provider: str | None = None,
-        max_retries: int = 3,
-        retry_base_delay: int = 5,
-        rate_limit_backoff: int = 60,
-        step_limit: int | None = 1000,
-        model: str | None = None,
-        model_config: ModelConfig | None = None,
-    ) -> None:
-        if provider is not None:
-            backend = provider
-
-        self.backend = backend
-        self.max_retries = max_retries
-        self.retry_base_delay = retry_base_delay
-        self.rate_limit_backoff = rate_limit_backoff
-        self.step_limit = step_limit
-        self.model_config = model_config
-        self.__post_init__()
-
-        if model is not None:
-            self.model = model
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
@@ -408,15 +381,6 @@ class AgentConfig:
 
         if self.model_config is not None and not isinstance(self.model_config, ModelConfig):
             raise TypeError(f"model_config must be a ModelConfig or None, got {type(self.model_config).__name__}")
-
-    @property
-    def provider(self) -> str:
-        return self.backend
-
-    @provider.setter
-    def provider(self, value: str) -> None:
-        self.backend = value
-        self.__post_init__()
 
     @property
     def model(self) -> str | None:
@@ -557,7 +521,7 @@ class OperatorConfig:
 class RuntimeConfig:
     impl: str = "cli_agent"
 
-    VALID_IMPLS = {"cli_agent", "langgraph", "adk", "pydantic_ai"}
+    VALID_IMPLS = {"cli_agent", "pydantic_ai"}
 
     def __post_init__(self):
         validate_field(self.impl, "impl", str, valid_values=self.VALID_IMPLS)
@@ -656,13 +620,6 @@ class Config:
     gepa: GEPAConfig = field(default_factory=GEPAConfig)
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
-
-    def __post_init__(self):
-        if self.runtime.impl in {"langgraph", "adk"} and self.agent.model is None:
-            raise ValueError(
-                f"agent.model must be set for {self.runtime.impl} runtime. "
-                "Set [agent] model in your sds.toml to ensure reproducible results."
-            )
 
     @staticmethod
     def _validate_fields(section_data: dict, section_name: str, config_class: type) -> None:

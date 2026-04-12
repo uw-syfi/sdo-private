@@ -1,7 +1,7 @@
 """Shared type definitions for the app_operator package."""
 
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from libs.agent_cli.trajectory import FaultInjectionMetadata, TokenUsage
 
@@ -59,7 +59,6 @@ class TrajectoryCallRecord(_TrajectoryCallRecordRequired, total=False):
 
     prompt_version: str
     fallback_occurred: bool
-    prompt_artifact: dict[str, Any]
 
 
 class _ConversationEntryRequired(TypedDict):
@@ -74,4 +73,3 @@ class ConversationEntry(_ConversationEntryRequired, total=False):
     fallback_occurred: bool
     prompt_kwargs: dict
     rendered_prompt: str
-    prompt_artifact: dict[str, Any]

@@ -17,19 +17,7 @@ from app_operator.config import (
     OperatorConfig,
 )
 
-VALID_PROVIDERS = {
-    "codex",
-    "gemini",
-    "claude",
-    "claude-code",
-    "opencode",
-    "anthropic",
-    "vertex",
-    "openai",
-    "rlm",
-    "subagent",
-    "hybrid",
-}
+VALID_PROVIDERS = AgentConfig.VALID_BACKENDS
 
 
 # ---------------------------------------------------------------------------
