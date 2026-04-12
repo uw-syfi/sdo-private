@@ -139,6 +139,23 @@ def _init_mitigation_file(
     logger.info(f"Initialized mitigation shared file: {mitigation_file}")
 
 
+async def _get_conductor_stage() -> str | None:
+    """Query the conductor for the current stage.
+
+    Returns the stage name (e.g. ``"diagnosis"``, ``"mitigation"``, ``"done"``)
+    or ``None`` on failure.
+    """
+    api_base = f"http://{os.getenv('API_HOSTNAME', 'localhost')}:{os.getenv('API_PORT', '8000')}"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{api_base}/status", timeout=5)
+            resp.raise_for_status()
+            return resp.json().get("stage")
+    except Exception as e:
+        logger.debug("Failed to query conductor stage: %s", e)
+        return None
+
+
 async def _wait_for_mitigation_stage(api_base: str, timeout: int = 300) -> None:
     """Poll until conductor reaches mitigation stage."""
     start = time.monotonic()
@@ -378,15 +395,58 @@ async def _run_stage_loop(
                 )
 
             answer = sre_state.answer or ""
-            try:
-                success, message, oracle = await submit_to_benchmark(submit_mcp_url, answer, stage)
-                oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
+
+            # Check if the conductor already advanced past this stage (agent-cli
+            # backends may submit directly via HTTP, so the stage moves before
+            # the orchestrator gets a chance to submit).
+            already_submitted = False
+            if not answer:
+                current_stage = await _get_conductor_stage()
+                if current_stage and current_stage != stage:
+                    logger.info(
+                        "[%s] Conductor already at stage %r — agent submitted directly. "
+                        "Fetching existing results instead of re-submitting.",
+                        stage,
+                        current_stage,
+                    )
+                    already_submitted = True
+
+            if already_submitted:
+                # The agent submitted directly — don't re-submit.
+                # We can't fetch results without an API endpoint, so mark it
+                # as externally submitted. The conductor already graded it.
                 benchmark_block = (
-                    f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n"
-                    f"{oracle_text}\n</benchmark_result>\n"
+                    f"\n<benchmark_result>\n"
+                    f"message: Stage '{stage}' was submitted directly by the agent "
+                    f"(conductor already advanced to next stage).\n"
+                    f"</benchmark_result>\n"
                 )
-            except Exception as e:
-                benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+            elif not answer:
+                logger.warning(
+                    "[%s] Submitting empty answer to benchmark (no-judge mode, iteration %d). "
+                    "This likely means the SRE agent did not produce a valid answer.",
+                    stage,
+                    iteration,
+                )
+                try:
+                    success, message, oracle = await submit_to_benchmark(submit_mcp_url, answer, stage)
+                    oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
+                    benchmark_block = (
+                        f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n"
+                        f"{oracle_text}\n</benchmark_result>\n"
+                    )
+                except Exception as e:
+                    benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+            else:
+                try:
+                    success, message, oracle = await submit_to_benchmark(submit_mcp_url, answer, stage)
+                    oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
+                    benchmark_block = (
+                        f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n"
+                        f"{oracle_text}\n</benchmark_result>\n"
+                    )
+                except Exception as e:
+                    benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
 
             entry = (
                 f"\n### Iteration {iteration} — Judge Verdict ({stage})\n"
@@ -523,6 +583,77 @@ def _parse_short_circuit(interrupt_data: Any) -> ShortCircuitSignal | None:
             stage="mitigation",
         )
     return None
+
+
+async def _try_recovery_playbook_shortcut(
+    *,
+    driver: AgentDriver,
+    model: Any,
+    app_info: dict[str, Any],
+    diag_result: StageLoopResult,
+    injected_kb: InjectedKB | None,
+    shared_file: SharedFile,
+    submit_mcp_url: str,
+    renderer: PromptRenderer,
+    playbook_run_subagent: RunSubagent,
+    primary_collector: UsageCollector,
+    recovery_collector: UsageCollector,
+) -> StageLoopResult | None:
+    """Classify a failed-diagnosis recovery answer to a KB slug and try its playbook.
+
+    Runs only when the diagnosis was not confirmed by the benchmark. Uses the
+    long-term summary and the recovery agent's corrected answer to pick a slug
+    via an LLM classifier; if a mitigation playbook exists for that slug,
+    executes it via ``_try_playbook_shortcut``. Returns ``None`` on any miss
+    so the caller falls back to the normal mitigation loop.
+    """
+    if not injected_kb or not injected_kb.summary or not injected_kb.summary.exists():
+        logger.info("[recovery-playbook-shortcut] Skipped — no long-term summary available.")
+        return None
+    if not injected_kb.mitigation_playbooks_dir:
+        logger.info("[recovery-playbook-shortcut] Skipped — no mitigation playbooks directory injected.")
+        return None
+    if not diag_result.agent_answer:
+        logger.info("[recovery-playbook-shortcut] Skipped — no recovery answer available.")
+        return None
+
+    from sregym_agents.crucible.recovery_playbook_classifier import classify_recovery_playbook
+
+    try:
+        summary_text = injected_kb.summary.read_text()
+    except OSError as exc:
+        logger.warning("[recovery-playbook-shortcut] Failed to read summary: %s", exc)
+        return None
+
+    benchmark_reasoning = _extract_benchmark_reasoning(diag_result.benchmark_block, stage="diagnosis")
+
+    slug = await classify_recovery_playbook(
+        driver=driver,
+        model_id=model,
+        summary_text=summary_text,
+        recovery_answer=diag_result.agent_answer,
+        recovery_justification=diag_result.agent_justification,
+        recovery_causal_chain=diag_result.agent_causal_chain,
+        benchmark_reasoning=benchmark_reasoning,
+        usage_collector=recovery_collector,
+    )
+    if not slug:
+        shared_file.append("\n### Recovery Playbook Shortcut\n- Outcome: No slug match from classifier\n")
+        return None
+
+    logger.info("[recovery-playbook-shortcut] Classifier picked slug=%r — attempting playbook.", slug)
+    shared_file.append(f"\n### Recovery Playbook Shortcut\n- Classifier slug: {slug}\n- Attempting direct mitigation\n")
+    return await _try_playbook_shortcut(
+        run_subagent=playbook_run_subagent,
+        namespace=app_info.get("namespace", "default"),
+        slug=slug,
+        mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
+        shared_file=shared_file,
+        submit_mcp_url=submit_mcp_url,
+        renderer=renderer,
+        usage_collector=primary_collector,
+        model_id=model,
+    )
 
 
 async def _try_playbook_shortcut(
@@ -810,10 +941,23 @@ async def run(
 
     # Playbook shortcut
     mit_result: StageLoopResult | None = None
+    diag_confirmed = bool(diag_result.benchmark_block) and "success: True" in diag_result.benchmark_block
     if not crucible_config.enable_playbook_shortcut:
         logger.info("[playbook-shortcut] Disabled (enable_playbook_shortcut=false).")
-    elif not diag_result.benchmark_block or "success: True" not in diag_result.benchmark_block:
-        logger.info("[playbook-shortcut] Skipped — diagnosis was not confirmed by benchmark.")
+    elif not diag_confirmed:
+        mit_result = await _try_recovery_playbook_shortcut(
+            driver=driver,
+            model=model,
+            app_info=app_info,
+            diag_result=diag_result,
+            injected_kb=injected_kb,
+            shared_file=mitigation_sf,
+            submit_mcp_url=submit_mcp_url,
+            renderer=renderer,
+            playbook_run_subagent=playbook_run_subagent,
+            primary_collector=primary_collector,
+            recovery_collector=recovery_collector,
+        )
     elif not diag_result.confirmed_slugs:
         logger.info("[playbook-shortcut] Skipped — no KB slugs from diagnosis stage.")
     elif not injected_kb or not injected_kb.mitigation_playbooks_dir:
