@@ -535,37 +535,6 @@ class TestAgentCLIDriverPrompt:
         assert "submit_answer" not in result
 
 
-class TestAgentCLIDriverStreamJsonParsing:
-    def test_result_event(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        output = '{"type": "text", "text": "thinking..."}\n{"type": "result", "result": "final answer"}\n'
-        assert AgentCLIDriver._extract_result_from_stream_json(output) == "final answer"
-
-    def test_text_events_fallback(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        output = '{"type": "text", "text": "hello "}\n{"type": "text", "text": "world"}\n'
-        assert AgentCLIDriver._extract_result_from_stream_json(output) == "hello world"
-
-    def test_non_json_fallback(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        output = "plain text output\n"
-        assert AgentCLIDriver._extract_result_from_stream_json(output) == "plain text output"
-
-    def test_empty_output(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        assert AgentCLIDriver._extract_result_from_stream_json("") == ""
-
-    def test_last_result_wins(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        output = '{"type": "result", "result": "first"}\n{"type": "result", "result": "second"}\n'
-        assert AgentCLIDriver._extract_result_from_stream_json(output) == "second"
-
-
 class TestAgentCLIDriverJsonParsing:
     def test_json_tags(self):
         from pydantic import BaseModel
@@ -707,60 +676,6 @@ class TestAgentCLIDriverParseResultData:
         assert result.answer == "misconfigured CPU limits"
         assert result.justification == "evidence here"
         assert result.causal_chain == "A -> B -> C"
-
-
-class TestAgentCLIDriverMCPConfigJson:
-    def test_format(self):
-        import json as _json
-
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        driver = AgentCLIDriver(provider="claude", model="test-model")
-        config = driver._build_mcp_config_json(["run", "python", "-m", "foo", "--bar"])
-        parsed = _json.loads(config)
-        assert "mcpServers" in parsed
-        assert "crucible-tools" in parsed["mcpServers"]
-        assert parsed["mcpServers"]["crucible-tools"]["command"] == "uv"
-        assert parsed["mcpServers"]["crucible-tools"]["args"] == [
-            "run",
-            "python",
-            "-m",
-            "foo",
-            "--bar",
-        ]
-
-
-class TestAgentCLIDriverCommand:
-    def test_basic_command(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        driver = AgentCLIDriver(provider="claude", model="test-model")
-        cmd = driver._build_command("/usr/bin/claude", "test prompt", None)
-        assert cmd[0] == "/usr/bin/claude"
-        assert "-p" in cmd
-        assert "--dangerously-skip-permissions" in cmd
-        assert "--output-format" in cmd
-        assert "stream-json" in cmd
-        assert "--model" in cmd
-        assert "test-model" in cmd
-        assert "test prompt" in cmd
-
-    def test_command_with_mcp(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        driver = AgentCLIDriver(provider="claude", model="test-model")
-        mcp_json = '{"mcpServers": {}}'
-        cmd = driver._build_command("/usr/bin/claude", "prompt", mcp_json)
-        assert "--mcp-config" in cmd
-        assert mcp_json in cmd
-        assert "--strict-mcp-config" in cmd
-
-    def test_command_without_mcp(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-
-        driver = AgentCLIDriver(provider="claude", model="test-model")
-        cmd = driver._build_command("/usr/bin/claude", "prompt", None)
-        assert "--mcp-config" not in cmd
 
 
 class TestAgentCLIDriverGetJsonSchema:

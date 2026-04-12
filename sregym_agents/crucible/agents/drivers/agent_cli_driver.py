@@ -1,17 +1,22 @@
-"""AgentCLIDriver — ``AgentDriver`` implementation backed by CLI coding agents.
+"""AgentCLIDriver — ``AgentDriver`` backed by ``libs.agent_cli`` coding agents.
 
-Always uses ``CLICodingAgent`` (e.g. Claude Code) — no litellm fallback.
-KB-specific tools go through the crucible MCP server (stdio transport);
-native tools (bash, file, grep) are omitted since the CLI agent has them
-built-in.
+Uses a provider-agnostic ``CodingAgent`` (resolved from
+``libs.agent_cli.base.AGENT_REGISTRY``) and relies on it to spawn the
+underlying CLI, parse the stream-json events, and drive its
+``AgentEventHandler`` callbacks.  Crucible MCP tools are exposed to the
+CLI via a ``StdioMcpServer`` entry.
 
-Structured output for main agents uses a ``submit_answer`` MCP tool that
-writes to a result file.  Subagents use prompt-instructed JSON with
+Structured output flows through a ``submit_answer`` MCP tool that writes
+to a result file; free-form ``str`` output is the generate() return
+value.  Subagents without a result file use prompt-instructed JSON with
 ``<json>`` tags.
 
-Short-circuit interrupts are delivered via a Unix domain socket: the MCP
-server connects and sends a JSON signal; the driver's concurrent monitor
-kills the CLI process group immediately.
+Short-circuit interrupts are delivered via the result file: the MCP
+server writes ``{"short_circuit": true, ...}`` when an LTM interrupt
+fires; the driver reconstructs the interrupt after the CLI exits.
+Fast-kill on short-circuit is currently not wired (a regression vs the
+previous socket-based path); it will be restored via an event-handler
+hook once ``CLIGenerationSession`` exposes process ownership.
 """
 
 from __future__ import annotations
@@ -22,9 +27,7 @@ import json
 import logging
 import os
 import re
-import shutil
-import signal as signal_module
-import socket
+import subprocess
 import tempfile
 from typing import Any, TypeVar
 
@@ -44,6 +47,54 @@ _NATIVE_TOOL_NAMES = frozenset(
         "str_replace_file",
     }
 )
+
+
+class _LoggingEventHandler:
+    """``AgentEventHandler`` impl that logs tool calls / results / thinking.
+
+    Used to give the crucible driver real-time visibility into the CLI
+    agent's trajectory via standard Python logging.  Matches the
+    ``libs.agent_cli.events.AgentEventHandler`` protocol structurally.
+    """
+
+    def __init__(self, agent_name: str = "") -> None:
+        self._prefix = f"[{agent_name}] " if agent_name else ""
+        self._turn = 0
+
+    def on_thinking(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+        if len(text) > 300:
+            text = text[:300] + "..."
+        logger.info("%sassistant: %s", self._prefix, text)
+
+    def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
+        self._turn += 1
+        params_repr = json.dumps(args, default=str) if isinstance(args, dict) else (args or "")
+        if len(params_repr) > 300:
+            params_repr = params_repr[:300] + "..."
+        logger.info(
+            "%sTurn %d: tool_use(%s) %s",
+            self._prefix,
+            self._turn,
+            tool,
+            params_repr,
+        )
+
+    def on_tool_result(
+        self,
+        tool: str,
+        stdout: str = "",
+        stderr: str = "",
+        exit_code: int | None = None,
+        duration: float | None = None,
+    ) -> None:
+        output = stdout or stderr or ""
+        if len(output) > 300:
+            output = output[:300] + "..."
+        dur = f" ({duration:.2f}s)" if duration is not None else ""
+        logger.info("%stool_result(%s)%s: %s", self._prefix, tool, dur, output)
 
 
 class AgentCLIDriver(AgentDriver):
@@ -69,23 +120,6 @@ class AgentCLIDriver(AgentDriver):
         self._provider = provider
         self._model = model
         self._cwd = cwd
-        self._binary_path: str | None = None
-        self._env: dict[str, str] | None = None
-
-    def _ensure_binary(self) -> tuple[str, dict[str, str]]:
-        """Lazily resolve the CLI binary path and environment."""
-        if self._binary_path is not None and self._env is not None:
-            return self._binary_path, self._env
-
-        from libs.agent_cli.utils import get_interactive_env
-
-        env = get_interactive_env()
-        binary = shutil.which("claude", path=env.get("PATH")) or shutil.which("claude")
-        if not binary:
-            raise RuntimeError("claude binary not found in PATH. Please ensure Claude Code CLI is installed.")
-        self._binary_path = binary
-        self._env = env
-        return binary, env
 
     # ------------------------------------------------------------------
     # MCP server configuration
@@ -168,19 +202,6 @@ class AgentCLIDriver(AgentDriver):
         args.extend(["--backend", "agent-cli", "--provider", self._provider])
         return args
 
-    def _build_mcp_config_json(self, mcp_server_args: list[str]) -> str:
-        """Build the ``--mcp-config`` JSON string for Claude Code."""
-        return json.dumps(
-            {
-                "mcpServers": {
-                    "crucible-tools": {
-                        "command": "uv",
-                        "args": mcp_server_args,
-                    },
-                },
-            }
-        )
-
     # ------------------------------------------------------------------
     # Prompt construction
     # ------------------------------------------------------------------
@@ -255,30 +276,6 @@ class AgentCLIDriver(AgentDriver):
     # ------------------------------------------------------------------
     # Output parsing
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_result_from_stream_json(output: str) -> str:
-        """Extract the final result from Claude Code's stream-json output."""
-        result_text: str | None = None
-        text_parts: list[str] = []
-
-        for line in output.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-                etype = event.get("type")
-                if etype == "result":
-                    result_text = event.get("result", "")
-                elif etype == "text":
-                    text_parts.append(event.get("text", ""))
-            except json.JSONDecodeError:
-                text_parts.append(line)
-
-        if result_text is not None:
-            return result_text
-        return "".join(text_parts)
 
     @staticmethod
     def _parse_json_from_text(text: str, output_type: type[T]) -> T | None:
@@ -377,128 +374,34 @@ class AgentCLIDriver(AgentDriver):
         return output_type(**answer_data)  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
-    # Subprocess + signal socket
+    # Coding-agent instantiation
     # ------------------------------------------------------------------
 
-    def _build_command(
-        self,
-        binary: str,
-        prompt: str,
-        mcp_config_json: str | None,
-    ) -> list[str]:
-        """Build the Claude Code CLI command."""
-        cmd = [
-            binary,
-            "-p",
-            "--dangerously-skip-permissions",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            prompt,
-        ]
-        if self._model:
-            cmd.extend(["--model", self._model])
-        if mcp_config_json:
-            cmd.extend(["--mcp-config", mcp_config_json, "--strict-mcp-config"])
-        return cmd
+    def _build_coding_agent(self, agent_name: str, mcp_args: list[str] | None) -> Any:
+        """Construct a ``CodingAgent`` from the registry for this provider.
 
-    @staticmethod
-    def _kill_process_group(process: asyncio.subprocess.Process) -> None:
-        """Send SIGTERM to the subprocess's process group."""
-        if process.returncode is not None:
-            return
-        try:
-            pgid = os.getpgid(process.pid)  # type: ignore[arg-type]
-            os.killpg(pgid, signal_module.SIGTERM)
-        except (ProcessLookupError, OSError):
-            pass
-
-    async def _run_cli_process(
-        self,
-        cmd: list[str],
-        timeout: int,
-        env: dict[str, str],
-        signal_socket_path: str | None = None,
-    ) -> tuple[str, dict[str, Any] | None]:
-        """Run CLI subprocess with optional signal socket monitoring.
-
-        Returns ``(stdout_text, signal_data_or_none)``.  When a signal
-        is received the CLI process group is killed immediately.
+        Resolves via ``libs.agent_cli.base.AGENT_REGISTRY`` so the driver
+        stays provider-agnostic (new providers only need to register
+        themselves in ``libs/agent_cli``).
         """
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=self._cwd,
-            env=env,
-            start_new_session=True,
+        from libs.agent_cli.base import AGENT_REGISTRY
+        from libs.agent_cli.mcp_config import StdioMcpServer
+
+        agent_cls = AGENT_REGISTRY.get(self._provider.lower())
+        if agent_cls is None:
+            raise RuntimeError(
+                f"No CodingAgent registered for provider={self._provider!r}. Available: {sorted(AGENT_REGISTRY)}"
+            )
+
+        mcp_servers: list[StdioMcpServer] = []
+        if mcp_args is not None:
+            mcp_servers.append(StdioMcpServer(name="crucible-tools", command="uv", args=list(mcp_args)))
+
+        return agent_cls(
+            model=self._model,
+            event_handler=_LoggingEventHandler(agent_name),
+            mcp_servers=mcp_servers,
         )
-
-        signal_data: dict[str, Any] | None = None
-        monitor_task: asyncio.Task[None] | None = None
-
-        if signal_socket_path:
-
-            async def _monitor_signal() -> None:
-                nonlocal signal_data
-                server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                try:
-                    server_sock.setblocking(False)
-                    server_sock.bind(signal_socket_path)
-                    server_sock.listen(1)
-                    loop = asyncio.get_running_loop()
-                    conn, _ = await loop.sock_accept(server_sock)
-                    chunks: list[bytes] = []
-                    while True:
-                        chunk = await loop.sock_recv(conn, 4096)
-                        if not chunk:
-                            break
-                        chunks.append(chunk)
-                    conn.close()
-                    if chunks:
-                        signal_data = json.loads(b"".join(chunks).decode())
-                        self._kill_process_group(process)
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:
-                    logger.debug("Signal monitor error: %s", exc)
-                finally:
-                    server_sock.close()
-
-            monitor_task = asyncio.create_task(_monitor_signal())
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            self._kill_process_group(process)
-            await process.wait()
-            if monitor_task:
-                monitor_task.cancel()
-            raise
-
-        if monitor_task:
-            # Give the monitor a moment to finish if a signal just arrived
-            await asyncio.sleep(0.05)
-            monitor_task.cancel()
-            try:
-                await monitor_task
-            except asyncio.CancelledError:
-                pass
-
-        output = stdout.decode() if stdout else ""
-
-        if process.returncode != 0 and not signal_data:
-            stderr_text = stderr.decode()[:500] if stderr else ""
-            logger.warning(
-                "CLI agent exited with code %d: %s",
-                process.returncode,
-                stderr_text,
-            )
-
-        return output, signal_data
 
     async def run(
         self,
@@ -525,12 +428,9 @@ class AgentCLIDriver(AgentDriver):
         # run_ctx is pydantic-ai-specific; ignore it
         kwargs.pop("run_ctx", None)
 
-        binary, env = self._ensure_binary()
-
         # ----- MCP server setup -----
-        signal_socket_path: str | None = None
         result_file_path: str | None = None
-        mcp_config_json: str | None = None
+        mcp_args: list[str] | None = None
 
         role = self._determine_tool_role(deps)
         if role and deps is not None:
@@ -539,17 +439,11 @@ class AgentCLIDriver(AgentDriver):
                 prefix="crucible_result_",
             )
             os.close(result_fd)
-
-            signal_dir = tempfile.mkdtemp(prefix="crucible_signal_")
-            signal_socket_path = os.path.join(signal_dir, "signal.sock")
-
             mcp_args = self._build_mcp_server_args(
                 deps,
                 role,
-                signal_socket_path=signal_socket_path,
                 result_file_path=result_file_path,
             )
-            mcp_config_json = self._build_mcp_config_json(mcp_args)
 
         # ----- Prompt -----
         full_prompt = self._build_prompt(
@@ -559,35 +453,29 @@ class AgentCLIDriver(AgentDriver):
             has_result_file=result_file_path is not None,
         )
 
-        # ----- Command -----
-        cmd = self._build_command(binary, full_prompt, mcp_config_json)
+        # ----- Coding agent -----
+        coding_agent = self._build_coding_agent(agent_name, mcp_args)
         effective_timeout = timeout or 900
 
         # ----- Execute -----
         try:
             try:
-                raw_output, signal_data = await self._run_cli_process(
-                    cmd,
-                    effective_timeout,
-                    env,
-                    signal_socket_path=signal_socket_path,
+                response_text = await asyncio.to_thread(
+                    coding_agent.generate,
+                    full_prompt,
+                    cwd=self._cwd,
+                    timeout=effective_timeout,
                 )
-            except (asyncio.TimeoutError, RuntimeError) as exc:
+            except (asyncio.TimeoutError, subprocess.TimeoutExpired, RuntimeError) as exc:
                 logger.warning("CLI agent failed: %s", exc)
                 return AgentResult(completed=False)
 
-            # ----- Signal check -----
-            if signal_data and signal_data.get("short_circuit"):
-                return AgentResult(
-                    completed=False,
-                    interrupt_data=self._reconstruct_interrupt(signal_data),
-                )
-
             # ----- Result file check -----
+            has_result = False
             if result_file_path:
                 result_data = self._read_result_file(result_file_path)
-
                 if result_data:
+                    has_result = True
                     if result_data.get("short_circuit"):
                         return AgentResult(
                             completed=False,
@@ -599,19 +487,19 @@ class AgentCLIDriver(AgentDriver):
                             return AgentResult(output=output, completed=True)
                         except Exception as exc:
                             logger.warning("Failed to parse result file: %s", exc)
-                    if result_data.get("type") == "verdict":
-                        # Judge verdict — state is communicated via result file.
-                        # The orchestrator checks deps.state; here we pass
-                        # through since JudgeAgent will inspect result_data.
-                        pass
+                    # type == "verdict" is handled by JudgeAgent via deps.state
 
-            # ----- Parse from response text -----
-            response_text = self._extract_result_from_stream_json(raw_output)
-
+            # ----- No result from structured path; parse from response text -----
             if output_type is not str:
                 output = self._parse_json_from_text(response_text, output_type)
                 if output is not None:
                     return AgentResult(output=output, completed=True)
+                # Accepted: no structured output found
+                if not has_result:
+                    logger.warning(
+                        "CLI agent produced no structured output and no result file — treating as failed run."
+                    )
+                    return AgentResult(completed=False)
                 return AgentResult(completed=True, output=None)
 
             return AgentResult(
@@ -619,11 +507,6 @@ class AgentCLIDriver(AgentDriver):
                 completed=True,
             )
         finally:
-            if signal_socket_path:
-                shutil.rmtree(
-                    os.path.dirname(signal_socket_path),
-                    ignore_errors=True,
-                )
             if result_file_path:
                 try:
                     os.unlink(result_file_path)
