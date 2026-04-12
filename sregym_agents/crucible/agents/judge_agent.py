@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
-    from sregym_agents.crucible.tools._deps import SharedFile
+    from sregym_agents.crucible.tools import SharedFile
 
 logger = logging.getLogger(__name__)
 

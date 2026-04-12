@@ -297,7 +297,7 @@ class AgentCLIDriver(AgentDriver):
         # Fallback: find JSON objects via brace balancing
         i = 0
         while i < len(text):
-            if text[i] == '{':
+            if text[i] == "{":
                 depth = 0
                 start = i
                 in_string = False
@@ -308,7 +308,7 @@ class AgentCLIDriver(AgentDriver):
                     if escape:
                         escape = False
                         continue
-                    if ch == '\\' and in_string:
+                    if ch == "\\" and in_string:
                         escape = True
                         continue
                     if ch == '"' and not escape:
@@ -316,12 +316,12 @@ class AgentCLIDriver(AgentDriver):
                         continue
                     if in_string:
                         continue
-                    if ch == '{':
+                    if ch == "{":
                         depth += 1
-                    elif ch == '}':
+                    elif ch == "}":
                         depth -= 1
                         if depth == 0:
-                            candidate = text[start:j + 1]
+                            candidate = text[start : j + 1]
                             try:
                                 data = json.loads(candidate)
                                 if hasattr(output_type, "model_validate"):
@@ -349,7 +349,7 @@ class AgentCLIDriver(AgentDriver):
     @staticmethod
     def _reconstruct_interrupt(signal_data: dict[str, Any]) -> Any:
         """Reconstruct an interrupt exception from signal data."""
-        from sregym_agents.crucible.tools._kb_tools import (
+        from sregym_agents.crucible.tools import (
             LTMMitigationShortCircuit,
             LTMShortCircuit,
         )
@@ -621,7 +621,8 @@ class AgentCLIDriver(AgentDriver):
         finally:
             if signal_socket_path:
                 shutil.rmtree(
-                    os.path.dirname(signal_socket_path), ignore_errors=True,
+                    os.path.dirname(signal_socket_path),
+                    ignore_errors=True,
                 )
             if result_file_path:
                 try:

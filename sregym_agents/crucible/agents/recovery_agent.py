@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
-    from sregym_agents.crucible.tools._deps import SharedFile, SRESubmission
+    from sregym_agents.crucible.tools import SharedFile, SRESubmission
 
 logger = logging.getLogger(__name__)
 

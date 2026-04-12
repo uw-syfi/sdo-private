@@ -15,8 +15,12 @@ if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
     from sregym_agents.crucible.config import CrucibleConfig
-    from sregym_agents.crucible.tools._deps import SharedFile, SharedState, SRESubmission
-    from sregym_agents.crucible.tools._kb_tools import TriagePriors
+    from sregym_agents.crucible.tools import (
+        SharedFile,
+        SharedState,
+        SRESubmission,
+        TriagePriors,
+    )
 
 logger = logging.getLogger(__name__)
 

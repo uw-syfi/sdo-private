@@ -8,8 +8,10 @@ from pathlib import Path
 # names like ``last_request_tokens`` (a context-window byte counter).
 DEPRECATED = [r"\.request_tokens\b", r"\.response_tokens\b"]
 FILES = [
-    Path("sregym_agents/crucible/backend/pydantic_ai_driver.py"),
-    Path("sregym_agents/crucible/backend/agents.py"),
+    Path("sregym_agents/crucible/agents/drivers/pydantic_ai_driver.py"),
+    Path("sregym_agents/crucible/agents/sre_agent.py"),
+    Path("sregym_agents/crucible/agents/judge_agent.py"),
+    Path("sregym_agents/crucible/agents/recovery_agent.py"),
 ]
 
 
