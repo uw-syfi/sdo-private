@@ -18,6 +18,7 @@ from .claude_events import (
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
 from .mcp_config import HttpMcpServer, McpServerConfig
+from .sandbox import SandboxConfig, build_claude_sandbox_settings, resolve_sandbox
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
@@ -139,6 +140,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
         mcp_servers: list[McpServerConfig] | None = None,
+        sandbox: bool | SandboxConfig = False,
     ):
         """Initialize the Claude Code coding agent.
 
@@ -147,8 +149,22 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
             mcp_servers: Optional list of MCP server configurations.
+            sandbox: If True (or a ``SandboxConfig``), enable Claude Code's
+                native sandbox (bubblewrap on Linux / Seatbelt on macOS)
+                by injecting a ``sandbox`` settings block via
+                ``--settings``. Only bash subprocess commands are
+                sandboxed; the Claude process itself is not wrapped.
+                Defaults to False (no sandbox).
         """
         super().__init__("claude", model, recorder, event_handler, mcp_servers)
+        self.sandbox = resolve_sandbox(sandbox)
+        if self.sandbox is not None:
+            # Without this, Claude Code cd's into a per-invocation scratch dir
+            # under <project-root>/.local_tmp/claude-$UID/cwd-* before every
+            # Bash call. That dir is outside the sandbox's allow_write set, so
+            # every sandboxed Bash invocation fails with EROFS before its
+            # command runs. Maintaining the project cwd avoids the scratch dir.
+            self.env["CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"] = "1"
 
     @property
     def claude_path(self) -> str:
@@ -193,6 +209,8 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
                     "--strict-mcp-config",
                 ]
             )
+        if self.sandbox is not None:
+            cmd.extend(["--settings", json.dumps(build_claude_sandbox_settings(self.sandbox))])
         return cmd
 
     def _create_session(

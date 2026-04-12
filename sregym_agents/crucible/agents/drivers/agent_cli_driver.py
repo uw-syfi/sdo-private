@@ -169,6 +169,7 @@ class AgentCLIDriver(AgentDriver):
         provider: str = "claude",
         model: str = "claude-sonnet-4-6",
         cwd: str | None = None,
+        sandbox: bool | Any = False,
     ) -> None:
         if provider not in ("claude", "claude-code", "anthropic"):
             raise ValueError(
@@ -177,6 +178,7 @@ class AgentCLIDriver(AgentDriver):
         self._provider = provider
         self._model = model
         self._cwd = cwd
+        self._sandbox = sandbox
 
     # ------------------------------------------------------------------
     # MCP server configuration
@@ -462,6 +464,7 @@ class AgentCLIDriver(AgentDriver):
             model=self._model,
             event_handler=handler,
             mcp_servers=mcp_servers,
+            sandbox=self._sandbox,
         )
 
     async def run(

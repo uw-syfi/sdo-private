@@ -1,6 +1,7 @@
 from .base import register_provider
 from .cli_agent import CLICodingAgent
 from .mcp_config import HttpMcpServer, McpServerConfig
+from .sandbox import SandboxConfig
 
 
 @register_provider("openai", "codex")
@@ -11,13 +12,17 @@ class CodexCodingAgent(CLICodingAgent):
         self,
         model: str | None = None,
         mcp_servers: list[McpServerConfig] | None = None,
+        sandbox: bool | SandboxConfig = False,
     ):
         """Initialize the Codex coding agent.
 
         Args:
             model: Optional model name to use with codex. If None, uses default.
             mcp_servers: Optional list of MCP server configurations.
+            sandbox: Not supported for Codex; must be False.
         """
+        if sandbox:
+            raise NotImplementedError("sandbox is not supported for CodexCodingAgent")
         super().__init__("codex", model, mcp_servers=mcp_servers)
 
     @property

@@ -13,6 +13,7 @@ from .base import register_provider
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
 from .gemini_events import GeminiEvent, MessageEvent, ToolResultEvent, ToolUseEvent
+from .sandbox import SandboxConfig
 
 _logger = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ class GeminiCodingAgent(CLICodingAgent):
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
         mcp_servers: list[object] | None = None,
+        sandbox: bool | SandboxConfig = False,
     ):
         """Initialize the Gemini coding agent.
 
@@ -168,12 +170,16 @@ class GeminiCodingAgent(CLICodingAgent):
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
             mcp_servers: Optional list of MCP server configurations.
+            sandbox: Not supported for Gemini; must be False.
 
         Raises:
             ValueError: If mcp_servers is non-empty (not supported).
+            NotImplementedError: If ``sandbox`` is truthy.
         """
         if mcp_servers:
             raise ValueError("GeminiCodingAgent does not support programmatic MCP server configuration via CLI flags")
+        if sandbox:
+            raise NotImplementedError("sandbox is not supported for GeminiCodingAgent")
         super().__init__("gemini", model, recorder, event_handler)
 
     @property
