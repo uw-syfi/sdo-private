@@ -21,10 +21,6 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import Agent
-
-from libs.agent_mw import arun_with_retry_tracked
-
 from .mitigation_playbook import (
     MitigationPlaybook,
     MitigationPlaybookValidationError,
@@ -34,6 +30,7 @@ from .mitigation_playbook import (
 if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
+    from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
 logger = logging.getLogger(__name__)
@@ -44,11 +41,9 @@ class MitigationPlaybookSynthesizer:
 
     MAX_VALIDATION_RETRIES = 2
 
-    def __init__(self, model_id: str, renderer: PromptRenderer) -> None:
-        self.model_id = model_id
+    def __init__(self, renderer: PromptRenderer, driver: AgentDriver) -> None:
         self.prompts = renderer
-        # Set per-update by the owning ``StructuredKnowledgeBase``; LLM calls
-        # report through ``arun_with_retry_tracked`` to this collector.
+        self._driver = driver
         self.usage_collector: UsageCollector | None = None
 
     async def synthesize_from_success(
@@ -139,24 +134,24 @@ class MitigationPlaybookSynthesizer:
         """Render, call the LLM, and validate; retry on validation failure."""
         feedback = ""
         last_violations: list[str] = []
-        agent: Agent[None, str] = Agent(self.model_id, output_type=str)
 
         total_attempts = self.MAX_VALIDATION_RETRIES + 1
         for attempt in range(total_attempts):
             vars_with_feedback = {**template_vars, "validation_feedback": feedback}
             prompt = self.prompts.render(template_name, **vars_with_feedback)
+            agent_name = f"mitigation-playbook-{template_name.split('/')[-1]}"
             try:
-                result = await arun_with_retry_tracked(
-                    agent,
-                    prompt,
-                    agent_name=f"mitigation-playbook-{template_name.split('/')[-1]}",
+                dr_result = await self._driver.run(
+                    prompt=prompt,
+                    output_type=str,
+                    agent_name=agent_name,
                     usage_collector=self.usage_collector,
                 )
+                text = (dr_result.output or "").strip()
             except Exception as exc:
                 logger.error(f"Mitigation playbook {log_label}: LLM call failed on attempt {attempt + 1}: {exc}")
                 return None
 
-            text = result.output.strip()
             violations = validate_mitigation_playbook(text)
             if not violations:
                 try:

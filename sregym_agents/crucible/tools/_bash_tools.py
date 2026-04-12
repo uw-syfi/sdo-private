@@ -173,8 +173,7 @@ def exec_bash_any(ctx: RunContext[Any], cmd: str) -> str:
     return run_bash_sync(cmd)
 
 
-def read_file(
-    ctx: RunContext[Any],
+def read_file_impl(
     path: str,
     start_line: int = 0,
     end_line: int | None = None,
@@ -217,8 +216,26 @@ def read_file(
         return f"Error reading file: {e}"
 
 
-def grep(
+def read_file(
     ctx: RunContext[Any],
+    path: str,
+    start_line: int = 0,
+    end_line: int | None = None,
+) -> str:
+    """Read lines from a file and return them in cat -n format.
+
+    Args:
+        path: Absolute or relative path to the file.
+        start_line: First line to read (0-indexed, inclusive). Negative values
+            count from the end of the file (e.g. -50 starts at the 50th-last line).
+        end_line: Last line to read (0-indexed, exclusive). Defaults to 200
+            when start_line >= 0, or end-of-file when start_line < 0.
+            Use -1 to explicitly read through the end of the file.
+    """
+    return read_file_impl(path, start_line, end_line)
+
+
+def grep_impl(
     pattern: str,
     path: str = ".",
     include: str = "",
@@ -293,7 +310,23 @@ def grep(
     return result
 
 
-def write_file(ctx: RunContext[Any], path: str, content: str) -> str:
+def grep(
+    ctx: RunContext[Any],
+    pattern: str,
+    path: str = ".",
+    include: str = "",
+) -> str:
+    """Search for a regex pattern in files, returning matching lines with file paths and line numbers.
+
+    Args:
+        pattern: Regex pattern to search for.
+        path: File or directory to search in (default: current working directory).
+        include: Optional glob pattern to filter files (e.g. "*.yaml", "*.py").
+    """
+    return grep_impl(pattern, path, include)
+
+
+def write_file_impl(path: str, content: str) -> str:
     """Write content to a file, creating parent directories as needed.
 
     Args:
@@ -309,8 +342,17 @@ def write_file(ctx: RunContext[Any], path: str, content: str) -> str:
         return f"Error writing file: {e}"
 
 
-def str_replace_file(
-    ctx: RunContext[Any],
+def write_file(ctx: RunContext[Any], path: str, content: str) -> str:
+    """Write content to a file, creating parent directories as needed.
+
+    Args:
+        path: Destination file path.
+        content: Text content to write.
+    """
+    return write_file_impl(path, content)
+
+
+def str_replace_file_impl(
     path: str,
     old_str: str,
     new_str: str,
@@ -336,6 +378,22 @@ def str_replace_file(
         return f"Error: File not found: {path}"
     except Exception as e:
         return f"Error replacing in file: {e}"
+
+
+def str_replace_file(
+    ctx: RunContext[Any],
+    path: str,
+    old_str: str,
+    new_str: str,
+) -> str:
+    """Replace the first occurrence of old_str with new_str in a file.
+
+    Args:
+        path: Path to the file to edit.
+        old_str: Exact string to find (must appear at least once).
+        new_str: Replacement string.
+    """
+    return str_replace_file_impl(path, old_str, new_str)
 
 
 def exec_bash_readonly(ctx: RunContext[Any], cmd: str) -> str:

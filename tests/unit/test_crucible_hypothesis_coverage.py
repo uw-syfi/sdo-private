@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,8 +24,6 @@ from sregym_agents.crucible.tools import (
 
 
 def _make_sre_ctx(deps: SREDeps):
-    from unittest.mock import MagicMock
-
     ctx = MagicMock()
     ctx.deps = deps
     return ctx
@@ -35,6 +33,7 @@ def _make_deps(
     tmp_path: Path,
     triage_report: TriageReport | None = None,
     model_id: TestModel | None = None,
+    run_subagent: AsyncMock | None = None,
 ) -> SREDeps:
     shared_file = tmp_path / "session.md"
     shared_file.write_text("")
@@ -45,6 +44,7 @@ def _make_deps(
         stage="diagnosis",
         model_id=model_id if model_id is not None else TestModel(),
         triage_report=triage_report,
+        run_subagent=run_subagent,
     )
 
 
@@ -164,11 +164,8 @@ class TestCheckHypothesisCoverageSubagent:
             unexplained_anomalies=[],
             reasoning="All explained",
         )
-        deps = _make_deps(
-            tmp_path,
-            triage_report=triage,
-            model_id=TestModel(custom_output_args=verdict.model_dump()),
-        )
+        mock_run_subagent = AsyncMock(return_value=verdict)
+        deps = _make_deps(tmp_path, triage_report=triage, run_subagent=mock_run_subagent)
         ctx = _make_sre_ctx(deps)
 
         with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
@@ -186,11 +183,8 @@ class TestCheckHypothesisCoverageSubagent:
             unexplained_anomalies=["Service/geo has 0 endpoints"],
             reasoning="Hypothesis doesn't explain service issue",
         )
-        deps = _make_deps(
-            tmp_path,
-            triage_report=triage,
-            model_id=TestModel(custom_output_args=verdict.model_dump()),
-        )
+        mock_run_subagent = AsyncMock(return_value=verdict)
+        deps = _make_deps(tmp_path, triage_report=triage, run_subagent=mock_run_subagent)
         ctx = _make_sre_ctx(deps)
 
         with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
@@ -209,11 +203,8 @@ class TestCheckHypothesisCoverageSubagent:
             residual_rationale="Endpoints issue is downstream of same root cause per hypothesis scope.",
             reasoning="Partial OK",
         )
-        deps = _make_deps(
-            tmp_path,
-            triage_report=triage,
-            model_id=TestModel(custom_output_args=verdict.model_dump()),
-        )
+        mock_run_subagent = AsyncMock(return_value=verdict)
+        deps = _make_deps(tmp_path, triage_report=triage, run_subagent=mock_run_subagent)
         ctx = _make_sre_ctx(deps)
 
         with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
@@ -226,15 +217,11 @@ class TestCheckHypothesisCoverageSubagent:
 
     def test_subagent_failure_returns_graceful_error(self, tmp_path: Path) -> None:
         triage = _make_triage_report()
-        deps = _make_deps(tmp_path, triage_report=triage, model_id=TestModel())
+        mock_run_subagent = AsyncMock(side_effect=RuntimeError("model unavailable"))
+        deps = _make_deps(tmp_path, triage_report=triage, run_subagent=mock_run_subagent)
         ctx = _make_sre_ctx(deps)
 
-        mock_arun = AsyncMock(side_effect=RuntimeError("model unavailable"))
-
-        with (
-            patch("libs.pydantic_agent.InlineAgent.arun", mock_arun),
-            patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        ):
+        with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
             result = asyncio.run(check_hypothesis_coverage(ctx, hypothesis="some hypothesis"))
 
         assert "failed" in result.lower() or "error" in result.lower()

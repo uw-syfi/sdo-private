@@ -56,11 +56,20 @@ class VariantConfig:
             raise ValueError("variants.spec_names requires variants.enabled = true")
 
 
+_BOOL_ENV_TRUE = {"1", "true", "yes", "on"}
+
+
+def _parse_bool_env(value: str) -> bool:
+    return value.strip().lower() in _BOOL_ENV_TRUE
+
+
 @dataclasses.dataclass
 class RunnerEnv:
     judge_model_id: str = ""
     crucible_seed_kb_dir: str = ""
     worker_cpu_limit: str = ""
+    reuse_cluster: bool = False
+    force_recreate_cluster: bool = False
 
 
 @dataclasses.dataclass
@@ -139,6 +148,8 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         judge_model_id=env_raw.get("judge_model_id", ""),
         crucible_seed_kb_dir=env_raw.get("crucible_seed_kb_dir", ""),
         worker_cpu_limit=str(env_raw.get("worker_cpu_limit", "")),
+        reuse_cluster=bool(env_raw.get("reuse_cluster", False)),
+        force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
     )
 
     agent_config = raw.get("agent", {})
@@ -174,7 +185,7 @@ def resolve_config(
         env_overrides = dict(os.environ)
 
     updates: dict[str, Any] = {}
-    env_updates: dict[str, str] = {}
+    env_updates: dict[str, Any] = {}
 
     if "MODEL" in env_overrides:
         updates["model"] = env_overrides["MODEL"]
@@ -186,6 +197,10 @@ def resolve_config(
         env_updates["crucible_seed_kb_dir"] = env_overrides["CRUCIBLE_SEED_KB_DIR"]
     if "SREGYM_WORKER_CPU_LIMIT" in env_overrides:
         env_updates["worker_cpu_limit"] = env_overrides["SREGYM_WORKER_CPU_LIMIT"]
+    if "SREGYM_REUSE_CLUSTER" in env_overrides:
+        env_updates["reuse_cluster"] = _parse_bool_env(env_overrides["SREGYM_REUSE_CLUSTER"])
+    if "SREGYM_FORCE_RECREATE_CLUSTER" in env_overrides:
+        env_updates["force_recreate_cluster"] = _parse_bool_env(env_overrides["SREGYM_FORCE_RECREATE_CLUSTER"])
     if updates or env_updates:
         new_env = dataclasses.replace(config.env, **env_updates) if env_updates else config.env
         config = dataclasses.replace(config, **updates, env=new_env)
@@ -344,6 +359,10 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
         env["CRUCIBLE_SEED_KB_DIR"] = config.env.crucible_seed_kb_dir
     if config.env.worker_cpu_limit:
         env["SREGYM_WORKER_CPU_LIMIT"] = config.env.worker_cpu_limit
+    if config.env.reuse_cluster:
+        env["SREGYM_REUSE_CLUSTER"] = "1"
+    if config.env.force_recreate_cluster:
+        env["SREGYM_FORCE_RECREATE_CLUSTER"] = "1"
 
     env["SREGYM_PROGRESS_MODE"] = "rich"
 
@@ -405,6 +424,8 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"judge_model_id = {_toml_value(config.env.judge_model_id)}")
     lines.append(f"crucible_seed_kb_dir = {_toml_value(config.env.crucible_seed_kb_dir)}")
     lines.append(f"worker_cpu_limit = {_toml_value(config.env.worker_cpu_limit)}")
+    lines.append(f"reuse_cluster = {_toml_value(config.env.reuse_cluster)}")
+    lines.append(f"force_recreate_cluster = {_toml_value(config.env.force_recreate_cluster)}")
 
     for agent_name, agent_cfg in config.agent_config.items():
         lines.append("")

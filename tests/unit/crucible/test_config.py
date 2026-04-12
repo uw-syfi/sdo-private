@@ -120,3 +120,40 @@ def test_kb_task_matches_defaults_where_unset() -> None:
     cfg = crucible_config_from_kb_task(task)
     base = CrucibleConfig(prompt_version="v9")
     assert cfg == base
+
+
+def test_to_kb_task_fields_round_trips() -> None:
+    """to_kb_task_fields() output can reconstruct an equivalent config via crucible_config_from_kb_task."""
+    original = CrucibleConfig(
+        include_benchmark_results=True,
+        enable_reflection=False,
+        enable_playbooks=True,
+        recovery_phase2_enabled=True,
+        include_incident_files=False,
+        per_app=False,
+        prompt_version="v3",
+    )
+    fields = original.to_kb_task_fields()
+    reconstructed = crucible_config_from_kb_task(fields)
+    assert reconstructed.include_benchmark_results == original.include_benchmark_results
+    assert reconstructed.enable_reflection == original.enable_reflection
+    assert reconstructed.enable_playbooks == original.enable_playbooks
+    assert reconstructed.recovery_phase2_enabled == original.recovery_phase2_enabled
+    assert reconstructed.include_incident_files == original.include_incident_files
+    assert reconstructed.per_app == original.per_app
+    assert reconstructed.prompt_version == original.prompt_version
+
+
+def test_to_kb_task_fields_keys() -> None:
+    """to_kb_task_fields() returns exactly the expected keys."""
+    fields = CrucibleConfig().to_kb_task_fields()
+    expected = {
+        "include_benchmark_results",
+        "enable_reflection",
+        "enable_playbooks",
+        "recovery_phase2_enabled",
+        "include_incident_files",
+        "per_app",
+        "prompt_version",
+    }
+    assert set(fields.keys()) == expected

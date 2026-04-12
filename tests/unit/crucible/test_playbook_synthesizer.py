@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 if TYPE_CHECKING:
     import pytest
 
+from sregym_agents.crucible.agents.base import AgentResult
 from sregym_agents.crucible.knowledge_base.playbook import Playbook
 from sregym_agents.crucible.knowledge_base.playbook_synthesizer import PlaybookSynthesizer
 from sregym_agents.crucible.recovery_reflection import RecoveryReflection
@@ -66,106 +67,77 @@ def _make_recovery_reflection() -> RecoveryReflection:
     )
 
 
-def _make_mock_result(text: str) -> MagicMock:
-    """Return a mock LLM result whose .output is the given text."""
-    result = MagicMock()
-    result.output = text
-    return result
+def _make_agent_result(text: str) -> AgentResult[str]:
+    """Return an AgentResult whose .output is the given text."""
+    return AgentResult(output=text, completed=True, messages=[])
 
 
-def _make_synthesizer() -> tuple[PlaybookSynthesizer, MagicMock]:
-    """Return a (synthesizer, mock_renderer) pair wired to return "PROMPT"."""
+def _make_synthesizer(
+    side_effect: list[str] | None = None,
+    return_text: str = "",
+) -> tuple[PlaybookSynthesizer, MagicMock, AsyncMock]:
+    """Return a (synthesizer, mock_renderer, mock_driver_run) triple.
+
+    If *side_effect* is given, ``driver.run`` cycles through those strings.
+    Otherwise it always returns *return_text*.
+    """
     mock_renderer = MagicMock()
     mock_renderer.render.return_value = "PROMPT"
-    synth = PlaybookSynthesizer(model_id="test-model", renderer=mock_renderer)
-    return synth, mock_renderer
+    mock_driver = MagicMock()
+    if side_effect is not None:
+        mock_driver.run = AsyncMock(side_effect=[_make_agent_result(t) for t in side_effect])
+    else:
+        mock_driver.run = AsyncMock(return_value=_make_agent_result(return_text))
+    synth = PlaybookSynthesizer(renderer=mock_renderer, driver=mock_driver)
+    return synth, mock_renderer, mock_driver.run
 
 
 class TestSynthesizeFromSuccess:
     async def test_valid_playbook_on_first_attempt(self) -> None:
-        synth, mock_renderer = _make_synthesizer()
         valid_md = _valid_playbook_markdown(slug="foo", class_name="Foo")
-        mock_arun = AsyncMock(return_value=_make_mock_result(valid_md))
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.synthesize_from_success(
-                class_name="Foo",
-                slug="foo",
-                stage_outputs="stages",
-                oracle_answer="answer",
-            )
+        synth, mock_renderer, mock_run = _make_synthesizer(return_text=valid_md)
+        result = await synth.synthesize_from_success(
+            class_name="Foo",
+            slug="foo",
+            stage_outputs="stages",
+            oracle_answer="answer",
+        )
 
         assert result is not None
         assert isinstance(result, Playbook)
         assert result.slug == "foo"
         assert result.class_name == "Foo"
-        assert mock_arun.await_count == 1
-        # Renderer called with the correct template name.
+        assert mock_run.await_count == 1
         first_call = mock_renderer.render.call_args_list[0]
         assert first_call.args[0] == "kb/synthesize_playbook_from_success"
 
     async def test_validation_failure_then_success(self) -> None:
-        synth, mock_renderer = _make_synthesizer()
         invalid_md = "not a playbook"
         valid_md = _valid_playbook_markdown(slug="foo", class_name="Foo")
-        mock_arun = AsyncMock(
-            side_effect=[
-                _make_mock_result(invalid_md),
-                _make_mock_result(valid_md),
-            ]
+        synth, mock_renderer, mock_run = _make_synthesizer(side_effect=[invalid_md, valid_md])
+        result = await synth.synthesize_from_success(
+            class_name="Foo",
+            slug="foo",
+            stage_outputs="stages",
+            oracle_answer="answer",
         )
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.synthesize_from_success(
-                class_name="Foo",
-                slug="foo",
-                stage_outputs="stages",
-                oracle_answer="answer",
-            )
 
         assert result is not None
         assert result.slug == "foo"
-        assert mock_arun.await_count == 2
+        assert mock_run.await_count == 2
 
-        # First render: empty feedback. Second render: non-empty feedback with '- ' lines.
         call_list = mock_renderer.render.call_args_list
         assert len(call_list) == 2
-        first_kwargs = call_list[0].kwargs
-        assert first_kwargs.get("validation_feedback") == ""
-        second_kwargs = call_list[1].kwargs
-        feedback = second_kwargs.get("validation_feedback")
+        assert call_list[0].kwargs.get("validation_feedback") == ""
+        feedback = call_list[1].kwargs.get("validation_feedback")
         assert isinstance(feedback, str)
         assert feedback != ""
         assert "- " in feedback
 
     async def test_validation_failure_on_all_attempts_returns_none(self, caplog: pytest.LogCaptureFixture) -> None:
-        synth, _mock_renderer = _make_synthesizer()
         invalid_md = "not a playbook"
-        mock_arun = AsyncMock(return_value=_make_mock_result(invalid_md))
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-            caplog.at_level(logging.ERROR, logger="sregym_agents.crucible.knowledge_base.playbook_synthesizer"),
-        ):
-            MockAgent.return_value = MagicMock()
+        synth, _, mock_run = _make_synthesizer(return_text=invalid_md)
+        with caplog.at_level(logging.ERROR, logger="sregym_agents.crucible.knowledge_base.playbook_synthesizer"):
             result = await synth.synthesize_from_success(
                 class_name="Foo",
                 slug="foo",
@@ -174,56 +146,36 @@ class TestSynthesizeFromSuccess:
             )
 
         assert result is None
-        assert mock_arun.await_count == 3
-        # Error log produced after giving up.
+        assert mock_run.await_count == 3
         error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
         assert any("giving up" in r.message for r in error_records)
 
     async def test_llm_call_raises_returns_none_without_retries(self) -> None:
-        synth, _mock_renderer = _make_synthesizer()
-        mock_arun = AsyncMock(side_effect=RuntimeError("boom"))
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.synthesize_from_success(
-                class_name="Foo",
-                slug="foo",
-                stage_outputs="stages",
-                oracle_answer="answer",
-            )
+        synth, _, mock_run = _make_synthesizer()
+        mock_run.side_effect = RuntimeError("boom")
+        result = await synth.synthesize_from_success(
+            class_name="Foo",
+            slug="foo",
+            stage_outputs="stages",
+            oracle_answer="answer",
+        )
 
         assert result is None
-        assert mock_arun.await_count == 1
+        assert mock_run.await_count == 1
 
 
 class TestSynthesizeFromRecovery:
     async def test_valid_playbook_template_vars(self) -> None:
-        synth, mock_renderer = _make_synthesizer()
         valid_md = _valid_playbook_markdown(slug="bar", class_name="Bar")
-        mock_arun = AsyncMock(return_value=_make_mock_result(valid_md))
+        synth, mock_renderer, _ = _make_synthesizer(return_text=valid_md)
         reflection = _make_recovery_reflection()
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.synthesize_from_recovery(
-                class_name="Bar",
-                slug="bar",
-                stage_outputs="stages",
-                recovery_reflection=reflection,
-                oracle_answer="answer",
-            )
+        result = await synth.synthesize_from_recovery(
+            class_name="Bar",
+            slug="bar",
+            stage_outputs="stages",
+            recovery_reflection=reflection,
+            oracle_answer="answer",
+        )
 
         assert result is not None
         assert isinstance(result, Playbook)
@@ -246,62 +198,40 @@ class TestSlugOverride:
     """LLM-corrupted slugs are silently corrected to the known template slug."""
 
     async def test_synthesize_corrects_corrupted_slug(self) -> None:
-        synth, _ = _make_synthesizer()
-        # LLM drops an underscore: "for_a_service" → "for a_service"
         corrupted_md = _valid_playbook_markdown(
             slug="coredns_nxdomain_responses_for a_service",
             class_name="CoreDNS NXDOMAIN for a service",
         )
         expected_slug = "coredns_nxdomain_responses_for_a_service"
-        mock_arun = AsyncMock(return_value=_make_mock_result(corrupted_md))
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.synthesize_from_success(
-                class_name="CoreDNS NXDOMAIN for a service",
-                slug=expected_slug,
-                stage_outputs="stages",
-                oracle_answer="answer",
-            )
+        synth, _, _ = _make_synthesizer(return_text=corrupted_md)
+        result = await synth.synthesize_from_success(
+            class_name="CoreDNS NXDOMAIN for a service",
+            slug=expected_slug,
+            stage_outputs="stages",
+            oracle_answer="answer",
+        )
 
         assert result is not None
         assert result.slug == expected_slug
 
     async def test_refine_corrects_corrupted_slug(self) -> None:
-        synth, _ = _make_synthesizer()
         existing_md = _valid_playbook_markdown(
             slug="coredns_nxdomain_responses_for_a_service",
             class_name="CoreDNS NXDOMAIN for a service",
         )
         existing = Playbook.parse(existing_md)
-        # LLM drops an underscore in the refined output
         corrupted_md = _valid_playbook_markdown(
             slug="coredns_nxdomain_responses_for a_service",
             class_name="CoreDNS NXDOMAIN for a service",
         )
-        mock_arun = AsyncMock(return_value=_make_mock_result(corrupted_md))
+        synth, _, _ = _make_synthesizer(return_text=corrupted_md)
         reflection = _make_recovery_reflection()
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.refine(
-                existing=existing,
-                stage_outputs="fail-stages",
-                recovery_reflection=reflection,
-                oracle_answer="answer",
-            )
+        result = await synth.refine(
+            existing=existing,
+            stage_outputs="fail-stages",
+            recovery_reflection=reflection,
+            oracle_answer="answer",
+        )
 
         assert result is not None
         assert result.slug == "coredns_nxdomain_responses_for_a_service"
@@ -309,27 +239,17 @@ class TestSlugOverride:
 
 class TestRefine:
     async def test_refine_passes_existing_markdown(self) -> None:
-        synth, mock_renderer = _make_synthesizer()
         existing_md = _valid_playbook_markdown(slug="baz", class_name="Baz")
         existing = Playbook.parse(existing_md)
         new_md = _valid_playbook_markdown(slug="baz", class_name="Baz")
-        mock_arun = AsyncMock(return_value=_make_mock_result(new_md))
+        synth, mock_renderer, _ = _make_synthesizer(return_text=new_md)
         reflection = _make_recovery_reflection()
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.refine(
-                existing=existing,
-                stage_outputs="fail-stages",
-                recovery_reflection=reflection,
-                oracle_answer="answer",
-            )
+        result = await synth.refine(
+            existing=existing,
+            stage_outputs="fail-stages",
+            recovery_reflection=reflection,
+            oracle_answer="answer",
+        )
 
         assert result is not None
         assert isinstance(result, Playbook)
@@ -348,29 +268,19 @@ class TestRefine:
 
 class TestConsolidate:
     async def test_consolidate_winner_none_uses_placeholder(self) -> None:
-        synth, mock_renderer = _make_synthesizer()
         loser_md = _valid_playbook_markdown(slug="loser", class_name="Loser")
         loser = Playbook.parse(loser_md)
         new_md = _valid_playbook_markdown(slug="winner", class_name="Winner")
-        mock_arun = AsyncMock(return_value=_make_mock_result(new_md))
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.consolidate(
-                winner_class_name="Winner",
-                winner_slug="winner",
-                winner_playbook=None,
-                loser_playbooks=[loser],
-                combined_seen=5,
-                stage_outputs="stages",
-                recovery_summary="summary",
-            )
+        synth, mock_renderer, _ = _make_synthesizer(return_text=new_md)
+        result = await synth.consolidate(
+            winner_class_name="Winner",
+            winner_slug="winner",
+            winner_playbook=None,
+            loser_playbooks=[loser],
+            combined_seen=5,
+            stage_outputs="stages",
+            recovery_summary="summary",
+        )
 
         assert result is not None
         assert isinstance(result, Playbook)
@@ -388,7 +298,6 @@ class TestConsolidate:
         assert kwargs["winner_class_name"] == "Winner"
 
     async def test_consolidate_with_winner(self) -> None:
-        synth, mock_renderer = _make_synthesizer()
         winner_md = _valid_playbook_markdown(slug="winner", class_name="Winner")
         winner = Playbook.parse(winner_md)
         loser1_md = _valid_playbook_markdown(slug="loser1", class_name="Loser1")
@@ -396,25 +305,16 @@ class TestConsolidate:
         loser1 = Playbook.parse(loser1_md)
         loser2 = Playbook.parse(loser2_md)
         new_md = _valid_playbook_markdown(slug="winner", class_name="Winner")
-        mock_arun = AsyncMock(return_value=_make_mock_result(new_md))
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            result = await synth.consolidate(
-                winner_class_name="Winner",
-                winner_slug="winner",
-                winner_playbook=winner,
-                loser_playbooks=[loser1, loser2],
-                combined_seen=7,
-                stage_outputs="stages",
-                recovery_summary="summary",
-            )
+        synth, mock_renderer, _ = _make_synthesizer(return_text=new_md)
+        result = await synth.consolidate(
+            winner_class_name="Winner",
+            winner_slug="winner",
+            winner_playbook=winner,
+            loser_playbooks=[loser1, loser2],
+            combined_seen=7,
+            stage_outputs="stages",
+            recovery_summary="summary",
+        )
 
         assert result is not None
 
@@ -429,39 +329,21 @@ class TestConsolidate:
 
 class TestValidationFeedback:
     async def test_feedback_empty_on_first_call_and_populated_on_retry(self) -> None:
-        synth, mock_renderer = _make_synthesizer()
         invalid_md = "not a playbook"
         valid_md = _valid_playbook_markdown(slug="foo", class_name="Foo")
-        mock_arun = AsyncMock(
-            side_effect=[
-                _make_mock_result(invalid_md),
-                _make_mock_result(valid_md),
-            ]
+        synth, mock_renderer, _ = _make_synthesizer(side_effect=[invalid_md, valid_md])
+        await synth.synthesize_from_success(
+            class_name="Foo",
+            slug="foo",
+            stage_outputs="stages",
+            oracle_answer="answer",
         )
-
-        with (
-            patch(
-                "sregym_agents.crucible.knowledge_base.playbook_synthesizer.arun_with_retry_tracked",
-                mock_arun,
-            ),
-            patch("sregym_agents.crucible.knowledge_base.playbook_synthesizer.Agent") as MockAgent,
-        ):
-            MockAgent.return_value = MagicMock()
-            await synth.synthesize_from_success(
-                class_name="Foo",
-                slug="foo",
-                stage_outputs="stages",
-                oracle_answer="answer",
-            )
 
         calls = mock_renderer.render.call_args_list
         assert len(calls) == 2
 
-        # First call: empty feedback.
         assert calls[0].kwargs["validation_feedback"] == ""
 
-        # Second call: feedback is a non-empty string, formatted as "- <violation>"
-        # lines joined by newlines.
         feedback = calls[1].kwargs["validation_feedback"]
         assert isinstance(feedback, str)
         assert feedback

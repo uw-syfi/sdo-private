@@ -1,6 +1,8 @@
 import json
 import logging
+import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,7 @@ from .base import register_provider
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
 from .gemini_events import GeminiEvent, MessageEvent, ToolResultEvent, ToolUseEvent
+from .sandbox import SandboxConfig
 
 _logger = logging.getLogger(__name__)
 
@@ -157,6 +160,8 @@ class GeminiCodingAgent(CLICodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        mcp_servers: list[object] | None = None,
+        sandbox: bool | SandboxConfig = False,
     ):
         """Initialize the Gemini coding agent.
 
@@ -164,7 +169,17 @@ class GeminiCodingAgent(CLICodingAgent):
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
+            mcp_servers: Optional list of MCP server configurations.
+            sandbox: Not supported for Gemini; must be False.
+
+        Raises:
+            ValueError: If mcp_servers is non-empty (not supported).
+            NotImplementedError: If ``sandbox`` is truthy.
         """
+        if mcp_servers:
+            raise ValueError("GeminiCodingAgent does not support programmatic MCP server configuration via CLI flags")
+        if sandbox:
+            raise NotImplementedError("sandbox is not supported for GeminiCodingAgent")
         super().__init__("gemini", model, recorder, event_handler)
 
     @property
@@ -198,6 +213,7 @@ class GeminiCodingAgent(CLICodingAgent):
         timeout: int = 300,
         silent: bool = False,
         recorder: TrajectoryRecorderProtocol | None = None,
+        on_process_started: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> GeminiGenerationSession:
         return GeminiGenerationSession(
             binary_name=self.binary_name,
@@ -210,4 +226,5 @@ class GeminiCodingAgent(CLICodingAgent):
             silent=silent,
             recorder=recorder,
             event_handler=self.event_handler,
+            on_process_started=on_process_started,
         )
