@@ -63,13 +63,27 @@ steps:
 
 ### 3. Fan-out (Parallel Execution)
 Runs the SAME agent/component against multiple items in parallel.
+
+**Static items** — when you know the items upfront:
 ```yaml
 type: "fan_out"
 items: ["Task A", "Task B", "Task C"]
 agent:
   type: "agent"
-    instruction: "Process {input}..." # {input} is optional
+  instruction: "Process this: {input}"  # {input} is replaced with each item
 ```
+
+**Dynamic items from a previous chain step** — when items come from a prior agent's output, use `items: []`. The runtime will automatically split the previous step's output by newlines and scatter one item per agent. Use `{input}` in the instruction to receive the current item:
+```yaml
+type: "fan_out"
+items: []  # empty = split previous step's output by newlines
+agent:
+  type: "agent"
+  instruction: "Analyze the file at path: {input}. Use read_file to read its content."
+  tools: ["read_file", "write_file"]
+```
+
+**IMPORTANT:** Never use expression syntax like `{steps.0.output...}` in `items` — it is not evaluated. Use `items: []` for dynamic scatter over the prior step's output.
 
 ### 4. Summarize (Aggregation)
 Aggregates a list of inputs (usually from Fan-out) into one string.
@@ -78,7 +92,7 @@ type: "summarize"
 instruction: "Summarize these reports."
 agent:
   type: "agent"
-    instruction: "You are a summarizer..."
+  instruction: "You are a summarizer..."
 ```
 
 ### 5. Judge Loop (Iterative Refinement)
