@@ -239,6 +239,7 @@ class CLICodingAgent(CodingAgent):
                 text=True,
                 check=False,
                 env=self.env,
+                stdin=subprocess.DEVNULL,
             )
             if result.returncode != 0:
                 raise RuntimeError(
