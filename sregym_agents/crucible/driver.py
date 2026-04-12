@@ -51,56 +51,11 @@ def create_driver(
     """
     print(f"[crucible] Driver backend: {config.backend}")
     if config.backend == "agent-cli":
-        from libs.agent_cli import SandboxConfig
         from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.sandbox import build_crucible_sandbox
 
-        # Confine bash subprocess reads to the experiment cwd plus the
-        # minimum set of system dirs required for shell commands to
-        # execute (/bin/bash, shared libs, certs, /proc/, tls, …). Without
-        # the system dirs in allow_read, `bwrap` cannot even resolve
-        # /bin/bash and every Bash tool call fails.
         exp_cwd = os.path.abspath(os.getcwd())
-        system_read_paths = [
-            "/bin",
-            "/sbin",
-            "/usr",
-            "/lib",
-            "/lib64",
-            "/etc",
-            "/opt",
-            "/var",
-            "/proc",
-            "/sys",
-            "/dev",
-            "/tmp",
-            "/run",
-        ]
-        allow_read = [exp_cwd, *system_read_paths]
-        for key in ("KUBECONFIG", "SREGYM_BASE_KUBECONFIG"):
-            kc = os.environ.get(key)
-            if not kc:
-                continue
-            kc_abs = os.path.abspath(kc.split(os.pathsep)[0])
-            allow_read.append(kc_abs)
-            allow_read.append(os.path.dirname(kc_abs))
-
-        # kubectl writes its disk cache to ~/.kube/cache and ~/.kube/http-cache
-        # by default; allow writes there so kubectl doesn't warn on every call.
-        allow_write = [os.path.expanduser("~/.kube")]
-
-        sandbox_cfg = SandboxConfig(
-            deny_read=["/"],
-            allow_read=allow_read,
-            allow_write=allow_write,
-            # Block Claude's native Read/Glob/Grep from escaping cwd. The
-            # OS-level sandbox only constrains bash subprocesses; native
-            # tools need a PreToolUse hook to be confined.
-            confine_native_reads_to=[exp_cwd],
-            # The sandbox's net namespace blocks loopback traffic to the
-            # per-worker k8s proxy. Run these commands outside the sandbox
-            # so they can reach 127.0.0.1:<port>.
-            excluded_commands=["kubectl *", "curl *", "wget *"],
-        )
+        sandbox_cfg = build_crucible_sandbox(exp_cwd)
         print(
             f"[crucible] Using AgentCLIDriver (provider={config.agent_cli_provider}, "
             f"model={model}, sandbox=workspace-only cwd={exp_cwd})"
@@ -108,6 +63,7 @@ def create_driver(
         return AgentCLIDriver(
             provider=config.agent_cli_provider,
             model=model,
+            cwd=exp_cwd,
             sandbox=sandbox_cfg,
         )
 

@@ -288,15 +288,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Backend for subagent dispatch within KB tools.",
     )
     parser.add_argument("--provider", default="claude", help="CLI agent provider (agent-cli backend only).")
+    parser.add_argument(
+        "--exp-cwd",
+        default=None,
+        help="Experiment working directory (used to sandbox + spawn subagents in the right dir).",
+    )
     return parser
 
 
-def _create_run_subagent(backend: str, model: str, provider: str):
+def _create_run_subagent(backend: str, model: str, provider: str, exp_cwd: str | None):
     """Create a ``run_subagent`` closure for KB tool subagent dispatch."""
     if backend == "agent-cli":
         from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.sandbox import build_crucible_sandbox
 
-        driver: Any = AgentCLIDriver(provider=provider, model=model)
+        sandbox_cfg = build_crucible_sandbox(exp_cwd) if exp_cwd else False
+        driver: Any = AgentCLIDriver(
+            provider=provider,
+            model=model,
+            cwd=exp_cwd,
+            sandbox=sandbox_cfg,
+        )
     else:
         from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import PydanticAIDriver
 
@@ -337,7 +349,7 @@ def main() -> None:
     renderer = PromptRenderer(args.prompt_version)
 
     # Create run_subagent closure for KB tool subagent dispatch
-    run_subagent = _create_run_subagent(args.backend, args.model, args.provider)
+    run_subagent = _create_run_subagent(args.backend, args.model, args.provider, args.exp_cwd)
 
     if args.tools in ("sre", "all"):
         from sregym_agents.crucible.config import CrucibleConfig

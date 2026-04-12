@@ -235,6 +235,13 @@ class AgentCLIDriver(AgentDriver):
             prompt_version,
         ]
 
+        # Forward the experiment cwd so the MCP-side subagent driver can
+        # match the parent's sandbox + spawn cwd. The MCP subprocess itself
+        # is launched with --directory _REPO_ROOT, so it cannot recover the
+        # exp cwd from os.getcwd().
+        if self._cwd:
+            args.extend(["--exp-cwd", str(self._cwd)])
+
         if role == "sre":
             if getattr(deps, "lt_summary_file", None):
                 args.extend(["--lt-summary-file", str(deps.lt_summary_file)])
