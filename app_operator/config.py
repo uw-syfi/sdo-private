@@ -500,7 +500,8 @@ class OperatorConfig:
 
         if not isinstance(self.dynamic_observability_injection, bool):
             raise TypeError(
-                f"dynamic_observability_injection must be bool, got {type(self.dynamic_observability_injection).__name__}"
+                "dynamic_observability_injection must be bool, got "
+                f"{type(self.dynamic_observability_injection).__name__}"
             )
 
 

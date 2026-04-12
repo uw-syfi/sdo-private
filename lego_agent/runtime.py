@@ -242,9 +242,7 @@ class Chain(Runnable):
         current_data = input_data
         for i, step in enumerate(self.steps):
             print(f"__LEGO_STEP_START__ {i}", flush=True)
-            print(
-                f"\n{Colors.BOLD}--- Step {i + 1}/{len(self.steps)} ({type(step).__name__}) ---{Colors.ENDC}"
-            )
+            print(f"\n{Colors.BOLD}--- Step {i + 1}/{len(self.steps)} ({type(step).__name__}) ---{Colors.ENDC}")
             current_data = step.run(current_data)
             print(f"__LEGO_STEP_END__ {i}", flush=True)
         return current_data
@@ -276,7 +274,7 @@ class FanOut(Runnable):
             else:
                 items = []
 
-        instruction = getattr(self.agent, 'instruction', None)
+        instruction = getattr(self.agent, "instruction", None)
 
         prompts_to_run = []
         for item in items:
