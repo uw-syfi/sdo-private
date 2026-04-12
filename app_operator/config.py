@@ -477,8 +477,6 @@ class OperatorConfig:
     agent_fix_timeout: int = 2700
     deploy_timeout: int = 900
     agent_timeout: int = 900
-    dynamic_observability_injection: bool = False
-    remediation_max_retries: int = 3
     phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
 
     def __post_init__(self):
@@ -493,16 +491,9 @@ class OperatorConfig:
             "agent_fix_timeout",
             "deploy_timeout",
             "agent_timeout",
-            "remediation_max_retries",
         ]:
             value = getattr(self, field_name)
             validate_field(value, field_name, int, positive=True)
-
-        if not isinstance(self.dynamic_observability_injection, bool):
-            raise TypeError(
-                "dynamic_observability_injection must be bool, got "
-                f"{type(self.dynamic_observability_injection).__name__}"
-            )
 
 
 @dataclass
