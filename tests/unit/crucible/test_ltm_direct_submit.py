@@ -73,6 +73,8 @@ def _make_sre_deps(
     enable_ltm_verified_direct_submit: bool = False,
     iteration: int = 1,
 ) -> SREDeps:
+    from sregym_agents.crucible.config import CrucibleConfig
+
     shared_path = tmp_path / "shared.md"
     shared_path.write_text("# Session\n")
     return SREDeps(
@@ -82,11 +84,11 @@ def _make_sre_deps(
         stage="diagnosis",
         renderer=PromptRenderer("v3"),
         state=SharedState(),
+        config=CrucibleConfig(enable_ltm_verified_direct_submit=enable_ltm_verified_direct_submit),
         lt_summary_file=tmp_path / "lt_summary.md",
         model_id="test",  # type: ignore[arg-type]
         ltm_call_budget=1,
         usage_collector=UsageCollector(),
-        enable_ltm_verified_direct_submit=enable_ltm_verified_direct_submit,
     )
 
 

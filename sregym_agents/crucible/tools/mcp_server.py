@@ -340,6 +340,12 @@ def main() -> None:
     run_subagent = _create_run_subagent(args.backend, args.model, args.provider)
 
     if args.tools in ("sre", "all"):
+        from sregym_agents.crucible.config import CrucibleConfig
+
+        mcp_config = CrucibleConfig(
+            enable_ltm_verified_direct_submit=args.enable_ltm_verified_direct_submit,
+            prompt_version=args.prompt_version,
+        )
         sre_deps = SREDeps(
             namespace=args.namespace,
             shared_file=shared_file,
@@ -348,12 +354,12 @@ def main() -> None:
             model_id=args.model,
             renderer=renderer,
             state=shared_state,
+            config=mcp_config,
             lt_summary_file=Path(args.lt_summary_file) if args.lt_summary_file else None,
             incidents_dir=Path(args.incidents_dir) if args.incidents_dir else None,
             playbooks_dir=Path(args.playbooks_dir) if args.playbooks_dir else None,
             mitigation_playbooks_dir=Path(args.mitigation_playbooks_dir) if args.mitigation_playbooks_dir else None,
             ltm_call_budget=args.ltm_call_budget,
-            enable_ltm_verified_direct_submit=args.enable_ltm_verified_direct_submit,
             run_subagent=run_subagent,
         )
         register_sre_tools(

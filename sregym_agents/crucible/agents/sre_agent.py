@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
+    from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.tools._deps import SharedFile, SharedState, SRESubmission
     from sregym_agents.crucible.tools._kb_tools import TriagePriors
 
@@ -22,10 +23,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SREAgentConfig:
-    """Static configuration that doesn't change per-iteration."""
+    """Static configuration that doesn't change per-iteration.
 
-    enable_ltm_retrieval: bool = False
-    enable_ltm_verified_direct_submit: bool = False
+    Feature flags live on ``config`` (a ``CrucibleConfig``); this dataclass
+    only carries *derived* data that is built from the config + injected KB.
+    """
+
+    config: CrucibleConfig
     lt_summary_file: Path | None = None
     incidents_dir: Path | None = None
     playbooks_dir: Path | None = None
@@ -53,7 +57,11 @@ class SREAgent:
         self._driver = driver
         self._model_id = model_id
         self._renderer = renderer
-        self._config = config or SREAgentConfig()
+        if config is None:
+            from sregym_agents.crucible.config import CrucibleConfig as _CC
+
+            config = SREAgentConfig(config=_CC())
+        self._config = config
 
     def _assemble_tools(self, stage: str) -> list[Any]:
         """Return the tool list for the given stage."""
@@ -121,6 +129,7 @@ class SREAgent:
         from sregym_agents.crucible.tools import SREDeps
 
         cfg = self._config
+        ltm_on = cfg.config.enable_ltm_retrieval
         return SREDeps(
             namespace=namespace,
             shared_file=shared_file,
@@ -129,11 +138,11 @@ class SREAgent:
             model_id=self._model_id,
             renderer=self._renderer,
             state=state,
-            lt_summary_file=cfg.lt_summary_file if cfg.enable_ltm_retrieval else None,
-            incidents_dir=cfg.incidents_dir if cfg.enable_ltm_retrieval else None,
-            playbooks_dir=cfg.playbooks_dir if cfg.enable_ltm_retrieval else None,
-            mitigation_playbooks_dir=(cfg.mitigation_playbooks_dir if cfg.enable_ltm_retrieval else None),
-            enable_ltm_verified_direct_submit=cfg.enable_ltm_verified_direct_submit,
+            config=cfg.config,
+            lt_summary_file=cfg.lt_summary_file if ltm_on else None,
+            incidents_dir=cfg.incidents_dir if ltm_on else None,
+            playbooks_dir=cfg.playbooks_dir if ltm_on else None,
+            mitigation_playbooks_dir=(cfg.mitigation_playbooks_dir if ltm_on else None),
             triage_priors=cfg.triage_priors,
             verification_guidance=cfg.verification_guidance,
             stage_outputs_file=cfg.stage_outputs_file,

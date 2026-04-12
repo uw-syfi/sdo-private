@@ -618,37 +618,40 @@ class TestCreateKnowledgeBase:
             create_knowledge_base("invalid", tmp_path / "kb", renderer=_renderer, driver=mock_driver)
 
     def test_include_incident_files_forwarded(self, tmp_path: Path, mock_driver):
+        cfg = CrucibleConfig(include_incident_files=False)
         kb = create_knowledge_base(
             "structured",
             tmp_path / "kb",
-            config=CrucibleConfig(include_incident_files=False),
+            config=cfg,
             renderer=_renderer,
             driver=mock_driver,
         )
         assert isinstance(kb, StructuredKnowledgeBase)
-        assert kb.include_incident_files is False
+        assert kb._config.include_incident_files is False
 
     def test_include_benchmark_results_forwarded(self, tmp_path: Path, mock_driver):
+        cfg = CrucibleConfig(include_benchmark_results=True)
         kb = create_knowledge_base(
             "structured",
             tmp_path / "kb",
-            config=CrucibleConfig(include_benchmark_results=True),
+            config=cfg,
             renderer=_renderer,
             driver=mock_driver,
         )
         assert isinstance(kb, StructuredKnowledgeBase)
-        assert kb.include_benchmark_results is True
+        assert kb._config.include_benchmark_results is True
 
     def test_include_benchmark_results_forwarded_append_only(self, tmp_path: Path, mock_driver):
+        cfg = CrucibleConfig(include_benchmark_results=True)
         kb = create_knowledge_base(
             "append-only",
             tmp_path / "kb",
-            config=CrucibleConfig(include_benchmark_results=True),
+            config=cfg,
             renderer=_renderer,
             driver=mock_driver,
         )
         assert isinstance(kb, AppendOnlyKnowledgeBase)
-        assert kb.include_benchmark_results is True
+        assert kb._config.include_benchmark_results is True
 
 
 class TestIncludeBenchmarkResults:

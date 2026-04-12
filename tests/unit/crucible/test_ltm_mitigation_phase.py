@@ -128,6 +128,8 @@ def _make_sre_deps(
     with_mitigation_playbook: bool = True,
     with_lt_summary: bool = True,
 ) -> SREDeps:
+    from sregym_agents.crucible.config import CrucibleConfig
+
     shared_path = tmp_path / "shared.md"
     shared_path.write_text("# Session\n")
     mitigation_playbooks_dir: Path | None = None
@@ -144,11 +146,11 @@ def _make_sre_deps(
         stage="mitigation",
         renderer=PromptRenderer("v3"),
         state=SharedState(),
+        config=CrucibleConfig(enable_ltm_verified_direct_submit=enable_ltm_verified_direct_submit),
         lt_summary_file=lt_summary_file,
         model_id="test",  # type: ignore[arg-type]
         ltm_call_budget=1,
         usage_collector=UsageCollector(),
-        enable_ltm_verified_direct_submit=enable_ltm_verified_direct_submit,
         mitigation_playbooks_dir=mitigation_playbooks_dir,
     )
 

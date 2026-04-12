@@ -280,12 +280,13 @@ class TestRoleAgentConstruction:
 
     def test_sre_agent_construction(self):
         from sregym_agents.crucible.agents import SREAgent, SREAgentConfig
+        from sregym_agents.crucible.config import CrucibleConfig
 
         agent = SREAgent(
             driver=self._mock_driver(),
             model_id="test-model",
             renderer=self._mock_renderer(),
-            config=SREAgentConfig(),
+            config=SREAgentConfig(config=CrucibleConfig()),
         )
         assert agent._driver is not None
         assert agent._model_id == "test-model"

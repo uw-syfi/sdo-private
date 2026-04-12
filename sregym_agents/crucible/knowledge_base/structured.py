@@ -100,11 +100,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self.app_name = app_name
         self.app_dir = self.kb_dir / sanitize_app_name(self.app_name)
         self.app_dir.mkdir(parents=True, exist_ok=True)
-        self.include_benchmark_results = config.include_benchmark_results
-        self.enable_reflection = config.enable_reflection
-        self.enable_playbooks = config.enable_playbooks
-        self.include_incident_files = config.include_incident_files
-        self.per_app = config.per_app
+        self._config = config
         self.prompts = renderer
         self.schema = SCHEMA_V2
         self._driver = driver
@@ -114,7 +110,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self._playbook_synthesizer: PlaybookSynthesizer | None = None
         self._mitigation_playbook_store: MitigationPlaybookStore | None = None
         self._mitigation_playbook_synthesizer: MitigationPlaybookSynthesizer | None = None
-        if self.enable_playbooks:
+        if self._config.enable_playbooks:
             self._playbook_store = PlaybookStore(self.kb_dir / "playbooks")
             self._playbook_synthesizer = PlaybookSynthesizer(renderer, driver=driver)
             self._mitigation_playbook_store = MitigationPlaybookStore(self.kb_dir / "mitigation_playbooks")
@@ -184,7 +180,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     @property
     def summary_path(self) -> Path:
-        if self.per_app:
+        if self._config.per_app:
             return self.app_dir / self.schema.summary
         return self.kb_dir / self.schema.summary
 
@@ -198,7 +194,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     @property
     def incidents_dir(self) -> Path:
-        if self.per_app:
+        if self._config.per_app:
             return self.app_dir / self.schema.incidents_dir
         return self.kb_dir / self.schema.incidents_dir / sanitize_app_name(self.app_name)
 
@@ -250,7 +246,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         else:
             logger.warning("Knowledge base: no architecture file found.")
 
-        if self.include_incident_files and self.per_app and self.incidents_dir.is_dir():
+        if self._config.include_incident_files and self._config.per_app and self.incidents_dir.is_dir():
             incident_files = sorted(self.incidents_dir.glob("*.md"))[-MAX_INJECTED_INCIDENTS:]
             if incident_files:
                 dest_incidents = target_dir / self.schema.incidents_dir
@@ -259,7 +255,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     shutil.copy2(f, dest_incidents / f.name)
                 result.incidents_dir = dest_incidents
                 logger.info(f"Knowledge base: copied {len(incident_files)} incident(s) to {dest_incidents}")
-        elif self.include_incident_files and not self.per_app:
+        elif self._config.include_incident_files and not self._config.per_app:
             root_incidents = self.kb_dir / self.schema.incidents_dir
             if root_incidents.is_dir():
                 all_incident_files = sorted(root_incidents.glob("*/*.md"))[-MAX_INJECTED_INCIDENTS:]
@@ -272,7 +268,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
                     logger.info(
                         f"Knowledge base: copied {len(all_incident_files)} incident(s) to {result.incidents_dir}"
                     )
-        elif not self.include_incident_files:
+        elif not self._config.include_incident_files:
             logger.info("Knowledge base: incident file injection disabled by include_incident_files=false")
 
         # Prior files (root-level, cross-app)
@@ -286,7 +282,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 logger.info(f"Knowledge base: copied {filename} to {dest}")
 
         # Playbooks directory (excludes .history/, includes .aliases.yaml)
-        if self.enable_playbooks:
+        if self._config.enable_playbooks:
             for src_dir_name, result_attr in [
                 ("playbooks", "playbooks_dir"),
                 ("mitigation_playbooks", "mitigation_playbooks_dir"),
@@ -330,7 +326,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
         prompt = self.prompts.render(
             "kb/summarize_session",
             content=content,
-            include_benchmark_results=self.include_benchmark_results,
+            include_benchmark_results=self._config.include_benchmark_results,
         )
         return await self._call_llm(prompt, agent_name="kb-summarize-session")
 
@@ -359,14 +355,14 @@ class StructuredKnowledgeBase(KnowledgeBase):
         messages = dr_result.messages
 
         for attempt in range(MAX_CITATION_RETRIES):
-            if self.per_app:
+            if self._config.per_app:
                 invalid = find_invalid_citations(output, self.incidents_dir)
             else:
                 invalid = find_invalid_citations_unified(output, self.kb_dir)
             if not invalid:
                 break
             valid_files = sorted(f.name for f in self.incidents_dir.glob("*.md")) if self.incidents_dir.is_dir() else []
-            if self.per_app:
+            if self._config.per_app:
                 fmt_hint = "Use the exact format {{ref:incidents/FILENAME.md}} for each citation."
             else:
                 app_slug = sanitize_app_name(self.app_name)
@@ -441,7 +437,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
 
     async def _distill_lessons(self) -> None:
         """Re-distill cross-cutting operational lessons from all per-app summaries."""
-        if self.per_app:
+        if self._config.per_app:
             summary_files = sorted(self.kb_dir.glob(f"*/{self.schema.summary}"))
         else:
             root_summary = self.kb_dir / self.schema.summary
@@ -726,7 +722,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
             return
 
         raw = "\n\n".join(parts)
-        if self.include_benchmark_results:
+        if self._config.include_benchmark_results:
             content = raw.strip()
         else:
             content = strip_benchmark_result(raw)
@@ -744,9 +740,9 @@ class StructuredKnowledgeBase(KnowledgeBase):
         logger.info(f"Session summary:\n{session_summary}")
 
         incident_ref = ""
-        if self.include_incident_files:
+        if self._config.include_incident_files:
             incident_id = self._save_incident(session_summary, content)
-            if self.per_app:
+            if self._config.per_app:
                 incident_ref = f"incidents/{incident_id}.md"
             else:
                 incident_ref = f"incidents/{sanitize_app_name(self.app_name)}/{incident_id}.md"
@@ -779,7 +775,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 else _RecoveryReflection.model_validate(recovery_reflection)
             )
 
-        if self.enable_playbooks:
+        if self._config.enable_playbooks:
             try:
                 await self._run_playbook_lifecycle(
                     merge_result=merge_result,
@@ -801,7 +797,7 @@ class StructuredKnowledgeBase(KnowledgeBase):
                 logger.error(f"Mitigation playbook lifecycle failed: {e}", exc_info=True)
 
         await self._distill_lessons()
-        if self.enable_reflection:
+        if self._config.enable_reflection:
             await self._reflector.run(
                 stage_outputs_file=stage_outputs_file,
                 recovery_reflection=normalized_recovery_reflection,

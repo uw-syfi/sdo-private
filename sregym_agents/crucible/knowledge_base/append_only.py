@@ -39,7 +39,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
         self.app_name = app_name
-        self.include_benchmark_results = config.include_benchmark_results
+        self._config = config
         self.prompts = renderer
         self._usage_collector: UsageCollector | None = None
         self._driver = driver
@@ -84,7 +84,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
             return
 
         raw = "\n\n".join(parts)
-        if self.include_benchmark_results:
+        if self._config.include_benchmark_results:
             content = raw.strip()
         else:
             content = strip_benchmark_result(raw)
@@ -110,6 +110,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         prompt = self.prompts.render(
             "kb/summarize_session",
             content=content,
-            include_benchmark_results=self.include_benchmark_results,
+            include_benchmark_results=self._config.include_benchmark_results,
         )
         return await self._call_llm(prompt)

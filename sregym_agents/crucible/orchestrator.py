@@ -670,8 +670,7 @@ def _build_sre_agent_config(
             verification_guidance = verification_priors_file.read_text().strip()
 
     return SREAgentConfig(
-        enable_ltm_retrieval=crucible_config.enable_ltm_retrieval,
-        enable_ltm_verified_direct_submit=crucible_config.enable_ltm_verified_direct_submit,
+        config=crucible_config,
         lt_summary_file=injected_kb.summary if injected_kb else None,
         incidents_dir=injected_kb.incidents_dir if injected_kb else None,
         playbooks_dir=injected_kb.playbooks_dir if injected_kb else None,

@@ -34,6 +34,18 @@ class CrucibleConfig:
         if self.backend not in ("pydantic-ai", "agent-cli"):
             raise ValueError(f"backend must be 'pydantic-ai' or 'agent-cli', got {self.backend!r}")
 
+    def to_kb_task_fields(self) -> dict[str, Any]:
+        """Return the config subset needed for KB update task serialization."""
+        return {
+            "include_benchmark_results": self.include_benchmark_results,
+            "enable_reflection": self.enable_reflection,
+            "enable_playbooks": self.enable_playbooks,
+            "recovery_phase2_enabled": self.recovery_phase2_enabled,
+            "include_incident_files": self.include_incident_files,
+            "per_app": self.per_app,
+            "prompt_version": self.prompt_version,
+        }
+
 
 def _reflection_from_mapping(mapping: Mapping[str, Any]) -> bool:
     """Resolve enable_reflection with legacy alias enable_heuristic_refinement."""
