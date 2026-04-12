@@ -227,6 +227,71 @@ class DeploymentAgent:
 
         return max_attempt + 1
 
+    def _detect_fix_loop(self, attempt: int) -> str | None:
+        """Detect if the agent is stuck applying the same fix repeatedly.
+
+        Reads fix_summary_N.log files for the last few attempts and compares
+        their content for similarity. Returns a warning string if a loop is
+        detected, or None if no loop is found.
+        """
+        if attempt < 3:
+            return None
+
+        logs_dir = self.sds_dir / "logs"
+        # Read the last 3 fix summaries (attempts attempt-3 through attempt-1)
+        summaries: list[str] = []
+        for i in range(attempt - 3, attempt):
+            log_file = logs_dir / f"fix_summary_{i}.log"
+            try:
+                if self.filesystem.exists(log_file):
+                    summaries.append(self.filesystem.read_text(log_file).strip())
+            except (OSError, AttributeError):
+                pass
+
+        if not summaries:
+            return None
+
+        def _similar(a: str, b: str) -> bool:
+            """Return True if two summaries share enough common tokens."""
+            tokens_a = set(a.lower().split())
+            tokens_b = set(b.lower().split())
+            if not tokens_a or not tokens_b:
+                return False
+            overlap = len(tokens_a & tokens_b)
+            shorter = min(len(tokens_a), len(tokens_b))
+            return (overlap / shorter) >= 0.7
+
+        # Check if ALL consecutive recent summaries are similar (3-loop)
+        if len(summaries) >= 3:
+            if _similar(summaries[-1], summaries[-2]) and _similar(summaries[-2], summaries[-3]):
+                n = len(summaries)
+                return (
+                    f"\n\n## CRITICAL: Fix Loop Detected\n"
+                    f"The last {n} consecutive repair attempts applied nearly identical fixes. "
+                    "You appear to be stuck in a loop.\n\n"
+                    "**You MUST take a fundamentally different approach this time.**\n\n"
+                    "Suggestions to break out of the loop:\n"
+                    "- Read the container logs (`docker compose logs`) to understand the root cause\n"
+                    "- Question your assumptions about which service or config is the real problem\n"
+                    "- Try a completely different fix strategy\n"
+                    "- Look for indirect causes (networking, permissions, dependency order)"
+                )
+
+        # Check if only the last 2 are similar (2-loop)
+        if len(summaries) >= 2 and _similar(summaries[-1], summaries[-2]):
+            return (
+                "\n\n## WARNING: Possible Fix Loop\n"
+                "The last 2 attempts applied similar fixes without success.\n\n"
+                "**You MUST take a fundamentally different approach this time.**\n\n"
+                "Suggestions to break out of the loop:\n"
+                "- Read the container logs (`docker compose logs`) to understand the root cause\n"
+                "- Question your assumptions about which service or config is the real problem\n"
+                "- Try a completely different fix strategy\n"
+                "- Look for indirect causes (networking, permissions, dependency order)"
+            )
+
+        return None
+
     def run(self, max_attempts: int = 5, check_shutdown: Callable[[], bool] | None = None) -> bool:
         """Attempt deployment with automatic error fixing.
 
@@ -245,8 +310,9 @@ class DeploymentAgent:
         start_attempt = self._get_next_attempt_number()
         self._prepare_fix_summary_for_run(start_attempt)
 
-        end_of_range = start_attempt + max_attempts
-        absolute_max_attempts = end_of_range - 1
+        # max_attempts is the absolute ceiling — total attempts ever, not additional ones.
+        absolute_max_attempts = max_attempts
+        end_of_range = absolute_max_attempts + 1
 
         # Step 2: Deploy → health-check → repair loop
         #   Each iteration: run deploy.sh, assess health, repair if needed.
