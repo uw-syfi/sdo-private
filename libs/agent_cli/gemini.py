@@ -1,6 +1,8 @@
 import json
 import logging
+import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +207,7 @@ class GeminiCodingAgent(CLICodingAgent):
         timeout: int = 300,
         silent: bool = False,
         recorder: TrajectoryRecorderProtocol | None = None,
+        on_process_started: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> GeminiGenerationSession:
         return GeminiGenerationSession(
             binary_name=self.binary_name,
@@ -217,4 +220,5 @@ class GeminiCodingAgent(CLICodingAgent):
             silent=silent,
             recorder=recorder,
             event_handler=self.event_handler,
+            on_process_started=on_process_started,
         )

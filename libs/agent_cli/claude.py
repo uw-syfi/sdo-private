@@ -1,5 +1,7 @@
 import json
+import subprocess
 import time
+from collections.abc import Callable
 from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
@@ -200,6 +202,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         timeout: int = 300,
         silent: bool = False,
         recorder: TrajectoryRecorderProtocol | None = None,
+        on_process_started: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> ClaudeGenerationSession:
         return ClaudeGenerationSession(
             binary_name=self.binary_name,
@@ -212,4 +215,5 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             silent=silent,
             recorder=recorder,
             event_handler=self.event_handler,
+            on_process_started=on_process_started,
         )

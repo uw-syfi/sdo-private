@@ -1,4 +1,6 @@
 import json
+import subprocess
+from collections.abc import Callable
 from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
@@ -142,6 +144,7 @@ class OpencodeCodingAgent(CLICodingAgent):
         timeout: int = 300,
         silent: bool = False,
         recorder: TrajectoryRecorderProtocol | None = None,
+        on_process_started: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> OpencodeGenerationSession:
         return OpencodeGenerationSession(
             binary_name=self.binary_name,
@@ -154,4 +157,5 @@ class OpencodeCodingAgent(CLICodingAgent):
             silent=silent,
             recorder=recorder,
             event_handler=self.event_handler,
+            on_process_started=on_process_started,
         )
