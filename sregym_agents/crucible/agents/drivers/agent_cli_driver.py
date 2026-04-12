@@ -29,12 +29,14 @@ import re
 import signal as signal_module
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Any, TypeVar
 
 from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # Tools that the CLI agent has natively — don't expose via MCP.
 _NATIVE_TOOL_NAMES = frozenset(
@@ -211,6 +213,8 @@ class AgentCLIDriver(AgentDriver):
             prompt_version = getattr(renderer, "version", "v2")
 
         args: list[str] = [
+            "--directory",
+            str(_REPO_ROOT),
             "run",
             "python",
             "-m",

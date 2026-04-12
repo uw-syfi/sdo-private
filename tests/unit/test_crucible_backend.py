@@ -452,6 +452,8 @@ class TestAgentCLIDriverMCPArgs:
         deps = self._make_sre_deps()
         args = driver._build_mcp_server_args(deps, "sre")
 
+        assert args[:2] == ["--directory", "/mnt/data/shli/sds"]
+        assert args[2:5] == ["run", "python", "-m"]
         assert "--tools" in args
         assert args[args.index("--tools") + 1] == "sre"
         assert "--namespace" in args
