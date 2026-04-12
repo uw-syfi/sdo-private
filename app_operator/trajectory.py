@@ -22,6 +22,7 @@ from typing import (
 )
 
 from app_operator.logger import logger
+from app_operator.prompts.trajectory_prompts import get_system_prompt
 from app_operator.trajectory_collectors import collect_gemini_sessions
 
 if TYPE_CHECKING:
@@ -203,6 +204,17 @@ class TrajectoryRecorder:
                 "context": context or {},
             }
             self.trajectory["calls"].append(call_record)
+
+            # Add system message with context
+            agent_name = self.trajectory["metadata"].get("agent_name", "AI Agent")
+            system_content = get_system_prompt(phase.value, context, agent_name)
+            self._current_conversation.append(
+                TrajectoryMessage(
+                    role=MessageRole.SYSTEM.value,
+                    content=system_content,
+                    timestamp=call_start_time,
+                ).to_dict()
+            )
 
     def add_system_message(self, content: str) -> None:
         """Add a system prompt message to the current conversation."""

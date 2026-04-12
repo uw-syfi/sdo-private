@@ -695,17 +695,6 @@ class Config:
         # Parse DSPy config and auto-populate runtime_model if not set
         dspy_config = cls._parse_dspy_config(dspy_data, agent_config)
         runtime_config = RuntimeConfig(**runtime_data)
-        if (
-            runtime_config.impl == "cli_agent"
-            and "agent" in data
-            and _raw_provider is None
-            and agent_config.model is None
-        ):
-            raise ValueError(
-                "agent.model is required when runtime.impl is 'cli_agent'. "
-                "Set [agent] model in your sds.toml to ensure reproducible results."
-            )
-
         return cls(
             agent=agent_config,
             operator=cls._parse_operator_config(operator_data),
