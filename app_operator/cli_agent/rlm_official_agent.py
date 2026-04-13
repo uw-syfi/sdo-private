@@ -59,10 +59,20 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
         Path(full).write_text(content)
         return f"Wrote {len(content)} bytes to {path}"
 
-    def list_files(path: str = ".") -> list[str]:
-        """List files/directories under *path* (relative to repo root)."""
+    def list_files(path: str = ".", recursive: bool = False) -> list[str]:
+        """List files/directories under *path* (relative to repo root).
+
+        If *recursive* is True, walk the tree and return all file paths.
+        """
         full = _resolve_safe(path)
         try:
+            if recursive:
+                result = []
+                for dirpath, _dirs, files in os.walk(full):
+                    for f in files:
+                        rel = os.path.relpath(os.path.join(dirpath, f), full)
+                        result.append(rel)
+                return sorted(result)
             return sorted(os.listdir(full))
         except OSError as exc:
             return [f"Error listing {path}: {exc}"]
