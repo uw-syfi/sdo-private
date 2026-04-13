@@ -301,8 +301,8 @@ class RLMOfficialAgent(CodingAgent):
     def _run_rlm(self, prompt: str, repo_path: Path, timeout: int) -> str:
         """Run the official RLM library for fix/analysis tasks."""
         try:
-            from rlm import RLM
-            from rlm.logger import RLMLogger
+            from rlm import RLM  # type: ignore[import-not-found]
+            from rlm.logger import RLMLogger  # type: ignore[import-not-found]
         except ImportError as exc:
             logger.error(f"[RLM-Official] rlm library not installed: {exc}")
             return f"rlm library not available: {exc}"
