@@ -106,10 +106,11 @@ def test_trajectory_lifecycle_integration(temp_repo):
     assert "messages" in conversation
 
     messages = conversation["messages"]
-    # Expect: User, Tool, Assistant + status message at end (no auto system stub)
-    assert len(messages) >= 4
-    assert messages[0]["role"] == "user"
-    assert messages[0]["content"] == "Generate scripts for this repo"
+    # Expect: System, User, Tool, Assistant + status message at end.
+    non_system_messages = [m for m in messages if m["role"] != "system"]
+    assert len(non_system_messages) >= 3
+    assert non_system_messages[0]["role"] == "user"
+    assert non_system_messages[0]["content"] == "Generate scripts for this repo"
 
     # Find tool call
     tool_msg = next((m for m in messages if m["role"] == "tool_call"), None)
@@ -156,7 +157,7 @@ def test_trajectory_robustness_large_output(temp_repo):
     # Access messages through the new structure
     conversation = data["script_generation"][0]
     messages = conversation["messages"]
-    tool_msg = messages[0]  # no auto system stub; first message is the tool call
+    tool_msg = next(m for m in messages if m["role"] == "tool_call")
     assert tool_msg["role"] == "tool_call"
 
     # Check truncation happened (max is 10000 in implementation)

@@ -86,7 +86,6 @@ def test_run_exp_parallelism(mock_exp_structure):
         mock_run.return_value = MagicMock(returncode=0)
         with patch("app_operator.commands.run_exp.sys.executable", "python"):
             with patch("app_operator.commands.run_exp.Path.cwd", return_value=root):
-
                 args = MagicMock()
                 args.experiment = str(config_file)
                 args.parallel = 2

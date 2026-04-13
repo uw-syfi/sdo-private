@@ -165,10 +165,10 @@ class TestAgentConfigValidation:
         assert "claude" in error_msg
 
     @pytest.mark.parametrize("backend", ["rlm"])
-    def test_legacy_architecture_backends_rejected(self, backend):
-        """Standalone legacy architecture backends should no longer be user-selectable."""
-        with pytest.raises(ValueError, match="Invalid backend"):
-            AgentConfig(backend=backend)
+    def test_registered_architecture_backends_accepted(self, backend):
+        """Registered architecture backends should be user-selectable."""
+        config = AgentConfig(backend=backend)
+        assert config.backend == backend
 
 
 class TestConfigIntegration:

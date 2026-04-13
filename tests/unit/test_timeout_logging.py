@@ -21,6 +21,7 @@ def repo_path(tmp_path):
 def stub_agent():
     """Create a stub agent for testing."""
     from tests.fixtures.agents import StubAgent
+
     return StubAgent()
 
 
@@ -62,7 +63,7 @@ echo "Line 3: Finished"
             self.stdout.readline.side_effect = [
                 "Line 1: Starting deployment\n",
                 "Line 2: Still working\n",
-                ""  # EOF
+                "",  # EOF
             ]
             self.stderr.readline.side_effect = [""]
             self.returncode = None
@@ -87,12 +88,11 @@ echo "Line 3: Finished"
         def __exit__(self, *args):
             pass
 
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.subprocess.Popen",
-                        lambda *args, **kwargs: MockProcess())
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.time.time",
-                        lambda: next(mock_times))
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.time.sleep",
-                        lambda x: None)
+    monkeypatch.setattr(
+        "app_operator.cli_agent.agents.deployer.subprocess.Popen", lambda *args, **kwargs: MockProcess()
+    )
+    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.time.time", lambda: next(mock_times))
+    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.time.sleep", lambda x: None)
 
     # Run with short timeout (2 seconds) - but no actual waiting
     result = agent.run_deploy_command("start", timeout=2, log_file_path=log_file_path)
@@ -143,15 +143,11 @@ echo "Health Check: Finished"
         # Should not reach here with our test
         raise RuntimeError("Unexpected call without timeout")
 
-    monkeypatch.setattr("app_operator.cli_agent.healthcheck.subprocess.run",
-                        mock_subprocess_run)
-    monkeypatch.setattr("app_operator.cli_agent.healthcheck.time.time",
-                        lambda: next(mock_times))
+    monkeypatch.setattr("app_operator.cli_agent.healthcheck.subprocess.run", mock_subprocess_run)
+    monkeypatch.setattr("app_operator.cli_agent.healthcheck.time.time", lambda: next(mock_times))
 
     # Run with short timeout (2 seconds) - no actual waiting
-    result = run_health_check(
-        repo_path, script_path, timeout=2, log_file_path=log_file_path
-    )
+    result = run_health_check(repo_path, script_path, timeout=2, log_file_path=log_file_path)
 
     # Verify timeout behavior
     assert result["success"] is False

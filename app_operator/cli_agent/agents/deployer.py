@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess  # noqa: F401 - re-exported for legacy monkeypatch paths
 import time
 from typing import TYPE_CHECKING
 
@@ -21,14 +22,18 @@ from app_operator.cli_agent.agents.script_generator_agent import (
 )
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.healthcheck import run_health_check  # noqa: F401
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
+from app_operator.prompts import get_loader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
+
+FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 
 
 class DeploymentAgent:
@@ -119,6 +124,7 @@ class DeploymentAgent:
 
         # Determine start attempt based on existing logs
         start_attempt = self._get_next_attempt_number()
+        self._prepare_fix_summary_for_run(start_attempt)
 
         end_of_range = start_attempt + max_attempts
         absolute_max_attempts = end_of_range - 1
@@ -143,6 +149,12 @@ class DeploymentAgent:
                 return result
 
         return False
+
+    def _prepare_fix_summary_for_run(self, start_attempt: int) -> None:
+        """Remove stale consolidated summary when starting from attempt 1."""
+        summary_file = self.sds_dir / "fix_summary.md"
+        if start_attempt == 1 and self.filesystem.exists(summary_file):
+            self.filesystem.remove(summary_file)
 
     def _ensure_scripts_exist(self) -> bool:
         """Check for deploy.sh and health_check.sh; generate them if missing.
@@ -297,6 +309,31 @@ class DeploymentAgent:
             log_file_path,
             health_check_log_path,
         )
+
+    def _update_consolidated_summary(self, attempt: int, summary: str) -> None:
+        """Update the legacy consolidated fix summary file.
+
+        The newer deployment-progress flow records hypotheses in
+        ``deployment_progress.md``, but some tests and callers still exercise
+        this older summary hook.
+        """
+        if attempt % FIX_SUMMARY_CONSOLIDATION_INTERVAL != 0:
+            return
+
+        summary_file = self.sds_dir / "fix_summary.md"
+        existing_summary = self.filesystem.read_text(summary_file) if self.filesystem.exists(summary_file) else ""
+        new_attempts_text = f"## Attempt {attempt}\n{summary}"
+        prompt = get_loader().render(
+            "deployer/consolidate_summary.jinja2",
+            existing_summary=existing_summary,
+            new_attempts_text=new_attempts_text,
+        )
+        updated = self.agent.generate(
+            prompt,
+            cwd=str(self.repo_path),
+            timeout=self.operator_config.agent_fix_timeout,
+        )
+        self.filesystem.write_text(summary_file, updated)
 
     def run_deploy_command(
         self,

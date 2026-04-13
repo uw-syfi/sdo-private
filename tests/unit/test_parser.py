@@ -5,15 +5,9 @@ import sys
 def truncate_content(content, max_lines=5, max_chars=500):
     lines = content.splitlines()
     if len(lines) > max_lines * 2:
-        return "\n".join(
-            lines[:max_lines] + ["... (truncated) ..."] + lines[-max_lines:]
-        )
+        return "\n".join(lines[:max_lines] + ["... (truncated) ..."] + lines[-max_lines:])
     if len(content) > max_chars:
-        return (
-            content[: max_chars / 2]
-            + " ... (truncated) ... "
-            + content[-max_chars / 2:]
-        )
+        return content[: max_chars / 2] + " ... (truncated) ... " + content[-max_chars / 2 :]
     return content
 
 

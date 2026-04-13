@@ -10,13 +10,13 @@ Register with ``provider = "rlm"`` in ``sds.toml``.
 
 import re
 from pathlib import Path
-
-import litellm
-from app_operator.rlm.environment import RLMContext
+from typing import Any
 
 from app_operator.logger import logger
-from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
-from app_operator.trajectory import TrajectoryRecorderProtocol
+from app_operator.rlm import RecursiveDeploymentAgent, RLMContext
+from libs.agent_cli.llm_client import LiteLLMClient
+from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
+from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 from .base import CodingAgent, register_provider
 from .events import AgentEventHandler
@@ -66,9 +66,10 @@ class RLMCodingAgent(CodingAgent):
                 Forwarded as ``vertex_location`` to litellm.
         """
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder = recorder
+        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
         self.location = location
+        self._client = LiteLLMClient(self.model, self.location, self.recorder)
 
     def generate(
         self,
@@ -98,7 +99,7 @@ class RLMCodingAgent(CodingAgent):
         if _FILE_GEN_RE.search(prompt):
             return self._generate_files(prompt, repo_path)
 
-        context = self._build_context(repo_path)
+        context: Any = self._build_context(repo_path)
         agent = RecursiveDeploymentAgent(
             trajectory=self.recorder,
             max_recursion_depth=5,
@@ -113,68 +114,22 @@ class RLMCodingAgent(CodingAgent):
         Asks the LLM to return the file content, then writes it to the expected
         output path so the operator's post-call existence check succeeds.
         """
-        import os
-
-        # Extract all expected .sds/<file> paths from the prompt.
-        expected_files = re.findall(r"\.sds/[\w._-]+", prompt)
-
-        system_msg = (
-            "You are a deployment assistant. The user will ask you to generate "
-            "one or more files. For EACH file, output a section in this exact format:\n\n"
-            "FILE: .sds/<filename>\n"
-            "```\n"
-            "<file content here>\n"
-            "```\n\n"
-            "Output ONLY these sections. Do not add explanations outside the sections."
-        )
-
-        kwargs = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": prompt},
-            ],
-            "cache": {"no-cache": True},
-        }
-        location = self.location or os.environ.get("VERTEX_LOCATION")
-        if location:
-            kwargs["vertex_location"] = location
-
         try:
-            response = litellm.completion(**kwargs)
-            raw = response.choices[0].message.content or ""
+            raw = self._client.complete(
+                [
+                    {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                label="rlm file gen",
+            )
         except Exception as e:
             logger.error(f"[RLM] Direct LLM call failed: {e}")
             return f"LLM call failed: {e}"
 
-        # Parse FILE: sections and write each file.
-        written = []
-        file_sections = re.findall(
-            r"FILE:\s*(\.sds/[\w._-]+)\s*\n```[^\n]*\n(.*?)```",
-            raw,
-            re.DOTALL,
-        )
-        for rel_path, content in file_sections:
-            out_path = repo_path / rel_path
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(content)
-            logger.info(f"[RLM] Wrote {out_path}")
-            written.append(rel_path)
-
-        # Fallback: if no FILE: sections but there's a single expected file,
-        # write the entire response as that file's content.
-        if not written and len(expected_files) == 1:
-            out_path = repo_path / expected_files[0]
-            # Strip markdown code fences if present.
-            content = re.sub(r"^```[^\n]*\n|```$", "", raw.strip(), flags=re.MULTILINE)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(content)
-            logger.info(f"[RLM] Wrote {out_path} (fallback)")
-            written.append(expected_files[0])
-
+        generate_and_write_files(raw, prompt, repo_path, "[RLM]")
         return raw
 
-    def _build_context(self, repo_path: Path) -> RLMContext:
+    def _build_context(self, repo_path: Path) -> Any:
         """Build an ``RLMContext`` by reading available artifacts from *repo_path*.
 
         Files that do not exist are silently skipped (empty string).
@@ -186,13 +141,9 @@ class RLMCodingAgent(CodingAgent):
             health_check_output=self._read(sds / "logs" / "health_check.log"),
             dockerfile=self._read(repo_path / "Dockerfile"),
             docker_compose=(
-                self._read(repo_path / "docker-compose.yml")
-                or self._read(repo_path / "docker-compose.yaml")
+                self._read(repo_path / "docker-compose.yml") or self._read(repo_path / "docker-compose.yaml")
             ),
-            readme=(
-                self._read(repo_path / "README.md")
-                or self._read(repo_path / "README.rst")
-            ),
+            readme=(self._read(repo_path / "README.md") or self._read(repo_path / "README.rst")),
             analysis_report=self._read(sds / "code_analysis.md"),
         )
 

@@ -1,10 +1,12 @@
+import importlib
 
 from app_operator.config import Config, load_config
 from app_operator.logger import logger
 
-# Import modules to ensure agents are registered
-from . import claude, codex, gemini, opencode, rlm_agent  # noqa: F401
 from .base import AGENT_REGISTRY, CodingAgent
+
+for _module_name in ("claude", "codex", "gemini", "opencode", "rlm_agent"):
+    importlib.import_module(f"{__package__}.{_module_name}")
 
 
 def create_agent_from_config(

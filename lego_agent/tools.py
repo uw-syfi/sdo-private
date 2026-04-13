@@ -384,9 +384,7 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], dict[str, A
     return run_command
 
 
-def build_tools(
-    repo_path: Path, filesystem: FileSystemInterface | None = None
-) -> list[Callable[..., Any]]:
+def build_tools(repo_path: Path, filesystem: FileSystemInterface | None = None) -> list[Callable[..., Any]]:
     if filesystem is None:
         filesystem = RealFilesystem()
 

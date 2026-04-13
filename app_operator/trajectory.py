@@ -22,7 +22,7 @@ from typing import (
 )
 
 from app_operator.logger import logger
-from app_operator.prompts.trajectory_prompts import get_system_prompt
+from app_operator.prompts import get_system_prompt
 from app_operator.trajectory_collectors import collect_gemini_sessions
 
 if TYPE_CHECKING:

@@ -70,8 +70,7 @@ def test_update_consolidated_summary_appends(repo_path):
 
 def test_update_consolidated_summary_respects_interval(repo_path, monkeypatch):
     # Set interval to 2
-    monkeypatch.setattr(
-        "app_operator.cli_agent.agents.deployer.FIX_SUMMARY_CONSOLIDATION_INTERVAL", 2)
+    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.FIX_SUMMARY_CONSOLIDATION_INTERVAL", 2)
 
     agent_mock = ConfigurableAgent()
     expected_content = "## Attempt 1\nsummary 1\n## Attempt 2\nsummary 2"
@@ -107,8 +106,10 @@ def test_run_cleans_summary_on_fresh_start(repo_path, monkeypatch):
     agent.run_deploy_command = MagicMock(return_value={"success": True, "exit_code": 0})
 
     # We also need to mock run_health_check in the module if it's imported
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.run_health_check",
-                        lambda *args, **kwargs: {"success": True, "exit_code": 0})
+    monkeypatch.setattr(
+        "app_operator.cli_agent.agents.deployer.run_health_check",
+        lambda *args, **kwargs: {"success": True, "exit_code": 0},
+    )
 
     agent.run(max_attempts=1)
 
@@ -125,8 +126,10 @@ def test_run_keeps_summary_on_resume(repo_path, monkeypatch):
     monkeypatch.setattr(agent, "_get_next_attempt_number", lambda: 2)
 
     agent.run_deploy_command = MagicMock(return_value={"success": True, "exit_code": 0})
-    monkeypatch.setattr("app_operator.cli_agent.agents.deployer.run_health_check",
-                        lambda *args, **kwargs: {"success": True, "exit_code": 0})
+    monkeypatch.setattr(
+        "app_operator.cli_agent.agents.deployer.run_health_check",
+        lambda *args, **kwargs: {"success": True, "exit_code": 0},
+    )
 
     agent.run(max_attempts=1)
 

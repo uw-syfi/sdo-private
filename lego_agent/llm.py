@@ -1,10 +1,12 @@
+from typing import Any
+
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
-from app_operator.config import Config
 from app_operator.logger import logger
+from lego_agent.config import Config
 
 
 def _normalize_provider(provider: str) -> str:
@@ -30,7 +32,7 @@ def build_llm(config: Config) -> BaseChatModel:
     if provider == "openai":
         return ChatOpenAI(model=model)
     if provider == "anthropic":
-        kwargs = {"model": model}
+        kwargs: dict[str, Any] = {"model": model}
         if config.agent.thinking_budget:
             kwargs["thinking"] = {
                 "type": "enabled",
@@ -39,7 +41,7 @@ def build_llm(config: Config) -> BaseChatModel:
         return ChatAnthropic(**kwargs)
     if provider == "gemini":
         try:
-            kwargs = {"model": model}
+            kwargs: dict[str, Any] = {"model": model}
             if config.agent.thinking_budget:
                 kwargs["thinking_budget"] = config.agent.thinking_budget
                 kwargs["include_thoughts"] = True
@@ -48,7 +50,7 @@ def build_llm(config: Config) -> BaseChatModel:
             # If API key is missing, try falling back to Vertex AI
             if "API key required" in str(e):
                 logger.info("Gemini API key not found, falling back to Vertex AI")
-                kwargs = {"model": model, "vertexai": True}
+                kwargs: dict[str, Any] = {"model": model, "vertexai": True}
                 if location:
                     kwargs["location"] = location
                 if config.agent.thinking_budget:
@@ -57,7 +59,7 @@ def build_llm(config: Config) -> BaseChatModel:
                 return ChatGoogleGenerativeAI(**kwargs)
             raise
     if provider == "vertex":
-        kwargs = {"model": model, "vertexai": True}
+        kwargs: dict[str, Any] = {"model": model, "vertexai": True}
         if location:
             kwargs["location"] = location
         if config.agent.thinking_budget:
