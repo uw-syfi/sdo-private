@@ -235,10 +235,17 @@ unterminated triple-quoted strings. Instead:
   append_file('path', 'section 1 content\\n')
   append_file('path', 'section 2 content\\n')
 
+CRITICAL RULES for deploy.sh and health_check.sh scripts:
+- PROJECT_NAME MUST be lowercased. Docker Compose rejects uppercase.
+  Use: PROJECT_NAME=$(basename "$APP_DIR" | tr '[:upper:]' '[:lower:]')
+- Always use: docker compose --project-name "$PROJECT_NAME" ...
+- Build context paths: verify they exist with list_files() before using them.
+
 When fixing deployment errors:
 1. Explore the repository structure with list_files().
 2. Read error logs and deployment scripts with read_file().
-3. Identify the root cause.
+3. Identify the root cause — do NOT re-run deploy.sh yourself.
+   The outer pipeline will re-run deployment after your fix.
 4. Write corrected scripts using write_file() or append_file().
 
 When generating deployment scripts or analysis:
@@ -317,6 +324,16 @@ class RLMOfficialAgent(CodingAgent):
     # File generation (direct LLM call, no REPL)
     # ------------------------------------------------------------------
 
+    _FILE_GEN_EXTRA = (
+        "\n\nCRITICAL: In deploy.sh and health_check.sh, the PROJECT_NAME "
+        "variable MUST be lowercased. Docker Compose rejects uppercase "
+        "characters in project names. Always use:\n"
+        '  PROJECT_NAME=$(basename "$APP_DIR" | tr \'[:upper:]\' \'[:lower:]\' '
+        "| tr -c '[:alnum:]-' '-')\n"
+        "Also verify that all docker compose build context paths actually exist "
+        "in the repository before referencing them."
+    )
+
     def _generate_files(self, prompt: str, repo_path: Path) -> str:
         """Handle file-generation tasks with a direct litellm call."""
         from libs.agent_cli.llm_client import LiteLLMClient
@@ -328,12 +345,12 @@ class RLMOfficialAgent(CodingAgent):
         try:
             raw = client.complete(
                 [
-                    {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT},
+                    {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT + self._FILE_GEN_EXTRA},
                     {"role": "user", "content": prompt},
                 ],
                 label="rlm-official file gen",
             )
-        except (ConnectionError, TimeoutError, RuntimeError) as exc:
+        except Exception as exc:
             logger.error(f"[RLM-Official] Direct LLM call failed: {exc}")
             return f"LLM call failed: {exc}"
 
