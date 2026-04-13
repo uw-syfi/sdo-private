@@ -357,6 +357,7 @@ class AgentConfig:
         "vertex",
         "openai",
         "rlm",
+        "rlm-official",
         "subagent",
         "hybrid",
     }
@@ -429,6 +430,7 @@ PROVIDER_TO_LITELLM_PREFIX: dict[str, str] = {
     "openai": "openai",
     "opencode": "openai",
     "rlm": "gemini",
+    "rlm-official": "gemini",
 }
 
 

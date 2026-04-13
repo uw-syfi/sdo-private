@@ -26,6 +26,7 @@ _ALIAS_TO_CANONICAL: dict[str, str] = {
     # Gemini (Google AI Studio)
     "gemini": "gemini",
     "rlm": "gemini",
+    "rlm-official": "gemini",
     # Vertex AI
     "vertex": "vertex",
 }
