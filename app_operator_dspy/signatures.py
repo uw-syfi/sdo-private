@@ -62,7 +62,8 @@ class GenerateDeployScript(dspy.Signature):
             "- Saved to <repo>/.sds/deploy.sh; invoked as 'deploy.sh <command>' from repo root.\n"
             '- Path setup: APP_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/..") to reach repo '
             'root (one level UP from .sds/); then cd "$APP_DIR"; '
-            'PROJECT_NAME=$(basename "$APP_DIR").\n'
+            "PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]'). "
+            "Docker Compose REJECTS uppercase in project names.\n"
             "- Case-statement CLI parsing $1: start|stop|restart|status|logs|build|cleanup. "
             "No flags or getopts. No interactive prompts. Exit 0 on success, non-zero on failure.\n"
             '- Pass --project-name "$PROJECT_NAME" to every docker compose command.\n'
@@ -92,7 +93,9 @@ class GenerateHealthCheckScript(dspy.Signature):
         desc=(
             "Raw bash script — no markdown fences. Requirements:\n"
             "- Saved to <repo>/.sds/health_check.sh; invoked with no arguments from repo root.\n"
-            '- Path setup: APP_DIR=$(pwd); PROJECT_NAME=$(basename "$APP_DIR"). '
+            "- Path setup: APP_DIR=$(pwd); "
+            "PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]'). "
+            "Docker Compose REJECTS uppercase in project names. "
             "Do NOT cd to the script's own directory.\n"
             '- Pass --project-name "$PROJECT_NAME" to every docker compose command; '
             "never use plain docker ps, docker-compose (hyphen), kubectl, Helm, or sudo.\n"
@@ -254,6 +257,11 @@ class RepairDeploymentErrorRLM(dspy.Signature):
     run_shell) to read the current scripts, analyze what went wrong, and write
     fixes. Do NOT rewrite scripts from scratch — make targeted fixes based on
     evidence from the error output.
+
+    CRITICAL: Do NOT run deploy.sh, docker compose up, or any deployment
+    commands yourself. The outer pipeline re-runs deployment automatically
+    after your fix. Only read files, analyze errors, and write targeted
+    fixes. Running builds wastes your limited iterations.
     """
 
     error_context: str = dspy.InputField(

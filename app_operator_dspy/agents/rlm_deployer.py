@@ -25,8 +25,6 @@ from app_operator_dspy.signatures import (
 from app_operator_dspy.tools import DEPLOYER_TOOLS, write_file
 from app_operator_dspy.tools.agent_tools import (
     read_file_tool,
-    run_health_check_tool,
-    run_shell_tool,
     write_file_tool,
 )
 from app_operator_dspy.tools.shell import ShellResult, run_shell
@@ -101,9 +99,11 @@ class RLMDeploymentAgent(dspy.Module):
             tools=DEPLOYER_TOOLS,
             max_iters=12,
         )
+        # Only read/write tools — no run_shell to prevent the LLM from
+        # wasting iterations re-running Docker builds inside the repair loop.
         self.repair_agent = RLM(
             RepairDeploymentErrorRLM,
-            tools=[read_file_tool, write_file_tool, run_shell_tool, run_health_check_tool],
+            tools=[read_file_tool, write_file_tool],
             max_iterations=15,
             max_llm_calls=30,
             max_output_chars=100_000,
@@ -242,7 +242,11 @@ class RLMDeploymentAgent(dspy.Module):
             f"2. Analyze the error output to identify root cause\n"
             f"3. Use write_file to apply targeted fixes\n"
             f"4. Do NOT rewrite scripts from scratch\n"
-            f"5. Never use sudo, never switch platforms\n"
+            f"5. Do NOT run deploy.sh or docker compose commands — "
+            f"the pipeline re-runs deployment automatically after your fix\n"
+            f"6. Never use sudo, never switch platforms\n"
+            f"7. PROJECT_NAME must always be lowercased in scripts "
+            f"(Docker Compose rejects uppercase)\n"
         )
 
         fix_result = self.repair_agent(error_context=error_context)
