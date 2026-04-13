@@ -1,6 +1,7 @@
 """Tests for TrajectoryRecorderProtocol consistency and partial implementations."""
 
 from pathlib import Path
+from unittest import mock
 
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
@@ -297,4 +298,3 @@ class TestLiteLLMClient:
         recorder.record_token_usage.assert_called_with(
             {"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28}
         )
->>>>>>> e653820 (feat: RLM recursive agent and hybrid agent refactor (PR 4/6))
