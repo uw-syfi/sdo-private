@@ -27,6 +27,7 @@ dependencies = [
     "pydantic-ai>=1.0.0",
     "fastmcp>=2.9.2",
     "deepagents>=0.5.0a1; python_version >= '3.11'",
+    "rlms>=0.1.0; python_version >= '3.11'",
     "numpy>=2.2.6",
     "matplotlib>=3.10.8",
 ]
