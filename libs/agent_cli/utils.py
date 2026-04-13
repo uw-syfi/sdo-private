@@ -66,9 +66,9 @@ def generate_and_write_files(
 
     written: list[str] = []
     file_sections = re.findall(
-        r"FILE:\s*(\.sds/[\w._-]+)\s*\n```[^\n]*\n(.*?)```",
+        r"(?:^|\n)\s*(?:#+\s*)?FILE:\s*(\.sds/[\w./-]+)\s*\n```[^\n]*\n(.*?)```",
         raw,
-        re.DOTALL,
+        re.DOTALL | re.IGNORECASE,
     )
     for rel_path, content in file_sections:
         out_path = repo_path / rel_path

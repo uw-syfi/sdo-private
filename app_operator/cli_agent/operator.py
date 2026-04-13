@@ -128,17 +128,20 @@ class AppOperator(OperatorBase):
         self.analyzer = CodeAnalyzerAgent(
             self.repo_path,
             self.agent,
+            ui=self.ui,
             ctx=self._ctx,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,
             self.agent,
             deployment_config=self.config.deployment,
+            ui=self.ui,
             ctx=self._ctx,
         )
         self.monitor = AppMonitor(
             self.repo_path,
             self.agent,
+            ui=self.ui,
             ctx=self._ctx,
         )
 

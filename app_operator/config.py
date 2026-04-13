@@ -46,6 +46,7 @@ class DSPyOptimizationConfig:
         teacher_model: Model to use for generating training examples
         num_examples: Number of examples for few-shot optimization
         validation_split: Fraction of data reserved for validation (0.0-1.0)
+        phase_signal_weight: Weight for prompt-aligned phase score blending (0.0-1.0)
         metric_weights: Weights for different metrics (must sum to 1.0)
     """
 
@@ -68,6 +69,7 @@ class DSPyOptimizationConfig:
     n_candidates: int = 4
     selection_mode: str = "hybrid"
     selection_top_k: int = 3
+    phase_signal_weight: float = 0.35
     metric_weights: dict[str, float] = field(
         default_factory=lambda: {
             "success": 0.5,
@@ -92,6 +94,18 @@ class DSPyOptimizationConfig:
         if self.selection_mode not in self.VALID_SELECTION_MODES:
             raise ValueError(f"selection_mode must be one of {self.VALID_SELECTION_MODES}, got '{self.selection_mode}'")
         validate_field(self.selection_top_k, "selection_top_k", int, min_val=1)
+        validate_type(
+            self.phase_signal_weight,
+            "phase_signal_weight",
+            (int, float),
+            type_label=_NUMERIC_LABEL,
+        )
+        validate_range(
+            self.phase_signal_weight,
+            "phase_signal_weight",
+            min_val=0.0,
+            max_val=1.0,
+        )
 
         # validation_split: numeric in [0.0, 1.0)
         validate_type(
@@ -332,6 +346,7 @@ class AgentConfig:
     step_limit: int | None = 1000  # hard limit; soft limit = max(0, step_limit - 5)
     model_config: ModelConfig | None = None
 
+    # "rlm" is intentionally absent: RLMAgent is only reachable via backend="hybrid".
     VALID_BACKENDS = {
         "codex",
         "gemini",
@@ -353,7 +368,8 @@ class AgentConfig:
         # Case-insensitive check
         if self.backend.lower() not in self.VALID_BACKENDS:
             raise ValueError(
-                f"Invalid backend: '{self.backend}'. Valid backends: {', '.join(sorted(self.VALID_BACKENDS))}"
+                f"Invalid backend/provider: '{self.backend}'. Invalid provider alias. "
+                f"Valid providers/backends: {', '.join(sorted(self.VALID_BACKENDS))}"
             )
         # Normalize backend name
         self.backend = self.backend.lower()
@@ -383,7 +399,12 @@ class AgentConfig:
             try:
                 self.model_config = from_provider_and_model(self.backend, value, location=loc, thinking_budget=tb)
             except ValueError:
-                pass
+                self.model_config = ModelConfig.from_string(
+                    value,
+                    provider_hint=self.backend,
+                    location=loc,
+                    thinking_budget=tb,
+                )
         else:
             self.model_config = ModelConfig.from_string(value, location=loc, thinking_budget=tb)
 
@@ -507,6 +528,20 @@ class RuntimeConfig:
 
 
 @dataclass
+class RLMConfig:
+    """Configuration for the CLI-agent RLM scaffold."""
+
+    VALID_MODES = {"compatibility", "paper_faithful"}
+
+    mode: str = "compatibility"
+
+    def __post_init__(self):
+        validate_field(self.mode, "mode", str)
+        if self.mode not in self.VALID_MODES:
+            raise ValueError(f"mode must be one of {sorted(self.VALID_MODES)}, got '{self.mode}'")
+
+
+@dataclass
 class GEPAConfig:
     """Configuration for GEPA prompt optimization.
 
@@ -580,17 +615,11 @@ class Config:
     operator: OperatorConfig = field(default_factory=OperatorConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    rlm: RLMConfig = field(default_factory=RLMConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     gepa: GEPAConfig = field(default_factory=GEPAConfig)
     dspy: DSPyConfig = field(default_factory=DSPyConfig)
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
-
-    def __post_init__(self):
-        if self.runtime.impl == "cli_agent" and self.agent.model is None:
-            raise ValueError(
-                "agent.model is required when runtime.impl is 'cli_agent'. "
-                "Set [agent] model in your sds.toml to ensure reproducible results."
-            )
 
     @staticmethod
     def _validate_fields(section_data: dict, section_name: str, config_class: type) -> None:
@@ -614,6 +643,7 @@ class Config:
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
+        rlm_data = data.get("rlm", {})
         features_data = data.get("features", {})
         gepa_data = data.get("gepa", {})
         dspy_data = data.get("dspy", {})
@@ -621,15 +651,19 @@ class Config:
 
         # Pop model-related flat keys - these are not AgentConfig fields but are
         # accepted in TOML for convenience and used to build model_config.
+        _raw_provider = agent_data.pop("provider", None)
         _raw_model = agent_data.pop("model", None)
         _raw_location = agent_data.pop("location", None)
         _raw_thinking_budget = agent_data.pop("thinking_budget", None)
+        if _raw_provider is not None:
+            agent_data["backend"] = _raw_provider
 
         cls._validate_fields(agent_data, "agent", AgentConfig)
         cls._validate_fields(operator_data, "operator", OperatorConfig)
         cls._validate_operator_phase_fields(operator_data)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
+        cls._validate_fields(rlm_data, "rlm", RLMConfig)
         cls._validate_fields(features_data, "features", FeaturesConfig)
         cls._validate_fields(gepa_data, "gepa", GEPAConfig)
         cls._validate_dspy_fields(dspy_data)
@@ -660,12 +694,20 @@ class Config:
 
         # Parse DSPy config and auto-populate runtime_model if not set
         dspy_config = cls._parse_dspy_config(dspy_data, agent_config)
-
+        runtime_config = RuntimeConfig(**runtime_data)
+        if (
+            runtime_config.impl == "cli_agent"
+            and "agent" in data
+            and agent_config.backend != "codex"
+            and not agent_config.model
+        ):
+            raise ValueError("agent.model is required for cli_agent runtime when agent.backend is set")
         return cls(
             agent=agent_config,
             operator=cls._parse_operator_config(operator_data),
             deployment=DeploymentConfig(**deployment_data),
-            runtime=RuntimeConfig(**runtime_data),
+            runtime=runtime_config,
+            rlm=RLMConfig(**rlm_data),
             features=FeaturesConfig(**features_data),
             gepa=GEPAConfig(**gepa_data),
             dspy=dspy_config,

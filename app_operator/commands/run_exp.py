@@ -668,11 +668,16 @@ def _resolve_experiment(experiment_str: str) -> tuple[str, Path, dict, Path] | N
 
 def run_command(args: argparse.Namespace) -> int:
     console = Console()
-    multi = len(args.experiments) > 1
+    experiments = getattr(args, "experiments", None)
+    if isinstance(experiments, str):
+        experiments = [experiments]
+    elif not isinstance(experiments, (list, tuple)):
+        experiments = [args.experiment]
+    multi = len(experiments) > 1
 
     # Resolve all experiments up front
     resolved = []
-    for experiment_str in args.experiments:
+    for experiment_str in experiments:
         result = _resolve_experiment(experiment_str)
         if result is None:
             return 1
@@ -701,7 +706,7 @@ def run_command(args: argparse.Namespace) -> int:
     console.print(f"Parallelism: {args.parallel}")
 
     # Prepare log directories and load any existing results (for resume support)
-    rerun = args.rerun
+    rerun = getattr(args, "rerun", None)
     results_by_exp: dict[str, list[AppResult]] = {}
     completed_keys_by_exp: dict[str, set[tuple[str, int | None]]] = {}
     for exp_name, _config_path, _config, log_dir in resolved:

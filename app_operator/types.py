@@ -15,15 +15,25 @@ __all__ = [
 ]
 
 
+class CommandResult(TypedDict):
+    """Result of running a shell command (deploy script or health check)."""
+
+    success: bool
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
 @dataclass
 class HealthVerdict:
-    """Result of an agent-based health assessment."""
+    """Normalized health assessment returned by the health judge."""
 
     healthy: bool
     assessment: str
     diagnosis: str
     script_was_fixed: bool
     raw_response: str
+    false_negative_suspected: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "HealthVerdict":
@@ -34,15 +44,6 @@ class HealthVerdict:
             script_was_fixed=d.get("script_was_fixed", False),
             raw_response=d.get("raw_response", ""),
         )
-
-
-class CommandResult(TypedDict):
-    """Result of running a shell command (deploy script or health check)."""
-
-    success: bool
-    exit_code: int
-    stdout: str
-    stderr: str
 
 
 class _TrajectoryCallRecordRequired(TypedDict):
