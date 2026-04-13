@@ -205,6 +205,78 @@ class ConsolidateFixSummary(dspy.Signature):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# RLM — Code Analyzer
+# ---------------------------------------------------------------------------
+
+
+class AnalyzeCodebaseRLM(dspy.Signature):
+    """Analyze a microservice repository to produce a deployment analysis and issue list.
+
+    You have the repo_path variable available. Use the provided tools
+    (read_file, list_files, run_shell) to explore the repository
+    programmatically. Read Dockerfiles, docker-compose files, package.json,
+    requirements.txt, and source code to identify services, ports,
+    dependencies, and potential deployment issues.
+    """
+
+    repo_path: str = dspy.InputField(desc="Absolute path to the repository to analyze")
+
+    analysis: str = dspy.OutputField(
+        desc=(
+            "Structured markdown analysis covering: executive summary, services inventory "
+            "table (name/tech/port/database/dependencies), per-service details (port, health "
+            "endpoint, env vars), database requirements, ASCII dependency graph, recommended "
+            "startup order, and environment variables summary"
+        )
+    )
+    issues: str = dspy.OutputField(
+        desc=(
+            "Markdown deployment issues document with: TODO checklist "
+            "(``- [ ] #N — title`` format) and per-issue blocks each containing "
+            "Severity (Critical/High/Medium/Low), Confidence (High/Medium/Low with "
+            "justification), Category, Affected service/file, Description, Evidence, "
+            "Impact, and Recommended Fix"
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# RLM — Repair
+# ---------------------------------------------------------------------------
+
+
+class RepairDeploymentErrorRLM(dspy.Signature):
+    """Debug and fix a failed deployment by analyzing error output and editing scripts.
+
+    You have the error_context variable containing the error output, file paths,
+    fix history, and attempt info. Use the provided tools (read_file, write_file,
+    run_shell) to read the current scripts, analyze what went wrong, and write
+    fixes. Do NOT rewrite scripts from scratch — make targeted fixes based on
+    evidence from the error output.
+    """
+
+    error_context: str = dspy.InputField(
+        desc=(
+            "Structured context containing: repo_path, deploy_path, health_path, "
+            "error_output from the failed deploy/health check, fix_history of "
+            "previous attempts, current attempt number, and max_attempts"
+        )
+    )
+
+    fix_summary: str = dspy.OutputField(
+        desc=(
+            "Brief summary of what issue(s) were found and what fix(es) were applied. "
+            "Workflow: read scripts, analyze error, make targeted fixes, verify."
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monitor
+# ---------------------------------------------------------------------------
+
+
 class AnalyzeHealthCheck(dspy.Signature):
     """Analyze health check output and classify application health status."""
 
