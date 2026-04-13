@@ -2,7 +2,6 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from app_operator.cli_agent.healthcheck import run_health_check
 
 

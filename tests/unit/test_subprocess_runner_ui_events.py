@@ -1,8 +1,8 @@
 from unittest.mock import Mock
 
 import pytest
-from app_operator.cli_agent.subprocess_runner import SubprocessRunner
 
+from app_operator.cli_agent.subprocess_runner import SubprocessRunner
 from app_operator.ui import OperatorUI
 
 

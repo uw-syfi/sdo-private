@@ -13,9 +13,9 @@ import sys
 import tempfile
 
 import litellm
+from app_operator.rlm.environment import RLMContext
 
 from app_operator.logger import logger
-from app_operator.rlm.environment import RLMContext
 
 _SYSTEM_PROMPT = """\
 You are an RLM deployment assistant. Use execute_code actions to inspect

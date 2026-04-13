@@ -12,9 +12,9 @@ import re
 from pathlib import Path
 
 import litellm
+from app_operator.rlm.environment import RLMContext
 
 from app_operator.logger import logger
-from app_operator.rlm.environment import RLMContext
 from app_operator.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.trajectory import TrajectoryRecorderProtocol
 
