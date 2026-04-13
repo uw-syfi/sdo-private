@@ -255,6 +255,26 @@ class RLMOfficialAgent(CodingAgent):
         self.max_depth = max_depth
         self.max_iterations = max_iterations
 
+    def _resolve_backend(self) -> tuple[str, dict[str, Any]]:
+        """Pick the RLM backend based on available credentials.
+
+        Uses the native ``gemini`` backend when ``GEMINI_API_KEY`` is set,
+        otherwise falls back to ``litellm`` which supports Vertex AI via
+        Application Default Credentials.
+        """
+        model_name = self.model
+        if "/" in model_name:
+            model_name = model_name.split("/", 1)[1]
+
+        if os.environ.get("GEMINI_API_KEY"):
+            logger.info("[RLM-Official] Using gemini backend (GEMINI_API_KEY)")
+            return "gemini", {"model_name": model_name}
+
+        # Fall back to litellm which handles Vertex AI auth via ADC
+        litellm_model = f"vertex_ai/{model_name}"
+        logger.info("[RLM-Official] Using litellm backend (Vertex AI): {}", litellm_model)
+        return "litellm", {"model_name": litellm_model}
+
     def generate(
         self,
         prompt: str,
@@ -314,18 +334,13 @@ class RLMOfficialAgent(CodingAgent):
         os.makedirs(log_dir, exist_ok=True)
         rlm_logger = RLMLogger(log_dir=log_dir)
 
-        # Build model name — the rlm library's gemini backend expects the
-        # bare model name (e.g. "gemini-2.5-pro") and reads GEMINI_API_KEY.
-        model_name = self.model
-        # Strip provider prefix if present (e.g. "gemini/gemini-2.5-pro" -> "gemini-2.5-pro")
-        if "/" in model_name:
-            model_name = model_name.split("/", 1)[1]
+        backend, backend_kwargs = self._resolve_backend()
 
         rlm = RLM(
-            backend="gemini",
-            backend_kwargs={"model_name": model_name},
-            other_backends=["gemini"],
-            other_backend_kwargs=[{"model_name": model_name}],
+            backend=backend,
+            backend_kwargs=backend_kwargs,
+            other_backends=[backend],
+            other_backend_kwargs=[backend_kwargs],
             environment="local",
             max_depth=self.max_depth,
             max_iterations=self.max_iterations,
