@@ -39,13 +39,8 @@ class ToolContext:
         # Check if path escapes repository root
         try:
             candidate.relative_to(self.repo_root)
-<<<<<<<< HEAD:libs/sds_core/tools.py
-        except ValueError as err:
-            raise ValueError(f"Path escapes repository root: {path}") from err
-========
         except ValueError:
             raise ValueError(f"Path escapes repository root: {path}") from None
->>>>>>>> 07df361 (fix: resolve post-rebase test and type check failures):lego_agent/tools.py
 
         return candidate
 
@@ -328,11 +323,7 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], dict[str, A
         try:
             validate_command(command)
             # subprocess uses real system
-<<<<<<<< HEAD:libs/sds_core/tools.py
-            result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
-========
             result = subprocess.run(  # noqa: S602
->>>>>>>> 07df361 (fix: resolve post-rebase test and type check failures):lego_agent/tools.py
                 command,
                 cwd=str(context.repo_root),
                 shell=True,
@@ -393,13 +384,9 @@ def _build_run_command(context: ToolContext) -> Callable[[str, int], dict[str, A
     return run_command
 
 
-<<<<<<<< HEAD:libs/sds_core/tools.py
-def build_tools(repo_path: Path, filesystem: FileSystemInterface | None = None) -> list[Callable[..., Any]]:
-========
 def build_tools(
     repo_path: Path, filesystem: FileSystemInterface | None = None
 ) -> list[Callable[..., Any]]:
->>>>>>>> 07df361 (fix: resolve post-rebase test and type check failures):lego_agent/tools.py
     if filesystem is None:
         filesystem = RealFilesystem()
 
