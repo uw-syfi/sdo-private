@@ -180,7 +180,7 @@ class DeploymentAgent:
 
         for confirm_idx in range(1, self._HEALTH_SUCCESS_CONFIRMATION_RECHECKS + 1):
             if self._HEALTH_SUCCESS_CONFIRMATION_SLEEP > 0:
-                self._sleep(self._HEALTH_SUCCESS_CONFIRMATION_SLEEP)
+                time.sleep(self._HEALTH_SUCCESS_CONFIRMATION_SLEEP)
 
             confirm_log = self.sds_dir / "logs" / f"health_confirm_attempt_{attempt}_{confirm_idx}.log"
             health_result, health_verdict = self._run_health_check_and_assess(

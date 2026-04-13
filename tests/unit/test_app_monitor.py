@@ -2,6 +2,7 @@ import pytest
 
 import app_operator.cli_agent.agents.app_monitor as app_monitor_module
 from app_operator.cli_agent.agents.app_monitor import AppMonitor, HealthCheckTask
+from app_operator.types import CommandResult
 
 
 class StubAgent:
@@ -76,12 +77,7 @@ def test_run_respects_max_checks(monitor, monkeypatch):
 
 
 def test_analyze_health_calls_agent(monitor, stub_agent):
-    health_result = {
-        "exit_code": 0,
-        "success": True,
-        "stdout": "all good",
-        "stderr": "",
-    }
+    health_result = CommandResult(exit_code=0, success=True, stdout="all good", stderr="")
     task = HealthCheckTask()
     monitor.check_count = 1
     task.analyze(monitor, health_result)
@@ -104,7 +100,7 @@ def test_analyze_parses_exec_summary(monitor, stub_agent, capture_logs, tmp_path
     monitor.log_dir = tmp_path / "logs"
 
     # Dummy health result
-    health_result = {"exit_code": 0, "success": True, "stdout": "ok", "stderr": ""}
+    health_result = CommandResult(exit_code=0, success=True, stdout="ok", stderr="")
 
     task.analyze(monitor, health_result)
 
@@ -124,7 +120,7 @@ def test_analyze_handles_missing_summary(monitor, stub_agent, capture_logs, tmp_
     monitor.check_count = 1
     monitor.log_dir = tmp_path / "logs"
 
-    health_result = {"exit_code": 0, "success": True, "stdout": "ok", "stderr": ""}
+    health_result = CommandResult(exit_code=0, success=True, stdout="ok", stderr="")
 
     task.analyze(monitor, health_result)
 
@@ -140,7 +136,7 @@ def test_analyze_handles_agent_exception(monitor, stub_agent, capture_logs, tmp_
     monitor.log_dir = tmp_path / "logs"
 
     task = HealthCheckTask()
-    health_result = {"exit_code": 0, "success": True, "stdout": "", "stderr": ""}
+    health_result = CommandResult(exit_code=0, success=True, stdout="", stderr="")
 
     # Should not crash
     task.analyze(monitor, health_result)
