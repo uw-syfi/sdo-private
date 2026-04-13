@@ -233,6 +233,31 @@ def load_problem_type_mapping():
     return mapping
 
 
+def _compute_group_stats(runs):
+    count = len(runs)
+    diag_ok = sum(1 for r in runs if r.get("Diagnosis.success") == "True")
+    with_mitig = [r for r in runs if r.get("has_mitigation")]
+    mitig_ok = sum(1 for r in with_mitig if r.get("Mitigation.success") == "True")
+
+    diag_pct = f"{100 * diag_ok / count:.0f}%" if count else "-"
+    mitig_pct = f"{100 * mitig_ok / len(with_mitig):.0f}%" if with_mitig else "-"
+
+    ttls = []
+    ttms = []
+    for r in runs:
+        try:
+            if r.get("TTL"):
+                ttls.append(float(r["TTL"]))
+            if r.get("has_mitigation") and r.get("TTM"):
+                ttms.append(float(r["TTM"]))
+        except ValueError:
+            pass
+    avg_ttl = f"{sum(ttls) / len(ttls):.1f}" if ttls else "-"
+    avg_ttm = f"{sum(ttms) / len(ttms):.1f}" if ttms else "-"
+
+    return count, diag_pct, mitig_pct, avg_ttl, avg_ttm
+
+
 def print_type_breakdown(completed_runs, type_mapping, table_width=130):
     """Print success rates grouped by problem type."""
     # Group runs by type
@@ -255,29 +280,13 @@ def print_type_breakdown(completed_runs, type_mapping, table_width=130):
     print("-" * table_width)
 
     for type_name in sorted_types:
-        runs = groups[type_name]
-        count = len(runs)
-        diag_ok = sum(1 for r in runs if r.get("Diagnosis.success") == "True")
-        with_mitig = [r for r in runs if r.get("has_mitigation")]
-        mitig_ok = sum(1 for r in with_mitig if r.get("Mitigation.success") == "True")
-
-        diag_pct = f"{100 * diag_ok / count:.0f}%" if count else "-"
-        mitig_pct = f"{100 * mitig_ok / len(with_mitig):.0f}%" if with_mitig else "-"
-
-        ttls = []
-        ttms = []
-        for r in runs:
-            try:
-                if r.get("TTL"):
-                    ttls.append(float(r["TTL"]))
-                if r.get("has_mitigation") and r.get("TTM"):
-                    ttms.append(float(r["TTM"]))
-            except ValueError:
-                pass
-        avg_ttl = f"{sum(ttls) / len(ttls):.1f}" if ttls else "-"
-        avg_ttm = f"{sum(ttms) / len(ttms):.1f}" if ttms else "-"
-
+        count, diag_pct, mitig_pct, avg_ttl, avg_ttm = _compute_group_stats(groups[type_name])
         print(f"{type_name:<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>8}")
+
+    # Aggregate row across all problems (ungrouped)
+    print("-" * table_width)
+    count, diag_pct, mitig_pct, avg_ttl, avg_ttm = _compute_group_stats(completed_runs)
+    print(f"{'all':<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>8}")
 
     print("-" * table_width + "\n")
 
