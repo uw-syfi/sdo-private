@@ -29,7 +29,8 @@ def get_lm_kwargs(model: str) -> dict:
     """Build extra kwargs for dspy.LM based on model identifier.
 
     Args:
-        model: LiteLLM model identifier (e.g. vertex_ai/gemini-2.5-pro).
+        model: LiteLLM model identifier (e.g. vertex_ai/gemini-2.5-pro,
+               gemini/gemini-2.5-pro).
 
     Returns:
         Dict of kwargs to pass to configure_lm (e.g. vertex_project, vertex_location).
@@ -40,4 +41,5 @@ def get_lm_kwargs(model: str) -> dict:
         kwargs["vertex_location"] = os.environ.get(
             "VERTEX_LOCATION", os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
         )
+    # gemini/ models use Google AI Studio via GEMINI_API_KEY — no extra kwargs needed
     return kwargs

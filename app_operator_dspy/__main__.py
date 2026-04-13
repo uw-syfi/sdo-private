@@ -39,11 +39,13 @@ def run_command(args: argparse.Namespace) -> int:
     model = args.model or DEFAULT_MODEL
     lm_kwargs = get_lm_kwargs(model)
     log.info("Model: {}", model)
-    configure_lm(model, **lm_kwargs)
+    lm = configure_lm(model, **lm_kwargs)
 
     # Run operator
-    log.info("Creating DSPyOperator...")
-    operator = DSPyOperator()
+    use_rlm = getattr(args, "rlm", False)
+    log.info("Creating DSPyOperator{}...", " (RLM)" if use_rlm else "")
+    sub_lm = lm if use_rlm else None
+    operator = DSPyOperator(use_rlm=use_rlm, sub_lm=sub_lm)
 
     set_task_repo(repo_path)
     log.info("Starting operator on {}", repo_path)
@@ -121,6 +123,12 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=HEALTH_CHECK_TIMEOUT,
         help=f"Health check timeout in seconds (default: {HEALTH_CHECK_TIMEOUT})",
+    )
+    parser.add_argument(
+        "--rlm",
+        action="store_true",
+        default=False,
+        help="Use RLM-based agents (code analyzer + repair) instead of ReAct",
     )
 
 
