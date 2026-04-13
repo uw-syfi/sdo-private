@@ -262,20 +262,19 @@ class DeploymentAgent:
             return (overlap / shorter) >= 0.7
 
         # Check if ALL consecutive recent summaries are similar (3-loop)
-        if len(summaries) >= 3:
-            if _similar(summaries[-1], summaries[-2]) and _similar(summaries[-2], summaries[-3]):
-                n = len(summaries)
-                return (
-                    f"\n\n## CRITICAL: Fix Loop Detected\n"
-                    f"The last {n} consecutive repair attempts applied nearly identical fixes. "
-                    "You appear to be stuck in a loop.\n\n"
-                    "**You MUST take a fundamentally different approach this time.**\n\n"
-                    "Suggestions to break out of the loop:\n"
-                    "- Read the container logs (`docker compose logs`) to understand the root cause\n"
-                    "- Question your assumptions about which service or config is the real problem\n"
-                    "- Try a completely different fix strategy\n"
-                    "- Look for indirect causes (networking, permissions, dependency order)"
-                )
+        if len(summaries) >= 3 and _similar(summaries[-1], summaries[-2]) and _similar(summaries[-2], summaries[-3]):
+            n = len(summaries)
+            return (
+                f"\n\n## CRITICAL: Fix Loop Detected\n"
+                f"The last {n} consecutive repair attempts applied nearly identical fixes. "
+                "You appear to be stuck in a loop.\n\n"
+                "**You MUST take a fundamentally different approach this time.**\n\n"
+                "Suggestions to break out of the loop:\n"
+                "- Read the container logs (`docker compose logs`) to understand the root cause\n"
+                "- Question your assumptions about which service or config is the real problem\n"
+                "- Try a completely different fix strategy\n"
+                "- Look for indirect causes (networking, permissions, dependency order)"
+            )
 
         # Check if only the last 2 are similar (2-loop)
         if len(summaries) >= 2 and _similar(summaries[-1], summaries[-2]):
