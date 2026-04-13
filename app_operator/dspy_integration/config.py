@@ -1,4 +1,4 @@
-"""DSPy configuration dataclasses.
+"""Backward-compatible DSPy config exports.
 
 Configuration for DSPy prompt optimization, including optimization settings,
 auto-rollback parameters, and metric weights.

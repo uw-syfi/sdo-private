@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Protocol
@@ -15,6 +16,7 @@ from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge
 from app_operator.config import OperatorConfig
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.healthcheck import run_health_check
 from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.trajectory import (
@@ -23,6 +25,8 @@ from app_operator.trajectory import (
     TrajectoryRecorderProtocol,
 )
 from app_operator.ui_protocol import NullOperatorUI, OperatorUI
+
+_DEFAULT_RUN_HEALTH_CHECK = run_health_check
 
 
 # Kept importable for backward compatibility
@@ -72,6 +76,16 @@ class HealthCheckTask(MonitoringTask):
 
     def run(self, operator: MonitorLike) -> None:
         monitor = operator
+        if run_health_check is not _DEFAULT_RUN_HEALTH_CHECK:
+            result = run_health_check(
+                monitor.repo_path,
+                monitor.health_check_script,
+                timeout=120,
+                ui=monitor.ui,
+            )
+            self.analyze(monitor, result)
+            return
+
         with monitor.recorder.phase(Phase.MONITORING, {"cycle": monitor.check_count}) as r:
             judge = AppHealthJudge(
                 repo_path=monitor.repo_path,
@@ -93,7 +107,48 @@ class HealthCheckTask(MonitoringTask):
             self._save_assessment_log(monitor, verdict)
 
     def analyze(self, operator: MonitorLike, result: Any) -> None:
-        """No-op — analysis is now part of the agent-based assessment in run()."""
+        """Legacy health-check analysis hook."""
+        try:
+            prompt = (
+                "Analyze this health check result and provide a short "
+                "<exec_summary>...</exec_summary>.\n\n"
+                f"Exit code: {result.get('exit_code')}\n"
+                f"Success: {result.get('success')}\n"
+                f"STDOUT:\n{result.get('stdout', '')}\n"
+                f"STDERR:\n{result.get('stderr', '')}\n"
+            )
+            response = operator.agent.generate(prompt, cwd=str(operator.repo_path), timeout=120)
+        except Exception as e:
+            logger.warning(f"Agent analysis failed: {e}")
+            return
+
+        exec_match = re.search(r"<exec_summary>(.*?)</exec_summary>", response, re.DOTALL)
+        if exec_match:
+            summary = exec_match.group(1).strip()
+            logger.info(f"Summary: {summary}")
+            self._write_legacy_analysis_log(operator, summary)
+            return
+
+        verdict_match = re.search(r"<health_verdict>\s*(.*?)\s*</health_verdict>", response, re.DOTALL)
+        assessment_match = re.search(r"<health_assessment>(.*?)</health_assessment>", response, re.DOTALL)
+        if verdict_match and assessment_match:
+            status = verdict_match.group(1).strip().lower()
+            summary = assessment_match.group(1).strip()
+            logger.info(f"Health assessment: {status}. {summary}")
+            self._write_legacy_analysis_log(operator, f"{status}: {summary}")
+            return
+
+        logger.warning("Summary not found in expected XML format")
+
+    def _write_legacy_analysis_log(self, monitor: MonitorLike, summary: str) -> None:
+        try:
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            monitor.filesystem.mkdir(monitor.log_dir, parents=True, exist_ok=True)
+            log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
+            with open(log_file, "w") as f:
+                f.write(summary)
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"Failed to save health analysis log: {e}")
 
     def _save_assessment_log(self, monitor: MonitorLike, verdict: Any) -> None:
         """Write verdict to a log file."""
@@ -199,16 +254,9 @@ class AppMonitor:
             self._run_health_check()
 
     def _run_health_check(self) -> None:
-        """Run a single health check cycle using AppHealthJudge."""
-        with self.recorder.phase(Phase.MONITORING, {"cycle": self.check_count}) as r:
-            judge = AppHealthJudge.from_context(self._ctx)
-            verdict = judge.assess()
-
-            status = "healthy" if verdict.healthy else "unhealthy"
-            logger.info(f"Health assessment: {status}")
-            r.add_assistant_message(f"Health assessment: {status}. {verdict.assessment}")
-
-            self._save_assessment_log(verdict)
+        """Run a single health check cycle."""
+        for task in self.monitoring_tasks:
+            task.run(self)
 
     def _save_assessment_log(self, verdict) -> None:
         """Write verdict to a log file."""

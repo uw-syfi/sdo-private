@@ -164,6 +164,12 @@ class TestAgentConfigValidation:
         assert "gemini" in error_msg
         assert "claude" in error_msg
 
+    @pytest.mark.parametrize("backend", ["rlm"])
+    def test_registered_architecture_backends_accepted(self, backend):
+        """Registered architecture backends should be user-selectable."""
+        config = AgentConfig(backend=backend)
+        assert config.backend == backend
+
 
 class TestConfigIntegration:
     """Tests for full Config object validation."""

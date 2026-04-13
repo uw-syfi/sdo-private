@@ -1,9 +1,10 @@
+import signal
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from app_operator.subprocess_runner import SubprocessRunner
+from app_operator.cli_agent.subprocess_runner import SubprocessRunner
 
 
 class MockProcess:
@@ -13,6 +14,7 @@ class MockProcess:
         self.stderr_lines = stderr_lines or []
         self.duration = duration
         self.start_time = None
+        self.pid: int | None = None
         self.stdout = MagicMock()
         self.stderr = MagicMock()
 
@@ -212,3 +214,93 @@ def test_log_file_open_failure(runner_setup, tmp_path):
         # Should not crash
         result = runner.run()
         assert result["success"]
+
+
+def test_process_group_killed_on_timeout(runner_setup):
+    """When a deploy times out, the entire process group (not just direct child) is killed."""
+    cmd, cwd, timeout = runner_setup
+
+    current_time = [0.0]
+
+    def mock_time():
+        return current_time[0]
+
+    def mock_sleep(seconds):
+        current_time[0] += seconds
+
+    mock_proc = MockProcess()
+    mock_proc.pid = 99999
+    mock_proc.poll = MagicMock(return_value=None)
+
+    runner = SubprocessRunner(
+        command=cmd,
+        cwd=cwd,
+        timeout=timeout,
+        time_func=mock_time,
+        sleep_func=mock_sleep,
+    )
+    runner.popen_func = MagicMock(return_value=mock_proc)
+
+    fake_pgid = 88888
+    with patch("os.getpgid", return_value=fake_pgid) as mock_getpgid, patch("os.killpg") as mock_killpg:
+        result = runner.run()
+
+    assert result["success"] is False
+    assert "timed out" in result["stderr"]
+    mock_getpgid.assert_called_with(mock_proc.pid)
+    # SIGTERM sent to process group first, SIGKILL on wait failure
+    assert call(fake_pgid, signal.SIGTERM) in mock_killpg.call_args_list
+
+
+def test_process_group_killed_on_shutdown(runner_setup):
+    """When shutdown is requested, the entire process group is killed."""
+    cmd, cwd, timeout = runner_setup
+
+    check_shutdown = MagicMock(return_value=True)
+
+    mock_proc = MockProcess()
+    mock_proc.pid = 77777
+    mock_proc.poll = MagicMock(return_value=None)
+
+    runner = SubprocessRunner(command=cmd, cwd=cwd, timeout=timeout, check_shutdown=check_shutdown)
+    runner.popen_func = MagicMock(return_value=mock_proc)
+
+    fake_pgid = 66666
+    with patch("os.getpgid", return_value=fake_pgid), patch("os.killpg") as mock_killpg:
+        result = runner.run()
+
+    assert result["success"] is False
+    assert call(fake_pgid, signal.SIGTERM) in mock_killpg.call_args_list
+
+
+def test_process_group_kill_falls_back_when_pgid_unavailable(runner_setup):
+    """When os.getpgid fails, falls back to direct process.terminate/kill."""
+    cmd, cwd, timeout = runner_setup
+
+    current_time = [0.0]
+
+    def mock_time():
+        return current_time[0]
+
+    def mock_sleep(seconds):
+        current_time[0] += seconds
+
+    mock_proc = MockProcess()
+    mock_proc.pid = 55555
+    mock_proc.poll = MagicMock(return_value=None)
+
+    runner = SubprocessRunner(
+        command=cmd,
+        cwd=cwd,
+        timeout=timeout,
+        time_func=mock_time,
+        sleep_func=mock_sleep,
+    )
+    runner.popen_func = MagicMock(return_value=mock_proc)
+
+    with patch("os.getpgid", side_effect=OSError("no such process")):
+        result = runner.run()
+
+    assert result["success"] is False
+    assert "timed out" in result["stderr"]
+    assert mock_proc.terminate_called
