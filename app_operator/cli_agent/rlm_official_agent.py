@@ -294,7 +294,10 @@ class RLMOfficialAgent(CodingAgent):
         """Handle file-generation tasks with a direct litellm call."""
         from libs.agent_cli.llm_client import LiteLLMClient
 
-        client = LiteLLMClient(f"gemini/{self.model}", self.location, self.recorder)
+        # Use the same backend resolution as the RLM path
+        _, bk = self._resolve_backend()
+        litellm_model = bk["model_name"]
+        client = LiteLLMClient(litellm_model, self.location, self.recorder)
         try:
             raw = client.complete(
                 [
