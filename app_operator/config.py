@@ -430,7 +430,6 @@ PROVIDER_TO_LITELLM_PREFIX: dict[str, str] = {
     "openai": "openai",
     "opencode": "openai",
     "rlm": "gemini",
-    "rlm-official": "gemini",
 }
 
 
