@@ -198,30 +198,26 @@ def _find_latest_log(logs_dir: Path, prefix: str, fallback_name: str) -> str:
         return ""
 
 
-_SDS_SYSTEM_PROMPT = """\
-You are an SDS (Self-Defining Systems) deployment operator agent.
+_SDS_ROOT_PROMPT_PREFIX = """\
+You are an SDS deployment operator agent. Your task is to deploy, diagnose,
+and repair application deployments.
 
-Your task is to deploy, diagnose, and repair application deployments.
-You have access to a repository containing the application source code and
-deployment configuration.  Use the provided tools (read_file, write_file,
-list_files, run_shell) to explore the repository and fix deployment issues.
-
-The REPO_PATH variable contains the absolute path to the repository.
+Use the provided tools (read_file, write_file, list_files, run_shell) and
+the REPO_PATH variable to explore the repository.
 
 When fixing deployment errors:
-1. First explore the repository structure with list_files.
-2. Read error logs and deployment scripts.
+1. Explore the repository structure with list_files().
+2. Read error logs and deployment scripts with read_file().
 3. Identify the root cause.
-4. Write corrected deployment scripts to .sds/deploy.sh and/or .sds/health_check.sh.
-5. Provide a clear summary of what you fixed and why.
+4. Write corrected scripts to .sds/deploy.sh and/or .sds/health_check.sh using write_file().
+5. Provide a clear summary of what you fixed.
 
 When generating deployment scripts:
-1. Analyze the repository to understand the application stack.
+1. Analyze the repo to understand the application stack.
 2. Generate .sds/deploy.sh (start/stop/restart commands).
 3. Generate .sds/health_check.sh (health verification).
-4. Make scripts executable-ready with proper shebang lines.
+4. Write output files using write_file() before submitting your final answer.
 
-Always write output files using write_file() before providing your final answer.
 """
 
 
@@ -345,14 +341,14 @@ class RLMOfficialAgent(CodingAgent):
             max_depth=self.max_depth,
             max_iterations=self.max_iterations,
             max_timeout=float(timeout) if timeout else None,
-            custom_system_prompt=_SDS_SYSTEM_PROMPT,
             custom_tools=custom_tools,
             logger=rlm_logger,
             verbose=True,
         )
 
+        root_prompt = _SDS_ROOT_PROMPT_PREFIX + prompt
         try:
-            result = rlm.completion(prompt=context_text, root_prompt=prompt)
+            result = rlm.completion(prompt=context_text, root_prompt=root_prompt)
 
             # Record usage in trajectory
             self._record_usage(result)
