@@ -53,11 +53,19 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
             return f"Error reading {path}: {exc}"
 
     def write_file(path: str, content: str) -> str:
-        """Write *content* to a file inside the repository."""
+        """Write *content* to a file inside the repository (overwrites)."""
         full = _resolve_safe(path)
         Path(full).parent.mkdir(parents=True, exist_ok=True)
         Path(full).write_text(content)
         return f"Wrote {len(content)} bytes to {path}"
+
+    def append_file(path: str, content: str) -> str:
+        """Append *content* to a file (creates if missing). Use this to build long files incrementally."""
+        full = _resolve_safe(path)
+        Path(full).parent.mkdir(parents=True, exist_ok=True)
+        with open(full, "a") as f:
+            f.write(content)
+        return f"Appended {len(content)} bytes to {path}"
 
     def list_files(path: str = ".", recursive: bool = False) -> list[str]:
         """List files/directories under *path* (relative to repo root).
@@ -107,11 +115,15 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
         },
         "write_file": {
             "tool": write_file,
-            "description": "Write content to a file in the repo",
+            "description": "Write content to a file in the repo (overwrites)",
+        },
+        "append_file": {
+            "tool": append_file,
+            "description": "Append content to a file (creates if missing). Use for building long files incrementally.",
         },
         "list_files": {
             "tool": list_files,
-            "description": "List files/directories (path relative to repo root)",
+            "description": "List files/directories (path relative to repo root). Pass recursive=True for full tree.",
         },
         "run_shell": {
             "tool": run_shell,
@@ -212,21 +224,26 @@ _SDS_ROOT_PROMPT_PREFIX = """\
 You are an SDS deployment operator agent. Your task is to deploy, diagnose,
 and repair application deployments.
 
-Use the provided tools (read_file, write_file, list_files, run_shell) and
-the REPO_PATH variable to explore the repository.
+Use the provided tools (read_file, write_file, append_file, list_files, run_shell)
+and the REPO_PATH variable to explore the repository.
+
+IMPORTANT: When writing long files (markdown reports, scripts), build them
+incrementally using append_file() in multiple code blocks. Do NOT try to define
+very long strings in a single code block — this causes SyntaxErrors from
+unterminated triple-quoted strings. Instead:
+  write_file('path', '')  # clear the file
+  append_file('path', 'section 1 content\\n')
+  append_file('path', 'section 2 content\\n')
 
 When fixing deployment errors:
 1. Explore the repository structure with list_files().
 2. Read error logs and deployment scripts with read_file().
 3. Identify the root cause.
-4. Write corrected scripts to .sds/deploy.sh and/or .sds/health_check.sh using write_file().
-5. Provide a clear summary of what you fixed.
+4. Write corrected scripts using write_file() or append_file().
 
-When generating deployment scripts:
+When generating deployment scripts or analysis:
 1. Analyze the repo to understand the application stack.
-2. Generate .sds/deploy.sh (start/stop/restart commands).
-3. Generate .sds/health_check.sh (health verification).
-4. Write output files using write_file() before submitting your final answer.
+2. Write output files before submitting your final answer.
 
 """
 

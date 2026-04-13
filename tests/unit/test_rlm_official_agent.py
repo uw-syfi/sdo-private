@@ -53,7 +53,7 @@ class TestCustomTools:
 
     def test_tool_keys(self, tmp_path):
         tools = _build_custom_tools(tmp_path)
-        assert set(tools) == {"read_file", "write_file", "list_files", "run_shell", "REPO_PATH"}
+        assert set(tools) == {"read_file", "write_file", "append_file", "list_files", "run_shell", "REPO_PATH"}
 
     def test_repo_path_value(self, tmp_path):
         tools = _build_custom_tools(tmp_path)
