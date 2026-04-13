@@ -387,7 +387,7 @@ class RLMOfficialAgent(CodingAgent):
             environment="local",
             max_depth=self.max_depth,
             max_iterations=self.max_iterations,
-            max_timeout=float(timeout) if timeout else None,
+            max_timeout=max(float(timeout), 300.0) if timeout else None,
             custom_tools=custom_tools,
             logger=rlm_logger,
             verbose=True,
