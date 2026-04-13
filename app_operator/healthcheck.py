@@ -180,7 +180,6 @@ def run_health_check(
             logger.debug("Failed to close health check log file: %s", e)
 
 
-
 def append_validation_verdict(log_file_path: Path, *, is_healthy: bool) -> None:
     """Append the validation verdict to an existing health check log.
 
