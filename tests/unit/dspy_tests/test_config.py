@@ -21,6 +21,7 @@ class TestDSPyOptimizationConfig:
         assert config.validation_split == 0.2
         assert config.selection_mode == "hybrid"
         assert config.selection_top_k == 3
+        assert config.phase_signal_weight == 0.35
         assert config.metric_weights == {
             "success": 0.5,
             "efficiency": 0.25,
@@ -43,6 +44,19 @@ class TestDSPyOptimizationConfig:
         """Test invalid selection_top_k raises ValueError."""
         with pytest.raises(ValueError, match="selection_top_k must be >= 1"):
             DSPyOptimizationConfig(selection_top_k=0)
+
+    def test_invalid_phase_signal_weight_type(self):
+        """Test invalid phase_signal_weight type raises TypeError."""
+        with pytest.raises(TypeError, match="phase_signal_weight must be numeric"):
+            DSPyOptimizationConfig(phase_signal_weight="0.35")  # type: ignore[arg-type]
+
+    def test_invalid_phase_signal_weight_range(self):
+        """Test phase_signal_weight out of range raises ValueError."""
+        with pytest.raises(ValueError, match="phase_signal_weight must be in range"):
+            DSPyOptimizationConfig(phase_signal_weight=-0.1)
+
+        with pytest.raises(ValueError, match="phase_signal_weight must be in range"):
+            DSPyOptimizationConfig(phase_signal_weight=1.1)
 
     def test_valid_optimizer(self):
         """Test valid optimizer configurations."""

@@ -25,6 +25,9 @@ def extract_rlm_statistics_from_trajectory(trajectory_dict: dict[str, Any]) -> d
         "recursive_calls": 0,
         "total_tokens_saved": 0,
         "max_depth_reached": 0,
+        "metadata_feedback_count": 0,
+        "feedback_turns": 0,
+        "finalization_type": "final_answer",
     }
 
     # Look for RLM-specific messages in deployment phase
@@ -58,5 +61,7 @@ def extract_rlm_statistics_from_trajectory(trajectory_dict: dict[str, Any]) -> d
                 elif "[RLM recursive_call" in content:
                     stats["recursive_calls"] += 1
                     stats["total_calls"] += 1
+                if "stored in `last_" in content:
+                    stats["metadata_feedback_count"] += 1
 
     return stats

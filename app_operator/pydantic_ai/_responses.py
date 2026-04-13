@@ -12,3 +12,7 @@ class HealthVerdictResponse(BaseModel):
     assessment: str = Field(description="What the script reported vs what was independently observed")
     diagnosis: str = Field(description="If unhealthy: symptoms and root causes. If healthy: empty string")
     script_was_fixed: bool = Field(description="Whether the health_check.sh script was modified")
+    false_negative_suspected: bool = Field(
+        default=False,
+        description="Whether a false-negative health verdict is suspected",
+    )

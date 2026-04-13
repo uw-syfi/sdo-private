@@ -34,10 +34,14 @@ class TestBaselineTemplate:
 
     def test_baseline_contains_expected_content(self):
         loader = PromptLoader()
-        result = loader.render_template("rlm/deployer_fix_error.jinja2", {})
+        result = loader.render_template("rlm/deployer_fix_error.jinja2", {"available_specialists": "error_log, repo"})
         assert "validate_file_refs" in result
         assert "MANDATORY FIRST STEPS" in result
         assert "FINAL_ANSWER" in result
+        assert "specialist_call" in result
+        assert "chunking or filtering strategy" in result
+        assert "REPL variables/buffers" in result
+        assert "sub_rlm(...)" in result
 
 
 class TestSeedTemplate:
@@ -69,9 +73,11 @@ class TestRenderFunction:
             attempt="2",
             max_attempts="10",
             has_original_script="True",
+            available_specialists="error_log, repo",
         )
         assert len(result) > 0
         assert "validate_file_refs" in result
+        assert "specialist_call" in result
 
     def test_render_returns_string(self):
         result = render_fix_error_task_prompt()

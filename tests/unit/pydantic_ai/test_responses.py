@@ -43,4 +43,5 @@ def test_health_verdict_response_model_dump():
         "assessment": "ok",
         "diagnosis": "",
         "script_was_fixed": False,
+        "false_negative_suspected": False,
     }

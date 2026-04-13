@@ -76,11 +76,34 @@ def test_run_resumes_from_existing_attempts(agent, repo_path, monkeypatch):
     bind_method(agent, "run_deploy_command", fake_run_deploy)
     bind_method(agent, "_fix_with_agent", fake_fix)
 
-    # Run for 2 more attempts
-    agent.run(max_attempts=2)
+    # Run up to absolute ceiling 4
+    agent.run(max_attempts=4)
 
     # Should run attempt 3 and 4
     assert executed_attempts == [3, 4]
+
+
+def test_run_refuses_resume_beyond_absolute_ceiling(agent, repo_path):
+    logs_dir = repo_path / ".sds" / "logs"
+    (logs_dir / "deploy_attempt_1.log").write_text("log")
+    (logs_dir / "deploy_attempt_2.log").write_text("log")
+
+    executed_attempts = []
+
+    def fake_run_deploy(
+        self,
+        command="start",
+        timeout=DEFAULT_DEPLOY_TIMEOUT_SECS,
+        log_file_path=None,
+        **kwargs,
+    ):
+        executed_attempts.append(log_file_path)
+        return {"success": False, "exit_code": 1, "stdout": "", "stderr": ""}
+
+    bind_method(agent, "run_deploy_command", fake_run_deploy)
+
+    assert agent.run(max_attempts=2) is False
+    assert executed_attempts == []
 
 
 def test_run_starts_fresh_without_logs(agent, monkeypatch):

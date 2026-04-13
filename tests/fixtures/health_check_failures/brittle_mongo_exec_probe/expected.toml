@@ -1,0 +1,4 @@
+verdict = "invalid_brittle_probe"
+
+# mongo exec probe without availability check is brittle
+invalid_consul_services = []

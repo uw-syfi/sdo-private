@@ -42,6 +42,14 @@ class DSPyConfigProtocol(Protocol):
 
 logger = logging.getLogger(__name__)
 
+_DOCKER_INCOMPATIBLE_DSPY_TOKENS: tuple[str, ...] = (
+    "initialdelayseconds",
+    "readinessprobe",
+    "livenessprobe",
+    "startupprobe",
+    "kubectl ",
+)
+
 # GEPA-style seed prompts: minimal starting points for optimization
 # Prompts that produce Jinja2 instructions for agent.generate() to execute.
 # They must never be routed through DSPy because:
@@ -77,6 +85,7 @@ SEED_TEMPLATE_MAP = {
     "subagent_repo_analyst": "seeds/subagent_repo_analyst.jinja2",
     "subagent_root_synthesis": "seeds/subagent_root_synthesis.jinja2",
     "rlm_deployer_fix_error": "seeds/rlm_deployer_fix_error.jinja2",
+    "deployer_fix_error": "seeds/deployer_fix_error.jinja2",
 }
 
 
@@ -210,9 +219,17 @@ class PromptLoader:
         if self._should_use_dspy(prompt_name, kwargs):
             try:
                 result = self._render_dspy(prompt_name, kwargs, recorder=recorder)
-                logger.info(f"Successfully rendered {prompt_name} using DSPy")
-                self._notify_recorder(recorder, "record_rendered_prompt", result)
-                return result
+                if self._has_platform_mismatch(prompt_name, result, kwargs):
+                    logger.warning(
+                        "DSPy output for %s is incompatible with platform=%s; falling back to Jinja2",
+                        prompt_name,
+                        kwargs.get("platform"),
+                    )
+                    self._notify_recorder(recorder, "record_fallback")
+                else:
+                    logger.info(f"Successfully rendered {prompt_name} using DSPy")
+                    self._notify_recorder(recorder, "record_rendered_prompt", result)
+                    return result
             except (ImportError, RuntimeError, AttributeError, KeyError) as e:
                 logger.warning(f"DSPy rendering failed for {prompt_name}: {e}. Falling back to Jinja2.")
                 # Record fallback in trajectory if available
@@ -241,6 +258,24 @@ class PromptLoader:
         # Remove .jinja2 extension and convert path separators to underscores
         name = template_name.replace(".jinja2", "").replace("/", "_")
         return name
+
+    @staticmethod
+    def _has_platform_mismatch(prompt_name: str, output: str, kwargs: dict[str, Any]) -> bool:
+        """Detect obvious platform-mismatched DSPy output.
+
+        Guardrail scope is intentionally narrow: only deployer_fix_error and only
+        when running on docker. This prevents known Kubernetes-only advice (e.g.
+        probe fields) from poisoning Docker troubleshooting prompts.
+        """
+        if prompt_name != "deployer_fix_error":
+            return False
+
+        platform = str(kwargs.get("platform", "")).strip().lower()
+        if platform != "docker":
+            return False
+
+        output_lower = output.lower()
+        return any(token in output_lower for token in _DOCKER_INCOMPATIBLE_DSPY_TOKENS)
 
     def _should_use_dspy(self, prompt_name: str, kwargs: dict) -> bool:
         """Determine if DSPy should be used for this prompt.

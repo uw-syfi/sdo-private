@@ -62,6 +62,8 @@ class RLMEfficiencyMetric:
         code_executions = stats.get("code_executions", 0)
         recursive_calls = stats.get("recursive_calls", 0)
         max_depth = stats.get("max_depth_reached", 0)
+        metadata_feedback_count = stats.get("metadata_feedback_count", 0)
+        finalization_type = stats.get("finalization_type", "final_answer")
 
         if total_calls == 0:
             return 0.0  # No RLM usage at all
@@ -90,8 +92,17 @@ class RLMEfficiencyMetric:
             # All code, no recursion - that's fine too
             ratio_score = 1.0 if code_executions > 0 else 0.5
 
+        metadata_score = min(1.0, metadata_feedback_count / max(1, total_calls))
+        finalization_score = 1.0 if finalization_type == "final_var" else 0.8
+
         # Weighted combination
-        efficiency_score = calls_score * 0.4 + depth_score * 0.3 + ratio_score * 0.3
+        efficiency_score = (
+            calls_score * 0.3
+            + depth_score * 0.25
+            + ratio_score * 0.2
+            + metadata_score * 0.15
+            + finalization_score * 0.1
+        )
 
         # Bonus: penalize if success=False
         if hasattr(example, "success") and not example.success:
@@ -137,12 +148,16 @@ class RLMContextUtilizationMetric:
 
         tokens_saved = stats.get("total_tokens_saved", 0)
         baseline_context_tokens = stats.get("baseline_context_tokens", 0)
+        metadata_feedback_count = stats.get("metadata_feedback_count", 0)
+        feedback_turns = stats.get("feedback_turns", 0)
 
         if baseline_context_tokens == 0:
             return 0.5
 
         savings_ratio = tokens_saved / baseline_context_tokens
         score = savings_ratio / self.target_savings_ratio
+        if feedback_turns > 0:
+            score *= metadata_feedback_count / feedback_turns
         return max(0.0, min(1.0, score))
 
 

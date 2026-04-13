@@ -3,15 +3,20 @@
 Handles loading optimized DSPy modules from disk with caching and version resolution.
 """
 
+import hashlib
 import json
 import logging
+import re
 from pathlib import Path
+from typing import Any
 
 import dspy
 
 from app_operator.dspy_integration.signatures import get_signature
 
 logger = logging.getLogger(__name__)
+
+_CANDIDATE_VERSION_RE = re.compile(r"^eval_(\d+)_c(\d+)$")
 
 
 class DSPyModuleCache:
@@ -121,74 +126,204 @@ def load_optimized_module(prompt_name: str, optimized_dir: Path, version: str = 
         Loaded DSPy module, or None on failure (missing files,
         corrupted data, invalid signatures).
     """
-    # Check cache first
-    cache_key = f"{prompt_name}:{version}"
-    cached = _module_cache.get(cache_key)
+    module, _metadata = load_optimized_module_with_metadata(prompt_name, optimized_dir, version)
+    return module
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _metadata_sha256(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _canonical_candidate_ref(candidate_ref: str, family_prefix: str) -> str:
+    """Return family-qualified candidate reference."""
+    ref = candidate_ref.strip()
+    if not ref:
+        return ref
+    if "/" in ref:
+        return ref
+    if family_prefix:
+        return f"{family_prefix}/{ref}"
+    return ref
+
+
+def _extract_lineage_from_metadata(
+    metadata_path: Path,
+    resolved_version: str,
+) -> tuple[str | None, list[str], str]:
+    """Extract candidate and parent identifiers from version metadata."""
+    if not metadata_path.exists():
+        return None, [], "none"
+
+    try:
+        metadata = json.loads(metadata_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None, [], "none"
+
+    family_prefix = resolved_version.rsplit("/", 1)[0] if "/" in resolved_version else ""
+
+    lineage = metadata.get("lineage", {})
+    candidate_id_raw = ""
+    if isinstance(lineage, dict):
+        candidate_id_raw = str(lineage.get("selected_candidate_id") or "").strip()
+    if not candidate_id_raw:
+        iter_num = metadata.get("iteration")
+        best_idx = metadata.get("best_candidate_index")
+        if isinstance(iter_num, int) and isinstance(best_idx, int):
+            candidate_id_raw = f"eval_{iter_num}_c{best_idx}"
+
+    candidate_id = _canonical_candidate_ref(candidate_id_raw, family_prefix) if candidate_id_raw else None
+
+    parent_candidates_raw: list[str] = []
+    if isinstance(lineage, dict):
+        raw_parents = lineage.get("parent_candidate_ids", [])
+        if isinstance(raw_parents, list):
+            parent_candidates_raw.extend(str(p) for p in raw_parents if str(p).strip())
+    if not parent_candidates_raw:
+        recombination = metadata.get("recombination", {})
+        if isinstance(recombination, dict):
+            raw_parents = recombination.get("parent_candidates", [])
+            if isinstance(raw_parents, list):
+                parent_candidates_raw.extend(str(p) for p in raw_parents if str(p).strip())
+
+    parent_candidates = [_canonical_candidate_ref(parent, family_prefix) for parent in parent_candidates_raw]
+    parent_candidates = list(dict.fromkeys(parent_candidates))
+
+    metadata_hash = _metadata_sha256(metadata)
+    return candidate_id, parent_candidates, metadata_hash
+
+
+def _infer_candidate_id_from_version(resolved_version: str) -> str | None:
+    """Infer candidate identifier directly from version string."""
+    version_leaf = resolved_version.rsplit("/", 1)[-1]
+    if _CANDIDATE_VERSION_RE.match(version_leaf):
+        return resolved_version
+    return None
+
+
+def load_optimized_module_with_metadata(
+    prompt_name: str,
+    optimized_dir: Path,
+    version: str = "latest",
+) -> tuple[dspy.Module | None, dict[str, Any] | None]:
+    """Load optimized module and return runtime artifact metadata."""
+    # Check cache first (requested key)
+    requested_key = f"{prompt_name}:{version}"
+    cached = _module_cache.get(requested_key)
     if cached is not None:
-        logger.debug(f"Cache hit for {cache_key}")
-        return cached
+        logger.debug(f"Cache hit for {requested_key}")
+        resolved_for_cache = resolve_version(optimized_dir, version) or version
+        version_dir = optimized_dir / resolved_for_cache
+        module_file = version_dir / f"{prompt_name}.dspy.json"
+        metadata_file = version_dir / "metadata.json"
+        candidate_id, parent_ids, metadata_hash = _extract_lineage_from_metadata(metadata_file, resolved_for_cache)
+        if candidate_id is None:
+            candidate_id = _infer_candidate_id_from_version(resolved_for_cache)
+        artifact = {
+            "renderer": "dspy",
+            "prompt_name": prompt_name,
+            "configured_version": version,
+            "resolved_version": resolved_for_cache,
+            "module_file": str(module_file),
+            "module_sha256": _file_sha256(module_file) if module_file.exists() else "",
+            "metadata_file": str(metadata_file) if metadata_file.exists() else "",
+            "metadata_sha256": metadata_hash,
+            "candidate_id": candidate_id,
+            "parent_candidate_ids": parent_ids,
+            "experiment_family": resolved_for_cache.rsplit("/", 1)[0] if "/" in resolved_for_cache else "",
+        }
+        return cached, artifact
 
     # Resolve version
     resolved_version = resolve_version(optimized_dir, version)
     if resolved_version is None:
         logger.error(f"Could not resolve version '{version}' in {optimized_dir}")
-        return None
+        return None, None
 
-    # Update cache key with resolved version
-    cache_key = f"{prompt_name}:{resolved_version}"
-    cached = _module_cache.get(cache_key)
+    # Check cache after resolution
+    resolved_key = f"{prompt_name}:{resolved_version}"
+    cached = _module_cache.get(resolved_key)
     if cached is not None:
-        logger.debug(f"Cache hit for {cache_key} (after version resolution)")
-        return cached
+        logger.debug(f"Cache hit for {resolved_key} (after version resolution)")
+        metadata_file = optimized_dir / resolved_version / "metadata.json"
+        candidate_id, parent_ids, metadata_hash = _extract_lineage_from_metadata(metadata_file, resolved_version)
+        if candidate_id is None:
+            candidate_id = _infer_candidate_id_from_version(resolved_version)
+        artifact = {
+            "renderer": "dspy",
+            "prompt_name": prompt_name,
+            "configured_version": version,
+            "resolved_version": resolved_version,
+            "module_file": str(optimized_dir / resolved_version / f"{prompt_name}.dspy.json"),
+            "module_sha256": _file_sha256(optimized_dir / resolved_version / f"{prompt_name}.dspy.json"),
+            "metadata_file": str(metadata_file) if metadata_file.exists() else "",
+            "metadata_sha256": metadata_hash,
+            "candidate_id": candidate_id,
+            "parent_candidate_ids": parent_ids,
+            "experiment_family": resolved_version.rsplit("/", 1)[0] if "/" in resolved_version else "",
+        }
+        return cached, artifact
 
-    # Build path to module file
     version_dir = optimized_dir / resolved_version
     module_file = version_dir / f"{prompt_name}.dspy.json"
+    metadata_file = version_dir / "metadata.json"
 
     if not module_file.exists():
         logger.error(f"DSPy module file not found: {module_file}")
-        return None
+        return None, None
 
-    # Load the module
     try:
         logger.info(f"Loading DSPy module: {module_file}")
-
-        # Get the signature class for this prompt
         signature_class = get_signature(prompt_name)
-
-        # Create a Predict module with the signature
         module = dspy.Predict(signature_class)
-
-        # Load the optimized state
         with open(module_file) as f:
             state = json.load(f)
 
-        # Load demonstrations if present
         if "demos" in state:
             module.demos = state["demos"]
             logger.debug(f"Loaded {len(module.demos)} demonstrations")
 
-        # Restore optimized instruction if present (COPRO / MIPROv2 artifact)
         if state.get("optimized_instruction"):
             module.signature = module.signature.with_instructions(state["optimized_instruction"])
             logger.debug(f"Restored optimized instruction ({len(state['optimized_instruction'])} chars)")
 
-        # Store in cache
-        _module_cache.set(cache_key, module)
-        logger.debug(f"Cached module as {cache_key}")
-
-        # Also cache under the original version key if it differs
+        _module_cache.set(resolved_key, module)
         if version != resolved_version:
-            _module_cache.set(f"{prompt_name}:{version}", module)
+            _module_cache.set(requested_key, module)
 
-        return module
+        candidate_id, parent_ids, metadata_hash = _extract_lineage_from_metadata(metadata_file, resolved_version)
+        if candidate_id is None:
+            candidate_id = _infer_candidate_id_from_version(resolved_version)
+
+        artifact = {
+            "renderer": "dspy",
+            "prompt_name": prompt_name,
+            "configured_version": version,
+            "resolved_version": resolved_version,
+            "module_file": str(module_file),
+            "module_sha256": _file_sha256(module_file),
+            "metadata_file": str(metadata_file) if metadata_file.exists() else "",
+            "metadata_sha256": metadata_hash,
+            "candidate_id": candidate_id,
+            "parent_candidate_ids": parent_ids,
+            "experiment_family": resolved_version.rsplit("/", 1)[0] if "/" in resolved_version else "",
+        }
+        return module, artifact
 
     except json.JSONDecodeError as e:
         logger.error(f"Corrupted DSPy module file {module_file}: {e}")
-        return None
+        return None, None
     except KeyError as e:
         logger.error(f"Invalid DSPy signature for '{prompt_name}': {e}")
-        return None
+        return None, None
     except (OSError, RuntimeError, AttributeError) as e:
         logger.error(f"Failed to load DSPy module from {module_file}: {e}")
-        return None
+        return None, None

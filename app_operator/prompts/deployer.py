@@ -15,6 +15,7 @@ class HealthVerdictLike(Protocol):
     healthy: bool
     assessment: str
     diagnosis: str
+    false_negative_suspected: bool
 
 
 def prepare_error_context(
@@ -54,6 +55,12 @@ def prepare_error_context(
             context_parts.append(f"Diagnosis: {health_verdict.diagnosis}")
         if health_verdict.assessment:
             context_parts.append(f"Assessment: {health_verdict.assessment}")
+        if health_verdict.false_negative_suspected:
+            context_parts.append(
+                "NOTE: Health judge suspects this is a FALSE NEGATIVE — "
+                "the health check script appears to be buggy, not the deployment. "
+                "Focus on fixing health_check.sh rather than redeploying."
+            )
 
     return "\n".join(context_parts)
 
@@ -65,6 +72,8 @@ def create_generate_script_prompt(
     platform: str,
     dspy_config: DSPyConfigProtocol | None = None,
     recorder=None,
+    previous_violations: str | None = None,
+    system_prompt: str | None = None,
 ) -> str:
     """Create a prompt for generating deployment scripts.
 
@@ -75,6 +84,8 @@ def create_generate_script_prompt(
         platform: The deployment platform (e.g., 'docker', 'kubernetes').
         dspy_config: Optional DSPy configuration for optimized prompts.
         recorder: Optional trajectory recorder for kwargs capture.
+        previous_violations: Optional preflight violations from a prior attempt
+            that caused the scripts to be regenerated; injected as hard constraints.
 
     Returns:
         str: The rendered prompt.
@@ -91,7 +102,7 @@ def create_generate_script_prompt(
     has_code_analysis = (sds_dir / "code_analysis.md").exists()
     has_deployment_issues = (sds_dir / "deployment_issues.md").exists()
 
-    return get_loader(dspy_config).render(
+    prompt = get_loader(dspy_config).render(
         template_name,
         script_name=script_name,
         repo_context=repo_context,
@@ -102,6 +113,19 @@ def create_generate_script_prompt(
         platform=platform,
         recorder=recorder,
     )
+
+    if previous_violations:
+        prompt += (
+            "\n\n## CRITICAL: Previous Script Violations (Must Avoid)\n\n"
+            "The previous scripts were **rejected by static analysis** before they could run. "
+            "You MUST avoid these exact patterns in the new scripts:\n\n"
+            "```\n"
+            f"{previous_violations}\n"
+            "```\n\n"
+            "Generate scripts that are free of all violations listed above."
+        )
+
+    return prompt
 
 
 def create_fix_prompt(
@@ -116,6 +140,8 @@ def create_fix_prompt(
     recorder=None,
     deployment_progress_path: Path | None = None,
     structured_output: bool = False,
+    fix_summary_consolidation: bool = True,
+    loop_warning: str | None = None,
 ) -> str:
     """Create a prompt for the coding agent to fix deployment errors.
 
@@ -139,7 +165,7 @@ def create_fix_prompt(
     has_code_analysis = (repo_path / ".sds" / "code_analysis.md").exists()
     has_deployment_progress = deployment_progress_path is not None and deployment_progress_path.exists()
 
-    return get_loader(dspy_config).render(
+    prompt = get_loader(dspy_config).render(
         "repair_agent/user.jinja2",
         repo_path=repo_path,
         attempt=attempt,
@@ -155,6 +181,9 @@ def create_fix_prompt(
         deployment_progress_path=deployment_progress_path,
         structured_output=structured_output,
     )
+    if loop_warning:
+        prompt += loop_warning
+    return prompt
 
 
 def create_fix_system_prompt() -> str:
@@ -165,3 +194,15 @@ def create_fix_system_prompt() -> str:
 def create_health_system_prompt() -> str:
     """Create the system prompt for the health judge agent."""
     return get_loader().render("health_judge_agent/system.jinja2")
+
+
+def create_consolidation_prompt(
+    existing_summary: str,
+    new_attempts_text: str,
+) -> str:
+    """Create a prompt for consolidating fix summaries."""
+    return get_loader().render(
+        "deployer/consolidate_summary.jinja2",
+        existing_summary=existing_summary,
+        new_attempts_text=new_attempts_text,
+    )

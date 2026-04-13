@@ -1,14 +1,12 @@
 """Hybrid coding agent for the SDS operator.
 
-Combines pre-computed subagent analyses with the RLM REPL loop:
+Combines the RLM REPL loop with lazy specialist analyses:
 
-1. Four independent subagents pre-analyse different context slices
-   (trajectory, error logs, deploy script, repo) and produce short summaries.
-2. The summaries are injected into the RLM REPL namespace alongside the raw
-   context variables (error_log, deployment_script, etc.).
-3. The root LLM runs the standard RLM loop — it can read the pre-digested
-   summaries immediately via ``execute_code``, or drill into the raw data,
-   or make further ``recursive_call``s as needed.
+1. The root LLM starts in the standard RLM loop immediately.
+2. When the root LLM wants focused help, it can request one of four
+   specialists (trajectory, error logs, deploy script, repo).
+3. Specialist summaries are cached into the RLM namespace so later steps can
+   read them via ``execute_code`` without paying for the same analysis twice.
 
 Register with ``provider = "hybrid"`` in ``sds.toml``.
 """
@@ -25,6 +23,7 @@ from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 from app_operator.prompts import (
     DSPyConfigProtocol,
     render_error_log_analyst_prompt,
+    render_fix_error_task_prompt,
     render_repo_analyst_prompt,
     render_script_analyst_prompt,
     render_trajectory_analyst_prompt,
@@ -37,19 +36,23 @@ from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorder
 
 @register_provider("hybrid")
 class HybridCodingAgent(CodingAgent):
-    """Coding agent that pre-populates the RLM REPL with subagent summaries.
+    """Coding agent that exposes lazy specialists to the RLM loop.
 
     For file-generation and direct-text tasks the behaviour matches
     ``RLMCodingAgent``.  For fix tasks:
 
-    1. Four subagents pre-analyse trajectory, error logs, deploy script, and
-       repo context — each returns a short summary (≤ 300 words).
-    2. Summaries are stored in ``RLMContext`` as ``trajectory_summary``,
-       ``error_summary``, ``script_summary``, and ``repo_summary``.
-    3. The full RLM loop runs with those summaries available as REPL
-       variables, so the LLM can read them immediately or ignore them and
-       drill into the raw data instead.
+    1. The full RLM loop starts with raw context only.
+    2. The root LLM can request focused specialist analyses on demand.
+    3. Returned summaries are stored in ``RLMContext`` as cached summary
+       variables for later REPL access.
     """
+
+    _SPECIALISTS: dict[str, str] = {
+        "trajectory": "Summarize what has already been tried and recurring failure patterns.",
+        "error_log": "Analyze deploy.log and health_check.log to isolate likely root causes.",
+        "script": "Review deploy.sh and any backup to identify likely script issues or regressions.",
+        "repo": "Summarize deployment-relevant repository constraints from Dockerfile, compose, README, and analysis.",
+    }
 
     def __init__(
         self,
@@ -58,12 +61,14 @@ class HybridCodingAgent(CodingAgent):
         event_handler: AgentEventHandler | None = None,
         location: str | None = None,
         dspy_config: DSPyConfigProtocol | None = None,
+        rlm_mode: str = "compatibility",
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
+        self.rlm_mode = rlm_mode
         self._total_token_usage: dict = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -105,99 +110,11 @@ class HybridCodingAgent(CodingAgent):
         repo_path: Path,
         token_acc: dict | None = None,
     ) -> str:
-        """Pre-run 4 subagent analyses, then hand off to the RLM loop."""
+        """Start the RLM loop and let it call specialists lazily."""
         helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
         sds = repo_path / ".sds"
-
-        trajectory_text = helper._read_trajectory(sds)
-        deploy_log = helper._read(sds / "logs" / "deploy.log")
-        health_check_log = helper._read(sds / "logs" / "health_check.log")
-        error_log = deploy_log + "\n" + health_check_log
         deploy_script = helper._read(sds / "deploy.sh")
         original_script = helper._read(sds / "deploy.sh.bak")
-        repo_context = helper._gather_repo_context(repo_path, sds)
-
-        logger.info("[Hybrid] Pre-running 4 subagent analyses")
-
-        try:
-            trajectory_summary = call_subagent(
-                model=self.model,
-                system_prompt=render_trajectory_analyst_prompt(
-                    data_description="deployment trajectory JSON",
-                    dspy_config=self.dspy_config,
-                    recorder=self.recorder,
-                ),
-                user_prompt=trajectory_text or "(no trajectory data available)",
-                location=self.location,
-                token_acc=token_acc,
-            )
-        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(f"[Hybrid] Trajectory analyst failed, skipping: {e}")
-            trajectory_summary = "(trajectory analysis unavailable)"
-        logger.info("[Hybrid] Trajectory analyst complete")
-
-        try:
-            error_summary = call_subagent(
-                model=self.model,
-                system_prompt=render_error_log_analyst_prompt(
-                    data_description="deploy.log and health_check.log",
-                    dspy_config=self.dspy_config,
-                    recorder=self.recorder,
-                ),
-                user_prompt=error_log or "(no error log available)",
-                location=self.location,
-                token_acc=token_acc,
-            )
-        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(f"[Hybrid] Error log analyst failed, skipping: {e}")
-            error_summary = "(error log analysis unavailable)"
-        logger.info("[Hybrid] Error log analyst complete")
-
-        script_input = f"Current script:\n{deploy_script}"
-        if original_script:
-            script_input += f"\n\nOriginal script (before fixes):\n{original_script}"
-        try:
-            script_summary = call_subagent(
-                model=self.model,
-                system_prompt=render_script_analyst_prompt(
-                    has_original_script=str(bool(original_script)),
-                    dspy_config=self.dspy_config,
-                    recorder=self.recorder,
-                ),
-                user_prompt=script_input or "(no deploy script available)",
-                location=self.location,
-                token_acc=token_acc,
-            )
-        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(f"[Hybrid] Script analyst failed, skipping: {e}")
-            script_summary = "(script analysis unavailable)"
-        logger.info("[Hybrid] Script analyst complete")
-
-        try:
-            repo_summary = call_subagent(
-                model=self.model,
-                system_prompt=render_repo_analyst_prompt(
-                    available_files="Dockerfile, docker-compose, README, code_analysis",
-                    dspy_config=self.dspy_config,
-                    recorder=self.recorder,
-                ),
-                user_prompt=repo_context or "(no repository context available)",
-                location=self.location,
-                token_acc=token_acc,
-            )
-        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
-            logger.warning(f"[Hybrid] Repo analyst failed, skipping: {e}")
-            repo_summary = "(repository analysis unavailable)"
-        logger.info("[Hybrid] Repo analyst complete")
-
-        if self.recorder and hasattr(self.recorder, "add_assistant_message"):
-            for name, summary in [
-                ("trajectory", trajectory_summary),
-                ("error_log", error_summary),
-                ("script", script_summary),
-                ("repo", repo_summary),
-            ]:
-                self.recorder.add_assistant_message(f"[Hybrid pre-analysis: {name}]\n{summary[:500]}")
 
         # Build the backup before creating context (same as RLMCodingAgent)
         deploy_sh = sds / "deploy.sh"
@@ -222,22 +139,40 @@ class HybridCodingAgent(CodingAgent):
             readme=(helper._read(repo_path / "README.md") or helper._read(repo_path / "README.rst")),
             analysis_report=helper._read(sds / "code_analysis.md"),
             original_script=original_script,
-            # Pre-computed summaries injected into the REPL namespace
-            trajectory_summary=trajectory_summary,
-            error_summary=error_summary,
-            script_summary=script_summary,
-            repo_summary=repo_summary,
         )
 
-        logger.info("[Hybrid] Starting RLM loop with pre-populated summaries")
+        logger.info("[Hybrid] Starting RLM loop with lazy specialist delegation")
+        available_specialists = self._SPECIALISTS if self.rlm_mode == "compatibility" else {}
         agent = RecursiveDeploymentAgent(
             trajectory=self.recorder,
             max_recursion_depth=5,
             llm_provider=self.model,
             vertex_location=self.location,
+            rlm_mode=self.rlm_mode,
             dspy_config=self.dspy_config,
+            specialist_dispatcher=lambda specialist, task: self._run_specialist_analysis(
+                helper=helper,
+                repo_path=repo_path,
+                specialist=specialist,
+                task=task,
+                token_acc=token_acc,
+            ),
+            available_specialists=available_specialists,
         )
-        result = agent.run_task(task=prompt, context=context, repo_path=str(repo_path))
+        if self.rlm_mode == "paper_faithful":
+            rlm_task = prompt
+        else:
+            # Use the RLM-specific task prompt instead of the standard deployer_fix_error
+            # output. The 270-line non-RLM prompt was written for agents that receive logs
+            # as raw text; the RLM handles context management natively via REPL variables,
+            # so a simpler RLM-specific prompt is more appropriate and can be GEPA-optimised
+            # independently from the non-RLM deployer_fix_error prompt.
+            rlm_task = render_fix_error_task_prompt(
+                available_specialists=", ".join(sorted(self._SPECIALISTS)),
+                dspy_config=self.dspy_config,
+                recorder=self.recorder if hasattr(self.recorder, "record_prompt_kwargs") else None,
+            )
+        result = agent.run_task(task=rlm_task, context=context, repo_path=str(repo_path))
 
         rlm_tokens = agent.get_rlm_statistics().get("token_usage", {})
         for k in ("prompt_tokens", "completion_tokens", "total_tokens"):
@@ -245,3 +180,85 @@ class HybridCodingAgent(CodingAgent):
                 token_acc[k] = token_acc.get(k, 0) + rlm_tokens.get(k, 0)
 
         return result
+
+    def _run_specialist_analysis(
+        self,
+        helper: SubagentCodingAgent,
+        repo_path: Path,
+        specialist: str,
+        task: str,
+        token_acc: dict | None = None,
+    ) -> str:
+        """Run one specialist analysis against the latest repo state."""
+        sds = repo_path / ".sds"
+        task_prefix = f"Focused task: {task}\n\n" if task else ""
+
+        try:
+            if specialist == "trajectory":
+                summary = call_subagent(
+                    model=self.model,
+                    system_prompt=render_trajectory_analyst_prompt(
+                        data_description="deployment trajectory JSON",
+                        dspy_config=self.dspy_config,
+                        recorder=self.recorder,
+                    ),
+                    user_prompt=task_prefix + (helper._read_trajectory(sds) or "(no trajectory data available)"),
+                    location=self.location,
+                    token_acc=token_acc,
+                )
+            elif specialist == "error_log":
+                error_log = (
+                    helper._read(sds / "logs" / "deploy.log") + "\n" + helper._read(sds / "logs" / "health_check.log")
+                )
+                summary = call_subagent(
+                    model=self.model,
+                    system_prompt=render_error_log_analyst_prompt(
+                        data_description="deploy.log and health_check.log",
+                        dspy_config=self.dspy_config,
+                        recorder=self.recorder,
+                    ),
+                    user_prompt=task_prefix + (error_log or "(no error log available)"),
+                    location=self.location,
+                    token_acc=token_acc,
+                )
+            elif specialist == "script":
+                deploy_script = helper._read(sds / "deploy.sh")
+                original_script = helper._read(sds / "deploy.sh.bak")
+                script_input = f"{task_prefix}Current script:\n{deploy_script}"
+                if original_script:
+                    script_input += f"\n\nOriginal script (before fixes):\n{original_script}"
+                summary = call_subagent(
+                    model=self.model,
+                    system_prompt=render_script_analyst_prompt(
+                        has_original_script=str(bool(original_script)),
+                        dspy_config=self.dspy_config,
+                        recorder=self.recorder,
+                    ),
+                    user_prompt=script_input or "(no deploy script available)",
+                    location=self.location,
+                    token_acc=token_acc,
+                )
+            elif specialist == "repo":
+                summary = call_subagent(
+                    model=self.model,
+                    system_prompt=render_repo_analyst_prompt(
+                        available_files="Dockerfile, docker-compose, README, code_analysis",
+                        dspy_config=self.dspy_config,
+                        recorder=self.recorder,
+                    ),
+                    user_prompt=task_prefix
+                    + (helper._gather_repo_context(repo_path, sds) or "(no repository context available)"),
+                    location=self.location,
+                    token_acc=token_acc,
+                )
+            else:
+                summary = f"(unknown specialist: {specialist})"
+        except (TimeoutError, ConnectionError, subprocess.SubprocessError, OSError) as e:
+            logger.warning(f"[Hybrid] {specialist} specialist failed, skipping: {e}")
+            summary = f"({specialist} analysis unavailable)"
+
+        if self.recorder and hasattr(self.recorder, "add_assistant_message"):
+            self.recorder.add_assistant_message(f"[Hybrid specialist: {specialist}]\n{summary[:500]}")
+
+        logger.info(f"[Hybrid] {specialist} specialist complete")
+        return summary

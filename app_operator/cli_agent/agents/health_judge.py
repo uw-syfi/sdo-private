@@ -47,6 +47,11 @@ def _parse_verdict(response: str) -> HealthVerdict | None:
         response,
         re.IGNORECASE,
     )
+    false_negative_match = re.search(
+        r"<false_negative_suspected>\s*(true|false)\s*</false_negative_suspected>",
+        response,
+        re.IGNORECASE,
+    )
 
     if not verdict_match or not assessment_match:
         return None
@@ -55,10 +60,14 @@ def _parse_verdict(response: str) -> HealthVerdict | None:
     assessment = assessment_match.group(1).strip()
     diagnosis = diagnosis_match.group(1).strip() if diagnosis_match else ""
     script_was_fixed = script_fixed_match.group(1).strip().lower() == "true" if script_fixed_match else False
+    false_negative_suspected = (
+        false_negative_match.group(1).strip().lower() == "true" if false_negative_match else False
+    )
 
     # Healthy verdicts must have empty diagnosis
     if healthy:
         diagnosis = ""
+        false_negative_suspected = False
 
     return HealthVerdict(
         healthy=healthy,
@@ -66,6 +75,7 @@ def _parse_verdict(response: str) -> HealthVerdict | None:
         diagnosis=diagnosis,
         script_was_fixed=script_was_fixed,
         raw_response=response,
+        false_negative_suspected=false_negative_suspected,
     )
 
 
