@@ -252,23 +252,26 @@ class AnalyzeCodebaseRLM(dspy.Signature):
 class RepairDeploymentErrorRLM(dspy.Signature):
     """Debug and fix a failed deployment by analyzing error output and editing scripts.
 
-    You have the error_context variable containing the error output, file paths,
-    fix history, and attempt info. Use the provided tools (read_file, write_file,
-    run_shell) to read the current scripts, analyze what went wrong, and write
-    fixes. Do NOT rewrite scripts from scratch — make targeted fixes based on
-    evidence from the error output.
+    The error_context contains key-value pairs at the top (repo_path, deploy_path,
+    health_path, attempt, max_attempts) followed by ERROR_OUTPUT between
+    ---ERROR_OUTPUT_START--- and ---ERROR_OUTPUT_END--- markers, and FIX_HISTORY
+    between ---FIX_HISTORY_START--- and ---FIX_HISTORY_END--- markers.
 
-    CRITICAL: Do NOT run deploy.sh, docker compose up, or any deployment
-    commands yourself. The outer pipeline re-runs deployment automatically
-    after your fix. Only read files, analyze errors, and write targeted
-    fixes. Running builds wastes your limited iterations.
+    Use the provided tools (read_file, write_file) to read the current scripts,
+    analyze what went wrong, and write fixes. Do NOT rewrite scripts from scratch
+    — make targeted fixes based on evidence from the error output.
+
+    CRITICAL: run_shell is NOT available. Do NOT run deploy.sh, docker compose up,
+    or any deployment commands. The outer pipeline re-runs deployment automatically
+    after your fix. Only read files, analyze errors, and write targeted fixes.
     """
 
     error_context: str = dspy.InputField(
         desc=(
-            "Structured context containing: repo_path, deploy_path, health_path, "
-            "error_output from the failed deploy/health check, fix_history of "
-            "previous attempts, current attempt number, and max_attempts"
+            "Structured context with key-value pairs (repo_path, deploy_path, "
+            "health_path, attempt, max_attempts) followed by error output between "
+            "---ERROR_OUTPUT_START/END--- markers and fix history between "
+            "---FIX_HISTORY_START/END--- markers"
         )
     )
 

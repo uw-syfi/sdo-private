@@ -35,6 +35,18 @@ DEFAULT_MAX_ATTEMPTS = 5
 _CODE_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n(.*?)```\s*$", re.DOTALL)
 
 
+def _blocked_run_shell(*args, **kwargs):
+    """No-op replacement that prevents the repair agent from running shell commands."""
+    return (
+        "ERROR: run_shell is not available in the repair context. "
+        "Only use read_file and write_file. "
+        "The pipeline handles deployment automatically after your fix."
+    )
+
+
+_blocked_run_shell.__name__ = "run_shell"
+
+
 def strip_code_fences(text: str) -> str:
     """Remove markdown code fences from LLM output."""
     m = _CODE_FENCE_RE.match(text.strip())
@@ -99,12 +111,12 @@ class RLMDeploymentAgent(dspy.Module):
             tools=DEPLOYER_TOOLS,
             max_iters=12,
         )
-        # Only read/write tools — no run_shell to prevent the LLM from
-        # wasting iterations re-running Docker builds inside the repair loop.
+        # Only read/write tools — _blocked_run_shell returns an error message
+        # if the LLM tries to call run_shell from the global namespace.
         self.repair_agent = RLM(
             RepairDeploymentErrorRLM,
-            tools=[read_file_tool, write_file_tool],
-            max_iterations=15,
+            tools=[read_file_tool, write_file_tool, _blocked_run_shell],
+            max_iterations=20,
             max_llm_calls=30,
             max_output_chars=100_000,
             verbose=True,
@@ -134,10 +146,15 @@ class RLMDeploymentAgent(dspy.Module):
             health_path,
         )
         log.info("scripts generated")
+        self._post_process_scripts(deploy_path, health_path)
 
         self._fix_history.reset()
 
-        for attempt in range(1, max_attempts + 1):
+        max_repair_failures = 3
+        attempt = 0
+        repair_failures = 0
+        while attempt < max_attempts:
+            attempt += 1
             deploy = self._run_deploy(repo_path, deploy_path, deploy_timeout)
             if not deploy.succeeded:
                 error_output = deploy.output
@@ -150,14 +167,27 @@ class RLMDeploymentAgent(dspy.Module):
             if attempt == max_attempts:
                 return self._failure(attempt, error_output)
             self._cleanup(repo_path, deploy_path)
-            self._repair(
-                repo_path,
-                deploy_path,
-                health_path,
-                error_output,
-                attempt,
-                max_attempts,
-            )
+            try:
+                self._repair(
+                    repo_path,
+                    deploy_path,
+                    health_path,
+                    error_output,
+                    attempt,
+                    max_attempts,
+                )
+                self._post_process_scripts(deploy_path, health_path)
+            except Exception as exc:
+                repair_failures += 1
+                log.warning("repair RLM failed ({}): {}", repair_failures, exc)
+                if repair_failures >= max_repair_failures:
+                    return self._failure(
+                        attempt,
+                        f"repair agent failed {max_repair_failures} times: {exc}",
+                    )
+                # Don't count this as a deploy attempt — the repair itself broke
+                attempt -= 1
+                continue
 
         return self._failure(max_attempts, "max attempts reached")
 
@@ -230,23 +260,16 @@ class RLMDeploymentAgent(dspy.Module):
     ) -> None:
         """Use RLM to analyze full error output and apply targeted fixes."""
         error_context = (
-            f"## Repository\nrepo_path: {repo_path}\n\n"
-            f"## Script Paths\n"
+            f"repo_path: {repo_path}\n"
             f"deploy_path: {deploy_path}\n"
-            f"health_path: {health_path}\n\n"
-            f"## Error Output\n{error_output}\n\n"
-            f"## Fix History\n{self._fix_history.text or '(first attempt)'}\n\n"
-            f"## Attempt\n{attempt} of {max_attempts}\n\n"
-            f"## Instructions\n"
-            f"1. Use read_file to read the deploy and health scripts\n"
-            f"2. Analyze the error output to identify root cause\n"
-            f"3. Use write_file to apply targeted fixes\n"
-            f"4. Do NOT rewrite scripts from scratch\n"
-            f"5. Do NOT run deploy.sh or docker compose commands — "
-            f"the pipeline re-runs deployment automatically after your fix\n"
-            f"6. Never use sudo, never switch platforms\n"
-            f"7. PROJECT_NAME must always be lowercased in scripts "
-            f"(Docker Compose rejects uppercase)\n"
+            f"health_path: {health_path}\n"
+            f"attempt: {attempt}\n"
+            f"max_attempts: {max_attempts}\n"
+            f"---ERROR_OUTPUT_START---\n{error_output}\n---ERROR_OUTPUT_END---\n"
+            f"---FIX_HISTORY_START---\n{self._fix_history.text or 'none'}\n---FIX_HISTORY_END---\n"
+            f"IMPORTANT: You do NOT have access to run_shell in this repair context. "
+            f"Only read_file() and write_file() are available. Do not attempt to run "
+            f"deployment commands — the pipeline handles deployment automatically.\n"
         )
 
         fix_result = self.repair_agent(error_context=error_context)
@@ -273,6 +296,43 @@ class RLMDeploymentAgent(dspy.Module):
     @staticmethod
     def _failure(attempt: int, error: str) -> dspy.Prediction:
         return dspy.Prediction(success=False, attempts=attempt, error=error)
+
+    @staticmethod
+    def _post_process_scripts(deploy_path: str, health_path: str) -> None:
+        """Deterministic fixes applied after script generation and after each repair."""
+        for path in (deploy_path, health_path):
+            if not os.path.exists(path):
+                continue
+            with open(path) as f:
+                text = f.read()
+            # Ensure PROJECT_NAME is lowercased
+            text = re.sub(
+                r'PROJECT_NAME=\$\(basename "\$APP_DIR"\)',
+                "PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]')",
+                text,
+            )
+            # Replace hyphenated docker-compose with v2 space-separated form
+            text = re.sub(r"docker-compose ", "docker compose ", text)
+            # Verify --project-name is present in docker compose commands;
+            # add it if missing (after 'docker compose' but before subcommand)
+            lines = text.split("\n")
+            fixed_lines = []
+            for line in lines:
+                stripped = line.lstrip()
+                if (
+                    stripped.startswith("docker compose ")
+                    and "--project-name" not in line
+                    and "docker compose --project-name" not in line
+                ):
+                    line = line.replace(
+                        "docker compose ",
+                        'docker compose --project-name "$PROJECT_NAME" ',
+                        1,
+                    )
+                fixed_lines.append(line)
+            text = "\n".join(fixed_lines)
+            with open(path, "w") as f:
+                f.write(text)
 
     @staticmethod
     def _validate(content: str) -> str:

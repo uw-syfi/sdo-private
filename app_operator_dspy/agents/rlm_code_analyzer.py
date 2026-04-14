@@ -16,6 +16,7 @@ from app_operator_dspy.tools.agent_tools import (
     list_files_tool,
     read_file_tool,
     run_shell_tool,
+    validate_compose_tool,
 )
 from app_operator_dspy.tools.filesystem import write_file
 
@@ -34,7 +35,7 @@ class RLMCodeAnalyzerAgent(dspy.Module):
         super().__init__()
         self.analyze = RLM(
             AnalyzeCodebaseRLM,
-            tools=[read_file_tool, list_files_tool, run_shell_tool],
+            tools=[read_file_tool, list_files_tool, run_shell_tool, validate_compose_tool],
             max_iterations=20,
             max_llm_calls=50,
             max_output_chars=100_000,
