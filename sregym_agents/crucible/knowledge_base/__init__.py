@@ -1,4 +1,4 @@
-"""Crucible knowledge base: cross-problem learning via pydantic-ai Agent."""
+"""Crucible knowledge base: root-cause playbooks and async review."""
 
 from __future__ import annotations
 
@@ -7,10 +7,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .append_only import AppendOnlyKnowledgeBase
 from .base import InjectedKB, KnowledgeBase, SessionFiles
-from .reflection import Reflector
-from .schema import CURRENT_SCHEMA_VERSION, KBSchema, get_schema, migrate_to_current
 from .structured import StructuredKnowledgeBase
 
 if TYPE_CHECKING:
@@ -19,15 +16,10 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.config import CrucibleConfig
 
 __all__ = [
-    "CURRENT_SCHEMA_VERSION",
     "InjectedKB",
-    "KBSchema",
     "KnowledgeBase",
-    "Reflector",
     "SessionFiles",
     "create_knowledge_base",
-    "get_schema",
-    "migrate_to_current",
     "seed_kb",
 ]
 
@@ -84,12 +76,4 @@ def create_knowledge_base(
             renderer=renderer,
             driver=driver,
         )
-    if kb_type == "append-only":
-        return AppendOnlyKnowledgeBase(
-            kb_dir,
-            app_name,
-            config=config,
-            renderer=renderer,
-            driver=driver,
-        )
-    raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")
+    raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured'.")

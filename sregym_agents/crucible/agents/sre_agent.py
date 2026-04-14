@@ -34,10 +34,7 @@ class SREAgentConfig:
     """
 
     config: CrucibleConfig
-    lt_summary_file: Path | None = None
-    incidents_dir: Path | None = None
-    playbooks_dir: Path | None = None
-    mitigation_playbooks_dir: Path | None = None
+    kb_view_dir: Path | None = None
     triage_priors: TriagePriors | None = None
     verification_guidance: str = ""
     stage_outputs_file: Path | None = None
@@ -75,7 +72,6 @@ class SREAgent:
             grep,
             read_file,
             search_prior_incidents,
-            search_prior_mitigations,
             str_replace_file,
             triage_cluster,
             write_file,
@@ -84,7 +80,7 @@ class SREAgent:
         tools: list[Any] = [exec_bash, read_file, grep, write_file, str_replace_file]
         if stage != "mitigation":
             tools.append(triage_cluster)
-        tools.append(search_prior_incidents if stage == "diagnosis" else search_prior_mitigations)
+            tools.append(search_prior_incidents)
         if stage != "mitigation":
             tools.append(check_hypothesis_coverage)
         return tools
@@ -143,10 +139,7 @@ class SREAgent:
             renderer=self._renderer,
             state=state,
             config=cfg.config,
-            lt_summary_file=cfg.lt_summary_file if ltm_on else None,
-            incidents_dir=cfg.incidents_dir if ltm_on else None,
-            playbooks_dir=cfg.playbooks_dir if ltm_on else None,
-            mitigation_playbooks_dir=(cfg.mitigation_playbooks_dir if ltm_on else None),
+            kb_view_dir=cfg.kb_view_dir if ltm_on else None,
             triage_priors=cfg.triage_priors,
             verification_guidance=cfg.verification_guidance,
             stage_outputs_file=cfg.stage_outputs_file,

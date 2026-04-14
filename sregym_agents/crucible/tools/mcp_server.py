@@ -32,11 +32,9 @@ from sregym_agents.crucible.tools._judge_tools import (
     submit_verdict_impl,
 )
 from sregym_agents.crucible.tools._kb_tools import (
-    LTMMitigationShortCircuit,
     LTMShortCircuit,
     check_hypothesis_coverage_impl,
     search_prior_incidents_impl,
-    search_prior_mitigations_impl,
     triage_cluster_impl,
 )
 
@@ -111,31 +109,6 @@ def register_sre_tools(
                 "short_circuit": True,
                 "confirmed": exc.confirmed,
                 "confirmed_slugs": exc.confirmed_slugs,
-                "iteration": exc.iteration,
-            }
-            if signal_socket_path:
-                _send_signal(signal_socket_path, signal)
-            if result_file_path:
-                _write_result_file(result_file_path, signal)
-            return json.dumps(signal)
-
-    @mcp.tool(name="search_prior_mitigations")
-    async def search_prior_mitigations(  # pyright: ignore[reportUnusedFunction]
-        root_cause: str,
-        failed_attempts: str = "",
-    ) -> str:
-        """Search past incidents for mitigation strategies matching a confirmed root cause.
-
-        Args:
-            root_cause: The confirmed root cause diagnosis.
-            failed_attempts: Description of mitigation attempts that already failed.
-        """
-        try:
-            return await search_prior_mitigations_impl(deps, root_cause, failed_attempts)
-        except LTMMitigationShortCircuit as exc:
-            signal = {
-                "short_circuit": True,
-                "applied": exc.applied,
                 "iteration": exc.iteration,
             }
             if signal_socket_path:
@@ -264,10 +237,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default="claude-sonnet-4-20250514", help="Model ID for subagents.")
     parser.add_argument("--iteration", type=int, default=1, help="Current iteration number.")
     parser.add_argument("--prompt-version", default="v1", help="Prompt renderer version.")
-    parser.add_argument("--lt-summary-file", default=None, help="Path to long-term summary file.")
-    parser.add_argument("--incidents-dir", default=None, help="Path to incidents directory.")
-    parser.add_argument("--playbooks-dir", default=None, help="Path to playbooks directory.")
-    parser.add_argument("--mitigation-playbooks-dir", default=None, help="Path to mitigation playbooks directory.")
+    parser.add_argument("--kb-view-dir", default=None, help="Path to injected KB view directory.")
     parser.add_argument("--ltm-call-budget", type=int, default=1, help="Max KB search calls per stage.")
     parser.add_argument(
         "--enable-ltm-verified-direct-submit",
@@ -367,10 +337,7 @@ def main() -> None:
             renderer=renderer,
             state=shared_state,
             config=mcp_config,
-            lt_summary_file=Path(args.lt_summary_file) if args.lt_summary_file else None,
-            incidents_dir=Path(args.incidents_dir) if args.incidents_dir else None,
-            playbooks_dir=Path(args.playbooks_dir) if args.playbooks_dir else None,
-            mitigation_playbooks_dir=Path(args.mitigation_playbooks_dir) if args.mitigation_playbooks_dir else None,
+            kb_view_dir=Path(args.kb_view_dir) if args.kb_view_dir else None,
             ltm_call_budget=args.ltm_call_budget,
             run_subagent=run_subagent,
         )

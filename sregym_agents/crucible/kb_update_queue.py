@@ -22,29 +22,22 @@ from filelock import FileLock
 logger = logging.getLogger(__name__)
 
 
-class SessionFilesPayload(TypedDict, total=False):
-    diagnosis: str | None
-    mitigation: str | None
-
-
 class KbUpdateTaskDict(TypedDict):
     """JSON shape for a pending KB update task (matches worker expectations)."""
 
-    session_files: SessionFilesPayload
+    original_run_file: str
+    grounded_run_file: str
     stage_outputs_file: str | None
     kb_dir: str
     kb_type: str
     model_id: str
     app_name: str
     include_benchmark_results: bool
-    enable_reflection: bool
-    enable_playbooks: bool
-    recovery_phase2_enabled: bool
-    include_incident_files: bool
-    per_app: bool
+    kb_scope: str
+    kb_runtime_mode: str
+    kb_update_mode: str
     problem_id: str
     prompt_version: str
-    recovery_reflection: dict[str, Any] | None
     diagnosis_succeeded: bool
     mitigation_succeeded: bool
     timestamp: str
@@ -57,28 +50,32 @@ class KbQueuePaths:
     kb_dir: Path
 
     @property
+    def reviews_root(self) -> Path:
+        return self.kb_dir / "v3" / "reviews"
+
+    @property
     def pending(self) -> Path:
-        return self.kb_dir / "pending"
+        return self.reviews_root / "pending"
 
     @property
     def completed(self) -> Path:
-        return self.kb_dir / "completed"
+        return self.reviews_root / "completed"
 
     @property
     def failed(self) -> Path:
-        return self.kb_dir / "failed"
+        return self.reviews_root / "failed"
 
     @property
     def lock_path(self) -> Path:
-        return self.kb_dir / "kb_worker.lock"
+        return self.reviews_root / "kb_worker.lock"
 
     @property
     def pid_path(self) -> Path:
-        return self.kb_dir / "kb_worker.pid"
+        return self.reviews_root / "kb_worker.pid"
 
     @property
     def worker_log(self) -> Path:
-        return self.kb_dir / "kb_worker.log"
+        return self.reviews_root / "kb_worker.log"
 
 
 def _pid_is_alive(pid: int) -> bool:

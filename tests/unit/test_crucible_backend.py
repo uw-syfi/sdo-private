@@ -319,7 +319,6 @@ class TestRoleAgentConstruction:
         tools = agent._assemble_tools("mitigation")
         tool_names = [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools]
         assert "exec_bash" in tool_names
-        assert "search_prior_mitigations" in tool_names
         assert "triage_cluster" not in tool_names
         assert "search_prior_incidents" not in tool_names
         assert "check_hypothesis_coverage" not in tool_names
@@ -437,10 +436,7 @@ class TestAgentCLIDriverMCPArgs:
                 "model_id": "test-model",
                 "iteration": 2,
                 "renderer": renderer,
-                "lt_summary_file": None,
-                "incidents_dir": "/tmp/incidents",
-                "playbooks_dir": None,
-                "mitigation_playbooks_dir": None,
+                "kb_view_dir": "/tmp/kb-view",
                 "ltm_call_budget": 3,
                 "enable_ltm_verified_direct_submit": True,
             },
@@ -470,8 +466,8 @@ class TestAgentCLIDriverMCPArgs:
         deps = self._make_sre_deps()
         args = driver._build_mcp_server_args(deps, "sre")
 
-        assert "--incidents-dir" in args
-        assert args[args.index("--incidents-dir") + 1] == "/tmp/incidents"
+        assert "--kb-view-dir" in args
+        assert args[args.index("--kb-view-dir") + 1] == "/tmp/kb-view"
         assert "--ltm-call-budget" in args
         assert args[args.index("--ltm-call-budget") + 1] == "3"
         assert "--enable-ltm-verified-direct-submit" in args
@@ -606,20 +602,6 @@ class TestAgentCLIDriverInterruptReconstruction:
         assert result.confirmed == ["root-cause-1"]
         assert result.confirmed_slugs == ["slug-1"]
         assert result.iteration == 3
-
-    def test_mitigation_short_circuit(self):
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
-        from sregym_agents.crucible.tools._kb_tools import LTMMitigationShortCircuit
-
-        signal = {
-            "short_circuit": True,
-            "applied": ["fix-1"],
-            "iteration": 2,
-        }
-        result = AgentCLIDriver._reconstruct_interrupt(signal)
-        assert isinstance(result, LTMMitigationShortCircuit)
-        assert result.applied == ["fix-1"]
-        assert result.iteration == 2
 
     def test_unknown_signal_passthrough(self):
         from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver

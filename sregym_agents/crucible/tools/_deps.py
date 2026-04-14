@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible.agents.base import RunSubagent
     from sregym_agents.crucible.config import CrucibleConfig
+    from sregym_agents.crucible.knowledge_base.root_cause import KBView
     from sregym_agents.crucible.tools._kb_tools import TriagePriors, TriageReport
 
 logger = logging.getLogger(__name__)
@@ -122,10 +123,7 @@ class SREDeps:
     renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     state: SharedState = field(default_factory=SharedState)
     config: CrucibleConfig | None = None
-    lt_summary_file: Path | None = None
-    incidents_dir: Path | None = None
-    playbooks_dir: Path | None = None
-    mitigation_playbooks_dir: Path | None = None
+    kb_view_dir: Path | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
     triage_report: TriageReport | None = None
@@ -140,6 +138,14 @@ class SREDeps:
     def enable_ltm_verified_direct_submit(self) -> bool:
         """Shorthand -- reads the flag from the embedded CrucibleConfig."""
         return self.config.enable_ltm_verified_direct_submit if self.config else False
+
+    @property
+    def kb_view(self) -> KBView | None:
+        if self.kb_view_dir is None:
+            return None
+        from sregym_agents.crucible.knowledge_base.root_cause import KBView
+
+        return KBView(self.kb_view_dir)
 
 
 @dataclass

@@ -1,0 +1,14 @@
+You are matching current Kubernetes incident symptoms to diagnosis playbooks.
+Given the incident snapshot and the available diagnosis playbook summaries, return the top 1-3 most plausible candidate root causes. Use only slugs from the provided summaries.
+Prefer no candidate over a weak match.
+
+Observed symptoms:
+{{ observed_symptoms }}
+
+{% if triage_context %}
+Triage report:
+{{ triage_context }}
+
+{% endif %}
+Diagnosis playbook summaries:
+{{ diagnosis_playbook_summaries }}

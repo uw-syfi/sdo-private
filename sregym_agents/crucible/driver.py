@@ -15,19 +15,20 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import requests
 
 if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver
+    from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
-from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
+from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, create_knowledge_base
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,13 +69,13 @@ def create_driver(
         )
 
     from sregym_agents.crucible.agents import PydanticAIDriver
-    from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
+    from sregym_agents.crucible.tools import LTMShortCircuit
 
     print(f"[crucible] Using PydanticAIDriver (model={model})")
     return PydanticAIDriver(
         model,
         trajectory_path=trajectory_path,
-        interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
+        interrupt_exceptions=(LTMShortCircuit,),
     )
 
 
@@ -184,7 +185,7 @@ def _parse_args() -> argparse.Namespace:
         "--kb-type",
         type=str,
         default=None,
-        choices=["structured", "append-only"],
+        choices=["structured"],
         dest="kb_type",
         help="Knowledge base implementation (overrides crucible.toml; default: structured)",
     )
@@ -267,10 +268,10 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     kb: KnowledgeBase | None = None
     injected_kb: InjectedKB | None = None
+    kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
 
     if args.kb_dir:
         model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
-        kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
         from sregym_agents.crucible.agents import PydanticAIDriver as _KBDriver
 
         kb_driver = _KBDriver(model_id)
@@ -289,10 +290,8 @@ async def _async_main(args: argparse.Namespace) -> None:
             else:
                 logger.info("Prior injection disabled by inject_priors=false")
                 injected_kb = InjectedKB(
-                    summary=injected.summary,
-                    lessons=injected.lessons,
                     architecture=injected.architecture,
-                    incidents_dir=injected.incidents_dir,
+                    kb_view_dir=injected.kb_view_dir,
                 )
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
@@ -316,9 +315,10 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
-    recovery_reflection = usage_metrics.get("recovery_reflection")
     diagnosis_succeeded = bool(usage_metrics.get("diagnosis_succeeded", False))
     mitigation_succeeded = bool(usage_metrics.get("mitigation_succeeded", False))
+    original_run_md = str(usage_metrics.get("original_run_md", ""))
+    grounded_run_md = str(usage_metrics.get("grounded_run_md", ""))
 
     if args.logs_dir:
         assert logs_dir is not None
@@ -335,6 +335,17 @@ async def _async_main(args: argparse.Namespace) -> None:
                 logger.info(f"Saved {suffix} session markdown to {dest}")
 
     if kb is not None and args.kb_dir:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        original_run_path = None
+        grounded_run_path = None
+        if kb_type == "structured":
+            structured_kb = cast("StructuredKnowledgeBase", kb)
+            original_run_path, grounded_run_path = structured_kb.write_incident_records(
+                timestamp=timestamp,
+                original_run_md=original_run_md,
+                grounded_run_md=grounded_run_md,
+            )
+
         # Copy stage_outputs_file to logs_dir so it survives exp_env cleanup
         saved_stage_outputs: str | None = None
         if stage_outputs_file and stage_outputs_file.exists() and args.logs_dir:
@@ -344,21 +355,10 @@ async def _async_main(args: argparse.Namespace) -> None:
             saved_stage_outputs = str(dest)
             logger.info(f"Saved stage outputs to {dest}")
 
-        # Collect paths to session markdown copies already saved above
-        session_files_task: dict[str, str | None] | None = None
-        if env_log_file:
-            stem = Path(env_log_file).stem
-            diag_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_diagnosis.md")
-            mit_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_mitigation.md")
-            if diag_p.exists():
-                session_files_task = {
-                    "diagnosis": str(diag_p),
-                    "mitigation": str(mit_p) if mit_p.exists() else None,
-                }
-
-        if session_files_task:
+        if original_run_path and grounded_run_path:
             task_payload: dict[str, Any] = {
-                "session_files": session_files_task,
+                "original_run_file": str(original_run_path),
+                "grounded_run_file": str(grounded_run_path),
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
@@ -366,25 +366,16 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "app_name": app_info.get("app_name", "unknown"),
                 **crucible_config.to_kb_task_fields(),
                 "problem_id": problem_id,
-                "recovery_reflection": recovery_reflection,
                 "diagnosis_succeeded": diagnosis_succeeded,
                 "mitigation_succeeded": mitigation_succeeded,
-                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "timestamp": timestamp,
             }
             task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)
             logger.info(f"KB update task written to {task_path}")
 
             ensure_kb_worker(Path(args.kb_dir))
         else:
-            # Standalone mode (no SREGYM_LOG_FILE) — run KB update inline
-            logger.info("Knowledge base: updating inline (no sregym harness detected).")
-            await kb.update(
-                SessionFiles(diagnosis=diagnosis_shared_file, mitigation=mitigation_shared_file),
-                stage_outputs_file=stage_outputs_file,
-                recovery_reflection=recovery_reflection,
-                diagnosis_succeeded=diagnosis_succeeded,
-                mitigation_succeeded=mitigation_succeeded,
-            )
+            logger.info("Knowledge base: no incident records produced; skipping async review enqueue.")
 
     logger.info("Crucible driver complete.")
 

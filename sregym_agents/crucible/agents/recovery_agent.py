@@ -1,6 +1,4 @@
-"""RecoveryAgent — encapsulates recovery-phase behavior: diagnosis recovery,
-reflection, and mitigation recovery.
-"""
+"""RecoveryAgent — encapsulates grounded diagnosis and mitigation recovery."""
 
 from __future__ import annotations
 
@@ -13,19 +11,13 @@ if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver
-    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
     from sregym_agents.crucible.tools import SharedFile, SRESubmission
 
 logger = logging.getLogger(__name__)
 
 
 class RecoveryAgent:
-    """Encapsulates recovery-phase behavior: diagnosis recovery, reflection,
-    and mitigation recovery.
-
-    Each method renders its own prompts, calls ``driver.run()``, and writes
-    results to shared_file / stage_outputs_file.
-    """
+    """Encapsulates grounded diagnosis and mitigation recovery."""
 
     def __init__(
         self,
@@ -177,68 +169,6 @@ class RecoveryAgent:
 
         logger.info(f"Recovery diagnosis complete: {submission.answer}")
         return submission
-
-    async def run_reflection(
-        self,
-        *,
-        app_info: dict[str, Any],
-        original_answer: str,
-        original_justification: str = "",
-        original_causal_chain: str = "",
-        stage_outputs_file: Path | None = None,
-        phase1_messages: list[Any] | None = None,
-        usage_collector: UsageCollector | None = None,
-    ) -> RecoveryReflection:
-        """Produce a KB-focused reflection from grounded recovery context."""
-        from sregym_agents.crucible.recovery_reflection import RecoveryReflection
-
-        stage_outputs = ""
-        if stage_outputs_file and stage_outputs_file.exists():
-            stage_outputs = stage_outputs_file.read_text().strip()
-
-        system_prompt = self._renderer.render("recovery_reflection_system")
-        user_prompt = self._renderer.render(
-            "recovery_reflection_user",
-            stage_outputs=stage_outputs or "(No stage outputs captured.)",
-            original_answer=original_answer,
-            original_justification=original_justification,
-            original_causal_chain=original_causal_chain,
-            app_name=app_info.get("app_name", "unknown"),
-            namespace=app_info.get("namespace", "default"),
-            descriptions=app_info.get("descriptions", ""),
-        )
-
-        result = await self._driver.run(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            tools=None,
-            output_type=RecoveryReflection,
-            agent_name="recovery-reflection",
-            usage_collector=usage_collector,
-            message_history=phase1_messages,
-        )
-
-        if result.output is None:
-            logger.warning("Recovery reflection produced no output; returning empty reflection.")
-            return RecoveryReflection(summary="Recovery reflection failed to produce output.")
-
-        reflection = result.output
-
-        # Write to stage outputs file
-        if stage_outputs_file:
-            with open(stage_outputs_file, "a") as f:
-                f.write("\n---\n## Recovery Reflection\n")
-                f.write(f"**Summary**: {reflection.summary}\n")
-                if reflection.investigation_observations:
-                    f.write("**Grounded Observations**:\n")
-                    f.writelines(f"- {obs}\n" for obs in reflection.investigation_observations)
-                for failure in reflection.stage_failures:
-                    f.write(f"### {failure.stage}\n")
-                    f.write(f"**Description**: {failure.description}\n")
-                    f.write(f"**Evidence**: {failure.evidence}\n")
-                    f.write(f"**Lesson**: {failure.lesson}\n")
-
-        return reflection
 
     async def run_mitigation(
         self,

@@ -1,0 +1,32 @@
+You are reviewing a failed diagnosis workflow for a Kubernetes SRE agent.
+
+Classify why the original diagnosis failed relative to the grounded diagnosis.
+Use one or more failure modes from:
+- triage_failure
+- missing_playbook
+- retrieval_failure
+- playbook_validation_failure
+
+Then choose a recommended action from:
+- create_playbook
+- refine_playbook
+- merge_playbooks
+- no_change
+
+Rules:
+- triage_failure means the triage stage missed the right symptoms; it is not itself a playbook failure.
+- missing_playbook means no relevant diagnosis playbook existed.
+- retrieval_failure means a relevant diagnosis playbook existed but was not selected.
+- playbook_validation_failure means a relevant diagnosis playbook was selected but its verification procedure was insufficient.
+- Prefer no_change over weak guesses.
+
+Existing diagnosis playbooks:
+{{ diagnosis_cards }}
+
+<original_run>
+{{ original_run_md }}
+</original_run>
+
+<grounded_run>
+{{ grounded_run_md }}
+</grounded_run>

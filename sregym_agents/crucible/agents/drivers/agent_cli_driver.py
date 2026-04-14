@@ -55,7 +55,6 @@ _NATIVE_TOOL_NAMES = frozenset(
 _SHORT_CIRCUIT_TOOLS = frozenset(
     {
         "search_prior_incidents",
-        "search_prior_mitigations",
     }
 )
 
@@ -243,14 +242,8 @@ class AgentCLIDriver(AgentDriver):
             args.extend(["--exp-cwd", str(self._cwd)])
 
         if role == "sre":
-            if getattr(deps, "lt_summary_file", None):
-                args.extend(["--lt-summary-file", str(deps.lt_summary_file)])
-            if getattr(deps, "incidents_dir", None):
-                args.extend(["--incidents-dir", str(deps.incidents_dir)])
-            if getattr(deps, "playbooks_dir", None):
-                args.extend(["--playbooks-dir", str(deps.playbooks_dir)])
-            if getattr(deps, "mitigation_playbooks_dir", None):
-                args.extend(["--mitigation-playbooks-dir", str(deps.mitigation_playbooks_dir)])
+            if getattr(deps, "kb_view_dir", None):
+                args.extend(["--kb-view-dir", str(deps.kb_view_dir)])
             ltm_budget = getattr(deps, "ltm_call_budget", None)
             if ltm_budget is not None:
                 args.extend(["--ltm-call-budget", str(ltm_budget)])
@@ -416,23 +409,14 @@ class AgentCLIDriver(AgentDriver):
     @staticmethod
     def _reconstruct_interrupt(signal_data: dict[str, Any]) -> Any:
         """Reconstruct an interrupt exception from signal data."""
-        from sregym_agents.crucible.tools import (
-            LTMMitigationShortCircuit,
-            LTMShortCircuit,
-        )
+        from sregym_agents.crucible.tools import LTMShortCircuit
 
-        if signal_data.get("short_circuit"):
-            if "confirmed" in signal_data:
-                return LTMShortCircuit(
-                    confirmed=signal_data["confirmed"],
-                    iteration=signal_data.get("iteration", 0),
-                    confirmed_slugs=signal_data.get("confirmed_slugs", []),
-                )
-            if "applied" in signal_data:
-                return LTMMitigationShortCircuit(
-                    applied=signal_data["applied"],
-                    iteration=signal_data.get("iteration", 0),
-                )
+        if signal_data.get("short_circuit") and "confirmed" in signal_data:
+            return LTMShortCircuit(
+                confirmed=signal_data["confirmed"],
+                iteration=signal_data.get("iteration", 0),
+                confirmed_slugs=signal_data.get("confirmed_slugs", []),
+            )
         return signal_data
 
     @staticmethod

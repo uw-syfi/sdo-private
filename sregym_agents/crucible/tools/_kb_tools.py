@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from sregym_agents.crucible.agents.base import RunSubagent
+    from sregym_agents.crucible.knowledge_base.root_cause import DiagnosisFrontMatter, KBView
 
 import yaml
 
@@ -363,55 +364,6 @@ class VerifiedMitigationSearchResult(BaseModel):
     general_guidance: str = Field(default="")
 
 
-class LTMMitigationShortCircuit(BaseException):
-    """Short-circuit signal raised by ``search_prior_mitigations`` when the
-    mitigation phase has successfully applied at least one strategy AND the
-    feature flag ``enable_ltm_verified_direct_submit`` is set on ``SREDeps``.
-
-    Mirrors :class:`LTMShortCircuit` for the diagnosis side. Inherits from
-    ``BaseException`` (not ``Exception``) so it bypasses pydantic-ai middleware
-    retry logic and propagates cleanly out of the SRE main agent loop to the
-    orchestrator. The orchestrator catches this signal, submits ``applied``
-    directly to the benchmark, and treats the iteration as APPROVED.
-    """
-
-    def __init__(self, applied: list[str], iteration: int) -> None:
-        super().__init__(f"LTM mitigation short-circuit: {len(applied)} applied")
-        self.applied = applied
-        self.iteration = iteration
-
-
-def _format_applied_mitigations_md(
-    verified: VerifiedMitigationSearchResult,
-    iteration: int,
-) -> str:
-    """Markdown summary of every mitigation strategy that went through the LTM
-    mitigation phase. Used to log to the shared session file every time
-    ``search_prior_mitigations`` runs."""
-    if not verified.applications:
-        return (
-            f"\n### Iteration {iteration} — LTM Mitigation Phase\n"
-            f"No mitigation playbooks matched the retrieved strategies.\n"
-        )
-    successful = verified.successful_applications
-    lines = [
-        f"\n### Iteration {iteration} — LTM Mitigation Phase",
-        (f"Applied {len(verified.applications)} strategy(ies) ({len(successful)} successful):"),
-        "",
-    ]
-    for app in verified.applications:
-        marker = "✅ APPLIED" if app.applied else "❌ failed"
-        lines.append(f"- **[{marker}] {app.root_cause_class}**")
-        if app.applied and app.mitigation_summary:
-            lines.append(f"  - summary: {app.mitigation_summary}")
-        if app.reasoning:
-            lines.append(f"  - reasoning: {app.reasoning}")
-        if app.applied and app.verification_evidence:
-            lines.extend(f"  - evidence: {ev}" for ev in app.verification_evidence)
-    lines.append("")
-    return "\n".join(lines)
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -440,126 +392,37 @@ def load_triage_priors(path: Path) -> TriagePriors:
     return TriagePriors.model_validate(raw)
 
 
-def _attach_slugs_to_candidates(
-    candidates: list[CandidateRootCause],
-    lt_summary_file: Path | None,
-) -> None:
-    """Mutate ``candidates`` to attach a ``slug`` from the long-term summary if matched.
-
-    Performs an exact-match against ``### Root Cause:`` headers, then a slug-derived
-    fuzzy match (slugify both sides) for minor wording differences.
-    """
-    if not lt_summary_file or not lt_summary_file.exists():
-        return
-    try:
-        from sregym_agents.crucible.knowledge_base.merge_result import extract_class_slugs
-        from sregym_agents.crucible.knowledge_base.playbook import slugify
-    except Exception as exc:
-        logger.warning("Slug attachment skipped: %s", exc)
-        return
-
-    try:
-        summary_text = lt_summary_file.read_text()
-    except OSError as exc:
-        logger.warning("Slug attachment: failed to read %s: %s", lt_summary_file, exc)
-        return
-
-    class_slugs = extract_class_slugs(summary_text)
-    if not class_slugs:
-        return
-
-    fuzzy_index: dict[str, str] = {}
-    for class_name, slug in class_slugs.items():
-        fuzzy_index.setdefault(slugify(class_name), slug)
-
-    for candidate in candidates:
-        if candidate.root_cause_class in class_slugs:
-            candidate.slug = class_slugs[candidate.root_cause_class]
-            continue
-        derived = slugify(candidate.root_cause_class)
-        if derived in fuzzy_index:
-            candidate.slug = fuzzy_index[derived]
+def _load_diagnosis_cards(kb_view: KBView | None) -> list[DiagnosisFrontMatter]:
+    if kb_view is None:
+        return []
+    return kb_view.list_active_diagnosis_cards()
 
 
-def _load_playbook_text(playbooks_dir: Path | None, slug: str | None) -> str:
-    """Load playbook markdown for ``slug`` (alias-aware). Returns empty string on miss."""
-    if not playbooks_dir or not slug:
+def _format_diagnosis_cards(cards: list[DiagnosisFrontMatter]) -> str:
+    if not cards:
+        return "(no diagnosis playbooks available)"
+    parts: list[str] = []
+    for card in cards:
+        parts.append(f"- slug: {card.slug}")
+        parts.append(f"  root_cause: {card.root_cause}")
+        parts.append("  when_to_consider:")
+        parts.extend(f"    - {item}" for item in card.when_to_consider)
+        parts.append("  disambiguators:")
+        parts.extend(f"    - {item}" for item in card.disambiguators)
+    return "\n".join(parts)
+
+
+def _load_diagnosis_playbook_text(kb_view: KBView | None, slug: str | None) -> str:
+    """Load diagnosis playbook markdown for ``slug``. Returns empty string on miss."""
+    if kb_view is None:
         return ""
-    try:
-        from sregym_agents.crucible.knowledge_base.playbook import PlaybookStore
+    return kb_view.load_diagnosis_text(slug)
 
-        store = PlaybookStore(playbooks_dir)
-        playbook = store.load(slug)
-    except Exception as exc:
-        logger.warning("Failed to load playbook for slug %s: %s", slug, exc)
+
+def load_mitigation_playbook_text(kb_view: KBView | None, slug: str | None) -> str:
+    if kb_view is None:
         return ""
-    if playbook is None:
-        return ""
-    return playbook.to_markdown()
-
-
-def _resolve_strategy_slug(
-    root_cause_class: str,
-    lt_summary_file: Path | None,
-) -> str | None:
-    """Resolve a mitigation strategy's root_cause_class to a long-term-summary slug.
-
-    Mirrors :func:`_attach_slugs_to_candidates`'s exact-then-fuzzy match. Returns
-    ``None`` if no match is found.
-    """
-    if not lt_summary_file or not lt_summary_file.exists():
-        return None
-    try:
-        from sregym_agents.crucible.knowledge_base.merge_result import extract_class_slugs
-        from sregym_agents.crucible.knowledge_base.playbook import slugify
-    except Exception as exc:
-        logger.warning("Strategy slug resolution skipped: %s", exc)
-        return None
-
-    try:
-        summary_text = lt_summary_file.read_text()
-    except OSError as exc:
-        logger.warning("Strategy slug resolution: failed to read %s: %s", lt_summary_file, exc)
-        return None
-
-    class_slugs = extract_class_slugs(summary_text)
-    if not class_slugs:
-        return None
-
-    if root_cause_class in class_slugs:
-        return class_slugs[root_cause_class]
-
-    fuzzy_index: dict[str, str] = {}
-    for class_name, slug in class_slugs.items():
-        fuzzy_index.setdefault(slugify(class_name), slug)
-
-    derived = slugify(root_cause_class)
-    return fuzzy_index.get(derived)
-
-
-def load_mitigation_playbook_text(
-    mitigation_playbooks_dir: Path | None,
-    slug: str | None,
-) -> str:
-    """Load mitigation playbook markdown for ``slug`` (alias-aware).
-
-    Returns empty string on miss.
-    """
-    if not mitigation_playbooks_dir or not slug:
-        return ""
-    try:
-        from sregym_agents.crucible.knowledge_base.mitigation_playbook import (
-            MitigationPlaybookStore,
-        )
-
-        store = MitigationPlaybookStore(mitigation_playbooks_dir)
-        playbook = store.load(slug)
-    except Exception as exc:
-        logger.warning("Failed to load mitigation playbook for slug %s: %s", slug, exc)
-        return ""
-    if playbook is None:
-        return ""
-    return playbook.to_markdown()
+    return kb_view.load_mitigation_text(slug)
 
 
 async def run_single_mitigation_playbook(
@@ -612,93 +475,6 @@ async def run_single_mitigation_playbook(
     return output
 
 
-async def _run_mitigation_phase(
-    strategies: list[MitigationStrategy],
-    search_result: MitigationSearchResult,
-    namespace: str,
-    stage: str,
-    run_subagent: RunSubagent,
-    renderer: PromptRenderer,
-    mitigation_playbooks_dir: Path | None,
-    lt_summary_file: Path | None,
-    model_id: Any = None,
-    failed_attempts: str = "",
-    usage_collector: UsageCollector | None = None,
-) -> VerifiedMitigationSearchResult:
-    """Execute mitigation playbooks for retrieved strategies, sequentially.
-
-    For each strategy whose ``root_cause_class`` resolves to a stored mitigation
-    playbook, spawn an inline subagent that:
-
-    1. Reads the playbook
-    2. Executes the Mitigation Procedure against the cluster
-    3. Runs the Post-Mitigation Verification
-    4. Confirms every Required Evidence checkbox is satisfied
-
-    Strategies are attempted **sequentially** (because each subagent mutates the
-    cluster) and we **early-exit on the first ``applied=True``**: once the
-    cluster is fixed there is no point trying the next strategy.
-
-    Strategies whose root_cause_class does not resolve to a playbook produce
-    a ``MitigationApplication`` with ``applied=False`` and an explanatory
-    ``reasoning``, but do not consume a subagent call.
-    """
-    applications: list[MitigationApplication] = []
-
-    for idx, strategy in enumerate(strategies):
-        slug = _resolve_strategy_slug(strategy.root_cause_class, lt_summary_file)
-        playbook_text = load_mitigation_playbook_text(mitigation_playbooks_dir, slug)
-        if not playbook_text:
-            applications.append(
-                MitigationApplication(
-                    strategy_index=idx,
-                    root_cause_class=strategy.root_cause_class,
-                    applied=False,
-                    reasoning=(
-                        f"No mitigation playbook found for root_cause_class "
-                        f"'{strategy.root_cause_class}' (slug={slug!r})."
-                    ),
-                )
-            )
-            continue
-
-        try:
-            output = await run_single_mitigation_playbook(
-                playbook_text=playbook_text,
-                root_cause_class=strategy.root_cause_class,
-                namespace=namespace,
-                run_subagent=run_subagent,
-                renderer=renderer,
-                model_id=model_id,
-                usage_collector=usage_collector,
-                agent_name=f"ltm-mitigate-{idx}",
-                failed_attempts=failed_attempts,
-            )
-            output.strategy_index = idx
-        except Exception as e:
-            logger.warning("[ltm-mitigate-%d] failed: %s", idx, e)
-            output = MitigationApplication(
-                strategy_index=idx,
-                root_cause_class=strategy.root_cause_class,
-                applied=False,
-                reasoning=f"Mitigation subagent raised: {e}",
-            )
-
-        applications.append(output)
-        if output.applied:
-            # Cluster is fixed; no point trying further strategies.
-            break
-
-    successful = [a for a in applications if a.applied]
-    return VerifiedMitigationSearchResult(
-        strategies=list(strategies),
-        applications=applications,
-        successful_applications=successful,
-        novel_cause=search_result.novel_cause,
-        general_guidance=search_result.general_guidance,
-    )
-
-
 async def _run_verification_phase(
     candidates: list[CandidateRootCause],
     diagnosis: DifferentialDiagnosis,
@@ -710,7 +486,7 @@ async def _run_verification_phase(
     model_id: Any = None,
     triage_report: TriageReport | None = None,
     verification_guidance: str = "",
-    playbooks_dir: Path | None = None,
+    kb_view: KBView | None = None,
     usage_collector: UsageCollector | None = None,
 ) -> VerifiedDifferentialDiagnosis:
     """Spawn one verification subagent per candidate in parallel and return aggregated results."""
@@ -719,7 +495,7 @@ async def _run_verification_phase(
         triage_context = format_triage_report(triage_report)
 
     async def _verify_one(idx: int, candidate: CandidateRootCause) -> CandidateVerification:
-        playbook_text = _load_playbook_text(playbooks_dir, candidate.slug)
+        playbook_text = _load_diagnosis_playbook_text(kb_view, candidate.slug)
         prompt = renderer.render(
             "ltm_verify_candidate",
             namespace=namespace,
@@ -1024,18 +800,14 @@ async def search_prior_incidents_impl(
     deps: SREDeps,
     observed_symptoms: str,
 ) -> str:
-    """Search past incidents and return verified candidate root causes.
-
-    Args:
-        deps: SRE dependency context.
-        observed_symptoms: Factual description of current observations or hypothesis.
-    """
+    """Search diagnosis playbooks and return verified candidate root causes."""
     empty_result = (
         '{"verified_candidates": [], "confirmed_candidates": [],'
         ' "novel_cause_signals": "", "caveats": "No incident history available."}'
     )
-    if not deps.lt_summary_file:
-        logger.info("[ltm-search] skipped (no summary file): %s", empty_result)
+    kb_view = deps.kb_view
+    if kb_view is None:
+        logger.info("[ltm-search] skipped (no root-cause KB injected): %s", empty_result)
         return empty_result
 
     if not observed_symptoms.strip():
@@ -1062,14 +834,12 @@ async def search_prior_incidents_impl(
     triage_context = ""
     if deps.triage_report is not None:
         triage_context = format_triage_report(deps.triage_report)
-
+    cards = _load_diagnosis_cards(kb_view)
     prompt = deps.renderer.render(
-        "search_prior_incidents",
-        stage=deps.stage,
+        "ltm_search_diagnosis_playbooks",
         observed_symptoms=observed_symptoms,
         triage_context=triage_context,
-        lt_summary_file=str(deps.lt_summary_file),
-        incidents_dir=str(deps.incidents_dir) if deps.incidents_dir else "",
+        diagnosis_playbook_summaries=_format_diagnosis_cards(cards),
     )
     logger.info("[ltm-search] PROMPT:\n%s", prompt)
 
@@ -1077,11 +847,19 @@ async def search_prior_incidents_impl(
     diagnosis: DifferentialDiagnosis = await run_subagent(
         prompt=prompt,
         output_type=DifferentialDiagnosis,
-        tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+        tools=None,
         agent_name="ltm-search",
         model_settings=ms,
         usage_collector=deps.usage_collector,
     )
+    valid_slugs = {card.slug for card in cards}
+    filtered_candidates: list[CandidateRootCause] = []
+    for candidate in diagnosis.candidate_root_causes:
+        if candidate.slug and candidate.slug in valid_slugs:
+            filtered_candidates.append(candidate)
+        else:
+            logger.info("[ltm-search] dropping candidate with invalid or missing slug: %s", candidate.root_cause_class)
+    diagnosis = diagnosis.model_copy(update={"candidate_root_causes": filtered_candidates})
     retrieval_json = diagnosis.model_dump_json(indent=2)
     logger.info("[ltm-search] retrieval output: %s", retrieval_json)
 
@@ -1103,8 +881,6 @@ async def search_prior_incidents_impl(
         )
         logger.info("[ltm-search] no candidates to verify")
     else:
-        _attach_slugs_to_candidates(diagnosis.candidate_root_causes, deps.lt_summary_file)
-
         verified = await _run_verification_phase(
             candidates=diagnosis.candidate_root_causes,
             diagnosis=diagnosis,
@@ -1116,7 +892,7 @@ async def search_prior_incidents_impl(
             model_id=model_id,
             triage_report=deps.triage_report,
             verification_guidance=deps.verification_guidance,
-            playbooks_dir=deps.playbooks_dir,
+            kb_view=kb_view,
             usage_collector=deps.usage_collector,
         )
 
@@ -1173,126 +949,3 @@ async def search_prior_incidents(
         observed_symptoms: Factual description of current observations or hypothesis.
     """
     return await search_prior_incidents_impl(ctx.deps, observed_symptoms)
-
-
-async def search_prior_mitigations_impl(
-    deps: SREDeps,
-    root_cause: str,
-    failed_attempts: str = "",
-) -> str:
-    """Search past incidents for mitigation strategies matching a confirmed root cause.
-
-    Args:
-        deps: SRE dependency context.
-        root_cause: The confirmed root cause diagnosis to find mitigations for.
-        failed_attempts: Description of mitigation attempts that already failed (optional).
-    """
-    empty_result = '{"strategies": [], "novel_cause": false, "general_guidance": "No incident history available."}'
-    if not deps.lt_summary_file:
-        logger.info("[ltm-mitigation] skipped (no summary file): %s", empty_result)
-        return empty_result
-
-    if not root_cause.strip():
-        result = "Error: root_cause must not be empty."
-        logger.info("[ltm-mitigation] skipped (empty root_cause): %s", result)
-        return result
-
-    if deps.ltm_call_count >= deps.ltm_call_budget:
-        result = (
-            '{"strategies": [], "novel_cause": false,'
-            ' "general_guidance": "Search budget exhausted. Proceed with independent mitigation."}'
-        )
-        logger.info("[ltm-mitigation] skipped (budget exhausted): %s", result)
-        return result
-    deps.ltm_call_count += 1
-
-    run_subagent = deps.run_subagent
-    if run_subagent is None:
-        logger.warning("[ltm-mitigation] run_subagent not configured; returning empty result")
-        return empty_result
-
-    model_id = deps.model_id
-    prompt = deps.renderer.render(
-        "search_prior_mitigations",
-        root_cause=root_cause,
-        failed_attempts=failed_attempts,
-        lt_summary_file=str(deps.lt_summary_file),
-        incidents_dir=str(deps.incidents_dir) if deps.incidents_dir else "",
-    )
-    logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
-
-    ms = dict(thinking_settings(model_id, THINKING_BUDGET)) if model_id else None
-    output: MitigationSearchResult = await run_subagent(
-        prompt=prompt,
-        output_type=MitigationSearchResult,
-        tools=[read_file, exec_bash_any, grep],
-        agent_name="ltm-mitigation",
-        model_settings=ms,
-        usage_collector=deps.usage_collector,
-    )
-    output_json = output.model_dump_json(indent=2)
-    logger.info("[ltm-mitigation] output: %s", output_json)
-    if deps.stage_outputs_file:
-        with open(deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Mitigation Retrieval Results\n**Query:** {root_cause}\n\n{output_json}\n")
-
-    # --- Mitigation phase: execute playbook-guided mitigation subagents ---
-    if not deps.mitigation_playbooks_dir or not output.strategies:
-        return output_json
-
-    verified = await _run_mitigation_phase(
-        strategies=output.strategies,
-        search_result=output,
-        namespace=deps.namespace,
-        stage=deps.stage,
-        run_subagent=run_subagent,
-        renderer=deps.renderer,
-        mitigation_playbooks_dir=deps.mitigation_playbooks_dir,
-        lt_summary_file=deps.lt_summary_file,
-        model_id=model_id,
-        failed_attempts=failed_attempts,
-        usage_collector=deps.usage_collector,
-    )
-
-    verified_json = verified.model_dump_json(indent=2)
-    logger.info("[ltm-mitigation] verified output: %s", verified_json)
-
-    # Log the mitigation phase results to the shared session file.
-    try:
-        deps.shared_file.append(_format_applied_mitigations_md(verified, deps.iteration))
-    except Exception as e:
-        logger.warning("[ltm-mitigation] failed to append phase results to shared file: %s", e)
-
-    if deps.stage_outputs_file:
-        with open(deps.stage_outputs_file, "a") as f:
-            f.write(f"\n## KB Mitigation Phase Results\n{verified_json}\n")
-
-    # Short-circuit: if the flag is on and at least one strategy applied.
-    if deps.enable_ltm_verified_direct_submit and verified.successful_applications:
-        applied_summaries = [a.mitigation_summary for a in verified.successful_applications]
-        logger.info(
-            "[ltm-mitigation] short-circuit fired with %d applied strategy(ies); raising LTMMitigationShortCircuit",
-            len(applied_summaries),
-        )
-        raise LTMMitigationShortCircuit(applied=applied_summaries, iteration=deps.iteration)
-
-    return verified_json
-
-
-async def search_prior_mitigations(
-    ctx: RunContext[SREDeps],
-    root_cause: str,
-    failed_attempts: str = "",
-) -> str:
-    """Search past incidents for mitigation strategies matching a confirmed root cause.
-
-    Call with the confirmed diagnosis to retrieve proven mitigation approaches
-    from past incidents. Optionally include failed_attempts to exclude strategies
-    that were already tried unsuccessfully. Budget: 1 call per stage (shared with
-    search_prior_incidents).
-
-    Args:
-        root_cause: The confirmed root cause diagnosis to find mitigations for.
-        failed_attempts: Description of mitigation attempts that already failed (optional).
-    """
-    return await search_prior_mitigations_impl(ctx.deps, root_cause, failed_attempts)

@@ -17,7 +17,7 @@ import httpx
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver, RunSubagent
-    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
+    from sregym_agents.crucible.knowledge_base.root_cause import KBView
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible.agents import (
@@ -29,8 +29,11 @@ from sregym_agents.crucible.agents import (
 )
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
+from sregym_agents.crucible.knowledge_base.incident_records import (
+    GroundedRunRecord,
+    OriginalRunRecord,
+)
 from sregym_agents.crucible.tools import (
-    LTMMitigationShortCircuit,
     LTMShortCircuit,
     SharedFile,
     SharedState,
@@ -50,7 +53,6 @@ class StageLoopResult:
     agent_justification: str = ""
     agent_causal_chain: str = ""
     agent_reflection: str = ""
-    recovery_reflection: RecoveryReflection | None = None
     stage_outputs_file: Path | None = None
     confirmed_slugs: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
@@ -190,18 +192,12 @@ def _resolve_injected_kb(injected: InjectedKB | None) -> InjectedKB | None:
     if injected is None:
         return None
     return InjectedKB(
-        summary=injected.summary.resolve() if injected.summary else None,
-        lessons=injected.lessons.resolve() if injected.lessons else None,
+        kb_view_dir=injected.kb_view_dir.resolve() if injected.kb_view_dir else None,
         architecture=injected.architecture.resolve() if injected.architecture else None,
-        incidents_dir=injected.incidents_dir.resolve() if injected.incidents_dir else None,
         diagnosis_priors=injected.diagnosis_priors.resolve() if injected.diagnosis_priors else None,
         triage_priors=injected.triage_priors.resolve() if injected.triage_priors else None,
         arbitration_priors=injected.arbitration_priors.resolve() if injected.arbitration_priors else None,
         verification_priors=injected.verification_priors.resolve() if injected.verification_priors else None,
-        playbooks_dir=injected.playbooks_dir.resolve() if injected.playbooks_dir else None,
-        mitigation_playbooks_dir=(
-            injected.mitigation_playbooks_dir.resolve() if injected.mitigation_playbooks_dir else None
-        ),
     )
 
 
@@ -214,8 +210,7 @@ async def _direct_submit_confirmed(
     stage_outputs_file: Path | None,
     confirmed_slugs: list[str] | None = None,
 ) -> StageLoopResult:
-    """Direct-submission path triggered by ``LTMShortCircuit`` (diagnosis) or
-    ``LTMMitigationShortCircuit`` (mitigation).
+    """Direct-submission path triggered by ``LTMShortCircuit``.
 
     Appends a "LTM Direct Submission" block + bullet list of confirmed
     candidates / applied mitigations to the shared file, posts the list to
@@ -281,8 +276,6 @@ async def _run_stage_loop(
     """Run the agent->judge loop for one stage."""
     if crucible_config is None:
         crucible_config = CrucibleConfig()
-    lt_summary_file = injected_kb.summary if injected_kb else None
-    lessons_file = injected_kb.lessons if injected_kb else None
     architecture_file = injected_kb.architecture if injected_kb else None
     stage_timeout = crucible_config.stage_timeout
     stage_start = time.monotonic()
@@ -293,13 +286,9 @@ async def _run_stage_loop(
     # When LTM retrieval is enabled, don't inject summary into the SRE prompt —
     # the SRE agent will use the search_prior_incidents tool instead.
     # The judge always receives the full summary regardless of the flag.
-    full_lt_summary_content = _read_kb_content(lt_summary_file)
-    if crucible_config.enable_ltm_retrieval:
-        lt_summary_content = ""
-    else:
-        lt_summary_content = full_lt_summary_content
-    # Lessons and architecture are always injected unconditionally.
-    lessons_content = _read_kb_content(lessons_file)
+    full_lt_summary_content = ""
+    lt_summary_content = ""
+    lessons_content = ""
     architecture_content = _read_kb_content(architecture_file)
 
     # stage_outputs_file is set on the SREAgentConfig already
@@ -336,7 +325,9 @@ async def _run_stage_loop(
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,
-            lt_summary_file=str(lt_summary_file) if lt_summary_file else "",
+            lt_summary_file=str(injected_kb.kb_view_dir / "manifest.json")
+            if injected_kb and injected_kb.kb_view_dir
+            else "",
             usage_collector=usage_collector,
         )
 
@@ -576,12 +567,6 @@ def _parse_short_circuit(interrupt_data: Any) -> ShortCircuitSignal | None:
             confirmed_slugs=interrupt_data.confirmed_slugs,
             stage="diagnosis",
         )
-    if isinstance(interrupt_data, LTMMitigationShortCircuit):
-        return ShortCircuitSignal(
-            confirmed=interrupt_data.applied,
-            iteration=interrupt_data.iteration,
-            stage="mitigation",
-        )
     return None
 
 
@@ -599,68 +584,15 @@ async def _try_recovery_playbook_shortcut(
     primary_collector: UsageCollector,
     recovery_collector: UsageCollector,
 ) -> StageLoopResult | None:
-    """Classify a failed-diagnosis recovery answer to a KB slug and try its playbook.
-
-    Runs only when the diagnosis was not confirmed by the benchmark. Uses the
-    long-term summary and the recovery agent's corrected answer to pick a slug
-    via an LLM classifier; if a mitigation playbook exists for that slug,
-    executes it via ``_try_playbook_shortcut``. Returns ``None`` on any miss
-    so the caller falls back to the normal mitigation loop.
-    """
-    if not injected_kb or not injected_kb.summary or not injected_kb.summary.exists():
-        logger.info("[recovery-playbook-shortcut] Skipped — no long-term summary available.")
-        return None
-    if not injected_kb.mitigation_playbooks_dir:
-        logger.info("[recovery-playbook-shortcut] Skipped — no mitigation playbooks directory injected.")
-        return None
-    if not diag_result.agent_answer:
-        logger.info("[recovery-playbook-shortcut] Skipped — no recovery answer available.")
-        return None
-
-    from sregym_agents.crucible.recovery_playbook_classifier import classify_recovery_playbook
-
-    try:
-        summary_text = injected_kb.summary.read_text()
-    except OSError as exc:
-        logger.warning("[recovery-playbook-shortcut] Failed to read summary: %s", exc)
-        return None
-
-    benchmark_reasoning = _extract_benchmark_reasoning(diag_result.benchmark_block, stage="diagnosis")
-
-    slug = await classify_recovery_playbook(
-        driver=driver,
-        model_id=model,
-        summary_text=summary_text,
-        recovery_answer=diag_result.agent_answer,
-        recovery_justification=diag_result.agent_justification,
-        recovery_causal_chain=diag_result.agent_causal_chain,
-        benchmark_reasoning=benchmark_reasoning,
-        usage_collector=recovery_collector,
-    )
-    if not slug:
-        shared_file.append("\n### Recovery Playbook Shortcut\n- Outcome: No slug match from classifier\n")
-        return None
-
-    logger.info("[recovery-playbook-shortcut] Classifier picked slug=%r — attempting playbook.", slug)
-    shared_file.append(f"\n### Recovery Playbook Shortcut\n- Classifier slug: {slug}\n- Attempting direct mitigation\n")
-    return await _try_playbook_shortcut(
-        run_subagent=playbook_run_subagent,
-        namespace=app_info.get("namespace", "default"),
-        slug=slug,
-        mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
-        shared_file=shared_file,
-        submit_mcp_url=submit_mcp_url,
-        renderer=renderer,
-        usage_collector=primary_collector,
-        model_id=model,
-    )
+    """v3 root-cause KB does not classify recovery answers to mitigation slugs."""
+    return None
 
 
 async def _try_playbook_shortcut(
     run_subagent: RunSubagent,
     namespace: str,
     slug: str,
-    mitigation_playbooks_dir: Path,
+    kb_view: KBView | None,
     shared_file: SharedFile,
     submit_mcp_url: str,
     renderer: PromptRenderer,
@@ -674,11 +606,10 @@ async def _try_playbook_shortcut(
     on success or ``None`` to signal fallback to the normal mitigation loop.
     """
     from sregym_agents.crucible.tools import (
-        load_mitigation_playbook_text,
         run_single_mitigation_playbook,
     )
 
-    playbook_text = load_mitigation_playbook_text(mitigation_playbooks_dir, slug)
+    playbook_text = kb_view.load_mitigation_text(slug) if kb_view is not None else ""
     if not playbook_text:
         logger.info("[playbook-shortcut] No mitigation playbook found for slug=%r", slug)
         shared_file.append(
@@ -686,12 +617,10 @@ async def _try_playbook_shortcut(
         )
         return None
 
-    # Resolve class_name from the playbook for the subagent prompt.
-    from sregym_agents.crucible.knowledge_base.mitigation_playbook import MitigationPlaybookStore
+    from sregym_agents.crucible.knowledge_base.root_cause import MitigationPlaybook
 
-    store = MitigationPlaybookStore(mitigation_playbooks_dir)
-    pb = store.load(slug)
-    root_cause_class = pb.class_name if pb else slug
+    pb = MitigationPlaybook.parse(playbook_text)
+    root_cause_class = pb.front_matter.root_cause
 
     try:
         output = await run_single_mitigation_playbook(
@@ -802,10 +731,7 @@ def _build_sre_agent_config(
 
     return SREAgentConfig(
         config=crucible_config,
-        lt_summary_file=injected_kb.summary if injected_kb else None,
-        incidents_dir=injected_kb.incidents_dir if injected_kb else None,
-        playbooks_dir=injected_kb.playbooks_dir if injected_kb else None,
-        mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir if injected_kb else None,
+        kb_view_dir=injected_kb.kb_view_dir if injected_kb else None,
         triage_priors=triage_priors,
         verification_guidance=verification_guidance,
         stage_outputs_file=stage_outputs_file,
@@ -877,6 +803,7 @@ async def run(
         crucible_config=crucible_config,
     )
     _append_stage_outcome(diag_result, "Diagnosis")
+    original_diag_result = dataclasses.replace(diag_result)
 
     # Recovery diagnosis: produce a validated causal chain when the benchmark
     # rejected the agent's diagnosis and we want causal chains for KB.
@@ -896,33 +823,38 @@ async def run(
             stage_outputs_file=diag_result.stage_outputs_file,
         )
         if recovery:
-            original_answer = diag_result.agent_answer
-            original_justification = diag_result.agent_justification
-            original_causal_chain = diag_result.agent_causal_chain
             diag_result.agent_answer = recovery.answer
             diag_result.agent_justification = recovery.justification
             diag_result.agent_causal_chain = recovery.causal_chain
             diag_result.agent_reflection = recovery.reflection
-            if crucible_config.recovery_phase2_enabled:
-                diag_result.recovery_reflection = await recovery_agent.run_reflection(
-                    app_info=app_info,
-                    original_answer=original_answer,
-                    original_justification=original_justification,
-                    original_causal_chain=original_causal_chain,
-                    stage_outputs_file=diag_result.stage_outputs_file,
-                    phase1_messages=recovery.message_history,
-                    usage_collector=recovery_collector,
-                )
-
     if "mitigation" not in planned_stages:
         logger.info("Diagnosis-only problem — orchestrator complete.")
         result = _build_usage_metrics(primary_collector, recovery_collector)
         sof = diag_result.stage_outputs_file
         result["stage_outputs_file"] = str(sof) if sof else None
-        result["recovery_reflection"] = (
-            diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
-        )
         result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
+        result["original_run_md"] = OriginalRunRecord.from_stage_outputs_file(
+            problem_id=problem_id,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            diagnosis_succeeded="success: True" in (original_diag_result.benchmark_block or ""),
+            agent_answer=original_diag_result.agent_answer,
+            agent_justification=original_diag_result.agent_justification,
+            agent_causal_chain=original_diag_result.agent_causal_chain,
+            benchmark_block=original_diag_result.benchmark_block,
+            stage_outputs_file=original_diag_result.stage_outputs_file,
+        ).to_markdown()
+        result["grounded_run_md"] = GroundedRunRecord(
+            problem_id=problem_id,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            has_grounded_diagnosis=bool(diag_result.agent_answer),
+            agent_answer=diag_result.agent_answer,
+            agent_justification=diag_result.agent_justification,
+            agent_causal_chain=diag_result.agent_causal_chain,
+            agent_reflection=diag_result.agent_reflection,
+            benchmark_block=diag_result.benchmark_block,
+        ).to_markdown()
         return result
 
     _init_mitigation_file(
@@ -942,9 +874,7 @@ async def run(
     # Playbook shortcut
     mit_result: StageLoopResult | None = None
     diag_confirmed = bool(diag_result.benchmark_block) and "success: True" in diag_result.benchmark_block
-    if not crucible_config.enable_playbook_shortcut:
-        logger.info("[playbook-shortcut] Disabled (enable_playbook_shortcut=false).")
-    elif not diag_confirmed:
+    if not diag_confirmed:
         mit_result = await _try_recovery_playbook_shortcut(
             driver=driver,
             model=model,
@@ -960,8 +890,8 @@ async def run(
         )
     elif not diag_result.confirmed_slugs:
         logger.info("[playbook-shortcut] Skipped — no KB slugs from diagnosis stage.")
-    elif not injected_kb or not injected_kb.mitigation_playbooks_dir:
-        logger.info("[playbook-shortcut] Skipped — no mitigation playbooks directory injected.")
+    elif not injected_kb or injected_kb.get_view() is None:
+        logger.info("[playbook-shortcut] Skipped — no KB view injected.")
     else:
         idx = _extract_matched_candidate_index(diag_result.benchmark_block)
         if idx is None or not (0 <= idx < len(diag_result.confirmed_slugs)):
@@ -983,7 +913,7 @@ async def run(
                 run_subagent=playbook_run_subagent,
                 namespace=app_info.get("namespace", "default"),
                 slug=slug,
-                mitigation_playbooks_dir=injected_kb.mitigation_playbooks_dir.resolve(),
+                kb_view=injected_kb.get_view(),
                 shared_file=mitigation_sf,
                 submit_mcp_url=submit_mcp_url,
                 renderer=renderer,
@@ -1037,9 +967,28 @@ async def run(
     result = _build_usage_metrics(primary_collector, recovery_collector)
     sof = diag_result.stage_outputs_file or mit_result.stage_outputs_file
     result["stage_outputs_file"] = str(sof) if sof else None
-    result["recovery_reflection"] = (
-        diag_result.recovery_reflection.model_dump() if diag_result.recovery_reflection else None
-    )
     result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
     result["mitigation_succeeded"] = "success: True" in (mit_result.benchmark_block or "")
+    result["original_run_md"] = OriginalRunRecord.from_stage_outputs_file(
+        problem_id=problem_id,
+        app_name=app_info.get("app_name", "unknown"),
+        namespace=app_info.get("namespace", "default"),
+        diagnosis_succeeded="success: True" in (original_diag_result.benchmark_block or ""),
+        agent_answer=original_diag_result.agent_answer,
+        agent_justification=original_diag_result.agent_justification,
+        agent_causal_chain=original_diag_result.agent_causal_chain,
+        benchmark_block=original_diag_result.benchmark_block,
+        stage_outputs_file=original_diag_result.stage_outputs_file,
+    ).to_markdown()
+    result["grounded_run_md"] = GroundedRunRecord(
+        problem_id=problem_id,
+        app_name=app_info.get("app_name", "unknown"),
+        namespace=app_info.get("namespace", "default"),
+        has_grounded_diagnosis=bool(diag_result.agent_answer),
+        agent_answer=diag_result.agent_answer,
+        agent_justification=diag_result.agent_justification,
+        agent_causal_chain=diag_result.agent_causal_chain,
+        agent_reflection=diag_result.agent_reflection,
+        benchmark_block=diag_result.benchmark_block,
+    ).to_markdown()
     return result
