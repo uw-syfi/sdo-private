@@ -14,7 +14,9 @@ Register with ``provider = "rlm-official"`` in ``sds.toml``.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -48,16 +50,22 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
         """Read a file from the repository.  *path* is relative to repo root."""
         full = _resolve_safe(path)
         try:
-            return Path(full).read_text()
+            result = Path(full).read_text()
+            print(result)
+            return result
         except OSError as exc:
-            return f"Error reading {path}: {exc}"
+            msg = f"Error reading {path}: {exc}"
+            print(msg)
+            return msg
 
     def write_file(path: str, content: str) -> str:
         """Write *content* to a file inside the repository (overwrites)."""
         full = _resolve_safe(path)
         Path(full).parent.mkdir(parents=True, exist_ok=True)
         Path(full).write_text(content)
-        return f"Wrote {len(content)} bytes to {path}"
+        msg = f"Wrote {len(content)} bytes to {path}"
+        print(msg)
+        return msg
 
     def append_file(path: str, content: str) -> str:
         """Append *content* to a file (creates if missing). Use this to build long files incrementally."""
@@ -65,7 +73,9 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
         Path(full).parent.mkdir(parents=True, exist_ok=True)
         with open(full, "a") as f:
             f.write(content)
-        return f"Appended {len(content)} bytes to {path}"
+        msg = f"Appended {len(content)} bytes to {path}"
+        print(msg)
+        return msg
 
     def list_files(path: str = ".", recursive: bool = False) -> list[str]:
         """List files/directories under *path* (relative to repo root).
@@ -75,15 +85,20 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
         full = _resolve_safe(path)
         try:
             if recursive:
-                result = []
+                result: list[str] = []
                 for dirpath, _dirs, files in os.walk(full):
                     for f in files:
                         rel = os.path.relpath(os.path.join(dirpath, f), full)
                         result.append(rel)
-                return sorted(result)
-            return sorted(os.listdir(full))
+                entries = sorted(result)
+            else:
+                entries = sorted(os.listdir(full))
+            print("\n".join(entries))
+            return entries
         except OSError as exc:
-            return [f"Error listing {path}: {exc}"]
+            msg = f"Error listing {path}: {exc}"
+            print(msg)
+            return [msg]
 
     def run_shell(cmd: str, timeout: int = 60) -> str:
         """Run a shell command inside the repository root.
@@ -102,11 +117,79 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
             output = result.stdout + result.stderr
             if len(output) > 20_000:
                 output = output[:20_000] + "\n... [truncated]"
+            print(output)
             return output
         except subprocess.TimeoutExpired:
-            return f"Command timed out after {timeout}s: {cmd}"
+            msg = f"Command timed out after {timeout}s: {cmd}"
+            print(msg)
+            return msg
         except OSError as exc:
-            return f"Error running command: {exc}"
+            msg = f"Error running command: {exc}"
+            print(msg)
+            return msg
+
+    def validate_compose(compose_path: str = "docker-compose.yml") -> str:
+        """Validate a docker-compose file. Returns errors or 'Valid'."""
+        full = _resolve_safe(compose_path)
+        if not Path(full).exists():
+            msg = f"File not found: {compose_path}"
+            print(msg)
+            return msg
+        try:
+            result = subprocess.run(
+                ["docker", "compose", "-f", full, "config", "--quiet"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=root,
+            )
+            if result.returncode == 0:
+                print("Valid")
+                return "Valid"
+            msg = f"Invalid: {result.stderr}"
+            print(msg)
+            return msg
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            msg = f"Validation error: {exc}"
+            print(msg)
+            return msg
+
+    def check_build_paths(compose_path: str = "docker-compose.yml") -> str:
+        """Check if all build context paths in docker-compose.yml exist."""
+        full = _resolve_safe(compose_path)
+        if not Path(full).exists():
+            msg = f"File not found: {compose_path}"
+            print(msg)
+            return msg
+
+        try:
+            content = Path(full).read_text()
+        except OSError as exc:
+            msg = f"Error reading {compose_path}: {exc}"
+            print(msg)
+            return msg
+
+        # Extract build context paths from YAML using regex
+        context_pattern = re.compile(r"^\s*context:\s*(.+)$", re.MULTILINE)
+        matches = context_pattern.findall(content)
+        if not matches:
+            msg = "No build context paths found"
+            print(msg)
+            return msg
+
+        issues: list[str] = []
+        for ctx in matches:
+            ctx = ctx.strip().strip("'\"")
+            ctx_full = os.path.realpath(os.path.join(root, ctx))
+            if not os.path.exists(ctx_full):
+                issues.append(f"Missing: {ctx}")
+
+        if issues:
+            msg = "Build path issues:\n" + "\n".join(issues)
+        else:
+            msg = f"All {len(matches)} build context paths exist"
+        print(msg)
+        return msg
 
     return {
         "read_file": {
@@ -128,6 +211,14 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
         "run_shell": {
             "tool": run_shell,
             "description": "Run a shell command in the repo root",
+        },
+        "validate_compose": {
+            "tool": validate_compose,
+            "description": "Validate a docker-compose file syntax. Returns 'Valid' or error details.",
+        },
+        "check_build_paths": {
+            "tool": check_build_paths,
+            "description": "Check if all build context paths in docker-compose.yml exist.",
         },
         "REPO_PATH": {
             "tool": root,
@@ -198,8 +289,6 @@ def _find_latest_log(logs_dir: Path, prefix: str, fallback_name: str) -> str:
     if not logs_dir.exists():
         return ""
 
-    import re
-
     numbered: list[tuple[int, Path]] = []
     for p in logs_dir.iterdir():
         m = re.match(rf"^{re.escape(prefix)}(\d+)\.log$", p.name)
@@ -247,6 +336,10 @@ When fixing deployment errors:
 3. Identify the root cause — do NOT re-run deploy.sh yourself.
    The outer pipeline will re-run deployment after your fix.
 4. Write corrected scripts using write_file() or append_file().
+5. Use validate_compose() and check_build_paths() to verify docker-compose files.
+6. If you see a rate limit or timeout error in the error output, note it in
+   your fix_summary but focus on fixing the actual deployment issue, not the
+   rate limit.
 
 When generating deployment scripts or analysis:
 1. Analyze the repo to understand the application stack.
@@ -321,6 +414,19 @@ class RLMOfficialAgent(CodingAgent):
         return self._run_rlm(prompt, repo_path, timeout)
 
     # ------------------------------------------------------------------
+    # Retry helpers
+    # ------------------------------------------------------------------
+
+    _RATE_LIMIT_BACKOFF = (30, 60, 120)  # seconds between retries
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        """Return True if *exc* looks like a rate-limit / quota error."""
+        msg = str(exc).lower()
+        indicators = ("429", "resource_exhausted", "rate limit", "ratelimit", "quota")
+        return any(ind in msg for ind in indicators)
+
+    # ------------------------------------------------------------------
     # File generation (direct LLM call, no REPL)
     # ------------------------------------------------------------------
 
@@ -328,7 +434,7 @@ class RLMOfficialAgent(CodingAgent):
         "\n\nCRITICAL: In deploy.sh and health_check.sh, the PROJECT_NAME "
         "variable MUST be lowercased. Docker Compose rejects uppercase "
         "characters in project names. Always use:\n"
-        '  PROJECT_NAME=$(basename "$APP_DIR" | tr \'[:upper:]\' \'[:lower:]\' '
+        "  PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]' "
         "| tr -c '[:alnum:]-' '-')\n"
         "Also verify that all docker compose build context paths actually exist "
         "in the repository before referencing them."
@@ -342,19 +448,34 @@ class RLMOfficialAgent(CodingAgent):
         _, bk = self._resolve_backend()
         litellm_model = bk["model_name"]
         client = LiteLLMClient(litellm_model, self.location, self.recorder)
-        try:
-            raw = client.complete(
-                [
-                    {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT + self._FILE_GEN_EXTRA},
-                    {"role": "user", "content": prompt},
-                ],
-                label="rlm-official file gen",
-            )
-        except Exception as exc:
-            logger.error(f"[RLM-Official] Direct LLM call failed: {exc}")
-            return f"LLM call failed: {exc}"
+
+        messages = [
+            {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT + self._FILE_GEN_EXTRA},
+            {"role": "user", "content": prompt},
+        ]
+
+        last_exc: Exception | None = None
+        for attempt in range(1 + len(self._RATE_LIMIT_BACKOFF)):
+            try:
+                raw = client.complete(messages, label="rlm-official file gen")
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt < len(self._RATE_LIMIT_BACKOFF) and self._is_rate_limit_error(exc):
+                    delay = self._RATE_LIMIT_BACKOFF[attempt]
+                    logger.warning(
+                        f"[RLM-Official] Rate limit hit (attempt {attempt + 1}), retrying in {delay}s: {exc}"
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.error(f"[RLM-Official] Direct LLM call failed: {exc}")
+                return f"LLM call failed: {exc}"
+        else:
+            logger.error(f"[RLM-Official] All retries exhausted: {last_exc}")
+            return f"LLM call failed after retries: {last_exc}"
 
         generate_and_write_files(raw, prompt, repo_path, "[RLM-Official]")
+        self._post_process_scripts(repo_path)
         return raw
 
     # ------------------------------------------------------------------
@@ -394,24 +515,87 @@ class RLMOfficialAgent(CodingAgent):
         )
 
         root_prompt = _SDS_ROOT_PROMPT_PREFIX + prompt
+        last_exc: Exception | None = None
         try:
-            result = rlm.completion(prompt=context_text, root_prompt=root_prompt)
+            for attempt in range(1 + len(self._RATE_LIMIT_BACKOFF)):
+                try:
+                    result = rlm.completion(prompt=context_text, root_prompt=root_prompt)
+                    break
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt < len(self._RATE_LIMIT_BACKOFF) and self._is_rate_limit_error(exc):
+                        delay = self._RATE_LIMIT_BACKOFF[attempt]
+                        logger.warning(
+                            f"[RLM-Official] Rate limit hit (attempt {attempt + 1}), retrying in {delay}s: {exc}"
+                        )
+                        time.sleep(delay)
+                        continue
+                    logger.error(f"[RLM-Official] RLM completion failed: {exc}")
+                    return f"RLM completion failed: {exc}"
+            else:
+                logger.error(f"[RLM-Official] All retries exhausted: {last_exc}")
+                return f"RLM completion failed after retries: {last_exc}"
 
             # Record usage in trajectory
             self._record_usage(result)
 
             answer = result.response
             logger.info(f"[RLM-Official] Completed in {result.execution_time:.1f}s")
+
+            # Post-process any scripts the RLM may have written via tools
+            self._post_process_scripts(repo_path)
+
             return answer
 
         except KeyboardInterrupt:
             logger.warning("[RLM-Official] Interrupted by user")
             raise
-        except Exception as exc:
-            logger.error(f"[RLM-Official] RLM completion failed: {exc}")
-            return f"RLM completion failed: {exc}"
         finally:
             rlm.close()
+
+    # ------------------------------------------------------------------
+    # Post-processing: deterministic script fixes
+    # ------------------------------------------------------------------
+
+    _PROJECT_NAME_RE = re.compile(r"^(\s*PROJECT_NAME)=.*$", re.MULTILINE)
+    _PROJECT_NAME_FIX = "$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]')"
+    _DOCKER_COMPOSE_HYPHEN_RE = re.compile(r"\bdocker-compose\b")
+
+    def _post_process_scripts(self, repo_path: Path) -> None:
+        """Apply deterministic fixes to deploy.sh and health_check.sh."""
+        sds = repo_path / ".sds"
+        for name in ("deploy.sh", "health_check.sh"):
+            script = sds / name
+            if script.exists():
+                self._post_process_script(script)
+
+    def _post_process_script(self, path: Path) -> None:
+        """Apply deterministic fixes to a single script file.
+
+        - Enforce lowercased PROJECT_NAME via ``tr``
+        - Replace ``docker-compose`` (hyphen) with ``docker compose`` (space)
+        """
+        try:
+            content = path.read_text()
+        except OSError:
+            return
+
+        original = content
+
+        # Fix PROJECT_NAME to use lowercase transform
+        def _replace_project_name(m: re.Match[str]) -> str:
+            return f"{m.group(1)}={self._PROJECT_NAME_FIX}"
+
+        content = self._PROJECT_NAME_RE.sub(_replace_project_name, content)
+
+        # Replace docker-compose (hyphenated) with docker compose (space)
+        content = self._DOCKER_COMPOSE_HYPHEN_RE.sub("docker compose", content)
+
+        if content != original:
+            path.write_text(content)
+            logger.info(f"[RLM-Official] Post-processed {path.name}")
 
     def _record_usage(self, result: Any) -> None:
         """Record RLM token usage into the SDS trajectory recorder."""

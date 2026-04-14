@@ -53,7 +53,17 @@ class TestCustomTools:
 
     def test_tool_keys(self, tmp_path):
         tools = _build_custom_tools(tmp_path)
-        assert set(tools) == {"read_file", "write_file", "append_file", "list_files", "run_shell", "REPO_PATH"}
+        expected = {
+            "read_file",
+            "write_file",
+            "append_file",
+            "list_files",
+            "run_shell",
+            "validate_compose",
+            "check_build_paths",
+            "REPO_PATH",
+        }
+        assert set(tools) == expected
 
     def test_repo_path_value(self, tmp_path):
         tools = _build_custom_tools(tmp_path)
@@ -64,6 +74,12 @@ class TestCustomTools:
         tools = _build_custom_tools(tmp_path)
         read_fn = tools["read_file"]["tool"]
         assert read_fn("hello.txt") == "world"
+
+    def test_read_file_prints_output(self, tmp_path, capsys):
+        (tmp_path / "hello.txt").write_text("world")
+        tools = _build_custom_tools(tmp_path)
+        tools["read_file"]["tool"]("hello.txt")
+        assert "world" in capsys.readouterr().out
 
     def test_read_file_missing(self, tmp_path):
         tools = _build_custom_tools(tmp_path)
@@ -78,11 +94,21 @@ class TestCustomTools:
         assert "Wrote" in result
         assert (tmp_path / "out.txt").read_text() == "data"
 
+    def test_write_file_prints_confirmation(self, tmp_path, capsys):
+        tools = _build_custom_tools(tmp_path)
+        tools["write_file"]["tool"]("out.txt", "data")
+        assert "Wrote" in capsys.readouterr().out
+
     def test_write_file_creates_dirs(self, tmp_path):
         tools = _build_custom_tools(tmp_path)
         write_fn = tools["write_file"]["tool"]
         write_fn("sub/dir/f.txt", "nested")
         assert (tmp_path / "sub" / "dir" / "f.txt").read_text() == "nested"
+
+    def test_append_file_prints_confirmation(self, tmp_path, capsys):
+        tools = _build_custom_tools(tmp_path)
+        tools["append_file"]["tool"]("out.txt", "data")
+        assert "Appended" in capsys.readouterr().out
 
     def test_list_files(self, tmp_path):
         (tmp_path / "a.txt").write_text("")
@@ -92,6 +118,12 @@ class TestCustomTools:
         result = list_fn(".")
         assert "a.txt" in result
         assert "b.txt" in result
+
+    def test_list_files_prints_output(self, tmp_path, capsys):
+        (tmp_path / "a.txt").write_text("")
+        tools = _build_custom_tools(tmp_path)
+        tools["list_files"]["tool"](".")
+        assert "a.txt" in capsys.readouterr().out
 
     def test_read_file_rejects_escape(self, tmp_path):
         tools = _build_custom_tools(tmp_path)
@@ -110,6 +142,40 @@ class TestCustomTools:
         run_fn = tools["run_shell"]["tool"]
         result = run_fn("echo hello")
         assert "hello" in result
+
+    def test_run_shell_prints_output(self, tmp_path, capsys):
+        tools = _build_custom_tools(tmp_path)
+        tools["run_shell"]["tool"]("echo hello")
+        assert "hello" in capsys.readouterr().out
+
+    def test_check_build_paths_missing_file(self, tmp_path):
+        tools = _build_custom_tools(tmp_path)
+        fn = tools["check_build_paths"]["tool"]
+        result = fn("docker-compose.yml")
+        assert "File not found" in result
+
+    def test_check_build_paths_missing_context(self, tmp_path):
+        compose = tmp_path / "docker-compose.yml"
+        compose.write_text("services:\n  app:\n    build:\n      context: ./nonexistent\n")
+        tools = _build_custom_tools(tmp_path)
+        fn = tools["check_build_paths"]["tool"]
+        result = fn("docker-compose.yml")
+        assert "Missing" in result
+
+    def test_check_build_paths_all_exist(self, tmp_path):
+        (tmp_path / "app").mkdir()
+        compose = tmp_path / "docker-compose.yml"
+        compose.write_text("services:\n  app:\n    build:\n      context: ./app\n")
+        tools = _build_custom_tools(tmp_path)
+        fn = tools["check_build_paths"]["tool"]
+        result = fn("docker-compose.yml")
+        assert "1 build context paths exist" in result
+
+    def test_validate_compose_missing_file(self, tmp_path):
+        tools = _build_custom_tools(tmp_path)
+        fn = tools["validate_compose"]["tool"]
+        result = fn("docker-compose.yml")
+        assert "File not found" in result
 
 
 class TestBuildContextText:
@@ -226,3 +292,108 @@ class TestRecordUsage:
         mock_result.usage_summary = None
         # Should not raise
         agent._record_usage(mock_result)
+
+
+class TestPostProcessScript:
+    """_post_process_script applies deterministic fixes to shell scripts."""
+
+    def test_fixes_project_name_uppercase(self, tmp_path):
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        script = sds / "deploy.sh"
+        script.write_text('#!/bin/bash\nPROJECT_NAME="MyApp"\necho $PROJECT_NAME\n')
+        agent = RLMOfficialAgent()
+        agent._post_process_script(script)
+        content = script.read_text()
+        assert "tr '[:upper:]' '[:lower:]'" in content
+        assert 'PROJECT_NAME="MyApp"' not in content
+
+    def test_fixes_docker_compose_hyphen(self, tmp_path):
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        script = sds / "deploy.sh"
+        script.write_text("#!/bin/bash\ndocker-compose up -d\n")
+        agent = RLMOfficialAgent()
+        agent._post_process_script(script)
+        content = script.read_text()
+        assert "docker compose up -d" in content
+        assert "docker-compose" not in content
+
+    def test_no_change_when_already_correct(self, tmp_path):
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        script = sds / "deploy.sh"
+        original = (
+            "#!/bin/bash\nPROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]')\ndocker compose up\n"
+        )
+        script.write_text(original)
+        agent = RLMOfficialAgent()
+        agent._post_process_script(script)
+        assert script.read_text() == original
+
+    def test_post_process_scripts_processes_both(self, tmp_path):
+        sds = tmp_path / ".sds"
+        sds.mkdir()
+        (sds / "deploy.sh").write_text('PROJECT_NAME="App"\ndocker-compose up\n')
+        (sds / "health_check.sh").write_text('PROJECT_NAME="App"\ndocker-compose ps\n')
+        agent = RLMOfficialAgent()
+        agent._post_process_scripts(tmp_path)
+        assert "docker compose" in (sds / "deploy.sh").read_text()
+        assert "docker compose" in (sds / "health_check.sh").read_text()
+
+
+class TestRateLimitDetection:
+    """_is_rate_limit_error identifies rate-limit exceptions."""
+
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "429 Too Many Requests",
+            "RESOURCE_EXHAUSTED: quota exceeded",
+            "Rate limit exceeded",
+            "RateLimitError: try again later",
+            "Quota exceeded for model",
+        ],
+    )
+    def test_detects_rate_limit(self, msg):
+        assert RLMOfficialAgent._is_rate_limit_error(Exception(msg))
+
+    def test_rejects_non_rate_limit(self):
+        assert not RLMOfficialAgent._is_rate_limit_error(Exception("Connection refused"))
+
+
+class TestGenerateFilesRetry:
+    """_generate_files retries on rate-limit errors."""
+
+    def test_retries_on_rate_limit(self, tmp_path):
+        agent = RLMOfficialAgent(model="gemini-2.5-pro")
+
+        mock_client = mock.MagicMock()
+        mock_client.complete.side_effect = [
+            Exception("429 Too Many Requests"),
+            "generated content",
+        ]
+
+        with (
+            mock.patch("app_operator.cli_agent.rlm_official_agent.time.sleep"),
+            mock.patch("libs.agent_cli.llm_client.LiteLLMClient", return_value=mock_client),
+            mock.patch("app_operator.cli_agent.rlm_official_agent.generate_and_write_files"),
+            mock.patch.object(agent, "_post_process_scripts"),
+        ):
+            result = agent._generate_files("Generate .sds/deploy.sh", tmp_path)
+            assert result == "generated content"
+            assert mock_client.complete.call_count == 2
+
+    def test_fails_after_exhausting_retries(self, tmp_path):
+        agent = RLMOfficialAgent(model="gemini-2.5-pro")
+
+        mock_client = mock.MagicMock()
+        mock_client.complete.side_effect = Exception("429 Too Many Requests")
+
+        with (
+            mock.patch("app_operator.cli_agent.rlm_official_agent.time.sleep"),
+            mock.patch("libs.agent_cli.llm_client.LiteLLMClient", return_value=mock_client),
+        ):
+            result = agent._generate_files("Generate .sds/deploy.sh", tmp_path)
+            assert "LLM call failed" in result
+            assert mock_client.complete.call_count == 4  # 1 + 3 retries
