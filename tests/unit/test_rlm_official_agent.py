@@ -5,6 +5,7 @@ import unittest.mock as mock
 import pytest
 
 from app_operator.cli_agent.rlm_official_agent import (
+    _SDS_ROOT_PROMPT_PREFIX,
     RLMOfficialAgent,
     _build_context_text,
     _build_custom_tools,
@@ -397,3 +398,54 @@ class TestGenerateFilesRetry:
             result = agent._generate_files("Generate .sds/deploy.sh", tmp_path)
             assert "LLM call failed" in result
             assert mock_client.complete.call_count == 4  # 1 + 3 retries
+
+
+class TestRootPromptContent:
+    """_SDS_ROOT_PROMPT_PREFIX must contain SDS patterns that prevent known failures."""
+
+    def test_health_check_forbids_curling_service_names_from_host(self):
+        assert "NEVER" in _SDS_ROOT_PROMPT_PREFIX
+        assert "curl http://<docker-service-name>" in _SDS_ROOT_PROMPT_PREFIX
+        assert "curl localhost:<EXPOSED-HOST-PORT>" in _SDS_ROOT_PROMPT_PREFIX
+
+    def test_instructs_reading_deploy_logs(self):
+        assert "deploy_attempt_N.log" in _SDS_ROOT_PROMPT_PREFIX
+        assert "read_file()" in _SDS_ROOT_PROMPT_PREFIX
+
+    def test_forbids_wholesale_rewrites(self):
+        assert "NEVER rewrite deploy.sh" in _SDS_ROOT_PROMPT_PREFIX
+        assert "TARGETED fixes" in _SDS_ROOT_PROMPT_PREFIX
+
+    def test_dependency_conflict_detection(self):
+        assert "opentelemetry-exporter-jaeger" in _SDS_ROOT_PROMPT_PREFIX
+        assert "CMD/ENTRYPOINT" in _SDS_ROOT_PROMPT_PREFIX
+
+    def test_deployment_progress_tracking(self):
+        assert "deployment_progress.md" in _SDS_ROOT_PROMPT_PREFIX
+        assert "Hypothesis" in _SDS_ROOT_PROMPT_PREFIX
+
+    def test_repair_invariants(self):
+        assert "NO HOST ARTIFACTS" in _SDS_ROOT_PROMPT_PREFIX
+        assert "NO WHOLESALE REWRITES" in _SDS_ROOT_PROMPT_PREFIX
+        assert "READ BEFORE EDIT" in _SDS_ROOT_PROMPT_PREFIX
+
+
+class TestFileGenExtraContent:
+    """_FILE_GEN_EXTRA must contain script generation rules."""
+
+    def test_health_check_rules(self):
+        extra = RLMOfficialAgent._FILE_GEN_EXTRA
+        assert "NEVER" in extra
+        assert "curl http://<docker-service-name>" in extra
+        assert "curl localhost:<EXPOSED-HOST-PORT>" in extra
+
+    def test_compose_rules(self):
+        extra = RLMOfficialAgent._FILE_GEN_EXTRA
+        assert "--project-name" in extra
+        assert "--build" in extra
+        assert "healthcheck:" in extra
+
+    def test_build_context_rules(self):
+        extra = RLMOfficialAgent._FILE_GEN_EXTRA
+        assert "multi-stage Docker builds" in extra
+        assert "Infrastructure services" in extra

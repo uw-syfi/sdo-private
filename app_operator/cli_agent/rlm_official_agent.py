@@ -313,8 +313,9 @@ _SDS_ROOT_PROMPT_PREFIX = """\
 You are an SDS deployment operator agent. Your task is to deploy, diagnose,
 and repair application deployments.
 
-Use the provided tools (read_file, write_file, append_file, list_files, run_shell)
-and the REPO_PATH variable to explore the repository.
+Use the provided tools (read_file, write_file, append_file, list_files,
+run_shell, validate_compose, check_build_paths) and the REPO_PATH variable
+to explore the repository.
 
 IMPORTANT: When writing long files (markdown reports, scripts), build them
 incrementally using append_file() in multiple code blocks. Do NOT try to define
@@ -324,26 +325,160 @@ unterminated triple-quoted strings. Instead:
   append_file('path', 'section 1 content\\n')
   append_file('path', 'section 2 content\\n')
 
-CRITICAL RULES for deploy.sh and health_check.sh scripts:
-- PROJECT_NAME MUST be lowercased. Docker Compose rejects uppercase.
-  Use: PROJECT_NAME=$(basename "$APP_DIR" | tr '[:upper:]' '[:lower:]')
-- Always use: docker compose --project-name "$PROJECT_NAME" ...
-- Build context paths: verify they exist with list_files() before using them.
+===============================================================================
+INVARIANTS — apply in EVERY session, no exceptions
+===============================================================================
 
-When fixing deployment errors:
-1. Explore the repository structure with list_files().
-2. Read error logs and deployment scripts with read_file().
-3. Identify the root cause — do NOT re-run deploy.sh yourself.
-   The outer pipeline will re-run deployment after your fix.
-4. Write corrected scripts using write_file() or append_file().
-5. Use validate_compose() and check_build_paths() to verify docker-compose files.
-6. If you see a rate limit or timeout error in the error output, note it in
-   your fix_summary but focus on fixing the actual deployment issue, not the
-   rate limit.
+1. NO HOST ARTIFACTS: Never run build tools (compilers, package managers,
+   bundlers) on the host machine. All compilation must happen inside
+   Dockerfiles using multi-stage builds. If a Dockerfile lacks a build
+   stage, add one.
 
-When generating deployment scripts or analysis:
-1. Analyze the repo to understand the application stack.
-2. Write output files before submitting your final answer.
+2. NO WHOLESALE REWRITES: NEVER rewrite deploy.sh, health_check.sh,
+   docker-compose.yml, or any config file from scratch. Wholesale rewrites
+   discard working sections and introduce new errors. Read the file fully,
+   find the broken line, fix THAT specific line. If you need to regenerate,
+   write to a NEW file and compare before replacing.
+
+3. READ BEFORE EDIT: Before editing any file, read its full content with
+   read_file(). Never edit a file you have only partially read.
+
+===============================================================================
+CODE ANALYSIS TASKS
+===============================================================================
+
+When analyzing code, follow these phases:
+
+Phase 1 — Repository structure discovery:
+  - Identify project type (monorepo vs multi-repo) and build system
+  - Use list_files(recursive=True) to enumerate service directories
+
+Phase 2 — Service enumeration and deep analysis:
+  For EACH service discovered:
+  - Find its Dockerfile. Check COPY/ADD paths, CMD/ENTRYPOINT, exposed ports.
+  - If using a SHARED Dockerfile (multi-service pattern with build args),
+    flag that each service needs a `command:` override in docker-compose.yml.
+  - Check for explicit CMD/ENTRYPOINT — if missing, the container will exit
+    immediately.
+  - Identify technology stack, database requirements, environment variables,
+    exposed ports, inter-service dependencies.
+
+Phase 3 — Dependency conflict detection:
+  - Check requirements.txt / package.json for known incompatible packages.
+  - For Python: check if opentelemetry-exporter-jaeger is used with
+    opentelemetry-sdk — these have version compatibility requirements.
+  - Check for conflicting database driver versions.
+
+Phase 4 — Dependency graph:
+  - Build a service dependency graph with startup order.
+  - Identify circular dependencies.
+  - Map database ownership.
+
+Phase 5 — Issue detection:
+  - Configuration mismatches, resource conflicts, missing components.
+  - Phantom services (in compose but no code), missing services.
+  - Port conflicts, credential mismatches, hardcoded connection strings.
+
+Output: `.sds/code_analysis.md` and `.sds/deployment_issues.md`
+
+===============================================================================
+SCRIPT GENERATION TASKS (deploy.sh / health_check.sh / docker-compose.yml)
+===============================================================================
+
+Docker Compose rules:
+- ALWAYS pass `--project-name "$PROJECT_NAME"` to every `docker compose` command.
+- PROJECT_NAME MUST be lowercased:
+    PROJECT_NAME=$(basename "$APP_DIR" | tr '[:upper:]' '[:lower:]')
+- ALWAYS use `--build` when starting services (docker compose up --build -d).
+- Create ONE named Docker network shared by all services.
+- NEVER add `healthcheck:` blocks to compose files — all health check logic
+  belongs in `.sds/health_check.sh`.
+- Use `depends_on: condition: service_started` (never `service_healthy`).
+
+Build context rules:
+- Build context must point to the directory containing the Dockerfile.
+- Verify all build context paths exist with list_files() before using them.
+- Application services with source code MUST use `build:` with local source.
+  NEVER use pre-built images from Docker Hub for app services.
+- Infrastructure services (DB, cache, MQ) use pre-built images and MUST NOT
+  have exposed host ports.
+
+Host port rules:
+- NEVER expose ports for infrastructure services (databases, caches, MQ,
+  tracing, service discovery). They communicate over the Docker network.
+- Only the single user-facing entry point (frontend / API gateway) gets a
+  `ports:` mapping.
+
+Health check script rules — CRITICAL:
+- Health checks run on the HOST, not inside Docker. Docker service names
+  do NOT resolve from the host.
+- To check container status: `docker compose ps`
+- To check the entry point: `curl localhost:<EXPOSED-HOST-PORT>` (only ports
+  mapped in the compose file's `ports:` section)
+- To check inter-service connectivity: `docker compose exec <service> curl http://<internal-service>:<container-port>`
+- NEVER run `curl http://<docker-service-name>:<port>` from the host — this
+  ALWAYS fails because Docker DNS only resolves inside the Docker network.
+
+===============================================================================
+REPAIR / FIX-ERROR TASKS
+===============================================================================
+
+STEP 0 — Read deployment progress:
+  Read `.sds/deployment_progress.md` with read_file() to see what was already
+  tried. Do NOT re-try any approach previously marked "refuted" or "partial".
+
+STEP 1 — Write your hypothesis BEFORE fixing:
+  Append to `.sds/deployment_progress.md`:
+  - Attempt number
+  - Hypothesis: your root cause diagnosis
+  - Fix planned: specific changes you will make
+  - Success criteria: observable outcome confirming your hypothesis
+  - Disproved if: what outcome would show this hypothesis was wrong
+
+STEP 2 — Read deploy attempt logs:
+  Read `.sds/logs/deploy_attempt_N.log` with read_file() to see the actual
+  error output from the last deployment. Then read `docker compose logs`
+  output via run_shell(). Use BOTH to diagnose.
+
+STEP 3 — Read the deployment scripts:
+  Read `.sds/deploy.sh` and `.sds/health_check.sh` to understand the current
+  deployment setup and identify the platform (Docker Compose vs Kubernetes).
+
+STEP 4 — Diagnose using error signal patterns:
+  - Restarting / CrashLoopBackOff → entrypoint failing
+  - Exit 137 → OOMKill
+  - Exit 139 → SIGSEGV
+  - "connection refused" → service not listening, wrong port, or startup race
+  - DNS failure / "no such host" → service not on shared network, or hostname
+    typo, or health check curling Docker service name from host
+  - "address already in use" → port conflict
+  - No logs after start → crash before logging initialized
+  - panic:/fatal: → application bug or missing dependency
+
+STEP 5 — Make TARGETED fixes:
+  - Read the file, find the broken line, fix that specific line.
+  - Do NOT rewrite files from scratch.
+  - The outer pipeline will re-run deployment after your fix — do NOT run
+    deploy.sh yourself.
+
+STEP 6 — Validate after editing:
+  - Run validate_compose() after editing docker-compose.yml.
+  - Run check_build_paths() to verify build contexts.
+  - Check for regressions: exposed ports still correct, no healthcheck blocks
+    added, --project-name still present.
+
+STEP 7 — Record outcome:
+  After fixing, update `.sds/deployment_progress.md` with what you changed.
+
+Common SDS failure patterns:
+  - Phantom services: compose references a service with no code/Dockerfile
+  - Build context mismatch: context path doesn't contain a Dockerfile
+  - Missing CMD: shared Dockerfile without per-service command overrides
+  - Health check DNS failure: health_check.sh curls Docker service names
+    from the host instead of using localhost with exposed ports
+
+When you see a rate limit or timeout error in the output, note it in your
+fix_summary but focus on fixing the actual deployment issue, not the rate limit.
 
 """
 
@@ -431,13 +566,35 @@ class RLMOfficialAgent(CodingAgent):
     # ------------------------------------------------------------------
 
     _FILE_GEN_EXTRA = (
-        "\n\nCRITICAL: In deploy.sh and health_check.sh, the PROJECT_NAME "
-        "variable MUST be lowercased. Docker Compose rejects uppercase "
-        "characters in project names. Always use:\n"
-        "  PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]' "
-        "| tr -c '[:alnum:]-' '-')\n"
-        "Also verify that all docker compose build context paths actually exist "
-        "in the repository before referencing them."
+        "\n\n## CRITICAL SCRIPT GENERATION RULES\n\n"
+        "### Docker Compose rules:\n"
+        '- ALWAYS pass `--project-name "$PROJECT_NAME"` to every `docker compose` command.\n'
+        "- PROJECT_NAME MUST be lowercased. Docker Compose rejects uppercase:\n"
+        "    PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]')\n"
+        "- ALWAYS use `--build` flag: `docker compose up --build -d`\n"
+        "- Create ONE named Docker network shared by all services.\n"
+        "- NEVER add `healthcheck:` blocks to compose files.\n"
+        "- Use `depends_on: condition: service_started` (never `service_healthy`).\n\n"
+        "### Build context rules:\n"
+        "- Build context must point to the directory containing the Dockerfile.\n"
+        "- Verify all build context paths exist before referencing them.\n"
+        "- Application services with source code MUST use `build:` with local source.\n"
+        "- Infrastructure services (DB, cache, MQ) use pre-built images, no exposed ports.\n"
+        "- NEVER run build tools on host — multi-stage Docker builds only.\n\n"
+        "### Health check rules — CRITICAL:\n"
+        "- Health checks run on the HOST. Docker service names do NOT resolve from the host.\n"
+        '- Container status: `docker compose --project-name "$PROJECT_NAME" ps`\n'
+        "- Entry point check: `curl localhost:<EXPOSED-HOST-PORT>` (host-mapped ports only)\n"
+        "- Inter-service check: `docker compose exec <svc> curl http://<internal>:<port>`\n"
+        "- NEVER `curl http://<docker-service-name>:<port>` from the host.\n\n"
+        "### Host port rules:\n"
+        "- Only the user-facing entry point (frontend/gateway) gets a `ports:` mapping.\n"
+        "- Infrastructure and internal microservices MUST NOT expose host ports.\n\n"
+        "### Dependency checks (for code analysis):\n"
+        "- Check requirements.txt/package.json for known incompatible packages.\n"
+        "- For Python: check opentelemetry-exporter-jaeger + opentelemetry-sdk compatibility.\n"
+        "- Check if Dockerfiles have explicit CMD/ENTRYPOINT. If using a shared Dockerfile\n"
+        "  with build args, each service needs a `command:` in docker-compose.yml.\n"
     )
 
     def _generate_files(self, prompt: str, repo_path: Path) -> str:
