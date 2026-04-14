@@ -7,6 +7,7 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
+from libs.agent_mw._turn_logger import log_agent_text
 from libs.pydantic_agent import AgentMiddleware
 
 if TYPE_CHECKING:
@@ -23,6 +24,30 @@ def _make_nudge_message(text: str) -> Any:
     return ModelRequest(parts=[UserPromptPart(content=text)])
 
 
+def _append_nudge_message(
+    middleware: AgentMiddleware,
+    messages: list[ModelMessage],
+    text: str,
+    *,
+    start_time: float | None = None,
+) -> list[ModelMessage]:
+    messages = list(messages)
+    messages.append(_make_nudge_message(text))
+
+    agent = getattr(middleware, "_agent", None)
+    if agent is not None:
+        elapsed = None if start_time is None else time.monotonic() - start_time
+        log_agent_text(
+            logger,
+            agent_name=agent.agent_name,
+            text=text,
+            elapsed_seconds=elapsed,
+            used_tokens=getattr(agent, "context_window_token_usage", None),
+            context_window=None,
+        )
+    return messages
+
+
 class LoopDetectionMiddleware(AgentMiddleware):
     """Detects repeated identical tool calls and nudges the agent to try something new."""
 
@@ -31,6 +56,10 @@ class LoopDetectionMiddleware(AgentMiddleware):
         self._loop_reminders: int = 0
         self._max_loop_reminders = max_loop_reminders
         self._pending_nudge: str | None = None
+        self._start_time: float | None = None
+
+    def before_run(self) -> None:
+        self._start_time = time.monotonic()
 
     def on_function_tool_call(self, event: Any) -> None:
         tool_name: str = event.part.tool_name
@@ -63,8 +92,7 @@ class LoopDetectionMiddleware(AgentMiddleware):
 
     def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         if self._pending_nudge:
-            messages = list(messages)
-            messages.append(_make_nudge_message(self._pending_nudge))
+            messages = _append_nudge_message(self, messages, self._pending_nudge, start_time=self._start_time)
             self._pending_nudge = None
         return messages
 
@@ -72,6 +100,7 @@ class LoopDetectionMiddleware(AgentMiddleware):
         self._recent_fps.clear()
         self._loop_reminders = 0
         self._pending_nudge = None
+        self._start_time = None
 
 
 class ThinkingRepetitionMiddleware(AgentMiddleware):
@@ -96,6 +125,14 @@ class ThinkingRepetitionMiddleware(AgentMiddleware):
         self._nudge_count: int = 0
         self._pending_nudge: str | None = None
         self._force_submit: bool = False
+        self._start_time: float | None = None
+
+    def before_run(self) -> None:
+        self._start_time = time.monotonic()
+        self._recent_hashes.clear()
+        self._nudge_count = 0
+        self._pending_nudge = None
+        self._force_submit = False
 
     def on_part_end(self, event: Any) -> None:
         from pydantic_ai.messages import ThinkingPart
@@ -132,8 +169,7 @@ class ThinkingRepetitionMiddleware(AgentMiddleware):
 
     def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
         if self._pending_nudge:
-            messages = list(messages)
-            messages.append(_make_nudge_message(self._pending_nudge))
+            messages = _append_nudge_message(self, messages, self._pending_nudge, start_time=self._start_time)
             self._pending_nudge = None
         return messages
 
@@ -150,6 +186,7 @@ class ThinkingRepetitionMiddleware(AgentMiddleware):
         self._nudge_count = 0
         self._pending_nudge = None
         self._force_submit = False
+        self._start_time = None
 
 
 class StallDetectionMiddleware(AgentMiddleware):
@@ -228,8 +265,7 @@ class StallDetectionMiddleware(AgentMiddleware):
                 )
 
         if self._pending_nudge:
-            messages = list(messages)
-            messages.append(_make_nudge_message(self._pending_nudge))
+            messages = _append_nudge_message(self, messages, self._pending_nudge, start_time=self._start_time)
             self._pending_nudge = None
         return messages
 
@@ -247,6 +283,75 @@ class StallDetectionMiddleware(AgentMiddleware):
         self._nudge_count = 0
         self._pending_nudge = None
         self._force_submit = False
+
+
+class SearchPriorMitigationsReminderMiddleware(AgentMiddleware):
+    """Nudges mitigation runs to call ``search_prior_mitigations`` early.
+
+    Counts completed model turns that did not invoke ``search_prior_mitigations``.
+    After every ``turn_threshold`` such turns, injects a reminder on the next
+    model request. Once the tool has been called successfully or unsuccessfully,
+    the middleware disables itself for the rest of the run.
+    """
+
+    def __init__(self, turn_threshold: int = 4) -> None:
+        self._turn_threshold = turn_threshold
+        self._turns_without_search = 0
+        self._current_request_had_search = False
+        self._search_called = False
+        self._pending_nudge: str | None = None
+        self._nudge_count = 0
+        self._start_time: float | None = None
+
+    def before_run(self) -> None:
+        self._turns_without_search = 0
+        self._current_request_had_search = False
+        self._search_called = False
+        self._pending_nudge = None
+        self._nudge_count = 0
+        self._start_time = time.monotonic()
+
+    def on_function_tool_call(self, event: Any) -> None:
+        if event.part.tool_name == "search_prior_mitigations":
+            self._current_request_had_search = True
+
+    def before_model_req_edit_messages(self, ctx: Any, messages: list[ModelMessage]) -> list[ModelMessage]:
+        if ctx.run_step <= 1 or self._search_called:
+            return messages
+
+        if self._current_request_had_search:
+            self._search_called = True
+            self._current_request_had_search = False
+            return messages
+
+        self._turns_without_search += 1
+        self._current_request_had_search = False
+        if self._turns_without_search % self._turn_threshold == 0:
+            self._nudge_count += 1
+            logger.warning(
+                "Mitigation search reminder: %d turns without search_prior_mitigations (nudge %d).",
+                self._turns_without_search,
+                self._nudge_count,
+            )
+            self._pending_nudge = (
+                "You have gone several turns in mitigation without calling "
+                "`search_prior_mitigations`. Per workflow, synthesize your best current "
+                "root-cause statement and call `search_prior_mitigations` before continuing "
+                "with independent mitigation."
+            )
+
+        if self._pending_nudge:
+            messages = _append_nudge_message(self, messages, self._pending_nudge, start_time=self._start_time)
+            self._pending_nudge = None
+        return messages
+
+    def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
+        self._turns_without_search = 0
+        self._current_request_had_search = False
+        self._search_called = False
+        self._pending_nudge = None
+        self._nudge_count = 0
+        self._start_time = None
 
 
 class TimeoutMiddleware(AgentMiddleware):
@@ -291,8 +396,7 @@ class TimeoutMiddleware(AgentMiddleware):
                 f"You have been running for over {int(elapsed) // 60} minutes. "
                 "Please wrap up and provide your final answer now."
             )
-            messages = list(messages)
-            messages.append(_make_nudge_message(nudge))
+            messages = _append_nudge_message(self, messages, nudge, start_time=self._start_time)
         else:
             self._force_submit = True
             logger.warning(
@@ -312,6 +416,7 @@ class TimeoutMiddleware(AgentMiddleware):
 
 __all__ = [
     "LoopDetectionMiddleware",
+    "SearchPriorMitigationsReminderMiddleware",
     "StallDetectionMiddleware",
     "ThinkingRepetitionMiddleware",
     "TimeoutMiddleware",

@@ -16,6 +16,7 @@ from libs.agent_mw import (
     FixedPathProvider,
     LoopDetectionMiddleware,
     RetryMiddleware,
+    SearchPriorMitigationsReminderMiddleware,
     SoftLimitExtension,
     StallDetectionMiddleware,
     ThinkingRepetitionMiddleware,
@@ -52,15 +53,27 @@ def _middleware_for_agent(
     mw: list[AgentMiddleware]
 
     if agent_name.startswith(("sre-", "recovery-")):
-        mw = [
-            TurnLoggingMiddleware(),
-            RetryMiddleware(),
-            ThinkingRepetitionMiddleware(),
-            LoopDetectionMiddleware(),
-            StallDetectionMiddleware(),
-            TimeoutMiddleware(),
-            SoftLimitExtension(step_limit),
-        ]
+        if agent_name == "sre-mitigation":
+            mw = [
+                TurnLoggingMiddleware(),
+                RetryMiddleware(),
+                ThinkingRepetitionMiddleware(),
+                LoopDetectionMiddleware(),
+                StallDetectionMiddleware(),
+                SearchPriorMitigationsReminderMiddleware(),
+                TimeoutMiddleware(),
+                SoftLimitExtension(step_limit),
+            ]
+        else:
+            mw = [
+                TurnLoggingMiddleware(),
+                RetryMiddleware(),
+                ThinkingRepetitionMiddleware(),
+                LoopDetectionMiddleware(),
+                StallDetectionMiddleware(),
+                TimeoutMiddleware(),
+                SoftLimitExtension(step_limit),
+            ]
     elif agent_name.startswith("judge-"):
         mw = [
             TurnLoggingMiddleware(),

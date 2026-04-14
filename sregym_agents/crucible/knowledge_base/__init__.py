@@ -27,11 +27,24 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _is_runtime_seed_artifact(rel: Path) -> bool:
+    parts = rel.parts
+    if not parts:
+        return False
+    if parts[0] in {"pending", "completed", "failed"}:
+        return True
+    if parts[:2] == ("v3", "reviews"):
+        return True
+    return parts[0] in {"kb_worker.log", "kb_worker.pid", "kb_worker.lock"}
+
+
 def seed_kb(dest_kb_dir: Path, seed_kb_dir: Path | str | None) -> None:
     """Copy every file from seed_kb_dir into dest_kb_dir, preserving layout.
 
     Existing destination files are left untouched. Seed and destination are
     assumed to share the same on-disk layout; no restructuring is performed.
+    Runtime queue artifacts (worker logs, PID files, pending/completed review
+    queues) are intentionally excluded.
     No-op if seed_kb_dir is falsy or does not exist on disk.
     """
     if not seed_kb_dir:
@@ -48,6 +61,9 @@ def seed_kb(dest_kb_dir: Path, seed_kb_dir: Path | str | None) -> None:
         if not f.is_file():
             continue
         rel = f.relative_to(src)
+        if _is_runtime_seed_artifact(rel):
+            skipped += 1
+            continue
         out = dest_kb_dir / rel
         if out.exists():
             skipped += 1

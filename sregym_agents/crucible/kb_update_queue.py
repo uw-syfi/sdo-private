@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,9 @@ from typing import Any, TypedDict
 from filelock import FileLock
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_QUEUE_DRAIN_TIMEOUT = 1800.0
+DEFAULT_QUEUE_DRAIN_POLL_INTERVAL = 2.0
 
 
 class KbUpdateTaskDict(TypedDict):
@@ -82,6 +86,14 @@ class KbQueuePaths:
         return self.reviews_root / "kb_worker.log"
 
 
+@dataclass(frozen=True)
+class KbQueueSnapshot:
+    """Snapshot of queue file names for one KB directory."""
+
+    pending: frozenset[str]
+    failed: frozenset[str]
+
+
 def _pid_is_alive(pid: int) -> bool:
     """Return True if a process with *pid* appears to be running."""
     try:
@@ -89,6 +101,18 @@ def _pid_is_alive(pid: int) -> bool:
         return True
     except (OSError, ProcessLookupError):
         return False
+
+
+def is_kb_worker_alive(kb_dir: Path) -> bool:
+    """Return True if the detached KB worker PID file points to a live process."""
+    paths = KbQueuePaths(Path(kb_dir))
+    if not paths.pid_path.exists():
+        return False
+    try:
+        pid = int(paths.pid_path.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    return _pid_is_alive(pid)
 
 
 def ensure_kb_worker(kb_dir: Path) -> None:
@@ -127,6 +151,54 @@ def ensure_kb_worker(kb_dir: Path) -> None:
         )
         paths.pid_path.write_text(str(proc.pid))
         logger.info("Spawned KB worker (pid=%d), log at %s", proc.pid, paths.worker_log)
+
+
+def snapshot_kb_queue(kb_dir: Path) -> KbQueueSnapshot:
+    """Capture the current queue state for later diffing."""
+    paths = KbQueuePaths(Path(kb_dir))
+    pending: frozenset[str] = (
+        frozenset(p.name for p in paths.pending.glob("*.json")) if paths.pending.exists() else frozenset[str]()
+    )
+    failed: frozenset[str] = (
+        frozenset(p.name for p in paths.failed.glob("*.json")) if paths.failed.exists() else frozenset[str]()
+    )
+    return KbQueueSnapshot(pending=pending, failed=failed)
+
+
+def wait_for_kb_queue_drain(
+    kb_dir: Path,
+    *,
+    baseline: KbQueueSnapshot | None = None,
+    timeout_s: float = DEFAULT_QUEUE_DRAIN_TIMEOUT,
+    poll_interval_s: float = DEFAULT_QUEUE_DRAIN_POLL_INTERVAL,
+) -> None:
+    """Wait until all queue items added after *baseline* leave ``pending/``.
+
+    If new tasks show up in ``failed/``, raises ``RuntimeError``.
+    If new tasks are pending but the detached worker is not alive, respawns it.
+    """
+    kb_dir = Path(kb_dir)
+    baseline = baseline or snapshot_kb_queue(kb_dir)
+    deadline = time.monotonic() + timeout_s
+
+    while True:
+        current = snapshot_kb_queue(kb_dir)
+        new_failed = sorted(current.failed - baseline.failed)
+        if new_failed:
+            raise RuntimeError(f"KB review tasks failed: {', '.join(new_failed)}")
+
+        new_pending = sorted(current.pending - baseline.pending)
+        if not new_pending:
+            return
+
+        if not is_kb_worker_alive(kb_dir):
+            logger.warning("KB worker not running with pending tasks present; respawning for %s", kb_dir)
+            ensure_kb_worker(kb_dir)
+
+        now = time.monotonic()
+        if now >= deadline:
+            raise TimeoutError(f"Timed out waiting for KB review tasks: {', '.join(new_pending)}")
+        time.sleep(min(poll_interval_s, max(deadline - now, 0.0)))
 
 
 def enqueue_task(kb_dir: Path, payload: dict[str, Any], *, problem_id: str) -> Path:

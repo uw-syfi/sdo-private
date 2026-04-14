@@ -546,3 +546,73 @@ class TestPipelineRunner:
         # Stage 1 should have crucible_seed_kb_dir pointing to stage 0's kb/
         seed_dir = captured_configs[1].env.crucible_seed_kb_dir
         assert seed_dir.endswith("/stage_0_build/kb")
+
+    def test_waits_for_kb_queue_drain_before_chaining(self, runner, sregym_dir, tmp_path: Path) -> None:
+        config = self._make_config()
+        wait_calls = []
+        snapshot_calls = []
+
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path):
+            return 0
+
+        def mock_snapshot(kb_dir: Path):
+            snapshot_calls.append(kb_dir)
+            return object()
+
+        def mock_wait(kb_dir: Path, *, baseline, timeout_s, poll_interval_s):
+            wait_calls.append((kb_dir, baseline, timeout_s, poll_interval_s))
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with (
+            patch.object(runner, "_SREGYM_DIR", sregym_dir),
+            patch.object(runner, "_PROJECT_ROOT", tmp_path),
+            patch.object(runner, "_run_stage", side_effect=mock_run_stage),
+            patch.object(runner, "snapshot_kb_queue", side_effect=mock_snapshot),
+            patch.object(runner, "wait_for_kb_queue_drain", side_effect=mock_wait),
+        ):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+
+        assert rc == 0
+        assert snapshot_calls == [pipeline_dir / "stage_0_build" / "kb"]
+        assert len(wait_calls) == 1
+        assert wait_calls[0][0] == pipeline_dir / "stage_0_build" / "kb"
+        assert wait_calls[0][1] is not None
+
+    def test_abort_on_kb_queue_drain_failure(self, runner, sregym_dir, tmp_path: Path) -> None:
+        config = self._make_config()
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with (
+            patch.object(runner, "_SREGYM_DIR", sregym_dir),
+            patch.object(runner, "_PROJECT_ROOT", tmp_path),
+            patch.object(runner, "_run_stage", return_value=0),
+            patch.object(runner, "snapshot_kb_queue", return_value=object()),
+            patch.object(runner, "wait_for_kb_queue_drain", side_effect=TimeoutError("queue stuck")),
+        ):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+
+        assert rc == 1
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert loaded_state.stages[0].status == "failed"
+        assert loaded_state.stages[0].error == "kb queue drain failed: queue stuck"
+        assert loaded_state.stages[1].status == "pending"

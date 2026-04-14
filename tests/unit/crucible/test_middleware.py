@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from libs.agent_mw import (
     LoopDetectionMiddleware,
+    SearchPriorMitigationsReminderMiddleware,
     StallDetectionMiddleware,
     ThinkingRepetitionMiddleware,
     TimeoutMiddleware,
@@ -34,6 +35,11 @@ def _make_ctx(run_step: int = 1) -> MagicMock:
     ctx = MagicMock()
     ctx.run_step = run_step
     return ctx
+
+
+class _DummyAgent:
+    agent_name = "sre-mitigation"
+    context_window_token_usage = 1200
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +104,78 @@ class TestLoopDetectionMiddleware:
         event.part.args = "raw string args"
         # Should not raise TypeError
         mw.on_function_tool_call(event)
+
+
+# ---------------------------------------------------------------------------
+# SearchPriorMitigationsReminderMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestSearchPriorMitigationsReminderMiddleware:
+    def test_no_nudge_before_threshold(self):
+        mw = SearchPriorMitigationsReminderMiddleware(turn_threshold=4)
+        mw.before_run()
+        for step in range(2, 5):
+            mw.before_model_req_edit_messages(_make_ctx(run_step=step), [])
+        assert mw._turns_without_search == 3
+        assert mw._pending_nudge is None
+
+    def test_nudge_after_four_turns_without_search(self):
+        mw = SearchPriorMitigationsReminderMiddleware(turn_threshold=4)
+        mw.before_run()
+        messages = []
+        for step in range(2, 6):
+            messages = mw.before_model_req_edit_messages(_make_ctx(run_step=step), [])
+        assert mw._turns_without_search == 4
+        assert len(messages) == 1
+        assert mw._pending_nudge is None
+
+    def test_target_tool_call_stops_future_nudges(self):
+        mw = SearchPriorMitigationsReminderMiddleware(turn_threshold=2)
+        mw.before_run()
+        mw.before_model_req_edit_messages(_make_ctx(run_step=2), [])
+        mw.on_function_tool_call(_make_event("search_prior_mitigations", {"confirmed_root_cause": "dns failure"}))
+        messages = mw.before_model_req_edit_messages(_make_ctx(run_step=3), [])
+        assert messages == []
+        assert mw._search_called is True
+
+    def test_non_target_tool_calls_do_not_reset_counter(self):
+        mw = SearchPriorMitigationsReminderMiddleware(turn_threshold=2)
+        mw.before_run()
+        mw.before_model_req_edit_messages(_make_ctx(run_step=2), [])
+        mw.on_function_tool_call(_make_event("exec_bash"))
+        messages = mw.before_model_req_edit_messages(_make_ctx(run_step=3), [])
+        assert len(messages) == 1
+        assert mw._search_called is False
+
+    def test_repeats_nudge_after_additional_threshold(self):
+        mw = SearchPriorMitigationsReminderMiddleware(turn_threshold=2)
+        mw.before_run()
+        messages = []
+        for step in range(2, 6):
+            messages = mw.before_model_req_edit_messages(_make_ctx(run_step=step), messages if step == 5 else [])
+        assert len(messages) == 1
+        assert mw._nudge_count == 2
+
+    def test_after_run_resets_state(self):
+        mw = SearchPriorMitigationsReminderMiddleware(turn_threshold=2)
+        mw.before_run()
+        mw.before_model_req_edit_messages(_make_ctx(run_step=2), [])
+        mw.before_model_req_edit_messages(_make_ctx(run_step=3), [])
+        mw.after_run(None)
+        assert mw._turns_without_search == 0
+        assert mw._search_called is False
+        assert mw._pending_nudge is None
+        assert mw._nudge_count == 0
+
+    def test_logs_injected_reminder(self):
+        mw = SearchPriorMitigationsReminderMiddleware(turn_threshold=2)
+        mw.on_attach(_DummyAgent())  # type: ignore[arg-type]
+        mw.before_run()
+        with patch("libs.agent_mw._behavior_guards.log_agent_text") as mock_log:
+            mw.before_model_req_edit_messages(_make_ctx(run_step=2), [])
+            mw.before_model_req_edit_messages(_make_ctx(run_step=3), [])
+        assert mock_log.called
 
 
 # ---------------------------------------------------------------------------

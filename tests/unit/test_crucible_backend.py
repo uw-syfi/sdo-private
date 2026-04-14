@@ -180,6 +180,13 @@ class TestMiddlewareSelection:
         assert "ThinkingRepetitionMiddleware" not in names
         assert "StallDetectionMiddleware" not in names
 
+    def test_mitigation_middleware_includes_search_reminder(self):
+        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
+
+        mw = _middleware_for_agent("sre-mitigation")
+        names = [type(m).__name__ for m in mw]
+        assert "SearchPriorMitigationsReminderMiddleware" in names
+
     def test_subagent_middleware_light(self):
         from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import _middleware_for_agent
 

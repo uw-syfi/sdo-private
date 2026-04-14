@@ -1,5 +1,6 @@
 from ._behavior_guards import (
     LoopDetectionMiddleware,
+    SearchPriorMitigationsReminderMiddleware,
     StallDetectionMiddleware,
     ThinkingRepetitionMiddleware,
     TimeoutMiddleware,
@@ -14,6 +15,7 @@ __all__ = [
     "FixedPathProvider",
     "LoopDetectionMiddleware",
     "RetryMiddleware",
+    "SearchPriorMitigationsReminderMiddleware",
     "SoftLimitExtension",
     "StallDetectionMiddleware",
     "ThinkingRepetitionMiddleware",
