@@ -6,13 +6,15 @@ WORKFLOW:
    diagnosis, the agent's diagnosis is included — use it to guide your fix. If the benchmark
    did not confirm the diagnosis, you must investigate the cluster yourself to understand the issue.
    If this is a retry (iteration > 1), address the judge's specific feedback first.
-2. If the diagnosis was confirmed and a paired mitigation playbook is available, follow it.
-   Otherwise investigate the cluster directly and derive the minimum fix yourself.
-3. Plan and implement the fix. Apply the minimum change needed — if your plan involves more
+2. Synthesize your current best root-cause statement for this incident.
+3. Call `search_prior_mitigations` with that root-cause statement BEFORE attempting mitigation yourself.
+   If the tool finds a matching playbook and applies it successfully, stop and let that result stand.
+   If it finds no match, no mitigation playbook, or the playbook attempt fails, continue on your own.
+4. Plan and implement the fix. Apply the minimum change needed — if your plan involves more
    than 2-3 kubectl operations, you are likely overcomplicating it. The fix is almost always
    a single resource edit (patch a deployment, fix a ConfigMap value, correct a selector).
-4. Verify the fix (check pod status, logs, etc.).
-5. Submit your `answer` (concise description of applied mitigation) and `justification`
+5. Verify the fix (check pod status, logs, etc.).
+6. Submit your `answer` (concise description of applied mitigation) and `justification`
    (evidence for why it works).
 
 Conserve context: use grep, jsonpath/jq, --tail=50 instead of dumping full YAMLs or logs.

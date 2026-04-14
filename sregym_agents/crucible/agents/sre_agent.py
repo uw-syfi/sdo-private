@@ -72,12 +72,15 @@ class SREAgent:
             grep,
             read_file,
             search_prior_incidents,
+            search_prior_mitigations,
             str_replace_file,
             triage_cluster,
             write_file,
         )
 
         tools: list[Any] = [exec_bash, read_file, grep, write_file, str_replace_file]
+        if stage == "mitigation":
+            tools.append(search_prior_mitigations)
         if stage != "mitigation":
             tools.append(triage_cluster)
             tools.append(search_prior_incidents)

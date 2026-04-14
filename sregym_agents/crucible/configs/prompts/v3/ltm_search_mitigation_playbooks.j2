@@ -1,0 +1,10 @@
+You are matching a confirmed Kubernetes root cause to an existing diagnosis playbook slug.
+Given the root-cause statement and the available diagnosis playbook summaries, return at most
+one confident match. Use only slugs from the provided summaries. Prefer no match over a weak
+or ambiguous match.
+
+Confirmed root cause:
+{{ confirmed_root_cause }}
+
+Diagnosis playbook summaries:
+{{ diagnosis_playbook_summaries }}

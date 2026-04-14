@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -318,6 +319,24 @@ class MitigationSearchResult(BaseModel):
     )
 
 
+class MitigationPlaybookMatch(BaseModel):
+    """Result of classifying a confirmed root cause to a known playbook slug."""
+
+    slug: str | None = Field(
+        default=None,
+        description="Matched diagnosis-playbook slug. Null when no confident match exists.",
+    )
+    root_cause: str = Field(
+        default="",
+        description="Canonical root-cause statement for the matched slug, or empty when no match exists.",
+    )
+    reasoning: str = Field(description="Why the playbook match does or does not apply.")
+    confident: bool = Field(
+        default=False,
+        description="True only when the match is strong enough to attempt the mitigation playbook.",
+    )
+
+
 class MitigationApplication(BaseModel):
     """Result of executing a mitigation strategy against the cluster."""
 
@@ -473,6 +492,155 @@ async def run_single_mitigation_playbook(
         output.reasoning,
     )
     return output
+
+
+async def search_prior_mitigations_impl(
+    deps: SREDeps,
+    confirmed_root_cause: str,
+) -> str:
+    """Match a root cause to one playbook, try it, and short-circuit on success."""
+    empty_result = {
+        "matched_slug": None,
+        "matched_root_cause": "",
+        "playbook_found": False,
+        "playbook_attempted": False,
+        "playbook_applied": False,
+        "reasoning": "No mitigation knowledge base available.",
+    }
+    kb_view = deps.kb_view
+    if kb_view is None:
+        result = json.dumps(empty_result)
+        logger.info("[ltm-mitigation] skipped (no root-cause KB injected): %s", result)
+        return result
+
+    if not confirmed_root_cause.strip():
+        result = "Error: confirmed_root_cause must not be empty."
+        logger.info("[ltm-mitigation] skipped (empty root cause): %s", result)
+        return result
+
+    if deps.ltm_call_count >= deps.ltm_call_budget:
+        result = json.dumps(
+            {
+                "matched_slug": None,
+                "matched_root_cause": "",
+                "playbook_found": False,
+                "playbook_attempted": False,
+                "playbook_applied": False,
+                "reasoning": "Search budget exhausted. Continue with independent mitigation.",
+            }
+        )
+        logger.info("[ltm-mitigation] skipped (budget exhausted): %s", result)
+        return result
+    deps.ltm_call_count += 1
+
+    run_subagent = deps.run_subagent
+    if run_subagent is None:
+        logger.warning("[ltm-mitigation] run_subagent not configured; returning empty result")
+        return json.dumps(empty_result)
+
+    cards = _load_diagnosis_cards(kb_view)
+    prompt = deps.renderer.render(
+        "ltm_search_mitigation_playbooks",
+        confirmed_root_cause=confirmed_root_cause,
+        diagnosis_playbook_summaries=_format_diagnosis_cards(cards),
+    )
+    logger.info("[ltm-mitigation] PROMPT:\n%s", prompt)
+
+    ms = dict(thinking_settings(deps.model_id, THINKING_BUDGET)) if deps.model_id else None
+    match: MitigationPlaybookMatch = await run_subagent(
+        prompt=prompt,
+        output_type=MitigationPlaybookMatch,
+        tools=None,
+        agent_name="ltm-mitigation-search",
+        model_settings=ms,
+        usage_collector=deps.usage_collector,
+    )
+
+    valid_slugs = {card.slug for card in cards}
+    if not match.confident or not match.slug or match.slug not in valid_slugs:
+        reason = match.reasoning
+        if match.slug and match.slug not in valid_slugs:
+            reason = f"Classifier returned invalid slug {match.slug!r}; falling back to independent mitigation."
+            logger.info("[ltm-mitigation] dropping invalid slug: %s", match.slug)
+        result = {
+            "matched_slug": None,
+            "matched_root_cause": "",
+            "playbook_found": False,
+            "playbook_attempted": False,
+            "playbook_applied": False,
+            "reasoning": reason,
+        }
+        output_json = json.dumps(result, indent=2)
+        logger.info("[ltm-mitigation] no confident playbook match: %s", output_json)
+        deps.shared_file.append(
+            "\n### KB Mitigation Retrieval\n"
+            f"- Root cause query: {confirmed_root_cause}\n"
+            "- Outcome: No confident match\n"
+            f"- Reasoning: {reason}\n"
+        )
+        return output_json
+
+    deps.shared_file.append(
+        "\n### KB Mitigation Retrieval\n"
+        f"- Root cause query: {confirmed_root_cause}\n"
+        f"- Matched slug: {match.slug}\n"
+        f"- Matched root cause: {match.root_cause}\n"
+        f"- Reasoning: {match.reasoning}\n"
+    )
+
+    playbook_text = load_mitigation_playbook_text(kb_view, match.slug)
+    if not playbook_text:
+        result = {
+            "matched_slug": match.slug,
+            "matched_root_cause": match.root_cause,
+            "playbook_found": False,
+            "playbook_attempted": False,
+            "playbook_applied": False,
+            "reasoning": f"No mitigation playbook found for matched slug {match.slug!r}.",
+        }
+        output_json = json.dumps(result, indent=2)
+        logger.info("[ltm-mitigation] no mitigation playbook for slug=%r", match.slug)
+        deps.shared_file.append(
+            f"\n### Playbook Shortcut (Mitigation)\n- Matched slug: {match.slug}\n- Outcome: No Playbook Found\n"
+        )
+        return output_json
+
+    application = await run_single_mitigation_playbook(
+        playbook_text=playbook_text,
+        root_cause_class=match.root_cause,
+        namespace=deps.namespace,
+        run_subagent=run_subagent,
+        renderer=deps.renderer,
+        model_id=deps.model_id,
+        usage_collector=deps.usage_collector,
+        agent_name="ltm-mitigate-0",
+    )
+
+    deps.shared_file.append(
+        "\n### Playbook Shortcut (Mitigation)\n"
+        f"- Matched slug: {match.slug}\n"
+        f"- Outcome: {'Applied' if application.applied else 'Not Applied'}\n"
+        + (
+            f"- Summary: {application.mitigation_summary}\n"
+            if application.applied
+            else f"- Reason: {application.reasoning}\n"
+        )
+    )
+
+    if application.applied:
+        raise LTMShortCircuit(confirmed=[application.mitigation_summary], iteration=deps.iteration)
+
+    result = {
+        "matched_slug": match.slug,
+        "matched_root_cause": match.root_cause,
+        "playbook_found": True,
+        "playbook_attempted": True,
+        "playbook_applied": False,
+        "reasoning": application.reasoning,
+    }
+    output_json = json.dumps(result, indent=2)
+    logger.info("[ltm-mitigation] playbook attempt did not apply: %s", output_json)
+    return output_json
 
 
 async def _run_verification_phase(
@@ -949,3 +1117,19 @@ async def search_prior_incidents(
         observed_symptoms: Factual description of current observations or hypothesis.
     """
     return await search_prior_incidents_impl(ctx.deps, observed_symptoms)
+
+
+async def search_prior_mitigations(
+    ctx: RunContext[SREDeps],
+    confirmed_root_cause: str,
+) -> str:
+    """Classify a root cause to one mitigation playbook and try it once.
+
+    Call this FIRST in mitigation after synthesizing your current best
+    root-cause statement. The tool will attempt to match that root cause to at
+    most one diagnosis playbook slug, load the paired mitigation playbook, and
+    execute it via a subagent. If the playbook succeeds, the run short-circuits
+    and submits directly to the benchmark. If no match is found or execution
+    fails, mitigation should continue independently.
+    """
+    return await search_prior_mitigations_impl(ctx.deps, confirmed_root_cause)

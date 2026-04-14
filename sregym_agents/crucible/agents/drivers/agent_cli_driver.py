@@ -55,6 +55,7 @@ _NATIVE_TOOL_NAMES = frozenset(
 _SHORT_CIRCUIT_TOOLS = frozenset(
     {
         "search_prior_incidents",
+        "search_prior_mitigations",
     }
 )
 

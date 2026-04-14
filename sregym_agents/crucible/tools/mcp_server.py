@@ -35,6 +35,7 @@ from sregym_agents.crucible.tools._kb_tools import (
     LTMShortCircuit,
     check_hypothesis_coverage_impl,
     search_prior_incidents_impl,
+    search_prior_mitigations_impl,
     triage_cluster_impl,
 )
 
@@ -104,6 +105,30 @@ def register_sre_tools(
         """
         try:
             return await search_prior_incidents_impl(deps, observed_symptoms)
+        except LTMShortCircuit as exc:
+            signal = {
+                "short_circuit": True,
+                "confirmed": exc.confirmed,
+                "confirmed_slugs": exc.confirmed_slugs,
+                "iteration": exc.iteration,
+            }
+            if signal_socket_path:
+                _send_signal(signal_socket_path, signal)
+            if result_file_path:
+                _write_result_file(result_file_path, signal)
+            return json.dumps(signal)
+
+    @mcp.tool(name="search_prior_mitigations")
+    async def search_prior_mitigations(confirmed_root_cause: str) -> str:  # pyright: ignore[reportUnusedFunction]
+        """Match a mitigation root cause to a playbook and try it once.
+
+        Call FIRST in mitigation after synthesizing your current best root cause.
+
+        Args:
+            confirmed_root_cause: Current best root-cause statement for this incident.
+        """
+        try:
+            return await search_prior_mitigations_impl(deps, confirmed_root_cause)
         except LTMShortCircuit as exc:
             signal = {
                 "short_circuit": True,

@@ -49,6 +49,7 @@ from sregym_agents.crucible.tools._kb_tools import (
     HypothesisCoverageVerdict,
     LTMShortCircuit,
     MitigationApplication,
+    MitigationPlaybookMatch,
     MitigationSearchResult,
     MitigationStrategy,
     TriageAnomaly,
@@ -65,6 +66,7 @@ from sregym_agents.crucible.tools._kb_tools import (
     load_triage_priors,
     run_single_mitigation_playbook,
     search_prior_incidents,
+    search_prior_mitigations,
     triage_cluster,
 )
 
@@ -111,6 +113,7 @@ __all__ = [
     "HypothesisCoverageVerdict",
     "LTMShortCircuit",
     "MitigationApplication",
+    "MitigationPlaybookMatch",
     "MitigationSearchResult",
     "MitigationStrategy",
     "VerifiedMitigationSearchResult",
@@ -127,5 +130,6 @@ __all__ = [
     "load_triage_priors",
     "run_single_mitigation_playbook",
     "search_prior_incidents",
+    "search_prior_mitigations",
     "triage_cluster",
 ]
