@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from sregym_agents.crucible.agents.base import AgentResult
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, ReviewDecision
+from sregym_agents.crucible.knowledge_base.incident_review import (
+    DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
+    ReviewDecision,
+)
 from sregym_agents.crucible.knowledge_base.root_cause import RootCauseStore
 
 
@@ -21,6 +26,17 @@ def _candidate(slug: str = "coredns-nxdomain") -> DiagnosisPlaybookDraft:
         verification_checks=["1. Inspect CoreDNS config for rules matching the failing service names."],
         required_evidence=["CoreDNS config contains a rule returning NXDOMAIN for the failing service FQDN."],
         known_confounders=["The Service object is missing entirely."],
+    )
+
+
+def _mitigation_candidate(slug: str = "coredns-nxdomain") -> MitigationPlaybookDraft:
+    return MitigationPlaybookDraft(
+        slug=slug,
+        root_cause="CoreDNS returns NXDOMAIN for backend service names.",
+        summary="Remove the targeted CoreDNS rule and verify service-name resolution recovers.",
+        mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted NXDOMAIN rule."],
+        verification_checks=["1. Verify the affected service names resolve from the application pod."],
+        rollback_stop_conditions=["Stop if the correct CoreDNS ConfigMap cannot be identified confidently."],
     )
 
 
@@ -284,3 +300,193 @@ async def test_process_task_accepts_missing_optional_recovery_run(tmp_path, monk
 
     saved = store.load_diagnosis("coredns-nxdomain")
     assert saved is not None
+
+
+@pytest.mark.asyncio
+async def test_process_task_saves_mitigation_candidate_for_existing_diagnosis(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    mitigation_path = tmp_path / "mitigation_run.md"
+    mitigation_candidate_path = tmp_path / "mitigation_candidate.json"
+    mitigation_path.write_text("# Mitigation")
+    mitigation_candidate_path.write_text(json.dumps(_mitigation_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": None,
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": None,
+                "mitigation_run_file": str(mitigation_path),
+                "recovery_mitigation_run_file": None,
+                "mitigation_playbook_candidate_file": str(mitigation_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": True,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    store.save_diagnosis(kb_worker._draft_to_playbook(_candidate()), created_from="seed")
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            return AgentResult(output=SimpleNamespace())
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    await kb_worker.process_task(task_path)
+
+    saved = store.load_mitigation("coredns-nxdomain")
+    assert saved is not None
+    assert saved.summary == "Remove the targeted CoreDNS rule and verify service-name resolution recovers."
+
+
+@pytest.mark.asyncio
+async def test_process_task_merges_mitigation_candidate_into_existing_playbook(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+    from sregym_agents.crucible.knowledge_base.root_cause import MitigationFrontMatter, MitigationPlaybook
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    mitigation_path = tmp_path / "mitigation_run.md"
+    recovery_path = tmp_path / "recovery_mitigation_run.md"
+    mitigation_candidate_path = tmp_path / "mitigation_candidate.json"
+    mitigation_path.write_text("# Mitigation")
+    recovery_path.write_text("# Recovery Mitigation")
+    mitigation_candidate_path.write_text(json.dumps(_mitigation_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": None,
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": None,
+                "mitigation_run_file": str(mitigation_path),
+                "recovery_mitigation_run_file": str(recovery_path),
+                "mitigation_playbook_candidate_file": str(mitigation_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": True,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    store.save_diagnosis(kb_worker._draft_to_playbook(_candidate()), created_from="seed")
+    store.save_mitigation(
+        MitigationPlaybook(
+            front_matter=MitigationFrontMatter(
+                slug="coredns-nxdomain",
+                root_cause="CoreDNS returns NXDOMAIN for backend service names.",
+            ),
+            summary="Restart the application pods and hope DNS recovers.",
+            mitigation_procedure=["1. Restart the affected pods."],
+            verification_checks=["1. Confirm the application error rate drops."],
+            rollback_stop_conditions=["Stop if the restart does not improve symptoms."],
+        ),
+        created_from="seed",
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            assert kwargs["agent_name"] == "kb-merge-mitigation-playbooks"
+            return AgentResult(output=_mitigation_candidate())
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    await kb_worker.process_task(task_path)
+
+    merged = store.load_mitigation("coredns-nxdomain")
+    assert merged is not None
+    assert merged.summary == "Remove the targeted CoreDNS rule and verify service-name resolution recovers."
+
+
+@pytest.mark.asyncio
+async def test_process_task_skips_mitigation_candidate_without_matching_diagnosis(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    mitigation_path = tmp_path / "mitigation_run.md"
+    mitigation_candidate_path = tmp_path / "mitigation_candidate.json"
+    mitigation_path.write_text("# Mitigation")
+    mitigation_candidate_path.write_text(json.dumps(_mitigation_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": None,
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": None,
+                "mitigation_run_file": str(mitigation_path),
+                "recovery_mitigation_run_file": None,
+                "mitigation_playbook_candidate_file": str(mitigation_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": True,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            return AgentResult(output=SimpleNamespace())
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    await kb_worker.process_task(task_path)
+
+    assert store.load_mitigation("coredns-nxdomain") is None

@@ -25,7 +25,7 @@ from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
 from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, create_knowledge_base
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 
 if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver
@@ -322,6 +322,11 @@ async def _async_main(args: argparse.Namespace) -> None:
     recovery_diagnosis_run_md = usage_metrics.get("recovery_diagnosis_run_md")
     recovery_diagnosis_run_md = str(recovery_diagnosis_run_md) if recovery_diagnosis_run_md is not None else None
     diagnosis_playbook_candidate_data = usage_metrics.get("diagnosis_playbook_candidate")
+    mitigation_run_md = usage_metrics.get("mitigation_run_md")
+    mitigation_run_md = str(mitigation_run_md) if mitigation_run_md is not None else None
+    recovery_mitigation_run_md = usage_metrics.get("recovery_mitigation_run_md")
+    recovery_mitigation_run_md = str(recovery_mitigation_run_md) if recovery_mitigation_run_md is not None else None
+    mitigation_playbook_candidate_data = usage_metrics.get("mitigation_playbook_candidate")
 
     if args.logs_dir:
         assert logs_dir is not None
@@ -342,16 +347,32 @@ async def _async_main(args: argparse.Namespace) -> None:
         diagnosis_run_path = None
         recovery_diagnosis_run_path = None
         diagnosis_playbook_candidate_path = None
+        mitigation_run_path = None
+        recovery_mitigation_run_path = None
+        mitigation_playbook_candidate_path = None
         if kb_type == "structured":
             structured_kb = cast("StructuredKnowledgeBase", kb)
-            diagnosis_run_path, recovery_diagnosis_run_path = structured_kb.write_incident_records(
-                timestamp=timestamp,
-                diagnosis_run_md=diagnosis_run_md,
-                recovery_diagnosis_run_md=recovery_diagnosis_run_md,
-            )
+            if diagnosis_run_md:
+                diagnosis_run_path, recovery_diagnosis_run_path = structured_kb.write_incident_records(
+                    timestamp=timestamp,
+                    diagnosis_run_md=diagnosis_run_md,
+                    recovery_diagnosis_run_md=recovery_diagnosis_run_md,
+                )
             if diagnosis_playbook_candidate_data:
                 draft = DiagnosisPlaybookDraft.model_validate(diagnosis_playbook_candidate_data)
                 diagnosis_playbook_candidate_path = structured_kb.write_diagnosis_playbook_candidate(
+                    timestamp=timestamp,
+                    draft=draft,
+                )
+            if mitigation_run_md:
+                mitigation_run_path, recovery_mitigation_run_path = structured_kb.write_mitigation_records(
+                    timestamp=timestamp,
+                    mitigation_run_md=mitigation_run_md,
+                    recovery_mitigation_run_md=recovery_mitigation_run_md,
+                )
+            if mitigation_playbook_candidate_data:
+                draft = MitigationPlaybookDraft.model_validate(mitigation_playbook_candidate_data)
+                mitigation_playbook_candidate_path = structured_kb.write_mitigation_playbook_candidate(
                     timestamp=timestamp,
                     draft=draft,
                 )
@@ -365,13 +386,22 @@ async def _async_main(args: argparse.Namespace) -> None:
             saved_stage_outputs = str(dest)
             logger.info(f"Saved stage outputs to {dest}")
 
-        if diagnosis_run_path and diagnosis_playbook_candidate_path:
+        if diagnosis_playbook_candidate_path or mitigation_playbook_candidate_path:
             task_payload: dict[str, Any] = {
-                "diagnosis_run_file": str(diagnosis_run_path),
+                "diagnosis_run_file": str(diagnosis_run_path) if diagnosis_run_path is not None else None,
                 "recovery_diagnosis_run_file": (
                     str(recovery_diagnosis_run_path) if recovery_diagnosis_run_path is not None else None
                 ),
-                "diagnosis_playbook_candidate_file": str(diagnosis_playbook_candidate_path),
+                "diagnosis_playbook_candidate_file": (
+                    str(diagnosis_playbook_candidate_path) if diagnosis_playbook_candidate_path is not None else None
+                ),
+                "mitigation_run_file": str(mitigation_run_path) if mitigation_run_path is not None else None,
+                "recovery_mitigation_run_file": (
+                    str(recovery_mitigation_run_path) if recovery_mitigation_run_path is not None else None
+                ),
+                "mitigation_playbook_candidate_file": (
+                    str(mitigation_playbook_candidate_path) if mitigation_playbook_candidate_path is not None else None
+                ),
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
@@ -388,10 +418,7 @@ async def _async_main(args: argparse.Namespace) -> None:
 
             ensure_kb_worker(Path(args.kb_dir))
         else:
-            logger.info(
-                "Knowledge base: missing incident artifacts or "
-                "diagnosis playbook candidate; skipping async review enqueue."
-            )
+            logger.info("Knowledge base: missing playbook candidates; skipping async review enqueue.")
 
     logger.info("Crucible driver complete.")
 

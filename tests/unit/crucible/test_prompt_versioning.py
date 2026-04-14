@@ -43,3 +43,14 @@ def test_v3_recovery_diagnosis_playbook_prompt_requires_localization_first_verif
     assert "The final diagnosis playbook file should have the following shape" in prompt
     assert "## Fault Localization" in prompt
     assert "`fault_localization_checks` populates `## Fault Localization`" in prompt
+
+
+def test_v3_recovery_mitigation_playbook_prompt_requires_concrete_fix_steps() -> None:
+    renderer = PromptRenderer("v3")
+
+    prompt = renderer.render("recovery_mitigation_playbook_system")
+
+    assert "reusable mitigation playbook" in prompt
+    assert "concrete resource and field changes" in prompt
+    assert "verification_checks" in prompt
+    assert "rollback_stop_conditions" in prompt

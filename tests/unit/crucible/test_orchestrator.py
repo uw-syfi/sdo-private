@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.knowledge_base.incident_review import MitigationPlaybookDraft
 from sregym_agents.crucible.orchestrator import (
     _build_usage_metrics,
     _replace_hypothesis_placeholder,
@@ -495,3 +496,81 @@ class TestOrchestratorRun:
         assert result["diagnosis_playbook_candidate"] is None
         assert "CoreDNS misconfiguration" in result["diagnosis_run_md"]
         assert result["recovery_diagnosis_run_md"] is None
+
+    @pytest.mark.asyncio
+    async def test_run_emits_mitigation_playbook_candidate_for_successful_stage(self, tmp_path: Path):
+        from sregym_agents.crucible.config import CrucibleConfig
+        from sregym_agents.crucible.orchestrator import StageLoopResult, run
+
+        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
+        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
+        mitigation_stage_outputs = tmp_path / "mitigation_stage_outputs.md"
+        diagnosis_stage_outputs.write_text("# diagnosis outputs\n")
+        mitigation_stage_outputs.write_text("# mitigation outputs\n")
+
+        driver = MagicMock()
+        driver.run = AsyncMock()
+
+        diag_result = StageLoopResult(
+            approved=True,
+            benchmark_block=(
+                "<benchmark_result>\nsuccess: True\n<oracle>\n"
+                '{"Diagnosis":{"matched_candidate_index":0}}\n'
+                "</oracle>\n</benchmark_result>\n"
+            ),
+            agent_answer="CoreDNS misconfiguration",
+            agent_justification="NXDOMAIN template for the service",
+            agent_causal_chain="coredns template -> NXDOMAIN -> client failures",
+            stage_outputs_file=diagnosis_stage_outputs,
+            confirmed_slugs=["coredns-nxdomain"],
+            message_history=[{"role": "assistant", "content": "diagnosis context"}],
+        )
+        mit_result = StageLoopResult(
+            approved=True,
+            benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>\n",
+            agent_answer="Patched ConfigMap/coredns to remove the NXDOMAIN rules.",
+            agent_justification="The affected service names resolve again.",
+            stage_outputs_file=mitigation_stage_outputs,
+            message_history=[{"role": "assistant", "content": "mitigation context"}],
+        )
+
+        with (
+            patch(
+                "sregym_agents.crucible.orchestrator._run_stage_loop",
+                new=AsyncMock(side_effect=[diag_result, mit_result]),
+            ),
+            patch("sregym_agents.crucible.orchestrator._wait_for_mitigation_stage", new=AsyncMock()),
+            patch("sregym_agents.crucible.orchestrator._try_playbook_shortcut", new=AsyncMock(return_value=None)),
+            patch(
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_mitigation_playbook_candidate",
+                new=AsyncMock(
+                    return_value=MitigationPlaybookDraft(
+                        slug="coredns-nxdomain",
+                        root_cause="CoreDNS misconfiguration",
+                        summary="Remove the CoreDNS override and verify DNS recovery.",
+                        mitigation_procedure=["1. Patch ConfigMap/coredns to remove the bad template rules."],
+                        verification_checks=["1. Verify the affected service names resolve again."],
+                        rollback_stop_conditions=["Stop if the correct CoreDNS change cannot be identified."],
+                    )
+                ),
+            ) as build_mitigation,
+        ):
+            result = await run(
+                model="test-model",
+                app_info={"app_name": "Social Network", "namespace": "social-network", "descriptions": ""},
+                problem_id="service_dns_resolution_failure__v_social_network_text-service",
+                diagnosis_shared_file=diagnosis_shared,
+                mitigation_shared_file=mitigation_shared,
+                planned_stages=["diagnosis", "mitigation"],
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=PromptRenderer("v3"),
+                crucible_config=CrucibleConfig(include_benchmark_results=True),
+                driver=driver,
+            )
+
+        assert result["mitigation_succeeded"] is True
+        assert result["mitigation_playbook_candidate"]["slug"] == "coredns-nxdomain"
+        assert "Patched ConfigMap/coredns" in result["mitigation_run_md"]
+        assert result["recovery_mitigation_run_md"] is None
+        build_mitigation.assert_awaited_once()

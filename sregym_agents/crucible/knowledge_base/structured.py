@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
 
-    from .incident_review import DiagnosisPlaybookDraft
+    from .incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +126,44 @@ class StructuredKnowledgeBase(KnowledgeBase):
             incident_dir = incidents_root / self.app_slug / timestamp
         incident_dir.mkdir(parents=True, exist_ok=True)
         candidate_path = incident_dir / "diagnosis_playbook_candidate.json"
+        candidate_path.write_text(json.dumps(draft.model_dump(mode="python"), indent=2) + "\n")
+        return candidate_path
+
+    def write_mitigation_records(
+        self,
+        *,
+        timestamp: str,
+        mitigation_run_md: str,
+        recovery_mitigation_run_md: str | None,
+    ) -> tuple[Path, Path | None]:
+        incidents_root = self.store.paths.incidents_dir
+        if self._config.kb_scope == "per_app":
+            incident_dir = incidents_root / timestamp
+        else:
+            incident_dir = incidents_root / self.app_slug / timestamp
+        incident_dir.mkdir(parents=True, exist_ok=True)
+        mitigation_path = incident_dir / "mitigation_run.md"
+        mitigation_path.write_text(mitigation_run_md)
+
+        recovery_path = None
+        if recovery_mitigation_run_md is not None:
+            recovery_path = incident_dir / "recovery_mitigation_run.md"
+            recovery_path.write_text(recovery_mitigation_run_md)
+        return mitigation_path, recovery_path
+
+    def write_mitigation_playbook_candidate(
+        self,
+        *,
+        timestamp: str,
+        draft: MitigationPlaybookDraft,
+    ) -> Path:
+        incidents_root = self.store.paths.incidents_dir
+        if self._config.kb_scope == "per_app":
+            incident_dir = incidents_root / timestamp
+        else:
+            incident_dir = incidents_root / self.app_slug / timestamp
+        incident_dir.mkdir(parents=True, exist_ok=True)
+        candidate_path = incident_dir / "mitigation_playbook_candidate.json"
         candidate_path.write_text(json.dumps(draft.model_dump(mode="python"), indent=2) + "\n")
         return candidate_path
 

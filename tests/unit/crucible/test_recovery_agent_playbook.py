@@ -7,7 +7,7 @@ import pytest
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 from sregym_agents.crucible.agents.recovery_agent import RecoveryAgent, RecoveryRunResult
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 from sregym_agents.crucible.tools import SharedFile, SRESubmission
 
 
@@ -88,6 +88,57 @@ async def test_recovery_agent_skips_playbook_candidate_without_grounded_diagnosi
     candidate = await agent.build_diagnosis_playbook_candidate(
         app_info={"app_name": "social-network", "namespace": "social-network"},
         original_answer="Pod networking is broken.",
+        grounded_answer="",
+        grounded_justification="",
+    )
+
+    assert candidate is None
+    assert driver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_builds_mitigation_playbook_candidate():
+    driver = _FakeDriver(
+        MitigationPlaybookDraft(
+            slug="wrong-slug",
+            root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+            summary="Remove the CoreDNS override and verify service-name resolution recovers.",
+            mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted NXDOMAIN template rule."],
+            verification_checks=["1. Verify the affected service names resolve from an application pod."],
+            rollback_stop_conditions=["Stop if the CoreDNS ConfigMap cannot be updated confidently."],
+        )
+    )
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_mitigation_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        root_cause_slug="coredns-nxdomain",
+        root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+        diagnosis_answer="CoreDNS injects NXDOMAIN for post-storage-service.",
+        original_answer="Restarted the application pods.",
+        original_justification="Pods were healthy after restart.",
+        grounded_answer="Patched ConfigMap/coredns to remove the NXDOMAIN template blocks.",
+        grounded_justification="DNS lookups for the affected service names now resolve successfully.",
+        recovery_message_history=[{"role": "assistant", "content": "grounded mitigation context"}],
+    )
+
+    assert candidate is not None
+    assert candidate.slug == "coredns-nxdomain"
+    assert driver.calls[0]["agent_name"] == "recovery-mitigation-playbook"
+    assert driver.calls[0]["message_history"] == [{"role": "assistant", "content": "grounded mitigation context"}]
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_skips_mitigation_playbook_candidate_without_grounded_context():
+    driver = _FakeDriver(None)
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_mitigation_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        root_cause_slug="coredns-nxdomain",
+        root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+        diagnosis_answer="CoreDNS injects NXDOMAIN for post-storage-service.",
+        original_answer="Restarted the application pods.",
         grounded_answer="",
         grounded_justification="",
     )

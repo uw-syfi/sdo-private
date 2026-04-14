@@ -17,6 +17,7 @@ import httpx
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver, RunSubagent
+    from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
     from sregym_agents.crucible.knowledge_base.root_cause import KBView
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
@@ -31,7 +32,9 @@ from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
 from sregym_agents.crucible.knowledge_base.incident_records import (
     DiagnosisRunRecord,
+    MitigationRunRecord,
     RecoveryDiagnosisRunRecord,
+    RecoveryMitigationRunRecord,
 )
 from sregym_agents.crucible.tools import (
     LTMShortCircuit,
@@ -54,6 +57,7 @@ class StageLoopResult:
     agent_causal_chain: str = ""
     stage_outputs_file: Path | None = None
     confirmed_slugs: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    message_history: list[object] = dataclasses.field(default_factory=lambda: [])
 
 
 def _build_usage_metrics(
@@ -99,6 +103,29 @@ def _replace_hypothesis_placeholder(
     content = shared_file.read_text()
     if placeholder in content:
         shared_file.write_text(content.replace(placeholder, real_content, 1))
+
+
+def _resolve_mitigation_playbook_identity(
+    diag_result: StageLoopResult,
+    diagnosis_playbook_candidate: DiagnosisPlaybookDraft | None,
+) -> tuple[str, str] | None:
+    """Resolve the canonical mitigation playbook slug/root-cause pair."""
+    idx = _extract_matched_candidate_index(diag_result.benchmark_block)
+    if idx is not None and 0 <= idx < len(diag_result.confirmed_slugs):
+        slug = diag_result.confirmed_slugs[idx]
+        if slug:
+            root_cause = (
+                diagnosis_playbook_candidate.root_cause
+                if diagnosis_playbook_candidate is not None
+                else diag_result.agent_answer
+            )
+            if root_cause.strip():
+                return slug, root_cause
+
+    if diagnosis_playbook_candidate is not None:
+        return diagnosis_playbook_candidate.slug, diagnosis_playbook_candidate.root_cause
+
+    return None
 
 
 def _init_mitigation_file(
@@ -256,6 +283,7 @@ async def _direct_submit_confirmed(
         agent_causal_chain="",
         stage_outputs_file=stage_outputs_file,
         confirmed_slugs=confirmed_slugs or [],
+        message_history=[],
     )
 
 
@@ -360,6 +388,7 @@ async def _run_stage_loop(
 
         # Extract state from the result (attached by SREAgent.run())
         sre_state: SharedState = sre_result.state or SharedState()
+        message_history = list(sre_result.messages or [])
 
         # Capture the hypothesis from the SRE agent for blind judge review
         last_answer = sre_state.answer or ""
@@ -451,6 +480,7 @@ async def _run_stage_loop(
                 agent_justification=last_justification,
                 agent_causal_chain=last_causal_chain,
                 stage_outputs_file=stage_outputs_file,
+                message_history=message_history,
             )
 
         # Judge agent
@@ -504,6 +534,7 @@ async def _run_stage_loop(
                 agent_justification=last_justification,
                 agent_causal_chain=last_causal_chain,
                 stage_outputs_file=stage_outputs_file,
+                message_history=message_history,
             )
 
         logger.info(f"Judge REJECTED {stage} (iteration {iteration}). Looping...")
@@ -518,6 +549,7 @@ async def _run_stage_loop(
         agent_justification=last_justification,
         agent_causal_chain=last_causal_chain,
         stage_outputs_file=stage_outputs_file,
+        message_history=[],
     )
 
 
@@ -791,6 +823,7 @@ async def run(
     )
     if recovery_stage_outputs_file is not None:
         recovery_stage_outputs_file.unlink(missing_ok=True)
+    recovery_mitigation_stage_outputs_file = None
 
     diagnosis_recovery = None
 
@@ -864,6 +897,9 @@ async def run(
         result["diagnosis_playbook_candidate"] = (
             diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
         )
+        result["mitigation_run_md"] = None
+        result["recovery_mitigation_run_md"] = None
+        result["mitigation_playbook_candidate"] = None
         return result
 
     _init_mitigation_file(
@@ -947,13 +983,23 @@ async def run(
             injected_kb=injected_kb,
             crucible_config=crucible_config,
         )
+    original_mit_result = dataclasses.replace(mit_result)
+    recovery_mitigation_stage_outputs_file = (
+        mit_result.stage_outputs_file.with_name("recovery_mitigation_stage_outputs.md")
+        if mit_result.stage_outputs_file is not None
+        else None
+    )
+    if recovery_mitigation_stage_outputs_file is not None:
+        recovery_mitigation_stage_outputs_file.unlink(missing_ok=True)
+
+    mitigation_recovery = None
     # Recovery mitigation
     if (
         crucible_config.include_benchmark_results
         and mit_result.benchmark_block
         and "success: False" in mit_result.benchmark_block
     ):
-        recovery = await recovery_agent.run_mitigation(
+        mitigation_recovery = await recovery_agent.run_mitigation(
             app_info=app_info,
             shared_file=mitigation_sf,
             original_answer=mit_result.agent_answer,
@@ -961,11 +1007,49 @@ async def run(
             usage_collector=recovery_collector,
             original_justification=mit_result.agent_justification,
             diagnosis_answer=diag_result.agent_answer,
-            stage_outputs_file=mit_result.stage_outputs_file,
+            stage_outputs_file=recovery_mitigation_stage_outputs_file,
         )
-        if recovery:
-            mit_result.agent_answer = recovery.submission.answer
-            mit_result.agent_justification = recovery.submission.justification
+        if mitigation_recovery:
+            mit_result.agent_answer = mitigation_recovery.submission.answer
+            mit_result.agent_justification = mitigation_recovery.submission.justification
+
+    mitigation_playbook_candidate = None
+    mitigation_identity = _resolve_mitigation_playbook_identity(diag_result, diagnosis_playbook_candidate)
+    if mitigation_identity is not None:
+        slug, root_cause = mitigation_identity
+        mitigation_context = None
+        if mitigation_recovery and mitigation_recovery.message_history:
+            mitigation_context = (
+                mitigation_recovery.message_history,
+                mit_result.agent_answer,
+                mit_result.agent_justification,
+            )
+        elif (
+            "success: True" in (mit_result.benchmark_block or "")
+            and mit_result.message_history
+            and not (mit_result.confirmed_slugs or [])
+        ):
+            mitigation_context = (
+                mit_result.message_history,
+                mit_result.agent_answer,
+                mit_result.agent_justification,
+            )
+
+        if mitigation_context is not None:
+            message_history, grounded_answer, grounded_justification = mitigation_context
+            mitigation_playbook_candidate = await recovery_agent.build_mitigation_playbook_candidate(
+                app_info=app_info,
+                root_cause_slug=slug,
+                root_cause=root_cause,
+                diagnosis_answer=diag_result.agent_answer,
+                original_answer=original_mit_result.agent_answer,
+                original_justification=original_mit_result.agent_justification,
+                grounded_answer=grounded_answer,
+                grounded_justification=grounded_justification,
+                recovery_message_history=message_history,
+                usage_collector=recovery_collector if mitigation_recovery else primary_collector,
+                stage_outputs_file=None,
+            )
 
     logger.info("=" * 60)
     logger.info("CRUCIBLE: Orchestrator complete.")
@@ -1003,5 +1087,32 @@ async def run(
     )
     result["diagnosis_playbook_candidate"] = (
         diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
+    )
+    result["mitigation_run_md"] = MitigationRunRecord.from_stage_outputs_file(
+        problem_id=problem_id,
+        app_name=app_info.get("app_name", "unknown"),
+        namespace=app_info.get("namespace", "default"),
+        mitigation_succeeded="success: True" in (original_mit_result.benchmark_block or ""),
+        agent_answer=original_mit_result.agent_answer,
+        agent_justification=original_mit_result.agent_justification,
+        benchmark_block=original_mit_result.benchmark_block,
+        stage_outputs_file=original_mit_result.stage_outputs_file,
+    ).to_markdown()
+    result["recovery_mitigation_run_md"] = (
+        RecoveryMitigationRunRecord.from_stage_outputs_file(
+            problem_id=problem_id,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            has_recovery_mitigation=bool(mit_result.agent_answer),
+            agent_answer=mit_result.agent_answer,
+            agent_justification=mit_result.agent_justification,
+            benchmark_block=mit_result.benchmark_block,
+            stage_outputs_file=recovery_mitigation_stage_outputs_file,
+        ).to_markdown()
+        if mitigation_recovery
+        else None
+    )
+    result["mitigation_playbook_candidate"] = (
+        mitigation_playbook_candidate.model_dump(mode="python") if mitigation_playbook_candidate is not None else None
     )
     return result

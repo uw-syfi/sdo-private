@@ -18,11 +18,14 @@ from sregym_agents.crucible.config import crucible_config_from_kb_task
 from sregym_agents.crucible.kb_update_queue import list_pending_tasks, move_to_completed, move_to_failed
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
     ReviewDecision,
 )
 from sregym_agents.crucible.knowledge_base.root_cause import (
     DiagnosisFrontMatter,
     DiagnosisPlaybook,
+    MitigationFrontMatter,
+    MitigationPlaybook,
     RootCauseStore,
 )
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
@@ -121,6 +124,45 @@ def _draft_to_playbook(draft: DiagnosisPlaybookDraft) -> DiagnosisPlaybook:
     )
 
 
+async def _merge_mitigation_playbooks(
+    *,
+    driver: AgentDriver,
+    renderer: PromptRenderer,
+    candidate_playbook: MitigationPlaybookDraft,
+    existing_playbook: MitigationPlaybook,
+    mitigation_run_md: str,
+    recovery_mitigation_run_md: str | None,
+    usage_collector: UsageCollector,
+) -> MitigationPlaybookDraft:
+    prompt = renderer.render(
+        "kb_merge_mitigation_playbooks",
+        candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
+        existing_playbook_md=existing_playbook.to_markdown(),
+        mitigation_run_md=mitigation_run_md,
+        recovery_mitigation_run_md=recovery_mitigation_run_md or "(none)",
+    )
+    result: AgentResult[MitigationPlaybookDraft] = await driver.run(
+        prompt=prompt,
+        output_type=MitigationPlaybookDraft,
+        agent_name="kb-merge-mitigation-playbooks",
+        usage_collector=usage_collector,
+    )
+    return result.unwrap("kb-merge-mitigation-playbooks")
+
+
+def _mitigation_draft_to_playbook(draft: MitigationPlaybookDraft) -> MitigationPlaybook:
+    return MitigationPlaybook(
+        front_matter=MitigationFrontMatter(
+            slug=draft.slug,
+            root_cause=draft.root_cause,
+        ),
+        summary=draft.summary,
+        mitigation_procedure=draft.mitigation_procedure,
+        verification_checks=draft.verification_checks,
+        rollback_stop_conditions=draft.rollback_stop_conditions,
+    )
+
+
 async def process_task(task_path: Path) -> None:
     task = json.loads(task_path.read_text())
     crucible_config = crucible_config_from_kb_task(task)
@@ -139,55 +181,109 @@ async def process_task(task_path: Path) -> None:
     kb.write_scope_metadata()
     store = RootCauseStore(kb.scope_dir)
 
-    diagnosis_run_md = Path(task["diagnosis_run_file"]).read_text()
+    diagnosis_run_path_str = task.get("diagnosis_run_file")
+    diagnosis_run_md = Path(diagnosis_run_path_str).read_text() if diagnosis_run_path_str else ""
     recovery_path_str = task.get("recovery_diagnosis_run_file")
     recovery_diagnosis_run_md = Path(recovery_path_str).read_text() if recovery_path_str else None
-    candidate_playbook = DiagnosisPlaybookDraft.model_validate(
-        json.loads(Path(task["diagnosis_playbook_candidate_file"]).read_text())
+    candidate_path_str = task.get("diagnosis_playbook_candidate_file")
+    candidate_playbook = (
+        DiagnosisPlaybookDraft.model_validate(json.loads(Path(candidate_path_str).read_text()))
+        if candidate_path_str
+        else None
     )
     cards = store.list_active_diagnosis_cards()
 
     collector = UsageCollector()
-    decision = await _review_failure(
-        driver=kb_driver,
-        renderer=renderer,
-        diagnosis_run_md=diagnosis_run_md,
-        recovery_diagnosis_run_md=recovery_diagnosis_run_md,
-        candidate_playbook=candidate_playbook,
-        cards=cards,
-        usage_collector=collector,
-    )
-    logger.info("KB review decision for %s: %s", task["problem_id"], decision.model_dump_json(indent=2))
-
-    if decision.recommended_action == "add_playbook":
-        store.save_diagnosis(_draft_to_playbook(candidate_playbook), created_from=task["problem_id"])
-    elif decision.recommended_action == "merge_playbooks":
-        existing_playbooks = [store.load_diagnosis(slug) for slug in decision.target_slugs]
-        existing_playbooks = [playbook for playbook in existing_playbooks if playbook is not None]
-        if existing_playbooks:
-            draft = await _merge_playbooks(
-                driver=kb_driver,
-                renderer=renderer,
-                candidate_playbook=candidate_playbook,
-                existing_playbooks=existing_playbooks,
-                diagnosis_run_md=diagnosis_run_md,
-                recovery_diagnosis_run_md=recovery_diagnosis_run_md,
-                usage_collector=collector,
-            )
-            canonical_slug = decision.target_slugs[0]
-            merged = _draft_to_playbook(draft.model_copy(update={"slug": canonical_slug}))
-            merged_from = [candidate_playbook.slug, *decision.target_slugs[1:]]
-            store.save_diagnosis(merged, created_from=task["problem_id"], merged_from=merged_from)
-            for merged_slug in decision.target_slugs[1:]:
-                meta = store.load_meta(merged_slug)
-                store.save_meta(meta.model_copy(update={"status": "deprecated"}))
-            store.refresh_manifest()
-    else:
-        logger.info(
-            "No KB mutation applied for %s (action=%s)",
-            task["problem_id"],
-            decision.recommended_action,
+    decision = None
+    canonical_diagnosis_slug = None
+    if candidate_playbook is not None:
+        decision = await _review_failure(
+            driver=kb_driver,
+            renderer=renderer,
+            diagnosis_run_md=diagnosis_run_md,
+            recovery_diagnosis_run_md=recovery_diagnosis_run_md,
+            candidate_playbook=candidate_playbook,
+            cards=cards,
+            usage_collector=collector,
         )
+        logger.info("KB review decision for %s: %s", task["problem_id"], decision.model_dump_json(indent=2))
+
+        if decision.recommended_action == "add_playbook":
+            store.save_diagnosis(_draft_to_playbook(candidate_playbook), created_from=task["problem_id"])
+            canonical_diagnosis_slug = candidate_playbook.slug
+        elif decision.recommended_action == "merge_playbooks":
+            existing_playbooks = [store.load_diagnosis(slug) for slug in decision.target_slugs]
+            existing_playbooks = [playbook for playbook in existing_playbooks if playbook is not None]
+            if existing_playbooks:
+                draft = await _merge_playbooks(
+                    driver=kb_driver,
+                    renderer=renderer,
+                    candidate_playbook=candidate_playbook,
+                    existing_playbooks=existing_playbooks,
+                    diagnosis_run_md=diagnosis_run_md,
+                    recovery_diagnosis_run_md=recovery_diagnosis_run_md,
+                    usage_collector=collector,
+                )
+                canonical_slug = decision.target_slugs[0]
+                merged = _draft_to_playbook(draft.model_copy(update={"slug": canonical_slug}))
+                merged_from = [candidate_playbook.slug, *decision.target_slugs[1:]]
+                store.save_diagnosis(merged, created_from=task["problem_id"], merged_from=merged_from)
+                for merged_slug in decision.target_slugs[1:]:
+                    meta = store.load_meta(merged_slug)
+                    store.save_meta(meta.model_copy(update={"status": "deprecated"}))
+                store.refresh_manifest()
+                canonical_diagnosis_slug = canonical_slug
+        else:
+            logger.info(
+                "No diagnosis KB mutation applied for %s (action=%s)",
+                task["problem_id"],
+                decision.recommended_action,
+            )
+
+    mitigation_run_path_str = task.get("mitigation_run_file")
+    mitigation_run_md = Path(mitigation_run_path_str).read_text() if mitigation_run_path_str else ""
+    recovery_mitigation_path_str = task.get("recovery_mitigation_run_file")
+    recovery_mitigation_run_md = (
+        Path(recovery_mitigation_path_str).read_text() if recovery_mitigation_path_str else None
+    )
+    mitigation_candidate_path_str = task.get("mitigation_playbook_candidate_file")
+    mitigation_candidate = (
+        MitigationPlaybookDraft.model_validate(json.loads(Path(mitigation_candidate_path_str).read_text()))
+        if mitigation_candidate_path_str
+        else None
+    )
+    if mitigation_candidate is not None:
+        target_slug = mitigation_candidate.slug
+        if store.load_diagnosis(target_slug) is None and canonical_diagnosis_slug:
+            target_slug = canonical_diagnosis_slug
+
+        if store.load_diagnosis(target_slug) is None:
+            logger.warning(
+                "Skipping mitigation playbook candidate for %s: no matching diagnosis root cause %r",
+                task["problem_id"],
+                target_slug,
+            )
+        else:
+            normalized_candidate = mitigation_candidate.model_copy(update={"slug": target_slug})
+            existing_mitigation = store.load_mitigation(target_slug)
+            if existing_mitigation is None:
+                store.save_mitigation(
+                    _mitigation_draft_to_playbook(normalized_candidate), created_from=task["problem_id"]
+                )
+            else:
+                draft = await _merge_mitigation_playbooks(
+                    driver=kb_driver,
+                    renderer=renderer,
+                    candidate_playbook=normalized_candidate,
+                    existing_playbook=existing_mitigation,
+                    mitigation_run_md=mitigation_run_md,
+                    recovery_mitigation_run_md=recovery_mitigation_run_md,
+                    usage_collector=collector,
+                )
+                merged = _mitigation_draft_to_playbook(
+                    draft.model_copy(update={"slug": target_slug, "root_cause": normalized_candidate.root_cause})
+                )
+                store.save_mitigation(merged, created_from=task["problem_id"])
 
     completed_task_path = move_to_completed(task_path, Path(task["kb_dir"]))
     completed_task_path.with_suffix(".usage.json").write_text(
@@ -196,7 +292,7 @@ async def process_task(task_path: Path) -> None:
                 "problem_id": task["problem_id"],
                 "app_name": task["app_name"],
                 "usage_metrics": collector.to_dict(),
-                "decision": decision.model_dump(mode="python"),
+                "decision": decision.model_dump(mode="python") if decision is not None else None,
             },
             indent=2,
         )

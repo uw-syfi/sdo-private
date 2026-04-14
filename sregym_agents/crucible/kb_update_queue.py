@@ -25,9 +25,12 @@ logger = logging.getLogger(__name__)
 class KbUpdateTaskDict(TypedDict):
     """JSON shape for a pending KB update task (matches worker expectations)."""
 
-    diagnosis_run_file: str
+    diagnosis_run_file: str | None
     recovery_diagnosis_run_file: str | None
-    diagnosis_playbook_candidate_file: str
+    diagnosis_playbook_candidate_file: str | None
+    mitigation_run_file: str | None
+    recovery_mitigation_run_file: str | None
+    mitigation_playbook_candidate_file: str | None
     stage_outputs_file: str | None
     kb_dir: str
     kb_type: str

@@ -1,0 +1,26 @@
+You have already completed the mitigation investigation in this same session. Using your existing
+investigation context, convert that grounded mitigation into a reusable mitigation playbook candidate.
+
+Application: {{ app_name }} / Namespace: {{ namespace }}
+{% if descriptions %}
+{{ descriptions }}
+{% endif %}
+
+Use this canonical root-cause identity:
+- `slug`: {{ root_cause_slug }}
+- `root_cause`: {{ root_cause }}
+
+Confirmed diagnosis:
+**Answer**: {{ diagnosis_answer }}
+
+For reference, the original failed or incomplete mitigation was:
+**Answer**: {{ original_answer }}
+{% if original_justification %}
+**Justification**: {{ original_justification }}
+{% endif %}
+
+The grounded mitigation you just established was:
+**Answer**: {{ grounded_answer }}
+**Justification**: {{ grounded_justification }}
+
+Produce a mitigation playbook candidate that captures this grounded fix as a reusable remediation artifact.

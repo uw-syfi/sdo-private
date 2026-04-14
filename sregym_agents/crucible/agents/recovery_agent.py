@@ -6,7 +6,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
 
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -241,6 +241,80 @@ class RecoveryAgent:
                 f.write(f"**Root Cause**: {draft.root_cause}\n")
 
         logger.info("Recovery diagnosis playbook candidate complete: %s", draft.slug)
+        return draft
+
+    async def build_mitigation_playbook_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        root_cause_slug: str,
+        root_cause: str,
+        diagnosis_answer: str,
+        original_answer: str,
+        original_justification: str = "",
+        grounded_answer: str,
+        grounded_justification: str,
+        recovery_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        stage_outputs_file: Path | None = None,
+    ) -> MitigationPlaybookDraft | None:
+        """Build a reusable mitigation playbook from the completed grounded mitigation."""
+
+        if not (
+            root_cause_slug.strip()
+            and root_cause.strip()
+            and grounded_answer.strip()
+            and grounded_justification.strip()
+            and recovery_message_history
+        ):
+            logger.warning("Recovery mitigation playbook candidate: grounded mitigation or message history missing.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("RECOVERY MITIGATION PLAYBOOK: converting grounded mitigation into playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Recovery Mitigation Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_mitigation_playbook_system")
+        user_prompt = self._renderer.render(
+            "recovery_mitigation_playbook_user",
+            root_cause_slug=root_cause_slug,
+            root_cause=root_cause,
+            diagnosis_answer=diagnosis_answer,
+            original_answer=original_answer,
+            original_justification=original_justification,
+            grounded_answer=grounded_answer,
+            grounded_justification=grounded_justification,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+        )
+        logger.info(f"[recovery-mitigation-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[recovery-mitigation-playbook] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=MitigationPlaybookDraft,
+            agent_name="recovery-mitigation-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=recovery_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Recovery mitigation playbook agent did not produce output.")
+            return None
+
+        draft = result.output.model_copy(update={"slug": root_cause_slug, "root_cause": root_cause})
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
+
+        logger.info("Recovery mitigation playbook candidate complete: %s", draft.slug)
         return draft
 
     async def run_mitigation(

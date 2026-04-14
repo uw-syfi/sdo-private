@@ -8,8 +8,13 @@ import pytest
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 from sregym_agents.crucible.config import CrucibleConfig
-from sregym_agents.crucible.knowledge_base.incident_records import DiagnosisRunRecord, RecoveryDiagnosisRunRecord
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_records import (
+    DiagnosisRunRecord,
+    MitigationRunRecord,
+    RecoveryDiagnosisRunRecord,
+    RecoveryMitigationRunRecord,
+)
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 from sregym_agents.crucible.knowledge_base.root_cause import (
     DiagnosisFrontMatter,
     DiagnosisPlaybook,
@@ -170,6 +175,39 @@ def test_structured_kb_writes_diagnosis_playbook_candidate(tmp_path: Path):
     assert json.loads(candidate_path.read_text())["slug"] == "coredns-nxdomain"
 
 
+def test_structured_kb_writes_mitigation_records_and_candidate(tmp_path: Path):
+    kb = StructuredKnowledgeBase(
+        tmp_path / "kb",
+        app_name="hotel-reservation",
+        config=CrucibleConfig(prompt_version="v3", kb_scope="per_app"),
+        renderer=PromptRenderer("v3"),
+        driver=_DummyDriver(),
+    )
+    mitigation_run, recovery_run = kb.write_mitigation_records(
+        timestamp="20260413_162613",
+        mitigation_run_md="# Mitigation",
+        recovery_mitigation_run_md="# Recovery Mitigation",
+    )
+    candidate = MitigationPlaybookDraft(
+        slug="coredns-nxdomain",
+        root_cause="CoreDNS template directives return NXDOMAIN for backend service names.",
+        summary="Remove the targeted NXDOMAIN rules from CoreDNS and verify DNS recovery.",
+        mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted template rules."],
+        verification_checks=["1. Verify the affected service names resolve from an application pod."],
+        rollback_stop_conditions=["Stop if the correct CoreDNS ConfigMap cannot be identified confidently."],
+    )
+
+    candidate_path = kb.write_mitigation_playbook_candidate(timestamp="20260413_162613", draft=candidate)
+
+    assert mitigation_run.name == "mitigation_run.md"
+    assert mitigation_run.read_text() == "# Mitigation"
+    assert recovery_run is not None
+    assert recovery_run.name == "recovery_mitigation_run.md"
+    assert recovery_run.read_text() == "# Recovery Mitigation"
+    assert candidate_path.name == "mitigation_playbook_candidate.json"
+    assert json.loads(candidate_path.read_text())["slug"] == "coredns-nxdomain"
+
+
 def test_diagnosis_run_record_does_not_duplicate_summary_or_include_recovery_content():
     record = DiagnosisRunRecord(
         problem_id="problem-a",
@@ -207,3 +245,40 @@ def test_recovery_diagnosis_run_record_includes_recovery_stage_outputs_once():
 
     assert markdown.count("<benchmark_result>") == 1
     assert markdown.count("## Recovery Diagnosis Investigation") == 1
+
+
+def test_mitigation_run_record_does_not_duplicate_summary_or_include_recovery_content():
+    record = MitigationRunRecord(
+        problem_id="problem-a",
+        app_name="Social Network",
+        namespace="social-network",
+        mitigation_succeeded=True,
+        agent_answer="Patched ConfigMap/coredns to remove the NXDOMAIN template rules.",
+        agent_justification="Service-name lookups now resolve from the affected pod.",
+        benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>",
+        stage_outputs="## Mitigation Investigation\nPatched CoreDNS and verified DNS recovery.\n",
+    )
+
+    markdown = record.to_markdown()
+
+    assert markdown.count("<benchmark_result>") == 1
+    assert markdown.count("Mitigation: Patched ConfigMap/coredns") == 1
+    assert "Recovery Mitigation Investigation" not in markdown
+
+
+def test_recovery_mitigation_run_record_includes_recovery_stage_outputs_once():
+    record = RecoveryMitigationRunRecord(
+        problem_id="problem-a",
+        app_name="Social Network",
+        namespace="social-network",
+        has_recovery_mitigation=True,
+        agent_answer="Patched ConfigMap/coredns and rolled CoreDNS.",
+        agent_justification="The target service names now resolve from the application pod.",
+        benchmark_block="<benchmark_result>\nsuccess: False\n</benchmark_result>",
+        stage_outputs="## Recovery Mitigation Investigation\nValidated the fix with DNS lookups.\n",
+    )
+
+    markdown = record.to_markdown()
+
+    assert markdown.count("<benchmark_result>") == 1
+    assert markdown.count("## Recovery Mitigation Investigation") == 1
