@@ -655,7 +655,6 @@ class TestAgentCLIDriverParseResultData:
                 "answer": "misconfigured CPU limits",
                 "justification": "evidence here",
                 "causal_chain": "A -> B -> C",
-                "reflection": "",
             },
         }
         result = AgentCLIDriver._parse_result_data(data, SRESubmission)

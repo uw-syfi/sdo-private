@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
+
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -14,6 +17,18 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.tools import SharedFile, SRESubmission
 
 logger = logging.getLogger(__name__)
+
+
+def _empty_message_history() -> list[object]:
+    return []
+
+
+@dataclasses.dataclass(frozen=True)
+class RecoveryRunResult:
+    """Semantic recovery submission plus internal conversation history."""
+
+    submission: SRESubmission
+    message_history: list[object] = dataclasses.field(default_factory=_empty_message_history)
 
 
 class RecoveryAgent:
@@ -58,7 +73,7 @@ class RecoveryAgent:
         original_justification: str = "",
         original_causal_chain: str = "",
         stage_outputs_file: Path | None = None,
-    ) -> SRESubmission | None:
+    ) -> RecoveryRunResult | None:
         """Run a recovery diagnosis agent to produce a causal chain for the correct root cause."""
 
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
@@ -125,7 +140,6 @@ class RecoveryAgent:
                 answer=state.answer or "",
                 justification=state.answer_justification or "",
                 causal_chain=state.answer_causal_chain or "",
-                reflection=state.answer_reflection or "",
             )
         else:
             # Update state from output
@@ -133,13 +147,10 @@ class RecoveryAgent:
             state.answer = result.output.answer
             state.answer_justification = result.output.justification
             state.answer_causal_chain = result.output.causal_chain
-            state.answer_reflection = result.output.reflection
             submission = SRESubmission(
                 answer=result.output.answer,
                 justification=result.output.justification,
                 causal_chain=result.output.causal_chain,
-                reflection=result.output.reflection,
-                message_history=result.messages,
             )
 
         # Append recovery result to shared file
@@ -150,8 +161,6 @@ class RecoveryAgent:
         )
         if submission.causal_chain:
             entry += f"**Causal Chain**: {submission.causal_chain}\n"
-        if submission.reflection:
-            entry += f"**Agent Reflection**: {submission.reflection}\n"
         try:
             shared_file.append(entry)
         except Exception as e:
@@ -164,11 +173,75 @@ class RecoveryAgent:
                 f.write(f"**Justification**: {submission.justification}\n")
                 if submission.causal_chain:
                     f.write(f"**Causal Chain**: {submission.causal_chain}\n")
-                if submission.reflection:
-                    f.write(f"**Agent Reflection**: {submission.reflection}\n")
 
         logger.info(f"Recovery diagnosis complete: {submission.answer}")
-        return submission
+        return RecoveryRunResult(submission=submission, message_history=result.messages)
+
+    async def build_diagnosis_playbook_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        original_answer: str,
+        original_justification: str = "",
+        original_causal_chain: str = "",
+        grounded_answer: str,
+        grounded_justification: str,
+        grounded_causal_chain: str = "",
+        recovery_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        stage_outputs_file: Path | None = None,
+    ) -> DiagnosisPlaybookDraft | None:
+        """Build a reusable diagnosis playbook from the completed grounded diagnosis."""
+
+        if not grounded_answer.strip() or not grounded_justification.strip() or not recovery_message_history:
+            logger.warning("Recovery playbook candidate: grounded diagnosis or message history missing, skipping.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("RECOVERY PLAYBOOK: converting grounded diagnosis into diagnosis playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Recovery Diagnosis Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_diagnosis_playbook_system")
+        user_prompt = self._renderer.render(
+            "recovery_diagnosis_playbook_user",
+            original_answer=original_answer,
+            original_justification=original_justification,
+            original_causal_chain=original_causal_chain,
+            grounded_answer=grounded_answer,
+            grounded_justification=grounded_justification,
+            grounded_causal_chain=grounded_causal_chain,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+        )
+        logger.info(f"[recovery-diagnosis-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[recovery-diagnosis-playbook] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=DiagnosisPlaybookDraft,
+            agent_name="recovery-diagnosis-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=recovery_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Recovery diagnosis playbook agent did not produce output.")
+            return None
+
+        draft = result.output
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
+
+        logger.info("Recovery diagnosis playbook candidate complete: %s", draft.slug)
+        return draft
 
     async def run_mitigation(
         self,
@@ -181,7 +254,7 @@ class RecoveryAgent:
         original_justification: str = "",
         diagnosis_answer: str = "",
         stage_outputs_file: Path | None = None,
-    ) -> SRESubmission | None:
+    ) -> RecoveryRunResult | None:
         """Run a recovery mitigation agent to investigate and apply the correct fix."""
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
 
@@ -244,17 +317,14 @@ class RecoveryAgent:
             submission = SRESubmission(
                 answer=state.answer or "",
                 justification=state.answer_justification or "",
-                reflection=state.answer_reflection or "",
             )
         else:
             state.submitted = True
             state.answer = result.output.answer
             state.answer_justification = result.output.justification
-            state.answer_reflection = result.output.reflection
             submission = SRESubmission(
                 answer=result.output.answer,
                 justification=result.output.justification,
-                reflection=result.output.reflection,
             )
 
         # Append recovery result to shared file
@@ -263,8 +333,6 @@ class RecoveryAgent:
             f"**Mitigation**: {submission.answer}\n"
             f"**Justification**: {submission.justification}\n"
         )
-        if submission.reflection:
-            entry += f"**Agent Reflection**: {submission.reflection}\n"
         try:
             shared_file.append(entry)
         except Exception as e:
@@ -275,11 +343,9 @@ class RecoveryAgent:
             with open(stage_outputs_file, "a") as f:
                 f.write(f"**Mitigation**: {submission.answer}\n")
                 f.write(f"**Justification**: {submission.justification}\n")
-                if submission.reflection:
-                    f.write(f"**Agent Reflection**: {submission.reflection}\n")
 
         logger.info(f"Recovery mitigation complete: {submission.answer}")
-        return submission
+        return RecoveryRunResult(submission=submission, message_history=result.messages)
 
     @staticmethod
     def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:

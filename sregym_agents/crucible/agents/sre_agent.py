@@ -260,7 +260,6 @@ class SREAgent:
             state.answer = output.answer
             state.answer_justification = output.justification
             state.answer_causal_chain = output.causal_chain
-            state.answer_reflection = output.reflection
 
             # Write iteration entry to shared file
             if stage == "diagnosis":

@@ -8,6 +8,7 @@ import pytest
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 from sregym_agents.crucible.config import CrucibleConfig
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
 from sregym_agents.crucible.knowledge_base.root_cause import (
     DiagnosisFrontMatter,
     DiagnosisPlaybook,
@@ -115,3 +116,29 @@ def test_structured_kb_writes_incident_records(tmp_path: Path):
     assert original.read_text() == "# Original"
     assert grounded.read_text() == "# Grounded"
     assert original.parent.name == "20260413_162613"
+
+
+def test_structured_kb_writes_diagnosis_playbook_candidate(tmp_path: Path):
+    kb = StructuredKnowledgeBase(
+        tmp_path / "kb",
+        app_name="hotel-reservation",
+        config=CrucibleConfig(prompt_version="v3", kb_scope="per_app"),
+        renderer=PromptRenderer("v3"),
+        driver=_DummyDriver(),
+    )
+    candidate = DiagnosisPlaybookDraft(
+        slug="coredns-nxdomain",
+        root_cause="CoreDNS template directives return NXDOMAIN for backend service names.",
+        when_to_consider=["Gateway logs show repeated host-resolution failures to backend services."],
+        disambiguators=["Backend pods are healthy but DNS lookups for their service names fail."],
+        summary="Check whether cluster DNS is intentionally returning NXDOMAIN for service names.",
+        triage_checks=["1. Inspect application logs for hostname resolution failures."],
+        verification_checks=["1. Inspect the CoreDNS configuration for service-specific NXDOMAIN rules."],
+        required_evidence=["CoreDNS config contains directives matching the failing service FQDNs."],
+        known_confounders=["Backend Service object is actually missing."],
+    )
+
+    candidate_path = kb.write_diagnosis_playbook_candidate(timestamp="20260413_162613", draft=candidate)
+
+    assert candidate_path.name == "diagnosis_playbook_candidate.json"
+    assert json.loads(candidate_path.read_text())["slug"] == "coredns-nxdomain"

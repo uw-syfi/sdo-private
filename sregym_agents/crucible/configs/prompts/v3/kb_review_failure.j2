@@ -1,6 +1,7 @@
 You are reviewing a failed diagnosis workflow for a Kubernetes SRE agent.
 
-Classify why the original diagnosis failed relative to the grounded diagnosis.
+Classify why the original diagnosis failed relative to the grounded diagnosis, then decide how to curate
+the recovery-produced diagnosis playbook candidate.
 Use one or more failure modes from:
 - triage_failure
 - missing_playbook
@@ -8,20 +9,30 @@ Use one or more failure modes from:
 - playbook_validation_failure
 
 Then choose a recommended action from:
-- create_playbook
-- refine_playbook
+- add_playbook
 - merge_playbooks
-- no_change
+- reject_playbook
 
 Rules:
 - triage_failure means the triage stage missed the right symptoms; it is not itself a playbook failure.
 - missing_playbook means no relevant diagnosis playbook existed.
 - retrieval_failure means a relevant diagnosis playbook existed but was not selected.
 - playbook_validation_failure means a relevant diagnosis playbook was selected but its verification procedure was insufficient.
-- Prefer no_change over weak guesses.
+- If there are no existing diagnosis playbooks, you must not choose `merge_playbooks`.
+- If `relevant_existing_playbooks` is empty, `primary_failure_mode` cannot be `retrieval_failure` or `playbook_validation_failure`.
+- Use `missing_playbook` when no relevant playbook exists.
+- `merge_playbooks` requires one or more `target_slugs`, and every target slug must come from `relevant_existing_playbooks`.
+- `add_playbook` must not include any target slugs.
+- `reject_playbook` must include a concrete `rejection_reason`.
+- Prefer `reject_playbook` over weak guesses.
 
 Existing diagnosis playbooks:
 {{ diagnosis_cards }}
+
+Recovery-produced diagnosis playbook candidate:
+```json
+{{ candidate_playbook_json }}
+```
 
 <original_run>
 {{ original_run_md }}

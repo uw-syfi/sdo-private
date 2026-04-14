@@ -52,7 +52,6 @@ class StageLoopResult:
     agent_answer: str = ""
     agent_justification: str = ""
     agent_causal_chain: str = ""
-    agent_reflection: str = ""
     stage_outputs_file: Path | None = None
     confirmed_slugs: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
@@ -805,6 +804,8 @@ async def run(
     _append_stage_outcome(diag_result, "Diagnosis")
     original_diag_result = dataclasses.replace(diag_result)
 
+    diagnosis_recovery = None
+
     # Recovery diagnosis: produce a validated causal chain when the benchmark
     # rejected the agent's diagnosis and we want causal chains for KB.
     if (
@@ -812,7 +813,7 @@ async def run(
         and diag_result.benchmark_block
         and "success: False" in diag_result.benchmark_block
     ):
-        recovery = await recovery_agent.run_diagnosis(
+        diagnosis_recovery = await recovery_agent.run_diagnosis(
             app_info=app_info,
             shared_file=diagnosis_sf,
             original_answer=diag_result.agent_answer,
@@ -822,11 +823,24 @@ async def run(
             original_causal_chain=diag_result.agent_causal_chain,
             stage_outputs_file=diag_result.stage_outputs_file,
         )
-        if recovery:
-            diag_result.agent_answer = recovery.answer
-            diag_result.agent_justification = recovery.justification
-            diag_result.agent_causal_chain = recovery.causal_chain
-            diag_result.agent_reflection = recovery.reflection
+        if diagnosis_recovery:
+            diag_result.agent_answer = diagnosis_recovery.submission.answer
+            diag_result.agent_justification = diagnosis_recovery.submission.justification
+            diag_result.agent_causal_chain = diagnosis_recovery.submission.causal_chain
+    diagnosis_playbook_candidate = None
+    if diagnosis_recovery and diagnosis_recovery.message_history:
+        diagnosis_playbook_candidate = await recovery_agent.build_diagnosis_playbook_candidate(
+            app_info=app_info,
+            original_answer=original_diag_result.agent_answer,
+            original_justification=original_diag_result.agent_justification,
+            original_causal_chain=original_diag_result.agent_causal_chain,
+            grounded_answer=diag_result.agent_answer,
+            grounded_justification=diag_result.agent_justification,
+            grounded_causal_chain=diag_result.agent_causal_chain,
+            recovery_message_history=diagnosis_recovery.message_history,
+            usage_collector=recovery_collector,
+            stage_outputs_file=diag_result.stage_outputs_file,
+        )
     if "mitigation" not in planned_stages:
         logger.info("Diagnosis-only problem — orchestrator complete.")
         result = _build_usage_metrics(primary_collector, recovery_collector)
@@ -852,9 +866,11 @@ async def run(
             agent_answer=diag_result.agent_answer,
             agent_justification=diag_result.agent_justification,
             agent_causal_chain=diag_result.agent_causal_chain,
-            agent_reflection=diag_result.agent_reflection,
             benchmark_block=diag_result.benchmark_block,
         ).to_markdown()
+        result["diagnosis_playbook_candidate"] = (
+            diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
+        )
         return result
 
     _init_mitigation_file(
@@ -957,9 +973,8 @@ async def run(
             stage_outputs_file=mit_result.stage_outputs_file,
         )
         if recovery:
-            mit_result.agent_answer = recovery.answer
-            mit_result.agent_justification = recovery.justification
-            mit_result.agent_reflection = recovery.reflection
+            mit_result.agent_answer = recovery.submission.answer
+            mit_result.agent_justification = recovery.submission.justification
 
     logger.info("=" * 60)
     logger.info("CRUCIBLE: Orchestrator complete.")
@@ -988,7 +1003,9 @@ async def run(
         agent_answer=diag_result.agent_answer,
         agent_justification=diag_result.agent_justification,
         agent_causal_chain=diag_result.agent_causal_chain,
-        agent_reflection=diag_result.agent_reflection,
         benchmark_block=diag_result.benchmark_block,
     ).to_markdown()
+    result["diagnosis_playbook_candidate"] = (
+        diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
+    )
     return result

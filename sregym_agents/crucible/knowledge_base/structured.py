@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
 
+    from .incident_review import DiagnosisPlaybookDraft
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,6 +108,22 @@ class StructuredKnowledgeBase(KnowledgeBase):
         original_path.write_text(original_run_md)
         grounded_path.write_text(grounded_run_md)
         return original_path, grounded_path
+
+    def write_diagnosis_playbook_candidate(
+        self,
+        *,
+        timestamp: str,
+        draft: DiagnosisPlaybookDraft,
+    ) -> Path:
+        incidents_root = self.store.paths.incidents_dir
+        if self._config.kb_scope == "per_app":
+            incident_dir = incidents_root / timestamp
+        else:
+            incident_dir = incidents_root / self.app_slug / timestamp
+        incident_dir.mkdir(parents=True, exist_ok=True)
+        candidate_path = incident_dir / "diagnosis_playbook_candidate.json"
+        candidate_path.write_text(json.dumps(draft.model_dump(mode="python"), indent=2) + "\n")
+        return candidate_path
 
     def write_scope_metadata(self) -> None:
         self.store.paths.scope_dir.mkdir(parents=True, exist_ok=True)

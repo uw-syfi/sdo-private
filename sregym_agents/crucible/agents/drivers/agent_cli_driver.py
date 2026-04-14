@@ -288,7 +288,7 @@ class AgentCLIDriver(AgentDriver):
                     "\n\nWhen you have completed your investigation and are "
                     "ready to submit your final answer, call the "
                     "`submit_answer` tool with your answer, justification, "
-                    "causal_chain, and reflection."
+                    "and causal_chain."
                 )
             else:
                 schema = self._get_json_schema(output_type)

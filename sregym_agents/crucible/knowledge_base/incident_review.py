@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 FailureMode = Literal[
     "triage_failure",
@@ -12,7 +12,7 @@ FailureMode = Literal[
     "retrieval_failure",
     "playbook_validation_failure",
 ]
-RecommendedAction = Literal["create_playbook", "refine_playbook", "merge_playbooks", "no_change"]
+RecommendedAction = Literal["add_playbook", "merge_playbooks", "reject_playbook"]
 
 
 class ReviewDecision(BaseModel):
@@ -21,10 +21,41 @@ class ReviewDecision(BaseModel):
     relevant_root_cause_slug: str | None = None
     relevant_existing_playbooks: list[str] = Field(default_factory=list)
     recommended_action: RecommendedAction
-    target_slug: str | None = None
-    merge_slugs: list[str] = Field(default_factory=list)
+    target_slugs: list[str] = Field(default_factory=list)
+    rejection_reason: str | None = None
     reasoning: str
     supporting_evidence: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_action_consistency(self) -> ReviewDecision:
+        if (
+            self.primary_failure_mode in {"retrieval_failure", "playbook_validation_failure"}
+            and not self.relevant_existing_playbooks
+        ):
+            raise ValueError(f"{self.primary_failure_mode} requires at least one relevant existing playbook")
+
+        if self.recommended_action == "add_playbook":
+            if self.target_slugs:
+                raise ValueError("add_playbook cannot specify target_slugs")
+            if self.rejection_reason:
+                raise ValueError("add_playbook cannot specify rejection_reason")
+
+        if self.recommended_action == "merge_playbooks":
+            if not self.target_slugs:
+                raise ValueError("merge_playbooks requires at least one target slug")
+            invalid = sorted(set(self.target_slugs) - set(self.relevant_existing_playbooks))
+            if invalid:
+                raise ValueError(f"target_slugs must be drawn from relevant_existing_playbooks: {invalid}")
+            if self.rejection_reason:
+                raise ValueError("merge_playbooks cannot specify rejection_reason")
+
+        if self.recommended_action == "reject_playbook":
+            if self.target_slugs:
+                raise ValueError("reject_playbook cannot specify target_slugs")
+            if not self.rejection_reason:
+                raise ValueError("reject_playbook requires rejection_reason")
+
+        return self
 
 
 class DiagnosisPlaybookDraft(BaseModel):

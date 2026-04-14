@@ -27,6 +27,7 @@ class KbUpdateTaskDict(TypedDict):
 
     original_run_file: str
     grounded_run_file: str
+    diagnosis_playbook_candidate_file: str
     stage_outputs_file: str | None
     kb_dir: str
     kb_type: str

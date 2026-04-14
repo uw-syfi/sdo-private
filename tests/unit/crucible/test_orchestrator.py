@@ -452,3 +452,45 @@ class TestStageLoopModelHTTPError:
         assert call_count == 2
         content = shared_path.read_text()
         assert "SRE Agent Error" in content
+
+
+class TestOrchestratorRun:
+    @pytest.mark.asyncio
+    async def test_run_skips_recovery_playbook_when_diagnosis_succeeds_initially(self, tmp_path: Path):
+        from sregym_agents.crucible.config import CrucibleConfig
+        from sregym_agents.crucible.orchestrator import StageLoopResult, run
+
+        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
+        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
+        stage_outputs.write_text("# stage outputs\n")
+
+        driver = MagicMock()
+        driver.run = AsyncMock()
+
+        diag_result = StageLoopResult(
+            approved=True,
+            benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>\n",
+            agent_answer="CoreDNS misconfiguration",
+            agent_justification="NXDOMAIN template for the service",
+            agent_causal_chain="coredns template -> NXDOMAIN -> client failures",
+            stage_outputs_file=stage_outputs,
+        )
+
+        with patch("sregym_agents.crucible.orchestrator._run_stage_loop", new=AsyncMock(return_value=diag_result)):
+            result = await run(
+                model="test-model",
+                app_info={"app_name": "Social Network", "namespace": "social-network", "descriptions": ""},
+                problem_id="service_dns_resolution_failure__v_social_network_text-service",
+                diagnosis_shared_file=diagnosis_shared,
+                mitigation_shared_file=mitigation_shared,
+                planned_stages=["diagnosis"],
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=PromptRenderer("v3"),
+                crucible_config=CrucibleConfig(include_benchmark_results=True),
+                driver=driver,
+            )
+
+        assert result["diagnosis_succeeded"] is True
+        assert result["diagnosis_playbook_candidate"] is None
+        assert "CoreDNS misconfiguration" in result["grounded_run_md"]

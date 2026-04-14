@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -40,20 +40,6 @@ class SRESubmission(BaseModel):
             "Full causal chain: misconfigured field → mechanism → observed symptom "
             "(diagnosis stage only). Leave empty for mitigation stage."
         ),
-    )
-    reflection: str = Field(
-        default="",
-        description=(
-            "Recovery only: 2-3 sentence analysis of why the original agent's "
-            "diagnosis or mitigation was wrong — what investigative steps were missed "
-            "or what evidence was misinterpreted, and what lesson follows. "
-            "Leave empty for normal diagnosis and mitigation stages."
-        ),
-    )
-    message_history: list[Any] = Field(
-        default_factory=list,
-        exclude=True,
-        description="Internal only: captured agent message history for follow-on phases.",
     )
 
 
@@ -101,7 +87,6 @@ class SharedState:
     answer: str | None = None
     answer_justification: str | None = None
     answer_causal_chain: str | None = None
-    answer_reflection: str | None = None
     independent_findings_submitted: bool = False
     hypothesis_revealed: bool = False
     benchmark_block: str = ""

@@ -20,7 +20,11 @@ from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     ReviewDecision,
 )
-from sregym_agents.crucible.knowledge_base.root_cause import DiagnosisFrontMatter, DiagnosisPlaybook, RootCauseStore
+from sregym_agents.crucible.knowledge_base.root_cause import (
+    DiagnosisFrontMatter,
+    DiagnosisPlaybook,
+    RootCauseStore,
+)
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
 if TYPE_CHECKING:
@@ -54,6 +58,7 @@ async def _review_failure(
     renderer: PromptRenderer,
     original_run_md: str,
     grounded_run_md: str,
+    candidate_playbook: DiagnosisPlaybookDraft,
     cards: list[DiagnosisFrontMatter],
     usage_collector: UsageCollector,
 ) -> ReviewDecision:
@@ -62,6 +67,7 @@ async def _review_failure(
         diagnosis_cards=_format_cards(cards),
         original_run_md=original_run_md,
         grounded_run_md=grounded_run_md,
+        candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
     )
     result: AgentResult[ReviewDecision] = await driver.run(
         prompt=prompt,
@@ -72,51 +78,30 @@ async def _review_failure(
     return result.unwrap("kb-review-classifier")
 
 
-async def _draft_new_playbook(
+async def _merge_playbooks(
     *,
     driver: AgentDriver,
     renderer: PromptRenderer,
+    candidate_playbook: DiagnosisPlaybookDraft,
+    existing_playbooks: list[DiagnosisPlaybook],
     original_run_md: str,
     grounded_run_md: str,
     usage_collector: UsageCollector,
 ) -> DiagnosisPlaybookDraft:
     prompt = renderer.render(
-        "kb_draft_diagnosis_playbook",
+        "kb_merge_diagnosis_playbooks",
+        candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
+        existing_playbooks_md="\n\n".join(pb.to_markdown() for pb in existing_playbooks),
         original_run_md=original_run_md,
         grounded_run_md=grounded_run_md,
     )
     result: AgentResult[DiagnosisPlaybookDraft] = await driver.run(
         prompt=prompt,
         output_type=DiagnosisPlaybookDraft,
-        agent_name="kb-draft-playbook",
+        agent_name="kb-merge-playbooks",
         usage_collector=usage_collector,
     )
-    return result.unwrap("kb-draft-playbook")
-
-
-async def _refine_playbook(
-    *,
-    driver: AgentDriver,
-    renderer: PromptRenderer,
-    existing_playbook: DiagnosisPlaybook,
-    original_run_md: str,
-    grounded_run_md: str,
-    usage_collector: UsageCollector,
-) -> DiagnosisPlaybookDraft:
-    prompt = renderer.render(
-        "kb_refine_diagnosis_playbook",
-        existing_playbook_md=existing_playbook.to_markdown(),
-        original_run_md=original_run_md,
-        grounded_run_md=grounded_run_md,
-    )
-    result: AgentResult[DiagnosisPlaybookDraft] = await driver.run(
-        prompt=prompt,
-        output_type=DiagnosisPlaybookDraft,
-        agent_name="kb-refine-playbook",
-        usage_collector=usage_collector,
-    )
-    draft = result.unwrap("kb-refine-playbook")
-    return draft.model_copy(update={"slug": existing_playbook.slug})
+    return result.unwrap("kb-merge-playbooks")
 
 
 def _draft_to_playbook(draft: DiagnosisPlaybookDraft) -> DiagnosisPlaybook:
@@ -155,6 +140,9 @@ async def process_task(task_path: Path) -> None:
 
     original_run_md = Path(task["original_run_file"]).read_text()
     grounded_run_md = Path(task["grounded_run_file"]).read_text()
+    candidate_playbook = DiagnosisPlaybookDraft.model_validate(
+        json.loads(Path(task["diagnosis_playbook_candidate_file"]).read_text())
+    )
     cards = store.list_active_diagnosis_cards()
 
     collector = UsageCollector()
@@ -163,34 +151,41 @@ async def process_task(task_path: Path) -> None:
         renderer=renderer,
         original_run_md=original_run_md,
         grounded_run_md=grounded_run_md,
+        candidate_playbook=candidate_playbook,
         cards=cards,
         usage_collector=collector,
     )
     logger.info("KB review decision for %s: %s", task["problem_id"], decision.model_dump_json(indent=2))
 
-    if decision.recommended_action == "create_playbook":
-        draft = await _draft_new_playbook(
-            driver=kb_driver,
-            renderer=renderer,
-            original_run_md=original_run_md,
-            grounded_run_md=grounded_run_md,
-            usage_collector=collector,
-        )
-        store.save_diagnosis(_draft_to_playbook(draft), created_from=task["problem_id"])
-    elif decision.recommended_action == "refine_playbook" and decision.target_slug:
-        existing = store.load_diagnosis(decision.target_slug)
-        if existing is not None:
-            draft = await _refine_playbook(
+    if decision.recommended_action == "add_playbook":
+        store.save_diagnosis(_draft_to_playbook(candidate_playbook), created_from=task["problem_id"])
+    elif decision.recommended_action == "merge_playbooks":
+        existing_playbooks = [store.load_diagnosis(slug) for slug in decision.target_slugs]
+        existing_playbooks = [playbook for playbook in existing_playbooks if playbook is not None]
+        if existing_playbooks:
+            draft = await _merge_playbooks(
                 driver=kb_driver,
                 renderer=renderer,
-                existing_playbook=existing,
+                candidate_playbook=candidate_playbook,
+                existing_playbooks=existing_playbooks,
                 original_run_md=original_run_md,
                 grounded_run_md=grounded_run_md,
                 usage_collector=collector,
             )
-            store.save_diagnosis(_draft_to_playbook(draft), created_from=task["problem_id"])
+            canonical_slug = decision.target_slugs[0]
+            merged = _draft_to_playbook(draft.model_copy(update={"slug": canonical_slug}))
+            merged_from = [candidate_playbook.slug, *decision.target_slugs[1:]]
+            store.save_diagnosis(merged, created_from=task["problem_id"], merged_from=merged_from)
+            for merged_slug in decision.target_slugs[1:]:
+                meta = store.load_meta(merged_slug)
+                store.save_meta(meta.model_copy(update={"status": "deprecated"}))
+            store.refresh_manifest()
     else:
-        logger.info("No KB mutation applied for %s (action=%s)", task["problem_id"], decision.recommended_action)
+        logger.info(
+            "No KB mutation applied for %s (action=%s)",
+            task["problem_id"],
+            decision.recommended_action,
+        )
 
     completed_task_path = move_to_completed(task_path, Path(task["kb_dir"]))
     completed_task_path.with_suffix(".usage.json").write_text(

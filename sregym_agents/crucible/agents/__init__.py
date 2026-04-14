@@ -19,7 +19,7 @@ from sregym_agents.crucible.agents.base import (
 from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import PydanticAIDriver
 from sregym_agents.crucible.agents.judge_agent import JudgeAgent
-from sregym_agents.crucible.agents.recovery_agent import RecoveryAgent
+from sregym_agents.crucible.agents.recovery_agent import RecoveryAgent, RecoveryRunResult
 from sregym_agents.crucible.agents.sre_agent import SREAgent, SREAgentConfig
 
 __all__ = [
@@ -29,6 +29,7 @@ __all__ = [
     "JudgeAgent",
     "PydanticAIDriver",
     "RecoveryAgent",
+    "RecoveryRunResult",
     "RunSubagent",
     "SREAgent",
     "SREAgentConfig",

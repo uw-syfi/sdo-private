@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
+from sregym_agents.crucible.agents.recovery_agent import RecoveryAgent, RecoveryRunResult
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
+from sregym_agents.crucible.tools import SharedFile, SRESubmission
+
+
+class _FakeDriver(AgentDriver):
+    def __init__(self, output: Any):
+        self.output = output
+        self.calls: list[dict[str, Any]] = []
+
+    async def run(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str = "",
+        tools: list[Any] | None = None,
+        output_type: type[Any] = str,
+        agent_name: str = "",
+        timeout: int | None = None,
+        model_settings: dict[str, Any] | None = None,
+        message_history: list[Any] | None = None,
+        usage_collector: Any | None = None,
+        **kwargs: Any,
+    ) -> AgentResult[Any]:
+        self.calls.append(kwargs)
+        return AgentResult(output=self.output)
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_builds_diagnosis_playbook_candidate():
+    driver = _FakeDriver(
+        DiagnosisPlaybookDraft(
+            slug="coredns-nxdomain",
+            root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+            when_to_consider=["Application logs show service-hostname resolution failures."],
+            disambiguators=["Backend services exist but lookups still return NXDOMAIN."],
+            summary="Check whether cluster DNS is intentionally returning NXDOMAIN for service names.",
+            triage_checks=["1. Inspect application logs for host-resolution errors."],
+            verification_checks=["1. Inspect CoreDNS configuration for matching NXDOMAIN rules."],
+            required_evidence=["CoreDNS config contains a rule matching the failing service FQDN."],
+            known_confounders=["The Service object is missing."],
+        )
+    )
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_diagnosis_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        original_answer="Pod networking is broken.",
+        grounded_answer="ConfigMap/coredns returns NXDOMAIN for post-storage-service.social-network.svc.cluster.local.",
+        grounded_justification="kubectl showed CoreDNS template rules for the failing service FQDN.",
+        grounded_causal_chain="CoreDNS rule -> NXDOMAIN -> app cannot resolve backend service names.",
+        recovery_message_history=[{"role": "assistant", "content": "grounded diagnosis context"}],
+    )
+
+    assert candidate is not None
+    assert candidate.slug == "coredns-nxdomain"
+    assert driver.calls[0]["agent_name"] == "recovery-diagnosis-playbook"
+    assert driver.calls[0]["message_history"] == [{"role": "assistant", "content": "grounded diagnosis context"}]
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_skips_playbook_candidate_without_grounded_diagnosis():
+    driver = _FakeDriver(None)
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_diagnosis_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        original_answer="Pod networking is broken.",
+        grounded_answer="",
+        grounded_justification="",
+    )
+
+    assert candidate is None
+    assert driver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_returns_wrapper_with_submission_and_history(tmp_path):
+    driver = _FakeDriver(SRESubmission(answer="root cause", justification="evidence", causal_chain="A -> B -> C"))
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+    shared_path = tmp_path / "shared.md"
+    shared_path.write_text("")
+
+    result = await agent.run_diagnosis(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        shared_file=SharedFile(shared_path),
+        original_answer="wrong answer",
+        benchmark_block=(
+            '<benchmark_result><oracle>{"Diagnosis":{"reasoning":"actual root cause"}}</oracle></benchmark_result>'
+        ),
+    )
+
+    assert isinstance(result, RecoveryRunResult)
+    assert result is not None
+    assert result.submission.answer == "root cause"
+    assert result.submission.justification == "evidence"
+    assert result.message_history == []

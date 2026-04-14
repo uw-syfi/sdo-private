@@ -1,0 +1,17 @@
+You are converting a completed grounded Kubernetes incident diagnosis into a reusable diagnosis playbook.
+
+Your job is to produce a diagnosis playbook candidate that generalizes the solved root cause into:
+- when to consider it
+- how to disambiguate it
+- what triage and verification steps reliably confirm it
+- what evidence must be present
+
+Requirements:
+- Base the playbook on the grounded diagnosis, not the original incorrect diagnosis.
+- Keep the playbook reusable across incidents; avoid one-off narrative phrasing.
+- Preserve concrete technical specificity where it matters (resource type, field, wrong value pattern, mechanism).
+- Do not include mitigation steps.
+- `slug` should be stable, concise, and rooted in the root cause class.
+- `when_to_consider` and `disambiguators` must each contain at least one item.
+- `triage_checks` and `verification_checks` must each contain at least one numbered step.
+- `required_evidence` must contain at least one bullet-worthy evidence item.

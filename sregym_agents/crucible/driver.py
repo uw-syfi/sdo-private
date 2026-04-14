@@ -19,16 +19,17 @@ from typing import TYPE_CHECKING, Any, cast
 
 import requests
 
-if TYPE_CHECKING:
-    from sregym_agents.crucible.agents.base import AgentDriver
-    from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
-
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
 from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, create_knowledge_base
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
+
+if TYPE_CHECKING:
+    from sregym_agents.crucible.agents.base import AgentDriver
+    from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
 logging.basicConfig(
     level=logging.INFO,
@@ -319,6 +320,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     mitigation_succeeded = bool(usage_metrics.get("mitigation_succeeded", False))
     original_run_md = str(usage_metrics.get("original_run_md", ""))
     grounded_run_md = str(usage_metrics.get("grounded_run_md", ""))
+    diagnosis_playbook_candidate_data = usage_metrics.get("diagnosis_playbook_candidate")
 
     if args.logs_dir:
         assert logs_dir is not None
@@ -338,6 +340,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         original_run_path = None
         grounded_run_path = None
+        diagnosis_playbook_candidate_path = None
         if kb_type == "structured":
             structured_kb = cast("StructuredKnowledgeBase", kb)
             original_run_path, grounded_run_path = structured_kb.write_incident_records(
@@ -345,6 +348,12 @@ async def _async_main(args: argparse.Namespace) -> None:
                 original_run_md=original_run_md,
                 grounded_run_md=grounded_run_md,
             )
+            if diagnosis_playbook_candidate_data:
+                draft = DiagnosisPlaybookDraft.model_validate(diagnosis_playbook_candidate_data)
+                diagnosis_playbook_candidate_path = structured_kb.write_diagnosis_playbook_candidate(
+                    timestamp=timestamp,
+                    draft=draft,
+                )
 
         # Copy stage_outputs_file to logs_dir so it survives exp_env cleanup
         saved_stage_outputs: str | None = None
@@ -355,10 +364,11 @@ async def _async_main(args: argparse.Namespace) -> None:
             saved_stage_outputs = str(dest)
             logger.info(f"Saved stage outputs to {dest}")
 
-        if original_run_path and grounded_run_path:
+        if original_run_path and grounded_run_path and diagnosis_playbook_candidate_path:
             task_payload: dict[str, Any] = {
                 "original_run_file": str(original_run_path),
                 "grounded_run_file": str(grounded_run_path),
+                "diagnosis_playbook_candidate_file": str(diagnosis_playbook_candidate_path),
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
@@ -375,7 +385,10 @@ async def _async_main(args: argparse.Namespace) -> None:
 
             ensure_kb_worker(Path(args.kb_dir))
         else:
-            logger.info("Knowledge base: no incident records produced; skipping async review enqueue.")
+            logger.info(
+                "Knowledge base: missing incident artifacts or "
+                "diagnosis playbook candidate; skipping async review enqueue."
+            )
 
     logger.info("Crucible driver complete.")
 

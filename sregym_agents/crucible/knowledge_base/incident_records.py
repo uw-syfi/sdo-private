@@ -98,8 +98,6 @@ class GroundedRunRecord:
     """Justification produced by the grounded run for the corrected diagnosis."""
     agent_causal_chain: str
     """Causal chain established by the grounded run."""
-    agent_reflection: str
-    """Reflection explaining why the original workflow failed."""
     benchmark_block: str
     """Raw benchmark/oracle block associated with the grounded run."""
 
@@ -115,7 +113,6 @@ class GroundedRunRecord:
             + f"Answer: {self.agent_answer or '(none)'}\n\n"
             + f"Justification: {self.agent_justification or '(none)'}\n\n"
             + f"Causal Chain: {self.agent_causal_chain or '(none)'}",
-            "## Reflection\n" + (self.agent_reflection or "(none)"),
             "## Benchmark Result\n" + (self.benchmark_block.strip() or "(none)"),
         ]
         return f"---\n{_render_front_matter(meta)}\n---\n\n# Grounded Diagnosis Run\n\n" + "\n\n".join(sections) + "\n"

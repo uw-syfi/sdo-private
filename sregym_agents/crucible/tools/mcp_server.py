@@ -136,7 +136,6 @@ def register_sre_tools(
             answer: str,
             justification: str,
             causal_chain: str = "",
-            reflection: str = "",
         ) -> str:
             """Submit your final answer when you have completed your investigation.
 
@@ -144,7 +143,6 @@ def register_sre_tools(
                 answer: Concise diagnosis or description of applied mitigation.
                 justification: Evidence and reasoning supporting the answer.
                 causal_chain: Full causal chain (diagnosis only). Leave empty for mitigation.
-                reflection: Recovery analysis (recovery only). Usually leave empty.
             """
             _write_result_file(
                 result_file_path,
@@ -154,7 +152,6 @@ def register_sre_tools(
                         "answer": answer,
                         "justification": justification,
                         "causal_chain": causal_chain,
-                        "reflection": reflection,
                     },
                 },
             )
