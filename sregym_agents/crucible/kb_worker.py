@@ -114,6 +114,7 @@ def _draft_to_playbook(draft: DiagnosisPlaybookDraft) -> DiagnosisPlaybook:
         ),
         summary=draft.summary,
         triage_checks=draft.triage_checks,
+        fault_localization_checks=draft.fault_localization_checks,
         verification_checks=draft.verification_checks,
         required_evidence=draft.required_evidence,
         known_confounders=draft.known_confounders,

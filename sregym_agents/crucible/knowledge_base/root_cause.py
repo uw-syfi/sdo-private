@@ -105,6 +105,7 @@ class DiagnosisPlaybook(BaseModel):
     front_matter: DiagnosisFrontMatter
     summary: str
     triage_checks: list[str] = Field(default_factory=list)
+    fault_localization_checks: list[str] = Field(default_factory=list)
     verification_checks: list[str] = Field(default_factory=list)
     required_evidence: list[str] = Field(default_factory=list)
     known_confounders: list[str] = Field(default_factory=list)
@@ -121,12 +122,20 @@ class DiagnosisPlaybook(BaseModel):
         sections = _extract_sections(body)
         violations = [
             f"missing section '## {section}'"
-            for section in ("Summary", "Triage Checks", "Verification Checks", "Required Evidence", "Known Confounders")
+            for section in (
+                "Summary",
+                "Triage Checks",
+                "Fault Localization",
+                "Verification Checks",
+                "Required Evidence",
+                "Known Confounders",
+            )
             if section not in sections
         ]
         if violations:
             raise RootCauseValidationError(violations)
         triage_checks = _parse_numbered(sections.get("Triage Checks", ""))
+        fault_localization_checks = _parse_numbered(sections.get("Fault Localization", ""))
         verification_checks = _parse_numbered(sections.get("Verification Checks", ""))
         required_evidence = _parse_bullets(sections.get("Required Evidence", ""))
         known_confounders = _parse_bullets(sections.get("Known Confounders", ""))
@@ -136,6 +145,8 @@ class DiagnosisPlaybook(BaseModel):
             violations.append("front matter 'disambiguators' must contain at least one item")
         if not triage_checks:
             violations.append("'## Triage Checks' must contain at least one numbered step")
+        if not fault_localization_checks:
+            violations.append("'## Fault Localization' must contain at least one numbered step")
         if not verification_checks:
             violations.append("'## Verification Checks' must contain at least one numbered step")
         if not required_evidence:
@@ -146,6 +157,7 @@ class DiagnosisPlaybook(BaseModel):
             front_matter=fm,
             summary=sections.get("Summary", "").strip(),
             triage_checks=triage_checks,
+            fault_localization_checks=fault_localization_checks,
             verification_checks=verification_checks,
             required_evidence=required_evidence,
             known_confounders=known_confounders,
@@ -166,6 +178,7 @@ class DiagnosisPlaybook(BaseModel):
                 "# Diagnosis Playbook",
                 "## Summary\n" + self.summary.strip(),
                 "## Triage Checks\n" + _render_numbered(self.triage_checks),
+                "## Fault Localization\n" + _render_numbered(self.fault_localization_checks),
                 "## Verification Checks\n" + _render_numbered(self.verification_checks),
                 "## Required Evidence\n" + _render_bullets(self.required_evidence, checkbox=True),
                 "## Known Confounders\n" + _render_bullets(self.known_confounders),

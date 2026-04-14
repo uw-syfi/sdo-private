@@ -65,6 +65,7 @@ class DiagnosisPlaybookDraft(BaseModel):
     disambiguators: list[str]
     summary: str
     triage_checks: list[str]
+    fault_localization_checks: list[str]
     verification_checks: list[str]
     required_evidence: list[str]
     known_confounders: list[str] = Field(default_factory=list)

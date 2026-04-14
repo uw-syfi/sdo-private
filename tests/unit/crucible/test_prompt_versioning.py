@@ -26,3 +26,20 @@ def test_render_raises_on_missing_variable() -> None:
     with pytest.raises(jinja2.UndefinedError):
         # diagnosis_agent_user requires many variables — omit most to trigger the error.
         renderer.render("diagnosis_agent_user", app_name="test", namespace="test")
+
+
+def test_v3_recovery_diagnosis_playbook_prompt_requires_localization_first_verification() -> None:
+    renderer = PromptRenderer("v3")
+
+    prompt = renderer.render("recovery_diagnosis_playbook_system")
+
+    assert "Do not assume the symptom-bearing component is the faulting component." in prompt
+    assert "`fault_localization_checks` must help an agent move from observed symptoms" in prompt
+    assert "Structure `fault_localization_checks` as a generic target-selection procedure" in prompt
+    assert "map it to the serving or entrypoint component" in prompt
+    assert "enumerate downstream dependencies on the active path" in prompt
+    assert "prefer role-based placeholders" in prompt
+    assert "the chosen target is actually on the failing path" in prompt
+    assert "The final diagnosis playbook file should have the following shape" in prompt
+    assert "## Fault Localization" in prompt
+    assert "`fault_localization_checks` populates `## Fault Localization`" in prompt

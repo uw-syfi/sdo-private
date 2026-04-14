@@ -30,7 +30,20 @@ class _FakeDriver(AgentDriver):
         usage_collector: Any | None = None,
         **kwargs: Any,
     ) -> AgentResult[Any]:
-        self.calls.append(kwargs)
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+                "tools": tools,
+                "output_type": output_type,
+                "agent_name": agent_name,
+                "timeout": timeout,
+                "model_settings": model_settings,
+                "message_history": message_history,
+                "usage_collector": usage_collector,
+                **kwargs,
+            }
+        )
         return AgentResult(output=self.output)
 
 
@@ -44,6 +57,7 @@ async def test_recovery_agent_builds_diagnosis_playbook_candidate():
             disambiguators=["Backend services exist but lookups still return NXDOMAIN."],
             summary="Check whether cluster DNS is intentionally returning NXDOMAIN for service names.",
             triage_checks=["1. Inspect application logs for host-resolution errors."],
+            fault_localization_checks=["1. Trace the failing request path to the dependent backend hostname."],
             verification_checks=["1. Inspect CoreDNS configuration for matching NXDOMAIN rules."],
             required_evidence=["CoreDNS config contains a rule matching the failing service FQDN."],
             known_confounders=["The Service object is missing."],
