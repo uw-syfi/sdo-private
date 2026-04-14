@@ -259,14 +259,36 @@ class RLMDeploymentAgent(dspy.Module):
         max_attempts: int,
     ) -> None:
         """Use RLM to analyze full error output and apply targeted fixes."""
+        sds_dir = os.path.join(repo_path, ".sds")
+        logs_dir = os.path.join(sds_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+
+        deploy_log_path = os.path.join(logs_dir, f"deploy_attempt_{attempt}.log")
+        with open(deploy_log_path, "w") as f:
+            f.write(error_output)
+
+        progress_path = os.path.join(sds_dir, "deployment_progress.md")
+
         error_context = (
             f"repo_path: {repo_path}\n"
             f"deploy_path: {deploy_path}\n"
             f"health_path: {health_path}\n"
+            f"deploy_log_path: {deploy_log_path}\n"
+            f"deployment_progress_path: {progress_path}\n"
             f"attempt: {attempt}\n"
             f"max_attempts: {max_attempts}\n"
+            f"\n"
+            f"INSTRUCTIONS:\n"
+            f"1. Read the deploy log file ({deploy_log_path}) FIRST for full error output.\n"
+            f"2. Read {progress_path} to check previous hypotheses — do NOT re-try "
+            f"any approach marked 'refuted' or 'partial'.\n"
+            f"3. Write your hypothesis to {progress_path} BEFORE applying fixes.\n"
+            f"4. Read scripts COMPLETELY before editing — make TARGETED fixes only.\n"
+            f"5. NEVER rewrite deploy.sh, health_check.sh, or docker-compose.yml from scratch.\n"
+            f"\n"
             f"---ERROR_OUTPUT_START---\n{error_output}\n---ERROR_OUTPUT_END---\n"
             f"---FIX_HISTORY_START---\n{self._fix_history.text or 'none'}\n---FIX_HISTORY_END---\n"
+            f"\n"
             f"IMPORTANT: You do NOT have access to run_shell in this repair context. "
             f"Only read_file() and write_file() are available. Do not attempt to run "
             f"deployment commands — the pipeline handles deployment automatically.\n"

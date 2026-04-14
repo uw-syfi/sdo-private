@@ -66,13 +66,23 @@ class GenerateDeployScript(dspy.Signature):
             "Docker Compose REJECTS uppercase in project names.\n"
             "- Case-statement CLI parsing $1: start|stop|restart|status|logs|build|cleanup. "
             "No flags or getopts. No interactive prompts. Exit 0 on success, non-zero on failure.\n"
-            '- Pass --project-name "$PROJECT_NAME" to every docker compose command.\n'
+            '- Pass --project-name "$PROJECT_NAME" to EVERY docker compose command.\n'
             '- start MUST use: docker compose --project-name "$PROJECT_NAME" up --build -d\n'
-            "- Use 'docker compose' (v2, space-separated), never docker-compose (hyphen) or sudo.\n"
-            "- Create one named Docker network shared by all services.\n"
+            "  (--build forces source compilation for every service with a Dockerfile).\n"
+            "- Use 'docker compose' (v2, space-separated), NEVER docker-compose (hyphen) or sudo.\n"
+            "- Create one named Docker network; reference it in every service's networks: key.\n"
+            "- Infrastructure services (DB, cache, MQ): use pre-built images, NO exposed ports, "
+            "communicate over Docker network only.\n"
+            "- Application services with source code: MUST use build: context pointing to local "
+            "Dockerfile. NEVER use pre-built images for services with code in the repo.\n"
+            "- NEVER add healthcheck: blocks to docker-compose.yml — all health check logic "
+            "goes in health_check.sh. Use depends_on: condition: service_started (not service_healthy).\n"
+            "- NEVER run build tools on host — all compilation in Dockerfile multi-stage builds.\n"
+            "- NEVER expose ports except the single user-facing entry point (frontend/gateway). "
+            "All internal services communicate over the Docker network.\n"
             "- If no docker-compose.yml exists: embed a generate_compose() shell function that "
             "writes docker-compose.yml from Dockerfiles and code analysis; call it before "
-            "docker compose up. Include healthchecks and depends_on where possible.\n"
+            "docker compose up.\n"
             "- Reconcile code analysis against deployment config: verify services, ports, "
             "startup order; flag missing/phantom services or mismatches."
         )
@@ -97,12 +107,23 @@ class GenerateHealthCheckScript(dspy.Signature):
             "PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]'). "
             "Docker Compose REJECTS uppercase in project names. "
             "Do NOT cd to the script's own directory.\n"
-            '- Pass --project-name "$PROJECT_NAME" to every docker compose command; '
-            "never use plain docker ps, docker-compose (hyphen), kubectl, Helm, or sudo.\n"
-            "- Check container status via 'docker compose ps'.\n"
-            "- Check HTTP endpoints ONLY on ports explicitly exposed in docker-compose "
-            "(host-mapped ports) using 'curl -sf -o /dev/null'. Do NOT grep response bodies "
-            "or assume paths like /actuator/health unless code analysis confirms them.\n"
+            '- Pass --project-name "$PROJECT_NAME" to EVERY docker compose command; '
+            "NEVER use plain docker ps, docker-compose (hyphen), kubectl, Helm, or sudo.\n"
+            "\n"
+            "CRITICAL — Host vs Container networking:\n"
+            "- NEVER curl Docker service names from the host (e.g. curl http://server:5000 "
+            "— this ALWAYS FAILS because Docker service names only resolve inside the "
+            "Docker network, not on the host).\n"
+            "- Container status: docker compose --project-name $PROJECT_NAME ps\n"
+            "- Host-port check: curl localhost:EXPOSED_PORT (ONLY for ports explicitly mapped "
+            "to the host in docker-compose.yml ports: section).\n"
+            "- Inter-service check: docker compose --project-name $PROJECT_NAME exec SERVICE "
+            "curl http://OTHER_SERVICE:CONTAINER_PORT\n"
+            "- Container logs: docker compose --project-name $PROJECT_NAME logs --tail=20 SERVICE "
+            "to check for crash signals.\n"
+            "\n"
+            "- Do NOT grep response bodies or assume paths like /actuator/health unless "
+            "code analysis confirms them.\n"
             "- Detect service count dynamically from docker compose ps; do not hardcode.\n"
             "- Track total/passed/failed/warnings; print summary with health score.\n"
             "- Use retries with backoff for slow-starting services.\n"
@@ -119,18 +140,49 @@ class GenerateHealthCheckScript(dspy.Signature):
 class JudgeHealthCheck(dspy.Signature):
     """Assess whether a deployed application is healthy.
 
-    Run the health check script, independently verify with platform commands
-    (docker compose ps, logs, curl), fix the script if it is buggy, and
-    validate that all services with Dockerfiles are built from source.
+    Two-pronged verification:
+    1. Run .sds/health_check.sh and observe exit code + output.
+    2. Independently verify with platform commands — do NOT trust the script
+       blindly. A passing script does NOT guarantee the app is healthy.
+
+    Independent verification (Docker):
+    - docker compose ps — check for Restarting, Exit, unhealthy
+    - docker compose logs --tail=50 — check for errors, panics, crash loops
+    - curl localhost:EXPOSED_PORT for host-mapped ports
+
+    Source-build compliance:
+    - Find all Dockerfiles in the repo. Each represents a service that must be
+      built from source.
+    - Verify deploy.sh contains a build step for each (--build flag or equivalent).
+    - Exempt infrastructure (mongo, mysql, redis, rabbitmq, kafka, etc.).
+    - If any non-exempt service has a Dockerfile but no build step, mark unhealthy.
+
+    Signal recognition:
+    - Restarting/CrashLoopBackOff → entrypoint failing
+    - Exit 137 → OOMKill; Exit 139 → SIGSEGV
+    - connection refused → wrong port or service not listening
+    - no such host → DNS failure, wrong hostname
+    - No logs after start → crash before logging initialized
+
+    If the script disagrees with independent checks, fix the script first,
+    re-run it, and repeat until script output matches reality.
     """
 
     repo_path: str = dspy.InputField(desc="Absolute path to the repository root")
     deploy_output: str = dspy.InputField(desc="Stdout/stderr from deploy.sh start")
     platform: str = dspy.InputField(desc="Deployment platform: docker or k8s")
 
-    healthy: bool = dspy.OutputField(desc="Whether the application is healthy")
-    assessment: str = dspy.OutputField(desc="What the script reported vs what was independently observed")
-    diagnosis: str = dspy.OutputField(desc="If unhealthy: symptoms and root causes. If healthy: empty string")
+    healthy: bool = dspy.OutputField(
+        desc="Whether the application is healthy based on BOTH script and independent verification"
+    )
+    assessment: str = dspy.OutputField(
+        desc="What the script reported vs what was independently observed, any discrepancies, what was fixed"
+    )
+    diagnosis: str = dspy.OutputField(
+        desc="If unhealthy: concise list of which components are unhealthy and what symptoms "
+        "(e.g. 'mongodb: CrashLoopBackOff exit 137; frontend: connection refused on 8080'). "
+        "If healthy: empty string"
+    )
     script_was_fixed: bool = dspy.OutputField(desc="Whether health_check.sh was modified")
 
 
@@ -218,9 +270,43 @@ class AnalyzeCodebaseRLM(dspy.Signature):
 
     You have the repo_path variable available. Use the provided tools
     (read_file, list_files, run_shell) to explore the repository
-    programmatically. Read Dockerfiles, docker-compose files, package.json,
-    requirements.txt, and source code to identify services, ports,
-    dependencies, and potential deployment issues.
+    programmatically.
+
+    Follow this phased analysis process:
+
+    Phase 1: Repository Structure Discovery
+    - Identify project type (monorepo vs multi-repo) and build system
+    - Enumerate all services via build markers (**/pom.xml, **/package.json,
+      **/go.mod, **/Cargo.toml, **/Dockerfile)
+
+    Phase 2: Deep Service Analysis
+    For EACH service discovered:
+    - Find its Dockerfile; check COPY/ADD source paths relative to build context
+    - Check CMD/ENTRYPOINT — if missing, the service needs a command: override
+    - Identify technology stack, framework, exposed ports, env vars
+    - Check dependency files (requirements.txt, package.json, pom.xml) for
+      known version conflicts
+    - Find health check endpoints in source code
+
+    Phase 3: Infrastructure Configuration
+    - Analyze docker-compose.yml: compare declared services vs discovered services
+    - Check for port conflicts, env var completeness, volume mounts, networks
+    - Analyze any Kubernetes manifests or Helm charts if present
+
+    Phase 4: Dependency Graph Construction
+    - Map service dependencies and startup order
+    - Identify database ownership per service
+
+    Phase 5: Issue Detection
+    CRITICAL CHECKS:
+    - If a single Dockerfile is shared across multiple services (build args
+      pattern), flag that each service needs explicit command: in docker-compose.yml
+    - Check requirements.txt/package.json for known incompatible versions
+    - Verify COPY/ADD source paths exist relative to expected build context
+    - Identify health check endpoints for each service
+    - Detect phantom services (in compose but no code/Dockerfile)
+    - Detect missing services (in code but not in compose)
+    - Check for hardcoded connection strings and IPs
     """
 
     repo_path: str = dspy.InputField(desc="Absolute path to the repository to analyze")
@@ -229,8 +315,8 @@ class AnalyzeCodebaseRLM(dspy.Signature):
         desc=(
             "Structured markdown analysis covering: executive summary, services inventory "
             "table (name/tech/port/database/dependencies), per-service details (port, health "
-            "endpoint, env vars), database requirements, ASCII dependency graph, recommended "
-            "startup order, and environment variables summary"
+            "endpoint, env vars, Dockerfile location, CMD/ENTRYPOINT), database requirements, "
+            "ASCII dependency graph, recommended startup order, and environment variables summary"
         )
     )
     issues: str = dspy.OutputField(
@@ -253,13 +339,47 @@ class RepairDeploymentErrorRLM(dspy.Signature):
     """Debug and fix a failed deployment by analyzing error output and editing scripts.
 
     The error_context contains key-value pairs at the top (repo_path, deploy_path,
-    health_path, attempt, max_attempts) followed by ERROR_OUTPUT between
-    ---ERROR_OUTPUT_START--- and ---ERROR_OUTPUT_END--- markers, and FIX_HISTORY
-    between ---FIX_HISTORY_START--- and ---FIX_HISTORY_END--- markers.
+    health_path, deploy_log_path, deployment_progress_path, attempt, max_attempts)
+    followed by ERROR_OUTPUT between ---ERROR_OUTPUT_START--- and ---ERROR_OUTPUT_END---
+    markers, and FIX_HISTORY between ---FIX_HISTORY_START--- and ---FIX_HISTORY_END---
+    markers.
 
-    Use the provided tools (read_file, write_file) to read the current scripts,
-    analyze what went wrong, and write fixes. Do NOT rewrite scripts from scratch
-    — make targeted fixes based on evidence from the error output.
+    WORKFLOW:
+    1. Read the deploy log file (deploy_log_path) FIRST for full error output
+    2. Read deployment_progress.md to check previous hypotheses — do NOT re-try
+       any approach marked "refuted" or "partial"
+    3. Write your hypothesis to deployment_progress.md BEFORE applying fixes
+    4. Read deploy.sh and health_check.sh COMPLETELY before editing
+    5. Make TARGETED fixes based on evidence — form hypothesis, verify, fix
+    6. After fixing, validate with: docker compose config --quiet (if available)
+
+    INVARIANTS (apply in every repair session):
+    1. NEVER run build tools on host — all compilation in Dockerfile
+    2. NEVER rewrite deploy.sh, health_check.sh, or docker-compose.yml from scratch
+       — make targeted edits only (read the file, find the broken line, fix only that line)
+    3. Read files COMPLETELY before editing — verify full content
+    4. NEVER drop or change --project-name from docker compose commands
+    5. NEVER add healthcheck: blocks to docker-compose.yml
+    6. NEVER use sudo, docker-compose (hyphen form), or pre-built images for app services
+    7. NEVER expose ports except the single user-facing entry point
+    8. Use POSIX-compatible sed: [[:space:]] not \\s, sed -E for extended regex
+
+    SIGNAL RECOGNITION:
+    - Restarting/CrashLoopBackOff → entrypoint failure (check CMD/command)
+    - Exit 137 → OOMKill (increase memory limit)
+    - Exit 139 → SIGSEGV (binary crash)
+    - "connection refused" → wrong port or service not listening
+    - "no such host" → DNS failure, wrong hostname in config
+    - "Dockerfile not found" → wrong build context path
+    - "COPY failed: file not found" → build context doesn't contain referenced files
+    - "address already in use" → port conflict, remove ports: mapping
+
+    COMMON PATTERNS:
+    - Phantom services: service in compose has no code/Dockerfile → remove it
+    - Missing CMD: shared Dockerfile needs per-service command: override in compose
+    - Build context mismatch: context should be parent of Dockerfile, containing all
+      COPY sources
+    - DNS failure: service not on shared Docker network, or hostname typo
 
     CRITICAL: run_shell is NOT available. Do NOT run deploy.sh, docker compose up,
     or any deployment commands. The outer pipeline re-runs deployment automatically
@@ -269,7 +389,8 @@ class RepairDeploymentErrorRLM(dspy.Signature):
     error_context: str = dspy.InputField(
         desc=(
             "Structured context with key-value pairs (repo_path, deploy_path, "
-            "health_path, attempt, max_attempts) followed by error output between "
+            "health_path, deploy_log_path, deployment_progress_path, attempt, "
+            "max_attempts) followed by error output between "
             "---ERROR_OUTPUT_START/END--- markers and fix history between "
             "---FIX_HISTORY_START/END--- markers"
         )
@@ -278,7 +399,10 @@ class RepairDeploymentErrorRLM(dspy.Signature):
     fix_summary: str = dspy.OutputField(
         desc=(
             "Brief summary of what issue(s) were found and what fix(es) were applied. "
-            "Workflow: read scripts, analyze error, make targeted fixes, verify."
+            "Workflow: (1) read deploy log and deployment_progress.md; "
+            "(2) form hypothesis and write to deployment_progress.md; "
+            "(3) read scripts completely; (4) make targeted fixes; "
+            "(5) never rewrite files from scratch."
         )
     )
 

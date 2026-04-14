@@ -99,6 +99,8 @@ class TestRepairErrorContext:
         assert "repo_path:" in ctx
         assert "deploy_path:" in ctx
         assert "health_path:" in ctx
+        assert "deploy_log_path:" in ctx
+        assert "deployment_progress_path:" in ctx
         assert "attempt:" in ctx
         assert "max_attempts:" in ctx
         assert "---ERROR_OUTPUT_START---" in ctx
@@ -106,6 +108,21 @@ class TestRepairErrorContext:
         assert "---FIX_HISTORY_START---" in ctx
         assert "---FIX_HISTORY_END---" in ctx
         assert "do NOT have access to run_shell" in ctx
+
+    @patch("app_operator_dspy.agents.rlm_deployer.run_shell")
+    def test_deploy_log_written_to_disk(self, mock_shell, tmp_path):
+        mock_shell.side_effect = [
+            _shell_fail("Exit code: 1\nStderr:\nport in use"),
+            _shell_ok(),  # cleanup
+            _shell_ok(),  # deploy success
+        ]
+        agent = _mock_rlm_agent()
+
+        agent.forward(str(tmp_path), "analysis", "issues", max_attempts=3)
+
+        log_path = tmp_path / ".sds" / "logs" / "deploy_attempt_1.log"
+        assert log_path.exists()
+        assert "port in use" in log_path.read_text()
 
 
 class TestPostProcessScripts:
