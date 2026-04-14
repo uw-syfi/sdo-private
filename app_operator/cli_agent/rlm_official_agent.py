@@ -22,10 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from app_operator.cli_agent._rlm_utils import _FILE_GEN_RE, _FIX_ERROR_RE
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
-from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 if TYPE_CHECKING:
     from libs.agent_cli.events import AgentEventHandler
@@ -101,10 +99,19 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
             return [msg]
 
     def run_shell(cmd: str, timeout: int = 60) -> str:
-        """Run a shell command inside the repository root.
+        """Run a diagnostic shell command inside the repository root.
+        Cannot run deployment commands (deploy.sh start, docker compose up).
 
         Returns combined stdout+stderr, truncated to 20 000 chars.
         """
+        # Block deployment commands — the pipeline handles deployment
+        _blocked = ("deploy.sh start", "deploy.sh restart", "docker compose up",
+                     "docker compose start", "docker-compose up", "docker-compose start")
+        if any(b in cmd for b in _blocked):
+            msg = ("ERROR: Cannot run deployment commands from REPL. "
+                   "The pipeline re-deploys automatically after your fixes.")
+            print(msg)
+            return msg
         try:
             result = subprocess.run(  # noqa: S602
                 cmd,
@@ -542,10 +549,9 @@ class RLMOfficialAgent(CodingAgent):
     ) -> str:
         repo_path = Path(cwd) if cwd else Path.cwd()
 
-        # File-generation tasks use a direct LLM call (same as existing RLM agent)
-        if not _FIX_ERROR_RE.search(prompt) and _FILE_GEN_RE.search(prompt):
-            return self._generate_files(prompt, repo_path)
-
+        # Route ALL tasks through RLM so the agent can explore the repo
+        # via REPL tools. The direct LLM call path is kept only as a
+        # fallback if RLM import fails.
         return self._run_rlm(prompt, repo_path, timeout)
 
     # ------------------------------------------------------------------
@@ -560,80 +566,6 @@ class RLMOfficialAgent(CodingAgent):
         msg = str(exc).lower()
         indicators = ("429", "resource_exhausted", "rate limit", "ratelimit", "quota")
         return any(ind in msg for ind in indicators)
-
-    # ------------------------------------------------------------------
-    # File generation (direct LLM call, no REPL)
-    # ------------------------------------------------------------------
-
-    _FILE_GEN_EXTRA = (
-        "\n\n## CRITICAL SCRIPT GENERATION RULES\n\n"
-        "### Docker Compose rules:\n"
-        '- ALWAYS pass `--project-name "$PROJECT_NAME"` to every `docker compose` command.\n'
-        "- PROJECT_NAME MUST be lowercased. Docker Compose rejects uppercase:\n"
-        "    PROJECT_NAME=$(basename \"$APP_DIR\" | tr '[:upper:]' '[:lower:]')\n"
-        "- ALWAYS use `--build` flag: `docker compose up --build -d`\n"
-        "- Create ONE named Docker network shared by all services.\n"
-        "- NEVER add `healthcheck:` blocks to compose files.\n"
-        "- Use `depends_on: condition: service_started` (never `service_healthy`).\n\n"
-        "### Build context rules:\n"
-        "- Build context must point to the directory containing the Dockerfile.\n"
-        "- Verify all build context paths exist before referencing them.\n"
-        "- Application services with source code MUST use `build:` with local source.\n"
-        "- Infrastructure services (DB, cache, MQ) use pre-built images, no exposed ports.\n"
-        "- NEVER run build tools on host — multi-stage Docker builds only.\n\n"
-        "### Health check rules — CRITICAL:\n"
-        "- Health checks run on the HOST. Docker service names do NOT resolve from the host.\n"
-        '- Container status: `docker compose --project-name "$PROJECT_NAME" ps`\n'
-        "- Entry point check: `curl localhost:<EXPOSED-HOST-PORT>` (host-mapped ports only)\n"
-        "- Inter-service check: `docker compose exec <svc> curl http://<internal>:<port>`\n"
-        "- NEVER `curl http://<docker-service-name>:<port>` from the host.\n\n"
-        "### Host port rules:\n"
-        "- Only the user-facing entry point (frontend/gateway) gets a `ports:` mapping.\n"
-        "- Infrastructure and internal microservices MUST NOT expose host ports.\n\n"
-        "### Dependency checks (for code analysis):\n"
-        "- Check requirements.txt/package.json for known incompatible packages.\n"
-        "- For Python: check opentelemetry-exporter-jaeger + opentelemetry-sdk compatibility.\n"
-        "- Check if Dockerfiles have explicit CMD/ENTRYPOINT. If using a shared Dockerfile\n"
-        "  with build args, each service needs a `command:` in docker-compose.yml.\n"
-    )
-
-    def _generate_files(self, prompt: str, repo_path: Path) -> str:
-        """Handle file-generation tasks with a direct litellm call."""
-        from libs.agent_cli.llm_client import LiteLLMClient
-
-        # Use the same backend resolution as the RLM path
-        _, bk = self._resolve_backend()
-        litellm_model = bk["model_name"]
-        client = LiteLLMClient(litellm_model, self.location, self.recorder)
-
-        messages = [
-            {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT + self._FILE_GEN_EXTRA},
-            {"role": "user", "content": prompt},
-        ]
-
-        last_exc: Exception | None = None
-        for attempt in range(1 + len(self._RATE_LIMIT_BACKOFF)):
-            try:
-                raw = client.complete(messages, label="rlm-official file gen")
-                break
-            except Exception as exc:
-                last_exc = exc
-                if attempt < len(self._RATE_LIMIT_BACKOFF) and self._is_rate_limit_error(exc):
-                    delay = self._RATE_LIMIT_BACKOFF[attempt]
-                    logger.warning(
-                        f"[RLM-Official] Rate limit hit (attempt {attempt + 1}), retrying in {delay}s: {exc}"
-                    )
-                    time.sleep(delay)
-                    continue
-                logger.error(f"[RLM-Official] Direct LLM call failed: {exc}")
-                return f"LLM call failed: {exc}"
-        else:
-            logger.error(f"[RLM-Official] All retries exhausted: {last_exc}")
-            return f"LLM call failed after retries: {last_exc}"
-
-        generate_and_write_files(raw, prompt, repo_path, "[RLM-Official]")
-        self._post_process_scripts(repo_path)
-        return raw
 
     # ------------------------------------------------------------------
     # RLM completion (depth-2 recursion with REPL)

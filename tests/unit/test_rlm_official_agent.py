@@ -206,13 +206,13 @@ class TestBuildContextText:
 class TestGenerateRouting:
     """generate() routes file-generation tasks to direct LLM call."""
 
-    def test_file_gen_prompt_uses_direct_call(self, tmp_path):
+    def test_all_prompts_route_through_rlm(self, tmp_path):
         agent = RLMOfficialAgent(model="gemini-2.5-pro")
         prompt = "Generate .sds/deploy.sh for this repository"
 
-        with mock.patch.object(agent, "_generate_files", return_value="ok") as m:
+        with mock.patch.object(agent, "_run_rlm", return_value="ok") as m:
             result = agent.generate(prompt, cwd=str(tmp_path))
-            m.assert_called_once_with(prompt, tmp_path)
+            m.assert_called_once()
             assert result == "ok"
 
     def test_fix_error_prompt_uses_rlm(self, tmp_path):
@@ -363,43 +363,6 @@ class TestRateLimitDetection:
         assert not RLMOfficialAgent._is_rate_limit_error(Exception("Connection refused"))
 
 
-class TestGenerateFilesRetry:
-    """_generate_files retries on rate-limit errors."""
-
-    def test_retries_on_rate_limit(self, tmp_path):
-        agent = RLMOfficialAgent(model="gemini-2.5-pro")
-
-        mock_client = mock.MagicMock()
-        mock_client.complete.side_effect = [
-            Exception("429 Too Many Requests"),
-            "generated content",
-        ]
-
-        with (
-            mock.patch("app_operator.cli_agent.rlm_official_agent.time.sleep"),
-            mock.patch("libs.agent_cli.llm_client.LiteLLMClient", return_value=mock_client),
-            mock.patch("app_operator.cli_agent.rlm_official_agent.generate_and_write_files"),
-            mock.patch.object(agent, "_post_process_scripts"),
-        ):
-            result = agent._generate_files("Generate .sds/deploy.sh", tmp_path)
-            assert result == "generated content"
-            assert mock_client.complete.call_count == 2
-
-    def test_fails_after_exhausting_retries(self, tmp_path):
-        agent = RLMOfficialAgent(model="gemini-2.5-pro")
-
-        mock_client = mock.MagicMock()
-        mock_client.complete.side_effect = Exception("429 Too Many Requests")
-
-        with (
-            mock.patch("app_operator.cli_agent.rlm_official_agent.time.sleep"),
-            mock.patch("libs.agent_cli.llm_client.LiteLLMClient", return_value=mock_client),
-        ):
-            result = agent._generate_files("Generate .sds/deploy.sh", tmp_path)
-            assert "LLM call failed" in result
-            assert mock_client.complete.call_count == 4  # 1 + 3 retries
-
-
 class TestRootPromptContent:
     """_SDS_ROOT_PROMPT_PREFIX must contain SDS patterns that prevent known failures."""
 
@@ -430,22 +393,19 @@ class TestRootPromptContent:
         assert "READ BEFORE EDIT" in _SDS_ROOT_PROMPT_PREFIX
 
 
-class TestFileGenExtraContent:
-    """_FILE_GEN_EXTRA must contain script generation rules."""
+class TestRunShellBlocksDeploy:
+    """run_shell must block deployment commands."""
 
-    def test_health_check_rules(self):
-        extra = RLMOfficialAgent._FILE_GEN_EXTRA
-        assert "NEVER" in extra
-        assert "curl http://<docker-service-name>" in extra
-        assert "curl localhost:<EXPOSED-HOST-PORT>" in extra
+    def test_blocks_deploy_start(self, tmp_path):
+        tools = _build_custom_tools(tmp_path)
+        run_fn = tools["run_shell"]["tool"]
+        result = run_fn("bash .sds/deploy.sh start")
+        assert "ERROR" in result
+        assert "Cannot run deployment commands" in result
 
-    def test_compose_rules(self):
-        extra = RLMOfficialAgent._FILE_GEN_EXTRA
-        assert "--project-name" in extra
-        assert "--build" in extra
-        assert "healthcheck:" in extra
-
-    def test_build_context_rules(self):
-        extra = RLMOfficialAgent._FILE_GEN_EXTRA
-        assert "multi-stage Docker builds" in extra
-        assert "Infrastructure services" in extra
+    def test_allows_diagnostic_commands(self, tmp_path):
+        tools = _build_custom_tools(tmp_path)
+        run_fn = tools["run_shell"]["tool"]
+        result = run_fn("docker compose ps")
+        # Should not be blocked (even if docker isn't running, no ERROR about deployment)
+        assert "Cannot run deployment commands" not in result
