@@ -82,7 +82,8 @@ class StructuredKnowledgeBase(KnowledgeBase):
         """Legacy no-op path.
 
         The v3 root-cause KB is updated by the dedicated KB worker from
-        ``original_run.md`` and ``grounded_run.md`` incident records, not from
+        ``diagnosis_run.md`` and optional ``recovery_diagnosis_run.md`` incident
+        records, not from
         inline session-summary merging.
         """
         logger.info(
@@ -94,20 +95,23 @@ class StructuredKnowledgeBase(KnowledgeBase):
         self,
         *,
         timestamp: str,
-        original_run_md: str,
-        grounded_run_md: str,
-    ) -> tuple[Path, Path]:
+        diagnosis_run_md: str,
+        recovery_diagnosis_run_md: str | None,
+    ) -> tuple[Path, Path | None]:
         incidents_root = self.store.paths.incidents_dir
         if self._config.kb_scope == "per_app":
             incident_dir = incidents_root / timestamp
         else:
             incident_dir = incidents_root / self.app_slug / timestamp
         incident_dir.mkdir(parents=True, exist_ok=True)
-        original_path = incident_dir / "original_run.md"
-        grounded_path = incident_dir / "grounded_run.md"
-        original_path.write_text(original_run_md)
-        grounded_path.write_text(grounded_run_md)
-        return original_path, grounded_path
+        diagnosis_path = incident_dir / "diagnosis_run.md"
+        diagnosis_path.write_text(diagnosis_run_md)
+
+        recovery_path = None
+        if recovery_diagnosis_run_md is not None:
+            recovery_path = incident_dir / "recovery_diagnosis_run.md"
+            recovery_path.write_text(recovery_diagnosis_run_md)
+        return diagnosis_path, recovery_path
 
     def write_diagnosis_playbook_candidate(
         self,

@@ -56,8 +56,8 @@ async def _review_failure(
     *,
     driver: AgentDriver,
     renderer: PromptRenderer,
-    original_run_md: str,
-    grounded_run_md: str,
+    diagnosis_run_md: str,
+    recovery_diagnosis_run_md: str | None,
     candidate_playbook: DiagnosisPlaybookDraft,
     cards: list[DiagnosisFrontMatter],
     usage_collector: UsageCollector,
@@ -65,8 +65,8 @@ async def _review_failure(
     prompt = renderer.render(
         "kb_review_failure",
         diagnosis_cards=_format_cards(cards),
-        original_run_md=original_run_md,
-        grounded_run_md=grounded_run_md,
+        diagnosis_run_md=diagnosis_run_md,
+        recovery_diagnosis_run_md=recovery_diagnosis_run_md or "(none)",
         candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
     )
     result: AgentResult[ReviewDecision] = await driver.run(
@@ -84,16 +84,16 @@ async def _merge_playbooks(
     renderer: PromptRenderer,
     candidate_playbook: DiagnosisPlaybookDraft,
     existing_playbooks: list[DiagnosisPlaybook],
-    original_run_md: str,
-    grounded_run_md: str,
+    diagnosis_run_md: str,
+    recovery_diagnosis_run_md: str | None,
     usage_collector: UsageCollector,
 ) -> DiagnosisPlaybookDraft:
     prompt = renderer.render(
         "kb_merge_diagnosis_playbooks",
         candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
         existing_playbooks_md="\n\n".join(pb.to_markdown() for pb in existing_playbooks),
-        original_run_md=original_run_md,
-        grounded_run_md=grounded_run_md,
+        diagnosis_run_md=diagnosis_run_md,
+        recovery_diagnosis_run_md=recovery_diagnosis_run_md or "(none)",
     )
     result: AgentResult[DiagnosisPlaybookDraft] = await driver.run(
         prompt=prompt,
@@ -138,8 +138,9 @@ async def process_task(task_path: Path) -> None:
     kb.write_scope_metadata()
     store = RootCauseStore(kb.scope_dir)
 
-    original_run_md = Path(task["original_run_file"]).read_text()
-    grounded_run_md = Path(task["grounded_run_file"]).read_text()
+    diagnosis_run_md = Path(task["diagnosis_run_file"]).read_text()
+    recovery_path_str = task.get("recovery_diagnosis_run_file")
+    recovery_diagnosis_run_md = Path(recovery_path_str).read_text() if recovery_path_str else None
     candidate_playbook = DiagnosisPlaybookDraft.model_validate(
         json.loads(Path(task["diagnosis_playbook_candidate_file"]).read_text())
     )
@@ -149,8 +150,8 @@ async def process_task(task_path: Path) -> None:
     decision = await _review_failure(
         driver=kb_driver,
         renderer=renderer,
-        original_run_md=original_run_md,
-        grounded_run_md=grounded_run_md,
+        diagnosis_run_md=diagnosis_run_md,
+        recovery_diagnosis_run_md=recovery_diagnosis_run_md,
         candidate_playbook=candidate_playbook,
         cards=cards,
         usage_collector=collector,
@@ -168,8 +169,8 @@ async def process_task(task_path: Path) -> None:
                 renderer=renderer,
                 candidate_playbook=candidate_playbook,
                 existing_playbooks=existing_playbooks,
-                original_run_md=original_run_md,
-                grounded_run_md=grounded_run_md,
+                diagnosis_run_md=diagnosis_run_md,
+                recovery_diagnosis_run_md=recovery_diagnosis_run_md,
                 usage_collector=collector,
             )
             canonical_slug = decision.target_slugs[0]

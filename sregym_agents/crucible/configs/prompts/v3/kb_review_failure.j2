@@ -1,6 +1,6 @@
 You are reviewing a failed diagnosis workflow for a Kubernetes SRE agent.
 
-Classify why the original diagnosis failed relative to the grounded diagnosis, then decide how to curate
+Classify why the diagnosis run failed relative to the recovery diagnosis, then decide how to curate
 the recovery-produced diagnosis playbook candidate.
 Use one or more failure modes from:
 - triage_failure
@@ -34,10 +34,10 @@ Recovery-produced diagnosis playbook candidate:
 {{ candidate_playbook_json }}
 ```
 
-<original_run>
-{{ original_run_md }}
-</original_run>
+<diagnosis_run>
+{{ diagnosis_run_md }}
+</diagnosis_run>
 
-<grounded_run>
-{{ grounded_run_md }}
-</grounded_run>
+<recovery_diagnosis_run>
+{{ recovery_diagnosis_run_md }}
+</recovery_diagnosis_run>

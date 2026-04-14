@@ -30,8 +30,8 @@ from sregym_agents.crucible.agents import (
 from sregym_agents.crucible.config import CrucibleConfig
 from sregym_agents.crucible.knowledge_base.base import InjectedKB
 from sregym_agents.crucible.knowledge_base.incident_records import (
-    GroundedRunRecord,
-    OriginalRunRecord,
+    DiagnosisRunRecord,
+    RecoveryDiagnosisRunRecord,
 )
 from sregym_agents.crucible.tools import (
     LTMShortCircuit,
@@ -662,24 +662,6 @@ async def _try_playbook_shortcut(
     )
 
 
-def _append_stage_outcome(result: StageLoopResult, stage_label: str) -> None:
-    """Append the agent's answer and benchmark result to the stage outputs file."""
-    sof = result.stage_outputs_file
-    if not sof:
-        return
-    parts: list[str] = [f"\n---\n## {stage_label} Outcome\n"]
-    if result.agent_answer:
-        parts.append(f"**Agent Answer**: {result.agent_answer}\n")
-    if result.agent_justification:
-        parts.append(f"**Justification**: {result.agent_justification}\n")
-    if result.agent_causal_chain:
-        parts.append(f"**Causal Chain**: {result.agent_causal_chain}\n")
-    if result.benchmark_block:
-        parts.append(f"\n{result.benchmark_block.strip()}\n")
-    with open(sof, "a") as f:
-        f.write("".join(parts))
-
-
 def _build_sre_agent_config(
     injected_kb: InjectedKB | None,
     crucible_config: CrucibleConfig,
@@ -801,8 +783,14 @@ async def run(
         injected_kb=injected_kb,
         crucible_config=crucible_config,
     )
-    _append_stage_outcome(diag_result, "Diagnosis")
     original_diag_result = dataclasses.replace(diag_result)
+    recovery_stage_outputs_file = (
+        diag_result.stage_outputs_file.with_name("recovery_diagnosis_stage_outputs.md")
+        if diag_result.stage_outputs_file is not None
+        else None
+    )
+    if recovery_stage_outputs_file is not None:
+        recovery_stage_outputs_file.unlink(missing_ok=True)
 
     diagnosis_recovery = None
 
@@ -821,7 +809,7 @@ async def run(
             usage_collector=recovery_collector,
             original_justification=diag_result.agent_justification,
             original_causal_chain=diag_result.agent_causal_chain,
-            stage_outputs_file=diag_result.stage_outputs_file,
+            stage_outputs_file=recovery_stage_outputs_file,
         )
         if diagnosis_recovery:
             diag_result.agent_answer = diagnosis_recovery.submission.answer
@@ -839,7 +827,7 @@ async def run(
             grounded_causal_chain=diag_result.agent_causal_chain,
             recovery_message_history=diagnosis_recovery.message_history,
             usage_collector=recovery_collector,
-            stage_outputs_file=diag_result.stage_outputs_file,
+            stage_outputs_file=None,
         )
     if "mitigation" not in planned_stages:
         logger.info("Diagnosis-only problem — orchestrator complete.")
@@ -847,7 +835,7 @@ async def run(
         sof = diag_result.stage_outputs_file
         result["stage_outputs_file"] = str(sof) if sof else None
         result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
-        result["original_run_md"] = OriginalRunRecord.from_stage_outputs_file(
+        result["diagnosis_run_md"] = DiagnosisRunRecord.from_stage_outputs_file(
             problem_id=problem_id,
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
@@ -858,16 +846,21 @@ async def run(
             benchmark_block=original_diag_result.benchmark_block,
             stage_outputs_file=original_diag_result.stage_outputs_file,
         ).to_markdown()
-        result["grounded_run_md"] = GroundedRunRecord(
-            problem_id=problem_id,
-            app_name=app_info.get("app_name", "unknown"),
-            namespace=app_info.get("namespace", "default"),
-            has_grounded_diagnosis=bool(diag_result.agent_answer),
-            agent_answer=diag_result.agent_answer,
-            agent_justification=diag_result.agent_justification,
-            agent_causal_chain=diag_result.agent_causal_chain,
-            benchmark_block=diag_result.benchmark_block,
-        ).to_markdown()
+        result["recovery_diagnosis_run_md"] = (
+            RecoveryDiagnosisRunRecord.from_stage_outputs_file(
+                problem_id=problem_id,
+                app_name=app_info.get("app_name", "unknown"),
+                namespace=app_info.get("namespace", "default"),
+                has_recovery_diagnosis=bool(diag_result.agent_answer),
+                agent_answer=diag_result.agent_answer,
+                agent_justification=diag_result.agent_justification,
+                agent_causal_chain=diag_result.agent_causal_chain,
+                benchmark_block=diag_result.benchmark_block,
+                stage_outputs_file=recovery_stage_outputs_file,
+            ).to_markdown()
+            if diagnosis_recovery
+            else None
+        )
         result["diagnosis_playbook_candidate"] = (
             diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
         )
@@ -954,8 +947,6 @@ async def run(
             injected_kb=injected_kb,
             crucible_config=crucible_config,
         )
-    _append_stage_outcome(mit_result, "Mitigation")
-
     # Recovery mitigation
     if (
         crucible_config.include_benchmark_results
@@ -984,7 +975,7 @@ async def run(
     result["stage_outputs_file"] = str(sof) if sof else None
     result["diagnosis_succeeded"] = "success: True" in (diag_result.benchmark_block or "")
     result["mitigation_succeeded"] = "success: True" in (mit_result.benchmark_block or "")
-    result["original_run_md"] = OriginalRunRecord.from_stage_outputs_file(
+    result["diagnosis_run_md"] = DiagnosisRunRecord.from_stage_outputs_file(
         problem_id=problem_id,
         app_name=app_info.get("app_name", "unknown"),
         namespace=app_info.get("namespace", "default"),
@@ -995,16 +986,21 @@ async def run(
         benchmark_block=original_diag_result.benchmark_block,
         stage_outputs_file=original_diag_result.stage_outputs_file,
     ).to_markdown()
-    result["grounded_run_md"] = GroundedRunRecord(
-        problem_id=problem_id,
-        app_name=app_info.get("app_name", "unknown"),
-        namespace=app_info.get("namespace", "default"),
-        has_grounded_diagnosis=bool(diag_result.agent_answer),
-        agent_answer=diag_result.agent_answer,
-        agent_justification=diag_result.agent_justification,
-        agent_causal_chain=diag_result.agent_causal_chain,
-        benchmark_block=diag_result.benchmark_block,
-    ).to_markdown()
+    result["recovery_diagnosis_run_md"] = (
+        RecoveryDiagnosisRunRecord.from_stage_outputs_file(
+            problem_id=problem_id,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            has_recovery_diagnosis=bool(diag_result.agent_answer),
+            agent_answer=diag_result.agent_answer,
+            agent_justification=diag_result.agent_justification,
+            agent_causal_chain=diag_result.agent_causal_chain,
+            benchmark_block=diag_result.benchmark_block,
+            stage_outputs_file=recovery_stage_outputs_file,
+        ).to_markdown()
+        if diagnosis_recovery
+        else None
+    )
     result["diagnosis_playbook_candidate"] = (
         diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
     )

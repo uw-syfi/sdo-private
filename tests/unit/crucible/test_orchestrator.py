@@ -493,4 +493,5 @@ class TestOrchestratorRun:
 
         assert result["diagnosis_succeeded"] is True
         assert result["diagnosis_playbook_candidate"] is None
-        assert "CoreDNS misconfiguration" in result["grounded_run_md"]
+        assert "CoreDNS misconfiguration" in result["diagnosis_run_md"]
+        assert result["recovery_diagnosis_run_md"] is None

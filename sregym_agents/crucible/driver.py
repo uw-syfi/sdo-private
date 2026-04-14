@@ -318,8 +318,9 @@ async def _async_main(args: argparse.Namespace) -> None:
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
     diagnosis_succeeded = bool(usage_metrics.get("diagnosis_succeeded", False))
     mitigation_succeeded = bool(usage_metrics.get("mitigation_succeeded", False))
-    original_run_md = str(usage_metrics.get("original_run_md", ""))
-    grounded_run_md = str(usage_metrics.get("grounded_run_md", ""))
+    diagnosis_run_md = str(usage_metrics.get("diagnosis_run_md", ""))
+    recovery_diagnosis_run_md = usage_metrics.get("recovery_diagnosis_run_md")
+    recovery_diagnosis_run_md = str(recovery_diagnosis_run_md) if recovery_diagnosis_run_md is not None else None
     diagnosis_playbook_candidate_data = usage_metrics.get("diagnosis_playbook_candidate")
 
     if args.logs_dir:
@@ -338,15 +339,15 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     if kb is not None and args.kb_dir:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        original_run_path = None
-        grounded_run_path = None
+        diagnosis_run_path = None
+        recovery_diagnosis_run_path = None
         diagnosis_playbook_candidate_path = None
         if kb_type == "structured":
             structured_kb = cast("StructuredKnowledgeBase", kb)
-            original_run_path, grounded_run_path = structured_kb.write_incident_records(
+            diagnosis_run_path, recovery_diagnosis_run_path = structured_kb.write_incident_records(
                 timestamp=timestamp,
-                original_run_md=original_run_md,
-                grounded_run_md=grounded_run_md,
+                diagnosis_run_md=diagnosis_run_md,
+                recovery_diagnosis_run_md=recovery_diagnosis_run_md,
             )
             if diagnosis_playbook_candidate_data:
                 draft = DiagnosisPlaybookDraft.model_validate(diagnosis_playbook_candidate_data)
@@ -364,10 +365,12 @@ async def _async_main(args: argparse.Namespace) -> None:
             saved_stage_outputs = str(dest)
             logger.info(f"Saved stage outputs to {dest}")
 
-        if original_run_path and grounded_run_path and diagnosis_playbook_candidate_path:
+        if diagnosis_run_path and diagnosis_playbook_candidate_path:
             task_payload: dict[str, Any] = {
-                "original_run_file": str(original_run_path),
-                "grounded_run_file": str(grounded_run_path),
+                "diagnosis_run_file": str(diagnosis_run_path),
+                "recovery_diagnosis_run_file": (
+                    str(recovery_diagnosis_run_path) if recovery_diagnosis_run_path is not None else None
+                ),
                 "diagnosis_playbook_candidate_file": str(diagnosis_playbook_candidate_path),
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,

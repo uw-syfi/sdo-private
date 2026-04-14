@@ -8,6 +8,7 @@ import pytest
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 from sregym_agents.crucible.config import CrucibleConfig
+from sregym_agents.crucible.knowledge_base.incident_records import DiagnosisRunRecord, RecoveryDiagnosisRunRecord
 from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
 from sregym_agents.crucible.knowledge_base.root_cause import (
     DiagnosisFrontMatter,
@@ -108,14 +109,37 @@ def test_structured_kb_writes_incident_records(tmp_path: Path):
         renderer=PromptRenderer("v3"),
         driver=_DummyDriver(),
     )
-    original, grounded = kb.write_incident_records(
+    diagnosis_run, recovery_run = kb.write_incident_records(
         timestamp="20260413_162613",
-        original_run_md="# Original",
-        grounded_run_md="# Grounded",
+        diagnosis_run_md="# Diagnosis",
+        recovery_diagnosis_run_md="# Recovery",
     )
-    assert original.read_text() == "# Original"
-    assert grounded.read_text() == "# Grounded"
-    assert original.parent.name == "20260413_162613"
+    assert diagnosis_run.name == "diagnosis_run.md"
+    assert diagnosis_run.read_text() == "# Diagnosis"
+    assert recovery_run is not None
+    assert recovery_run.name == "recovery_diagnosis_run.md"
+    assert recovery_run.read_text() == "# Recovery"
+    assert diagnosis_run.parent.name == "20260413_162613"
+
+
+def test_structured_kb_skips_optional_recovery_incident_record(tmp_path: Path):
+    kb = StructuredKnowledgeBase(
+        tmp_path / "kb",
+        app_name="hotel-reservation",
+        config=CrucibleConfig(prompt_version="v3", kb_scope="per_app"),
+        renderer=PromptRenderer("v3"),
+        driver=_DummyDriver(),
+    )
+    diagnosis_run, recovery_run = kb.write_incident_records(
+        timestamp="20260413_162613",
+        diagnosis_run_md="# Diagnosis",
+        recovery_diagnosis_run_md=None,
+    )
+
+    assert diagnosis_run.name == "diagnosis_run.md"
+    assert diagnosis_run.read_text() == "# Diagnosis"
+    assert recovery_run is None
+    assert not (diagnosis_run.parent / "recovery_diagnosis_run.md").exists()
 
 
 def test_structured_kb_writes_diagnosis_playbook_candidate(tmp_path: Path):
@@ -142,3 +166,42 @@ def test_structured_kb_writes_diagnosis_playbook_candidate(tmp_path: Path):
 
     assert candidate_path.name == "diagnosis_playbook_candidate.json"
     assert json.loads(candidate_path.read_text())["slug"] == "coredns-nxdomain"
+
+
+def test_diagnosis_run_record_does_not_duplicate_summary_or_include_recovery_content():
+    record = DiagnosisRunRecord(
+        problem_id="problem-a",
+        app_name="Social Network",
+        namespace="social-network",
+        diagnosis_succeeded=False,
+        agent_answer="Wrong DNS setting",
+        agent_justification="The client points to an invalid resolver.",
+        agent_causal_chain="bad resolver -> failed lookups",
+        benchmark_block="<benchmark_result>\nsuccess: False\n</benchmark_result>",
+        stage_outputs="## Triage Report\nObserved DNS failures.\n",
+    )
+
+    markdown = record.to_markdown()
+
+    assert markdown.count("<benchmark_result>") == 1
+    assert markdown.count("Answer: Wrong DNS setting") == 1
+    assert "Recovery Diagnosis Investigation" not in markdown
+
+
+def test_recovery_diagnosis_run_record_includes_recovery_stage_outputs_once():
+    record = RecoveryDiagnosisRunRecord(
+        problem_id="problem-a",
+        app_name="Social Network",
+        namespace="social-network",
+        has_recovery_diagnosis=True,
+        agent_answer="CoreDNS template returns NXDOMAIN",
+        agent_justification="The Corefile contains an NXDOMAIN rule.",
+        agent_causal_chain="NXDOMAIN rule -> lookup failure",
+        benchmark_block="<benchmark_result>\nsuccess: False\n</benchmark_result>",
+        stage_outputs="## Recovery Diagnosis Investigation\nChecked CoreDNS config.\n",
+    )
+
+    markdown = record.to_markdown()
+
+    assert markdown.count("<benchmark_result>") == 1
+    assert markdown.count("## Recovery Diagnosis Investigation") == 1
