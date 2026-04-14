@@ -9,3 +9,4 @@ agents:
     kickoff_workdir: ../..
     kickoff_env:
       PYTHONUNBUFFERED: "1"
+    wait_for_natural_exit: true
