@@ -105,11 +105,19 @@ def _build_custom_tools(repo_path: Path) -> dict[str, Any]:
         Returns combined stdout+stderr, truncated to 20 000 chars.
         """
         # Block deployment commands — the pipeline handles deployment
-        _blocked = ("deploy.sh start", "deploy.sh restart", "docker compose up",
-                     "docker compose start", "docker-compose up", "docker-compose start")
+        _blocked = (
+            "deploy.sh start",
+            "deploy.sh restart",
+            "docker compose up",
+            "docker compose start",
+            "docker-compose up",
+            "docker-compose start",
+        )
         if any(b in cmd for b in _blocked):
-            msg = ("ERROR: Cannot run deployment commands from REPL. "
-                   "The pipeline re-deploys automatically after your fixes.")
+            msg = (
+                "ERROR: Cannot run deployment commands from REPL. "
+                "The pipeline re-deploys automatically after your fixes."
+            )
             print(msg)
             return msg
         try:
@@ -590,9 +598,9 @@ class RLMOfficialAgent(CodingAgent):
         backend, backend_kwargs = self._resolve_backend()
 
         rlm = RLM(
-            backend=backend,
+            backend=backend,  # type: ignore[arg-type]
             backend_kwargs=backend_kwargs,
-            other_backends=[backend],
+            other_backends=[backend],  # type: ignore[list-item]
             other_backend_kwargs=[backend_kwargs],
             environment="local",
             max_depth=self.max_depth,
