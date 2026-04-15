@@ -45,6 +45,40 @@ def test_v3_recovery_diagnosis_playbook_prompt_requires_localization_first_verif
     assert "`fault_localization_checks` populates `## Fault Localization`" in prompt
 
 
+def test_v3_diagnosis_prompt_allows_repeat_kb_search_after_new_evidence() -> None:
+    renderer = PromptRenderer("v3")
+
+    prompt = renderer.render("diagnosis_agent_system")
+
+    assert "RECOMMENDED WORKFLOW:" in prompt
+    assert "Use this as your default sequence" in prompt
+    assert "MAY call `search_prior_incidents`" in prompt
+    assert "exact error text" in prompt
+    assert "affected FQDN" in prompt
+
+
+def test_v3_recovery_diagnosis_prompt_handles_post_mitigation_state() -> None:
+    renderer = PromptRenderer("v3")
+
+    system_prompt = renderer.render("recovery_diagnosis_system")
+    user_prompt = renderer.render(
+        "recovery_diagnosis_user",
+        benchmark_reasoning="The benchmark knows the true root cause.",
+        original_answer="The original diagnosis was wrong.",
+        original_justification="It focused on a symptom-bearing component.",
+        original_causal_chain="wrong target -> wrong conclusion",
+        app_name="social-network",
+        namespace="social-network",
+        descriptions="",
+    )
+
+    assert "This recovery run may happen after mitigation has already changed the cluster." in system_prompt
+    assert "Do NOT assume the fault is still live." in system_prompt
+    assert "If the live fault has already been mitigated" in system_prompt
+    assert "This recovery diagnosis may run after mitigation has already changed the cluster." in user_prompt
+    assert "rather than insisting on reproducing the fault" in user_prompt
+
+
 def test_v3_recovery_mitigation_playbook_prompt_requires_concrete_fix_steps() -> None:
     renderer = PromptRenderer("v3")
 
