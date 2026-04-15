@@ -95,7 +95,7 @@ class TestRepairErrorContext:
 
         agent.forward(str(tmp_path), "analysis", "issues", max_attempts=3)
 
-        ctx = agent.repair_agent.call_args.kwargs["error_context"]
+        ctx = agent.repair_agent.call_args.kwargs["error_context"]  # type: ignore[union-attr]
         assert "repo_path:" in ctx
         assert "deploy_path:" in ctx
         assert "health_path:" in ctx
