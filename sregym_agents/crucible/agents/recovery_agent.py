@@ -247,6 +247,66 @@ class RecoveryAgent:
         logger.info("Recovery diagnosis playbook candidate complete: %s", draft.slug)
         return draft
 
+    async def build_success_diagnosis_playbook_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        diagnosis_answer: str,
+        diagnosis_justification: str,
+        diagnosis_causal_chain: str = "",
+        diagnosis_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        stage_outputs_file: Path | None = None,
+    ) -> DiagnosisPlaybookDraft | None:
+        """Build a reusable diagnosis playbook from a successful primary diagnosis run."""
+
+        if not diagnosis_answer.strip() or not diagnosis_justification.strip() or not diagnosis_message_history:
+            logger.warning("Success diagnosis playbook candidate: diagnosis or message history missing, skipping.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("SUCCESS DIAGNOSIS PLAYBOOK: converting successful diagnosis into diagnosis playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Success Diagnosis Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_diagnosis_playbook_system")
+        user_prompt = self._renderer.render(
+            "success_diagnosis_playbook_user",
+            diagnosis_answer=diagnosis_answer,
+            diagnosis_justification=diagnosis_justification,
+            diagnosis_causal_chain=diagnosis_causal_chain,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+        )
+        logger.info(f"[success-diagnosis-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[success-diagnosis-playbook] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=DiagnosisPlaybookDraft,
+            agent_name="success-diagnosis-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=diagnosis_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Success diagnosis playbook agent did not produce output.")
+            return None
+
+        draft = result.output
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
+
+        logger.info("Success diagnosis playbook candidate complete: %s", draft.slug)
+        return draft
+
     async def build_triage_area_candidate(
         self,
         *,
@@ -373,6 +433,76 @@ class RecoveryAgent:
                 f.write(f"**Root Cause**: {draft.root_cause}\n")
 
         logger.info("Recovery mitigation playbook candidate complete: %s", draft.slug)
+        return draft
+
+    async def build_success_mitigation_playbook_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        root_cause_slug: str,
+        root_cause: str,
+        diagnosis_answer: str,
+        mitigation_answer: str,
+        mitigation_justification: str,
+        mitigation_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        stage_outputs_file: Path | None = None,
+    ) -> MitigationPlaybookDraft | None:
+        """Build a reusable mitigation playbook from a successful primary mitigation run."""
+
+        if not (
+            root_cause_slug.strip()
+            and root_cause.strip()
+            and mitigation_answer.strip()
+            and mitigation_justification.strip()
+            and mitigation_message_history
+        ):
+            logger.warning("Success mitigation playbook candidate: mitigation or message history missing.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("SUCCESS MITIGATION PLAYBOOK: converting successful mitigation into playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Success Mitigation Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_mitigation_playbook_system")
+        user_prompt = self._renderer.render(
+            "success_mitigation_playbook_user",
+            root_cause_slug=root_cause_slug,
+            root_cause=root_cause,
+            diagnosis_answer=diagnosis_answer,
+            mitigation_answer=mitigation_answer,
+            mitigation_justification=mitigation_justification,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+        )
+        logger.info(f"[success-mitigation-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[success-mitigation-playbook] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=MitigationPlaybookDraft,
+            agent_name="success-mitigation-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=mitigation_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Success mitigation playbook agent did not produce output.")
+            return None
+
+        draft = result.output.model_copy(update={"slug": root_cause_slug, "root_cause": root_cause})
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
+
+        logger.info("Success mitigation playbook candidate complete: %s", draft.slug)
         return draft
 
     async def run_mitigation(

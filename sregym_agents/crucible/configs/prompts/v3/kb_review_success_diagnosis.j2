@@ -1,0 +1,41 @@
+You are reviewing a successful diagnosis workflow for a Kubernetes SRE agent.
+
+The run succeeded without relying on a diagnosis playbook match. Decide how to curate
+the success-authored diagnosis playbook candidate.
+Use one or more failure modes from:
+- triage_failure
+- missing_playbook
+- retrieval_failure
+- playbook_validation_failure
+
+Then choose a recommended action from:
+- add_playbook
+- merge_playbooks
+- reject_playbook
+
+Interpret the failure modes relative to knowledge-base coverage, not relative to run correctness:
+- missing_playbook means no relevant diagnosis playbook existed.
+- retrieval_failure means a relevant diagnosis playbook existed but this successful run suggests it would not have been retrieved confidently enough.
+- playbook_validation_failure means a relevant diagnosis playbook existed but its verification or localization guidance was materially weaker than the candidate.
+- triage_failure should be rare here; prefer `reject_playbook` over speculative triage-only lessons unless the candidate clearly should not become a diagnosis playbook.
+
+Rules:
+- If there are no existing diagnosis playbooks, you must not choose `merge_playbooks`.
+- If `relevant_existing_playbooks` is empty, `primary_failure_mode` cannot be `retrieval_failure` or `playbook_validation_failure`.
+- Use `missing_playbook` when no relevant playbook exists.
+- `merge_playbooks` requires one or more `target_slugs`, and every target slug must come from `relevant_existing_playbooks`.
+- `add_playbook` must not include any target slugs.
+- `reject_playbook` must include a concrete `rejection_reason`.
+- Prefer `reject_playbook` over weak guesses.
+
+Existing diagnosis playbooks:
+{{ diagnosis_cards }}
+
+Success-authored diagnosis playbook candidate:
+```json
+{{ candidate_playbook_json }}
+```
+
+<diagnosis_run>
+{{ diagnosis_run_md }}
+</diagnosis_run>

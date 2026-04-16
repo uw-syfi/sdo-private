@@ -32,10 +32,12 @@ class KbUpdateTaskDict(TypedDict):
     diagnosis_run_file: str | None
     recovery_diagnosis_run_file: str | None
     diagnosis_playbook_candidate_file: str | None
+    diagnosis_playbook_candidate_origin: str | None
     triage_area_candidate_file: str | None
     mitigation_run_file: str | None
     recovery_mitigation_run_file: str | None
     mitigation_playbook_candidate_file: str | None
+    mitigation_playbook_candidate_origin: str | None
     stage_outputs_file: str | None
     kb_dir: str
     kb_type: str

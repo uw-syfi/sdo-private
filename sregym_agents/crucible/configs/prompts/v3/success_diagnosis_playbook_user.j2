@@ -1,0 +1,16 @@
+You have already completed a successful diagnosis in this same session. Using your existing investigation context,
+convert that grounded diagnosis into a reusable diagnosis playbook candidate.
+
+Application: {{ app_name }} / Namespace: {{ namespace }}
+{% if descriptions %}
+{{ descriptions }}
+{% endif %}
+
+The grounded diagnosis you just established was:
+**Answer**: {{ diagnosis_answer }}
+**Justification**: {{ diagnosis_justification }}
+{% if diagnosis_causal_chain %}
+**Causal Chain**: {{ diagnosis_causal_chain }}
+{% endif %}
+
+Produce a diagnosis playbook candidate that captures this successful diagnosis as a reusable troubleshooting artifact.

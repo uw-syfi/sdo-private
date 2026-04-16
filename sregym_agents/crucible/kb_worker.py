@@ -59,7 +59,7 @@ def _format_cards(cards: list[DiagnosisFrontMatter]) -> str:
     return "\n".join(parts)
 
 
-async def _review_failure(
+async def _review_diagnosis_candidate(
     *,
     driver: AgentDriver,
     renderer: PromptRenderer,
@@ -68,14 +68,23 @@ async def _review_failure(
     candidate_playbook: DiagnosisPlaybookDraft,
     cards: list[DiagnosisFrontMatter],
     usage_collector: UsageCollector,
+    candidate_origin: str = "recovery",
 ) -> ReviewDecision:
-    prompt = renderer.render(
-        "kb_review_failure",
-        diagnosis_cards=_format_cards(cards),
-        diagnosis_run_md=diagnosis_run_md,
-        recovery_diagnosis_run_md=recovery_diagnosis_run_md or "(none)",
-        candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
-    )
+    if candidate_origin == "success":
+        prompt = renderer.render(
+            "kb_review_success_diagnosis",
+            diagnosis_cards=_format_cards(cards),
+            diagnosis_run_md=diagnosis_run_md,
+            candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
+        )
+    else:
+        prompt = renderer.render(
+            "kb_review_failure",
+            diagnosis_cards=_format_cards(cards),
+            diagnosis_run_md=diagnosis_run_md,
+            recovery_diagnosis_run_md=recovery_diagnosis_run_md or "(none)",
+            candidate_playbook_json=json.dumps(candidate_playbook.model_dump(mode="python"), indent=2),
+        )
     result: AgentResult[ReviewDecision] = await driver.run(
         prompt=prompt,
         output_type=ReviewDecision,
@@ -237,7 +246,8 @@ async def process_task(task_path: Path) -> None:
     decision = None
     canonical_diagnosis_slug = None
     if candidate_playbook is not None:
-        decision = await _review_failure(
+        candidate_origin = str(task.get("diagnosis_playbook_candidate_origin") or "recovery")
+        decision = await _review_diagnosis_candidate(
             driver=kb_driver,
             renderer=renderer,
             diagnosis_run_md=diagnosis_run_md,
@@ -245,6 +255,7 @@ async def process_task(task_path: Path) -> None:
             candidate_playbook=candidate_playbook,
             cards=cards,
             usage_collector=collector,
+            candidate_origin=candidate_origin,
         )
         logger.info("KB review decision for %s: %s", task["problem_id"], decision.model_dump_json(indent=2))
 

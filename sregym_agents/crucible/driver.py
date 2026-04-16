@@ -326,12 +326,14 @@ async def _async_main(args: argparse.Namespace) -> None:
     recovery_diagnosis_run_md = usage_metrics.get("recovery_diagnosis_run_md")
     recovery_diagnosis_run_md = str(recovery_diagnosis_run_md) if recovery_diagnosis_run_md is not None else None
     diagnosis_playbook_candidate_data = usage_metrics.get("diagnosis_playbook_candidate")
+    diagnosis_playbook_candidate_origin = usage_metrics.get("diagnosis_playbook_candidate_origin")
     triage_area_candidate_data = usage_metrics.get("triage_area_candidate")
     mitigation_run_md = usage_metrics.get("mitigation_run_md")
     mitigation_run_md = str(mitigation_run_md) if mitigation_run_md is not None else None
     recovery_mitigation_run_md = usage_metrics.get("recovery_mitigation_run_md")
     recovery_mitigation_run_md = str(recovery_mitigation_run_md) if recovery_mitigation_run_md is not None else None
     mitigation_playbook_candidate_data = usage_metrics.get("mitigation_playbook_candidate")
+    mitigation_playbook_candidate_origin = usage_metrics.get("mitigation_playbook_candidate_origin")
 
     if args.logs_dir:
         assert logs_dir is not None
@@ -407,6 +409,11 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "diagnosis_playbook_candidate_file": (
                     str(diagnosis_playbook_candidate_path) if diagnosis_playbook_candidate_path is not None else None
                 ),
+                "diagnosis_playbook_candidate_origin": (
+                    str(diagnosis_playbook_candidate_origin)
+                    if diagnosis_playbook_candidate_origin is not None
+                    else None
+                ),
                 "triage_area_candidate_file": (
                     str(triage_area_candidate_path) if triage_area_candidate_path is not None else None
                 ),
@@ -416,6 +423,11 @@ async def _async_main(args: argparse.Namespace) -> None:
                 ),
                 "mitigation_playbook_candidate_file": (
                     str(mitigation_playbook_candidate_path) if mitigation_playbook_candidate_path is not None else None
+                ),
+                "mitigation_playbook_candidate_origin": (
+                    str(mitigation_playbook_candidate_origin)
+                    if mitigation_playbook_candidate_origin is not None
+                    else None
                 ),
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,

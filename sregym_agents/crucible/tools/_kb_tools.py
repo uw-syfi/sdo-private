@@ -646,7 +646,11 @@ async def search_prior_mitigations_impl(
     )
 
     if application.applied:
-        raise LTMShortCircuit(confirmed=[application.mitigation_summary], iteration=deps.iteration)
+        raise LTMShortCircuit(
+            confirmed=[application.mitigation_summary],
+            iteration=deps.iteration,
+            confirmed_slugs=[match.slug],
+        )
 
     result = {
         "matched_slug": match.slug,

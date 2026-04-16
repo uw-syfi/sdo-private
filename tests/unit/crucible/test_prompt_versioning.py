@@ -94,6 +94,46 @@ def test_v3_recovery_mitigation_playbook_prompt_requires_concrete_fix_steps() ->
     assert "class of values" in prompt
 
 
+def test_v3_success_diagnosis_playbook_prompt_uses_primary_run_context() -> None:
+    renderer = PromptRenderer("v3")
+
+    prompt = renderer.render(
+        "success_diagnosis_playbook_user",
+        diagnosis_answer="CoreDNS returns NXDOMAIN for post-storage-service.",
+        diagnosis_justification="kubectl showed CoreDNS template rules for the failing service FQDN.",
+        diagnosis_causal_chain="CoreDNS rule -> NXDOMAIN -> client failures",
+        app_name="social-network",
+        namespace="social-network",
+        descriptions="",
+    )
+
+    assert "successful diagnosis" in prompt
+    assert "Using your existing investigation context" in prompt
+    assert "The grounded diagnosis you just established was" in prompt
+    assert "recovery diagnosis" not in prompt.lower()
+
+
+def test_v3_success_mitigation_playbook_prompt_uses_primary_run_context() -> None:
+    renderer = PromptRenderer("v3")
+
+    prompt = renderer.render(
+        "success_mitigation_playbook_user",
+        root_cause_slug="coredns-nxdomain",
+        root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+        diagnosis_answer="CoreDNS returns NXDOMAIN for post-storage-service.",
+        mitigation_answer="Patched ConfigMap/coredns to remove the NXDOMAIN template blocks.",
+        mitigation_justification="DNS lookups for the affected service names now resolve successfully.",
+        app_name="social-network",
+        namespace="social-network",
+        descriptions="",
+    )
+
+    assert "successful mitigation" in prompt
+    assert "Using your existing investigation context" in prompt
+    assert "The grounded mitigation you just established was" in prompt
+    assert "failed or incomplete mitigation" not in prompt.lower()
+
+
 def test_v3_mitigation_prompt_uses_diagnosis_shared_file_and_faulting_components() -> None:
     renderer = PromptRenderer("v3")
 

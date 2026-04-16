@@ -575,7 +575,7 @@ class TestOrchestratorRun:
         assert kwargs["diagnosis_shared_content"] == diagnosis_path.read_text()
 
     @pytest.mark.asyncio
-    async def test_run_skips_recovery_playbook_when_diagnosis_succeeds_initially(self, tmp_path: Path):
+    async def test_run_emits_diagnosis_playbook_candidate_for_successful_novel_diagnosis(self, tmp_path: Path):
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import StageLoopResult, run
 
@@ -585,7 +585,6 @@ class TestOrchestratorRun:
         stage_outputs.write_text("# stage outputs\n")
 
         driver = MagicMock()
-        driver.run = AsyncMock()
 
         diag_result = StageLoopResult(
             approved=True,
@@ -594,9 +593,32 @@ class TestOrchestratorRun:
             agent_justification="NXDOMAIN template for the service",
             agent_causal_chain="coredns template -> NXDOMAIN -> client failures",
             stage_outputs_file=stage_outputs,
+            confirmed_slugs=[],
+            message_history=[{"role": "assistant", "content": "successful diagnosis context"}],
         )
 
-        with patch("sregym_agents.crucible.orchestrator._run_stage_loop", new=AsyncMock(return_value=diag_result)):
+        with (
+            patch("sregym_agents.crucible.orchestrator._run_stage_loop", new=AsyncMock(return_value=diag_result)),
+            patch(
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_success_diagnosis_playbook_candidate",
+                new=AsyncMock(
+                    return_value=DiagnosisPlaybookDraft(
+                        slug="coredns-nxdomain",
+                        root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+                        when_to_consider=["Application logs show service-hostname resolution failures."],
+                        disambiguators=["Backend services exist but lookups still return NXDOMAIN."],
+                        summary="Check whether CoreDNS is intentionally returning NXDOMAIN for service names.",
+                        triage_checks=["1. Inspect application logs for host-resolution errors."],
+                        fault_localization_checks=[
+                            "1. Trace the failing request path to the dependent backend hostname."
+                        ],
+                        verification_checks=["1. Inspect CoreDNS configuration for matching NXDOMAIN rules."],
+                        required_evidence=["CoreDNS config contains a rule matching the failing service FQDN."],
+                        known_confounders=["The Service object is missing."],
+                    )
+                ),
+            ) as build_success_diagnosis,
+        ):
             result = await run(
                 model="test-model",
                 app_info={"app_name": "Social Network", "namespace": "social-network", "descriptions": ""},
@@ -606,14 +628,15 @@ class TestOrchestratorRun:
                 planned_stages=["diagnosis"],
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=PromptRenderer("v3"),
-                crucible_config=CrucibleConfig(include_benchmark_results=True),
+                crucible_config=CrucibleConfig(include_benchmark_results=True, prompt_version="v3"),
                 driver=driver,
             )
 
         assert result["diagnosis_succeeded"] is True
-        assert result["diagnosis_playbook_candidate"] is None
+        assert result["diagnosis_playbook_candidate"]["slug"] == "coredns-nxdomain"
         assert "CoreDNS misconfiguration" in result["diagnosis_run_md"]
         assert result["recovery_diagnosis_run_md"] is None
+        build_success_diagnosis.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_run_emits_mitigation_playbook_candidate_for_successful_stage(self, tmp_path: Path):
@@ -661,7 +684,7 @@ class TestOrchestratorRun:
             patch("sregym_agents.crucible.orchestrator._wait_for_mitigation_stage", new=AsyncMock()),
             patch("sregym_agents.crucible.orchestrator._try_playbook_shortcut", new=AsyncMock(return_value=None)),
             patch(
-                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_mitigation_playbook_candidate",
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_success_mitigation_playbook_candidate",
                 new=AsyncMock(
                     return_value=MitigationPlaybookDraft(
                         slug="coredns-nxdomain",
@@ -683,7 +706,7 @@ class TestOrchestratorRun:
                 planned_stages=["diagnosis", "mitigation"],
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=PromptRenderer("v3"),
-                crucible_config=CrucibleConfig(include_benchmark_results=True),
+                crucible_config=CrucibleConfig(include_benchmark_results=True, prompt_version="v3"),
                 driver=driver,
             )
 
@@ -692,6 +715,162 @@ class TestOrchestratorRun:
         assert "Patched ConfigMap/coredns" in result["mitigation_run_md"]
         assert result["recovery_mitigation_run_md"] is None
         build_mitigation.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_does_not_emit_success_diagnosis_candidate_when_playbook_already_matched(self, tmp_path: Path):
+        from sregym_agents.crucible.config import CrucibleConfig
+        from sregym_agents.crucible.orchestrator import StageLoopResult, run
+
+        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
+        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
+        stage_outputs.write_text("# stage outputs\n")
+
+        driver = MagicMock()
+        driver.run = AsyncMock()
+
+        diag_result = StageLoopResult(
+            approved=True,
+            benchmark_block=(
+                "<benchmark_result>\nsuccess: True\n<oracle>\n"
+                '{"Diagnosis":{"matched_candidate_index":0}}\n'
+                "</oracle>\n</benchmark_result>\n"
+            ),
+            agent_answer="CoreDNS misconfiguration",
+            agent_justification="NXDOMAIN template for the service",
+            agent_causal_chain="coredns template -> NXDOMAIN -> client failures",
+            stage_outputs_file=stage_outputs,
+            confirmed_slugs=["coredns-nxdomain"],
+            message_history=[{"role": "assistant", "content": "successful diagnosis context"}],
+        )
+
+        with (
+            patch("sregym_agents.crucible.orchestrator._run_stage_loop", new=AsyncMock(return_value=diag_result)),
+            patch(
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_success_diagnosis_playbook_candidate",
+                new=AsyncMock(),
+            ) as build_success_diagnosis,
+        ):
+            result = await run(
+                model="test-model",
+                app_info={"app_name": "Social Network", "namespace": "social-network", "descriptions": ""},
+                problem_id="service_dns_resolution_failure__v_social_network_text-service",
+                diagnosis_shared_file=diagnosis_shared,
+                mitigation_shared_file=mitigation_shared,
+                planned_stages=["diagnosis"],
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=PromptRenderer("v3"),
+                crucible_config=CrucibleConfig(include_benchmark_results=True, prompt_version="v3"),
+                driver=driver,
+            )
+
+        assert result["diagnosis_succeeded"] is True
+        assert result["diagnosis_playbook_candidate"] is None
+        build_success_diagnosis.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_run_defers_success_diagnosis_authoring_until_after_mitigation_and_reuses_slug(self, tmp_path: Path):
+        from sregym_agents.crucible.config import CrucibleConfig
+        from sregym_agents.crucible.orchestrator import StageLoopResult, run
+
+        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
+        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
+        mitigation_stage_outputs = tmp_path / "mitigation_stage_outputs.md"
+        diagnosis_stage_outputs.write_text("# diagnosis outputs\n")
+        mitigation_stage_outputs.write_text("# mitigation outputs\n")
+
+        driver = MagicMock()
+        driver.run = AsyncMock()
+
+        diag_result = StageLoopResult(
+            approved=True,
+            benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>\n",
+            agent_answer="CoreDNS misconfiguration",
+            agent_justification="NXDOMAIN template for the service",
+            agent_causal_chain="coredns template -> NXDOMAIN -> client failures",
+            stage_outputs_file=diagnosis_stage_outputs,
+            confirmed_slugs=[],
+            message_history=[{"role": "assistant", "content": "successful diagnosis context"}],
+        )
+        mit_result = StageLoopResult(
+            approved=True,
+            benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>\n",
+            agent_answer="Patched ConfigMap/coredns to remove the NXDOMAIN rules.",
+            agent_justification="The affected service names resolve again.",
+            stage_outputs_file=mitigation_stage_outputs,
+            confirmed_slugs=[],
+            message_history=[{"role": "assistant", "content": "successful mitigation context"}],
+        )
+        call_order: list[str] = []
+
+        async def fake_run_stage_loop(*args, **kwargs):
+            stage = kwargs.get("stage", args[3])
+            call_order.append(stage)
+            if stage == "diagnosis":
+                return diag_result
+            return mit_result
+
+        async def fake_build_success_diagnosis(self, **kwargs):
+            call_order.append("diagnosis-playbook")
+            return DiagnosisPlaybookDraft(
+                slug="coredns-nxdomain",
+                root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+                when_to_consider=["Application logs show service-hostname resolution failures."],
+                disambiguators=["Backend services exist but lookups still return NXDOMAIN."],
+                summary="Check whether CoreDNS is intentionally returning NXDOMAIN for service names.",
+                triage_checks=["1. Inspect application logs for host-resolution errors."],
+                fault_localization_checks=["1. Trace the failing request path to the dependent backend hostname."],
+                verification_checks=["1. Inspect CoreDNS configuration for matching NXDOMAIN rules."],
+                required_evidence=["CoreDNS config contains a rule matching the failing service FQDN."],
+                known_confounders=["The Service object is missing."],
+            )
+
+        async def fake_build_success_mitigation(self, **kwargs):
+            call_order.append("mitigation-playbook")
+            assert kwargs["root_cause_slug"] == "coredns-nxdomain"
+            assert kwargs["root_cause"] == "CoreDNS returns NXDOMAIN for targeted service names."
+            return MitigationPlaybookDraft(
+                slug="coredns-nxdomain",
+                root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+                summary="Remove the CoreDNS override and verify DNS recovery.",
+                mitigation_procedure=["1. Patch ConfigMap/coredns to remove the bad template rules."],
+                verification_checks=["1. Verify the affected service names resolve again."],
+                rollback_stop_conditions=["Stop if the correct CoreDNS change cannot be identified."],
+            )
+
+        with (
+            patch(
+                "sregym_agents.crucible.orchestrator._run_stage_loop",
+                new=fake_run_stage_loop,
+            ),
+            patch("sregym_agents.crucible.orchestrator._wait_for_mitigation_stage", new=AsyncMock()),
+            patch("sregym_agents.crucible.orchestrator._try_playbook_shortcut", new=AsyncMock(return_value=None)),
+            patch(
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_success_diagnosis_playbook_candidate",
+                new=fake_build_success_diagnosis,
+            ),
+            patch(
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_success_mitigation_playbook_candidate",
+                new=fake_build_success_mitigation,
+            ),
+        ):
+            result = await run(
+                model="test-model",
+                app_info={"app_name": "Social Network", "namespace": "social-network", "descriptions": ""},
+                problem_id="service_dns_resolution_failure__v_social_network_text-service",
+                diagnosis_shared_file=diagnosis_shared,
+                mitigation_shared_file=mitigation_shared,
+                planned_stages=["diagnosis", "mitigation"],
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=PromptRenderer("v3"),
+                crucible_config=CrucibleConfig(include_benchmark_results=True, prompt_version="v3"),
+                driver=driver,
+            )
+
+        assert call_order == ["diagnosis", "mitigation", "diagnosis-playbook", "mitigation-playbook"]
+        assert result["diagnosis_playbook_candidate"]["slug"] == "coredns-nxdomain"
+        assert result["mitigation_playbook_candidate"]["slug"] == "coredns-nxdomain"
 
     @pytest.mark.asyncio
     async def test_run_defers_diagnosis_recovery_until_after_mitigation(self, tmp_path: Path):
@@ -759,11 +938,21 @@ class TestOrchestratorRun:
                 known_confounders=["The Service object is missing."],
             )
 
+        async def fake_wait_for_mitigation_stage(*args, **kwargs):
+            return None
+
+        async def fake_try_recovery_playbook_shortcut(*args, **kwargs):
+            return None
+
         with (
-            patch("sregym_agents.crucible.orchestrator._run_stage_loop", side_effect=fake_run_stage_loop),
-            patch("sregym_agents.crucible.orchestrator._wait_for_mitigation_stage", new=AsyncMock()),
+            patch("sregym_agents.crucible.orchestrator._run_stage_loop", new=fake_run_stage_loop),
             patch(
-                "sregym_agents.crucible.orchestrator._try_recovery_playbook_shortcut", new=AsyncMock(return_value=None)
+                "sregym_agents.crucible.orchestrator._wait_for_mitigation_stage",
+                new=fake_wait_for_mitigation_stage,
+            ),
+            patch(
+                "sregym_agents.crucible.orchestrator._try_recovery_playbook_shortcut",
+                new=fake_try_recovery_playbook_shortcut,
             ),
             patch(
                 "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.run_diagnosis",
@@ -783,7 +972,7 @@ class TestOrchestratorRun:
                 planned_stages=["diagnosis", "mitigation"],
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 renderer=PromptRenderer("v3"),
-                crucible_config=CrucibleConfig(include_benchmark_results=True),
+                crucible_config=CrucibleConfig(include_benchmark_results=True, prompt_version="v3"),
                 driver=driver,
             )
 

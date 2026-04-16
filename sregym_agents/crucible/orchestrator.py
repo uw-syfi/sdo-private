@@ -169,7 +169,7 @@ async def _run_diagnosis_recovery_if_needed(
             diag_result.agent_justification = diagnosis_recovery.submission.justification
             diag_result.agent_causal_chain = diagnosis_recovery.submission.causal_chain
 
-    if diagnosis_recovery and diagnosis_recovery.message_history:
+    if diagnosis_recovery and diagnosis_recovery.message_history and crucible_config.prompt_version >= "v3":
         diagnosis_playbook_candidate = await recovery_agent.build_diagnosis_playbook_candidate(
             app_info=app_info,
             original_answer=original_diag_result.agent_answer,
@@ -766,6 +766,7 @@ async def _try_playbook_shortcut(
         shared_file=shared_file,
         submit_mcp_url=submit_mcp_url,
         stage_outputs_file=None,
+        confirmed_slugs=[slug],
     )
 
 
@@ -903,6 +904,7 @@ async def run(
 
     diagnosis_recovery = None
     diagnosis_playbook_candidate = None
+    diagnosis_playbook_candidate_origin: str | None = None
     triage_area_candidate = None
     if "mitigation" not in planned_stages:
         (
@@ -919,6 +921,25 @@ async def run(
             recovery_stage_outputs_file=recovery_stage_outputs_file,
             crucible_config=crucible_config,
         )
+        if diagnosis_playbook_candidate is not None:
+            diagnosis_playbook_candidate_origin = "recovery"
+        elif (
+            crucible_config.prompt_version >= "v3"
+            and "success: True" in (diag_result.benchmark_block or "")
+            and not diag_result.confirmed_slugs
+            and diag_result.message_history
+        ):
+            diagnosis_playbook_candidate = await recovery_agent.build_success_diagnosis_playbook_candidate(
+                app_info=app_info,
+                diagnosis_answer=diag_result.agent_answer,
+                diagnosis_justification=diag_result.agent_justification,
+                diagnosis_causal_chain=diag_result.agent_causal_chain,
+                diagnosis_message_history=diag_result.message_history,
+                usage_collector=primary_collector,
+                stage_outputs_file=None,
+            )
+            if diagnosis_playbook_candidate is not None:
+                diagnosis_playbook_candidate_origin = "success"
         logger.info("Diagnosis-only problem — orchestrator complete.")
         result = _build_usage_metrics(primary_collector, recovery_collector)
         sof = diag_result.stage_outputs_file
@@ -953,12 +974,14 @@ async def run(
         result["diagnosis_playbook_candidate"] = (
             diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
         )
+        result["diagnosis_playbook_candidate_origin"] = diagnosis_playbook_candidate_origin
         result["triage_area_candidate"] = (
             triage_area_candidate.model_dump(mode="python") if triage_area_candidate is not None else None
         )
         result["mitigation_run_md"] = None
         result["recovery_mitigation_run_md"] = None
         result["mitigation_playbook_candidate"] = None
+        result["mitigation_playbook_candidate_origin"] = None
         return result
 
     _init_mitigation_file(
@@ -1063,6 +1086,25 @@ async def run(
         recovery_stage_outputs_file=recovery_stage_outputs_file,
         crucible_config=crucible_config,
     )
+    if diagnosis_playbook_candidate is not None:
+        diagnosis_playbook_candidate_origin = "recovery"
+    elif (
+        crucible_config.prompt_version >= "v3"
+        and "success: True" in (diag_result.benchmark_block or "")
+        and not diag_result.confirmed_slugs
+        and diag_result.message_history
+    ):
+        diagnosis_playbook_candidate = await recovery_agent.build_success_diagnosis_playbook_candidate(
+            app_info=app_info,
+            diagnosis_answer=diag_result.agent_answer,
+            diagnosis_justification=diag_result.agent_justification,
+            diagnosis_causal_chain=diag_result.agent_causal_chain,
+            diagnosis_message_history=diag_result.message_history,
+            usage_collector=primary_collector,
+            stage_outputs_file=None,
+        )
+        if diagnosis_playbook_candidate is not None:
+            diagnosis_playbook_candidate_origin = "success"
 
     mitigation_recovery = None
     # Recovery mitigation
@@ -1086,29 +1128,11 @@ async def run(
             mit_result.agent_justification = mitigation_recovery.submission.justification
 
     mitigation_playbook_candidate = None
+    mitigation_playbook_candidate_origin: str | None = None
     mitigation_identity = _resolve_mitigation_playbook_identity(diag_result, diagnosis_playbook_candidate)
-    if mitigation_identity is not None:
+    if crucible_config.prompt_version >= "v3" and mitigation_identity is not None:
         slug, root_cause = mitigation_identity
-        mitigation_context = None
         if mitigation_recovery and mitigation_recovery.message_history:
-            mitigation_context = (
-                mitigation_recovery.message_history,
-                mit_result.agent_answer,
-                mit_result.agent_justification,
-            )
-        elif (
-            "success: True" in (mit_result.benchmark_block or "")
-            and mit_result.message_history
-            and not (mit_result.confirmed_slugs or [])
-        ):
-            mitigation_context = (
-                mit_result.message_history,
-                mit_result.agent_answer,
-                mit_result.agent_justification,
-            )
-
-        if mitigation_context is not None:
-            message_history, grounded_answer, grounded_justification = mitigation_context
             mitigation_playbook_candidate = await recovery_agent.build_mitigation_playbook_candidate(
                 app_info=app_info,
                 root_cause_slug=slug,
@@ -1116,12 +1140,32 @@ async def run(
                 diagnosis_answer=diag_result.agent_answer,
                 original_answer=original_mit_result.agent_answer,
                 original_justification=original_mit_result.agent_justification,
-                grounded_answer=grounded_answer,
-                grounded_justification=grounded_justification,
-                recovery_message_history=message_history,
-                usage_collector=recovery_collector if mitigation_recovery else primary_collector,
+                grounded_answer=mit_result.agent_answer,
+                grounded_justification=mit_result.agent_justification,
+                recovery_message_history=mitigation_recovery.message_history,
+                usage_collector=recovery_collector,
                 stage_outputs_file=None,
             )
+            if mitigation_playbook_candidate is not None:
+                mitigation_playbook_candidate_origin = "recovery"
+        elif (
+            "success: True" in (mit_result.benchmark_block or "")
+            and mit_result.message_history
+            and not (mit_result.confirmed_slugs or [])
+        ):
+            mitigation_playbook_candidate = await recovery_agent.build_success_mitigation_playbook_candidate(
+                app_info=app_info,
+                root_cause_slug=slug,
+                root_cause=root_cause,
+                diagnosis_answer=diag_result.agent_answer,
+                mitigation_answer=mit_result.agent_answer,
+                mitigation_justification=mit_result.agent_justification,
+                mitigation_message_history=mit_result.message_history,
+                usage_collector=primary_collector,
+                stage_outputs_file=None,
+            )
+            if mitigation_playbook_candidate is not None:
+                mitigation_playbook_candidate_origin = "success"
 
     logger.info("=" * 60)
     logger.info("CRUCIBLE: Orchestrator complete.")
@@ -1160,6 +1204,7 @@ async def run(
     result["diagnosis_playbook_candidate"] = (
         diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
     )
+    result["diagnosis_playbook_candidate_origin"] = diagnosis_playbook_candidate_origin
     result["triage_area_candidate"] = (
         triage_area_candidate.model_dump(mode="python") if triage_area_candidate is not None else None
     )
@@ -1190,4 +1235,5 @@ async def run(
     result["mitigation_playbook_candidate"] = (
         mitigation_playbook_candidate.model_dump(mode="python") if mitigation_playbook_candidate is not None else None
     )
+    result["mitigation_playbook_candidate_origin"] = mitigation_playbook_candidate_origin
     return result

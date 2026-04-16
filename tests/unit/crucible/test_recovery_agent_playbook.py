@@ -86,6 +86,40 @@ async def test_recovery_agent_builds_diagnosis_playbook_candidate():
 
 
 @pytest.mark.asyncio
+async def test_recovery_agent_builds_success_diagnosis_playbook_candidate():
+    driver = _FakeDriver(
+        DiagnosisPlaybookDraft(
+            slug="coredns-nxdomain",
+            root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+            when_to_consider=["Application logs show service-hostname resolution failures."],
+            disambiguators=["Backend services exist but lookups still return NXDOMAIN."],
+            summary="Check whether cluster DNS is intentionally returning NXDOMAIN for service names.",
+            triage_checks=["1. Inspect application logs for host-resolution errors."],
+            fault_localization_checks=["1. Trace the failing request path to the dependent backend hostname."],
+            verification_checks=["1. Inspect CoreDNS configuration for matching NXDOMAIN rules."],
+            required_evidence=["CoreDNS config contains a rule matching the failing service FQDN."],
+            known_confounders=["The Service object is missing."],
+        )
+    )
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_success_diagnosis_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        diagnosis_answer=(
+            "ConfigMap/coredns returns NXDOMAIN for post-storage-service.social-network.svc.cluster.local."
+        ),
+        diagnosis_justification="kubectl showed CoreDNS template rules for the failing service FQDN.",
+        diagnosis_causal_chain="CoreDNS rule -> NXDOMAIN -> app cannot resolve backend service names.",
+        diagnosis_message_history=[{"role": "assistant", "content": "successful diagnosis context"}],
+    )
+
+    assert candidate is not None
+    assert candidate.slug == "coredns-nxdomain"
+    assert driver.calls[0]["agent_name"] == "success-diagnosis-playbook"
+    assert driver.calls[0]["message_history"] == [{"role": "assistant", "content": "successful diagnosis context"}]
+
+
+@pytest.mark.asyncio
 async def test_recovery_agent_skips_playbook_candidate_without_grounded_diagnosis():
     driver = _FakeDriver(None)
     agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
@@ -95,6 +129,21 @@ async def test_recovery_agent_skips_playbook_candidate_without_grounded_diagnosi
         original_answer="Pod networking is broken.",
         grounded_answer="",
         grounded_justification="",
+    )
+
+    assert candidate is None
+    assert driver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_skips_success_diagnosis_playbook_candidate_without_context():
+    driver = _FakeDriver(None)
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_success_diagnosis_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        diagnosis_answer="",
+        diagnosis_justification="",
     )
 
     assert candidate is None
@@ -198,6 +247,46 @@ async def test_recovery_agent_builds_mitigation_playbook_candidate():
 
 
 @pytest.mark.asyncio
+async def test_recovery_agent_builds_success_mitigation_playbook_candidate():
+    driver = _FakeDriver(
+        MitigationPlaybookDraft(
+            slug="wrong-slug",
+            root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+            summary="Remove the CoreDNS override and verify service-name resolution recovers.",
+            mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted NXDOMAIN template rule."],
+            placeholder_resolution=[
+                PlaceholderResolutionRule(
+                    symbol="<AFFECTED_SERVICE_FQDNS>",
+                    resolution_guidance=(
+                        "Resolve from the diagnosis-confirmed service names. This may be one FQDN or a set "
+                        "of service names matched by the same CoreDNS rule."
+                    ),
+                )
+            ],
+            verification_checks=["1. Verify the affected service names resolve from an application pod."],
+            rollback_stop_conditions=["Stop if the CoreDNS ConfigMap cannot be updated confidently."],
+        )
+    )
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_success_mitigation_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        root_cause_slug="coredns-nxdomain",
+        root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+        diagnosis_answer="CoreDNS injects NXDOMAIN for post-storage-service.",
+        mitigation_answer="Patched ConfigMap/coredns to remove the NXDOMAIN template blocks.",
+        mitigation_justification="DNS lookups for the affected service names now resolve successfully.",
+        mitigation_message_history=[{"role": "assistant", "content": "successful mitigation context"}],
+    )
+
+    assert candidate is not None
+    assert candidate.slug == "coredns-nxdomain"
+    assert candidate.placeholder_resolution[0].symbol == "<AFFECTED_SERVICE_FQDNS>"
+    assert driver.calls[0]["agent_name"] == "success-mitigation-playbook"
+    assert driver.calls[0]["message_history"] == [{"role": "assistant", "content": "successful mitigation context"}]
+
+
+@pytest.mark.asyncio
 async def test_recovery_agent_skips_mitigation_playbook_candidate_without_grounded_context():
     driver = _FakeDriver(None)
     agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
@@ -210,6 +299,24 @@ async def test_recovery_agent_skips_mitigation_playbook_candidate_without_ground
         original_answer="Restarted the application pods.",
         grounded_answer="",
         grounded_justification="",
+    )
+
+    assert candidate is None
+    assert driver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_skips_success_mitigation_playbook_candidate_without_context():
+    driver = _FakeDriver(None)
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_success_mitigation_playbook_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        root_cause_slug="coredns-nxdomain",
+        root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+        diagnosis_answer="CoreDNS injects NXDOMAIN for post-storage-service.",
+        mitigation_answer="",
+        mitigation_justification="",
     )
 
     assert candidate is None

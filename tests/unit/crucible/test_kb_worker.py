@@ -315,6 +315,69 @@ async def test_process_task_accepts_missing_optional_recovery_run(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_process_task_reviews_success_authored_diagnosis_candidate_with_success_prompt(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    diagnosis_path = tmp_path / "diagnosis_run.md"
+    candidate_path = tmp_path / "candidate.json"
+    diagnosis_path.write_text("# Diagnosis")
+    candidate_path.write_text(json.dumps(_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": str(diagnosis_path),
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": str(candidate_path),
+                "diagnosis_playbook_candidate_origin": "success",
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": False,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            assert "successful diagnosis workflow" in kwargs["prompt"].lower()
+            assert "recovery-produced diagnosis playbook candidate" not in kwargs["prompt"].lower()
+            return AgentResult(
+                output=ReviewDecision(
+                    primary_failure_mode="missing_playbook",
+                    relevant_existing_playbooks=[],
+                    recommended_action="add_playbook",
+                    reasoning="The successful run demonstrates a novel reusable diagnosis pattern.",
+                )
+            )
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    await kb_worker.process_task(task_path)
+
+    saved = store.load_diagnosis("coredns-nxdomain")
+    assert saved is not None
+
+
+@pytest.mark.asyncio
 async def test_process_task_refines_triage_priors_from_candidate(tmp_path, monkeypatch):
     from sregym_agents.crucible import kb_worker
     from sregym_agents.crucible.tools import TriageArea, TriagePriors
