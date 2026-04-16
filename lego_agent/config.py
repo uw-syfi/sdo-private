@@ -14,6 +14,7 @@ except ImportError:
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from libs.model_config import ModelConfig, from_provider_and_model
 
@@ -40,8 +41,8 @@ class AgentConfig:
     rate_limit_backoff: int = 60
     model_config: ModelConfig | None = None
 
-    def __post_init__(self):
-        if not isinstance(self.backend, str):
+    def __post_init__(self) -> None:
+        if not isinstance(self.backend, str):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"backend must be a str, got {type(self.backend)}")
         self.backend = self.backend.lower()
         if self.backend not in self.VALID_BACKENDS:
@@ -49,7 +50,7 @@ class AgentConfig:
                 f"Invalid backend: '{self.backend}'. Valid backends: {', '.join(sorted(self.VALID_BACKENDS))}"
             )
 
-        if self.model_config is not None and not isinstance(self.model_config, ModelConfig):
+        if self.model_config is not None and not isinstance(self.model_config, ModelConfig):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"model_config must be a ModelConfig or None, got {type(self.model_config).__name__}")
 
     @property
@@ -86,8 +87,8 @@ class AgentConfig:
 class OperatorConfig:
     agent_timeout: int = 900
 
-    def __post_init__(self):
-        if not isinstance(self.agent_timeout, int):
+    def __post_init__(self) -> None:
+        if not isinstance(self.agent_timeout, int):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"agent_timeout must be an int, got {type(self.agent_timeout)}")
 
 
@@ -97,12 +98,12 @@ class Config:
     operator: OperatorConfig = field(default_factory=OperatorConfig)
 
     @classmethod
-    def from_dict(cls, data: dict) -> Config:
-        agent_data = dict(data.get("agent", {}))
-        operator_data = data.get("operator", {})
+    def from_dict(cls, data: dict[str, Any]) -> Config:
+        agent_data: dict[str, Any] = dict(data.get("agent", {}))
+        operator_data: dict[str, Any] = data.get("operator", {})
 
         # Only pass recognised fields to OperatorConfig
-        operator_kwargs = {}
+        operator_kwargs: dict[str, Any] = {}
         if "agent_timeout" in operator_data:
             operator_kwargs["agent_timeout"] = operator_data["agent_timeout"]
 
@@ -121,14 +122,14 @@ class Config:
             raise ValueError(f"Unrecognised key(s) in [agent]: {', '.join(sorted(unknown_keys))}")
 
         # Pop flat model keys
-        _raw_model = agent_data.pop("model", None)
-        _raw_location = agent_data.pop("location", None)
-        _raw_thinking_budget = agent_data.pop("thinking_budget", None)
+        _raw_model: str | None = agent_data.pop("model", None)
+        _raw_location: str | None = agent_data.pop("location", None)
+        _raw_thinking_budget: int | None = agent_data.pop("thinking_budget", None)
 
         # Build model_config from flat keys
-        _raw_backend = agent_data.get("backend", "codex").lower()
+        _raw_backend: str = str(agent_data.get("backend", "codex")).lower()
         _UNRESOLVABLE = {"subagent", "hybrid"}
-        _agent_mc = None
+        _agent_mc: ModelConfig | None = None
         if _raw_model:
             if _raw_backend not in _UNRESOLVABLE:
                 try:
@@ -142,7 +143,7 @@ class Config:
                     _raw_model, location=_raw_location, thinking_budget=_raw_thinking_budget
                 )
 
-        agent_kwargs = {**agent_data, "model_config": _agent_mc}
+        agent_kwargs: dict[str, Any] = {**agent_data, "model_config": _agent_mc}
 
         return cls(
             agent=AgentConfig(**agent_kwargs),
@@ -150,11 +151,11 @@ class Config:
         )
 
 
-def _deep_merge(base: dict, update: dict) -> dict:
+def _deep_merge(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge update dict into base dict."""
     for k, v in update.items():
         if isinstance(v, dict) and k in base and isinstance(base[k], dict):
-            _deep_merge(base[k], v)
+            _deep_merge(base[k], v)  # pyright: ignore[reportUnknownArgumentType]
         else:
             base[k] = v
     return base
@@ -171,14 +172,14 @@ def load_config(target_dir: str, config_path: str | None = None) -> Config:
         Config: The loaded configuration object.
     """
     target_path = Path(target_dir)
-    merged_data: dict = {}
+    merged_data: dict[str, Any] = {}
 
     if config_path:
         files_to_load = [Path(config_path)]
     else:
         project_root = Path(__file__).resolve().parent.parent
 
-        files_to_load = []
+        files_to_load: list[Path] = []
 
         root_sds = project_root / "sds.toml"
         if root_sds.exists() and root_sds.resolve() != (target_path / "sds.toml").resolve():

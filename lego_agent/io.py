@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Any, Protocol
 
 import click
 
@@ -67,7 +67,7 @@ class UserIO(Protocol):
         """Render a general info message."""
         ...
 
-    def render_graph(self, config: dict) -> None:
+    def render_graph(self, config: dict[str, Any]) -> None:
         """Render the dependency graph from the config."""
         ...
 
@@ -84,7 +84,7 @@ class ConsoleIO:
             return ""
 
     async def ask_questions(self, questions: list[str]) -> list[str]:
-        answers = []
+        answers: list[str] = []
         for i, q in enumerate(questions, 1):
             click.echo(f"\n{Colors.BOLD}{Colors.YELLOW}Question {i}:{Colors.ENDC} {q}")
             click.echo(f"{Colors.CYAN}Answer: {Colors.ENDC}", nl=False)
@@ -140,7 +140,7 @@ class ConsoleIO:
     def render_info(self, message: str) -> None:
         click.echo(message)
 
-    def render_graph(self, config: dict) -> None:
+    def render_graph(self, config: dict[str, Any]) -> None:
         # For console, we just print a simple text representation or info message
         click.echo(f"\n{Colors.BOLD}{Colors.BLUE}[Graph Generated]{Colors.ENDC}")
         # We could print a tree here, but for now just acknowledge it

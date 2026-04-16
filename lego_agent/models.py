@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 
 @dataclass
@@ -10,7 +10,7 @@ class LegoAgentResponse:
     """Structured response from the agent."""
 
     status: Literal["clarify", "ready"]
-    questions: list[str] = field(default_factory=list)
+    questions: list[str] = field(default_factory=list[str])
     yaml_config: str | None = None
 
     def validate(self) -> None:
@@ -86,10 +86,14 @@ def parse_lego_agent_response(text: str) -> LegoAgentResponse:
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object, got {type(data).__name__}: {json_text}")
 
+    data_dict: dict[str, Any] = data  # pyright: ignore[reportUnknownVariableType]
+    status_val: str = data_dict.get("status", "ready")
+    questions_val: list[str] = data_dict.get("questions", []) or []
+    yaml_config_val: str | None = data_dict.get("yaml_config")
     response = LegoAgentResponse(
-        status=data.get("status", "ready"),  # type: ignore[reportArgumentType]
-        questions=data.get("questions", []),
-        yaml_config=data.get("yaml_config"),
+        status=status_val,  # type: ignore[reportArgumentType]
+        questions=questions_val,
+        yaml_config=yaml_config_val,
     )
     response.validate()
     return response
