@@ -869,13 +869,15 @@ async def run(
     playbook_run_subagent = sre_agent.make_run_subagent(primary_collector)
 
     diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
-    diagnosis_sf.init(
+    diagnosis_header = (
         "# SRE Judged Session State\n"
         "## Session\n"
         f"- App: {app_info.get('app_name', 'unknown')} "
         f"/ Namespace: {app_info.get('namespace', 'default')}\n\n"
         "## Diagnosis\n"
     )
+    diagnosis_shared_file.resolve().parent.mkdir(parents=True, exist_ok=True)
+    diagnosis_sf.write_text(diagnosis_header)
     logger.info(f"Initialized diagnosis shared file: {diagnosis_sf}")
 
     diag_result = await _run_stage_loop(

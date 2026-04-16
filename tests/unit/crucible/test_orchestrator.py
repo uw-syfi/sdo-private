@@ -517,6 +517,55 @@ class TestStageLoopModelHTTPError:
 
 class TestOrchestratorRun:
     @pytest.mark.asyncio
+    async def test_run_reinitializes_existing_diagnosis_shared_file(self, tmp_path: Path):
+        from sregym_agents.crucible.config import CrucibleConfig
+        from sregym_agents.crucible.orchestrator import StageLoopResult, run
+
+        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
+        diagnosis_shared.write_text(
+            "# SRE Judged Session State\n"
+            "## Session\n"
+            "- App: Blueprint Hotel Reservation / Namespace: blueprint-hotel-reservation\n\n"
+            "## Diagnosis\n"
+            "\n### Iteration 1 — LTM Direct Submission (diagnosis)\n"
+            "stale state from previous run\n"
+        )
+        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        driver = MagicMock()
+        observed_shared_content: dict[str, str] = {}
+
+        async def fake_run_stage_loop(*args, **kwargs):
+            observed_shared_content["diagnosis"] = diagnosis_shared.read_text()
+            return StageLoopResult(
+                approved=True,
+                benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>\n",
+                agent_answer="Current run diagnosis",
+                agent_justification="Current run justification",
+            )
+
+        with patch(
+            "sregym_agents.crucible.orchestrator._run_stage_loop", new=AsyncMock(side_effect=fake_run_stage_loop)
+        ):
+            await run(
+                model="test-model",
+                app_info={"app_name": "Hotel Reservation", "namespace": "hotel-reservation", "descriptions": ""},
+                problem_id="update_incompatible_correlated",
+                diagnosis_shared_file=diagnosis_shared,
+                mitigation_shared_file=mitigation_shared,
+                planned_stages=["diagnosis"],
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=PromptRenderer("v2"),
+                crucible_config=CrucibleConfig(prompt_version="v2"),
+                driver=driver,
+            )
+
+        content = observed_shared_content["diagnosis"]
+        assert "Hotel Reservation" in content
+        assert "hotel-reservation" in content
+        assert "Blueprint Hotel Reservation" not in content
+        assert "stale state from previous run" not in content
+
+    @pytest.mark.asyncio
     async def test_playbook_shortcut_passes_diagnosis_shared_file_to_runner(self, tmp_path: Path):
         from sregym_agents.crucible.knowledge_base.root_cause import (
             MitigationFrontMatter,
