@@ -194,6 +194,7 @@ class RecoveryAgent:
         recovery_message_history: list[Any] | None = None,
         usage_collector: UsageCollector | None = None,
         stage_outputs_file: Path | None = None,
+        diagnosis_oracle_reasoning: str = "",
     ) -> DiagnosisPlaybookDraft | None:
         """Build a reusable diagnosis playbook from the completed grounded diagnosis."""
 
@@ -218,6 +219,7 @@ class RecoveryAgent:
             grounded_answer=grounded_answer,
             grounded_justification=grounded_justification,
             grounded_causal_chain=grounded_causal_chain,
+            diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
             descriptions=app_info.get("descriptions", ""),
@@ -375,6 +377,7 @@ class RecoveryAgent:
         recovery_message_history: list[Any] | None = None,
         usage_collector: UsageCollector | None = None,
         stage_outputs_file: Path | None = None,
+        diagnosis_oracle_reasoning: str = "",
     ) -> MitigationPlaybookDraft | None:
         """Build a reusable mitigation playbook from the completed grounded mitigation."""
 
@@ -406,6 +409,7 @@ class RecoveryAgent:
             original_justification=original_justification,
             grounded_answer=grounded_answer,
             grounded_justification=grounded_justification,
+            diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
             descriptions=app_info.get("descriptions", ""),
@@ -447,6 +451,7 @@ class RecoveryAgent:
         mitigation_message_history: list[Any] | None = None,
         usage_collector: UsageCollector | None = None,
         stage_outputs_file: Path | None = None,
+        diagnosis_oracle_reasoning: str = "",
     ) -> MitigationPlaybookDraft | None:
         """Build a reusable mitigation playbook from a successful primary mitigation run."""
 
@@ -476,6 +481,7 @@ class RecoveryAgent:
             diagnosis_answer=diagnosis_answer,
             mitigation_answer=mitigation_answer,
             mitigation_justification=mitigation_justification,
+            diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
             descriptions=app_info.get("descriptions", ""),

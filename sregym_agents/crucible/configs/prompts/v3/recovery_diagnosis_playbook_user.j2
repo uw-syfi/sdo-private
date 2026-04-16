@@ -15,6 +15,14 @@ The grounded diagnosis you just established was:
 {% if grounded_causal_chain %}
 **Causal Chain**: {{ grounded_causal_chain }}
 {% endif %}
+{% if diagnosis_oracle_reasoning is defined and diagnosis_oracle_reasoning %}
+
+The diagnosis oracle rejected the original diagnosis with the following expected-root-cause framing. Treat this as ground truth when choosing the playbook's fault class:
+
+**Oracle reasoning**: {{ diagnosis_oracle_reasoning }}
+
+When your grounded diagnosis and the oracle's framing disagree on the fault class (e.g. "missing client credentials" vs. "database privilege revocation"), prefer the oracle's framing for `slug`, `root_cause`, `summary`, and `when_to_consider`. The `slug` should be a short kebab-case phrase summarising the oracle-named fault class, not the narrative you used during recovery. Only fall back to your grounded framing if the oracle text is empty or clearly non-specific.
+{% endif %}
 
 Produce a diagnosis playbook candidate that captures your grounded diagnosis as a reusable troubleshooting artifact.
 

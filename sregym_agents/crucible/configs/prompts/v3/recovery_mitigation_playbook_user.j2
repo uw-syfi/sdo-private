@@ -22,5 +22,13 @@ For reference, the original failed or incomplete mitigation was:
 The grounded mitigation you just established was:
 **Answer**: {{ grounded_answer }}
 **Justification**: {{ grounded_justification }}
+{% if diagnosis_oracle_reasoning is defined and diagnosis_oracle_reasoning %}
+
+The diagnosis oracle rejected the original diagnosis with the following expected-root-cause framing. Treat this as ground truth for how the fault class should be described:
+
+**Oracle reasoning**: {{ diagnosis_oracle_reasoning }}
+
+The `slug` and `root_cause` above are pinned from the diagnosis playbook — keep them. But frame `summary` and the narrative fields (`placeholder_resolution` guidance, `verification_checks`) around the oracle's fault class, not around any symptom you happened to fix. If the applied mitigation addressed the symptom without addressing the oracle-named fault (for example, disabling a feature that makes the fault irrelevant rather than reversing the faulting configuration), say so explicitly in `summary` and add a `rollback_stop_conditions` entry noting that the fix is symptomatic and flagging the oracle-named resource as still potentially misconfigured.
+{% endif %}
 
 Produce a mitigation playbook candidate that captures this grounded fix as a reusable remediation artifact.

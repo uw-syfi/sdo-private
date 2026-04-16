@@ -181,6 +181,9 @@ async def _run_diagnosis_recovery_if_needed(
             recovery_message_history=diagnosis_recovery.message_history,
             usage_collector=recovery_collector,
             stage_outputs_file=None,
+            diagnosis_oracle_reasoning=_extract_benchmark_reasoning(
+                original_diag_result.benchmark_block or "", stage="diagnosis"
+            ),
         )
 
         if crucible_config.prompt_version >= "v3" and original_diag_result.stage_outputs_file is not None:
@@ -625,7 +628,7 @@ async def _run_stage_loop(
     )
 
 
-def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:  # pyright: ignore[reportUnusedFunction]
+def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:
     """Extract the 'reasoning' field from a benchmark_result block.
 
     Args:
@@ -1134,6 +1137,9 @@ async def run(
     mitigation_identity = _resolve_mitigation_playbook_identity(diag_result, diagnosis_playbook_candidate)
     if crucible_config.prompt_version >= "v3" and mitigation_identity is not None:
         slug, root_cause = mitigation_identity
+        diagnosis_oracle_reasoning = _extract_benchmark_reasoning(
+            original_diag_result.benchmark_block or "", stage="diagnosis"
+        )
         if mitigation_recovery and mitigation_recovery.message_history:
             mitigation_playbook_candidate = await recovery_agent.build_mitigation_playbook_candidate(
                 app_info=app_info,
@@ -1147,6 +1153,7 @@ async def run(
                 recovery_message_history=mitigation_recovery.message_history,
                 usage_collector=recovery_collector,
                 stage_outputs_file=None,
+                diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
             )
             if mitigation_playbook_candidate is not None:
                 mitigation_playbook_candidate_origin = "recovery"
@@ -1165,6 +1172,7 @@ async def run(
                 mitigation_message_history=mit_result.message_history,
                 usage_collector=primary_collector,
                 stage_outputs_file=None,
+                diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
             )
             if mitigation_playbook_candidate is not None:
                 mitigation_playbook_candidate_origin = "success"
