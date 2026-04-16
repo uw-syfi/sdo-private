@@ -329,7 +329,7 @@ class FanOut(Runnable):
 
             # Print each worker's captured output sequentially with markers so
             # the UI can route logs to individual worker nodes.
-            results = []
+            results: list[Any] = []
             for i, result, captured in sorted(indexed_results, key=lambda x: x[0]):
                 print(f"__LEGO_WORKER_START__ {i}", flush=True)
                 if captured:
