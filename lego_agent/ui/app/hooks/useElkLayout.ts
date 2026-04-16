@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import ELK from 'elkjs/lib/elk.bundled';
 import { useGraphStore } from '../store/graphStore';
 import { Node, Edge } from 'reactflow';
@@ -16,8 +16,10 @@ const layoutOptions = {
 
 export const useElkLayout = () => {
   const { setNodes } = useGraphStore();
+  const layoutVersionRef = useRef(0);
 
   const computeLayout = useCallback(async (nodes: Node[], edges: Edge[]) => {
+    const myVersion = ++layoutVersionRef.current;
     if (nodes.length === 0) return;
 
     // 1. Build hierarchy tree from flat ReactFlow nodes
@@ -120,53 +122,58 @@ export const useElkLayout = () => {
       // 2. Compute Layout
       const layoutedGraph = await elk.layout(graph);
 
-      // 3. Flatten back to ReactFlow nodes
-      const nextNodes: Node[] = [];
-      
-      const processNode = (elkNode: any) => {
-        // Find original node to preserve data
-        const originalNode = nodes.find((n) => n.id === elkNode.id);
-        if (originalNode) {
-          nextNodes.push({
-            ...originalNode,
-            position: {
-              x: elkNode.x,
-              y: elkNode.y,
-            },
-            style: {
-                ...originalNode.style,
-                width: elkNode.width,
-                height: elkNode.height,
-            }
-          });
-        }
-        
-        // Recurse
+      // Abort if a newer layout was triggered while ELK was running.
+      if (myVersion !== layoutVersionRef.current) return;
+
+      // 3. Collect ELK-assigned positions into a map (keyed by node id).
+      //    We do NOT replace the store with the snapshot — we merge positions
+      //    onto the *current* store so that nodes added after the snapshot was
+      //    taken (e.g. fan_out workers) are never accidentally dropped.
+      const positionMap = new Map<string, { x: number; y: number; width: number; height: number }>();
+
+      const collectPositions = (elkNode: any) => {
+        positionMap.set(elkNode.id, {
+          x: elkNode.x ?? 0,
+          y: elkNode.y ?? 0,
+          width: elkNode.width,
+          height: elkNode.height,
+        });
         if (elkNode.children) {
-            elkNode.children.forEach((child: any) => processNode(child));
+          elkNode.children.forEach((child: any) => collectPositions(child));
         }
       };
 
       if (layoutedGraph.children) {
-          layoutedGraph.children.forEach((child: any) => processNode(child));
+        layoutedGraph.children.forEach((child: any) => collectPositions(child));
       }
 
-      // Check if nodes actually changed to prevent infinite loops
-      const hasChanges = nextNodes.some((newNode) => {
-          const oldNode = nodes.find((n) => n.id === newNode.id);
+      // 4. Apply positions to the *live* store state (not the stale snapshot).
+      //    This guarantees the merged array is always structurally valid for
+      //    ReactFlow (no orphaned children with missing parents).
+      const currentNodes = useGraphStore.getState().nodes;
+      const merged = currentNodes.map((n) => {
+        const layout = positionMap.get(n.id);
+        if (!layout) return n;
+        return {
+          ...n,
+          position: { x: layout.x, y: layout.y },
+          style: { ...n.style, width: layout.width, height: layout.height },
+        };
+      });
+
+      // Check if any positioned node actually moved to prevent infinite loops.
+      const hasChanges = merged.some((newNode) => {
+          const oldNode = currentNodes.find((n) => n.id === newNode.id);
           if (!oldNode) return true;
-          
-          const posChanged = Math.abs(newNode.position.x - oldNode.position.x) > 1 || 
+          const posChanged = Math.abs(newNode.position.x - oldNode.position.x) > 1 ||
                              Math.abs(newNode.position.y - oldNode.position.y) > 1;
-          
           const sizeChanged = Math.abs(Number(newNode.style?.width) - Number(oldNode.style?.width)) > 1 ||
                               Math.abs(Number(newNode.style?.height) - Number(oldNode.style?.height)) > 1;
-                              
           return posChanged || sizeChanged;
       });
 
       if (hasChanges) {
-          setNodes(nextNodes);
+          setNodes(merged);
       }
       
     } catch (err) {

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { LogItem } from '../types';
-import { cn } from '@/lib/utils';
+import { cn, stripAnsi } from '@/lib/utils';
 import { ChevronRight, Terminal, Activity, Check, X, HelpCircle, Cpu } from 'lucide-react';
 
 interface TerminalLogProps {
@@ -146,7 +146,7 @@ function LogEntry({ item }: { item: LogItem }) {
       return (
           <div className="pl-[4.5rem] text-xs text-muted-foreground">
               <span className={event.stream === 'stderr' ? 'text-error' : ''}>
-                  {event.data}
+                  {stripAnsi(event.data ?? '')}
               </span>
           </div>
       );

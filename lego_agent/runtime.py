@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import re
+import sys
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -47,7 +50,7 @@ class AsyncRunnable(Protocol):
 
     def run(self, input_data: Any) -> Any: ...
 
-    async def generate_async(self, prompt: str, timeout: int) -> str: ...
+    async def generate_async(self, prompt: str, timeout: int, output: io.StringIO | None = None) -> str: ...
 
 
 class LangGraphAgent:
@@ -98,12 +101,17 @@ class LangGraphAgent:
         """
         return asyncio.run(self.generate_async(prompt, timeout))
 
-    async def generate_async(self, prompt: str, timeout: int) -> str:
+    async def generate_async(self, prompt: str, timeout: int, output: io.StringIO | None = None) -> str:
         """Async implementation of generate.
 
         Public so that callers such as :class:`FanOut` can await it
         directly without reaching into private internals.
+
+        Args:
+            output: Optional buffer to write printed output to instead of stdout.
+                    Used by FanOut to capture per-worker output for clean routing.
         """
+        out = output if output is not None else sys.stdout
         messages = [HumanMessage(content=prompt)]
         config: RunnableConfig = {"recursion_limit": 50}
 
@@ -125,12 +133,14 @@ class LangGraphAgent:
                             print(
                                 f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}",
                                 flush=True,
+                                file=out,
                             )
                             thinking_started = True
                         print(
                             f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}",
                             end="",
                             flush=True,
+                            file=out,
                         )
                         accumulated_text.append(text_chunk)
 
@@ -138,17 +148,18 @@ class LangGraphAgent:
                     name = event["name"]
                     inputs = event["data"].get("input")
                     if thinking_started:
-                        print(flush=True)
+                        print(flush=True, file=out)
                         thinking_started = False
                     print(
                         f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}",
                         flush=True,
+                        file=out,
                     )
 
                 elif kind == "on_tool_end":
                     name = event["name"]
-                    output = event["data"].get("output")
-                    status, result_text = extract_tool_result(output)
+                    tool_output = event["data"].get("output")
+                    status, result_text = extract_tool_result(tool_output)
 
                     symbol = ""
                     if status == "success":
@@ -161,10 +172,11 @@ class LangGraphAgent:
                         f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
                         f"{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}",
                         flush=True,
+                        file=out,
                     )
 
             if thinking_started:
-                print(flush=True)
+                print(flush=True, file=out)
 
         try:
             await asyncio.wait_for(run_stream(), timeout=timeout)
@@ -182,7 +194,10 @@ class LangGraphAgent:
 
     def run(self, input_data: Any) -> Any:
         """Implement Runnable protocol."""
-        prompt = str(input_data)
+        if self.instruction and "{input}" in self.instruction:
+            prompt = self.instruction.replace("{input}", str(input_data))
+        else:
+            prompt = str(input_data)
         return self.generate(prompt)
 
 
@@ -270,7 +285,16 @@ class FanOut(Runnable):
         items = self.items
         if not isinstance(items, list) or not items:
             if input_data:
-                items = [line for line in str(input_data).strip().splitlines() if line.strip()]
+                raw_lines = [line.strip() for line in str(input_data).strip().splitlines() if line.strip()]
+                # Strip lines that are clearly prose/formatting rather than items:
+                # numbered list prefixes ("1. foo"), bullet markers ("- foo", "* foo"),
+                # and header lines ending with a colon ("Here are the files:").
+                _prefix = re.compile(r'^(\d+[\.\)]\s+|[-*•]\s+)')
+                items = [
+                    _prefix.sub("", line)
+                    for line in raw_lines
+                    if not line.endswith(":")
+                ]
             else:
                 items = []
 
@@ -293,14 +317,28 @@ class FanOut(Runnable):
         async def _run_parallel() -> list[Any]:
             semaphore = asyncio.Semaphore(self.max_workers)
 
-            async def _run_one(p: str) -> Any:
+            async def _run_one(i: int, p: str) -> tuple[int, Any, str]:
                 async with semaphore:
+                    buffer = io.StringIO()
                     if isinstance(self.agent, AsyncRunnable):
-                        return await self.agent.generate_async(p, timeout=self.timeout)
-                    return await asyncio.to_thread(self.agent.run, p)
+                        result = await self.agent.generate_async(p, timeout=self.timeout, output=buffer)
+                    else:
+                        result = await asyncio.to_thread(self.agent.run, p)
+                    return i, result, buffer.getvalue()
 
-            tasks = [_run_one(p) for p in prompts_to_run]
-            return await asyncio.gather(*tasks)
+            tasks = [_run_one(i, p) for i, p in enumerate(prompts_to_run)]
+            indexed_results = await asyncio.gather(*tasks)
+
+            # Print each worker's captured output sequentially with markers so
+            # the UI can route logs to individual worker nodes.
+            results = []
+            for i, result, captured in sorted(indexed_results, key=lambda x: x[0]):
+                print(f"__LEGO_WORKER_START__ {i}", flush=True)
+                if captured:
+                    print(captured, end="", flush=True)
+                print(f"__LEGO_WORKER_END__ {i}", flush=True)
+                results.append(result)
+            return results
 
         return asyncio.run(_run_parallel())
 

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -6,6 +6,7 @@ from lego_agent.runtime import (
     DEFAULT_AGENT_TIMEOUT,
     RUNNABLE_TYPES,
     FanOut,
+    LangGraphAgent,
     _build_runnable,
     fan_out,
     judge_loop,
@@ -141,6 +142,64 @@ def test_build_runnable_judge_loop_requires_worker():
 
 
 # --- FanOut timeout configurability (issue 3) ---
+
+
+# --- {input} placeholder substitution in standalone agent (issue 3) ---
+
+
+def test_langgraph_agent_run_substitutes_input_placeholder():
+    """When instruction contains {input}, run() should substitute input_data into it."""
+    agent = LangGraphAgent.__new__(LangGraphAgent)
+    agent.instruction = "Analyze the file at path: {input}. Use read_file."
+
+    with patch.object(agent, "generate", return_value="result") as mock_generate:
+        agent.run("myfile.py")
+        mock_generate.assert_called_once_with("Analyze the file at path: myfile.py. Use read_file.")
+
+
+def test_langgraph_agent_run_no_placeholder_uses_input_data():
+    """When instruction has no {input}, run() should pass input_data as the prompt."""
+    agent = LangGraphAgent.__new__(LangGraphAgent)
+    agent.instruction = "Do something useful."
+
+    with patch.object(agent, "generate", return_value="result") as mock_generate:
+        agent.run("some input")
+        mock_generate.assert_called_once_with("some input")
+
+
+# --- Per-worker output markers for fan_out (issue 2) ---
+
+
+def test_fan_out_emits_worker_markers(capsys):
+    """FanOut should wrap each worker's output in __LEGO_WORKER_START/END__ markers."""
+
+    # Use a real class so isinstance(agent, AsyncRunnable) returns True.
+    class FakeAsyncAgent:
+        def run(self, input_data):
+            return f"result for {input_data}"
+
+        async def generate_async(self, prompt, timeout, output=None):
+            if output is not None:
+                output.write(f"output for {prompt}")
+            return f"result for {prompt}"
+
+    fo = FanOut(FakeAsyncAgent(), ["item0", "item1"])
+    results = fo.run("")
+
+    captured = capsys.readouterr().out
+    assert "__LEGO_WORKER_START__ 0" in captured
+    assert "__LEGO_WORKER_END__ 0" in captured
+    assert "__LEGO_WORKER_START__ 1" in captured
+    assert "__LEGO_WORKER_END__ 1" in captured
+    # Worker 0's output should appear between its markers
+    start0 = captured.index("__LEGO_WORKER_START__ 0")
+    end0 = captured.index("__LEGO_WORKER_END__ 0")
+    assert "output for item0" in captured[start0:end0]
+    # Worker 1's output should appear between its markers
+    start1 = captured.index("__LEGO_WORKER_START__ 1")
+    end1 = captured.index("__LEGO_WORKER_END__ 1")
+    assert "output for item1" in captured[start1:end1]
+    assert results == ["result for item0", "result for item1"]
 
 
 def test_fan_out_default_timeout():

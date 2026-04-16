@@ -85,6 +85,11 @@ agent:
 
 **IMPORTANT:** Never use expression syntax like `{steps.0.output...}` in `items` — it is not evaluated. Use `items: []` for dynamic scatter over the prior step's output.
 
+**CRITICAL — File path handling:** When fan_out items are file paths:
+- **Prefer static items.** If you already called `list_files` or `find_files` during planning and know the file paths, embed those **exact full relative paths** directly in `items` — do NOT create an intermediate chain step to re-discover them. The tools return paths like `app_operator/cli_agent/__init__.py`; use those verbatim.
+- **Avoid dynamic `items: []` for file paths.** LLM chain steps reformulate paths (e.g. dropping the directory prefix to just `__init__.py`) and add header text, which breaks the path and creates extra workers from non-path lines.
+- If dynamic `items: []` is unavoidable, the preceding chain step's instruction **must** say: "Output ONLY the file paths, one per line, exactly as returned by the tool. No headers, no numbering, no explanation."
+
 ### 4. Summarize (Aggregation)
 Aggregates a list of inputs (usually from Fan-out) into one string.
 ```yaml
