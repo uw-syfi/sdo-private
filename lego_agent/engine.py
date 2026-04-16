@@ -1,11 +1,11 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import StructuredTool, tool
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.tools import StructuredTool, tool  # pyright: ignore[reportUnknownVariableType]
+from langgraph.prebuilt import create_react_agent  # pyright: ignore[reportUnknownVariableType, reportDeprecated]
 from loguru import logger
 
 from lego_agent.config import Config
@@ -48,7 +48,7 @@ class LegoAgentEngine:
         self.work_dir = work_dir
         self._thinking_started = False
 
-    def _wrap_tool(self, func: Callable, name: str) -> StructuredTool:
+    def _wrap_tool(self, func: Callable[..., Any], name: str) -> StructuredTool:
         """Wrap a callable into a LangChain StructuredTool."""
         # Use the function's docstring and name
         t = tool(func)
@@ -75,16 +75,21 @@ class LegoAgentEngine:
     def _extract_message_content(last_msg_content: Any) -> str:
         """Extract text content from an agent message response."""
         if isinstance(last_msg_content, list):
-            parts = []
-            for part in last_msg_content:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    parts.append(part.get("text", ""))
+            parts: list[str] = []
+            items: list[Any] = last_msg_content  # pyright: ignore[reportUnknownVariableType]
+            for part in items:
+                if isinstance(part, dict):
+                    part_d: dict[str, Any] = part  # pyright: ignore[reportUnknownVariableType]
+                    if part_d.get("type") == "text":
+                        parts.append(str(part_d.get("text", "")))
                 elif isinstance(part, str):
                     parts.append(part)
             return "".join(parts)
         return str(last_msg_content)
 
-    async def _run_clarification_round(self, agent: Any, messages: list[Any]) -> tuple[str, dict | None]:
+    async def _run_clarification_round(
+        self, agent: Any, messages: list[BaseMessage]
+    ) -> tuple[str, dict[str, Any] | None]:
         """Stream one clarification round and return (final_content, final_response_data).
 
         Handles streaming events from the agent, rendering thinking chunks and
@@ -93,7 +98,7 @@ class LegoAgentEngine:
 
         Raises ``AgentError`` on execution failure.
         """
-        final_response_data = None
+        final_response_data: dict[str, Any] | None = None
 
         try:
             accumulated_text: list[str] = []
@@ -118,17 +123,20 @@ class LegoAgentEngine:
 
                 elif kind == "on_tool_start":
                     name = event["name"]
-                    inputs = event["data"].get("input")
+                    inputs: Any = event["data"].get("input")
                     if name == "submit_response":
-                        final_response_data = inputs
+                        final_response_data = cast(
+                            "dict[str, Any] | None", inputs if isinstance(inputs, dict) else None
+                        )
                         # Optimization: If response is valid, stop agent immediately
                         # to avoid re-invoking the LLM with the tool output.
-                        if inputs:
+                        if final_response_data:
                             try:
+                                status_raw = final_response_data.get("status")
                                 LegoAgentResponse(
-                                    status=inputs.get("status"),
-                                    questions=inputs.get("questions", []) or [],
-                                    yaml_config=inputs.get("yaml_config"),
+                                    status=cast("Any", status_raw),
+                                    questions=final_response_data.get("questions", []) or [],
+                                    yaml_config=final_response_data.get("yaml_config"),
                                 ).validate()
                                 break
                             except (ValueError, TypeError, KeyError) as e:
@@ -137,7 +145,7 @@ class LegoAgentEngine:
                     if self._thinking_started:
                         self.io.info("")  # Newline
                         self._thinking_started = False
-                    self.io.render_tool_start(name, str(inputs))
+                    self.io.render_tool_start(name, str(cast("Any", inputs)))
 
                 elif kind == "on_tool_end":
                     name = event["name"]
@@ -166,7 +174,7 @@ class LegoAgentEngine:
     def _parse_response(
         self,
         final_content: str,
-        final_response_data: dict | None,
+        final_response_data: dict[str, Any] | None,
     ) -> LegoAgentResponse:
         """Parse and validate the agent response from a clarification round.
 
@@ -271,11 +279,11 @@ class LegoAgentEngine:
             # We recreate it each time to reset state or we could persist it,
             # but since we are changing the prompt (QA pairs), it's easier to treat each round as a fresh generation
             # with full context in the prompt.
-            agent = create_react_agent(llm, tools, prompt=system_prompt)
+            agent = create_react_agent(llm, tools, prompt=system_prompt)  # pyright: ignore[reportDeprecated, reportUnknownVariableType]
 
             self.io.info(f"Thinking... (Round {round_idx + 1})")
 
-            messages: list = [HumanMessage(content=user_msg_text)]
+            messages: list[BaseMessage] = [HumanMessage(content=user_msg_text)]
 
             # Run one clarification round: stream events, collect response
             final_content, final_response_data = await self._run_clarification_round(agent, messages)
@@ -294,7 +302,7 @@ class LegoAgentEngine:
                 messages.append(AIMessage(content=final_content))
                 messages.append(HumanMessage(content=repair_msg_text))
 
-                result = await agent.ainvoke({"messages": messages})
+                result: Any = await agent.ainvoke({"messages": messages})  # pyright: ignore[reportUnknownMemberType]
                 last_msg_content = result["messages"][-1].content
                 final_content = self._extract_message_content(last_msg_content)
 

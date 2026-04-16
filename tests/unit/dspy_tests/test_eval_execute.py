@@ -1154,17 +1154,19 @@ def test_optimize_phase_signal_weight_controls_blend_strength(monkeypatch, tmp_p
         monkeypatch.setattr(
             optimizer,
             "_collect_phase_metrics",
-            lambda exp_dir: {"error_recovery_quality": 1.0}
-            if "_c2_" in exp_dir.name
-            else {"error_recovery_quality": 0.1},
+            lambda exp_dir: (
+                {"error_recovery_quality": 1.0} if "_c2_" in exp_dir.name else {"error_recovery_quality": 0.1}
+            ),
         )
         # Base score favors elite candidate 1 (success), phase score favors mutation candidate 2.
         monkeypatch.setattr(
             optimizer,
             "_run_candidate_subprocess",
-            lambda cmd: SimpleNamespace(returncode=0, stderr="", stdout="")
-            if "_c1_" in Path(cmd[-1]).name
-            else SimpleNamespace(returncode=1, stderr="simulated failure", stdout=""),
+            lambda cmd: (
+                SimpleNamespace(returncode=0, stderr="", stdout="")
+                if "_c1_" in Path(cmd[-1]).name
+                else SimpleNamespace(returncode=1, stderr="simulated failure", stdout="")
+            ),
         )
 
     optimizer_weight_zero = _make_optimizer(tmp_path, n_candidates=2, selection_mode="score", phase_signal_weight=0.0)

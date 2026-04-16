@@ -26,12 +26,14 @@ def parse_chunk_content(content: Any) -> str:
         return content
     if isinstance(content, list):
         text = ""
-        for part in content:
+        parts: list[Any] = content  # pyright: ignore[reportUnknownVariableType]
+        for part in parts:
             if isinstance(part, dict):
-                if part.get("type") == "text":
-                    text += part.get("text", "")
-                elif part.get("type") == "thinking":
-                    text += part.get("thinking", "")
+                part_dict: dict[str, Any] = part  # pyright: ignore[reportUnknownVariableType]
+                if part_dict.get("type") == "text":
+                    text += str(part_dict.get("text", ""))
+                elif part_dict.get("type") == "thinking":
+                    text += str(part_dict.get("thinking", ""))
             elif isinstance(part, str):
                 text += part
         return text
@@ -47,13 +49,14 @@ def extract_tool_result(
     *status* is one of ``"success"``, ``"error"``, or ``"unknown"``.
     *result_text* is the human-readable output, truncated to *max_length*.
     """
-    status = "unknown"
-    result_text = ""
+    status: str = "unknown"
+    result_text: str = ""
 
-    content = getattr(output, "content", output)
+    content: Any = getattr(output, "content", output)
 
     try:
         if isinstance(content, str):
+            content_dict: Any = None
             try:
                 content_dict = json.loads(content)
             except json.JSONDecodeError:
@@ -63,18 +66,20 @@ def extract_tool_result(
                     content_dict = None
 
             if isinstance(content_dict, dict):
-                status = content_dict.get("status", "unknown")
-                result_text = str(content_dict.get("output", ""))
+                cd: dict[str, Any] = content_dict  # pyright: ignore[reportUnknownVariableType]
+                status = str(cd.get("status", "unknown"))
+                result_text = str(cd.get("output", ""))
             else:
                 result_text = content
         elif isinstance(content, dict):
-            status = content.get("status", "unknown")
-            result_text = str(content.get("output", ""))
+            cd2: dict[str, Any] = content  # pyright: ignore[reportUnknownVariableType]
+            status = str(cd2.get("status", "unknown"))
+            result_text = str(cd2.get("output", ""))
         else:
             result_text = str(content)
     except (TypeError, AttributeError) as e:
         logger.debug("Failed to parse tool result: %s", e)
-        result_text = str(content)
+        result_text = str(content)  # pyright: ignore[reportUnknownArgumentType]
 
     if len(result_text) > max_length:
         result_text = result_text[:max_length] + "\n... (truncated)"
