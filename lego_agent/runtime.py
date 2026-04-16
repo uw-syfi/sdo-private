@@ -291,12 +291,8 @@ class FanOut(Runnable):
                 # Strip lines that are clearly prose/formatting rather than items:
                 # numbered list prefixes ("1. foo"), bullet markers ("- foo", "* foo"),
                 # and header lines ending with a colon ("Here are the files:").
-                _prefix = re.compile(r'^(\d+[\.\)]\s+|[-*•]\s+)')
-                items = [
-                    _prefix.sub("", line)
-                    for line in raw_lines
-                    if not line.endswith(":")
-                ]
+                _prefix = re.compile(r"^(\d+[\.\)]\s+|[-*•]\s+)")
+                items = [_prefix.sub("", line) for line in raw_lines if not line.endswith(":")]
             else:
                 items = []
 
