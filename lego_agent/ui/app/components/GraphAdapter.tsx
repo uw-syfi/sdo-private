@@ -26,6 +26,24 @@ interface GraphAdapterProps {
 }
 
 /**
+ * Split a step segment into per-worker segments using __LEGO_WORKER_START__ markers.
+ * Returns a map of workerIndex → content string, or an empty map if no markers found.
+ */
+function extractWorkerSegments(data: string): Map<number, string> {
+  const segments = new Map<number, string>();
+  const matches = [...data.matchAll(/(?:^|\n)__LEGO_WORKER_START__ (\d+)/g)];
+
+  for (let i = 0; i < matches.length; i++) {
+    const workerIdx = parseInt(matches[i][1], 10);
+    const start = matches[i].index!;
+    const end = i + 1 < matches.length ? matches[i + 1].index! : data.length;
+    segments.set(workerIdx, data.slice(start, end));
+  }
+
+  return segments;
+}
+
+/**
  * Split a coalesced script_execution data string into per-step segments.
  * Each segment spans from one __LEGO_STEP_START__ marker to the next (or end).
  * Returns a map of stepIndex → content string.
@@ -270,9 +288,26 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
 
           const stepNode = getStepNodeFrom(freshNodes, stepIdx);
           if (stepNode?.type === 'group') {
-            freshNodes
-              .filter(n => n.parentId === stepNode.id)
-              .forEach(child => addNodeLog(child.id, segLog));
+            const workerSegments = extractWorkerSegments(content);
+            if (workerSegments.size > 0) {
+              // Route each worker's captured output to its specific child node.
+              const children = freshNodes.filter(n => n.parentId === stepNode.id);
+              for (const [workerIdx, workerContent] of workerSegments) {
+                const workerNode = children[workerIdx];
+                if (workerNode) {
+                  addNodeLog(workerNode.id, {
+                    ...lastLog,
+                    id: `${lastLog.id}_s${stepIdx}_w${workerIdx}`,
+                    event: { ...lastLog.event, data: workerContent },
+                  });
+                }
+              }
+            } else {
+              // No worker markers — broadcast to all children (non-fan_out groups).
+              freshNodes
+                .filter(n => n.parentId === stepNode.id)
+                .forEach(child => addNodeLog(child.id, segLog));
+            }
           } else if (stepNode) {
             addNodeLog(stepNode.id, segLog);
           }
