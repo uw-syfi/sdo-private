@@ -21,6 +21,14 @@ Requirements:
   - do not name app-specific services, endpoints, files, or ports unless they are intrinsic to the root cause class itself
   - prefer role-based placeholders such as `<ENTRYPOINT_COMPONENT>`, `<REQUEST_PATH>`, `<DOWNSTREAM_DEPENDENCY>`, `<TARGET_RESOURCE>`, `<TARGET_FQDN>`, and `<AFFECTED_POD>`
 
+Grounding requirements (these fields drive future retrieval — they must reflect what was actually observable, not what sounds plausible):
+- Your investigation trajectory is in context via the session message history. Every item in `when_to_consider`, `disambiguators`, `triage_checks`, `verification_checks`, and `required_evidence` MUST be traceable to a concrete observation, command, or output from that trajectory. Do not emit plausible-sounding items that you did not actually see.
+- `when_to_consider` enumerates the **observable signals a future triage coordinator could surface** — pod status, event messages, anomaly names, log strings, metric shifts, kubectl output patterns that appeared in this investigation. Do not include unobservable domain priors such as "recent changes to a Secret", "credential rotation issues", or "recent changes to user management" — those belong in the narrative `summary` or in `known_confounders`, not in routing triggers.
+- If you cite a log pattern or error string as a trigger (e.g., "logs show `authentication failed`"), that exact string — or an explicit synonym — must have appeared in the logs you inspected. If the recovery investigation surfaced a different signal for this fault class (e.g., a triage anomaly like "access control disabled on mongod" rather than a client-side "auth failed" log line), use the signal you actually saw, not the one a domain textbook would predict.
+- `triage_checks` must generalize the symptom-collection actions that actually surfaced the fault in this run, not invent new ones. If you found the fault by inspecting a ConfigMap or exec'ing into a pod, that action should appear (with placeholders).
+- `required_evidence` must correspond to evidence actually collected during the investigation. Do not list "screenshot comparing X to Y" if no such comparison occurred.
+- Prefer omitting a speculative item over including an ungrounded one. A shorter, grounded playbook routes correctly; a longer, hallucinated one misleads future retrieval and compounds over merges.
+
 Additional requirements for diagnosis playbooks:
 - `fault_localization_checks` must help an agent move from observed symptoms to the likely faulting component(s).
 - Do not assume the symptom-bearing component is the faulting component.

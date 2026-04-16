@@ -74,6 +74,29 @@ def test_review_decision_rejects_validation_failure_without_existing_playbooks()
         )
 
 
+def test_review_decision_rejects_retrieval_failure_with_add_playbook():
+    with pytest.raises(ValueError, match="incoherent with add_playbook"):
+        ReviewDecision(
+            primary_failure_mode="retrieval_failure",
+            relevant_existing_playbooks=["some-adjacent-playbook"],
+            recommended_action="add_playbook",
+            reasoning=(
+                "Classifier lists an adjacent playbook but wants to add a new one — "
+                "this should be missing_playbook + add_playbook instead."
+            ),
+        )
+
+
+def test_review_decision_rejects_playbook_validation_failure_with_add_playbook():
+    with pytest.raises(ValueError, match="incoherent with add_playbook"):
+        ReviewDecision(
+            primary_failure_mode="playbook_validation_failure",
+            relevant_existing_playbooks=["some-adjacent-playbook"],
+            recommended_action="add_playbook",
+            reasoning="Same incoherence as retrieval_failure + add.",
+        )
+
+
 def test_review_decision_rejects_add_with_targets():
     with pytest.raises(ValueError, match="cannot specify target_slugs"):
         ReviewDecision(
@@ -668,3 +691,96 @@ async def test_process_task_skips_mitigation_candidate_without_matching_diagnosi
     await kb_worker.process_task(task_path)
 
     assert store.load_mitigation("coredns-nxdomain") is None
+
+
+def test_read_playbook_tool_returns_diagnosis_markdown(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
+    from sregym_agents.crucible.knowledge_base.root_cause import DiagnosisFrontMatter, DiagnosisPlaybook
+
+    store = RootCauseStore(tmp_path / "kb")
+    store.save_diagnosis(
+        DiagnosisPlaybook(
+            front_matter=DiagnosisFrontMatter(
+                slug="my-pb",
+                root_cause="Root cause text",
+                when_to_consider=["signal A"],
+                disambiguators=["disambig 1"],
+            ),
+            summary="Summary text",
+            triage_checks=["1. First triage check"],
+            fault_localization_checks=["1. Localize"],
+            verification_checks=["1. Verify"],
+            required_evidence=["evidence 1"],
+            known_confounders=["confounder 1"],
+        ),
+        created_from="test",
+    )
+
+    tool = _make_read_playbook_tool(store)
+    markdown = tool(ctx=None, playbook_type="diagnosis", slug="my-pb")
+    assert "my-pb" in markdown
+    assert "Summary text" in markdown
+    assert "First triage check" in markdown
+    assert "Verify" in markdown
+
+
+def test_read_playbook_tool_returns_mitigation_markdown(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
+    from sregym_agents.crucible.knowledge_base.root_cause import (
+        DiagnosisFrontMatter,
+        DiagnosisPlaybook,
+        MitigationFrontMatter,
+        MitigationPlaybook,
+    )
+
+    store = RootCauseStore(tmp_path / "kb")
+    store.save_diagnosis(
+        DiagnosisPlaybook(
+            front_matter=DiagnosisFrontMatter(
+                slug="pb-slug",
+                root_cause="rc",
+                when_to_consider=["x"],
+                disambiguators=["y"],
+            ),
+            summary="s",
+            triage_checks=["1. t"],
+            fault_localization_checks=["1. fl"],
+            verification_checks=["1. v"],
+            required_evidence=["e"],
+        ),
+        created_from="test",
+    )
+    store.save_mitigation(
+        MitigationPlaybook(
+            front_matter=MitigationFrontMatter(slug="pb-slug", root_cause="rc"),
+            summary="mitigation summary",
+            mitigation_procedure=["1. Apply a patch"],
+            verification_checks=["1. Confirm recovery"],
+        ),
+        created_from="test",
+    )
+
+    tool = _make_read_playbook_tool(store)
+    markdown = tool(ctx=None, playbook_type="mitigation", slug="pb-slug")
+    assert "mitigation summary" in markdown
+    assert "Apply a patch" in markdown
+
+
+def test_read_playbook_tool_raises_on_missing_slug(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
+
+    store = RootCauseStore(tmp_path / "kb")
+
+    tool = _make_read_playbook_tool(store)
+    with pytest.raises(ValueError, match="not found"):
+        tool(ctx=None, playbook_type="diagnosis", slug="nope")
+
+
+def test_read_playbook_tool_raises_on_invalid_type(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
+
+    store = RootCauseStore(tmp_path / "kb")
+
+    tool = _make_read_playbook_tool(store)
+    with pytest.raises(ValueError, match="Invalid playbook_type"):
+        tool(ctx=None, playbook_type="bogus", slug="whatever")

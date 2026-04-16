@@ -14,15 +14,23 @@ Then choose a recommended action from:
 - reject_playbook
 
 Interpret the failure modes relative to knowledge-base coverage, not relative to run correctness:
-- missing_playbook means no relevant diagnosis playbook existed.
-- retrieval_failure means a relevant diagnosis playbook existed but this successful run suggests it would not have been retrieved confidently enough.
-- playbook_validation_failure means a relevant diagnosis playbook existed but its verification or localization guidance was materially weaker than the candidate.
-- triage_failure should be rare here; prefer `reject_playbook` over speculative triage-only lessons unless the candidate clearly should not become a diagnosis playbook.
+- `missing_playbook` means no playbook in `Existing diagnosis playbooks` covers the **same root cause class** as the candidate. An adjacent / sibling playbook is not the same class — if the only related playbooks are adjacent, this is `missing_playbook`.
+- `retrieval_failure` means a playbook covering the **same root cause class** existed but this successful run suggests it would not have been retrieved confidently enough.
+- `playbook_validation_failure` means a playbook covering the **same root cause class** existed but its verification or localization guidance was materially weaker than the candidate.
+- `triage_failure` should be rare here; prefer `reject_playbook` over speculative triage-only lessons unless the candidate clearly should not become a diagnosis playbook.
+
+`relevant_existing_playbooks` must list ONLY playbooks covering the same root cause class. Do not populate it with adjacent slugs just because they were considered. Empty is normal and correct when the candidate fills a gap.
+
+Tools available:
+- `read_playbook(playbook_type, slug)` — load the full content (summary, triage_checks, fault_localization_checks, verification_checks, required_evidence, known_confounders) of an existing playbook. `playbook_type` is `"diagnosis"` or `"mitigation"`; `slug` must come from `Existing diagnosis playbooks`. Call this when front-matter alone is not enough — specifically to judge whether a merge target's checks would already cover what the candidate adds, or whether the candidate's contribution is substantive enough to warrant a merge. Use sparingly.
+
+Forbidden combinations (schema-enforced):
+- `retrieval_failure` + `add_playbook` — incoherent. If an existing same-class playbook exists, the fix is `merge_playbooks` or `reject_playbook`. If you're tempted to add, the existing playbook is actually adjacent-not-same → flip to `missing_playbook` and drop the slug.
+- `playbook_validation_failure` + `add_playbook` — same reasoning.
+- `missing_playbook` + `merge_playbooks` — contradictory.
 
 Rules:
 - If there are no existing diagnosis playbooks, you must not choose `merge_playbooks`.
-- If `relevant_existing_playbooks` is empty, `primary_failure_mode` cannot be `retrieval_failure` or `playbook_validation_failure`.
-- Use `missing_playbook` when no relevant playbook exists.
 - `merge_playbooks` requires one or more `target_slugs`, and every target slug must come from `relevant_existing_playbooks`.
 - `add_playbook` must not include any target slugs.
 - `reject_playbook` must include a concrete `rejection_reason`.

@@ -39,6 +39,14 @@ class ReviewDecision(BaseModel):
                 raise ValueError("add_playbook cannot specify target_slugs")
             if self.rejection_reason:
                 raise ValueError("add_playbook cannot specify rejection_reason")
+            if self.primary_failure_mode in {"retrieval_failure", "playbook_validation_failure"}:
+                raise ValueError(
+                    f"{self.primary_failure_mode} is incoherent with add_playbook: if a relevant "
+                    "playbook already exists, the fix is merge_playbooks or reject_playbook. "
+                    "If the existing playbook only covers an adjacent (not same) root cause class, "
+                    "reclassify the primary_failure_mode as missing_playbook and drop the adjacent "
+                    "slug from relevant_existing_playbooks."
+                )
 
         if self.recommended_action == "merge_playbooks":
             if not self.target_slugs:

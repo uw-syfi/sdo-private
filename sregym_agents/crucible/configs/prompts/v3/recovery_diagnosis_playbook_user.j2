@@ -17,3 +17,5 @@ The grounded diagnosis you just established was:
 {% endif %}
 
 Produce a diagnosis playbook candidate that captures your grounded diagnosis as a reusable troubleshooting artifact.
+
+Before emitting each item in `when_to_consider`, `disambiguators`, `triage_checks`, `verification_checks`, and `required_evidence`, confirm that item is grounded in a specific observation, command, or output from your recovery investigation. If it is not — if it is a domain prior that sounds right but you did not actually observe it — omit it.

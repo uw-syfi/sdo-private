@@ -10,9 +10,10 @@ import os
 import signal
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import yaml
+from pydantic_ai import RunContext  # noqa: TC002 — required at runtime for pydantic-ai tool introspection
 
 from libs.pydantic_agent import UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
@@ -59,6 +60,46 @@ def _format_cards(cards: list[DiagnosisFrontMatter]) -> str:
     return "\n".join(parts)
 
 
+def _make_read_playbook_tool(store: RootCauseStore) -> Callable[..., str]:
+    """Build a pydantic-ai tool that reads a playbook's full content from ``store``.
+
+    The returned tool lets the reviewer/classifier fetch full markdown
+    (summary, triage_checks, verification_checks, required_evidence, etc.) for
+    any existing playbook — the default ``diagnosis_cards`` context only
+    includes front matter.
+    """
+
+    def read_playbook(
+        ctx: RunContext[Any],
+        playbook_type: Literal["diagnosis", "mitigation"],
+        slug: str,
+    ) -> str:
+        """Read the full content of a playbook from the knowledge base.
+
+        Args:
+            playbook_type: ``"diagnosis"`` or ``"mitigation"``.
+            slug: The playbook's stable slug (from ``Existing diagnosis playbooks``).
+
+        Returns:
+            The full playbook markdown (front matter + all sections). Raises
+            ``ValueError`` if the slug is not found or the type is invalid.
+        """
+        if playbook_type == "diagnosis":
+            playbook: DiagnosisPlaybook | MitigationPlaybook | None = store.load_diagnosis(slug)
+        elif playbook_type == "mitigation":
+            playbook = store.load_mitigation(slug)
+        else:
+            raise ValueError(
+                f"Invalid playbook_type: {playbook_type!r}. Must be 'diagnosis' or 'mitigation'."
+            )
+
+        if playbook is None:
+            raise ValueError(f"{playbook_type} playbook not found: slug={slug!r}")
+        return playbook.to_markdown()
+
+    return read_playbook
+
+
 async def _review_diagnosis_candidate(
     *,
     driver: AgentDriver,
@@ -69,6 +110,7 @@ async def _review_diagnosis_candidate(
     cards: list[DiagnosisFrontMatter],
     usage_collector: UsageCollector,
     candidate_origin: str = "recovery",
+    store: RootCauseStore,
 ) -> ReviewDecision:
     if candidate_origin == "success":
         prompt = renderer.render(
@@ -90,6 +132,7 @@ async def _review_diagnosis_candidate(
         output_type=ReviewDecision,
         agent_name="kb-review-classifier",
         usage_collector=usage_collector,
+        tools=[_make_read_playbook_tool(store)],
     )
     return result.unwrap("kb-review-classifier")
 
@@ -256,6 +299,7 @@ async def process_task(task_path: Path) -> None:
             cards=cards,
             usage_collector=collector,
             candidate_origin=candidate_origin,
+            store=store,
         )
         logger.info("KB review decision for %s: %s", task["problem_id"], decision.model_dump_json(indent=2))
 
