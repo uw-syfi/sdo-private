@@ -77,10 +77,20 @@ class TriageAreaCandidate(BaseModel):
     grounding: list[str] = Field(default_factory=list)
 
 
+class PlaceholderResolutionRule(BaseModel):
+    symbol: str
+    resolution_guidance: str
+
+
+def _empty_placeholder_resolution() -> list[PlaceholderResolutionRule]:
+    return []
+
+
 class MitigationPlaybookDraft(BaseModel):
     slug: str
     root_cause: str
     summary: str
     mitigation_procedure: list[str]
+    placeholder_resolution: list[PlaceholderResolutionRule] = Field(default_factory=_empty_placeholder_resolution)
     verification_checks: list[str]
     rollback_stop_conditions: list[str] = Field(default_factory=list)

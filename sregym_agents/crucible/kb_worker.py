@@ -191,6 +191,7 @@ def _mitigation_draft_to_playbook(draft: MitigationPlaybookDraft) -> MitigationP
         ),
         summary=draft.summary,
         mitigation_procedure=draft.mitigation_procedure,
+        placeholder_resolution=draft.placeholder_resolution,
         verification_checks=draft.verification_checks,
         rollback_stop_conditions=draft.rollback_stop_conditions,
     )

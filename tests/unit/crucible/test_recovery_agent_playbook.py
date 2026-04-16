@@ -10,6 +10,7 @@ from sregym_agents.crucible.agents.recovery_agent import RecoveryAgent, Recovery
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,
+    PlaceholderResolutionRule,
     TriageAreaCandidate,
 )
 from sregym_agents.crucible.tools import SharedFile, SRESubmission
@@ -162,6 +163,15 @@ async def test_recovery_agent_builds_mitigation_playbook_candidate():
             root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
             summary="Remove the CoreDNS override and verify service-name resolution recovers.",
             mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted NXDOMAIN template rule."],
+            placeholder_resolution=[
+                PlaceholderResolutionRule(
+                    symbol="<AFFECTED_SERVICE_FQDNS>",
+                    resolution_guidance=(
+                        "Resolve from the diagnosis-confirmed service names. This may be one FQDN or a set "
+                        "of service names matched by the same CoreDNS rule."
+                    ),
+                )
+            ],
             verification_checks=["1. Verify the affected service names resolve from an application pod."],
             rollback_stop_conditions=["Stop if the CoreDNS ConfigMap cannot be updated confidently."],
         )
@@ -182,6 +192,7 @@ async def test_recovery_agent_builds_mitigation_playbook_candidate():
 
     assert candidate is not None
     assert candidate.slug == "coredns-nxdomain"
+    assert candidate.placeholder_resolution[0].symbol == "<AFFECTED_SERVICE_FQDNS>"
     assert driver.calls[0]["agent_name"] == "recovery-mitigation-playbook"
     assert driver.calls[0]["message_history"] == [{"role": "assistant", "content": "grounded mitigation context"}]
 

@@ -154,6 +154,44 @@ async def test_search_prior_mitigations_returns_when_mitigation_playbook_missing
     assert payload["playbook_applied"] is False
 
 
+@pytest.mark.asyncio
+async def test_search_prior_mitigations_passes_diagnosis_shared_file_to_playbook_runner(tmp_path) -> None:
+    deps, run_subagent = _make_deps(tmp_path)
+    diagnosis_shared_path = tmp_path / "diagnosis_session_state.md"
+    diagnosis_shared_path.write_text("# diagnosis state\n**Diagnosis**: deployment/coredns is faulting.\n")
+    deps.diagnosis_shared_file = SharedFile(diagnosis_shared_path)
+    run_subagent.return_value = MitigationPlaybookMatch(
+        slug="coredns-nxdomain",
+        root_cause="CoreDNS returns NXDOMAIN for a valid service hostname.",
+        reasoning="The recovered diagnosis matches the stored root cause class.",
+        confident=True,
+    )
+
+    with patch(
+        "sregym_agents.crucible.tools._kb_tools.run_single_mitigation_playbook",
+        new=AsyncMock(
+            return_value=MitigationApplication(
+                strategy_index=0,
+                root_cause_class="CoreDNS returns NXDOMAIN for a valid service hostname.",
+                applied=False,
+                applied_steps=[],
+                verification_evidence=[],
+                mitigation_summary="",
+                reasoning="The playbook did not apply cleanly.",
+            )
+        ),
+    ) as playbook_runner:
+        await search_prior_mitigations_impl(
+            deps,
+            "CoreDNS returns NXDOMAIN for post-storage-service.social-network.svc.cluster.local.",
+        )
+
+    assert playbook_runner.await_args is not None
+    kwargs = playbook_runner.await_args.kwargs
+    assert kwargs["diagnosis_shared_file"] == str(diagnosis_shared_path)
+    assert kwargs["diagnosis_shared_content"] == diagnosis_shared_path.read_text()
+
+
 def test_sre_agent_mitigation_tools_include_search_prior_mitigations() -> None:
     agent = SREAgent(
         driver=AsyncMock(spec=Any),

@@ -88,3 +88,58 @@ def test_v3_recovery_mitigation_playbook_prompt_requires_concrete_fix_steps() ->
     assert "concrete resource and field changes" in prompt
     assert "verification_checks" in prompt
     assert "rollback_stop_conditions" in prompt
+    assert "placeholder_resolution" in prompt
+    assert "For every placeholder you introduce" in prompt
+    assert "single concrete value or to multiple concrete values" in prompt
+    assert "class of values" in prompt
+
+
+def test_v3_mitigation_prompt_uses_diagnosis_shared_file_and_faulting_components() -> None:
+    renderer = PromptRenderer("v3")
+
+    system_prompt = renderer.render("mitigation_agent_system")
+    user_prompt = renderer.render(
+        "mitigation_agent_user",
+        app_name="social-network",
+        namespace="social-network",
+        descriptions="",
+        iteration=1,
+        shared_content="# mitigation state\n",
+        shared_file="/tmp/mitigation_session_state.md",
+        diagnosis_shared_content="# diagnosis state\n**Diagnosis**: The faulting component is deployment/geo.\n",
+        diagnosis_shared_file="/tmp/diagnosis_session_state.md",
+        architecture_content="",
+        lt_summary_content="",
+        lessons_content="",
+    )
+
+    assert "Extract the faulting component(s) from diagnosis first" in system_prompt
+    assert "Do not assume the symptom-bearing component is the one to patch" in system_prompt
+    assert "The diagnosis shared file is at: /tmp/diagnosis_session_state.md" in user_prompt
+    assert "The faulting component is deployment/geo." in user_prompt
+
+
+def test_v3_ltm_apply_mitigation_prompt_reads_diagnosis_shared_file() -> None:
+    renderer = PromptRenderer("v3")
+
+    prompt = renderer.render(
+        "ltm_apply_mitigation",
+        namespace="social-network",
+        stage="mitigation",
+        strategy_index=0,
+        root_cause_class="Misconfigured service port.",
+        mitigation_approach="",
+        playbook="# Mitigation Playbook\n",
+        failed_attempts="",
+        diagnosis_shared_file="/tmp/diagnosis_session_state.md",
+        diagnosis_shared_content=(
+            "# diagnosis state\n**Diagnosis**: The faulting component is service/post-storage-service.\n"
+        ),
+    )
+
+    assert "Extract the faulting component(s) from the diagnosis shared file first" in prompt
+    assert "The diagnosis shared file is at: /tmp/diagnosis_session_state.md" in prompt
+    assert "The faulting component is service/post-storage-service." in prompt
+    assert "Placeholder Resolution" in prompt
+    assert "single concrete value or to multiple concrete values" in prompt
+    assert "class of values" in prompt

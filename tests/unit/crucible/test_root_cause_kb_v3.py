@@ -17,6 +17,7 @@ from sregym_agents.crucible.knowledge_base.incident_records import (
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,
+    PlaceholderResolutionRule,
     TriageAreaCandidate,
 )
 from sregym_agents.crucible.knowledge_base.root_cause import (
@@ -62,6 +63,16 @@ def _mitigation_playbook(slug: str = "wrong_port") -> MitigationPlaybook:
         ),
         summary="Correct the client port configuration and verify recovery.",
         mitigation_procedure=["1. Patch the client deployment to use the correct Service port."],
+        placeholder_resolution=[
+            PlaceholderResolutionRule(
+                symbol="<CORRECT_SERVICE_PORT>",
+                resolution_guidance=(
+                    "Resolve from the authoritative serving port for the diagnosed upstream Service. "
+                    "This may be one concrete port or a per-service class of ports if multiple affected "
+                    "clients must be aligned."
+                ),
+            )
+        ],
         verification_checks=["1. Confirm the client can reach the upstream service successfully."],
         rollback_stop_conditions=["Stop if the correct Service port cannot be determined confidently."],
     )
@@ -84,6 +95,8 @@ def test_root_cause_store_round_trips_playbooks(tmp_path: Path):
     assert loaded_mit is not None
     assert loaded_diag.front_matter.root_cause == "A client deployment points at the wrong upstream port."
     assert loaded_mit.summary == "Correct the client port configuration and verify recovery."
+    assert loaded_mit.placeholder_resolution[0].symbol == "<CORRECT_SERVICE_PORT>"
+    assert "per-service class of ports" in loaded_mit.placeholder_resolution[0].resolution_guidance
 
 
 @pytest.mark.asyncio
@@ -243,6 +256,15 @@ def test_structured_kb_writes_mitigation_records_and_candidate(tmp_path: Path):
         root_cause="CoreDNS template directives return NXDOMAIN for backend service names.",
         summary="Remove the targeted NXDOMAIN rules from CoreDNS and verify DNS recovery.",
         mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted template rules."],
+        placeholder_resolution=[
+            PlaceholderResolutionRule(
+                symbol="<AFFECTED_SERVICE_FQDNS>",
+                resolution_guidance=(
+                    "Resolve from the diagnosis-confirmed failing service names. This may map to one FQDN "
+                    "or to a set of service names covered by the same targeted rule."
+                ),
+            )
+        ],
         verification_checks=["1. Verify the affected service names resolve from an application pod."],
         rollback_stop_conditions=["Stop if the correct CoreDNS ConfigMap cannot be identified confidently."],
     )
@@ -256,6 +278,7 @@ def test_structured_kb_writes_mitigation_records_and_candidate(tmp_path: Path):
     assert recovery_run.read_text() == "# Recovery Mitigation"
     assert candidate_path.name == "mitigation_playbook_candidate.json"
     assert json.loads(candidate_path.read_text())["slug"] == "coredns-nxdomain"
+    assert json.loads(candidate_path.read_text())["placeholder_resolution"][0]["symbol"] == "<AFFECTED_SERVICE_FQDNS>"
 
 
 def test_diagnosis_run_record_does_not_duplicate_summary_or_include_recovery_content():

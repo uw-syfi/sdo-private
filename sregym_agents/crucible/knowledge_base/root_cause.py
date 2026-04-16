@@ -11,6 +11,8 @@ from typing import Any, Literal, cast
 import yaml
 from pydantic import BaseModel, Field
 
+from sregym_agents.crucible.knowledge_base.incident_review import PlaceholderResolutionRule
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -87,6 +89,30 @@ def _render_numbered(items: list[str]) -> str:
         _, dot, _ = item.partition(". ")
         rendered.append(item if dot and item.split(". ", 1)[0].isdigit() else f"{idx}. {item}")
     return "\n".join(rendered)
+
+
+def _parse_placeholder_resolution(items: list[str]) -> tuple[list[PlaceholderResolutionRule], list[str]]:
+    rules: list[PlaceholderResolutionRule] = []
+    violations: list[str] = []
+    for item in items:
+        symbol, sep, guidance = item.partition(":")
+        symbol = symbol.strip()
+        guidance = guidance.strip()
+        if not sep or not symbol or not guidance:
+            violations.append(
+                "each '## Placeholder Resolution' bullet must have the form '- <SYMBOL>: how to resolve it'"
+            )
+            continue
+        rules.append(PlaceholderResolutionRule(symbol=symbol, resolution_guidance=guidance))
+    return rules, violations
+
+
+def _render_placeholder_resolution(items: list[PlaceholderResolutionRule]) -> str:
+    return "\n".join(f"- {item.symbol}: {item.resolution_guidance}" for item in items)
+
+
+def _empty_placeholder_resolution() -> list[PlaceholderResolutionRule]:
+    return []
 
 
 class DiagnosisFrontMatter(BaseModel):
@@ -191,6 +217,7 @@ class MitigationPlaybook(BaseModel):
     front_matter: MitigationFrontMatter
     summary: str
     mitigation_procedure: list[str] = Field(default_factory=list)
+    placeholder_resolution: list[PlaceholderResolutionRule] = Field(default_factory=_empty_placeholder_resolution)
     verification_checks: list[str] = Field(default_factory=list)
     rollback_stop_conditions: list[str] = Field(default_factory=list)
     markdown: str = ""
@@ -210,8 +237,12 @@ class MitigationPlaybook(BaseModel):
             if section not in sections
         ]
         mitigation_procedure = _parse_numbered(sections.get("Mitigation Procedure", ""))
+        placeholder_resolution, placeholder_violations = _parse_placeholder_resolution(
+            _parse_bullets(sections.get("Placeholder Resolution", ""))
+        )
         verification_checks = _parse_numbered(sections.get("Verification Checks", ""))
         rollback_stop_conditions = _parse_bullets(sections.get("Rollback / Stop Conditions", ""))
+        violations.extend(placeholder_violations)
         if not mitigation_procedure:
             violations.append("'## Mitigation Procedure' must contain at least one numbered step")
         if not verification_checks:
@@ -222,6 +253,7 @@ class MitigationPlaybook(BaseModel):
             front_matter=fm,
             summary=sections.get("Summary", "").strip(),
             mitigation_procedure=mitigation_procedure,
+            placeholder_resolution=placeholder_resolution,
             verification_checks=verification_checks,
             rollback_stop_conditions=rollback_stop_conditions,
             markdown=text,
@@ -236,15 +268,20 @@ class MitigationPlaybook(BaseModel):
             except Exception:
                 pass
         meta = yaml.safe_dump(self.front_matter.model_dump(mode="python"), sort_keys=False).strip()
-        body = "\n\n".join(
+        sections = [
+            "# Mitigation Playbook",
+            "## Summary\n" + self.summary.strip(),
+            "## Mitigation Procedure\n" + _render_numbered(self.mitigation_procedure),
+        ]
+        if self.placeholder_resolution:
+            sections.append("## Placeholder Resolution\n" + _render_placeholder_resolution(self.placeholder_resolution))
+        sections.extend(
             [
-                "# Mitigation Playbook",
-                "## Summary\n" + self.summary.strip(),
-                "## Mitigation Procedure\n" + _render_numbered(self.mitigation_procedure),
                 "## Verification Checks\n" + _render_numbered(self.verification_checks),
                 "## Rollback / Stop Conditions\n" + _render_bullets(self.rollback_stop_conditions),
             ]
-        ).strip()
+        )
+        body = "\n\n".join(sections).strip()
         return f"---\n{meta}\n---\n\n{body}\n"
 
 

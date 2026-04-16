@@ -454,8 +454,126 @@ class TestStageLoopModelHTTPError:
         content = shared_path.read_text()
         assert "SRE Agent Error" in content
 
+    @pytest.mark.asyncio
+    async def test_mitigation_stage_passes_diagnosis_shared_file_to_sre_agent(self, tmp_path: Path):
+        from sregym_agents.crucible.agents.base import AgentResult
+        from sregym_agents.crucible.config import CrucibleConfig
+        from sregym_agents.crucible.orchestrator import _run_stage_loop
+        from sregym_agents.crucible.tools import SharedState, SRESubmission
+
+        mitigation_path = tmp_path / "mitigation_session_state.md"
+        mitigation_path.write_text("# mitigation state\n")
+        mitigation_shared = SharedFile(mitigation_path)
+
+        diagnosis_path = tmp_path / "diagnosis_session_state.md"
+        diagnosis_path.write_text("# diagnosis state\n")
+        diagnosis_shared = SharedFile(diagnosis_path)
+
+        mock_sre = MagicMock()
+        mock_sre._config = MagicMock()
+        mock_sre._config.stage_outputs_file = None
+
+        async def fake_sre_run(**kwargs):
+            assert kwargs["diagnosis_shared_file"] is diagnosis_shared
+            state = SharedState()
+            state.answer = "Patched ConfigMap/coredns."
+            state.answer_justification = "DNS recovered."
+            state.submitted = True
+            result = AgentResult(
+                output=SRESubmission(answer="Patched ConfigMap/coredns.", justification="DNS recovered."),
+                completed=True,
+            )
+            result.state = state  # type: ignore[attr-defined]
+            return result
+
+        mock_sre.run = AsyncMock(side_effect=fake_sre_run)
+
+        async def fake_judge_run(**kwargs):
+            state = SharedState()
+            state.verdict = "APPROVED"
+            state.submitted = True
+            state.benchmark_block = "<benchmark_result>\nsuccess: True\n</benchmark_result>\n"
+            result = AgentResult(output="approved", completed=True)
+            result.state = state  # type: ignore[attr-defined]
+            return result
+
+        mock_judge = MagicMock()
+        mock_judge.run = AsyncMock(side_effect=fake_judge_run)
+
+        await _run_stage_loop(
+            sre_agent=mock_sre,
+            judge_agent=mock_judge,
+            app_info={"app_name": "myapp", "namespace": "default"},
+            stage="mitigation",
+            max_iters=1,
+            shared_file=mitigation_shared,
+            diagnosis_shared_file=diagnosis_shared,
+            submit_mcp_url="http://localhost:9954/submit/sse",
+            renderer=PromptRenderer("v3"),
+            usage_collector=UsageCollector(),
+            crucible_config=CrucibleConfig(enable_judge=True),
+        )
+
 
 class TestOrchestratorRun:
+    @pytest.mark.asyncio
+    async def test_playbook_shortcut_passes_diagnosis_shared_file_to_runner(self, tmp_path: Path):
+        from sregym_agents.crucible.knowledge_base.root_cause import (
+            MitigationFrontMatter,
+            MitigationPlaybook,
+        )
+        from sregym_agents.crucible.orchestrator import _try_playbook_shortcut
+
+        diagnosis_path = tmp_path / "diagnosis_session_state.md"
+        diagnosis_path.write_text("# diagnosis state\n**Diagnosis**: deployment/coredns is faulting.\n")
+        diagnosis_shared = SharedFile(diagnosis_path)
+
+        mitigation_path = tmp_path / "mitigation_session_state.md"
+        mitigation_path.write_text("# mitigation state\n")
+        mitigation_shared = SharedFile(mitigation_path)
+
+        playbook_text = MitigationPlaybook(
+            front_matter=MitigationFrontMatter(
+                slug="coredns-nxdomain",
+                root_cause="CoreDNS returns NXDOMAIN for a valid service hostname.",
+            ),
+            summary="Remove the targeted NXDOMAIN rule from CoreDNS.",
+            mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted template rule."],
+            verification_checks=["1. Confirm the affected Service hostname resolves successfully."],
+            rollback_stop_conditions=["Stop if the CoreDNS ConfigMap cannot be identified confidently."],
+        ).to_markdown()
+        kb_view = MagicMock()
+        kb_view.load_mitigation_text.return_value = playbook_text
+
+        with patch(
+            "sregym_agents.crucible.tools.run_single_mitigation_playbook",
+            new=AsyncMock(
+                return_value=MagicMock(
+                    applied=False,
+                    mitigation_summary="",
+                    reasoning="playbook failed",
+                )
+            ),
+        ) as playbook_runner:
+            result = await _try_playbook_shortcut(
+                run_subagent=AsyncMock(),
+                namespace="social-network",
+                slug="coredns-nxdomain",
+                kb_view=kb_view,
+                shared_file=mitigation_shared,
+                diagnosis_shared_file=diagnosis_shared,
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=PromptRenderer("v3"),
+                usage_collector=UsageCollector(),
+                model_id="test-model",
+            )
+
+        assert result is None
+        assert playbook_runner.await_args is not None
+        kwargs = playbook_runner.await_args.kwargs
+        assert kwargs["diagnosis_shared_file"] == str(diagnosis_path)
+        assert kwargs["diagnosis_shared_content"] == diagnosis_path.read_text()
+
     @pytest.mark.asyncio
     async def test_run_skips_recovery_playbook_when_diagnosis_succeeds_initially(self, tmp_path: Path):
         from sregym_agents.crucible.config import CrucibleConfig

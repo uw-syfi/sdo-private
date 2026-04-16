@@ -466,6 +466,8 @@ async def run_single_mitigation_playbook(
     usage_collector: UsageCollector | None = None,
     agent_name: str = "ltm-mitigate-0",
     failed_attempts: str = "",
+    diagnosis_shared_file: str = "",
+    diagnosis_shared_content: str = "",
 ) -> MitigationApplication:
     """Run a single mitigation playbook via a subagent.
 
@@ -482,6 +484,8 @@ async def run_single_mitigation_playbook(
         mitigation_approach="",
         playbook=playbook_text,
         failed_attempts=failed_attempts,
+        diagnosis_shared_file=diagnosis_shared_file,
+        diagnosis_shared_content=diagnosis_shared_content,
     )
     logger.info("[%s] PROMPT:\n%s", agent_name, prompt)
 
@@ -626,6 +630,8 @@ async def search_prior_mitigations_impl(
         model_id=deps.model_id,
         usage_collector=deps.usage_collector,
         agent_name="ltm-mitigate-0",
+        diagnosis_shared_file=str(deps.diagnosis_shared_file) if deps.diagnosis_shared_file is not None else "",
+        diagnosis_shared_content=deps.diagnosis_shared_file.read() if deps.diagnosis_shared_file is not None else "",
     )
 
     deps.shared_file.append(

@@ -123,6 +123,7 @@ class SREAgent:
         *,
         namespace: str,
         shared_file: SharedFile,
+        diagnosis_shared_file: SharedFile | None,
         iteration: int,
         stage: str,
         state: SharedState,
@@ -139,6 +140,7 @@ class SREAgent:
             iteration=iteration,
             stage=stage,
             model_id=self._model_id,
+            diagnosis_shared_file=diagnosis_shared_file,
             renderer=self._renderer,
             state=state,
             config=cfg.config,
@@ -158,6 +160,8 @@ class SREAgent:
         iteration: int,
         shared_content: str,
         shared_file_str: str,
+        diagnosis_shared_content: str = "",
+        diagnosis_shared_file_str: str = "",
         architecture_content: str = "",
         lt_summary_content: str = "",
         lessons_content: str = "",
@@ -173,6 +177,8 @@ class SREAgent:
             iteration=iteration,
             shared_content=shared_content,
             shared_file=shared_file_str,
+            diagnosis_shared_content=diagnosis_shared_content,
+            diagnosis_shared_file=diagnosis_shared_file_str,
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,
@@ -196,6 +202,7 @@ class SREAgent:
         iteration: int,
         shared_file: SharedFile,
         shared_content: str,
+        diagnosis_shared_file: SharedFile | None = None,
         architecture_content: str = "",
         lt_summary_content: str = "",
         lessons_content: str = "",
@@ -218,11 +225,18 @@ class SREAgent:
         deps = self._build_deps(
             namespace=app_info.get("namespace", "default"),
             shared_file=shared_file,
+            diagnosis_shared_file=diagnosis_shared_file,
             iteration=iteration,
             stage=stage,
             state=state,
             usage_collector=usage_collector,
         )
+
+        diagnosis_shared_content = ""
+        diagnosis_shared_file_str = ""
+        if diagnosis_shared_file is not None:
+            diagnosis_shared_content = diagnosis_shared_file.read()
+            diagnosis_shared_file_str = str(diagnosis_shared_file)
 
         system_prompt, user_prompt = self._render_prompts(
             stage,
@@ -230,6 +244,8 @@ class SREAgent:
             iteration=iteration,
             shared_content=shared_content,
             shared_file_str=str(shared_file),
+            diagnosis_shared_content=diagnosis_shared_content,
+            diagnosis_shared_file_str=diagnosis_shared_file_str,
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,

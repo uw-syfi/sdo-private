@@ -369,6 +369,7 @@ async def _run_stage_loop(
     usage_collector: UsageCollector,
     injected_kb: InjectedKB | None = None,
     crucible_config: CrucibleConfig | None = None,
+    diagnosis_shared_file: SharedFile | None = None,
 ) -> StageLoopResult:
     """Run the agent->judge loop for one stage."""
     if crucible_config is None:
@@ -419,6 +420,7 @@ async def _run_stage_loop(
             iteration=iteration,
             shared_file=shared_file,
             shared_content=shared_content,
+            diagnosis_shared_file=diagnosis_shared_file,
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,
@@ -699,6 +701,7 @@ async def _try_playbook_shortcut(
     renderer: PromptRenderer,
     usage_collector: UsageCollector,
     model_id: Any = None,
+    diagnosis_shared_file: SharedFile | None = None,
 ) -> StageLoopResult | None:
     """Try to execute a mitigation playbook directly, bypassing the SRE agent.
 
@@ -733,6 +736,8 @@ async def _try_playbook_shortcut(
             model_id=model_id,
             usage_collector=usage_collector,
             agent_name="playbook-shortcut",
+            diagnosis_shared_file=str(diagnosis_shared_file) if diagnosis_shared_file is not None else "",
+            diagnosis_shared_content=diagnosis_shared_file.read() if diagnosis_shared_file is not None else "",
         )
     except Exception as exc:
         logger.warning("[playbook-shortcut] Subagent failed: %s", exc)
@@ -879,7 +884,8 @@ async def run(
         "diagnosis",
         max_diag_iters,
         diagnosis_sf,
-        submit_mcp_url,
+        submit_mcp_url=submit_mcp_url,
+        diagnosis_shared_file=None,
         renderer=renderer,
         usage_collector=primary_collector,
         injected_kb=injected_kb,
@@ -1013,6 +1019,7 @@ async def run(
                 slug=slug,
                 kb_view=injected_kb.get_view(),
                 shared_file=mitigation_sf,
+                diagnosis_shared_file=diagnosis_sf,
                 submit_mcp_url=submit_mcp_url,
                 renderer=renderer,
                 usage_collector=primary_collector,
@@ -1030,7 +1037,8 @@ async def run(
             "mitigation",
             max_mit_iters,
             mitigation_sf,
-            submit_mcp_url,
+            submit_mcp_url=submit_mcp_url,
+            diagnosis_shared_file=diagnosis_sf,
             renderer=renderer,
             usage_collector=primary_collector,
             injected_kb=injected_kb,

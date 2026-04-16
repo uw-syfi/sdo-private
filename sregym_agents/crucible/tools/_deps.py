@@ -105,6 +105,7 @@ class SREDeps:
     iteration: int
     stage: str  # "diagnosis" | "mitigation"
     model_id: Model | str
+    diagnosis_shared_file: SharedFile | None = None
     renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     state: SharedState = field(default_factory=SharedState)
     config: CrucibleConfig | None = None

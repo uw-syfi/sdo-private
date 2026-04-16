@@ -10,6 +10,7 @@ from sregym_agents.crucible.agents.base import AgentResult
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,
+    PlaceholderResolutionRule,
     ReviewDecision,
     TriageAreaCandidate,
 )
@@ -37,6 +38,15 @@ def _mitigation_candidate(slug: str = "coredns-nxdomain") -> MitigationPlaybookD
         root_cause="CoreDNS returns NXDOMAIN for backend service names.",
         summary="Remove the targeted CoreDNS rule and verify service-name resolution recovers.",
         mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted NXDOMAIN rule."],
+        placeholder_resolution=[
+            PlaceholderResolutionRule(
+                symbol="<AFFECTED_SERVICE_FQDNS>",
+                resolution_guidance=(
+                    "Resolve from the diagnosis-confirmed service names. This may be one FQDN or a set "
+                    "of service names covered by the same CoreDNS override."
+                ),
+            )
+        ],
         verification_checks=["1. Verify the affected service names resolve from the application pod."],
         rollback_stop_conditions=["Stop if the correct CoreDNS ConfigMap cannot be identified confidently."],
     )
