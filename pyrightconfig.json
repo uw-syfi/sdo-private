@@ -1,10 +1,10 @@
 {
   "include": ["app_operator", "lego_agent", "libs", "sregym_agents", "tests"],
-  "exclude": ["apps/", ".venv/", ".claude/"],
+  "exclude": ["apps/", ".venv/", ".claude/", "lego_agent/ui"],
   "typeCheckingMode": "standard",
   "pythonVersion": "3.12",
   "venvPath": ".",
   "venv": ".venv",
   "reportMissingTypeStubs": false,
-  "strict": ["libs", "sregym_agents"]
+  "strict": ["libs", "sregym_agents", "lego_agent"]
 }

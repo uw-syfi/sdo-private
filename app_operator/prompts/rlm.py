@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 def render_fix_error_task_prompt(
     repo_path: str = "",
     available_variables: str = "",
+    available_specialists: str = "",
     error_log_size: str = "",
     attempt: str = "",
     max_attempts: str = "",
@@ -30,6 +31,7 @@ def render_fix_error_task_prompt(
         "rlm/deployer_fix_error.jinja2",
         repo_path=repo_path,
         available_variables=available_variables,
+        available_specialists=available_specialists,
         error_log_size=error_log_size,
         attempt=attempt,
         max_attempts=max_attempts,

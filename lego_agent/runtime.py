@@ -15,14 +15,14 @@ from typing import (
 
 import yaml
 from langchain_core.messages import HumanMessage
-from langchain_core.tools import StructuredTool, tool
+from langchain_core.tools import BaseTool, StructuredTool, tool  # pyright: ignore[reportUnknownVariableType]
+from langgraph.prebuilt import create_react_agent  # pyright: ignore[reportUnknownVariableType, reportDeprecated]
+from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from langchain_core.runnables import RunnableConfig
-from langgraph.prebuilt import create_react_agent
-from loguru import logger
 
 from lego_agent.config import load_config
 from lego_agent.io import Colors
@@ -60,7 +60,7 @@ class LangGraphAgent:
         self,
         model_name: str,
         llm: Any,
-        tools: list[Callable],
+        tools: list[Callable[..., Any]],
         instruction: str = "",
         agent_name: str = "LegoAgentWorker",
     ):
@@ -71,11 +71,13 @@ class LangGraphAgent:
         self.agent_name = agent_name
 
         # Create the graph
-        self.graph = create_react_agent(model=self.llm, tools=self.tools, prompt=self.instruction)
+        self.graph: Any = create_react_agent(  # pyright: ignore[reportDeprecated]
+            model=self.llm, tools=self.tools, prompt=self.instruction
+        )
 
-    def _wrap_tools(self, tools: list[Callable]) -> list[StructuredTool]:
+    def _wrap_tools(self, tools: list[Callable[..., Any]]) -> list[BaseTool]:
         """Wrap ADK tools into LangChain StructuredTools."""
-        wrapped_tools = []
+        wrapped_tools: list[BaseTool] = []
         for t in tools:
             if isinstance(t, StructuredTool):
                 wrapped_tools.append(t)
@@ -226,7 +228,7 @@ def create_agent(
 
     # Filter tools if requested
     if tools:
-        selected_tools = []
+        selected_tools: list[Callable[..., Any]] = []
         available_tools_map = {t.__name__: t for t in all_tools}
 
         for tool_name in tools:
@@ -282,8 +284,8 @@ class FanOut(Runnable):
         # Resolve items: if empty or a non-list expression string (LLM-generated
         # template that we can't evaluate), fall back to splitting input_data by
         # newlines so the fan_out scatters over the previous step's output.
-        items = self.items
-        if not isinstance(items, list) or not items:
+        items: list[str] = self.items
+        if not items:
             if input_data:
                 raw_lines = [line.strip() for line in str(input_data).strip().splitlines() if line.strip()]
                 # Strip lines that are clearly prose/formatting rather than items:
@@ -300,13 +302,13 @@ class FanOut(Runnable):
 
         instruction = getattr(self.agent, "instruction", None)
 
-        prompts_to_run = []
+        prompts_to_run: list[str] = []
         for item in items:
             if instruction and "{input}" in instruction:
                 # Agent has an {input} placeholder in its instruction — pass
                 # the item as the full prompt so the agent fills in context.
                 prompts_to_run.append(instruction.replace("{input}", str(item)))
-            elif isinstance(item, str) and "{input}" in item:
+            elif "{input}" in item:
                 prompts_to_run.append(item.format(input=str(input_data)))
             else:
                 prompts_to_run.append(str(item))
@@ -352,7 +354,8 @@ class Summarize(Runnable):
 
     def run(self, input_data: Any) -> str:
         if isinstance(input_data, list):
-            combined_input = "\n\n---\n\n".join([str(x) for x in input_data])
+            items_list: list[Any] = input_data  # pyright: ignore[reportUnknownVariableType]
+            combined_input = "\n\n---\n\n".join([str(x) for x in items_list])
         else:
             combined_input = str(input_data)
 

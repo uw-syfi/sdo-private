@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from app_operator.trajectory import NullTrajectoryRecorder
 from libs.agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
 from libs.agent_cli.cli_agent import CLICodingAgent
+from libs.agent_cli.mcp_config import HttpMcpServer, StdioMcpServer
 
 
 @pytest.fixture
@@ -163,3 +165,70 @@ class TestClaudeGenerationSession:
     def test_create_session_returns_claude_session(self, agent):
         session = agent._create_session(cmd=["claude", "-p"])
         assert isinstance(session, ClaudeGenerationSession)
+
+
+class TestClaudeMcpConfig:
+    """Tests for MCP server configuration in Claude agent."""
+
+    def test_command_omits_mcp_when_no_servers(self, agent):
+        cmd = agent._get_command("test")
+        assert "--mcp-config" not in cmd
+        assert "--strict-mcp-config" not in cmd
+
+    def test_command_includes_mcp_flags_when_servers_set(self, mock_binaries):
+        servers = [HttpMcpServer(name="test", url="http://localhost:8080")]
+        agent = ClaudeCodeCodingAgent(mcp_servers=servers)
+        cmd = agent._get_command("test")
+        assert "--mcp-config" in cmd
+        assert "--strict-mcp-config" in cmd
+
+    def test_mcp_json_http_server(self, mock_binaries):
+        servers = [HttpMcpServer(name="my-srv", url="http://localhost:9000/sse")]
+        agent = ClaudeCodeCodingAgent(mcp_servers=servers)
+        cmd = agent._get_command("test")
+        idx = cmd.index("--mcp-config")
+        config = json.loads(cmd[idx + 1])
+        assert config == {"mcpServers": {"my-srv": {"url": "http://localhost:9000/sse"}}}
+
+    def test_mcp_json_stdio_server(self, mock_binaries):
+        servers = [
+            StdioMcpServer(
+                name="tool",
+                command="npx",
+                args=["-y", "@some/pkg"],
+                env={"KEY": "val"},
+            )
+        ]
+        agent = ClaudeCodeCodingAgent(mcp_servers=servers)
+        cmd = agent._get_command("test")
+        idx = cmd.index("--mcp-config")
+        config = json.loads(cmd[idx + 1])
+        assert config == {
+            "mcpServers": {
+                "tool": {
+                    "command": "npx",
+                    "args": ["-y", "@some/pkg"],
+                    "env": {"KEY": "val"},
+                }
+            }
+        }
+
+    def test_mcp_json_stdio_server_no_env(self, mock_binaries):
+        servers = [StdioMcpServer(name="t", command="cmd")]
+        agent = ClaudeCodeCodingAgent(mcp_servers=servers)
+        cmd = agent._get_command("test")
+        idx = cmd.index("--mcp-config")
+        config = json.loads(cmd[idx + 1])
+        assert "env" not in config["mcpServers"]["t"]
+
+    def test_mcp_json_multiple_servers(self, mock_binaries):
+        servers = [
+            HttpMcpServer(name="http-srv", url="http://localhost:8080"),
+            StdioMcpServer(name="stdio-srv", command="node", args=["server.js"]),
+        ]
+        agent = ClaudeCodeCodingAgent(mcp_servers=servers)
+        cmd = agent._get_command("test")
+        idx = cmd.index("--mcp-config")
+        config = json.loads(cmd[idx + 1])
+        assert "http-srv" in config["mcpServers"]
+        assert "stdio-srv" in config["mcpServers"]

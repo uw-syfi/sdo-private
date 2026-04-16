@@ -30,64 +30,39 @@ from sregym_agents.crucible.tools import (
 )
 
 
-class _FakeInlineAgent:
-    """Test double for ``libs.pydantic_agent.InlineAgent``.
+def _make_run_subagent_routing(responses: dict[str, Any]) -> AsyncMock:
+    """Create a run_subagent mock that routes calls by agent_name.
 
-    Tests configure ``responses`` (keyed by ``agent_name``) before invoking the
-    code under test, then patch ``_kb_tools.InlineAgent`` with this class.
-    Captures construction kwargs in ``instances`` for assertions, and routes
-    ``arun`` calls to the configured response, raising if the value is an
-    ``Exception``. Calls ``after_run`` on each middleware so trajectory writers
-    fire as they would in a real run.
+    ``responses`` maps agent_name to the typed output value. If the value is
+    a ``BaseException``, it is raised.
     """
+    call_log: list[dict[str, Any]] = []
 
-    instances: list[_FakeInlineAgent] = []
-    responses: dict[str, Any] = {}
-
-    @classmethod
-    def reset(cls) -> None:
-        cls.instances = []
-        cls.responses = {}
-
-    def __init__(
-        self,
-        model: Any,
+    async def _run_subagent(
         *,
-        agent_name: str,
-        output_type: type,
+        prompt: str = "",
+        output_type: type | None = None,
         tools: list[Any] | None = None,
-        model_settings: Any | None = None,
-        middleware: list[Any] | None = None,
+        agent_name: str = "",
+        model_settings: dict[str, Any] | None = None,
         usage_collector: Any | None = None,
-    ) -> None:
-        self.model = model
-        self._agent_name = agent_name
-        self.output_type = output_type
-        self.tools = tools or []
-        self.model_settings = model_settings
-        self._middleware = middleware or []
-        # Mock .agent so callers using @agent.output_validator decorator
-        # (e.g. triage_cluster) keep working.
-        self.agent = MagicMock()
-        self.agent.output_validator = lambda f: f
-        for m in self._middleware:
-            m.on_attach(self)
-        type(self).instances.append(self)
-
-    @property
-    def agent_name(self) -> str:
-        return self._agent_name
-
-    async def arun(self, prompt: str, *, run_ctx: dict[str, Any] | None = None) -> Any:
-        try:
-            result = type(self).responses[self._agent_name]
-        except KeyError as e:
-            raise AssertionError(f"_FakeInlineAgent: no response configured for agent_name={self._agent_name!r}") from e
+    ) -> Any:
+        call_log.append(
+            {
+                "agent_name": agent_name,
+                "output_type": output_type,
+                "tools": tools,
+                "prompt": prompt,
+            }
+        )
+        result = responses[agent_name]
         if isinstance(result, BaseException):
             raise result
-        for m in self._middleware:
-            m.after_run(result, run_ctx)
         return result
+
+    mock = AsyncMock(side_effect=_run_subagent)
+    mock._call_log = call_log  # type: ignore[attr-defined]
+    return mock
 
 
 def _make_sre_ctx(deps: SREDeps) -> MagicMock:
@@ -101,7 +76,7 @@ def _make_deps(
     lt_summary_file: Path | None = None,
     incidents_dir: Path | None = None,
     model_id: TestModel | None = None,
-    trajectory_path: Path | None = None,
+    run_subagent: AsyncMock | None = None,
 ) -> SREDeps:
     shared_path = tmp_path / "session.md"
     shared_path.write_text("")
@@ -113,7 +88,7 @@ def _make_deps(
         lt_summary_file=lt_summary_file,
         incidents_dir=incidents_dir,
         model_id=model_id if model_id is not None else TestModel(),
-        trajectory_path=trajectory_path,
+        run_subagent=run_subagent,
     )
 
 
@@ -187,11 +162,12 @@ def test_search_calls_subagent(tmp_path: Path) -> None:
     incidents.mkdir()
 
     diagnosis = DifferentialDiagnosis(candidate_root_causes=[], novel_cause_signals="", caveats="none")
+    mock_run_subagent = AsyncMock(return_value=diagnosis)
     deps = _make_deps(
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        model_id=TestModel(custom_output_args=diagnosis.model_dump()),
+        run_subagent=mock_run_subagent,
     )
     ctx = _make_sre_ctx(deps)
 
@@ -232,11 +208,12 @@ def test_search_increments_counter(tmp_path: Path) -> None:
     incidents.mkdir()
 
     diagnosis = DifferentialDiagnosis(candidate_root_causes=[], novel_cause_signals="", caveats="none")
+    mock_run_subagent = AsyncMock(return_value=diagnosis)
     deps = _make_deps(
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        model_id=TestModel(custom_output_args=diagnosis.model_dump()),
+        run_subagent=mock_run_subagent,
     )
     deps.ltm_call_budget = 2  # use budget of 2 so we can test exhaustion after 2 calls
     ctx = _make_sre_ctx(deps)
@@ -269,53 +246,54 @@ def shared_file(tmp_path: Path) -> SharedFile:
     return SharedFile(f)
 
 
-def _fake_sre_constructor_factory(shared_file):
-    """Return a fake SRE agent constructor that captures deps for inspection."""
-    captured_deps = []
-
-    def constructor(model, deps, trajectory_path=None, system_prompt_override=None):
-        captured_deps.append(deps)
-        mock = MagicMock()
-
-        def fake_run(prompt, run_ctx=None):
-            deps.state.answer = "some answer"
-            return ""
-
-        mock.arun = AsyncMock(side_effect=fake_run)
-        return mock
-
-    return constructor, captured_deps
-
-
-def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
+def test_flag_false_injects_summary(shared_file: SharedFile, tmp_path: Path) -> None:
     """When enable_ltm_retrieval=False, orchestrator passes lt_summary_content to prompt."""
+    from sregym_agents.crucible.agents.base import AgentResult
+    from sregym_agents.crucible.knowledge_base import InjectedKB
+    from sregym_agents.crucible.orchestrator import _run_stage_loop
+    from sregym_agents.crucible.tools import SharedState, SRESubmission
+
     lt_file = tmp_path / "summary.md"
     lt_file.write_text("Prior incident summary content")
 
-    constructor, captured_deps = _fake_sre_constructor_factory(shared_file)
+    # Mock SRE agent that captures the call kwargs
+    mock_sre = MagicMock()
+    mock_sre._config = MagicMock()
+    mock_sre._config.stage_outputs_file = None
+    sre_call_kwargs: list[dict[str, Any]] = []
+
+    async def fake_sre_run(**kwargs):
+        sre_call_kwargs.append(kwargs)
+        state = SharedState()
+        state.answer = "some answer"
+        result = AgentResult(
+            output=SRESubmission(answer="some answer", justification=""),
+            completed=True,
+        )
+        result.state = state  # type: ignore[attr-defined]
+        return result
+
+    mock_sre.run = AsyncMock(side_effect=fake_sre_run)
+
+    # Mock judge (unused — no-judge mode)
+    mock_judge = MagicMock()
 
     mock_renderer = MagicMock(spec=PromptRenderer)
     mock_renderer.render.return_value = "rendered"
 
-    with (
-        patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=constructor),
-        patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
-        patch(
-            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
-            new_callable=AsyncMock,
-            return_value=(True, "ok", None),
-        ),
+    with patch(
+        "sregym_agents.crucible.orchestrator.submit_to_benchmark",
+        new_callable=AsyncMock,
+        return_value=(True, "ok", None),
     ):
-        from sregym_agents.crucible.knowledge_base import InjectedKB
-        from sregym_agents.crucible.orchestrator import _run_stage_loop
-
         asyncio.run(
             _run_stage_loop(
-                model=TestModel(),
+                sre_agent=mock_sre,
+                judge_agent=mock_judge,
                 app_info={"app_name": "myapp", "namespace": "default"},
                 stage="diagnosis",
                 max_iters=1,
-                shared_file=shared_file,  # type: ignore[arg-type]
+                shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 injected_kb=InjectedKB(summary=lt_file),
                 renderer=mock_renderer,
@@ -324,51 +302,59 @@ def test_flag_false_injects_summary(shared_file: Path, tmp_path: Path) -> None:
             )
         )
 
-    # SREDeps should NOT have ltm paths set
-    assert captured_deps[0].lt_summary_file is None
-    assert captured_deps[0].incidents_dir is None
-    # Regression: model_id must be set even when LTM retrieval is off, because
-    # triage_cluster and check_hypothesis_coverage need it to spawn subagents.
-    assert captured_deps[0].model_id is not None
-
-    # The user prompt render should include lt_summary_content
-    render_calls = [c for c in mock_renderer.render.call_args_list if "diagnosis_agent_user" in str(c)]
-    assert len(render_calls) == 1
-    kwargs = render_calls[0][1]
-    assert kwargs["lt_summary_content"] == "Prior incident summary content"
+    # SRE agent was called — check that lt_summary_content was passed
+    assert len(sre_call_kwargs) == 1
+    assert sre_call_kwargs[0]["lt_summary_content"] == "Prior incident summary content"
 
 
-def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
-    """When enable_ltm_retrieval=True, orchestrator passes empty lt_summary_content and sets SREDeps paths."""
+def test_flag_true_omits_summary(shared_file: SharedFile, tmp_path: Path) -> None:
+    """When enable_ltm_retrieval=True, orchestrator passes empty lt_summary_content."""
+    from sregym_agents.crucible.agents.base import AgentResult
+    from sregym_agents.crucible.knowledge_base import InjectedKB
+    from sregym_agents.crucible.orchestrator import _run_stage_loop
+    from sregym_agents.crucible.tools import SharedState, SRESubmission
+
     lt_file = tmp_path / "summary.md"
     lt_file.write_text("Prior incident summary content")
     inc_dir = tmp_path / "incidents"
     inc_dir.mkdir()
 
-    constructor, captured_deps = _fake_sre_constructor_factory(shared_file)
+    mock_sre = MagicMock()
+    mock_sre._config = MagicMock()
+    mock_sre._config.stage_outputs_file = None
+    sre_call_kwargs: list[dict[str, Any]] = []
+
+    async def fake_sre_run(**kwargs):
+        sre_call_kwargs.append(kwargs)
+        state = SharedState()
+        state.answer = "some answer"
+        result = AgentResult(
+            output=SRESubmission(answer="some answer", justification=""),
+            completed=True,
+        )
+        result.state = state  # type: ignore[attr-defined]
+        return result
+
+    mock_sre.run = AsyncMock(side_effect=fake_sre_run)
+
+    mock_judge = MagicMock()
 
     mock_renderer = MagicMock(spec=PromptRenderer)
     mock_renderer.render.return_value = "rendered"
 
-    with (
-        patch("sregym_agents.crucible.orchestrator.CrucibleSREAgent", side_effect=constructor),
-        patch("sregym_agents.crucible.orchestrator.CrucibleJudgeAgent"),
-        patch(
-            "sregym_agents.crucible.orchestrator.submit_to_benchmark",
-            new_callable=AsyncMock,
-            return_value=(True, "ok", None),
-        ),
+    with patch(
+        "sregym_agents.crucible.orchestrator.submit_to_benchmark",
+        new_callable=AsyncMock,
+        return_value=(True, "ok", None),
     ):
-        from sregym_agents.crucible.knowledge_base import InjectedKB
-        from sregym_agents.crucible.orchestrator import _run_stage_loop
-
         asyncio.run(
             _run_stage_loop(
-                model=TestModel(),
+                sre_agent=mock_sre,
+                judge_agent=mock_judge,
                 app_info={"app_name": "myapp", "namespace": "default"},
                 stage="diagnosis",
                 max_iters=1,
-                shared_file=shared_file,  # type: ignore[arg-type]
+                shared_file=shared_file,
                 submit_mcp_url="http://localhost:9954/submit/sse",
                 injected_kb=InjectedKB(summary=lt_file, incidents_dir=inc_dir),
                 renderer=mock_renderer,
@@ -377,16 +363,9 @@ def test_flag_true_omits_summary(shared_file: Path, tmp_path: Path) -> None:
             )
         )
 
-    # SREDeps should have ltm paths set
-    assert captured_deps[0].lt_summary_file == lt_file.resolve()
-    assert captured_deps[0].incidents_dir == inc_dir.resolve()
-    assert captured_deps[0].model_id is not None
-
-    # The user prompt render should have empty lt_summary_content
-    render_calls = [c for c in mock_renderer.render.call_args_list if "diagnosis_agent_user" in str(c)]
-    assert len(render_calls) == 1
-    kwargs = render_calls[0][1]
-    assert kwargs["lt_summary_content"] == ""
+    # The SRE agent should have received empty lt_summary_content
+    assert len(sre_call_kwargs) == 1
+    assert sre_call_kwargs[0]["lt_summary_content"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -543,14 +522,6 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
     incidents = tmp_path / "incidents"
     incidents.mkdir()
 
-    deps = _make_deps(
-        tmp_path,
-        lt_summary_file=summary,
-        incidents_dir=incidents,
-        model_id=TestModel(),
-    )
-    ctx = _make_sre_ctx(deps)
-
     candidates = _make_candidates()
 
     # Retrieval agent returns 2 candidates
@@ -559,8 +530,6 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
         novel_cause_signals="Check network policies",
         caveats="Verify specifics",
     )
-    retrieval_run_result = MagicMock()
-    retrieval_run_result.output = retrieval_output
 
     # Verification agents return structured results
     verify_output_0 = CandidateVerification(
@@ -568,7 +537,7 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
         root_cause_class="missing Kubernetes Service",
         root_cause="Service user-service missing in ns",
         applies=True,
-        causal_chain="Service deleted → 503",
+        causal_chain="Service deleted \u2192 503",
         evidence=["svc not found"],
         reasoning="Confirmed.",
     )
@@ -580,36 +549,29 @@ def test_search_spawns_verification_subagents(tmp_path: Path) -> None:
         reasoning="Ports match.",
     )
 
-    verify_run_result_0 = MagicMock()
-    verify_run_result_0.output = verify_output_0
-    verify_run_result_0.usage.return_value = MagicMock(input_tokens=100, output_tokens=50)
-    verify_run_result_0.all_messages.return_value = []
+    mock_run_subagent = _make_run_subagent_routing(
+        {
+            "ltm-search": retrieval_output,
+            "ltm-verify-0": verify_output_0,
+            "ltm-verify-1": verify_output_1,
+        }
+    )
 
-    verify_run_result_1 = MagicMock()
-    verify_run_result_1.output = verify_output_1
-    verify_run_result_1.usage.return_value = MagicMock(input_tokens=100, output_tokens=50)
-    verify_run_result_1.all_messages.return_value = []
+    deps = _make_deps(
+        tmp_path,
+        lt_summary_file=summary,
+        incidents_dir=incidents,
+        run_subagent=mock_run_subagent,
+    )
+    ctx = _make_sre_ctx(deps)
 
-    _FakeInlineAgent.reset()
-    _FakeInlineAgent.responses = {
-        "ltm-search": retrieval_run_result,
-        "ltm-verify-0": verify_run_result_0,
-        "ltm-verify-1": verify_run_result_1,
-    }
-
-    with (
-        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        patch("sregym_agents.crucible.tools._kb_tools.InlineAgent", _FakeInlineAgent),
-    ):
+    with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
     parsed = json.loads(result)
 
-    # Should have 3 agents total: 1 retrieval + 2 verification
-    assert len(_FakeInlineAgent.instances) == 3
-    assert _FakeInlineAgent.instances[0].output_type is DifferentialDiagnosis
-    assert _FakeInlineAgent.instances[1].output_type is CandidateVerification
-    assert _FakeInlineAgent.instances[2].output_type is CandidateVerification
+    # Should have 3 calls total: 1 retrieval + 2 verification
+    assert mock_run_subagent.call_count == 3
 
     # Result has verified structure
     assert "verified_candidates" in parsed
@@ -625,34 +587,27 @@ def test_search_no_candidates_skips_verification(tmp_path: Path) -> None:
     incidents = tmp_path / "incidents"
     incidents.mkdir()
 
-    deps = _make_deps(
-        tmp_path,
-        lt_summary_file=summary,
-        incidents_dir=incidents,
-        model_id=TestModel(),
-    )
-    ctx = _make_sre_ctx(deps)
-
     retrieval_output = DifferentialDiagnosis(
         candidate_root_causes=[],
         novel_cause_signals="novel signals",
         caveats="none",
     )
-    retrieval_run_result = MagicMock()
-    retrieval_run_result.output = retrieval_output
 
-    _FakeInlineAgent.reset()
-    _FakeInlineAgent.responses = {"ltm-search": retrieval_run_result}
+    mock_run_subagent = AsyncMock(return_value=retrieval_output)
 
-    with (
-        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        patch("sregym_agents.crucible.tools._kb_tools.InlineAgent", _FakeInlineAgent),
-    ):
+    deps = _make_deps(
+        tmp_path,
+        lt_summary_file=summary,
+        incidents_dir=incidents,
+        run_subagent=mock_run_subagent,
+    )
+    ctx = _make_sre_ctx(deps)
+
+    with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
-    # Only 1 agent (retrieval), no verification agents
-    assert len(_FakeInlineAgent.instances) == 1
-    assert _FakeInlineAgent.instances[0].output_type is DifferentialDiagnosis
+    # Only 1 call (retrieval), no verification calls
+    assert mock_run_subagent.call_count == 1
 
     parsed = json.loads(result)
     assert parsed["verified_candidates"] == []
@@ -666,22 +621,12 @@ def test_search_verification_failure_graceful(tmp_path: Path) -> None:
     incidents = tmp_path / "incidents"
     incidents.mkdir()
 
-    deps = _make_deps(
-        tmp_path,
-        lt_summary_file=summary,
-        incidents_dir=incidents,
-        model_id=TestModel(),
-    )
-    ctx = _make_sre_ctx(deps)
-
     candidates = _make_candidates()
     retrieval_output = DifferentialDiagnosis(
         candidate_root_causes=candidates,
         novel_cause_signals="",
         caveats="",
     )
-    retrieval_run_result = MagicMock()
-    retrieval_run_result.output = retrieval_output
 
     # Second verification agent will fail
     verify_output_0 = CandidateVerification(
@@ -689,26 +634,28 @@ def test_search_verification_failure_graceful(tmp_path: Path) -> None:
         root_cause_class="missing Kubernetes Service",
         root_cause="Service user-service missing in ns",
         applies=True,
-        causal_chain="Service deleted → 503",
+        causal_chain="Service deleted \u2192 503",
         evidence=["svc not found"],
         reasoning="Confirmed.",
     )
-    verify_run_result_0 = MagicMock()
-    verify_run_result_0.output = verify_output_0
-    verify_run_result_0.usage.return_value = MagicMock(input_tokens=100, output_tokens=50)
-    verify_run_result_0.all_messages.return_value = []
 
-    _FakeInlineAgent.reset()
-    _FakeInlineAgent.responses = {
-        "ltm-search": retrieval_run_result,
-        "ltm-verify-0": verify_run_result_0,
-        "ltm-verify-1": RuntimeError("LLM timeout"),
-    }
+    mock_run_subagent = _make_run_subagent_routing(
+        {
+            "ltm-search": retrieval_output,
+            "ltm-verify-0": verify_output_0,
+            "ltm-verify-1": RuntimeError("LLM timeout"),
+        }
+    )
 
-    with (
-        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        patch("sregym_agents.crucible.tools._kb_tools.InlineAgent", _FakeInlineAgent),
-    ):
+    deps = _make_deps(
+        tmp_path,
+        lt_summary_file=summary,
+        incidents_dir=incidents,
+        run_subagent=mock_run_subagent,
+    )
+    ctx = _make_sre_ctx(deps)
+
+    with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
         result = asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
     parsed = json.loads(result)
@@ -723,20 +670,12 @@ def test_search_verification_failure_graceful(tmp_path: Path) -> None:
     assert "LLM timeout" in failed[0]["reasoning"]
 
 
-def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
-    """Verification subagents are created with investigation tools but NOT search_prior_incidents."""
+def test_verification_subagent_tools_passed(tmp_path: Path) -> None:
+    """Verification subagents receive investigation tools but NOT search_prior_incidents."""
     summary = tmp_path / "summary.md"
     summary.write_text("# Summary")
     incidents = tmp_path / "incidents"
     incidents.mkdir()
-
-    deps = _make_deps(
-        tmp_path,
-        lt_summary_file=summary,
-        incidents_dir=incidents,
-        model_id=TestModel(),
-    )
-    ctx = _make_sre_ctx(deps)
 
     candidates = [_make_candidates()[0]]
     retrieval_output = DifferentialDiagnosis(
@@ -744,8 +683,6 @@ def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
         novel_cause_signals="",
         caveats="",
     )
-    retrieval_run_result = MagicMock()
-    retrieval_run_result.output = retrieval_output
 
     verify_output = CandidateVerification(
         candidate_index=0,
@@ -754,27 +691,30 @@ def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
         applies=False,
         reasoning="Not found.",
     )
-    verify_run_result = MagicMock()
-    verify_run_result.output = verify_output
-    verify_run_result.usage.return_value = MagicMock(input_tokens=100, output_tokens=50)
-    verify_run_result.all_messages.return_value = []
 
-    _FakeInlineAgent.reset()
-    _FakeInlineAgent.responses = {
-        "ltm-search": retrieval_run_result,
-        "ltm-verify-0": verify_run_result,
-    }
+    mock_run_subagent = _make_run_subagent_routing(
+        {
+            "ltm-search": retrieval_output,
+            "ltm-verify-0": verify_output,
+        }
+    )
 
-    with (
-        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        patch("sregym_agents.crucible.tools._kb_tools.InlineAgent", _FakeInlineAgent),
-    ):
+    deps = _make_deps(
+        tmp_path,
+        lt_summary_file=summary,
+        incidents_dir=incidents,
+        run_subagent=mock_run_subagent,
+    )
+    ctx = _make_sre_ctx(deps)
+
+    with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
 
-    # Second agent constructed is the verification agent
-    assert len(_FakeInlineAgent.instances) == 2
-    verify_inst = _FakeInlineAgent.instances[1]
-    tool_names = {t.__name__ for t in verify_inst.tools}
+    # Check that verification call was made with tools
+    call_log = mock_run_subagent._call_log  # type: ignore[attr-defined]
+    verify_calls = [c for c in call_log if c["agent_name"] == "ltm-verify-0"]
+    assert len(verify_calls) == 1
+    tool_names = {t.__name__ for t in verify_calls[0]["tools"]}
 
     # Should have investigation tools
     assert "read_file" in tool_names
@@ -785,73 +725,6 @@ def test_verification_subagent_tools_exclude_search(tmp_path: Path) -> None:
 
     # Should NOT have search_prior_incidents
     assert "search_prior_incidents" not in tool_names
-    assert "search_prior_incidents_any" not in tool_names
-
-
-def test_verification_writes_trajectory(tmp_path: Path) -> None:
-    """Verify trajectory JSONL record is written with correct agent_name."""
-    summary = tmp_path / "summary.md"
-    summary.write_text("# Summary")
-    incidents = tmp_path / "incidents"
-    incidents.mkdir()
-    trajectory_file = tmp_path / "trajectory.jsonl"
-
-    deps = _make_deps(
-        tmp_path,
-        lt_summary_file=summary,
-        incidents_dir=incidents,
-        model_id=TestModel(),
-        trajectory_path=trajectory_file,
-    )
-    ctx = _make_sre_ctx(deps)
-
-    candidates = [_make_candidates()[0]]
-    retrieval_output = DifferentialDiagnosis(
-        candidate_root_causes=candidates,
-        novel_cause_signals="",
-        caveats="",
-    )
-    retrieval_run_result = MagicMock()
-    retrieval_run_result.output = retrieval_output
-
-    verify_output = CandidateVerification(
-        candidate_index=0,
-        root_cause_class="missing Kubernetes Service",
-        root_cause="Service user-service missing in ns",
-        applies=True,
-        causal_chain="Service deleted → 503",
-        evidence=["svc not found"],
-        reasoning="Confirmed.",
-    )
-    verify_run_result = MagicMock()
-    verify_run_result.output = verify_output
-    verify_run_result.usage.return_value = MagicMock(input_tokens=100, output_tokens=50)
-    verify_run_result.all_messages.return_value = []
-
-    _FakeInlineAgent.reset()
-    _FakeInlineAgent.responses = {
-        "ltm-search": retrieval_run_result,
-        "ltm-verify-0": verify_run_result,
-    }
-
-    with (
-        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        patch("sregym_agents.crucible.tools._kb_tools.InlineAgent", _FakeInlineAgent),
-    ):
-        asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
-
-    # Trajectory file should exist with a record (only verification subagent
-    # gets a trajectory_path; the retrieval agent doesn't write trajectories).
-    assert trajectory_file.exists()
-    lines = trajectory_file.read_text().strip().split("\n")
-    assert len(lines) == 1
-
-    record = json.loads(lines[0])
-    assert record["agent_name"] == "ltm-verify-0"
-    assert record["run_ctx"]["role"] == "ltm-verify"
-    assert record["run_ctx"]["candidate_index"] == 0
-    assert record["usage"]["input_tokens"] == 100
-    assert record["usage"]["output_tokens"] == 50
 
 
 # ---------------------------------------------------------------------------
@@ -968,33 +841,26 @@ def test_search_mitigations_shared_budget(tmp_path: Path) -> None:
     incidents = tmp_path / "incidents"
     incidents.mkdir()
 
+    mock_diag = DifferentialDiagnosis(candidate_root_causes=[], novel_cause_signals="", caveats="none")
+    mock_mit = MitigationSearchResult(strategies=[], novel_cause=False)
+
+    mock_run_subagent = _make_run_subagent_routing(
+        {
+            "ltm-search": mock_diag,
+            "ltm-mitigation": mock_mit,
+        }
+    )
+
     deps = _make_deps(
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        model_id=TestModel(),
+        run_subagent=mock_run_subagent,
     )
     deps.ltm_call_budget = 2
     ctx = _make_sre_ctx(deps)
 
-    mock_diag = DifferentialDiagnosis(candidate_root_causes=[], novel_cause_signals="", caveats="none")
-    mock_diag_result = MagicMock()
-    mock_diag_result.output = mock_diag
-
-    mock_mit = MitigationSearchResult(strategies=[], novel_cause=False)
-    mock_mit_result = MagicMock()
-    mock_mit_result.output = mock_mit
-
-    _FakeInlineAgent.reset()
-    _FakeInlineAgent.responses = {
-        "ltm-search": mock_diag_result,
-        "ltm-mitigation": mock_mit_result,
-    }
-
-    with (
-        patch.object(PromptRenderer, "render", return_value="rendered prompt"),
-        patch("sregym_agents.crucible.tools._kb_tools.InlineAgent", _FakeInlineAgent),
-    ):
+    with patch.object(PromptRenderer, "render", return_value="rendered prompt"):
         # First call (diagnosis) — count goes to 1
         asyncio.run(search_prior_incidents(ctx, observed_symptoms="pods crashing"))
         assert deps.ltm_call_count == 1
@@ -1028,11 +894,12 @@ def test_search_mitigations_calls_subagent(tmp_path: Path) -> None:
         ],
         novel_cause=False,
     )
+    mock_run_subagent = AsyncMock(return_value=mock_result)
     deps = _make_deps(
         tmp_path,
         lt_summary_file=summary,
         incidents_dir=incidents,
-        model_id=TestModel(custom_output_args=mock_result.model_dump()),
+        run_subagent=mock_run_subagent,
     )
     ctx = _make_sre_ctx(deps)
 

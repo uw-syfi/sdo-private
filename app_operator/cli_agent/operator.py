@@ -128,17 +128,20 @@ class AppOperator(OperatorBase):
         self.analyzer = CodeAnalyzerAgent(
             self.repo_path,
             self.agent,
+            ui=self.ui,
             ctx=self._ctx,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,
             self.agent,
             deployment_config=self.config.deployment,
+            ui=self.ui,
             ctx=self._ctx,
         )
         self.monitor = AppMonitor(
             self.repo_path,
             self.agent,
+            ui=self.ui,
             ctx=self._ctx,
         )
 
@@ -193,8 +196,11 @@ class AppOperator(OperatorBase):
             else:
                 logger.info("Health monitoring disabled by configuration, skipping")
 
-            run_succeeded = True
-            return 0
+            if not self.monitor.healthy:
+                logger.warning("Monitor reported unhealthy status after deployment")
+
+            run_succeeded = self.monitor.healthy
+            return 0 if run_succeeded else 1
 
         except KeyboardInterrupt:
             # Graceful shutdown initiated by signal handler

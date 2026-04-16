@@ -1,0 +1,6 @@
+verdict = "health_policy_regression"
+
+# The frontend endpoint probe uses warning_check() instead of check(),
+# so a frontend failure never causes the script to exit non-zero.
+# This is a classic health-gate weakening pattern.
+invalid_consul_services = []

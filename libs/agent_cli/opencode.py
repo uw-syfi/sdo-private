@@ -1,4 +1,6 @@
 import json
+import subprocess
+from collections.abc import Callable
 from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
@@ -7,6 +9,7 @@ from .base import register_provider
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
 from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
+from .sandbox import SandboxConfig
 
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
@@ -100,6 +103,8 @@ class OpencodeCodingAgent(CLICodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        mcp_servers: list[object] | None = None,
+        sandbox: bool | SandboxConfig = False,
     ):
         """Initialize the Opencode coding agent.
 
@@ -107,7 +112,17 @@ class OpencodeCodingAgent(CLICodingAgent):
             model: Optional model name to use.
             recorder: Trajectory recorder instance.
             event_handler: Optional event handler for UI updates.
+            mcp_servers: Optional list of MCP server configurations.
+            sandbox: Not supported for Opencode; must be False.
+
+        Raises:
+            ValueError: If mcp_servers is non-empty (not supported).
+            NotImplementedError: If ``sandbox`` is truthy.
         """
+        if mcp_servers:
+            raise ValueError("OpencodeCodingAgent does not support programmatic MCP server configuration via CLI flags")
+        if sandbox:
+            raise NotImplementedError("sandbox is not supported for OpencodeCodingAgent")
         if not model:
             model = OPENCODE_DEFAULT_MODEL
         super().__init__("opencode", model, recorder, event_handler)
@@ -135,6 +150,7 @@ class OpencodeCodingAgent(CLICodingAgent):
         timeout: int = 300,
         silent: bool = False,
         recorder: TrajectoryRecorderProtocol | None = None,
+        on_process_started: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> OpencodeGenerationSession:
         return OpencodeGenerationSession(
             binary_name=self.binary_name,
@@ -147,4 +163,5 @@ class OpencodeCodingAgent(CLICodingAgent):
             silent=silent,
             recorder=recorder,
             event_handler=self.event_handler,
+            on_process_started=on_process_started,
         )

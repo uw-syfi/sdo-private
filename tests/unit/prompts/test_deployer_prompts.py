@@ -342,6 +342,23 @@ class TestCreateFixPrompt:
         assert "Architecture Reconciliation" in prompt
         assert "code_analysis.md" in prompt
 
+    def test_fix_prompt_warns_about_missing_healthcheck_binaries(self):
+        """Fix prompt should call out missing probe tools inside container images."""
+        repo_path = Path("/test/repo")
+        deploy_script = Path("/test/repo/.sds/deploy.sh")
+        health_script = Path("/test/repo/.sds/health_check.sh")
+
+        prompt = create_fix_prompt(
+            repo_path,
+            attempt=1,
+            max_attempts=3,
+            error_context="jaeger is unhealthy",
+            deploy_script_path=deploy_script,
+            health_check_script_path=health_script,
+        )
+
+        assert "NEVER add `healthcheck:` blocks to Docker Compose files" in prompt
+
     def test_fix_prompt_omits_reconciliation_when_no_code_analysis(self, tmp_path):
         """When code_analysis.md is absent, no reconciliation instructions appear."""
         sds = tmp_path / ".sds"
@@ -477,6 +494,45 @@ class TestCreateGenerateScriptPrompt:
         # Should still generate valid prompt
         assert "deploy.sh" in prompt
         assert "docker" in prompt
+
+    def test_deploy_prompt_allows_replacing_placeholder_compose(self):
+        """Placeholder compose files should not be treated as authoritative."""
+        prompt = create_generate_script_prompt(
+            system_prompt="System",
+            script_name="deploy.sh",
+            repo_context="Found docker-compose.yml with a placeholder service.",
+            target_dir="/repo/.sds",
+            platform="docker",
+        )
+
+        assert "docker compose" in prompt.lower()
+        assert "deploy.sh" in prompt
+
+    def test_deploy_prompt_warns_about_container_healthcheck_tool_assumptions(self):
+        """Deploy prompt should not add healthcheck blocks to compose files."""
+        prompt = create_generate_script_prompt(
+            system_prompt="System",
+            script_name="deploy.sh",
+            repo_context="Docker Compose app",
+            target_dir="/repo/.sds",
+            platform="docker",
+        )
+
+        assert "docker compose" in prompt.lower()
+        assert "deploy.sh" in prompt
+
+    def test_health_check_prompt_warns_about_compose_exec_tool_assumptions(self):
+        """health_check prompt should include health check requirements."""
+        prompt = create_generate_script_prompt(
+            system_prompt="System",
+            script_name="health_check.sh",
+            repo_context="Docker Compose app",
+            target_dir="/repo/.sds",
+            platform="docker",
+        )
+
+        assert "health_check.sh" in prompt
+        assert "Do NOT add `healthcheck:` blocks" in prompt
 
     def test_multiline_repo_context(self):
         """Test with multiline repo context."""

@@ -299,9 +299,10 @@ class TestLogFileManagement:
         log_file_1 = sds_dir / "logs" / "deploy_attempt_1.log"
         assert log_file_1.exists()
 
-        # Second run should continue numbering
+        # Second run should continue numbering.
+        # max_attempts is the absolute ceiling, so pass 2 to allow attempt 2.
         deployer2 = DeploymentAgent(repo, agent)
-        result2 = deployer2.run(max_attempts=1, check_shutdown=lambda: False)
+        result2 = deployer2.run(max_attempts=2, check_shutdown=lambda: False)
         assert result2 is True
 
         # Should create log file with number 2
@@ -335,8 +336,9 @@ class TestLogFileManagement:
         agent = StubAgent()
         deployer = DeploymentAgent(repo, agent)
 
-        # Run deployment which should create attempt 4
-        result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
+        # Run deployment which should create attempt 4.
+        # max_attempts is the absolute ceiling, so pass 4 to allow attempt 4.
+        result = deployer.run(max_attempts=4, check_shutdown=lambda: False)
         assert result is True
 
         # Should create log file numbered 4 (continuing from previous)

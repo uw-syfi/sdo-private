@@ -1,7 +1,25 @@
 Please analyze the repository at {{ repo_path }} following the system instructions.
 
-Generate the required files:
-1. .sds/code_analysis.md
-2. .sds/deployment_issues.md
+## Repository File Tree
 
-You have read access to the entire repository.
+```
+{{ file_tree }}
+```
+
+{% if repo_content is defined and repo_content %}
+## Key Repository Files
+
+{{ repo_content }}
+
+{% endif %}
+Generate the required files. For EACH file, output a section in this exact format:
+
+FILE: .sds/code_analysis.md
+```
+<content>
+```
+
+FILE: .sds/deployment_issues.md
+```
+<content>
+```

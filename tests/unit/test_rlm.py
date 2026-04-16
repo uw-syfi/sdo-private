@@ -164,6 +164,25 @@ result = len(lines)
         # Should hit limit and return warning
         assert "limit" in result.lower() or "done" in result.lower()
 
+    def test_sub_rlm_uses_same_recursion_limit_as_recursive_call(self):
+        """REPL-side sub_rlm should route through recursive_call depth checks."""
+        context = RLMContext()
+        env = None
+
+        def nested_llm(prompt: str, filtered_context=None) -> str:
+            del prompt, filtered_context
+            assert env is not None
+            return env.execute_code("result = sub_rlm('deeper')", "Nested sub_rlm")
+
+        env = RLMEnvironment(context, max_recursion_depth=1, sub_rlm_fn=nested_llm)
+
+        result = env.execute_code("result = sub_rlm('start')", "Call sub_rlm from REPL")
+
+        assert "Recursion limit reached" in result
+        recursive_calls = [call for call in env.call_history if call.action_type == ActionType.RECURSIVE_CALL]
+        assert len(recursive_calls) == 1
+        assert recursive_calls[0].depth == 1
+
     def test_get_statistics(self):
         """Test getting RLM statistics."""
         context = RLMContext(error_log="test" * 1000)
@@ -213,6 +232,34 @@ result = len(lines)
         assert "recursive_call" in prompt.lower()
         assert "final_answer" in prompt.lower()
         assert "recursion depth: 0/5" in prompt.lower()
+
+    def test_get_system_prompt_mentions_chunking_and_buffers(self):
+        """System prompt should teach paper-style chunking and REPL buffers."""
+        context = RLMContext(error_log="test log")
+        env = RLMEnvironment(context)
+
+        prompt = env.get_system_prompt()
+
+        assert "chunking or filtering strategy" in prompt
+        assert "REPL variables/buffers" in prompt
+        assert "sub_rlm(...)" in prompt
+
+    def test_get_system_prompt_mentions_specialists_when_available(self):
+        """Available specialists should be listed in the system prompt."""
+        context = RLMContext()
+        env = RLMEnvironment(
+            context,
+            available_specialists={
+                "error_log": "Analyze deploy and health logs.",
+                "repo": "Summarize deployment-relevant repository constraints.",
+            },
+        )
+
+        prompt = env.get_system_prompt()
+
+        assert "specialist_call" in prompt
+        assert "error_log" in prompt
+        assert "repo" in prompt
 
 
 class TestValidateFileRefs:
@@ -326,6 +373,32 @@ class TestRLMEnvironmentValidation:
         result = env.execute_code(code, "Validate existing file")
         assert "All referenced file paths exist." in result
 
+    def test_execute_code_can_import_prebound_os(self, tmp_path):
+        context = RLMContext()
+        env = RLMEnvironment(context, cwd=str(tmp_path))
+        result = env.execute_code("import os\nresult = os.getcwd()", "Import prebound os")
+        assert str(tmp_path) in result
+
+    def test_execute_code_supports_safe_os_walk_and_chmod(self, tmp_path):
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "subdir" / "deploy.sh").write_text("#!/bin/bash\n")
+        target = tmp_path / "run.sh"
+        target.write_text("#!/bin/bash\n")
+        context = RLMContext()
+        env = RLMEnvironment(context, cwd=str(tmp_path))
+
+        code = (
+            "files = []\n"
+            "for _root, _dirs, _names in os.walk(cwd):\n"
+            "    files.extend(_names)\n"
+            "os.chmod(cwd + '/run.sh', 0o755)\n"
+            "result = sorted(files)"
+        )
+        result = env.execute_code(code, "Walk cwd and chmod script")
+        assert "deploy.sh" in result
+        assert "run.sh" in result
+        assert oct(target.stat().st_mode & 0o777) == "0o755"
+
     def test_system_prompt_mentions_validate_file_refs(self):
         context = RLMContext()
         env = RLMEnvironment(context)
@@ -338,6 +411,12 @@ class TestRLMEnvironmentValidation:
         prompt = env.get_system_prompt()
         assert "MISSING" in prompt
         assert "original_script" in prompt
+
+    def test_system_prompt_instructs_no_os_import(self):
+        context = RLMContext()
+        env = RLMEnvironment(context)
+        prompt = env.get_system_prompt()
+        assert "Do NOT write `import os`" in prompt
 
 
 class TestRLMAgentBackup:
@@ -426,6 +505,25 @@ class TestRLMAgentBackup:
         assert ctx.health_check_output == "health recheck one\n"
 
 
+class TestRLMCodingAgentRunConfig:
+    """Tests for RLMCodingAgent runtime configuration wiring."""
+
+    def test_generate_sets_max_consecutive_errors(self, tmp_path):
+        import unittest.mock as mock
+
+        from app_operator.cli_agent.rlm_agent import RLMCodingAgent
+
+        (tmp_path / ".sds").mkdir()
+        agent = RLMCodingAgent()
+
+        with mock.patch("app_operator.cli_agent.rlm_agent.RecursiveDeploymentAgent") as mock_agent_cls:
+            mock_agent_cls.return_value.run_task.return_value = "done"
+            result = agent.generate("Fix the deployment error", cwd=str(tmp_path))
+
+        assert result == "done"
+        assert mock_agent_cls.call_args.kwargs["max_consecutive_errors"] == 3
+
+
 class TestRLMMetrics:
     """Tests for RLM metrics."""
 
@@ -439,6 +537,8 @@ class TestRLMMetrics:
                 "code_executions": 4,
                 "recursive_calls": 2,
                 "max_depth_reached": 2,
+                "metadata_feedback_count": 5,
+                "finalization_type": "final_var",
             }
             success = True
 
@@ -457,6 +557,8 @@ class TestRLMMetrics:
                 "code_executions": 2,  # Not enough code
                 "recursive_calls": 48,  # Too many recursive calls
                 "max_depth_reached": 10,  # Too deep
+                "metadata_feedback_count": 0,
+                "finalization_type": "final_answer",
             }
             success = False  # Also failed
 
@@ -483,7 +585,12 @@ class TestRLMMetrics:
 
         class MockExample:
             # baseline=10000, saved=8000 → 80% savings, exceeds 50% target
-            rlm_statistics = {"total_tokens_saved": 8000, "baseline_context_tokens": 10000}
+            rlm_statistics = {
+                "total_tokens_saved": 8000,
+                "baseline_context_tokens": 10000,
+                "metadata_feedback_count": 4,
+                "feedback_turns": 4,
+            }
 
         score = metric(MockExample(), None)
 
@@ -496,7 +603,12 @@ class TestRLMMetrics:
 
         class MockExample:
             # baseline=10000, saved=1000 → 10% savings (below 50% target)
-            rlm_statistics = {"total_tokens_saved": 1000, "baseline_context_tokens": 10000}
+            rlm_statistics = {
+                "total_tokens_saved": 1000,
+                "baseline_context_tokens": 10000,
+                "metadata_feedback_count": 0,
+                "feedback_turns": 4,
+            }
 
         score = metric(MockExample(), None)
 
@@ -509,7 +621,12 @@ class TestRLMMetrics:
 
         class MockExample:
             # baseline=5000, actual=8000 → saved=-3000 (RLM cost more)
-            rlm_statistics = {"total_tokens_saved": -3000, "baseline_context_tokens": 5000}
+            rlm_statistics = {
+                "total_tokens_saved": -3000,
+                "baseline_context_tokens": 5000,
+                "metadata_feedback_count": 2,
+                "feedback_turns": 2,
+            }
 
         score = metric(MockExample(), None)
 
@@ -539,6 +656,9 @@ class TestRLMMetrics:
                 "total_tokens_saved": 8000,
                 "baseline_context_tokens": 10000,
                 "max_depth_reached": 1,
+                "metadata_feedback_count": 5,
+                "feedback_turns": 5,
+                "finalization_type": "final_var",
             }
 
         class MockPrediction:
@@ -549,6 +669,37 @@ class TestRLMMetrics:
         # Should score well - successful, efficient, good RLM usage
         assert score > 0.7
         assert score <= 1.0
+
+    def test_rlm_efficiency_metric_penalizes_non_repl_finalization(self):
+        metric = RLMEfficiencyMetric()
+
+        class MockExample:
+            rlm_statistics = {
+                "total_calls": 4,
+                "code_executions": 3,
+                "recursive_calls": 1,
+                "max_depth_reached": 1,
+                "metadata_feedback_count": 4,
+                "finalization_type": "final_answer",
+            }
+            success = True
+
+        score = metric(MockExample(), None)
+        assert score < 0.95
+
+    def test_rlm_context_utilization_metric_penalizes_history_pollution(self):
+        metric = RLMContextUtilizationMetric(target_savings_ratio=0.5)
+
+        class MockExample:
+            rlm_statistics = {
+                "total_tokens_saved": 8000,
+                "baseline_context_tokens": 10000,
+                "metadata_feedback_count": 1,
+                "feedback_turns": 4,
+            }
+
+        score = metric(MockExample(), None)
+        assert score < 1.0
 
     def test_rlm_composite_metric_weights_validation(self):
         """Test that composite metric validates weights sum to 1.0."""
@@ -677,6 +828,58 @@ class TestFilteredContextValidation:
         assert env.call_history[0].tokens_saved == 0
 
 
+class TestSpecialistCallParsing:
+    """Tests for parsing and routing specialist_call actions."""
+
+    def test_parse_specialist_call(self):
+        agent = RecursiveDeploymentAgent()
+        response = "ACTION: specialist_call\nSPECIALIST: error_log\nTASK: Summarize the failures"
+        parsed = agent._parse_rlm_response(response)
+        assert parsed["action"] == ActionType.SPECIALIST_CALL
+        assert parsed["specialist"] == "error_log"
+        assert parsed["task"] == "Summarize the failures"
+
+    def test_run_task_executes_specialist_call_and_caches_summary(self):
+        """A specialist call should dispatch work and cache the returned summary."""
+        import unittest.mock as mock
+
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                content = "ACTION: specialist_call\nSPECIALIST: error_log\nTASK: Summarize the failures"
+            elif call_count == 2:
+                content = "ACTION: execute_code\nDESCRIPTION: Read cached summary\nCODE:\nresult = error_summary"
+            else:
+                content = "ACTION: final_answer\nANSWER: done"
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        specialist_calls = []
+
+        def dispatch(name: str, task: str) -> str:
+            specialist_calls.append((name, task))
+            return "Cached error summary"
+
+        agent = RecursiveDeploymentAgent(
+            specialist_dispatcher=dispatch,
+            available_specialists={"error_log": "Analyze deploy and health logs."},
+        )
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            result = agent.run_task("test task", context, "/tmp")
+
+        assert result == "done"
+        assert specialist_calls == [("error_log", "Summarize the failures")]
+        assert context.error_summary == "Cached error summary"
+
+
 class TestConsecutiveExploreCounter:
     """Tests for the consecutive non-answer forcing logic."""
 
@@ -767,6 +970,116 @@ class TestConversationHistory:
         assert roles.count("user") == 3
         assert roles.count("assistant") == 2
 
+    def test_execute_code_feedback_uses_metadata_not_full_result(self):
+        """After execute_code, the next prompt should reference last_result metadata only."""
+        import unittest.mock as mock
+
+        captured_user_prompts = []
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            user_messages = [m["content"] for m in kwargs["messages"] if m["role"] == "user"]
+            captured_user_prompts.append(user_messages[-1])
+
+            if call_count == 1:
+                content = "ACTION: execute_code\nDESCRIPTION: build long string\nCODE:\nresult = 'x' * 5000"
+            else:
+                content = "ACTION: final_answer\nANSWER: done"
+
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            agent.run_task("test task", context, "/tmp")
+
+        followup_prompt = captured_user_prompts[1]
+        assert "last_result" in followup_prompt
+        assert "Code execution result stored" in followup_prompt
+        assert "x" * 400 not in followup_prompt
+
+    def test_recursive_feedback_uses_metadata_not_full_result(self):
+        """After recursive_call, the next parent prompt should reference last_recursive_result metadata only."""
+        import unittest.mock as mock
+
+        captured_user_prompts = []
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            user_messages = [m["content"] for m in kwargs["messages"] if m["role"] == "user"]
+            captured_user_prompts.append(user_messages[-1])
+
+            if call_count == 1:
+                content = 'ACTION: recursive_call\nSUBTASK: Analyse the error\nCONTEXT: {"error_log": "test error"}'
+            elif call_count == 2:
+                content = f"ACTION: final_answer\nANSWER: {'y' * 4000}"
+            else:
+                content = "ACTION: final_answer\nANSWER: done"
+
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            agent.run_task("test task", context, "/tmp")
+
+        parent_followup_prompt = captured_user_prompts[2]
+        assert "last_recursive_result" in parent_followup_prompt
+        assert "Recursive subcall result stored" in parent_followup_prompt
+        assert "y" * 400 not in parent_followup_prompt
+
+    def test_specialist_feedback_uses_metadata_not_full_result(self):
+        """After specialist_call, the next prompt should reference last_specialist_result metadata only."""
+        import unittest.mock as mock
+
+        captured_user_prompts = []
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            user_messages = [m["content"] for m in kwargs["messages"] if m["role"] == "user"]
+            captured_user_prompts.append(user_messages[-1])
+
+            if call_count == 1:
+                content = "ACTION: specialist_call\nSPECIALIST: error_log\nTASK: Summarize the failures"
+            else:
+                content = "ACTION: final_answer\nANSWER: done"
+
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent(
+            specialist_dispatcher=lambda _name, _task: "z" * 4000,
+            available_specialists={"error_log": "Analyze deploy and health logs."},
+        )
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            agent.run_task("test task", context, "/tmp")
+
+        followup_prompt = captured_user_prompts[1]
+        assert "last_specialist_result" in followup_prompt
+        assert "Specialist result from `error_log` stored" in followup_prompt
+        assert "z" * 400 not in followup_prompt
+
     def test_call_llm_appends_to_messages(self):
         """_call_llm appends both the user prompt and the assistant response."""
         import unittest.mock as mock
@@ -838,6 +1151,60 @@ class TestAutoValidateDeploySh:
         assert result == "No script needed."
 
 
+class TestREPLNativeFinalization:
+    """Tests for returning final answers directly from REPL variables."""
+
+    def test_parse_final_var_response(self):
+        agent = RecursiveDeploymentAgent()
+        parsed = agent._parse_rlm_response("FINAL_VAR: final_buffer")
+        assert parsed["action"] == ActionType.FINAL_ANSWER
+        assert parsed["final_var"] == "final_buffer"
+
+    def test_run_task_returns_repl_variable_via_final_var(self):
+        import unittest.mock as mock
+
+        responses = iter(
+            [
+                "ACTION: execute_code\nDESCRIPTION: store answer\nCODE:\n"
+                "final_buffer = 'buffered answer'\nresult = 'ok'",
+                "FINAL_VAR: final_buffer",
+            ]
+        )
+
+        def fake_completion(**kwargs):
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = next(responses)
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            result = agent.run_task("test task", context, "/tmp")
+
+        assert result == "buffered answer"
+
+    def test_run_task_errors_when_final_var_missing(self):
+        import unittest.mock as mock
+
+        def fake_completion(**kwargs):
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = "FINAL_VAR: missing_buffer"
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            result = agent.run_task("test task", context, "/tmp")
+
+        assert "Unknown final variable" in result
+
+
 class TestRLMDeployerFixErrorSignature:
     """Tests for the RLMDeployerFixError DSPy signature."""
 
@@ -877,7 +1244,8 @@ class TestExtractRLMStatisticsFromTrajectory:
                         {
                             "content": 'RLM Statistics: {"total_calls": 3, '
                             '"code_executions": 2, "recursive_calls": 1, '
-                            '"total_tokens_saved": 5000, "max_depth_reached": 1}'
+                            '"total_tokens_saved": 5000, "max_depth_reached": 1, '
+                            '"metadata_feedback_count": 3, "finalization_type": "final_var"}'
                         },
                     ]
                 }
@@ -890,6 +1258,8 @@ class TestExtractRLMStatisticsFromTrajectory:
         assert stats["code_executions"] == 2
         assert stats["recursive_calls"] == 1
         assert stats["total_tokens_saved"] == 5000
+        assert stats["metadata_feedback_count"] == 3
+        assert stats["finalization_type"] == "final_var"
 
     def test_extract_from_non_rlm_trajectory(self):
         trajectory = {
@@ -911,12 +1281,30 @@ class TestExtractRLMStatisticsFromTrajectory:
         stats = extract_rlm_statistics_from_trajectory({})
         assert stats["total_calls"] == 0
 
+    def test_extract_counts_fallback_messages_when_json_stats_missing(self):
+        trajectory = {
+            "deployment": [
+                {
+                    "messages": [
+                        {"content": "[RLM execute_code at depth 0]\nInput: test"},
+                        {"content": "[RLM recursive_call at depth 1]\nInput: sub"},
+                        {"content": "Code execution result stored in `last_result`.\nType: str"},
+                        {"content": "Recursive subcall result stored in `last_recursive_result`.\nType: str"},
+                    ]
+                }
+            ]
+        }
 
-class TestIsolatedRecursiveCall:
-    """Tests for _call_llm_isolated and recursive call isolation."""
+        stats = extract_rlm_statistics_from_trajectory(trajectory)
+        assert stats["total_calls"] == 2
+        assert stats["metadata_feedback_count"] == 2
 
-    def test_isolated_call_uses_fresh_messages(self):
-        """_call_llm_isolated builds a fresh messages list, not self._messages."""
+
+class TestNestedRecursiveCall:
+    """Tests for nested RLM recursion behavior."""
+
+    def test_recursive_subtask_runs_in_nested_rlm_loop(self):
+        """recursive_call should start a nested RLM loop, not a plain subagent call."""
         import unittest.mock as mock
 
         captured_kwargs = []
@@ -1018,6 +1406,43 @@ class TestIsolatedRecursiveCall:
         # (system + user), not the growing main conversation.
         assert main_messages_lengths[1] == 2
 
+    def test_recursive_call_in_run_task_keeps_parent_history_isolated(self):
+        """Nested RLM subcalls should not append their turns into the parent history."""
+        import unittest.mock as mock
+
+        captured_messages = []
+        call_count = 0
+
+        def fake_completion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_messages.append([m.copy() for m in kwargs["messages"]])
+
+            if call_count == 1:
+                content = 'ACTION: recursive_call\nSUBTASK: Analyse the error\nCONTEXT: {"error_log": "test error"}'
+            elif call_count == 2:
+                content = "ACTION: final_answer\nANSWER: nested result"
+            else:
+                content = "ACTION: final_answer\nANSWER: done"
+
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = content
+            resp.usage = None
+            return resp
+
+        agent = RecursiveDeploymentAgent()
+        context = RLMContext()
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            agent.run_task("test task", context, "/tmp")
+
+        parent_followup_messages = captured_messages[2]
+        roles = [m["role"] for m in parent_followup_messages]
+        assert roles.count("system") == 1
+        assert roles.count("user") == 2
+        assert roles.count("assistant") == 1
+
 
 class TestExecuteCodeTruncation:
     """Tests for execute_code result truncation."""
@@ -1076,15 +1501,39 @@ class TestNamespaceReservedNamesRestored:
 class TestParseRobustness:
     """Tests for the regex-based response parser."""
 
-    def test_parse_missing_action_line_returns_noop(self):
-        """Missing ACTION: line returns a no-op execute_code, not FINAL_ANSWER."""
+    def test_parse_missing_action_line_requests_format_retry(self):
+        """Missing ACTION: line requests a strict format retry."""
         agent = RecursiveDeploymentAgent()
         response = "This response has no action line at all."
         parsed = agent._parse_rlm_response(response)
 
         assert parsed["action"] == ActionType.EXECUTE_CODE
         assert parsed["code"] == ""
-        assert parsed["description"] == "no-op"
+        assert parsed["description"] == "invalid-format"
+        assert parsed["invalid_format"] is True
+
+    def test_run_task_reprompts_on_invalid_format(self):
+        """Invalid format should trigger a corrective retry prompt."""
+        prompts = []
+        responses = iter(
+            [
+                "No action line here",
+                "ACTION: final_answer\nANSWER: done",
+            ]
+        )
+
+        def fake_call_llm(prompt):
+            prompts.append(prompt)
+            return next(responses)
+
+        agent = RecursiveDeploymentAgent()
+        agent._call_llm = fake_call_llm
+        context = RLMContext()
+        result = agent.run_task("test task", context, "/tmp")
+
+        assert result == "done"
+        assert len(prompts) >= 2
+        assert prompts[1].startswith("Invalid format.")
 
     def test_parse_bounded_code_block(self):
         """CODE: extraction stops at the next section keyword."""
@@ -1201,6 +1650,11 @@ class TestConfigurableLoopParams:
         agent = RecursiveDeploymentAgent()
         assert agent.consecutive_explore_limit == 5
 
+    def test_default_max_consecutive_errors(self):
+        """Default max_consecutive_errors is 3."""
+        agent = RecursiveDeploymentAgent()
+        assert agent.max_consecutive_errors == 3
+
 
 class TestEstimateTokensTiktoken:
     """Tests for tiktoken integration in _estimate_tokens."""
@@ -1299,6 +1753,56 @@ class TestRunTaskUsesRenderFunction:
         first_prompt = captured_prompts[0]
         assert "my deployment task" in first_prompt
         assert "RENDERED_WRAPPER_CONTENT" in first_prompt
+
+    def test_paper_faithful_mode_skips_deployment_wrapper_render(self):
+        """paper_faithful mode should avoid the SDS deployment wrapper prompt."""
+        import unittest.mock as mock
+
+        agent = RecursiveDeploymentAgent(rlm_mode="paper_faithful")
+        context = RLMContext()
+
+        with (
+            mock.patch(
+                "app_operator.cli_agent.rlm.recursive_agent.render_fix_error_task_prompt",
+                side_effect=AssertionError("wrapper should not be rendered"),
+            ),
+            mock.patch(
+                "litellm.completion",
+                return_value=mock.MagicMock(
+                    choices=[mock.MagicMock(message=mock.MagicMock(content="ACTION: final_answer\nANSWER: done"))],
+                    usage=None,
+                ),
+            ),
+        ):
+            result = agent.run_task("my deployment task", context, "/tmp")
+
+        assert result == "done"
+
+    def test_paper_faithful_mode_uses_chunking_guidance(self):
+        """paper_faithful mode should nudge the model toward REPL-first decomposition."""
+        import unittest.mock as mock
+
+        captured_prompts = []
+        agent = RecursiveDeploymentAgent(rlm_mode="paper_faithful")
+        context = RLMContext()
+
+        def fake_completion(**kwargs):
+            user_msgs = [m["content"] for m in kwargs["messages"] if m["role"] == "user"]
+            captured_prompts.append(user_msgs[-1])
+            resp = mock.MagicMock()
+            resp.choices = [mock.MagicMock()]
+            resp.choices[0].message.content = "ACTION: final_answer\nANSWER: done"
+            resp.usage = None
+            return resp
+
+        with mock.patch("litellm.completion", side_effect=fake_completion):
+            result = agent.run_task("my deployment task", context, "/tmp")
+
+        assert result == "done"
+        first_prompt = captured_prompts[0]
+        assert "task_prompt" in first_prompt
+        assert "Use sub_rlm(...)" in first_prompt
+        assert "specialist summaries" in first_prompt
 
 
 if __name__ == "__main__":

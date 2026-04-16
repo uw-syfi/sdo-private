@@ -176,6 +176,53 @@ class TestRenderWithDSPy:
         # Should fall back to Jinja2
         assert result == "System prompt for /repo"
 
+    def test_render_dspy_deployer_fix_error_platform_mismatch_falls_back(self, tmp_path):
+        """Should fall back to Jinja2 when DSPy fix prompt mismatches docker platform."""
+        templates_dir = tmp_path / "templates"
+        deployer_dir = templates_dir / "deployer"
+        deployer_dir.mkdir(parents=True)
+        template_file = deployer_dir / "fix_error.jinja2"
+        template_file.write_text("Fallback fix prompt for {{ platform }}")
+
+        config = DSPyConfig(use_optimized=True, optimized_version="v1")
+        loader = PromptLoader(templates_dir=templates_dir, dspy_config=config)
+        mock_recorder = Mock()
+
+        with (
+            patch.object(loader, "_should_use_dspy", return_value=True),
+            patch.object(
+                loader,
+                "_render_dspy",
+                return_value="Increase initialDelaySeconds on readinessProbe to fix health checks.",
+            ),
+        ):
+            result = loader.render("deployer/fix_error.jinja2", platform="docker", recorder=mock_recorder)
+
+        assert result == "Fallback fix prompt for docker"
+        mock_recorder.record_fallback.assert_called_once()
+
+    def test_render_dspy_deployer_fix_error_platform_match_keeps_dspy(self, tmp_path):
+        """Should keep DSPy output when docker prompt content is platform-appropriate."""
+        templates_dir = tmp_path / "templates"
+        deployer_dir = templates_dir / "deployer"
+        deployer_dir.mkdir(parents=True)
+        template_file = deployer_dir / "fix_error.jinja2"
+        template_file.write_text("Fallback fix prompt for {{ platform }}")
+
+        config = DSPyConfig(use_optimized=True, optimized_version="v1")
+        loader = PromptLoader(templates_dir=templates_dir, dspy_config=config)
+        mock_recorder = Mock()
+        dspy_prompt = "Use docker compose logs --tail 200 and inspect failing service startup."
+
+        with (
+            patch.object(loader, "_should_use_dspy", return_value=True),
+            patch.object(loader, "_render_dspy", return_value=dspy_prompt),
+        ):
+            result = loader.render("deployer/fix_error.jinja2", platform="docker", recorder=mock_recorder)
+
+        assert result == dspy_prompt
+        mock_recorder.record_fallback.assert_not_called()
+
 
 class TestGetLoaderWithDSPy:
     """Tests for get_loader with DSPy config."""

@@ -4,14 +4,17 @@ Implements the core RLM paradigm: context stored as variables in a REPL
 that the LLM can programmatically query, filter, and recursively process.
 """
 
+import inspect
 import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from app_operator.logger import logger
+
+RecursiveLLMFunction = Callable[[str], str] | Callable[[str, dict[str, Any] | None], str]
 
 
 def _estimate_tokens(text: str) -> int:
@@ -62,6 +65,7 @@ class ActionType(str, Enum):
 
     EXECUTE_CODE = "execute_code"  # Run Python code to query/filter context
     RECURSIVE_CALL = "recursive_call"  # Make a recursive sub-LLM call
+    SPECIALIST_CALL = "specialist_call"  # Run a named specialist analysis
     FINAL_ANSWER = "final_answer"  # Provide final response
 
 
@@ -99,6 +103,10 @@ class RLMContext:
     script_summary: str = ""
     repo_summary: str = ""
 
+    # Additional ad hoc variables to expose in nested recursive subcalls when a
+    # filtered context contains names outside the fixed deployment schema.
+    extra_variables: dict[str, Any] = field(default_factory=dict)
+
     # Metadata
     attempt_number: int = 0
     total_tokens_used: int = 0
@@ -120,6 +128,7 @@ class RLMContext:
             "error_summary": self.error_summary,
             "script_summary": self.script_summary,
             "repo_summary": self.repo_summary,
+            "extra_variables": self.extra_variables,
             "attempt_number": self.attempt_number,
             "total_tokens_used": self.total_tokens_used,
         }
@@ -156,6 +165,17 @@ class RLMContext:
                 " ← deployment constraints from Dockerfile/compose/README\n"
             )
 
+        extra_variables_section = ""
+        if self.extra_variables:
+            lines = []
+            for key, value in sorted(self.extra_variables.items()):
+                typename = type(value).__name__
+                size_hint = f"{len(str(value))} chars" if isinstance(value, str) else typename
+                lines.append(f"- {key}: {typename} ({size_hint})")
+            extra_variables_section = (
+                "\nExtra context variables loaded for this recursive task:\n" + "\n".join(lines) + "\n"
+            )
+
         return f"""Available context variables in REPL environment:
 
 - error_log: str ({len(self.error_log)} chars)
@@ -169,6 +189,7 @@ class RLMContext:
 - analysis_report: str ({len(self.analysis_report)} chars)
 {original_note}
 {summaries_section}
+{extra_variables_section}
 Metadata:
 - attempt_number: {self.attempt_number}
 - total_tokens_used: {self.total_tokens_used}
@@ -261,6 +282,11 @@ class RLMEnvironment:
         record_callback: Callable[[RLMCall], None] | None = None,
         cwd: str = "",
         max_result_chars: int = 20_000,
+        available_specialists: dict[str, str] | None = None,
+        task_prompt: str = "",
+        sub_rlm_fn: RecursiveLLMFunction | None = None,
+        initial_depth: int = 0,
+        shared_call_history: list[RLMCall] | None = None,
     ):
         """Initialize RLM environment.
 
@@ -272,16 +298,25 @@ class RLMEnvironment:
                 model can read/write files (e.g. ``open(cwd + "/.sds/deploy.sh", "w")``)
             max_result_chars: Maximum characters for code execution results before
                 truncation. Prevents 500-line logs from filling the next LLM prompt.
+            task_prompt: The full task loaded as a REPL variable so the LLM can
+                query it programmatically rather than receiving it in the context
+                window directly. Faithful to Algorithm 1 in the RLM paper.
+            sub_rlm_fn: Callable injected as ``sub_rlm(prompt, context=None)``
+                in the REPL namespace so the LLM can invoke sub-LLM calls
+                programmatically from within code, e.g. inside loops.
         """
         self.context = context
         self.max_recursion_depth = max_recursion_depth
-        self.current_depth = 0
+        self.current_depth = initial_depth
         self.record_callback = record_callback
         self.cwd = cwd
         self.max_result_chars = max_result_chars
+        self.available_specialists = dict(available_specialists or {})
+        self.task_prompt = task_prompt
+        self.sub_rlm_fn = sub_rlm_fn
 
         # Track all RLM calls for analysis
-        self.call_history: list[RLMCall] = []
+        self.call_history: list[RLMCall] = shared_call_history if shared_call_history is not None else []
 
         # Safe namespace for code execution
         self._namespace = self._create_safe_namespace()
@@ -300,6 +335,12 @@ class RLMEnvironment:
                 "list",
                 "dict",
                 "print",
+                "sub_rlm",
+                "task_prompt",
+                "last_result",
+                "last_recursive_result",
+                "last_specialist_result",
+                "last_specialist_name",
             }
         )
 
@@ -313,8 +354,8 @@ class RLMEnvironment:
         Security restrictions:
         - ``os`` is replaced with a restricted wrapper exposing only path
           utilities (os.path.join, os.path.exists, etc.), and restricted
-          versions of os.listdir, os.makedirs, and os.getcwd that only
-          allow access within the working directory.
+          versions of os.listdir, os.makedirs, os.walk, os.chmod, and
+          os.getcwd that only allow access within the working directory.
         - ``open`` is replaced with a wrapper that validates the resolved
           path is within self.cwd before allowing file operations.
         - ``Path`` is available for path manipulation but not for arbitrary
@@ -327,32 +368,55 @@ class RLMEnvironment:
         # -- Restricted open: only allows access within self.cwd --
         _allowed_root = os.path.realpath(self.cwd) if self.cwd else ""
 
-        def _safe_open(path, mode="r", *args, **kwargs):
-            """open() wrapper that restricts file access to the working directory."""
+        def _resolve_in_allowed_root(path: str) -> str:
+            """Resolve *path* relative to cwd and reject escapes."""
             resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
             if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
                 raise PermissionError(f"Access denied: {path!r} resolves outside the working directory")
+            return resolved
+
+        def _safe_open(path, mode="r", *args, **kwargs):
+            """open() wrapper that restricts file access to the working directory."""
+            resolved = _resolve_in_allowed_root(path)
             return open(resolved, mode, *args, **kwargs)
 
         def _safe_listdir(path="."):
             """os.listdir() wrapper restricted to the working directory."""
-            resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
-            if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
-                raise PermissionError(f"Access denied: {path!r} resolves outside the working directory")
+            resolved = _resolve_in_allowed_root(path)
             return os.listdir(resolved)
 
         def _safe_makedirs(path, *args, **kwargs):
             """os.makedirs() wrapper restricted to the working directory."""
-            resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
-            if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
-                raise PermissionError(f"Access denied: {path!r} resolves outside the working directory")
+            resolved = _resolve_in_allowed_root(path)
             return os.makedirs(resolved, *args, **kwargs)
 
-        # -- Restricted os: only safe path utilities, listdir, makedirs --
+        def _safe_walk(top=".", *args, **kwargs):
+            """os.walk() wrapper restricted to the working directory."""
+            resolved_top = _resolve_in_allowed_root(top)
+            for root, dirs, files in os.walk(resolved_top, *args, **kwargs):
+                # Prevent traversal via symlinks pointing outside the root.
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if (
+                        (candidate := os.path.realpath(os.path.join(root, d))).startswith(_allowed_root + os.sep)
+                        or candidate == _allowed_root
+                    )
+                ]
+                yield root, dirs, files
+
+        def _safe_chmod(path, mode, *args, **kwargs):
+            """os.chmod() wrapper restricted to the working directory."""
+            resolved = _resolve_in_allowed_root(path)
+            return os.chmod(resolved, mode, *args, **kwargs)
+
+        # -- Restricted os: only safe path utilities and file operations --
         _safe_os = SimpleNamespace(
             path=os.path,
             listdir=_safe_listdir,
             makedirs=_safe_makedirs,
+            walk=_safe_walk,
+            chmod=_safe_chmod,
             getcwd=lambda: _allowed_root,
             sep=os.sep,
         )
@@ -375,6 +439,7 @@ class RLMEnvironment:
             "error_summary": self.context.error_summary,
             "script_summary": self.context.script_summary,
             "repo_summary": self.context.repo_summary,
+            "extra_variables": self.context.extra_variables,
             "attempt_number": self.context.attempt_number,
             # Utilities — restricted versions to limit filesystem access
             "re": re,
@@ -394,8 +459,78 @@ class RLMEnvironment:
             "map": map,
             # File validation helper — call this before writing a fixed deploy.sh
             "validate_file_refs": _validate_file_refs,
+            # Task prompt as REPL variable (RLM paper Algorithm 1: P loaded into state)
+            "task_prompt": self.task_prompt,
+            # Holds the full output of the most recent execute_code call
+            "last_result": None,
+            # Holds full outputs of the most recent recursive/specialist calls
+            "last_recursive_result": None,
+            "last_specialist_result": None,
+            "last_specialist_name": None,
         }
+
+        for key, value in self.context.extra_variables.items():
+            namespace[key] = value
+
+        # Sub-RLM callable: inject as a REPL function so the LLM can invoke
+        # sub-LLM calls programmatically from within code (e.g. inside loops),
+        # matching the RLM paper's design of sub_RLM_M as a REPL-registered fn.
+        if self.sub_rlm_fn is not None:
+            _fn = self.sub_rlm_fn
+            _self = self
+
+            def _sub_rlm(prompt: str, context: dict | None = None) -> str:
+                return _self.recursive_call(prompt, filtered_context=context, llm_function=_fn)
+
+            namespace["sub_rlm"] = _sub_rlm
+        else:
+            namespace["sub_rlm"] = None
+
         return namespace
+
+    def update_summary(self, specialist: str, summary: str) -> None:
+        """Cache a specialist summary into context and the REPL namespace."""
+        field_map = {
+            "trajectory": "trajectory_summary",
+            "error_log": "error_summary",
+            "script": "script_summary",
+            "repo": "repo_summary",
+        }
+        field_name = field_map.get(specialist)
+        if not field_name:
+            raise ValueError(f"Unknown specialist: {specialist}")
+        setattr(self.context, field_name, summary)
+        self._namespace[field_name] = summary
+
+    def set_repl_value(self, name: str, value: Any) -> None:
+        """Persist a value into the REPL namespace for later steps."""
+        self._namespace[name] = value
+
+    def get_repl_value(self, name: str) -> Any:
+        """Return a value from the REPL namespace."""
+        return self._namespace.get(name)
+
+    def describe_value(self, variable_name: str, label: str) -> str:
+        """Return compact metadata about a REPL value without inlining it fully."""
+        value = self._namespace.get(variable_name)
+        value_type = type(value).__name__
+        rendered = str(value)
+        char_count = len(rendered)
+        line_count = rendered.count("\n") + 1 if rendered else 0
+        preview_limit = 240
+        preview = rendered[:preview_limit]
+        if len(rendered) > preview_limit:
+            preview += "... [preview truncated]"
+        lines = [
+            f"{label} stored in `{variable_name}`.",
+            f"Type: {value_type}",
+            f"Size: {char_count} chars, {line_count} lines"
+            if isinstance(value, str)
+            else f"Rendered size: {char_count} chars",
+            f"Preview:\n{preview}" if preview else "Preview: <empty>",
+            f"Use `{variable_name}` in execute_code to inspect the full value.",
+        ]
+        return "\n".join(lines)
 
     def execute_code(self, code: str, description: str = "") -> str:
         """Execute Python code in the REPL environment.
@@ -442,9 +577,19 @@ class RLMEnvironment:
                 }
             )
 
+            _PREBOUND_MODULES = {
+                "os": exec_globals["os"],
+            }
+
             def _safe_import(name, *args, **kwargs):
-                if name not in _SAFE_MODULES:
-                    raise ImportError(f"Import of {name!r} is not allowed in the sandbox")
+                root_name = name.split(".", 1)[0]
+                if root_name in _PREBOUND_MODULES:
+                    return _PREBOUND_MODULES[root_name]
+                if root_name not in _SAFE_MODULES:
+                    raise ImportError(
+                        f"Import of {name!r} is not allowed in the sandbox. "
+                        "Use prebound modules/objects directly (os, re, json)."
+                    )
                 return __import__(name, *args, **kwargs)
 
             exec_globals["__builtins__"] = {
@@ -509,13 +654,20 @@ class RLMEnvironment:
             # For simplicity, we'll look for a 'result' variable
             result = exec_globals.get("result", "Code executed successfully (no result variable)")
 
+            # Store raw result as REPL variable so it remains accessible in
+            # subsequent iterations (RLM paper: data stays in state, not hist).
+            self._namespace["last_result"] = result
+
             # Convert result to string
             output = str(result)
 
-            # Truncate oversized results to prevent filling the next LLM prompt
+            # Truncate oversized results; full output remains in `last_result`
             if len(output) > self.max_result_chars:
                 truncated = len(output) - self.max_result_chars
-                output = output[: self.max_result_chars] + f"\n... [{truncated} chars truncated]"
+                output = (
+                    output[: self.max_result_chars]
+                    + f"\n... [{truncated} chars truncated — full output accessible as `last_result`]"
+                )
 
             # Estimate tokens saved: context filtered programmatically
             # instead of sending full context to LLM
@@ -574,7 +726,7 @@ class RLMEnvironment:
         self,
         sub_prompt: str,
         filtered_context: dict[str, Any] | None = None,
-        llm_function: Callable[[str], str] | None = None,
+        llm_function: RecursiveLLMFunction | None = None,
     ) -> str:
         """Make a recursive LLM sub-call with filtered context.
 
@@ -608,7 +760,13 @@ class RLMEnvironment:
             # Make the recursive LLM call
             logger.info(f"RLM recursive call (depth={self.current_depth}): {sub_prompt[:100]}")
 
-            result = llm_function(sub_prompt)
+            llm_params = inspect.signature(llm_function).parameters
+            if len(llm_params) >= 2:
+                llm_function_with_context = cast("Callable[[str, dict[str, Any] | None], str]", llm_function)
+                result = llm_function_with_context(sub_prompt, filtered_context)
+            else:
+                llm_function_simple = cast("Callable[[str], str]", llm_function)
+                result = llm_function_simple(sub_prompt)
 
             # Estimate tokens saved by using filtered context
             if filtered_context:
@@ -670,21 +828,48 @@ class RLMEnvironment:
     def get_system_prompt(self) -> str:
         """Get the RLM system prompt explaining the environment."""
         cwd_line = f"\nWorking directory: {self.cwd}" if self.cwd else ""
+        specialist_section = ""
+        specialist_format = ""
+        if self.available_specialists:
+            lines = "\n".join(
+                f"  - {name}: {description}" for name, description in sorted(self.available_specialists.items())
+            )
+            specialist_section = (
+                "\nLazy specialists are available for focused analysis. "
+                "When you need one, request it explicitly instead of reading large raw context.\n"
+                f"{lines}\n"
+            )
+            specialist_format = f"""
+════════════════════════════════════════
+FORMAT 3 — Request a named specialist analysis:
+════════════════════════════════════════
+ACTION: specialist_call
+SPECIALIST: <one of: {", ".join(sorted(self.available_specialists))}>
+TASK: <focused question for that specialist>
+"""
         return f"""You are operating in a Recursive Language Model (RLM) environment.
 
 Instead of receiving the full context directly, the context is stored as variables
 in a REPL environment that you can programmatically query and explore.
 {cwd_line}
 {self.context.get_summary()}
+{specialist_section}
 The following variables and functions are available in your REPL:
-  cwd       — absolute path to the working directory (str)
-  open      — Python built-in open() for reading and writing files
-  os        — Python os module (os.makedirs, os.path, os.listdir, etc.)
-  Path      — pathlib.Path
-  re, json  — standard library modules
+  cwd         — absolute path to the working directory (str)
+  open        — Python built-in open() for reading and writing files
+  os          — restricted os helper (os.path, os.listdir, os.makedirs, os.walk, os.chmod, os.getcwd)
+  Path        — pathlib.Path
+  re, json    — standard library modules
+  task_prompt — the full task ({len(self.task_prompt)} chars); query programmatically, e.g. task_prompt[:500]
+  last_result — full output of the most recent execute_code call (Python object, not just string)
+  last_recursive_result — full output of the most recent recursive subcall
+  last_specialist_result — full output of the most recent specialist call
+  last_specialist_name — name of the most recent specialist used
+  sub_rlm(prompt, context=None) — invoke a focused sub-LLM call and return its response as a string;
+                call from within code to process slices programmatically, e.g. inside a loop
   All context variables listed above (error_log, deployment_script, etc.)
 
-You MUST respond using EXACTLY one of the three formats below. Do not include any
+You MUST respond using EXACTLY one of the available formats below. Do not include any
 text before the ACTION: line. Do not wrap your response in markdown code blocks.
 
 ════════════════════════════════════════
@@ -707,10 +892,10 @@ Write an output file:
 ACTION: execute_code
 DESCRIPTION: Write deploy.sh to .sds/
 CODE:
-import os
 os.makedirs(cwd + "/.sds", exist_ok=True)
 with open(cwd + "/.sds/deploy.sh", "w") as f:
     f.write("#!/bin/bash\\ndocker compose up -d")
+os.chmod(cwd + "/.sds/deploy.sh", 0o755)
 result = "deploy.sh written"
 
 List directory contents:
@@ -726,19 +911,32 @@ ACTION: recursive_call
 SUBTASK: <focused question or task for the sub-call>
 CONTEXT: {{"key": "value"}}
 
+{specialist_format}
 ════════════════════════════════════════
-FORMAT 3 — Provide your final answer (after all required files are written):
+FORMAT {4 if self.available_specialists else 3} — Provide your final answer (after all required files are written):
 ════════════════════════════════════════
 ACTION: final_answer
 ANSWER: <your complete response>
+
+OR
+
+FINAL_VAR: <name of a REPL variable holding the final answer>
 
 ════════════════════════════════════════
 
 RULES:
 - Every response MUST start with exactly "ACTION: " on the very first line.
+- `os`, `re`, and `json` are prebound. Do NOT write `import os`, `import yaml`, or `import difflib`.
+- Start by inspecting `task_prompt` and relevant context variables programmatically.
+- For long inputs, decide on a chunking or filtering strategy in code before answering.
+- Keep intermediate findings in REPL variables/buffers instead of copying large text into chat.
+- When semantic analysis over many slices is needed, call `sub_rlm(...)` from within code, especially inside loops.
 - Use execute_code to explore the filesystem (os.listdir, open) and to write output files.
 - Context variables (error_log, readme, etc.) may be empty — read from disk instead when needed.
+- If a cached specialist summary exists (e.g. error_summary), prefer reading it
+  before re-requesting the same specialist.
 - Write all required output files via execute_code BEFORE responding with final_answer.
+- Prefer FINAL_VAR when your final answer already exists in a REPL variable or buffer.
 
 FILE VALIDATION (mandatory when fixing deploy.sh):
 - Run validate_file_refs(deployment_script, cwd) early to find paths that do not exist on disk.

@@ -514,13 +514,13 @@ class TestPipelineRunner:
         assert rc == 0
         assert len(calls) == 1  # only stage 1 ran
 
-    def test_kb_chaining_env_var(self, runner, sregym_dir, tmp_path: Path) -> None:
+    def test_kb_chaining_sets_seed_on_config(self, runner, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()
-        captured_envs = []
+        captured_configs = []
 
-        def mock_run(argv, cwd=None, env=None):
-            captured_envs.append(env or {})
-            return type("Result", (), {"returncode": 0})()
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path):
+            captured_configs.append(exp_config)
+            return 0
 
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
@@ -528,7 +528,7 @@ class TestPipelineRunner:
         with (
             patch.object(runner, "_SREGYM_DIR", sregym_dir),
             patch.object(runner, "_PROJECT_ROOT", tmp_path),
-            patch("subprocess.run", side_effect=mock_run),
+            patch.object(runner, "_run_stage", side_effect=mock_run_stage),
         ):
             state = PipelineState(
                 stages=[
@@ -540,9 +540,9 @@ class TestPipelineRunner:
             write_pipeline_snapshot(config, pipeline_dir)
             runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
 
-        # Stage 0 should not have CRUCIBLE_SEED_KB_DIR set (chain_kb=false)
-        assert captured_envs[0].get("CRUCIBLE_SEED_KB_DIR", "") == ""
+        # Stage 0 should not have crucible_seed_kb_dir set (chain_kb=false)
+        assert captured_configs[0].env.crucible_seed_kb_dir == ""
 
-        # Stage 1 should have CRUCIBLE_SEED_KB_DIR pointing to stage 0's kb/
-        seed_dir = captured_envs[1].get("CRUCIBLE_SEED_KB_DIR", "")
+        # Stage 1 should have crucible_seed_kb_dir pointing to stage 0's kb/
+        seed_dir = captured_configs[1].env.crucible_seed_kb_dir
         assert seed_dir.endswith("/stage_0_build/kb")

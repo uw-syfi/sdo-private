@@ -27,6 +27,24 @@ class CrucibleConfig:
     max_mitigation_iterations: int = 5
     wait_stage_timeout: int = 300
     stage_timeout: int = 900  # 15 minutes max per diagnosis/mitigation stage
+    backend: str = "pydantic-ai"  # "pydantic-ai" or "agent-cli"
+    agent_cli_provider: str = "claude"  # provider for agent-cli backend
+
+    def __post_init__(self) -> None:
+        if self.backend not in ("pydantic-ai", "agent-cli"):
+            raise ValueError(f"backend must be 'pydantic-ai' or 'agent-cli', got {self.backend!r}")
+
+    def to_kb_task_fields(self) -> dict[str, Any]:
+        """Return the config subset needed for KB update task serialization."""
+        return {
+            "include_benchmark_results": self.include_benchmark_results,
+            "enable_reflection": self.enable_reflection,
+            "enable_playbooks": self.enable_playbooks,
+            "recovery_phase2_enabled": self.recovery_phase2_enabled,
+            "include_incident_files": self.include_incident_files,
+            "per_app": self.per_app,
+            "prompt_version": self.prompt_version,
+        }
 
 
 def _reflection_from_mapping(mapping: Mapping[str, Any]) -> bool:
@@ -87,6 +105,8 @@ def crucible_config_from_experiment_agent(
         max_mitigation_iterations=int(agent_settings.get("max_mitigation_iterations", base.max_mitigation_iterations)),
         wait_stage_timeout=int(agent_settings.get("wait_stage_timeout", base.wait_stage_timeout)),
         stage_timeout=int(agent_settings.get("stage_timeout", base.stage_timeout)),
+        backend=str(agent_settings.get("backend", base.backend)),
+        agent_cli_provider=str(agent_settings.get("agent_cli_provider", base.agent_cli_provider)),
     )
 
 

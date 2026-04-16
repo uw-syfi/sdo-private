@@ -1,7 +1,7 @@
 """Tests for TrajectoryRecorderProtocol consistency and partial implementations."""
 
-import unittest.mock as mock
 from pathlib import Path
+from unittest import mock
 
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
@@ -124,7 +124,7 @@ class TestRecorderGuardConsistency:
 
         from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 
-        source = inspect.getsource(HybridCodingAgent._generate_fix)
+        source = inspect.getsource(HybridCodingAgent._run_specialist_analysis)
         assert 'hasattr(self.recorder, "add_assistant_message")' in source
 
     def test_partial_recorder_does_not_crash_subagent(self, tmp_path):

@@ -25,6 +25,7 @@ dependencies = [
     "rich>=13.0.0",
     "tach>=0.33",
     "pydantic-ai>=1.0.0",
+    "fastmcp>=2.9.2",
     "deepagents>=0.5.0a1; python_version >= '3.11'",
     "numpy>=2.2.6",
     "matplotlib>=3.10.8",
@@ -103,4 +104,3 @@ dev = [
     "pre-commit>=4.2.0",
     "pyright>=1.1.408",
 ]
-

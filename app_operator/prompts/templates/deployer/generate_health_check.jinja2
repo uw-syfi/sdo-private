@@ -32,7 +32,29 @@ CRITICAL REQUIREMENTS:
 
 {% include "deployer/_health_check_schema.jinja2" %}
 
+{% if platform == "docker" %}
+2. **Compose CLI compatibility (MANDATORY)**:
+   - Support both `docker compose` (plugin) and `docker-compose` (standalone) via a runtime
+     fallback: check `docker compose version` first; if that fails, try `command -v docker-compose`
+     and fall back to `/usr/local/bin/docker-compose` if found.
+   - Never hard-code the compose binary — always use the fallback wrapper.
+
+3. **Layered, tool-agnostic health gates (MANDATORY)**:
+   - Prefer compose status checks, host-side endpoint probes, and small app-level
+     end-to-end checks over invasive exec probes.
+   - Do not assume every local service registers itself with service discovery —
+     always verify via compose or port-level probes.
+   - do NOT make `docker compose exec ... mongo`, `mongosh`, `memcached-tool`, or
+     similar dependency-local tools a required health gate — these may not exist inside
+     the container and will cause false failures.
+   - Bound every external probe with an explicit timeout guard: use `nc -w <seconds>` for
+     netcat, `curl --max-time <seconds>` for HTTP, and `timeout <seconds>` for exec checks.
+   - Every `docker compose exec` probe must pass `-T` (no-TTY) to stay non-interactive.
+
+4. **Script Requirements**:
+{% else %}
 2. **Script Requirements**:
+{% endif %}
    - Create the file at: .sds/health_check.sh
    - Include checks for: containers/pods, ports, endpoints, databases, cache, performance
    - Include a summary report with health score

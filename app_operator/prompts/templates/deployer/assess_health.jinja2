@@ -129,6 +129,8 @@ Prefer spawning subagents over reading large outputs directly.
 - **NEVER drop or change the `--project-name` flag** from `docker compose` commands
 - **NEVER add `healthcheck:` blocks to Docker Compose files** — all health check logic must be self-contained in `.sds/health_check.sh`
 - **NEVER remove a check merely because it is failing.** Only remove a check if the corresponding service or component is no longer part of the application (e.g., it was removed from the deployment). If a check fails for a fixable reason (wrong port, wrong service name, flawed logic), fix the check — do not delete it.
+- **NEVER install packages** (e.g. `apt-get`, `pip install`, `npm install`) during health assessment — the environment must not be mutated.
+- **Do NOT treat transient startup log noise as failures** — brief connection errors or retries in the first few seconds of startup are expected and should not affect the health verdict.
 
 ## REQUIRED Output Format
 

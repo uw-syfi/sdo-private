@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -14,14 +15,17 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
+
+if TYPE_CHECKING:
+    from sregym_agents.crucible.agents.base import AgentDriver
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.config import crucible_config_from_experiment_agent
+from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
 from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
 
@@ -33,6 +37,45 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 _READY_STAGES = {"diagnosis", "mitigation"}
+
+
+def create_driver(
+    model: str,
+    config: CrucibleConfig,
+    trajectory_path: Path | None = None,
+) -> AgentDriver:
+    """Create an AgentDriver based on the configured backend.
+
+    Returns a ``PydanticAIDriver`` for ``backend="pydantic-ai"`` (default)
+    or an ``AgentCLIDriver`` for ``backend="agent-cli"``.
+    """
+    print(f"[crucible] Driver backend: {config.backend}")
+    if config.backend == "agent-cli":
+        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.sandbox import build_crucible_sandbox
+
+        exp_cwd = os.path.abspath(os.getcwd())
+        sandbox_cfg = build_crucible_sandbox(exp_cwd)
+        print(
+            f"[crucible] Using AgentCLIDriver (provider={config.agent_cli_provider}, "
+            f"model={model}, sandbox=workspace-only cwd={exp_cwd})"
+        )
+        return AgentCLIDriver(
+            provider=config.agent_cli_provider,
+            model=model,
+            cwd=exp_cwd,
+            sandbox=sandbox_cfg,
+        )
+
+    from sregym_agents.crucible.agents import PydanticAIDriver
+    from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
+
+    print(f"[crucible] Using PydanticAIDriver (model={model})")
+    return PydanticAIDriver(
+        model,
+        trajectory_path=trajectory_path,
+        interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
+    )
 
 
 def _load_crucible_config() -> tuple[dict[str, Any], str]:
@@ -196,7 +239,12 @@ async def _async_main(args: argparse.Namespace) -> None:
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
     logger.info(f"model={args.model} api={api_base} mcp={submit_mcp_url} crucible_config={crucible_config}")
-
+    print("\n" + "=" * 60)
+    print("[crucible] CONFIGURATION")
+    print("=" * 60)
+    for field in dataclasses.fields(crucible_config):
+        print(f"  {field.name}: {getattr(crucible_config, field.name)!r}")
+    print("=" * 60 + "\n")
     _wait_for_stage(api_base, timeout=300)
 
     app_info = _get_app_info(api_base)
@@ -222,17 +270,17 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     if args.kb_dir:
         model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
-        seed_kb_dir_str = os.environ.get("CRUCIBLE_SEED_KB_DIR")
-        seed_kb_dir = Path(seed_kb_dir_str) if seed_kb_dir_str else None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
+        from sregym_agents.crucible.agents import PydanticAIDriver as _KBDriver
+
+        kb_driver = _KBDriver(model_id)
         kb = create_knowledge_base(
             kb_type=kb_type,
             kb_dir=Path(args.kb_dir),
-            model_id=model_id,
             app_name=app_info.get("app_name", "unknown"),
-            seed_kb_dir=seed_kb_dir,
             config=crucible_config,
             renderer=renderer,
+            driver=kb_driver,
         )
         if not args.no_inject_kb:
             injected = await kb.inject(Path(exp_env or "."))
@@ -249,6 +297,8 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
+    driver = create_driver(args.model, crucible_config, trajectory_path=trajectory_path)
+
     usage_metrics = await orchestrator.run(
         model=args.model,
         app_info=app_info,
@@ -261,6 +311,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         injected_kb=injected_kb,
         trajectory_path=trajectory_path,
         crucible_config=crucible_config,
+        driver=driver,
     )
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
@@ -313,14 +364,8 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
                 "model_id": args.kb_model or os.environ.get("MODEL_ID", args.model),
                 "app_name": app_info.get("app_name", "unknown"),
-                "include_benchmark_results": crucible_config.include_benchmark_results,
-                "enable_reflection": crucible_config.enable_reflection,
-                "enable_playbooks": crucible_config.enable_playbooks,
-                "recovery_phase2_enabled": crucible_config.recovery_phase2_enabled,
-                "include_incident_files": crucible_config.include_incident_files,
-                "per_app": crucible_config.per_app,
+                **crucible_config.to_kb_task_fields(),
                 "problem_id": problem_id,
-                "prompt_version": crucible_config.prompt_version,
                 "recovery_reflection": recovery_reflection,
                 "diagnosis_succeeded": diagnosis_succeeded,
                 "mitigation_succeeded": mitigation_succeeded,

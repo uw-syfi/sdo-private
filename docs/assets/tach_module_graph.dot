@@ -22,4 +22,5 @@ digraph tach_modules {
     "lego_agent" -> "libs.sds_core";
     "sregym_agents" -> "libs.pydantic_agent";
     "sregym_agents" -> "libs.agent_mw";
+    "sregym_agents" -> "libs.agent_cli";
 }

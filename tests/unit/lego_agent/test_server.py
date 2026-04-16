@@ -34,7 +34,7 @@ def input_queue():
 @pytest.mark.anyio
 async def test_webio_send_event(mock_websocket, input_queue):
     io = WebIO(mock_websocket, input_queue)
-    await io._send_event("test_type", {"key": "value"})
+    await io.send_event("test_type", {"key": "value"})
 
     assert len(mock_websocket.sent_messages) == 1
     assert mock_websocket.sent_messages[0] == {"type": "test_type", "key": "value"}
@@ -142,14 +142,14 @@ async def test_server_logic(tmp_path):
 
             # Verify events
             # Log success of generation
-            io._send_event.assert_any_call(
+            io.send_event.assert_any_call(
                 "log",
                 {"message": "Script generated at: /tmp/script.py", "level": "success"},
             )
             # Log execution start
-            io._send_event.assert_any_call("log", {"message": "Executing generated script...", "level": "info"})
+            io.send_event.assert_any_call("log", {"message": "Executing generated script...", "level": "info"})
             # Execution result
-            io._send_event.assert_any_call("execution_result", {"exit_code": 0})
+            io.send_event.assert_any_call("execution_result", {"exit_code": 0})
 
 
 @pytest.mark.anyio

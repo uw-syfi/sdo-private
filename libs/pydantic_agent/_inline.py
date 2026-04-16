@@ -13,11 +13,12 @@ if TYPE_CHECKING:
     from libs.pydantic_agent._middleware import AgentMiddleware
     from libs.pydantic_agent._usage import UsageCollector
 
+DepsT = TypeVar("DepsT")
 OutputT = TypeVar("OutputT")
 
 
-class InlineAgent(BaseAgent[None], Generic[OutputT]):
-    """A reusable BaseAgent[None] for ephemeral subagents that need middleware.
+class InlineAgent(BaseAgent[DepsT], Generic[DepsT, OutputT]):
+    """A reusable BaseAgent wrapper for ephemeral subagents that need middleware.
 
     Wraps a plain pydantic-ai Agent in BaseAgent so that middleware like
     TurnLoggingMiddleware, RetryMiddleware, and TrajectoryMiddleware work
@@ -40,6 +41,7 @@ class InlineAgent(BaseAgent[None], Generic[OutputT]):
         self,
         model: Model | str,
         *,
+        deps: DepsT,
         agent_name: str,
         output_type: type[OutputT],
         tools: list[Any] | None = None,
@@ -48,7 +50,7 @@ class InlineAgent(BaseAgent[None], Generic[OutputT]):
         usage_collector: UsageCollector | None = None,
     ) -> None:
         super().__init__(
-            None,
+            deps,
             agent_name=agent_name,
             middleware=middleware,
             usage_collector=usage_collector,
@@ -58,10 +60,11 @@ class InlineAgent(BaseAgent[None], Generic[OutputT]):
             output_type=output_type,
             tools=tools or [],
             model_settings=model_settings,
+            deps_type=type(deps) if deps is not None else type(None),
         )
 
     @property
-    def agent(self) -> Agent[None, OutputT]:
+    def agent(self) -> Agent[DepsT, OutputT]:
         """The underlying pydantic-ai Agent (e.g. for registering output validators)."""
         return self._agent
 
@@ -70,5 +73,6 @@ class InlineAgent(BaseAgent[None], Generic[OutputT]):
         prompt: str,
         *,
         run_ctx: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> Any:
-        return await self._arun(prompt, _run_ctx=run_ctx)
+        return await self._arun(prompt, _run_ctx=run_ctx, **kwargs)

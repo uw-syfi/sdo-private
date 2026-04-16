@@ -60,6 +60,7 @@ def test_generate_deploy_script(loader):
     assert "/tmp/target" in rendered
     assert "Create the file at: .sds/deploy.sh" in rendered
     assert "Use `docker compose` or `docker` commands" in rendered
+    assert "non-follow by default" in rendered
 
 
 def test_generate_health_check_script(loader):
@@ -75,6 +76,25 @@ def test_generate_health_check_script(loader):
     assert "health_check.sh" in rendered
     assert "Create the file at: .sds/health_check.sh" in rendered
     assert "Check pod status and readiness" in rendered
+
+
+def test_generate_health_check_prompt_requires_compose_fallback(loader):
+    rendered = loader.render(
+        "deployer/generate_health_check.jinja2",
+        system_prompt="SYSTEM_PROMPT",
+        repo_context="REPO_CONTEXT",
+        target_dir="/tmp/target",
+        platform="docker",
+    )
+    assert "Compose CLI compatibility (MANDATORY)" in rendered
+    assert "docker compose version" in rendered
+    assert "command -v docker-compose" in rendered
+    assert "/usr/local/bin/docker-compose" in rendered
+    assert "nc -w" in rendered
+    assert "curl --max-time" in rendered
+    assert "Layered, tool-agnostic health gates (MANDATORY)" in rendered
+    assert "do NOT make `docker compose exec ... mongo`, `mongosh`," in rendered
+    assert "Do not assume every local service registers itself with service discovery" in rendered
 
 
 def test_fix_error_prompt(loader):
@@ -110,9 +130,17 @@ def test_code_analyzer_system(loader):
 
 
 def test_code_analyzer_user(loader):
-    rendered = loader.render("code_analyzer/user.jinja2", repo_path="/repo")
-    # Verify repository path injection
+    rendered = loader.render(
+        "code_analyzer/user.jinja2",
+        repo_path="/repo",
+        file_tree="src/main.go\ndocker-compose.yml",
+        repo_content="--- docker-compose.yml ---\nservices:\n  web:\n    build: .",
+    )
     assert "analyze the repository at /repo" in rendered
+    assert "src/main.go" in rendered
+    assert "docker-compose.yml" in rendered
+    assert ".sds/code_analysis.md" in rendered
+    assert ".sds/deployment_issues.md" in rendered
 
 
 def test_monitor_analyze_health(loader):

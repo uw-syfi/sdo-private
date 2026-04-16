@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.config import AgentConfig, Config, UnrecognizedFieldError
+from app_operator.config import AgentConfig, Config, RLMConfig, UnrecognizedFieldError
 from app_operator.dspy_integration.config import (
     DSPyAutoRollbackConfig,
     DSPyConfig,
@@ -20,8 +20,30 @@ class TestConfigIntegration:
             agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
         )
         assert isinstance(config.dspy, DSPyConfig)
+        assert isinstance(config.rlm, RLMConfig)
+        assert config.rlm.mode == "compatibility"
         assert config.dspy.use_optimized is False
         assert config.dspy.optimized_version == "latest"
+
+    def test_from_dict_with_rlm_fields(self):
+        """Test loading config with rlm mode fields."""
+        config = Config.from_dict(
+            {
+                "agent": {"backend": "codex", "model": "test-model"},
+                "rlm": {"mode": "paper_faithful"},
+            }
+        )
+        assert config.rlm.mode == "paper_faithful"
+
+    def test_invalid_rlm_mode_raises_error(self):
+        """Invalid RLM mode should raise a validation error."""
+        with pytest.raises(ValueError, match="mode must be one of"):
+            Config.from_dict(
+                {
+                    "agent": {"backend": "codex", "model": "test-model"},
+                    "rlm": {"mode": "invalid_mode"},
+                }
+            )
 
     def test_from_dict_empty_dspy_section(self):
         """Test loading config with empty dspy section."""

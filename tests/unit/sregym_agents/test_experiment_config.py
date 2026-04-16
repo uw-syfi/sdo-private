@@ -9,10 +9,13 @@ import pytest
 
 from sregym_agents.experiment_config import (
     ExperimentConfig,
+    RunnerEnv,
     VariantConfig,
     _serialize_config,
+    config_to_env,
     config_to_main_args,
     load_experiment_config,
+    resolve_config,
 )
 
 if TYPE_CHECKING:
@@ -121,3 +124,71 @@ def test_roundtrip_spec_names(tmp_path: Path) -> None:
     toml_path.write_text(_serialize_config(config))
     loaded = load_experiment_config(toml_path)
     assert loaded.spec_names == config.spec_names
+
+
+def test_reuse_cluster_defaults_to_false() -> None:
+    config = ExperimentConfig()
+    assert config.env.reuse_cluster is False
+    assert config.env.force_recreate_cluster is False
+
+
+def test_reuse_cluster_loaded_from_toml(tmp_path: Path) -> None:
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        agent = "crucible"
+
+        [runner.variants]
+        enabled = false
+
+        [runner.env]
+        reuse_cluster = true
+        force_recreate_cluster = false
+    """,
+    )
+    config = load_experiment_config(toml)
+    assert config.env.reuse_cluster is True
+    assert config.env.force_recreate_cluster is False
+
+
+def test_reuse_cluster_env_override_enables() -> None:
+    config = ExperimentConfig(env=RunnerEnv(reuse_cluster=False))
+    resolved = resolve_config(config, env_overrides={"SREGYM_REUSE_CLUSTER": "1"})
+    assert resolved.env.reuse_cluster is True
+
+
+def test_reuse_cluster_env_override_disables() -> None:
+    config = ExperimentConfig(env=RunnerEnv(reuse_cluster=True))
+    resolved = resolve_config(config, env_overrides={"SREGYM_REUSE_CLUSTER": "false"})
+    assert resolved.env.reuse_cluster is False
+
+
+def test_force_recreate_env_override() -> None:
+    config = ExperimentConfig(env=RunnerEnv(reuse_cluster=True))
+    resolved = resolve_config(config, env_overrides={"SREGYM_FORCE_RECREATE_CLUSTER": "yes"})
+    assert resolved.env.reuse_cluster is True
+    assert resolved.env.force_recreate_cluster is True
+
+
+def test_config_to_env_emits_reuse_flags(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(reuse_cluster=True, force_recreate_cluster=True))
+    env = config_to_env(config, project_root=tmp_path)
+    assert env["SREGYM_REUSE_CLUSTER"] == "1"
+    assert env["SREGYM_FORCE_RECREATE_CLUSTER"] == "1"
+
+
+def test_config_to_env_omits_reuse_flags_when_false(tmp_path: Path) -> None:
+    config = ExperimentConfig()
+    env = config_to_env(config, project_root=tmp_path)
+    assert "SREGYM_REUSE_CLUSTER" not in env
+    assert "SREGYM_FORCE_RECREATE_CLUSTER" not in env
+
+
+def test_roundtrip_reuse_cluster(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(reuse_cluster=True))
+    toml_path = tmp_path / "snap.toml"
+    toml_path.write_text(_serialize_config(config))
+    loaded = load_experiment_config(toml_path)
+    assert loaded.env.reuse_cluster is True
+    assert loaded.env.force_recreate_cluster is False

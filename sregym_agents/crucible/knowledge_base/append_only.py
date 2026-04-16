@@ -8,15 +8,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import Agent
-
-from libs.agent_mw import arun_with_retry_tracked
-
 from .base import KB_APPEND_FILENAME, InjectedKB, KnowledgeBase, SessionFiles, strip_benchmark_result
 
 if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
+    from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.recovery_reflection import RecoveryReflection
 
@@ -29,11 +26,11 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
     def __init__(
         self,
         kb_dir: Path,
-        model_id: str,
         app_name: str = "unknown",
         *,
         config: CrucibleConfig | None = None,
         renderer: PromptRenderer,
+        driver: AgentDriver,
     ):
         from sregym_agents.crucible.config import CrucibleConfig as _CrucibleConfig
 
@@ -41,11 +38,11 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
             config = _CrucibleConfig()
         self.kb_dir = Path(kb_dir)
         self.kb_dir.mkdir(parents=True, exist_ok=True)
-        self.model_id = model_id
         self.app_name = app_name
-        self.include_benchmark_results = config.include_benchmark_results
+        self._config = config
         self.prompts = renderer
         self._usage_collector: UsageCollector | None = None
+        self._driver = driver
 
     @property
     def knowledge_path(self) -> Path:
@@ -63,14 +60,13 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         return result
 
     async def _call_llm(self, prompt: str) -> str:
-        agent: Agent[None, str] = Agent(self.model_id, output_type=str)
-        result = await arun_with_retry_tracked(
-            agent,
-            prompt,
+        result = await self._driver.run(
+            prompt=prompt,
+            output_type=str,
             agent_name="kb-append-only",
             usage_collector=self._usage_collector,
         )
-        return result.output
+        return result.output or ""
 
     async def update(
         self,
@@ -88,7 +84,7 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
             return
 
         raw = "\n\n".join(parts)
-        if self.include_benchmark_results:
+        if self._config.include_benchmark_results:
             content = raw.strip()
         else:
             content = strip_benchmark_result(raw)
@@ -114,6 +110,6 @@ class AppendOnlyKnowledgeBase(KnowledgeBase):
         prompt = self.prompts.render(
             "kb/summarize_session",
             content=content,
-            include_benchmark_results=self.include_benchmark_results,
+            include_benchmark_results=self._config.include_benchmark_results,
         )
         return await self._call_llm(prompt)
