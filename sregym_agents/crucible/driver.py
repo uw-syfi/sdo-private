@@ -108,6 +108,20 @@ def _get_api_base() -> str:
     return f"http://{host}:{port}"
 
 
+def _signal_cleanup(api_base: str) -> None:
+    """POST /cleanup to release the conductor's deferred-teardown gate.
+
+    Crucible always runs in deferred-cleanup mode (see agents.yaml). This
+    call never raises — cleanup failure must not mask orchestrator errors
+    or block the driver from exiting.
+    """
+    try:
+        resp = requests.post(f"{api_base}/cleanup", timeout=60)
+        logger.info(f"POST /cleanup -> status={resp.status_code} body={resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"POST /cleanup failed: {e}")
+
+
 def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
     """Poll until conductor reaches a submission-ready stage."""
     start = time.time()
@@ -221,6 +235,23 @@ def _parse_args() -> argparse.Namespace:
 async def _async_main(args: argparse.Namespace) -> None:
     logger.info("Crucible driver starting...")
 
+    # Crucible always runs in deferred-cleanup mode: after submitting mitigation,
+    # the orchestrator runs recovery-diagnosis + playbook generation against the
+    # live cluster, then signals the sregym conductor to tear down via POST /cleanup.
+    # Opt-in is declared in `sregym_agents/agents.yaml` (`defer_cleanup: true` on
+    # the crucible entry); sregym's worker process propagates it via this env var
+    # when spawning the agent subprocess. If the env var is missing, sregym was
+    # misconfigured or the driver was invoked outside the harness — fail loudly
+    # so reflection doesn't silently run against a torn-down namespace.
+    if os.getenv("SREGYM_DEFER_CLEANUP") != "1":
+        raise RuntimeError(
+            "SREGYM_DEFER_CLEANUP=1 is required. Crucible depends on deferred "
+            "cleanup so its post-submit recovery/reflection step can inspect "
+            "the live cluster. Ensure `defer_cleanup: true` is set on the "
+            "crucible entry in agents.yaml (sregym sets this env var "
+            "automatically when spawning the agent)."
+        )
+
     crucible_cfg, config_source = _load_crucible_config()
     agent_cfg: dict[str, Any] = crucible_cfg.get("agent", {})
     logger.info(f"Effective agent config (source={config_source}): {agent_cfg}")
@@ -303,20 +334,26 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     driver = create_driver(args.model, crucible_config, trajectory_path=trajectory_path)
 
-    usage_metrics = await orchestrator.run(
-        model=args.model,
-        app_info=app_info,
-        problem_id=problem_id,
-        diagnosis_shared_file=diagnosis_shared_file,
-        mitigation_shared_file=mitigation_shared_file,
-        planned_stages=planned_stages,
-        submit_mcp_url=submit_mcp_url,
-        renderer=renderer,
-        injected_kb=injected_kb,
-        trajectory_path=trajectory_path,
-        crucible_config=crucible_config,
-        driver=driver,
-    )
+    try:
+        usage_metrics = await orchestrator.run(
+            model=args.model,
+            app_info=app_info,
+            problem_id=problem_id,
+            diagnosis_shared_file=diagnosis_shared_file,
+            mitigation_shared_file=mitigation_shared_file,
+            planned_stages=planned_stages,
+            submit_mcp_url=submit_mcp_url,
+            renderer=renderer,
+            injected_kb=injected_kb,
+            trajectory_path=trajectory_path,
+            crucible_config=crucible_config,
+            driver=driver,
+        )
+    finally:
+        # Release the conductor's deferred-cleanup gate. Must run AFTER
+        # recovery/reflection inside orchestrator.run() completes and BEFORE
+        # this process exits, even if the orchestrator raised.
+        _signal_cleanup(api_base)
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
