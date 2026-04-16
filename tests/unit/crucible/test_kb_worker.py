@@ -4,12 +4,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from sregym_agents.crucible.agents.base import AgentResult
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,
     ReviewDecision,
+    TriageAreaCandidate,
 )
 from sregym_agents.crucible.knowledge_base.root_cause import RootCauseStore
 
@@ -300,6 +302,109 @@ async def test_process_task_accepts_missing_optional_recovery_run(tmp_path, monk
 
     saved = store.load_diagnosis("coredns-nxdomain")
     assert saved is not None
+
+
+@pytest.mark.asyncio
+async def test_process_task_refines_triage_priors_from_candidate(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+    from sregym_agents.crucible.tools import TriageArea, TriagePriors
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    diagnosis_path = tmp_path / "diagnosis_run.md"
+    recovery_path = tmp_path / "recovery_diagnosis_run.md"
+    triage_candidate_path = tmp_path / "triage_candidate.json"
+    diagnosis_path.write_text("# Diagnosis")
+    recovery_path.write_text("# Recovery")
+    triage_candidate_path.write_text(
+        json.dumps(
+            TriageAreaCandidate(
+                area_name="DNS and Service Discovery",
+                hints=[
+                    (
+                        "Inspect entrypoint logs for hostname-resolution failures when smoke tests only "
+                        "show generic HTTP errors."
+                    ),
+                    "Test the failing service FQDN and one known-good service name from the same pod.",
+                ],
+                grounding=[
+                    "Initial triage only surfaced generic HTTP failures.",
+                    "Recovery found a targeted DNS failure.",
+                ],
+            ).model_dump(mode="python")
+        )
+    )
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": str(diagnosis_path),
+                "recovery_diagnosis_run_file": str(recovery_path),
+                "diagnosis_playbook_candidate_file": None,
+                "triage_area_candidate_file": str(triage_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": False,
+                "mitigation_succeeded": False,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            return AgentResult(
+                output=TriagePriors(
+                    areas=[
+                        TriageArea(
+                            name="DNS and Service Discovery",
+                            hints=[
+                                (
+                                    "Inspect entrypoint logs for hostname-resolution failures when smoke tests "
+                                    "only show generic HTTP errors."
+                                ),
+                                "Test the failing service FQDN and one known-good service name from the same pod.",
+                            ],
+                        )
+                    ]
+                )
+            )
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    await kb_worker.process_task(task_path)
+
+    triage_priors_path = kb_dir / "v3" / "apps" / "social-network" / "triage_priors.yaml"
+    assert triage_priors_path.exists()
+    saved = yaml.safe_load(triage_priors_path.read_text())
+    assert saved == {
+        "areas": [
+            {
+                "name": "DNS and Service Discovery",
+                "hints": [
+                    (
+                        "Inspect entrypoint logs for hostname-resolution failures when smoke tests only show "
+                        "generic HTTP errors."
+                    ),
+                    "Test the failing service FQDN and one known-good service name from the same pod.",
+                ],
+            }
+        ]
+    }
 
 
 @pytest.mark.asyncio

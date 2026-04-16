@@ -7,7 +7,11 @@ import pytest
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 from sregym_agents.crucible.agents.recovery_agent import RecoveryAgent, RecoveryRunResult
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_review import (
+    DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
+    TriageAreaCandidate,
+)
 from sregym_agents.crucible.tools import SharedFile, SRESubmission
 
 
@@ -90,6 +94,60 @@ async def test_recovery_agent_skips_playbook_candidate_without_grounded_diagnosi
         original_answer="Pod networking is broken.",
         grounded_answer="",
         grounded_justification="",
+    )
+
+    assert candidate is None
+    assert driver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_builds_triage_area_candidate():
+    driver = _FakeDriver(
+        TriageAreaCandidate(
+            area_name="DNS and Service Discovery",
+            hints=[
+                (
+                    "Inspect entrypoint logs for hostname-resolution failures before assuming generic HTTP "
+                    "errors are application-only."
+                ),
+                "Test the failing service FQDN and one known-good service name from the same pod.",
+            ],
+            grounding=[
+                "Initial triage only surfaced generic HTTP failures.",
+                "Later investigation found repeated host-resolution errors in the entrypoint component.",
+            ],
+        )
+    )
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_triage_area_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        original_answer="Pod networking is broken.",
+        original_justification="Requests were failing.",
+        grounded_answer="CoreDNS returned NXDOMAIN for a specific service.",
+        grounded_justification="CoreDNS config and DNS behavior matched the targeted failure.",
+        stage_outputs="## Triage Report\n- generic HTTP failures only\n",
+        recovery_message_history=[{"role": "assistant", "content": "grounded diagnosis context"}],
+    )
+
+    assert candidate is not None
+    assert candidate.area_name == "DNS and Service Discovery"
+    assert driver.calls[0]["agent_name"] == "recovery-triage-area-candidate"
+    assert driver.calls[0]["message_history"] == [{"role": "assistant", "content": "grounded diagnosis context"}]
+
+
+@pytest.mark.asyncio
+async def test_recovery_agent_skips_triage_area_candidate_without_stage_outputs():
+    driver = _FakeDriver(None)
+    agent = RecoveryAgent(driver=driver, model_id="test-model", renderer=PromptRenderer("v3"))
+
+    candidate = await agent.build_triage_area_candidate(
+        app_info={"app_name": "social-network", "namespace": "social-network"},
+        original_answer="Pod networking is broken.",
+        grounded_answer="CoreDNS returned NXDOMAIN for a specific service.",
+        grounded_justification="CoreDNS config matched the failure.",
+        stage_outputs="",
+        recovery_message_history=[{"role": "assistant", "content": "grounded diagnosis context"}],
     )
 
     assert candidate is None

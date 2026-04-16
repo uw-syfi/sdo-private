@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 from libs.pydantic_agent import UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import crucible_config_from_kb_task
@@ -20,6 +22,7 @@ from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,
     ReviewDecision,
+    TriageAreaCandidate,
 )
 from sregym_agents.crucible.knowledge_base.root_cause import (
     DiagnosisFrontMatter,
@@ -29,6 +32,7 @@ from sregym_agents.crucible.knowledge_base.root_cause import (
     RootCauseStore,
 )
 from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
+from sregym_agents.crucible.tools import TriagePriors
 
 if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
@@ -105,6 +109,35 @@ async def _merge_playbooks(
         usage_collector=usage_collector,
     )
     return result.unwrap("kb-merge-playbooks")
+
+
+async def _refine_triage_priors(
+    *,
+    driver: AgentDriver,
+    renderer: PromptRenderer,
+    triage_area_candidate: TriageAreaCandidate,
+    existing_priors: TriagePriors,
+    diagnosis_run_md: str,
+    recovery_diagnosis_run_md: str | None,
+    usage_collector: UsageCollector,
+) -> TriagePriors:
+    prompt = renderer.render(
+        "kb/refine_triage_priors",
+        existing_triage_priors_yaml=yaml.safe_dump(
+            existing_priors.model_dump(mode="python"),
+            sort_keys=False,
+        ).strip(),
+        triage_area_candidate_json=json.dumps(triage_area_candidate.model_dump(mode="python"), indent=2),
+        diagnosis_run_md=diagnosis_run_md,
+        recovery_diagnosis_run_md=recovery_diagnosis_run_md or "(none)",
+    )
+    result: AgentResult[TriagePriors] = await driver.run(
+        prompt=prompt,
+        output_type=TriagePriors,
+        agent_name="kb-refine-triage-priors",
+        usage_collector=usage_collector,
+    )
+    return result.unwrap("kb-refine-triage-priors")
 
 
 def _draft_to_playbook(draft: DiagnosisPlaybookDraft) -> DiagnosisPlaybook:
@@ -191,6 +224,12 @@ async def process_task(task_path: Path) -> None:
         if candidate_path_str
         else None
     )
+    triage_candidate_path_str = task.get("triage_area_candidate_file")
+    triage_area_candidate = (
+        TriageAreaCandidate.model_validate(json.loads(Path(triage_candidate_path_str).read_text()))
+        if triage_candidate_path_str
+        else None
+    )
     cards = store.list_active_diagnosis_cards()
 
     collector = UsageCollector()
@@ -239,6 +278,26 @@ async def process_task(task_path: Path) -> None:
                 task["problem_id"],
                 decision.recommended_action,
             )
+
+    if triage_area_candidate is not None:
+        triage_priors_path = kb.scope_dir / "triage_priors.yaml"
+        existing_priors = (
+            TriagePriors.model_validate(yaml.safe_load(triage_priors_path.read_text()))
+            if triage_priors_path.exists()
+            else TriagePriors(areas=[])
+        )
+        refined_priors = await _refine_triage_priors(
+            driver=kb_driver,
+            renderer=renderer,
+            triage_area_candidate=triage_area_candidate,
+            existing_priors=existing_priors,
+            diagnosis_run_md=diagnosis_run_md,
+            recovery_diagnosis_run_md=recovery_diagnosis_run_md,
+            usage_collector=collector,
+        )
+        triage_priors_path.write_text(
+            yaml.safe_dump(refined_priors.model_dump(mode="python"), sort_keys=False),
+        )
 
     mitigation_run_path_str = task.get("mitigation_run_file")
     mitigation_run_md = Path(mitigation_run_path_str).read_text() if mitigation_run_path_str else ""

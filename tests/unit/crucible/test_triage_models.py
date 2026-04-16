@@ -127,3 +127,14 @@ class TestTriagePriors:
     def test_max_hints_exceeded(self) -> None:
         with pytest.raises(ValueError, match="Maximum 10 hints per area"):
             TriageArea(name="test", hints=[f"hint-{i}" for i in range(11)])
+
+    def test_hint_word_limit_exceeded(self) -> None:
+        hint = " ".join(f"word{i}" for i in range(25))
+        with pytest.raises(ValueError, match="Each hint must be at most 24 words"):
+            TriageArea(name="test", hints=[hint])
+
+    def test_total_hint_words_exceeded(self) -> None:
+        hint = " ".join(f"word{i}" for i in range(13))
+        hints = [hint for _ in range(10)]
+        with pytest.raises(ValueError, match="Maximum 120 total hint words per area"):
+            TriageArea(name="test", hints=hints)

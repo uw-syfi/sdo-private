@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
-from sregym_agents.crucible.knowledge_base.incident_review import MitigationPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 from sregym_agents.crucible.orchestrator import (
     _build_usage_metrics,
     _replace_hypothesis_placeholder,
@@ -574,3 +574,101 @@ class TestOrchestratorRun:
         assert "Patched ConfigMap/coredns" in result["mitigation_run_md"]
         assert result["recovery_mitigation_run_md"] is None
         build_mitigation.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_defers_diagnosis_recovery_until_after_mitigation(self, tmp_path: Path):
+        from sregym_agents.crucible.agents.recovery_agent import RecoveryRunResult
+        from sregym_agents.crucible.config import CrucibleConfig
+        from sregym_agents.crucible.orchestrator import StageLoopResult, run
+        from sregym_agents.crucible.tools import SRESubmission
+
+        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
+        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
+        mitigation_stage_outputs = tmp_path / "mitigation_stage_outputs.md"
+        diagnosis_stage_outputs.write_text("# diagnosis outputs\n")
+        mitigation_stage_outputs.write_text("# mitigation outputs\n")
+
+        driver = MagicMock()
+        driver.run = AsyncMock()
+
+        diag_result = StageLoopResult(
+            approved=False,
+            benchmark_block="<benchmark_result>\nsuccess: False\n</benchmark_result>\n",
+            agent_answer="Wrong diagnosis",
+            agent_justification="Looked at the wrong component.",
+            stage_outputs_file=diagnosis_stage_outputs,
+        )
+        mit_result = StageLoopResult(
+            approved=True,
+            benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>\n",
+            agent_answer="Patched ConfigMap/coredns to remove the bad template.",
+            agent_justification="DNS resolution recovered after the patch.",
+            stage_outputs_file=mitigation_stage_outputs,
+        )
+        call_order: list[str] = []
+
+        async def fake_run_stage_loop(*args, **kwargs):
+            stage = kwargs.get("stage", args[3])
+            call_order.append(stage)
+            if stage == "diagnosis":
+                return diag_result
+            return mit_result
+
+        async def fake_run_diagnosis_recovery(self, **kwargs):
+            call_order.append("recovery-diagnosis")
+            return RecoveryRunResult(
+                submission=SRESubmission(
+                    answer="Grounded CoreDNS diagnosis",
+                    justification="Benchmark-guided recovery found the NXDOMAIN template.",
+                    causal_chain="bad coredns template -> NXDOMAIN -> client failures",
+                ),
+                message_history=[{"role": "assistant", "content": "recovery context"}],
+            )
+
+        async def fake_build_diagnosis_candidate(self, **kwargs):
+            call_order.append("diagnosis-playbook")
+            return DiagnosisPlaybookDraft(
+                slug="coredns-nxdomain",
+                root_cause="CoreDNS returns NXDOMAIN for targeted service names.",
+                when_to_consider=["Application logs show service-hostname resolution failures."],
+                disambiguators=["Backend services exist but lookups still return NXDOMAIN."],
+                summary="Check whether CoreDNS is intentionally returning NXDOMAIN for service names.",
+                triage_checks=["1. Inspect application logs for host-resolution errors."],
+                fault_localization_checks=["1. Trace the failing request path to the dependent backend hostname."],
+                verification_checks=["1. Inspect CoreDNS configuration for matching NXDOMAIN rules."],
+                required_evidence=["CoreDNS config contains a rule matching the failing service FQDN."],
+                known_confounders=["The Service object is missing."],
+            )
+
+        with (
+            patch("sregym_agents.crucible.orchestrator._run_stage_loop", side_effect=fake_run_stage_loop),
+            patch("sregym_agents.crucible.orchestrator._wait_for_mitigation_stage", new=AsyncMock()),
+            patch(
+                "sregym_agents.crucible.orchestrator._try_recovery_playbook_shortcut", new=AsyncMock(return_value=None)
+            ),
+            patch(
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.run_diagnosis",
+                new=fake_run_diagnosis_recovery,
+            ),
+            patch(
+                "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_diagnosis_playbook_candidate",
+                new=fake_build_diagnosis_candidate,
+            ),
+        ):
+            result = await run(
+                model="test-model",
+                app_info={"app_name": "Social Network", "namespace": "social-network", "descriptions": ""},
+                problem_id="service_dns_resolution_failure__v_social_network_text-service",
+                diagnosis_shared_file=diagnosis_shared,
+                mitigation_shared_file=mitigation_shared,
+                planned_stages=["diagnosis", "mitigation"],
+                submit_mcp_url="http://localhost:9954/submit/sse",
+                renderer=PromptRenderer("v3"),
+                crucible_config=CrucibleConfig(include_benchmark_results=True),
+                driver=driver,
+            )
+
+        assert call_order == ["diagnosis", "mitigation", "recovery-diagnosis", "diagnosis-playbook"]
+        assert result["mitigation_succeeded"] is True
+        assert "Grounded CoreDNS diagnosis" in result["recovery_diagnosis_run_md"]

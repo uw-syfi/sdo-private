@@ -10,14 +10,15 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver, RunSubagent
-    from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft
+    from sregym_agents.crucible.agents.recovery_agent import RecoveryRunResult
+    from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, TriageAreaCandidate
     from sregym_agents.crucible.knowledge_base.root_cause import KBView
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
@@ -57,7 +58,7 @@ class StageLoopResult:
     agent_causal_chain: str = ""
     stage_outputs_file: Path | None = None
     confirmed_slugs: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
-    message_history: list[object] = dataclasses.field(default_factory=lambda: [])
+    message_history: list[object] = dataclasses.field(default_factory=lambda: cast("list[object]", []))
 
 
 def _build_usage_metrics(
@@ -126,6 +127,75 @@ def _resolve_mitigation_playbook_identity(
         return diagnosis_playbook_candidate.slug, diagnosis_playbook_candidate.root_cause
 
     return None
+
+
+async def _run_diagnosis_recovery_if_needed(
+    recovery_agent: RecoveryAgent,
+    *,
+    app_info: dict[str, Any],
+    diag_result: StageLoopResult,
+    original_diag_result: StageLoopResult,
+    diagnosis_sf: SharedFile,
+    recovery_collector: UsageCollector,
+    recovery_stage_outputs_file: Path | None,
+    crucible_config: CrucibleConfig,
+) -> tuple[RecoveryRunResult | None, DiagnosisPlaybookDraft | None, TriageAreaCandidate | None]:
+    """Run diagnosis recovery + playbook generation when a failed diagnosis needs grounding.
+
+    This work is only required for recovery/KB curation. It should stay off the
+    diagnosis->mitigation critical path whenever mitigation still needs to run.
+    """
+    diagnosis_recovery = None
+    diagnosis_playbook_candidate = None
+    triage_area_candidate = None
+
+    if (
+        crucible_config.include_benchmark_results
+        and diag_result.benchmark_block
+        and "success: False" in diag_result.benchmark_block
+    ):
+        diagnosis_recovery = await recovery_agent.run_diagnosis(
+            app_info=app_info,
+            shared_file=diagnosis_sf,
+            original_answer=diag_result.agent_answer,
+            benchmark_block=diag_result.benchmark_block,
+            usage_collector=recovery_collector,
+            original_justification=diag_result.agent_justification,
+            original_causal_chain=diag_result.agent_causal_chain,
+            stage_outputs_file=recovery_stage_outputs_file,
+        )
+        if diagnosis_recovery:
+            diag_result.agent_answer = diagnosis_recovery.submission.answer
+            diag_result.agent_justification = diagnosis_recovery.submission.justification
+            diag_result.agent_causal_chain = diagnosis_recovery.submission.causal_chain
+
+    if diagnosis_recovery and diagnosis_recovery.message_history:
+        diagnosis_playbook_candidate = await recovery_agent.build_diagnosis_playbook_candidate(
+            app_info=app_info,
+            original_answer=original_diag_result.agent_answer,
+            original_justification=original_diag_result.agent_justification,
+            original_causal_chain=original_diag_result.agent_causal_chain,
+            grounded_answer=diag_result.agent_answer,
+            grounded_justification=diag_result.agent_justification,
+            grounded_causal_chain=diag_result.agent_causal_chain,
+            recovery_message_history=diagnosis_recovery.message_history,
+            usage_collector=recovery_collector,
+            stage_outputs_file=None,
+        )
+
+        if crucible_config.prompt_version >= "v3" and original_diag_result.stage_outputs_file is not None:
+            triage_area_candidate = await recovery_agent.build_triage_area_candidate(
+                app_info=app_info,
+                original_answer=original_diag_result.agent_answer,
+                original_justification=original_diag_result.agent_justification,
+                grounded_answer=diag_result.agent_answer,
+                grounded_justification=diag_result.agent_justification,
+                stage_outputs=original_diag_result.stage_outputs_file.read_text(),
+                recovery_message_history=diagnosis_recovery.message_history,
+                usage_collector=recovery_collector,
+            )
+
+    return diagnosis_recovery, diagnosis_playbook_candidate, triage_area_candidate
 
 
 def _init_mitigation_file(
@@ -826,43 +896,23 @@ async def run(
     recovery_mitigation_stage_outputs_file = None
 
     diagnosis_recovery = None
-
-    # Recovery diagnosis: produce a validated causal chain when the benchmark
-    # rejected the agent's diagnosis and we want causal chains for KB.
-    if (
-        crucible_config.include_benchmark_results
-        and diag_result.benchmark_block
-        and "success: False" in diag_result.benchmark_block
-    ):
-        diagnosis_recovery = await recovery_agent.run_diagnosis(
-            app_info=app_info,
-            shared_file=diagnosis_sf,
-            original_answer=diag_result.agent_answer,
-            benchmark_block=diag_result.benchmark_block,
-            usage_collector=recovery_collector,
-            original_justification=diag_result.agent_justification,
-            original_causal_chain=diag_result.agent_causal_chain,
-            stage_outputs_file=recovery_stage_outputs_file,
-        )
-        if diagnosis_recovery:
-            diag_result.agent_answer = diagnosis_recovery.submission.answer
-            diag_result.agent_justification = diagnosis_recovery.submission.justification
-            diag_result.agent_causal_chain = diagnosis_recovery.submission.causal_chain
     diagnosis_playbook_candidate = None
-    if diagnosis_recovery and diagnosis_recovery.message_history:
-        diagnosis_playbook_candidate = await recovery_agent.build_diagnosis_playbook_candidate(
-            app_info=app_info,
-            original_answer=original_diag_result.agent_answer,
-            original_justification=original_diag_result.agent_justification,
-            original_causal_chain=original_diag_result.agent_causal_chain,
-            grounded_answer=diag_result.agent_answer,
-            grounded_justification=diag_result.agent_justification,
-            grounded_causal_chain=diag_result.agent_causal_chain,
-            recovery_message_history=diagnosis_recovery.message_history,
-            usage_collector=recovery_collector,
-            stage_outputs_file=None,
-        )
+    triage_area_candidate = None
     if "mitigation" not in planned_stages:
+        (
+            diagnosis_recovery,
+            diagnosis_playbook_candidate,
+            triage_area_candidate,
+        ) = await _run_diagnosis_recovery_if_needed(
+            recovery_agent,
+            app_info=app_info,
+            diag_result=diag_result,
+            original_diag_result=original_diag_result,
+            diagnosis_sf=diagnosis_sf,
+            recovery_collector=recovery_collector,
+            recovery_stage_outputs_file=recovery_stage_outputs_file,
+            crucible_config=crucible_config,
+        )
         logger.info("Diagnosis-only problem — orchestrator complete.")
         result = _build_usage_metrics(primary_collector, recovery_collector)
         sof = diag_result.stage_outputs_file
@@ -896,6 +946,9 @@ async def run(
         )
         result["diagnosis_playbook_candidate"] = (
             diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
+        )
+        result["triage_area_candidate"] = (
+            triage_area_candidate.model_dump(mode="python") if triage_area_candidate is not None else None
         )
         result["mitigation_run_md"] = None
         result["recovery_mitigation_run_md"] = None
@@ -992,6 +1045,17 @@ async def run(
     if recovery_mitigation_stage_outputs_file is not None:
         recovery_mitigation_stage_outputs_file.unlink(missing_ok=True)
 
+    diagnosis_recovery, diagnosis_playbook_candidate, triage_area_candidate = await _run_diagnosis_recovery_if_needed(
+        recovery_agent,
+        app_info=app_info,
+        diag_result=diag_result,
+        original_diag_result=original_diag_result,
+        diagnosis_sf=diagnosis_sf,
+        recovery_collector=recovery_collector,
+        recovery_stage_outputs_file=recovery_stage_outputs_file,
+        crucible_config=crucible_config,
+    )
+
     mitigation_recovery = None
     # Recovery mitigation
     if (
@@ -1087,6 +1151,9 @@ async def run(
     )
     result["diagnosis_playbook_candidate"] = (
         diagnosis_playbook_candidate.model_dump(mode="python") if diagnosis_playbook_candidate is not None else None
+    )
+    result["triage_area_candidate"] = (
+        triage_area_candidate.model_dump(mode="python") if triage_area_candidate is not None else None
     )
     result["mitigation_run_md"] = MitigationRunRecord.from_stage_outputs_file(
         problem_id=problem_id,

@@ -36,6 +36,8 @@ COVERAGE_THINKING_BUDGET = 2048
 
 MAX_TRIAGE_AREAS = 12
 MAX_HINTS_PER_AREA = 10
+MAX_HINT_WORDS = 24
+MAX_HINT_TOTAL_WORDS = 120
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +68,16 @@ class TriageArea(BaseModel):
     def max_hints(cls, v: list[str]) -> list[str]:
         if len(v) > MAX_HINTS_PER_AREA:
             raise ValueError(f"Maximum {MAX_HINTS_PER_AREA} hints per area")
+        total_words = 0
+        for hint in v:
+            words = len(hint.split())
+            if words == 0:
+                raise ValueError("Hints must not be empty")
+            if words > MAX_HINT_WORDS:
+                raise ValueError(f"Each hint must be at most {MAX_HINT_WORDS} words")
+            total_words += words
+        if total_words > MAX_HINT_TOTAL_WORDS:
+            raise ValueError(f"Maximum {MAX_HINT_TOTAL_WORDS} total hint words per area")
         return v
 
 
@@ -1015,7 +1027,7 @@ async def search_prior_incidents_impl(
     diagnosis: DifferentialDiagnosis = await run_subagent(
         prompt=prompt,
         output_type=DifferentialDiagnosis,
-        tools=None,
+        tools=[read_file, exec_bash_any, grep],
         agent_name="ltm-search",
         model_settings=ms,
         usage_collector=deps.usage_collector,

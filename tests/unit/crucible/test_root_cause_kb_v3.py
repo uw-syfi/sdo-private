@@ -14,7 +14,11 @@ from sregym_agents.crucible.knowledge_base.incident_records import (
     RecoveryDiagnosisRunRecord,
     RecoveryMitigationRunRecord,
 )
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_review import (
+    DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
+    TriageAreaCandidate,
+)
 from sregym_agents.crucible.knowledge_base.root_cause import (
     DiagnosisFrontMatter,
     DiagnosisPlaybook,
@@ -107,6 +111,30 @@ async def test_structured_kb_injects_manifest_and_root_causes(tmp_path: Path):
     assert kb_view.load_diagnosis("wrong_port") is not None
 
 
+@pytest.mark.asyncio
+async def test_structured_kb_injects_triage_priors_when_present(tmp_path: Path):
+    kb = StructuredKnowledgeBase(
+        tmp_path / "kb",
+        app_name="hotel-reservation",
+        config=CrucibleConfig(prompt_version="v3", kb_scope="per_app"),
+        renderer=PromptRenderer("v3"),
+        driver=_DummyDriver(),
+    )
+    (kb.scope_dir / "triage_priors.yaml").write_text(
+        "areas:\n"
+        "  - name: DNS and Service Discovery\n"
+        "    hints:\n"
+        "      - Inspect entrypoint logs for hostname-resolution failures.\n"
+    )
+
+    target = tmp_path / "target"
+    target.mkdir()
+    injected = await kb.inject(target)
+
+    assert injected.triage_priors is not None
+    assert injected.triage_priors.read_text().startswith("areas:")
+
+
 def test_structured_kb_writes_incident_records(tmp_path: Path):
     kb = StructuredKnowledgeBase(
         tmp_path / "kb",
@@ -173,6 +201,28 @@ def test_structured_kb_writes_diagnosis_playbook_candidate(tmp_path: Path):
 
     assert candidate_path.name == "diagnosis_playbook_candidate.json"
     assert json.loads(candidate_path.read_text())["slug"] == "coredns-nxdomain"
+
+
+def test_structured_kb_writes_triage_area_candidate(tmp_path: Path):
+    kb = StructuredKnowledgeBase(
+        tmp_path / "kb",
+        app_name="hotel-reservation",
+        config=CrucibleConfig(prompt_version="v3", kb_scope="per_app"),
+        renderer=PromptRenderer("v3"),
+        driver=_DummyDriver(),
+    )
+    candidate = TriageAreaCandidate(
+        area_name="DNS and Service Discovery",
+        hints=[
+            "Inspect entrypoint logs for hostname-resolution failures when smoke tests only show generic HTTP errors."
+        ],
+        grounding=["Initial triage only surfaced generic HTTP failures."],
+    )
+
+    candidate_path = kb.write_triage_area_candidate(timestamp="20260413_162613", candidate=candidate)
+
+    assert candidate_path.name == "triage_area_candidate.json"
+    assert json.loads(candidate_path.read_text())["area_name"] == "DNS and Service Discovery"
 
 
 def test_structured_kb_writes_mitigation_records_and_candidate(tmp_path: Path):

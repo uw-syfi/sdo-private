@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
 
-    from .incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
+    from .incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft, TriageAreaCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,12 @@ class StructuredKnowledgeBase(KnowledgeBase):
             shutil.rmtree(dest_view)
         shutil.copytree(self.store.paths.scope_dir, dest_view)
         result.kb_view_dir = dest_view
+
+        triage_priors_src = self.scope_dir / "triage_priors.yaml"
+        if triage_priors_src.exists():
+            triage_priors_dest = target_dir / "triage_priors.yaml"
+            shutil.copy2(triage_priors_src, triage_priors_dest)
+            result.triage_priors = triage_priors_dest
 
         return result
 
@@ -165,6 +171,22 @@ class StructuredKnowledgeBase(KnowledgeBase):
         incident_dir.mkdir(parents=True, exist_ok=True)
         candidate_path = incident_dir / "mitigation_playbook_candidate.json"
         candidate_path.write_text(json.dumps(draft.model_dump(mode="python"), indent=2) + "\n")
+        return candidate_path
+
+    def write_triage_area_candidate(
+        self,
+        *,
+        timestamp: str,
+        candidate: TriageAreaCandidate,
+    ) -> Path:
+        incidents_root = self.store.paths.incidents_dir
+        if self._config.kb_scope == "per_app":
+            incident_dir = incidents_root / timestamp
+        else:
+            incident_dir = incidents_root / self.app_slug / timestamp
+        incident_dir.mkdir(parents=True, exist_ok=True)
+        candidate_path = incident_dir / "triage_area_candidate.json"
+        candidate_path.write_text(json.dumps(candidate.model_dump(mode="python"), indent=2) + "\n")
         return candidate_path
 
     def write_scope_metadata(self) -> None:

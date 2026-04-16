@@ -6,7 +6,11 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
 
-from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
+from sregym_agents.crucible.knowledge_base.incident_review import (
+    DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
+    TriageAreaCandidate,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -242,6 +246,60 @@ class RecoveryAgent:
 
         logger.info("Recovery diagnosis playbook candidate complete: %s", draft.slug)
         return draft
+
+    async def build_triage_area_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        original_answer: str,
+        grounded_answer: str,
+        grounded_justification: str,
+        stage_outputs: str,
+        recovery_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        original_justification: str = "",
+    ) -> TriageAreaCandidate | None:
+        """Build a reusable triage-area candidate from a grounded diagnosis failure."""
+
+        if not grounded_answer.strip() or not grounded_justification.strip() or not stage_outputs.strip():
+            logger.warning("Recovery triage candidate: grounded diagnosis or stage outputs missing, skipping.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("RECOVERY TRIAGE CANDIDATE: extracting reusable triage lessons")
+        logger.info("=" * 60)
+
+        system_prompt = self._renderer.render("recovery_triage_area_candidate_system")
+        user_prompt = self._renderer.render(
+            "recovery_triage_area_candidate_user",
+            original_answer=original_answer,
+            original_justification=original_justification,
+            grounded_answer=grounded_answer,
+            grounded_justification=grounded_justification,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+            stage_outputs=stage_outputs,
+        )
+        logger.info(f"[recovery-triage-area-candidate] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[recovery-triage-area-candidate] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=TriageAreaCandidate,
+            agent_name="recovery-triage-area-candidate",
+            model_settings=self._sre_model_settings(),
+            message_history=recovery_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Recovery triage area candidate agent did not produce output.")
+            return None
+
+        candidate = result.output
+        logger.info("Recovery triage area candidate complete: %s", candidate.area_name)
+        return candidate
 
     async def build_mitigation_playbook_candidate(
         self,

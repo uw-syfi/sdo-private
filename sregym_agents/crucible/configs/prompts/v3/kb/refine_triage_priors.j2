@@ -1,0 +1,41 @@
+You are curating runtime triage priors for a Kubernetes SRE agent.
+
+Your task is to merge one recovery-produced triage area candidate into the existing triage priors.
+
+Output the full updated priors document using this structure:
+
+```yaml
+areas:
+  - name: <area name>
+    hints:
+      - <hint 1>
+      - <hint 2>
+```
+
+Rules:
+- Keep the output reusable across incidents.
+- Areas should be investigation lenses, not specific root-cause classes.
+- Prefer updating an existing area over creating a near-duplicate area.
+- Maintain mutual exclusivity / no overlap between areas as much as possible.
+- If the candidate belongs in an existing area, merge its strongest hints there.
+- Keep hints concise and non-redundant.
+- Do not add explanatory paragraphs, metadata, or incident-specific grounding to the final priors.
+- Preserve useful existing areas unless the candidate clearly replaces them.
+
+Existing triage priors:
+```yaml
+{{ existing_triage_priors_yaml }}
+```
+
+Recovery-produced triage area candidate:
+```json
+{{ triage_area_candidate_json }}
+```
+
+<diagnosis_run>
+{{ diagnosis_run_md }}
+</diagnosis_run>
+
+<recovery_diagnosis_run>
+{{ recovery_diagnosis_run_md }}
+</recovery_diagnosis_run>

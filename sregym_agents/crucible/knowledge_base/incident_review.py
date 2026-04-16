@@ -71,6 +71,12 @@ class DiagnosisPlaybookDraft(BaseModel):
     known_confounders: list[str] = Field(default_factory=list)
 
 
+class TriageAreaCandidate(BaseModel):
+    area_name: str
+    hints: list[str]
+    grounding: list[str] = Field(default_factory=list)
+
+
 class MitigationPlaybookDraft(BaseModel):
     slug: str
     root_cause: str
