@@ -39,9 +39,7 @@ def test_crucible_config_enable_mitigation_kb_default_true() -> None:
 
 
 def test_config_from_experiment_reads_enable_mitigation_kb() -> None:
-    cfg = crucible_config_from_experiment_agent(
-        {"prompt_version": "v3", "enable_mitigation_kb": False}
-    )
+    cfg = crucible_config_from_experiment_agent({"prompt_version": "v3", "enable_mitigation_kb": False})
     assert cfg.enable_mitigation_kb is False
 
 

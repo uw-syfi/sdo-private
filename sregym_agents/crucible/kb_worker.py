@@ -89,9 +89,7 @@ def _make_read_playbook_tool(store: RootCauseStore) -> Callable[..., str]:
         elif playbook_type == "mitigation":
             playbook = store.load_mitigation(slug)
         else:
-            raise ValueError(
-                f"Invalid playbook_type: {playbook_type!r}. Must be 'diagnosis' or 'mitigation'."
-            )
+            raise ValueError(f"Invalid playbook_type: {playbook_type!r}. Must be 'diagnosis' or 'mitigation'.")
 
         if playbook is None:
             raise ValueError(f"{playbook_type} playbook not found: slug={slug!r}")
