@@ -33,6 +33,18 @@ def test_config_from_experiment_reads_kb_v3_fields() -> None:
     assert cfg.kb_scope == "shared"
 
 
+def test_crucible_config_enable_mitigation_kb_default_true() -> None:
+    cfg = CrucibleConfig()
+    assert cfg.enable_mitigation_kb is True
+
+
+def test_config_from_experiment_reads_enable_mitigation_kb() -> None:
+    cfg = crucible_config_from_experiment_agent(
+        {"prompt_version": "v3", "enable_mitigation_kb": False}
+    )
+    assert cfg.enable_mitigation_kb is False
+
+
 def test_config_from_kb_task_reads_kb_v3_fields() -> None:
     cfg = crucible_config_from_kb_task(
         {

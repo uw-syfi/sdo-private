@@ -15,6 +15,7 @@ class CrucibleConfig:
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     enable_ltm_verified_direct_submit: bool = False
+    enable_mitigation_kb: bool = True
     include_benchmark_results: bool = False
     kb_scope: str = "per_app"
     kb_runtime_mode: str = "playbook-first"
@@ -85,6 +86,7 @@ def crucible_config_from_experiment_agent(
         enable_ltm_verified_direct_submit=bool(
             agent_settings.get("enable_ltm_verified_direct_submit", base.enable_ltm_verified_direct_submit)
         ),
+        enable_mitigation_kb=bool(agent_settings.get("enable_mitigation_kb", base.enable_mitigation_kb)),
         include_benchmark_results=bool(agent_settings.get("include_benchmark_results", base.include_benchmark_results)),
         kb_scope=str(agent_settings.get("kb_scope", base.kb_scope)),
         kb_runtime_mode=str(agent_settings.get("kb_runtime_mode", base.kb_runtime_mode)),

@@ -1003,10 +1003,12 @@ async def run(
     logger.info("Waiting for benchmark to reach mitigation stage...")
     await _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
 
-    # Playbook shortcut
+    # Playbook shortcut (gated by enable_mitigation_kb)
     mit_result: StageLoopResult | None = None
     diag_confirmed = bool(diag_result.benchmark_block) and "success: True" in diag_result.benchmark_block
-    if not diag_confirmed:
+    if not crucible_config.enable_mitigation_kb:
+        logger.info("[playbook-shortcut] Skipped — mitigation KB disabled.")
+    elif not diag_confirmed:
         mit_result = await _try_recovery_playbook_shortcut(
             driver=driver,
             model=model,
