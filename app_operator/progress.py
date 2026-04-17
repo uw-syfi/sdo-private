@@ -16,7 +16,7 @@ def emit_progress(phase: str, **kwargs: int) -> None:
     logger.info(f"{_MARKER_PREFIX} phase={phase}{extra}")
 
 
-def parse_progress(line: str) -> dict | None:
+def parse_progress(line: str) -> dict[str, str | int] | None:
     """Parse a structured progress marker line.
 
     Returns a dict with at least {"phase": str} plus any int kwargs,
@@ -25,7 +25,7 @@ def parse_progress(line: str) -> dict | None:
     m = _PARSE_RE.search(line)
     if not m:
         return None
-    result: dict = {"phase": m.group(1)}
+    result: dict[str, str | int] = {"phase": m.group(1)}
     for kv in m.group(2).split():
         if "=" in kv:
             k, _, v = kv.partition("=")

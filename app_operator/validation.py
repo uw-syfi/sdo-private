@@ -110,7 +110,7 @@ def validate_range(
 def validate_in(
     value: Any,
     name: str,
-    valid_values: Collection,
+    valid_values: Collection[Any],
 ) -> None:
     """Raise ``ValueError`` if *value* is not in *valid_values*."""
     if value not in valid_values:
@@ -135,7 +135,7 @@ def validate_field(
     max_val: float | None = None,
     min_exclusive: bool = False,
     max_exclusive: bool = False,
-    valid_values: Collection | None = None,
+    valid_values: Collection[Any] | None = None,
     non_empty_str: bool = False,
 ) -> None:
     """All-in-one field validator combining type + value checks.
@@ -172,7 +172,7 @@ def validate_field(
 
 
 def validate_dataclass_fields(
-    section_data: dict,
+    section_data: dict[str, Any],
     section_name: str,
     config_class: type,
 ) -> None:

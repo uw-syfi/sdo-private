@@ -29,8 +29,10 @@ if TYPE_CHECKING:
     from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
 
 from libs.agent_cli.trajectory import (
-    NullTrajectoryRecorder,  # noqa: F401
-    TrajectoryRecorderProtocol,  # noqa: F401
+    NullTrajectoryRecorder as NullTrajectoryRecorder,
+)
+from libs.agent_cli.trajectory import (
+    TrajectoryRecorderProtocol as TrajectoryRecorderProtocol,
 )
 from libs.agent_cli.trajectory import (
     register_context_providers as _register_context_providers,
@@ -125,7 +127,7 @@ class TrajectoryRecorder:
 
         # Current conversation being recorded (not yet committed)
         self._current_phase: Phase | None = None
-        self._current_conversation: list[dict] = []
+        self._current_conversation: list[dict[str, Any]] = []
         self._current_call_id: int | None = None
         self._conversation_lock = threading.Lock()
 

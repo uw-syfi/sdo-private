@@ -1,13 +1,13 @@
 import sys
 from typing import TYPE_CHECKING
 
-from loguru import logger
+from loguru import Message, Record, logger
 
 if TYPE_CHECKING:
     from app_operator.ui_protocol import OperatorUI
 
 
-def formatter(record):
+def formatter(record: Record) -> str:
     """Custom formatter that changes format based on presence of agent_prefix or stderr."""
     node = record["extra"].get("node")
     node_prefix = f"<cyan>[{node}]</cyan> " if node else ""
@@ -23,7 +23,7 @@ def formatter(record):
     return f"{base}{node_prefix}<level>{{message}}</level>\n"
 
 
-def setup_logger():
+def setup_logger() -> None:
     """Configure the logger for the application."""
     logger.remove()  # Remove default handler
 
@@ -40,7 +40,7 @@ def attach_ui_sink(ui: "OperatorUI", replace: bool = False) -> None:
     if replace:
         logger.remove()
 
-    def sink(message):
+    def sink(message: Message) -> None:
         record = message.record
         text = record["message"]
         level = record["level"].name.lower()
