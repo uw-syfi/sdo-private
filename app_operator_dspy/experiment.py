@@ -68,6 +68,10 @@ def run_experiment(args) -> str:
     log.info("Results: {}", results_dir)
     log.info("Apps: {}", len(app_paths))
 
+    use_rlm = getattr(args, "rlm", False)
+    if use_rlm:
+        log.info("RLM mode enabled")
+
     # Save experiment config
     config = {
         "model": model,
@@ -75,6 +79,7 @@ def run_experiment(args) -> str:
         "monitor_checks": args.monitor_checks,
         "deploy_timeout": args.deploy_timeout,
         "health_check_timeout": args.health_check_timeout,
+        "use_rlm": use_rlm,
         "apps": [os.path.basename(p) for p in app_paths],
         "timestamp": timestamp,
         "platform": {
@@ -101,6 +106,7 @@ def run_experiment(args) -> str:
             monitor_checks=args.monitor_checks,
             deploy_timeout=args.deploy_timeout,
             health_check_timeout=args.health_check_timeout,
+            use_rlm=use_rlm,
         )
         app_results.append(result)
 
@@ -130,6 +136,7 @@ def _run_single_app(
     monitor_checks: int,
     deploy_timeout: int,
     health_check_timeout: int,
+    use_rlm: bool = False,
 ) -> dict:
     """Run the operator on a single app and return structured metrics."""
     app_name = os.path.basename(app_path)
@@ -146,7 +153,8 @@ def _run_single_app(
     # Clear LM history for clean token tracking
     clear_history(lm)
 
-    operator = DSPyOperator()
+    sub_lm = lm if use_rlm else None
+    operator = DSPyOperator(use_rlm=use_rlm, sub_lm=sub_lm)
     set_task_repo(repo_path)
 
     start = time.time()

@@ -79,9 +79,64 @@ def run_health_check_tool(repo_path: str, timeout: int = DEFAULT_TIMEOUT) -> str
     return _truncate_output(run_health_check(repo_path, timeout))
 
 
+def validate_compose_tool(compose_path: str) -> str:
+    """Validate a docker-compose file and check if build context paths exist.
+
+    Parses the compose file, checks that referenced build contexts and
+    Dockerfiles exist on disk, and reports any structural issues.
+    """
+    import yaml
+
+    compose_path = _resolve_path(compose_path)
+    try:
+        with open(compose_path) as f:
+            content = f.read()
+    except OSError as exc:
+        return f"Error reading {compose_path}: {exc}"
+
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        return f"Invalid YAML in {compose_path}: {exc}"
+
+    if not isinstance(data, dict):
+        return f"Invalid compose file: expected mapping, got {type(data).__name__}"
+
+    issues = []
+    services = data.get("services", {})
+    if not services:
+        issues.append("No 'services' key found in compose file")
+
+    compose_dir = os.path.dirname(os.path.abspath(compose_path))
+    for name, svc in (services or {}).items():
+        if not isinstance(svc, dict):
+            issues.append(f"Service '{name}': expected mapping, got {type(svc).__name__}")
+            continue
+        build = svc.get("build")
+        if isinstance(build, str):
+            ctx = os.path.join(compose_dir, build)
+            if not os.path.isdir(ctx):
+                issues.append(f"Service '{name}': build context '{build}' does not exist")
+        elif isinstance(build, dict):
+            ctx_path = build.get("context", ".")
+            ctx = os.path.join(compose_dir, ctx_path)
+            if not os.path.isdir(ctx):
+                issues.append(f"Service '{name}': build context '{ctx_path}' does not exist")
+            dockerfile = build.get("dockerfile")
+            if dockerfile:
+                df_path = os.path.join(ctx, dockerfile)
+                if not os.path.isfile(df_path):
+                    issues.append(f"Service '{name}': dockerfile '{dockerfile}' not found in '{ctx_path}'")
+
+    if not issues:
+        return f"Compose file {compose_path} is valid ({len(services)} services)"
+    return "Compose validation issues:\n" + "\n".join(f"- {i}" for i in issues)
+
+
 # Expose stable names for ReAct (LLM expects these from signatures)
 write_file_tool.__name__ = "write_file"
 run_shell_tool.__name__ = "run_shell"
 read_file_tool.__name__ = "read_file"
 list_files_tool.__name__ = "list_files"
 run_health_check_tool.__name__ = "run_health_check"
+validate_compose_tool.__name__ = "validate_compose"

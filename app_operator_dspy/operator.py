@@ -5,6 +5,8 @@ import dspy
 from app_operator_dspy.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator_dspy.agents.deployer import DeploymentAgent
 from app_operator_dspy.agents.monitor import MonitorAgent
+from app_operator_dspy.agents.rlm_code_analyzer import RLMCodeAnalyzerAgent
+from app_operator_dspy.agents.rlm_deployer import RLMDeploymentAgent
 from app_operator_dspy.constants import DEPLOY_TIMEOUT, HEALTH_CHECK_TIMEOUT
 from app_operator_dspy.logger import get_logger
 
@@ -31,12 +33,21 @@ class DSPyOperator(dspy.Module):
 
     Composes CodeAnalyzerAgent, DeploymentAgent, and MonitorAgent into
     a single end-to-end pipeline.
+
+    Args:
+        use_rlm: Use RLM-based agents for code analysis and repair.
+        sub_lm: Optional sub-LM for RLM's llm_query calls.
     """
 
-    def __init__(self):
+    def __init__(self, use_rlm: bool = False, sub_lm: dspy.LM | None = None):
         super().__init__()
-        self.analyzer = CodeAnalyzerAgent()
-        self.deployer = DeploymentAgent()
+        if use_rlm:
+            log.info("using RLM-based agents")
+            self.analyzer = RLMCodeAnalyzerAgent(sub_lm=sub_lm)
+            self.deployer = RLMDeploymentAgent(sub_lm=sub_lm)
+        else:
+            self.analyzer = CodeAnalyzerAgent()
+            self.deployer = DeploymentAgent()
         self.monitor = MonitorAgent()
 
     def forward(

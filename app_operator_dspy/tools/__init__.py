@@ -23,6 +23,7 @@ CODE_ANALYZER_TOOLS = [
     agent_tools.read_file_tool,
     agent_tools.list_files_tool,
     agent_tools.run_shell_tool,
+    agent_tools.validate_compose_tool,
 ]
 
 __all__ = [
