@@ -4,6 +4,7 @@ import pytest
 
 import app_operator.cli_agent.agents.deploy_executor as executor_module
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.exceptions import DeploymentError
 from app_operator.prompts.deployer import (
     create_fix_prompt,
     prepare_error_context,
@@ -184,7 +185,8 @@ def test_run_respects_max_attempts(agent):
     bind_method(agent, "run_deploy_command", fake_run_deploy)
     bind_method(agent, "_fix_with_agent", fake_fix)
 
-    assert agent.run(max_attempts=1) is False
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=1)
     assert fix_calls["count"] == 1
 
 
@@ -306,9 +308,8 @@ def test_deployment_skips_fix_when_max_attempts_reached(tmp_path, stub_agent):
     agent = DeploymentAgent(repo, stub_agent)
 
     # Run with max_attempts=1, should not call agent for fix
-    result = agent.run(max_attempts=1, check_shutdown=lambda: False)
-
-    assert result is False
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=1, check_shutdown=lambda: False)
     # Agent should not be called since we're at max attempts (scripts already exist)
     assert len(stub_agent.calls) == 0
 
@@ -333,7 +334,8 @@ def test_deployment_calls_agent_on_failure_when_under_max_attempts(tmp_path, tra
     agent = DeploymentAgent(repo, tracking_agent)
 
     # Run with max_attempts=3, agent should be called to fix
-    _ = agent.run(max_attempts=3, check_shutdown=lambda: False)
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=3, check_shutdown=lambda: False)
 
     # Agent should be called at least once to try to fix the error
     assert tracking_agent.generation_count > 0
@@ -361,11 +363,9 @@ def test_deployment_handles_agent_errors_gracefully(tmp_path, error_agent):
 
     agent = DeploymentAgent(repo, error_agent)
 
-    # Run should handle agent errors gracefully
-    result = agent.run(max_attempts=2, check_shutdown=lambda: False)
-
-    # Should fail but not crash
-    assert result is False
+    # Run should handle agent errors gracefully (raises DeploymentError)
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=2, check_shutdown=lambda: False)
 
 
 def test_prepare_error_context_truncates_long_outputs(agent):
@@ -494,7 +494,8 @@ def test_run_health_unhealthy_exhausts_retries(agent, monkeypatch):
 
     monkeypatch.setattr(hj_module.AppHealthJudge, "assess", fake_assess)
 
-    assert agent.run(max_attempts=2) is False
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=2)
 
 
 def test_exit_code_zero_recorded_correctly(repo_path, stub_agent, monkeypatch):
@@ -607,8 +608,9 @@ def test_run_retries_if_fix_fails(agent):
     bind_method(agent, "_fix_with_agent", fake_fix)
 
     # Run with max_attempts=3.
-    # It should retry 3 times.
-    assert agent.run(max_attempts=3) is False
+    # It should retry 3 times, then raise DeploymentError.
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=3)
 
     # Verify we tried 3 times
     assert fix_calls["count"] == 3

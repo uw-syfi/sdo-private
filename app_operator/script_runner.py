@@ -4,14 +4,18 @@ import subprocess
 import time
 from pathlib import Path
 
+from app_operator.exceptions import FileSystemError, ProcessError
 from app_operator.filesystem import FileSystemInterface
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from app_operator.types import CommandResult
 
 
 def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:
-    filesystem.mkdir(path.parent, parents=True, exist_ok=True)
-    filesystem.write_text(path, content)
+    try:
+        filesystem.mkdir(path.parent, parents=True, exist_ok=True)
+        filesystem.write_text(path, content)
+    except OSError as e:
+        raise FileSystemError(f"Failed to write log file {path}: {e}") from e
 
 
 def run_script(
@@ -23,6 +27,7 @@ def run_script(
     recorder: TrajectoryRecorderProtocol | None = None,
 ) -> CommandResult:
     start_time = time.time()
+    _process_error: ProcessError | None = None
     try:
         result = subprocess.run(  # noqa: S602 — shell=True required for agent commands
             command,
@@ -37,17 +42,21 @@ def run_script(
         stderr = result.stderr
         exit_code = result.returncode
 
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         success = False
         stdout = ""
         stderr = f"Command timed out after {timeout} seconds"
         exit_code = -1
+        _process_error = ProcessError(stderr, exit_code=exit_code, timeout=True)
+        _process_error.__cause__ = e
 
     except (OSError, subprocess.SubprocessError) as e:
         success = False
         stdout = ""
         stderr = f"Error: {e!s}"
         exit_code = -1
+        _process_error = ProcessError(stderr, exit_code=exit_code)
+        _process_error.__cause__ = e
 
     duration = time.time() - start_time
 
@@ -69,6 +78,9 @@ def run_script(
             exit_code=exit_code,
             duration=duration,
         )
+
+    if _process_error is not None:
+        raise _process_error
 
     return {
         "success": success,

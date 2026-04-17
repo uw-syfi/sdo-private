@@ -10,7 +10,7 @@ from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import Config, load_config
-from app_operator.exceptions import AgentError, SdsOperatorError
+from app_operator.exceptions import AgentError, DeploymentError, SdsOperatorError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
@@ -176,11 +176,15 @@ class AppOperator(OperatorBase):
             # Step 2: Deploy with automatic error fixing (includes script
             # generation)
             self.ui.set_stage("Deployment")
-            if not self.deployer.run(
-                max_attempts=self.max_deployment_attempts,
-                check_shutdown=lambda: self._shutdown_requested,
-            ):
-                logger.error("Failed to deploy application after multiple attempts")
+            try:
+                if not self.deployer.run(
+                    max_attempts=self.max_deployment_attempts,
+                    check_shutdown=lambda: self._shutdown_requested,
+                ):
+                    logger.error("Failed to deploy application after multiple attempts")
+                    return 1
+            except DeploymentError as e:
+                logger.error(f"Deployment failed: {e}")
                 return 1
 
             self._deployed = True

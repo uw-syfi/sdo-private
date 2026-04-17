@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from app_operator.config import Config, load_config
+from app_operator.exceptions import ProcessError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
@@ -173,13 +174,22 @@ class PydanticAIOperator(OperatorBase):
 
             # Run deploy script
             log_file = self.repo_path / ".sds" / "logs" / f"deploy_attempt_{attempt}.log"
-            deploy_result = run_script(
-                self.repo_path,
-                self.filesystem,
-                ".sds/deploy.sh start",
-                log_file_path=log_file,
-                timeout=self.config.operator.deploy_timeout,
-            )
+            try:
+                deploy_result = run_script(
+                    self.repo_path,
+                    self.filesystem,
+                    ".sds/deploy.sh start",
+                    log_file_path=log_file,
+                    timeout=self.config.operator.deploy_timeout,
+                )
+            except ProcessError as e:
+                logger.error(f"Process error during deployment: {e}")
+                deploy_result: CommandResult = {
+                    "success": False,
+                    "exit_code": e.exit_code if e.exit_code is not None else -1,
+                    "stdout": "",
+                    "stderr": str(e),
+                }
 
             # Run health check
             verdict = self._run_health_check(attempt)

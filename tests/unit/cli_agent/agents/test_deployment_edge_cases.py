@@ -4,7 +4,10 @@ These tests verify proper handling of boundary conditions and unusual
 scenarios in the deployment process.
 """
 
+import pytest
+
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.exceptions import DeploymentError
 from tests.fixtures.agents import ErrorAgent, StubAgent, TrackingAgent
 
 
@@ -36,7 +39,7 @@ class TestDeploymentAttemptBoundaries:
         assert result is True
 
     def test_max_attempts_equals_one_with_failure(self, tmp_path):
-        """Single attempt failure should fail immediately."""
+        """Single attempt failure should raise DeploymentError."""
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -55,9 +58,9 @@ class TestDeploymentAttemptBoundaries:
         agent = StubAgent()
         deployer = DeploymentAgent(repo, agent)
 
-        result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
-
-        assert result is False
+        with pytest.raises(DeploymentError) as exc_info:
+            deployer.run(max_attempts=1, check_shutdown=lambda: False)
+        assert exc_info.value.attempt == 1
 
     def test_max_attempts_large_number(self, tmp_path):
         """Large max_attempts value should be handled."""
@@ -183,10 +186,9 @@ class TestHealthCheckEdgeCases:
         agent = StubAgent()
         deployer = DeploymentAgent(repo, agent)
 
-        result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
-
-        # Deployment should fail, health check should not run
-        assert result is False
+        # Deployment should raise DeploymentError
+        with pytest.raises(DeploymentError):
+            deployer.run(max_attempts=1, check_shutdown=lambda: False)
 
 
 class TestAgentInteractionEdgeCases:
@@ -213,14 +215,13 @@ class TestAgentInteractionEdgeCases:
         agent = TrackingAgent(response="")
         deployer = DeploymentAgent(repo, agent)
 
-        result = deployer.run(max_attempts=2, check_shutdown=lambda: False)
-
-        # Should handle empty response gracefully
-        assert isinstance(result, bool)
+        # Should handle empty response gracefully, eventually raising DeploymentError
+        with pytest.raises(DeploymentError):
+            deployer.run(max_attempts=2, check_shutdown=lambda: False)
         assert agent.fix_request_count > 0
 
     def test_agent_raises_exception_during_fix(self, tmp_path):
-        """Agent exception during fix should be handled."""
+        """Agent exception during fix should raise DeploymentError."""
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -240,10 +241,8 @@ class TestAgentInteractionEdgeCases:
         agent = ErrorAgent()
         deployer = DeploymentAgent(repo, agent)
 
-        result = deployer.run(max_attempts=2, check_shutdown=lambda: False)
-
-        # Should fail gracefully without crashing
-        assert result is False
+        with pytest.raises(DeploymentError):
+            deployer.run(max_attempts=2, check_shutdown=lambda: False)
 
 
 class TestScriptGenerationEdgeCases:
