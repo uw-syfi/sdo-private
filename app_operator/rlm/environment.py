@@ -1,3 +1,5 @@
-from app_operator.rlm import RLMContext
+import importlib
+
+RLMContext = importlib.import_module("app_operator.cli_agent.rlm.environment").RLMContext
 
 __all__ = ["RLMContext"]

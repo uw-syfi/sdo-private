@@ -35,15 +35,50 @@ depends_on = [
     "libs.sds_core",
 ]
 
+# --- Layer 0.5: app_operator foundation (catch-all for undeclared submodules) ---
+# Every app_operator file not covered by a more specific module declaration
+# falls into this catch-all.  This ensures that imports from libs/ or
+# lego_agent/ into *any* app_operator.* path are flagged by tach.
+
+[[modules]]
+path = "app_operator"
+depends_on = [
+    "libs.model_config",
+    "libs.agent_cli",
+    "libs.sds_core",
+    "app_operator.prompts",
+    "app_operator.trajectory",
+]
+
+[[modules]]
+path = "app_operator.pydantic_ai"
+depends_on = [
+    "app_operator",
+    "app_operator.prompts",
+    "app_operator.trajectory",
+    "libs.agent_mw",
+    "libs.model_config",
+    "libs.pydantic_agent",
+]
+
+[[modules]]
+path = "app_operator.rlm"
+depends_on = [
+    "app_operator.cli_agent",
+]
+
 # --- Layer 1: shared infrastructure ---
 
 [[modules]]
 path = "app_operator.prompts"
-depends_on = []
+depends_on = [
+    "app_operator",
+]
 
 [[modules]]
 path = "app_operator.trajectory"
 depends_on = [
+    "app_operator",
     "app_operator.prompts",
     "libs.agent_cli",
 ]
@@ -53,19 +88,23 @@ depends_on = [
 [[modules]]
 path = "app_operator.dspy_integration"
 depends_on = [
+    "app_operator",
     "app_operator.prompts",
     "app_operator.trajectory",
 ]
 
 [[modules]]
 path = "app_operator.fault_injection"
-depends_on = []
+depends_on = [
+    "app_operator",
+]
 
 # --- Layer 3: runtimes (independent of each other) ---
 
 [[modules]]
 path = "app_operator.cli_agent"
 depends_on = [
+    "app_operator",
     "app_operator.prompts",
     "app_operator.trajectory",
     "libs.agent_cli",
@@ -74,6 +113,7 @@ depends_on = [
 [[modules]]
 path = "app_operator.gepa"
 depends_on = [
+    "app_operator",
     "app_operator.cli_agent",
     "app_operator.prompts",
     "app_operator.trajectory",
@@ -90,6 +130,7 @@ depends_on = []
 [[modules]]
 path = "app_operator.commands"
 depends_on = [
+    "app_operator",
     "app_operator.dspy_integration",
 ]
 
@@ -98,6 +139,7 @@ depends_on = [
 [[modules]]
 path = "app_operator.__main__"
 depends_on = [
+    "app_operator",
     "app_operator.commands",
 ]
 
@@ -121,7 +163,7 @@ depends_on = [
 [[modules]]
 path = "sregym_agents"
 depends_on = [
-    "libs.pydantic_agent",
-    "libs.agent_mw",
     "libs.agent_cli",
+    "libs.agent_mw",
+    "libs.pydantic_agent",
 ]
