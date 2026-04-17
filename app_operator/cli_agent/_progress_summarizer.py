@@ -4,8 +4,13 @@ import re
 import time
 from collections.abc import Callable
 
+from app_operator.constants import (
+    PROGRESS_INITIAL_DELAY_SECS,
+    PROGRESS_SUMMARY_INTERVAL_SECS,
+)
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 class ProgressSummarizer:
@@ -21,10 +26,10 @@ class ProgressSummarizer:
     def __init__(
         self,
         agent_generate_fn: Callable[[str, bool, int], str],
-        initial_delay: float = 15.0,
-        summary_interval: float = 30.0,
+        initial_delay: float = PROGRESS_INITIAL_DELAY_SECS,
+        summary_interval: float = PROGRESS_SUMMARY_INTERVAL_SECS,
         time_func: Callable[[], float] | None = None,
-        recorder=None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ):
         """Initialize the progress summarizer.
 

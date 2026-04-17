@@ -7,11 +7,11 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import dspy
 
-from app_operator.dspy_integration._data_loader import TrajectoryDataLoader
+from app_operator.dspy_integration._data_loader import TrajectoryDataLoader, TrajectoryExample
 from app_operator.dspy_integration._field_mappings import (
     get_output_field_name,
     map_kwargs_to_fields,
@@ -38,7 +38,7 @@ class _MetricCallTracker:
         self.metric = metric
         self.call_count = 0
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> float:
         result = self.metric(*args, **kwargs)
         self.call_count += 1
         return result
@@ -92,7 +92,7 @@ PROMPT_TO_TEMPLATE: dict[str, str] = {
 _ENSURE_SERIALIZABLE_MAX_DEPTH = 50
 
 
-def _ensure_serializable(obj, _depth: int = 0):
+def _ensure_serializable(obj: Any, _depth: int = 0) -> Any:
     """Ensure object is JSON-serializable, raising TypeError if not.
 
     DSPy demo objects may contain non-primitive types (e.g. Example
@@ -105,9 +105,11 @@ def _ensure_serializable(obj, _depth: int = 0):
     if isinstance(obj, (str, int, float, bool, type(None))):
         return obj
     if isinstance(obj, dict):
-        return {str(k): _ensure_serializable(v, _depth + 1) for k, v in obj.items()}
+        obj_dict = cast("dict[Any, Any]", obj)
+        return {str(k): _ensure_serializable(v, _depth + 1) for k, v in obj_dict.items()}
     if isinstance(obj, (list, tuple)):
-        return [_ensure_serializable(v, _depth + 1) for v in obj]
+        obj_seq = cast("list[Any] | tuple[Any, ...]", obj)
+        return [_ensure_serializable(v, _depth + 1) for v in obj_seq]
     return str(obj)  # Convert unknown types to string with explicit intent
 
 
@@ -176,7 +178,7 @@ class PromptOptimizer:
 
         # Load training data from all provided directories
         logger.info("Loading training data from %s...", trajectories_dirs)
-        examples = []
+        examples: list[TrajectoryExample] = []
         for tdir in trajectories_dirs:
             data_loader = TrajectoryDataLoader(tdir)
             examples.extend(data_loader.load_examples(success_only=False))
@@ -228,7 +230,7 @@ class PromptOptimizer:
             )
 
         # Optimize each prompt
-        results = {}
+        results: dict[str, dict[str, Any]] = {}
         for prompt_name in prompt_names:
             # Filter examples to the relevant phase for this prompt, then
             # split into train/validation.  The split must happen *after*
@@ -301,7 +303,7 @@ class PromptOptimizer:
             "results": results,
         }
 
-    def _configure_dspy_lm(self):
+    def _configure_dspy_lm(self) -> None:
         """Configure DSPy language model."""
         from app_operator.config import qualify_model_for_litellm
 
@@ -312,7 +314,7 @@ class PromptOptimizer:
 
         # Disable LiteLLM's request-level cache so that COPRO candidates
         # with different instructions are not served stale responses.
-        kwargs = {"model": model_str, "cache": False}
+        kwargs: dict[str, Any] = {"model": model_str, "cache": False}
 
         # Explicitly pass VERTEX_PROJECT and VERTEX_LOCATION if present in environment
         # This fixes issues where litellm defaults to us-central1 despite env var
@@ -329,7 +331,7 @@ class PromptOptimizer:
 
     def _convert_to_dspy_examples(
         self,
-        trajectory_examples: list,
+        trajectory_examples: list[TrajectoryExample],
         prompt_name: str,
     ) -> list[dspy.Example]:
         """Convert TrajectoryExample objects to dspy.Example objects.
@@ -351,7 +353,7 @@ class PromptOptimizer:
         input_field_names = list(signature.input_fields.keys())
         output_field_name = get_output_field_name(prompt_name)
 
-        dspy_examples = []
+        dspy_examples: list[dspy.Example] = []
         skipped_no_kwargs = 0
         skipped_wrong_prompt = 0
         for traj_ex in trajectory_examples:
@@ -422,7 +424,7 @@ class PromptOptimizer:
             from app_operator.prompts import PromptLoader
 
             loader = PromptLoader(templates_dir=self.prompts_dir / "templates")
-            return loader.render_template(template_name, prompt_kwargs)
+            return loader.render_template(template_name, prompt_kwargs)  # type: ignore[reportUnknownMemberType]
         except (ImportError, OSError, RuntimeError, ValueError) as e:
             logger.warning(
                 "Failed to re-render prompt '%s' from kwargs (template=%s): %s",
@@ -435,8 +437,8 @@ class PromptOptimizer:
     def _optimize_single_prompt(
         self,
         prompt_name: str,
-        train_examples: list,
-        val_examples: list,
+        train_examples: list[TrajectoryExample],
+        val_examples: list[TrajectoryExample],
         metric: CompositeMetric,
     ) -> dict[str, Any]:
         """Optimize a single prompt.
@@ -455,11 +457,11 @@ class PromptOptimizer:
 
         # Create DSPy module (simple Predict for now)
         class PromptModule(dspy.Module):
-            def __init__(self, signature):
-                super().__init__()
+            def __init__(self, signature: Any) -> None:
+                super().__init__()  # type: ignore[reportUnknownMemberType]
                 self.predictor = dspy.Predict(signature)
 
-            def forward(self, **kwargs):
+            def forward(self, **kwargs: Any) -> Any:
                 return self.predictor(**kwargs)
 
         module = PromptModule(signature)
@@ -544,7 +546,7 @@ class PromptOptimizer:
                 "error": str(e),
             }
 
-    def _create_optimizer(self, metric: CompositeMetric, num_train_examples: int = 30):
+    def _create_optimizer(self, metric: CompositeMetric, num_train_examples: int = 30) -> Any:
         """Create DSPy optimizer based on config.
 
         Args:
@@ -576,7 +578,7 @@ class PromptOptimizer:
     def _evaluate(
         self,
         module: dspy.Module,
-        examples: list,
+        examples: list[TrajectoryExample],
         metric: CompositeMetric,
         prompt_name: str,
     ) -> float | None:
@@ -595,7 +597,7 @@ class PromptOptimizer:
         Returns:
             Average score, or None when no examples convert to DSPy format.
         """
-        scores = []
+        scores: list[float] = []
         for traj_ex in examples:
             converted = self._convert_to_dspy_examples([traj_ex], prompt_name)
             if not converted:
@@ -619,7 +621,7 @@ class PromptOptimizer:
         if not self.optimized_dir.exists():
             return 1
 
-        versions = []
+        versions: list[int] = []
         for version_dir in self.optimized_dir.iterdir():
             if version_dir.is_dir() and version_dir.name.startswith("v"):
                 try:
@@ -634,7 +636,7 @@ class PromptOptimizer:
         self,
         results: dict[str, dict[str, Any]],
         output_dir: Path,
-    ):
+    ) -> None:
         """Save optimized prompts to disk.
 
         Args:
@@ -644,7 +646,8 @@ class PromptOptimizer:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Save metadata
-        metadata = {
+        prompts_meta: dict[str, dict[str, Any]] = {}
+        metadata: dict[str, Any] = {
             "version": output_dir.name,
             "config": {
                 "optimizer": self.config.optimization.optimizer,
@@ -652,7 +655,7 @@ class PromptOptimizer:
                 "num_examples": self.config.optimization.num_examples,
                 "metric_weights": self.config.optimization.metric_weights,
             },
-            "prompts": {},
+            "prompts": prompts_meta,
         }
 
         for prompt_name, result in results.items():
@@ -669,19 +672,19 @@ class PromptOptimizer:
                     self._save_dspy_module(optimized_module, module_file, prompt_name)
                     logger.info("Saved optimized module: %s", module_file)
 
-                    metadata["prompts"][prompt_name] = {
+                    prompts_meta[prompt_name] = {
                         "validation_score": result.get("validation_score"),
                         "optimized": True,
                         "module_file": f"{prompt_name}.dspy.json",
                     }
                 except (OSError, RuntimeError, TypeError, ValueError) as e:
                     logger.error("Failed to save module %s: %s", prompt_name, e)
-                    metadata["prompts"][prompt_name] = {
+                    prompts_meta[prompt_name] = {
                         "optimized": False,
                         "error": f"Save failed: {e!s}",
                     }
             else:
-                metadata["prompts"][prompt_name] = {
+                prompts_meta[prompt_name] = {
                     "optimized": False,
                     "error": result.get("error"),
                 }
@@ -708,7 +711,7 @@ class PromptOptimizer:
         module: dspy.Module,
         output_file: Path,
         prompt_name: str,
-    ):
+    ) -> None:
         """Save a DSPy module to disk.
 
         Args:
@@ -729,7 +732,7 @@ class PromptOptimizer:
 
             # Serialize the module's state
             # DSPy modules store demonstrations in the demos attribute
-            module_state = {
+            module_state: dict[str, Any] = {
                 "prompt_name": prompt_name,
                 "signature": get_signature(prompt_name).__name__,
                 "demos": [],
@@ -737,7 +740,7 @@ class PromptOptimizer:
 
             # Extract demonstrations if they exist (BootstrapFewShot)
             if hasattr(predictor, "demos") and predictor.demos:  # type: ignore[reportAttributeAccessIssue]
-                serializable_demos = []
+                serializable_demos: list[Any] = []
                 for demo in predictor.demos:  # type: ignore[reportAttributeAccessIssue]
                     if isinstance(demo, dict):
                         serializable_demos.append(demo)

@@ -19,7 +19,7 @@ def extract_rlm_statistics_from_trajectory(trajectory_dict: dict[str, Any]) -> d
     Returns:
         Dictionary of RLM statistics
     """
-    stats = {
+    stats: dict[str, Any] = {
         "total_calls": 0,
         "code_executions": 0,
         "recursive_calls": 0,

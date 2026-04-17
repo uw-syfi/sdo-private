@@ -6,7 +6,7 @@ working with Docker Compose data structures.
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, cast
 
 from app_operator.fault_injection.models import Fault, FaultResult
 
@@ -82,7 +82,8 @@ class ComposeManipulator:
         env = svc.get("environment", [])
 
         if isinstance(env, dict):
-            return [f"{k}={v}" for k, v in env.items()]
+            env_dict = cast("dict[str, Any]", env)
+            return [f"{k}={v}" for k, v in env_dict.items()]
         return list(env)
 
     @staticmethod

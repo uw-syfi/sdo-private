@@ -1,3 +1,15 @@
 """Shared constants for app_operator."""
 
 DEPLOYMENT_PROGRESS_FILENAME = "deployment_progress.md"
+
+# Subprocess lifecycle
+THREAD_JOIN_TIMEOUT_SECS = 5
+PROCESS_TERM_WAIT_TIMEOUT_SECS = 5
+PROCESS_CLEANUP_TIMEOUT_SECS = 2
+
+# Command execution
+COMMAND_EXEC_TIMEOUT_SECS = 120
+
+# Progress summarizer
+PROGRESS_INITIAL_DELAY_SECS = 15.0
+PROGRESS_SUMMARY_INTERVAL_SECS = 30.0

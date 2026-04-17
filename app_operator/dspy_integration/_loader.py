@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import dspy
 
@@ -164,7 +164,7 @@ def _extract_lineage_from_metadata(
         return None, [], "none"
 
     try:
-        metadata = json.loads(metadata_path.read_text())
+        metadata: dict[str, Any] = json.loads(metadata_path.read_text())
     except (json.JSONDecodeError, OSError):
         return None, [], "none"
 
@@ -173,7 +173,8 @@ def _extract_lineage_from_metadata(
     lineage = metadata.get("lineage", {})
     candidate_id_raw = ""
     if isinstance(lineage, dict):
-        candidate_id_raw = str(lineage.get("selected_candidate_id") or "").strip()
+        lineage_dict = cast("dict[str, Any]", lineage)
+        candidate_id_raw = str(lineage_dict.get("selected_candidate_id") or "").strip()
     if not candidate_id_raw:
         iter_num = metadata.get("iteration")
         best_idx = metadata.get("best_candidate_index")
@@ -184,15 +185,19 @@ def _extract_lineage_from_metadata(
 
     parent_candidates_raw: list[str] = []
     if isinstance(lineage, dict):
-        raw_parents = lineage.get("parent_candidate_ids", [])
+        lineage_dict = cast("dict[str, Any]", lineage)
+        raw_parents = lineage_dict.get("parent_candidate_ids", [])
         if isinstance(raw_parents, list):
-            parent_candidates_raw.extend(str(p) for p in raw_parents if str(p).strip())
+            raw_parents_list = cast("list[Any]", raw_parents)
+            parent_candidates_raw.extend(str(p) for p in raw_parents_list if str(p).strip())
     if not parent_candidates_raw:
         recombination = metadata.get("recombination", {})
         if isinstance(recombination, dict):
-            raw_parents = recombination.get("parent_candidates", [])
+            recombination_dict = cast("dict[str, Any]", recombination)
+            raw_parents = recombination_dict.get("parent_candidates", [])
             if isinstance(raw_parents, list):
-                parent_candidates_raw.extend(str(p) for p in raw_parents if str(p).strip())
+                raw_parents_list = cast("list[Any]", raw_parents)
+                parent_candidates_raw.extend(str(p) for p in raw_parents_list if str(p).strip())
 
     parent_candidates = [_canonical_candidate_ref(parent, family_prefix) for parent in parent_candidates_raw]
     parent_candidates = list(dict.fromkeys(parent_candidates))

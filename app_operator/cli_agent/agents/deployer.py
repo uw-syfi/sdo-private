@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import subprocess  # noqa: F401 - re-exported for legacy monkeypatch paths
+import subprocess as subprocess
 import time
 from typing import TYPE_CHECKING
 
@@ -18,7 +18,9 @@ from app_operator.cli_agent.agents.health_judge import AppHealthJudge, HealthVer
 from app_operator.cli_agent.agents.repair_agent import RepairAgent
 from app_operator.cli_agent.agents.script_generator_agent import (
     ScriptGeneratorAgent,
-    generate_scripts,  # noqa: F401 — re-exported for backward compat
+)
+from app_operator.cli_agent.agents.script_generator_agent import (
+    generate_scripts as generate_scripts,
 )
 from app_operator.config import DeploymentConfig, OperatorConfig
 from app_operator.exceptions import DeploymentError
@@ -138,7 +140,7 @@ class DeploymentAgent:
             args={"script": script_label},
             stdout=health_result.get("stdout", ""),
             stderr=health_result.get("stderr", ""),
-            exit_code=int(health_ec) if health_ec is not None else -1,
+            exit_code=int(health_ec),
             duration=health_duration,
         )
 
@@ -427,7 +429,7 @@ class DeploymentAgent:
             args={"script": ".sds/deploy.sh start"},
             stdout=deploy_result.get("stdout", ""),
             stderr=deploy_result.get("stderr", ""),
-            exit_code=int(deploy_ec) if deploy_ec is not None else -1,
+            exit_code=int(deploy_ec),
             duration=deploy_duration,
         )
 

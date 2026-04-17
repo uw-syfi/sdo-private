@@ -51,20 +51,21 @@ class MetricsAggregator:
             }
 
         # Aggregate by phase
-        by_phase = defaultdict(list)
+        by_phase: defaultdict[str, list[TrajectoryExample]] = defaultdict(list)
         for example in examples:
             by_phase[example.phase].append(example)
 
-        metrics = {
+        by_phase_metrics: dict[str, dict[str, Any]] = {}
+        metrics: dict[str, Any] = {
             "total_examples": len(examples),
             "total_runs": len({ex.run_id for ex in examples}),
-            "by_phase": {},
+            "by_phase": by_phase_metrics,
             "overall": self._compute_phase_metrics(examples, model),
         }
 
         # Compute metrics per phase
         for phase, phase_examples in by_phase.items():
-            metrics["by_phase"][phase] = self._compute_phase_metrics(phase_examples, model)
+            by_phase_metrics[phase] = self._compute_phase_metrics(phase_examples, model)
 
         return metrics
 
@@ -91,7 +92,7 @@ class MetricsAggregator:
 
         # Group by run for iteration stats — each run contributes one value
         # (all examples in the same run share the same iterations count)
-        runs: dict[str, list] = defaultdict(list)
+        runs: defaultdict[str, list[TrajectoryExample]] = defaultdict(list)
         for ex in examples:
             runs[ex.run_id].append(ex)
 
@@ -122,7 +123,7 @@ class MetricsAggregator:
         successful = [ex for ex in examples if ex.success]
         failed = [ex for ex in examples if not ex.success]
 
-        metrics = {
+        metrics: dict[str, Any] = {
             "count": len(examples),
             "success_rate": round(success_rate, 4),
             "successful_count": len(successful),
@@ -176,7 +177,7 @@ class MetricsAggregator:
         avg_input = total_input / len(examples) if examples else 0
         avg_output = total_output / len(examples) if examples else 0
 
-        metrics = {
+        metrics: dict[str, Any] = {
             "available": True,
             "total_input": total_input,
             "total_output": total_output,
@@ -283,7 +284,7 @@ class MetricsAggregator:
         Returns:
             Dictionary of improvements (positive = better, negative = worse)
         """
-        improvements = {}
+        improvements: dict[str, Any] = {}
 
         # Success rate improvement
         baseline_sr = baseline.get("success_rate")

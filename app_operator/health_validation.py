@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,7 +46,7 @@ class HealthValidationResult:
     reason: str
     source: str
     confidence: float | None = None
-    failure_signals: list[str] = field(default_factory=list)
+    failure_signals: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     agent_verdict: str | None = None
 
 
@@ -54,7 +54,7 @@ class HealthValidationResult:
 class _HeuristicAssessment:
     is_healthy: bool
     reason: str
-    failure_signals: list[str] = field(default_factory=list)
+    failure_signals: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 def validate_health_check_result(
@@ -265,7 +265,7 @@ def _extract_first_json_object(text: str) -> dict[str, Any] | None:
     try:
         obj = json.loads(stripped)
         if isinstance(obj, dict):
-            return obj
+            return cast("dict[str, Any]", obj)
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -277,7 +277,7 @@ def _extract_first_json_object(text: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict):
-            return obj
+            return cast("dict[str, Any]", obj)
     return None
 
 

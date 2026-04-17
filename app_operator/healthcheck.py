@@ -3,6 +3,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from typing import TextIO
 
 from app_operator.logger import logger
 from app_operator.types import CommandResult
@@ -14,7 +15,7 @@ _STDOUT_MARKER = "=== STDOUT ==="
 _STDERR_MARKER = "=== STDERR ==="
 
 
-def _write_to_log(log_file, header: str, stdout: str = "", stderr: str = "") -> None:
+def _write_to_log(log_file: TextIO, header: str, stdout: str = "", stderr: str = "") -> None:
     """Write a structured entry to a health check log file.
 
     Args:

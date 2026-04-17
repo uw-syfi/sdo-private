@@ -82,8 +82,8 @@ class RLMContext:
     health_check_output: str = ""
 
     # Historical context
-    previous_attempts: list[dict[str, Any]] = field(default_factory=list)
-    trajectory_data: dict[str, Any] = field(default_factory=dict)
+    previous_attempts: list[dict[str, Any]] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    trajectory_data: dict[str, Any] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
     # Code analysis context
     dockerfile: str = ""
@@ -105,7 +105,7 @@ class RLMContext:
 
     # Additional ad hoc variables to expose in nested recursive subcalls when a
     # filtered context contains names outside the fixed deployment schema.
-    extra_variables: dict[str, Any] = field(default_factory=dict)
+    extra_variables: dict[str, Any] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
     # Metadata
     attempt_number: int = 0
@@ -167,7 +167,7 @@ class RLMContext:
 
         extra_variables_section = ""
         if self.extra_variables:
-            lines = []
+            lines: list[str] = []
             for key, value in sorted(self.extra_variables.items()):
                 typename = type(value).__name__
                 size_hint = f"{len(str(value))} chars" if isinstance(value, str) else typename
@@ -249,7 +249,7 @@ def _validate_file_refs(script: str, cwd: str) -> str:
         (re.compile(r"\bcat\s+(\S+)"), 1),
     ]
 
-    missing: list = []
+    missing: list[str] = []
     for line in script.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -266,6 +266,10 @@ def _validate_file_refs(script: str, cwd: str) -> str:
     if not missing:
         return "All referenced file paths exist."
     return "\n".join(missing)
+
+
+# Public alias for consumers outside this module.
+validate_file_refs = _validate_file_refs
 
 
 class RLMEnvironment:
@@ -370,27 +374,27 @@ class RLMEnvironment:
 
         def _resolve_in_allowed_root(path: str) -> str:
             """Resolve *path* relative to cwd and reject escapes."""
-            resolved = os.path.realpath(os.path.join(_allowed_root, str(path)))
+            resolved: str = os.path.realpath(os.path.join(_allowed_root, str(path)))
             if not _allowed_root or (not resolved.startswith(_allowed_root + os.sep) and resolved != _allowed_root):
                 raise PermissionError(f"Access denied: {path!r} resolves outside the working directory")
             return resolved
 
-        def _safe_open(path, mode="r", *args, **kwargs):
+        def _safe_open(path: str, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
             """open() wrapper that restricts file access to the working directory."""
             resolved = _resolve_in_allowed_root(path)
-            return open(resolved, mode, *args, **kwargs)
+            return open(resolved, mode, *args, **kwargs)  # pyright: ignore[reportAny]
 
-        def _safe_listdir(path="."):
+        def _safe_listdir(path: str = ".") -> list[str]:
             """os.listdir() wrapper restricted to the working directory."""
             resolved = _resolve_in_allowed_root(path)
             return os.listdir(resolved)
 
-        def _safe_makedirs(path, *args, **kwargs):
+        def _safe_makedirs(path: str, *args: Any, **kwargs: Any) -> None:
             """os.makedirs() wrapper restricted to the working directory."""
             resolved = _resolve_in_allowed_root(path)
             return os.makedirs(resolved, *args, **kwargs)
 
-        def _safe_walk(top=".", *args, **kwargs):
+        def _safe_walk(top: str = ".", *args: Any, **kwargs: Any) -> Any:
             """os.walk() wrapper restricted to the working directory."""
             resolved_top = _resolve_in_allowed_root(top)
             for root, dirs, files in os.walk(resolved_top, *args, **kwargs):
@@ -405,7 +409,7 @@ class RLMEnvironment:
                 ]
                 yield root, dirs, files
 
-        def _safe_chmod(path, mode, *args, **kwargs):
+        def _safe_chmod(path: str, mode: int, *args: Any, **kwargs: Any) -> None:
             """os.chmod() wrapper restricted to the working directory."""
             resolved = _resolve_in_allowed_root(path)
             return os.chmod(resolved, mode, *args, **kwargs)
@@ -421,7 +425,7 @@ class RLMEnvironment:
             sep=os.sep,
         )
 
-        namespace = {
+        namespace: dict[str, Any] = {
             # Working directory — use this to build absolute file paths
             "cwd": self.cwd,
             # Context variables (what LLM can query)
@@ -479,7 +483,7 @@ class RLMEnvironment:
             _fn = self.sub_rlm_fn
             _self = self
 
-            def _sub_rlm(prompt: str, context: dict | None = None) -> str:
+            def _sub_rlm(prompt: str, context: dict[str, Any] | None = None) -> str:
                 return _self.recursive_call(prompt, filtered_context=context, llm_function=_fn)
 
             namespace["sub_rlm"] = _sub_rlm
@@ -581,7 +585,7 @@ class RLMEnvironment:
                 "os": exec_globals["os"],
             }
 
-            def _safe_import(name, *args, **kwargs):
+            def _safe_import(name: str, *args: Any, **kwargs: Any) -> Any:
                 root_name = name.split(".", 1)[0]
                 if root_name in _PREBOUND_MODULES:
                     return _PREBOUND_MODULES[root_name]

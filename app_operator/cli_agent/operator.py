@@ -3,6 +3,7 @@ import signal
 import subprocess
 import threading
 from pathlib import Path
+from types import FrameType
 
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
@@ -10,6 +11,7 @@ from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import Config, load_config
+from app_operator.constants import COMMAND_EXEC_TIMEOUT_SECS
 from app_operator.exceptions import AgentError, MonitoringError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -211,7 +213,7 @@ class AppOperator(OperatorBase):
             self._cleanup()
             self.recorder.finalize("completed" if succeeded else "failed")
 
-    def _handle_shutdown_signal(self, signum: int, frame) -> None:
+    def _handle_shutdown_signal(self, signum: int, frame: FrameType | None) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).
 
         Sets the ``_shutdown_requested`` flag so that running loops exit
@@ -238,7 +240,7 @@ class AppOperator(OperatorBase):
         logger.info("Running deployment script stop command...")
 
         try:
-            result = self.deployer.run_deploy_command("stop", timeout=120)
+            result = self.deployer.run_deploy_command("stop", timeout=COMMAND_EXEC_TIMEOUT_SECS)
             if result["success"]:
                 logger.success("Application stopped successfully")
             else:

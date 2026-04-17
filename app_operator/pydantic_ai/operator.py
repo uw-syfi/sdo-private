@@ -4,6 +4,7 @@ import signal
 import threading
 import time
 from pathlib import Path
+from types import FrameType
 
 from app_operator.config import Config, load_config
 from app_operator.exceptions import DeploymentError, ProcessError
@@ -233,7 +234,7 @@ class PydanticAIOperator(OperatorBase):
 
             self.health_agent.run_check(phase=Phase.MONITORING, cycle=cycle)
 
-    def _handle_shutdown_signal(self, signum: int, frame) -> None:
+    def _handle_shutdown_signal(self, signum: int, frame: FrameType | None) -> None:
         self._shutdown_requested = True
         if signum == signal.SIGINT:
             # Restore default handler so a second Ctrl-C force-quits immediately.

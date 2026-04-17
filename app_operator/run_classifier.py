@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -91,9 +91,9 @@ class RunClassification:
     log_health_rechecks: int = 0
     final_health_exit_code: int | None = None
     final_health_passed: bool | None = None
-    health_contradictions: list[str] = field(default_factory=list)
-    monitor_concerns: list[str] = field(default_factory=list)
-    reasons: list[str] = field(default_factory=list)
+    health_contradictions: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    monitor_concerns: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    reasons: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     health_check_coverage_dropped: bool = False
 
 
@@ -112,8 +112,15 @@ def classify_run(run_dir: Path) -> RunClassification:
     # --- 1. Parse trajectory ---
     traj = _load_trajectory(run_dir)
     if traj is not None:
-        result.trajectory_status = str(traj.get("metadata", {}).get("status", "unknown"))
-        result.trajectory_attempts = len(traj.get("deployment", []))
+        metadata = traj.get("metadata", {})
+        if isinstance(metadata, dict):
+            metadata_dict = cast("dict[str, Any]", metadata)
+            result.trajectory_status = str(metadata_dict.get("status", "unknown"))
+        else:
+            result.trajectory_status = "unknown"
+        deployment = traj.get("deployment", [])
+        if isinstance(deployment, list):
+            result.trajectory_attempts = len(cast("list[Any]", deployment))
     else:
         result.trajectory_status = None
 
@@ -260,7 +267,7 @@ def classify_workdir(workdir: Path) -> list[RunClassification]:
     Returns:
         List of classifications sorted by directory name.
     """
-    results = []
+    results: list[RunClassification] = []
     for child in sorted(workdir.iterdir()):
         if not child.is_dir():
             continue
@@ -276,7 +283,7 @@ def classify_workdir(workdir: Path) -> list[RunClassification]:
 # ---------------------------------------------------------------------------
 
 
-def _load_trajectory(run_dir: Path) -> dict | None:
+def _load_trajectory(run_dir: Path) -> dict[str, Any] | None:
     """Load the most recent trajectory JSON from a run directory."""
     traj_dir = run_dir / ".sds" / "trajectories"
     if not traj_dir.exists():
@@ -285,7 +292,10 @@ def _load_trajectory(run_dir: Path) -> dict | None:
     if not traj_files:
         return None
     try:
-        return json.loads(traj_files[0].read_text())
+        parsed = json.loads(traj_files[0].read_text())
+        if isinstance(parsed, dict):
+            return cast("dict[str, Any]", parsed)
+        return None
     except Exception:
         return None
 

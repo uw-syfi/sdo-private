@@ -3,8 +3,9 @@
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 from app_operator.config import GEPAConfig
@@ -22,8 +23,8 @@ class ExecutionTrace:
     messages: list[dict[str, Any]]
     evaluation_result: dict[str, Any]
     success: bool
-    metric_scores: dict[str, float] = field(default_factory=dict)
-    generated_scripts: dict[str, str] = field(default_factory=dict)
+    metric_scores: dict[str, float] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
+    generated_scripts: dict[str, str] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
     efficiency: Any = None
 
 
@@ -36,10 +37,10 @@ class PromptReflector:
 
     def __init__(self, gepa_config: GEPAConfig) -> None:
         self._gepa_config = gepa_config
-        self._llm = None
+        self._llm: BaseChatModel | None = None
         self._llm_lock = threading.Lock()
 
-    def _get_llm(self):
+    def _get_llm(self) -> BaseChatModel:
         """Build the reflection LLM using create_chat_model directly."""
         if self._llm is None:
             with self._llm_lock:
@@ -201,7 +202,7 @@ The merged prompt text here.
         if not traces:
             return "(no traces available)"
 
-        parts = []
+        parts: list[str] = []
         for i, trace in enumerate(traces):
             parts.append(f"### Trace {i + 1} ({trace.agent_type} / {trace.phase})")
             parts.append(f"Success: {trace.success}")
@@ -286,7 +287,7 @@ The merged prompt text here.
         Note: evaluator.py has a parallel implementation that operates on
         raw trajectory dicts rather than ExecutionTrace objects.
         """
-        patterns = []
+        patterns: list[str] = []
         for trace in traces:
             if trace.success:
                 continue
@@ -352,9 +353,18 @@ and potential issues
         response = llm.invoke([HumanMessage(content=prompt)])
         # Some models (e.g. Gemini with thinking) return content as a list
         # of parts; extract text parts and join them.
-        raw = response.content
+        raw = cast(
+            "str | list[str | dict[str, Any]]",
+            response.content,  # pyright: ignore[reportUnknownMemberType]
+        )
         if isinstance(raw, list):
-            response_text = "\n".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in raw)
+            parts: list[str] = []
+            for part in raw:
+                if isinstance(part, dict):
+                    parts.append(str(part.get("text", "")))
+                else:
+                    parts.append(str(part))
+            response_text = "\n".join(parts)
         else:
             response_text = raw
 

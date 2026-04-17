@@ -88,7 +88,7 @@ class CodeAnalyzerAgent:
 
     def _gather_repo_content(self) -> str:
         """Read key repository files and return their contents for LLM context."""
-        parts = []
+        parts: list[str] = []
         _MAX_FILE_BYTES = 8_000
 
         def _read(path: object) -> str:
@@ -189,7 +189,7 @@ class CodeAnalyzerAgent:
                     logger.success("Code analysis completed successfully via response parsing fallback")
                     r.add_assistant_message("Code analysis completed successfully via response parsing fallback")
                     return True
-                missing = []
+                missing: list[str] = []
                 if not self.filesystem.exists(self.analysis_file):
                     missing.append(str(self.analysis_file))
                 if not self.filesystem.exists(self.issues_file):
