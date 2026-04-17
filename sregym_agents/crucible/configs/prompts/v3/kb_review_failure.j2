@@ -1,0 +1,86 @@
+You are reviewing a failed diagnosis workflow for a Kubernetes SRE agent.
+
+Classify why the diagnosis run failed relative to the recovery diagnosis, then decide how to curate
+the recovery-produced diagnosis playbook candidate.
+Use one or more failure modes from:
+- triage_failure
+- missing_playbook
+- retrieval_failure
+- playbook_validation_failure
+
+Then choose a recommended action from:
+- add_playbook
+- merge_playbooks
+- reject_playbook
+
+Failure mode definitions:
+- `triage_failure` — the triage stage missed the right symptoms; it is not itself a playbook failure. Applies when a symptom the grounded fault class would reasonably produce was knowable but not surfaced in triage output (no anomaly line, no event, no log captured).
+- `missing_playbook` — no playbook in `Existing diagnosis playbooks` covers the **same root cause class** as the candidate. An *adjacent* or *sibling* playbook (e.g., an auth-enforcement playbook when the fault is privilege-revocation) is not the same class — if the only related playbooks are adjacent, this is `missing_playbook`, not `retrieval_failure`.
+- `retrieval_failure` — a playbook covering the **same root cause class** as the candidate existed but did not route this incident to itself. This is broader than "LTM returned the wrong top-1" — see the sub-types below.
+- `playbook_validation_failure` — a playbook covering the **same root cause class** was selected and its verification procedure ran, but those checks failed to confirm the real fault (checks too narrow, wrong placeholders, didn't account for this manifestation).
+
+`relevant_existing_playbooks` — meaning and scope:
+- List ONLY playbooks that cover the **same root cause class** as the candidate. "LTM considered this slug" is not the bar. "The candidate's root cause is a specific instance of this playbook's root cause, or the two cover the same class" is the bar.
+- If you find yourself reasoning "this existing playbook is about a DIFFERENT scenario" or "adjacent but not the same," do NOT list it. Those adjacent findings belong in `reasoning` as context, not in `relevant_existing_playbooks`.
+- Empty `relevant_existing_playbooks` is normal and correct when the candidate captures a root cause the KB does not yet cover. In that case the primary mode is `missing_playbook`.
+
+Diagnosing `retrieval_failure` robustly (READ THIS before classifying):
+A `retrieval_failure` covers any of these sub-cases — treat them all as retrieval_failure, not triage_failure:
+
+1. **Trigger-vocabulary mismatch** (most common). An existing playbook covers the grounded root cause class, but its `when_to_consider` list does not enumerate the specific symptoms that the diagnosis run's triage actually surfaced. LTM matches surfaced symptoms to `when_to_consider` entries; missing vocabulary guarantees a miss. To check: read each existing playbook's `when_to_consider` against the triage anomalies in `<diagnosis_run>`, and ask whether any triage signal would plausibly key-match any trigger in the relevant playbook. If no match path exists, that is a routing gap — classify as `retrieval_failure` and merge to extend `when_to_consider` with the symptom vocabulary that triage actually produced (quote the exact surfaced wording where possible).
+
+2. **Ranking / distractor dominance**. The right playbook was in the pool but ranked below a distractor whose `when_to_consider` keywords matched the noisiest triage line (e.g., a generic "connection refused" playbook outranks a specific auth playbook because triage foregrounded a network-level symptom). Still `retrieval_failure`: the fix is sharpening the relevant playbook's triggers so they beat the distractor for this symptom profile.
+
+3. **Retrieval-caveat dismissal**. LTM surfaced the relevant playbook or anomaly but reasoned it away as "orthogonal" or "unrelated to the main symptom" in a caveat / novel_cause_signals field. Common when a playbook's `root_cause` or `summary` is scoped too narrowly to be recognized as applicable. Still `retrieval_failure`: the KB framing caused the dismissal.
+
+Disambiguation between `triage_failure` and `retrieval_failure`:
+- If triage surfaced a signal that a reasonable `when_to_consider` entry would match, but the relevant playbook was still not retrieved → `retrieval_failure` (the KB vocabulary or ranking is at fault, not triage). Do NOT default to `triage_failure` in this case.
+- If triage did NOT surface any signal that the grounded fault class would produce (the symptom simply wasn't reported) → `triage_failure`.
+- If triage surfaced a *semantically adjacent but mis-framed* signal (e.g., reported "access control disabled" when the fault is "privileges revoked"), that is usually **both**: a partial `triage_failure` for the framing and a `retrieval_failure` because no playbook's triggers cover the as-reported wording. List both in `failure_modes`; pick `retrieval_failure` as primary if the routing fix is more actionable.
+- Runs may exhibit multiple modes. Populate `failure_modes` with the complete applicable set — do not leave it empty unless only one mode applies. The primary is the most actionable one.
+
+Required cross-checks before emitting the decision:
+- Scan `<diagnosis_run>` for the triage report / anomaly list and for the LTM retrieval output (candidate slugs, caveats, novel_cause_signals).
+- For every candidate in `relevant_existing_playbooks`, quote (mentally) the surfaced triage symptoms and test them against that playbook's `when_to_consider`. Record the specific vocabulary gap or match in `reasoning`.
+- If you choose `triage_failure` as primary, you must have concretely checked that no existing playbook's triggers could have matched the surfaced symptoms — otherwise prefer `retrieval_failure`.
+
+Tools available:
+- `read_playbook(playbook_type, slug)` — load the full content (summary, triage_checks, fault_localization_checks, verification_checks, required_evidence, known_confounders) of an existing playbook. `playbook_type` is `"diagnosis"` or `"mitigation"`; `slug` must come from `Existing diagnosis playbooks`. Call this when front-matter alone is not enough — specifically to judge `playbook_validation_failure` (you need to read `verification_checks` / `required_evidence`), to confirm a merge target's body is compatible with the candidate, or to audit whether an existing playbook's body looks grounded vs hallucinated. Use sparingly — one or two targeted reads, not exhaustive loading.
+
+Mode ↔ action decision tree (apply in order):
+1. Does any existing playbook cover the **same root cause class** as the candidate? Use the strict bar above, not "LTM mentioned it."
+   - **No** → `primary_failure_mode` = `missing_playbook`, `relevant_existing_playbooks` = [], `recommended_action` = `add_playbook`.
+   - **Yes** → list those slugs in `relevant_existing_playbooks` and continue to step 2.
+2. Was the same-class playbook retrieved AND did its verification procedure run on the target?
+   - **Yes, but verification failed to confirm the real fault** → `primary_failure_mode` = `playbook_validation_failure`, `recommended_action` = `merge_playbooks` (extend checks) or `reject_playbook` (if the candidate adds nothing).
+   - **No (not retrieved, or ranked low, or dismissed via caveat)** → `primary_failure_mode` = `retrieval_failure`, `recommended_action` = `merge_playbooks` (extend triggers/disambiguators) or `reject_playbook` (if the candidate duplicates existing content).
+
+Forbidden combinations (these are schema violations, not just stylistic preferences):
+- `retrieval_failure` + `add_playbook` — incoherent: if a same-class playbook exists, the fix is to extend it (merge) or drop the candidate (reject); adding a duplicate compounds retrieval. If you're tempted to add, it means the existing playbook is actually adjacent-not-same → flip the mode to `missing_playbook` and drop the slug from `relevant_existing_playbooks`.
+- `playbook_validation_failure` + `add_playbook` — same reasoning.
+- `missing_playbook` + `merge_playbooks` — contradictory (nothing to merge into).
+- `retrieval_failure` or `playbook_validation_failure` with empty `relevant_existing_playbooks` — the mode asserts a same-class playbook exists; the list must reflect that.
+
+Rules:
+- If there are no existing diagnosis playbooks, you must not choose `merge_playbooks`.
+- `merge_playbooks` requires one or more `target_slugs`, and every target slug must come from `relevant_existing_playbooks`.
+- `add_playbook` must not include any target slugs.
+- `reject_playbook` must include a concrete `rejection_reason`.
+- Prefer `reject_playbook` over weak guesses.
+- `reasoning` must cite the specific triage signal(s) and the specific `when_to_consider` entries you compared against.
+
+Existing diagnosis playbooks:
+{{ diagnosis_cards }}
+
+Recovery-produced diagnosis playbook candidate:
+```json
+{{ candidate_playbook_json }}
+```
+
+<diagnosis_run>
+{{ diagnosis_run_md }}
+</diagnosis_run>
+
+<recovery_diagnosis_run>
+{{ recovery_diagnosis_run_md }}
+</recovery_diagnosis_run>

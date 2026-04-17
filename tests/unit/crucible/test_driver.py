@@ -1,4 +1,4 @@
-"""Unit tests for sregym_agents.crucible.driver._wait_for_stage."""
+"""Unit tests for sregym_agents.crucible.driver._wait_for_stage and _signal_cleanup."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from sregym_agents.crucible.driver import _wait_for_stage
+from sregym_agents.crucible.driver import _signal_cleanup, _wait_for_stage
 
 
 def _make_response(stage: str) -> MagicMock:
@@ -98,3 +98,31 @@ class TestWaitForStage:
 
         for c in mock_sleep.call_args_list:
             assert c.args[0] <= 30.0
+
+
+class TestSignalCleanup:
+    """Crucible always POSTs /cleanup after orchestrator.run() returns, to release
+    the conductor's deferred-teardown gate. The call must tolerate network errors
+    so a flaky conductor connection does not mask orchestrator failures."""
+
+    def test_posts_cleanup_to_api(self):
+        resp = MagicMock(status_code=200, text='{"status":"ok"}')
+        with patch("sregym_agents.crucible.driver.requests.post", return_value=resp) as mock_post:
+            _signal_cleanup("http://localhost:8000")
+        mock_post.assert_called_once()
+        url = mock_post.call_args.args[0]
+        assert url == "http://localhost:8000/cleanup"
+
+    def test_swallows_exceptions(self):
+        with patch(
+            "sregym_agents.crucible.driver.requests.post",
+            side_effect=requests.ConnectionError("refused"),
+        ):
+            # Must not raise — cleanup-signal failure should not crash the driver.
+            _signal_cleanup("http://localhost:8000")
+
+    def test_uses_timeout(self):
+        resp = MagicMock(status_code=200, text="")
+        with patch("sregym_agents.crucible.driver.requests.post", return_value=resp) as mock_post:
+            _signal_cleanup("http://localhost:8000")
+        assert mock_post.call_args.kwargs.get("timeout") is not None

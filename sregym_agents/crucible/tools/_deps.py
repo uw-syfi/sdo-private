@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible.agents.base import RunSubagent
     from sregym_agents.crucible.config import CrucibleConfig
+    from sregym_agents.crucible.knowledge_base.root_cause import KBView
     from sregym_agents.crucible.tools._kb_tools import TriagePriors, TriageReport
 
 logger = logging.getLogger(__name__)
@@ -39,20 +40,6 @@ class SRESubmission(BaseModel):
             "Full causal chain: misconfigured field → mechanism → observed symptom "
             "(diagnosis stage only). Leave empty for mitigation stage."
         ),
-    )
-    reflection: str = Field(
-        default="",
-        description=(
-            "Recovery only: 2-3 sentence analysis of why the original agent's "
-            "diagnosis or mitigation was wrong — what investigative steps were missed "
-            "or what evidence was misinterpreted, and what lesson follows. "
-            "Leave empty for normal diagnosis and mitigation stages."
-        ),
-    )
-    message_history: list[Any] = Field(
-        default_factory=list,
-        exclude=True,
-        description="Internal only: captured agent message history for follow-on phases.",
     )
 
 
@@ -100,7 +87,6 @@ class SharedState:
     answer: str | None = None
     answer_justification: str | None = None
     answer_causal_chain: str | None = None
-    answer_reflection: str | None = None
     independent_findings_submitted: bool = False
     hypothesis_revealed: bool = False
     benchmark_block: str = ""
@@ -119,13 +105,11 @@ class SREDeps:
     iteration: int
     stage: str  # "diagnosis" | "mitigation"
     model_id: Model | str
+    diagnosis_shared_file: SharedFile | None = None
     renderer: PromptRenderer = field(default_factory=lambda: PromptRenderer("v1"))
     state: SharedState = field(default_factory=SharedState)
     config: CrucibleConfig | None = None
-    lt_summary_file: Path | None = None
-    incidents_dir: Path | None = None
-    playbooks_dir: Path | None = None
-    mitigation_playbooks_dir: Path | None = None
+    kb_view_dir: Path | None = None
     ltm_call_count: int = 0
     ltm_call_budget: int = 1
     triage_report: TriageReport | None = None
@@ -135,11 +119,20 @@ class SREDeps:
     stage_outputs_file: Path | None = None
     usage_collector: UsageCollector | None = None
     run_subagent: RunSubagent | None = None
+    hypothesis_verified: bool = False
 
     @property
     def enable_ltm_verified_direct_submit(self) -> bool:
         """Shorthand -- reads the flag from the embedded CrucibleConfig."""
         return self.config.enable_ltm_verified_direct_submit if self.config else False
+
+    @property
+    def kb_view(self) -> KBView | None:
+        if self.kb_view_dir is None:
+            return None
+        from sregym_agents.crucible.knowledge_base.root_cause import KBView
+
+        return KBView(self.kb_view_dir)
 
 
 @dataclass

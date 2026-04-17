@@ -29,6 +29,40 @@ def _fmt_k(n: int | None) -> str:
     return f"{round(n / 1000)}k"
 
 
+def format_usage_prefix(
+    *,
+    agent_name: str,
+    elapsed_seconds: float | None,
+    used_tokens: int | None,
+    context_window: int | None,
+) -> str:
+    elapsed = "0.0s" if elapsed_seconds is None else f"{elapsed_seconds:.1f}s"
+    used = _fmt_k(used_tokens)
+    limit = _fmt_k(context_window)
+    return f"[{agent_name} | {elapsed} | {used}/{limit}]"
+
+
+def log_agent_text(
+    logger: logging.Logger,
+    *,
+    agent_name: str,
+    text: str,
+    elapsed_seconds: float | None,
+    used_tokens: int | None,
+    context_window: int | None = None,
+) -> None:
+    logger.info(
+        "%s <text> %s",
+        format_usage_prefix(
+            agent_name=agent_name,
+            elapsed_seconds=elapsed_seconds,
+            used_tokens=used_tokens,
+            context_window=context_window,
+        ),
+        text,
+    )
+
+
 def tool_call_failed(content: Any) -> bool:
     if not isinstance(content, dict):
         return False
@@ -58,9 +92,13 @@ class TurnLoggingMiddleware(AgentMiddleware):
         return f"{time.monotonic() - self._start_time:.1f}s"
 
     def _usage_prefix(self) -> str:
-        used = _fmt_k(self._agent.context_window_token_usage)
-        limit = _fmt_k(self._context_window)
-        return f"[{self._agent.agent_name} | {self._elapsed()} | {used}/{limit}]"
+        elapsed = None if self._start_time is None else time.monotonic() - self._start_time
+        return format_usage_prefix(
+            agent_name=self._agent.agent_name,
+            elapsed_seconds=elapsed,
+            used_tokens=self._agent.context_window_token_usage,
+            context_window=self._context_window,
+        )
 
     def on_function_tool_call(self, event: Any) -> None:
         self._logger.info(
@@ -109,7 +147,14 @@ class TurnLoggingMiddleware(AgentMiddleware):
         if isinstance(event.part, ThinkingPart) and event.part.has_content():
             self._logger.info("%s <thinking> %s", self._usage_prefix(), event.part.content)
         elif isinstance(event.part, TextPart) and event.part.content:
-            self._logger.info("%s <text> %s", self._usage_prefix(), event.part.content)
+            log_agent_text(
+                self._logger,
+                agent_name=self._agent.agent_name,
+                text=event.part.content,
+                elapsed_seconds=None if self._start_time is None else time.monotonic() - self._start_time,
+                used_tokens=self._agent.context_window_token_usage,
+                context_window=self._context_window,
+            )
 
     def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
         output = result.output

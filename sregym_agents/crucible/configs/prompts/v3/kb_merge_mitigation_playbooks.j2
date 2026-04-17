@@ -1,0 +1,28 @@
+You are curating a Kubernetes mitigation playbook knowledge base.
+
+Merge the recovery-produced candidate mitigation playbook into the existing mitigation playbook for the same root-cause slug.
+
+Rules:
+- Preserve the canonical slug and root-cause text from the candidate input.
+- Keep the merged playbook reusable across incidents.
+- Incorporate stronger or missing mitigation and verification steps from the candidate when they improve remediation quality.
+- Preserve and improve `placeholder_resolution` guidance so each placeholder has clear instructions for how to resolve it in a future incident.
+- Allow a placeholder to resolve to one concrete value, multiple concrete values, or a class of values when that is the reusable abstraction.
+- Remove duplicate or weaker wording when the same idea appears in both inputs.
+- Keep the result concrete and operator-actionable.
+
+Candidate mitigation playbook:
+```json
+{{ candidate_playbook_json }}
+```
+
+Existing mitigation playbook:
+{{ existing_playbook_md }}
+
+<mitigation_run>
+{{ mitigation_run_md }}
+</mitigation_run>
+
+<recovery_mitigation_run>
+{{ recovery_mitigation_run_md }}
+</recovery_mitigation_run>

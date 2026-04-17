@@ -5,31 +5,32 @@ from __future__ import annotations
 import abc
 import dataclasses
 import re
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from libs.pydantic_agent import UsageCollector
-    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
+    from pathlib import Path
 
-KB_APPEND_FILENAME = "knowledge.md"
-MAX_INJECTED_INCIDENTS = 100
+    from libs.pydantic_agent import UsageCollector
 
 
 @dataclasses.dataclass
 class InjectedKB:
     """Paths to KB files injected into the experiment environment."""
 
-    summary: Path | None = None
-    lessons: Path | None = None
-    architecture: Path | None = None
-    incidents_dir: Path | None = None
+    kb_view_dir: Path | None = None
     diagnosis_priors: Path | None = None
     triage_priors: Path | None = None
     arbitration_priors: Path | None = None
     verification_priors: Path | None = None
-    playbooks_dir: Path | None = None
-    mitigation_playbooks_dir: Path | None = None
+    architecture: Path | None = None
+
+    def get_view(self):
+        """Build a KB view for the injected scope."""
+        if self.kb_view_dir is None:
+            return None
+        from .root_cause import KBView
+
+        return KBView(self.kb_view_dir)
 
 
 @dataclasses.dataclass
@@ -43,49 +44,6 @@ class SessionFiles:
         """Read content from all existing session files."""
         files = [f for f in (self.diagnosis, self.mitigation) if f is not None]
         return [f.read_text() for f in files if f.exists()]
-
-
-BENCHMARK_RESULT_RE = re.compile(r"<benchmark_result>.*?</benchmark_result>", re.DOTALL)
-CITATION_RE = re.compile(r"\{\{ref:(incidents/[^}]+)\}\}")
-MAX_CITATION_RETRIES = 2
-
-
-def strip_benchmark_result(text: str) -> str:
-    """Remove all <benchmark_result>...</benchmark_result> blocks from text."""
-    return BENCHMARK_RESULT_RE.sub("", text).strip()
-
-
-def extract_citations(text: str) -> list[str]:
-    """Extract all {{ref:incidents/...}} citation values from text."""
-    result: list[str] = CITATION_RE.findall(text)
-    return result
-
-
-def find_invalid_citations(text: str, incidents_dir: Path) -> list[str]:
-    """Return citation values that reference non-existent incident files."""
-    citations = extract_citations(text)
-    invalid: list[str] = []
-    for ref in citations:
-        # ref is like "incidents/20260324_010224.md"
-        filename = Path(ref).name
-        if not (incidents_dir / filename).exists():
-            invalid.append(ref)
-    return invalid
-
-
-def find_invalid_citations_unified(text: str, kb_dir: Path) -> list[str]:
-    """Return citation values that reference non-existent incident files (unified KB).
-
-    In unified mode citations include the app subdirectory, e.g.
-    ``incidents/myapp/20260324_010224.md``.  Resolve against *kb_dir* directly.
-    """
-    citations = extract_citations(text)
-    return [ref for ref in citations if not (kb_dir / ref).exists()]
-
-
-def strip_citation_wrappers(text: str) -> str:
-    """Replace {{ref:incidents/foo.md}} with incidents/foo.md."""
-    return CITATION_RE.sub(r"\1", text)
 
 
 def sanitize_app_name(name: str) -> str:
@@ -105,7 +63,6 @@ class KnowledgeBase(abc.ABC):
         self,
         session_files: SessionFiles,
         stage_outputs_file: Path | None = None,
-        recovery_reflection: RecoveryReflection | dict[str, Any] | None = None,
         diagnosis_succeeded: bool = False,
         mitigation_succeeded: bool = False,
         usage_collector: UsageCollector | None = None,

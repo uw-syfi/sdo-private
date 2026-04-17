@@ -24,6 +24,83 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Submission gate — rejects diagnosis submissions that skip verify_hypothesis
+# ---------------------------------------------------------------------------
+
+_GATE_REMINDER_TEMPLATE = (
+    "\n### Iteration {iteration} — Submission blocked "
+    "({rejections}/{max_rejections})\n"
+    "You attempted to submit a diagnosis without calling "
+    "`verify_hypothesis` and receiving an `accept` or "
+    "`accept_partial` verdict. Every diagnosis must be verified "
+    "by calling `verify_hypothesis(root_cause_description, "
+    "causal_chain, root_cause_resources)` before submission. "
+    "If the verifier rejected your last attempt, revise the "
+    "hypothesis to address `causal_chain_rejection` and "
+    "re-verify — do not submit until accepted.\n"
+)
+
+
+class SubmissionGate:
+    """Tracks verify_hypothesis gate rejections for a single SREAgent.run() call.
+
+    The gate rejects up to ``max_rejections`` times, then allows the
+    submission through to ensure forward progress.  On rejection it
+    returns a reminder prompt so the caller can resume the agent in the
+    same context window.
+    """
+
+    def __init__(self, *, max_rejections: int = 2) -> None:
+        self.max_rejections = max_rejections
+        self.rejections = 0
+
+    def check(
+        self,
+        result: AgentResult[SRESubmission],
+        *,
+        stage: str,
+        hypothesis_verified: bool,
+        iteration: int,
+        shared_file: SharedFile,
+    ) -> str | None:
+        """Return a reminder prompt if the submission should be rejected, else ``None``.
+
+        When ``None`` is returned the caller should accept the result as-is.
+        """
+        if stage != "diagnosis":
+            return None
+        if not (result.completed and result.output is not None):
+            return None
+        if hypothesis_verified:
+            return None
+
+        self.rejections += 1
+        if self.rejections >= self.max_rejections:
+            logger.warning(
+                "[submission-gate] Allowing submission after %d rejections to ensure forward progress.",
+                self.rejections,
+            )
+            return None
+
+        logger.warning(
+            "[submission-gate] Rejecting diagnosis submission (%d/%d): "
+            "verify_hypothesis was not called or did not return "
+            "accept/accept_partial.",
+            self.rejections,
+            self.max_rejections,
+        )
+        reminder = _GATE_REMINDER_TEMPLATE.format(
+            iteration=iteration,
+            rejections=self.rejections,
+            max_rejections=self.max_rejections,
+        )
+        try:
+            shared_file.append(reminder)
+        except Exception as e:
+            logger.warning("Error writing submission-gate reminder to shared file: %s", e)
+        return reminder
+
 
 @dataclass
 class SREAgentConfig:
@@ -34,10 +111,7 @@ class SREAgentConfig:
     """
 
     config: CrucibleConfig
-    lt_summary_file: Path | None = None
-    incidents_dir: Path | None = None
-    playbooks_dir: Path | None = None
-    mitigation_playbooks_dir: Path | None = None
+    kb_view_dir: Path | None = None
     triage_priors: TriagePriors | None = None
     verification_guidance: str = ""
     stage_outputs_file: Path | None = None
@@ -70,7 +144,6 @@ class SREAgent:
     def _assemble_tools(self, stage: str) -> list[Any]:
         """Return the tool list for the given stage."""
         from sregym_agents.crucible.tools import (
-            check_hypothesis_coverage,
             exec_bash,
             grep,
             read_file,
@@ -78,15 +151,18 @@ class SREAgent:
             search_prior_mitigations,
             str_replace_file,
             triage_cluster,
+            verify_hypothesis,
             write_file,
         )
 
         tools: list[Any] = [exec_bash, read_file, grep, write_file, str_replace_file]
+        if stage == "mitigation":
+            tools.append(search_prior_mitigations)
         if stage != "mitigation":
             tools.append(triage_cluster)
-        tools.append(search_prior_incidents if stage == "diagnosis" else search_prior_mitigations)
+            tools.append(search_prior_incidents)
         if stage != "mitigation":
-            tools.append(check_hypothesis_coverage)
+            tools.append(verify_hypothesis)
         return tools
 
     @property
@@ -124,6 +200,7 @@ class SREAgent:
         *,
         namespace: str,
         shared_file: SharedFile,
+        diagnosis_shared_file: SharedFile | None,
         iteration: int,
         stage: str,
         state: SharedState,
@@ -140,13 +217,11 @@ class SREAgent:
             iteration=iteration,
             stage=stage,
             model_id=self._model_id,
+            diagnosis_shared_file=diagnosis_shared_file,
             renderer=self._renderer,
             state=state,
             config=cfg.config,
-            lt_summary_file=cfg.lt_summary_file if ltm_on else None,
-            incidents_dir=cfg.incidents_dir if ltm_on else None,
-            playbooks_dir=cfg.playbooks_dir if ltm_on else None,
-            mitigation_playbooks_dir=(cfg.mitigation_playbooks_dir if ltm_on else None),
+            kb_view_dir=cfg.kb_view_dir if ltm_on else None,
             triage_priors=cfg.triage_priors,
             verification_guidance=cfg.verification_guidance,
             stage_outputs_file=cfg.stage_outputs_file,
@@ -162,6 +237,8 @@ class SREAgent:
         iteration: int,
         shared_content: str,
         shared_file_str: str,
+        diagnosis_shared_content: str = "",
+        diagnosis_shared_file_str: str = "",
         architecture_content: str = "",
         lt_summary_content: str = "",
         lessons_content: str = "",
@@ -177,6 +254,8 @@ class SREAgent:
             iteration=iteration,
             shared_content=shared_content,
             shared_file=shared_file_str,
+            diagnosis_shared_content=diagnosis_shared_content,
+            diagnosis_shared_file=diagnosis_shared_file_str,
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,
@@ -200,6 +279,7 @@ class SREAgent:
         iteration: int,
         shared_file: SharedFile,
         shared_content: str,
+        diagnosis_shared_file: SharedFile | None = None,
         architecture_content: str = "",
         lt_summary_content: str = "",
         lessons_content: str = "",
@@ -222,11 +302,18 @@ class SREAgent:
         deps = self._build_deps(
             namespace=app_info.get("namespace", "default"),
             shared_file=shared_file,
+            diagnosis_shared_file=diagnosis_shared_file,
             iteration=iteration,
             stage=stage,
             state=state,
             usage_collector=usage_collector,
         )
+
+        diagnosis_shared_content = ""
+        diagnosis_shared_file_str = ""
+        if diagnosis_shared_file is not None:
+            diagnosis_shared_content = diagnosis_shared_file.read()
+            diagnosis_shared_file_str = str(diagnosis_shared_file)
 
         system_prompt, user_prompt = self._render_prompts(
             stage,
@@ -234,6 +321,8 @@ class SREAgent:
             iteration=iteration,
             shared_content=shared_content,
             shared_file_str=str(shared_file),
+            diagnosis_shared_content=diagnosis_shared_content,
+            diagnosis_shared_file_str=diagnosis_shared_file_str,
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,
@@ -248,17 +337,40 @@ class SREAgent:
 
         tools = self._assemble_tools(stage)
 
-        result: AgentResult[SRESubmission] = await self._driver.run(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            tools=tools,
-            output_type=SRESubmission,
-            agent_name=f"sre-{stage}",
-            model_settings=self._model_settings(),
-            usage_collector=usage_collector,
-            deps=deps,
-            run_ctx={"stage": stage, "iteration": iteration, "role": "sre"},
-        )
+        gate = SubmissionGate()
+        current_prompt = user_prompt
+        message_history: list[Any] | None = None
+
+        while True:
+            run_kwargs: dict[str, Any] = {
+                "prompt": current_prompt,
+                "system_prompt": system_prompt,
+                "tools": tools,
+                "output_type": SRESubmission,
+                "agent_name": f"sre-{stage}",
+                "model_settings": self._model_settings(),
+                "usage_collector": usage_collector,
+                "deps": deps,
+                "run_ctx": {"stage": stage, "iteration": iteration, "role": "sre"},
+            }
+            if message_history is not None:
+                run_kwargs["message_history"] = message_history
+
+            result: AgentResult[SRESubmission] = await self._driver.run(**run_kwargs)
+
+            # Check the verify_hypothesis gate; on rejection the agent is
+            # resumed in the same context window with a reminder prompt.
+            reminder = gate.check(
+                result,
+                stage=stage,
+                hypothesis_verified=deps.hypothesis_verified,
+                iteration=iteration,
+                shared_file=shared_file,
+            )
+            if reminder is None:
+                break
+            message_history = list(result.messages or [])
+            current_prompt = reminder
 
         # Post-run: extract state from deps (tools update state directly)
         if result.completed and result.output is not None:
@@ -267,7 +379,6 @@ class SREAgent:
             state.answer = output.answer
             state.answer_justification = output.justification
             state.answer_causal_chain = output.causal_chain
-            state.answer_reflection = output.reflection
 
             # Write iteration entry to shared file
             if stage == "diagnosis":

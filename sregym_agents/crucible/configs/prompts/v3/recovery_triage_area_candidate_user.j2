@@ -1,0 +1,26 @@
+You have already completed the grounded recovery diagnosis for this incident. Using that context,
+produce one reusable triage-area candidate that captures what early triage should have done better.
+
+Application: {{ app_name }} / Namespace: {{ namespace }}
+{% if descriptions %}
+{{ descriptions }}
+{% endif %}
+
+Original failed diagnosis:
+- answer: {{ original_answer }}
+{% if original_justification %}- justification: {{ original_justification }}
+{% endif %}
+
+Grounded diagnosis:
+- answer: {{ grounded_answer }}
+- justification: {{ grounded_justification }}
+
+Original diagnosis stage outputs:
+---
+{{ stage_outputs }}
+---
+
+Return:
+- `area_name`: reusable investigation lens
+- `hints`: concise early triage checks that would have surfaced the right symptoms sooner
+- `grounding`: short factual observations from this incident that justify the candidate

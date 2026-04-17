@@ -9,3 +9,11 @@ agents:
     kickoff_workdir: ../..
     kickoff_env:
       PYTHONUNBUFFERED: "1"
+    wait_for_natural_exit: true
+    # Crucible runs recovery-diagnosis + playbook generation AFTER submitting
+    # mitigation. Those steps need the app's namespace to still exist, so
+    # sregym must hold teardown (recover_fault + undeploy + reconcile) until
+    # the agent explicitly POSTs /cleanup. Without this flag the conductor
+    # would tear down synchronously inside the final /submit response, and
+    # the reflection agent would see an empty namespace.
+    defer_cleanup: true

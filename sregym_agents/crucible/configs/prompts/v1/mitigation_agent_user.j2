@@ -11,6 +11,15 @@ Current shared session state:
 
 The shared session file is at: {{ shared_file }}
 
+{% if diagnosis_shared_content|default('') %}
+Diagnosis shared session state:
+---
+{{ diagnosis_shared_content }}
+---
+
+The diagnosis shared file is at: {{ diagnosis_shared_file|default('') }}
+
+{% endif %}
 {% if architecture_content %}
 Application architecture reference:
 ---
@@ -30,5 +39,6 @@ Summary of findings from previous incidents:
 ---
 {% endif %}
 
-Begin your mitigation. Read the shared file for the diagnosis results and any prior
-judge feedback, implement the fix, verify it, then provide your final answer.
+Begin your mitigation. Read the diagnosis shared file first, extract the faulting
+component(s), then read the mitigation shared file for any carried-over context or
+judge feedback. Implement the fix, verify it, then provide your final answer.

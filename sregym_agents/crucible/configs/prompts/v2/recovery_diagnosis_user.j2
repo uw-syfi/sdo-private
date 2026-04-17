@@ -15,6 +15,10 @@ Application: {{ app_name }} / Namespace: {{ namespace }}
 {{ descriptions }}
 {% endif %}
 
+This recovery diagnosis may run after mitigation has already changed the cluster. If the live
+symptom is gone, use the benchmark reasoning plus any remaining config, log, event, and shared-file
+evidence to reconstruct the original causal chain rather than insisting on reproducing the fault.
+
 Investigate the cluster to build a complete causal chain from the true root cause to the
 observed symptoms, and reflect on why the original agent went wrong. Submit:
 - `answer`: the correct root cause (specific resource + field + wrong value)

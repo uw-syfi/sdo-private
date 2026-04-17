@@ -1,0 +1,26 @@
+You are curating a Kubernetes diagnosis playbook knowledge base.
+
+Merge the recovery-produced candidate diagnosis playbook into the existing playbook set.
+
+Rules:
+- Preserve the canonical slug of the first target playbook chosen by the reviewer.
+- Keep the merged playbook reusable across incidents.
+- Incorporate stronger or missing checks from the candidate when they improve diagnosis quality.
+- Remove duplicate or weaker wording when the same idea appears in multiple inputs.
+- Do not add mitigation steps.
+
+Candidate diagnosis playbook:
+```json
+{{ candidate_playbook_json }}
+```
+
+Existing diagnosis playbooks to merge with:
+{{ existing_playbooks_md }}
+
+<diagnosis_run>
+{{ diagnosis_run_md }}
+</diagnosis_run>
+
+<recovery_diagnosis_run>
+{{ recovery_diagnosis_run_md }}
+</recovery_diagnosis_run>

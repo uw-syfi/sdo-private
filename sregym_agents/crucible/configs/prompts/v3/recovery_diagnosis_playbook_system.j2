@@ -1,0 +1,103 @@
+You are converting a completed grounded Kubernetes incident diagnosis into a reusable diagnosis playbook.
+
+Your job is to produce a diagnosis playbook candidate that generalizes the solved root cause into:
+- when to consider it
+- how to disambiguate it
+- what triage steps collect the relevant symptoms
+- what fault-localization steps map symptoms to the likely faulting component
+- what verification steps reliably confirm the fault class on that component
+- what evidence must be present
+
+Requirements:
+- Base the playbook on the grounded diagnosis, not the original incorrect diagnosis.
+- Keep the playbook reusable across incidents; avoid one-off narrative phrasing.
+- Preserve concrete technical specificity where it matters (resource type, field, wrong value pattern, mechanism).
+- Do not include mitigation steps.
+- `slug` should be stable, concise, and rooted in the root cause class.
+- `when_to_consider` and `disambiguators` must each contain at least one item.
+- `triage_checks`, `fault_localization_checks`, and `verification_checks` must each contain at least one numbered step.
+- `required_evidence` must contain at least one bullet-worthy evidence item.
+- Keep the playbook portable across incidents:
+  - do not name app-specific services, endpoints, files, or ports unless they are intrinsic to the root cause class itself
+  - prefer role-based placeholders such as `<ENTRYPOINT_COMPONENT>`, `<REQUEST_PATH>`, `<DOWNSTREAM_DEPENDENCY>`, `<TARGET_RESOURCE>`, `<TARGET_FQDN>`, and `<AFFECTED_POD>`
+
+Grounding requirements (these fields drive future retrieval — they must reflect what was actually observable, not what sounds plausible):
+- Your investigation trajectory is in context via the session message history. Every item in `when_to_consider`, `disambiguators`, `triage_checks`, `verification_checks`, and `required_evidence` MUST be traceable to a concrete observation, command, or output from that trajectory. Do not emit plausible-sounding items that you did not actually see.
+- `when_to_consider` enumerates the **observable signals a future triage coordinator could surface** — pod status, event messages, anomaly names, log strings, metric shifts, kubectl output patterns that appeared in this investigation. Do not include unobservable domain priors such as "recent changes to a Secret", "credential rotation issues", or "recent changes to user management" — those belong in the narrative `summary` or in `known_confounders`, not in routing triggers.
+- If you cite a log pattern or error string as a trigger (e.g., "logs show `authentication failed`"), that exact string — or an explicit synonym — must have appeared in the logs you inspected. If the recovery investigation surfaced a different signal for this fault class (e.g., a triage anomaly like "access control disabled on mongod" rather than a client-side "auth failed" log line), use the signal you actually saw, not the one a domain textbook would predict.
+- `triage_checks` must generalize the symptom-collection actions that actually surfaced the fault in this run, not invent new ones. If you found the fault by inspecting a ConfigMap or exec'ing into a pod, that action should appear (with placeholders).
+- `required_evidence` must correspond to evidence actually collected during the investigation. Do not list "screenshot comparing X to Y" if no such comparison occurred.
+- Prefer omitting a speculative item over including an ungrounded one. A shorter, grounded playbook routes correctly; a longer, hallucinated one misleads future retrieval and compounds over merges.
+
+Additional requirements for diagnosis playbooks:
+- `fault_localization_checks` must help an agent move from observed symptoms to the likely faulting component(s).
+- Do not assume the symptom-bearing component is the faulting component.
+- For dependency-mediated failures, fault localization must not start and end with only the most visible failing component.
+- Structure `fault_localization_checks` as a generic target-selection procedure:
+  1. identify the failing request path, operation, or symptom source
+  2. map it to the serving or entrypoint component
+  3. enumerate downstream dependencies on the active path
+  4. prioritize shared downstream dependencies across failing paths
+  5. select one or more candidate target resources for verification
+- Structure `verification_checks` as fault-class confirmation on the selected targets:
+  - check the defining evidence for the root cause class on the selected targets
+  - rule out common confounders
+  - confirm the selected target fully explains the observed symptoms
+- When drafting `required_evidence`, include evidence that:
+  - the chosen target is actually on the failing path
+  - the defining class-specific misconfiguration or failure exists on that target
+- Good playbooks should help an agent answer:
+  "Given these symptoms, which component should I inspect first, and why?"
+  not just:
+  "Once I already know the target, how do I confirm the class?"
+
+The final diagnosis playbook file should have the following shape after it is materialized to markdown:
+
+```md
+---
+slug: <stable_slug>
+root_cause: <generic root-cause description>
+when_to_consider:
+  - <signal 1>
+  - <signal 2>
+disambiguators:
+  - <disambiguator 1>
+  - <disambiguator 2>
+---
+
+# Diagnosis Playbook
+
+## Summary
+<brief reusable summary of the fault class>
+
+## Triage Checks
+1. <broad symptom-collection step>
+2. <broad symptom-collection step>
+
+## Fault Localization
+1. <map symptom source or failing request path to an entrypoint component>
+2. <enumerate downstream dependencies on the active path>
+3. <prioritize shared downstream dependencies or likely targets>
+4. <select candidate target resource(s) for verification>
+
+## Verification Checks
+1. <confirm the defining fault-class evidence on the selected target>
+2. <rule out common confounders>
+3. <confirm the selected target explains the observed symptoms>
+
+## Required Evidence
+- [ ] <evidence that the selected target is on the failing path>
+- [ ] <evidence of the defining class-specific failure on that target>
+
+## Known Confounders
+- <confounder 1>
+- <confounder 2>
+```
+
+Your structured output must correspond directly to that template:
+- `summary` populates `## Summary`
+- `triage_checks` populates `## Triage Checks`
+- `fault_localization_checks` populates `## Fault Localization`
+- `verification_checks` populates `## Verification Checks`
+- `required_evidence` populates `## Required Evidence`
+- `known_confounders` populates `## Known Confounders`

@@ -13,39 +13,51 @@ import os
 import re
 import sys
 
+_DIRNAME_RE = re.compile(r"^\d{4}_\d{4}_(?:\d{5}_)?(.+)$")
+
 
 def extract_problems(logdir):
-    """Extract problem results from trajectory MD files in a run directory."""
+    """Extract problem results from problem_runs/<ts>_<pid>/agent/{diagnosis,mitigation}.md."""
     results = {}
-    for f in os.listdir(logdir):
-        if f.startswith("sregym_") and f.endswith(".md"):
-            m = re.match(r"sregym_\d+_\d+_w\d+_(.*?)\.md", f)
-            if not m:
-                continue
-            problem = m.group(1)
-            filepath = os.path.join(logdir, f)
-            with open(filepath) as fh:
-                content = fh.read()
+    runs_dir = os.path.join(logdir, "problem_runs")
+    if not os.path.isdir(runs_dir):
+        return results
+    for dirname in os.listdir(runs_dir):
+        run_dir = os.path.join(runs_dir, dirname)
+        if not os.path.isdir(run_dir):
+            continue
+        m = _DIRNAME_RE.match(dirname)
+        if not m:
+            continue
+        problem = m.group(1)
 
-            success_m = re.search(r"success: (True|False)", content)
-            ttl_m = re.search(r'"TTL": ([0-9.]+)', content)
-            ttm_m = re.search(r'"TTM": ([0-9.]+)', content)
-            accuracy_m = re.search(r'"accuracy": ([0-9.]+)', content)
+        agent_dir = os.path.join(run_dir, "agent")
+        content = ""
+        for name in ("diagnosis.md", "mitigation.md"):
+            path = os.path.join(agent_dir, name)
+            if os.path.exists(path):
+                with open(path) as fh:
+                    content += fh.read()
+        if not content:
+            continue
 
-            # Count diagnosis iterations
-            diag_iters = len(re.findall(r"### Iteration \d+ — Agent Hypothesis", content))
-            # Count mitigation iterations
-            mit_iters = len(re.findall(r"### Iteration \d+ — Agent Strategy", content))
+        success_m = re.search(r"success: (True|False)", content)
+        ttl_m = re.search(r'"TTL": ([0-9.]+)', content)
+        ttm_m = re.search(r'"TTM": ([0-9.]+)', content)
+        accuracy_m = re.search(r'"accuracy": ([0-9.]+)', content)
 
-            results[problem] = {
-                "success": success_m.group(1) == "True" if success_m else None,
-                "ttl": float(ttl_m.group(1)) if ttl_m else None,
-                "ttm": float(ttm_m.group(1)) if ttm_m else None,
-                "accuracy": float(accuracy_m.group(1)) if accuracy_m else None,
-                "diagnosis_iterations": diag_iters,
-                "mitigation_iterations": mit_iters,
-                "file": f,
-            }
+        diag_iters = len(re.findall(r"### Iteration \d+ — Agent Hypothesis", content))
+        mit_iters = len(re.findall(r"### Iteration \d+ — Agent Strategy", content))
+
+        results[problem] = {
+            "success": success_m.group(1) == "True" if success_m else None,
+            "ttl": float(ttl_m.group(1)) if ttl_m else None,
+            "ttm": float(ttm_m.group(1)) if ttm_m else None,
+            "accuracy": float(accuracy_m.group(1)) if accuracy_m else None,
+            "diagnosis_iterations": diag_iters,
+            "mitigation_iterations": mit_iters,
+            "dir": os.path.join("problem_runs", dirname),
+        }
     return results
 
 

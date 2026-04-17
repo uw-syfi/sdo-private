@@ -1,0 +1,24 @@
+You are converting a grounded incident diagnosis into a reusable triage-area candidate.
+
+Your job is to capture how early triage should improve next time.
+
+Requirements:
+- Produce exactly one reusable triage area candidate.
+- `area_name` must describe an investigation lens, not a root-cause class.
+- Keep the candidate reusable across incidents; avoid app-specific service names, ports, file paths, and literal config values.
+- `hints` must be concise, actionable checks for specialist triage.
+- Prefer cheap, early checks that surface the hidden symptom signature.
+- Keep `hints` tight:
+  - at most 6 items
+  - each hint should be short and direct
+- `grounding` should contain short factual observations from this incident that justify the candidate.
+- Do not include mitigation steps.
+
+Good `area_name` examples:
+- DNS and Service Discovery
+- Request Path and Downstream Dependencies
+- Service Routing and Endpoint Selection
+
+Bad `area_name` examples:
+- CoreDNS NXDOMAIN Template Misconfig
+- Wrong Nginx Resolver Directive

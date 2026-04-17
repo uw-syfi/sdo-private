@@ -36,15 +36,28 @@ except ImportError:
     HAS_YAML = False
 
 
+def find_results_csvs(log_dir):
+    """Return SREGym results CSV paths under *log_dir*.
+
+    Prefers the current layout (``problem_runs/<ts>_<pid>/results_<ts>.csv``).
+    Falls back to the legacy flat layout (``*_results.csv`` at any depth)
+    when no new-layout files are present. The two layouts are never mixed.
+    """
+    new_pattern = os.path.join(log_dir, "**", "problem_runs", "*", "results_*.csv")
+    new_files = glob.glob(new_pattern, recursive=True)
+    if new_files:
+        return new_files
+    legacy_pattern = os.path.join(log_dir, "**", "*_results.csv")
+    return glob.glob(legacy_pattern, recursive=True)
+
+
 def load_results(target_path=None):
     # Determine which files to process
     if target_path:
         if os.path.isdir(target_path):
             # If user provided a directory, search recursively for results inside
             print(f"Searching for result files in directory: '{target_path}'")
-            # recursive=True requires the pattern to include ** for that part
-            pattern = os.path.join(target_path, "**", "*_results.csv")
-            files = glob.glob(pattern, recursive=True)
+            files = find_results_csvs(target_path)
         elif not os.path.exists(target_path) and not any(c in target_path for c in "*?[]"):
             print(f"Error: The path '{target_path}' does not exist.")
             sys.exit(1)
@@ -54,8 +67,8 @@ def load_results(target_path=None):
             print(f"Searching for files matching: '{target_path}'")
     else:
         # Default behavior: find all CSV files recursively in current directory
-        print("Searching for *_results.csv files recursively in current directory...")
-        files = glob.glob("**/*_results.csv", recursive=True)
+        print("Searching for results CSVs recursively in current directory...")
+        files = find_results_csvs(".")
 
     all_runs_raw = []
 
@@ -163,6 +176,145 @@ def load_stratus_tokens(log_dir):
     return tokens_by_pid
 
 
+def load_crucible_turns(log_dir):
+    """Load per-problem turn counts from crucible_results_*.json files.
+
+    Each JSON stores ``usage_metrics.total.turns`` (or, on older runs, just
+    ``usage_metrics.total`` without the nested ``total`` wrapper). Returns
+    dict[problem_id, turns] or empty dict if no crucible JSON files are found.
+    """
+    pattern = os.path.join(log_dir, "**", "crucible_results_*.json")
+    files = glob.glob(pattern, recursive=True)
+    if not files:
+        return {}
+
+    turns_by_pid = {}
+    # Sort chronologically so later runs overwrite earlier ones for the same pid.
+    for file_path in sorted(files):
+        basename = os.path.basename(file_path)
+        m = re.match(r"crucible_results_(.+)_\d{8}_\d{6}\.json", basename)
+        if not m:
+            continue
+        problem_id = m.group(1)
+
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            um = data.get("usage_metrics", {})
+            total_block = um.get("total", {}) if isinstance(um, dict) else {}
+            turns = int(total_block.get("turns", 0) or 0)
+            if turns > 0:
+                turns_by_pid[problem_id] = turns
+        except Exception as e:
+            print(f"Warning: could not read {file_path}: {e}")
+
+    return turns_by_pid
+
+
+def load_crucible_tokens(log_dir):
+    """Load per-problem total token usage from crucible_results_*.json files.
+
+    Returns dict[problem_id, total_tokens] where total = input + output
+    (``cached_input_tokens`` is a subset of ``input_tokens`` and is not double-counted).
+    Empty dict if no crucible JSON files are found.
+    """
+    pattern = os.path.join(log_dir, "**", "crucible_results_*.json")
+    files = glob.glob(pattern, recursive=True)
+    if not files:
+        return {}
+
+    tokens_by_pid: dict[str, int] = {}
+    for file_path in sorted(files):
+        basename = os.path.basename(file_path)
+        m = re.match(r"crucible_results_(.+)_\d{8}_\d{6}\.json", basename)
+        if not m:
+            continue
+        problem_id = m.group(1)
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            total = (data.get("usage_metrics") or {}).get("total") or {}
+            tokens = int(total.get("input_tokens", 0) or 0) + int(total.get("output_tokens", 0) or 0)
+            if tokens > 0:
+                tokens_by_pid[problem_id] = tokens
+        except Exception as e:
+            print(f"Warning: could not read {file_path}: {e}")
+    return tokens_by_pid
+
+
+def load_crucible_tokens_by_phase(log_dir):
+    """Load per-problem diagnosis/mitigation token usage from crucible_results_*.json.
+
+    Reads ``usage_metrics.diagnosis`` / ``usage_metrics.mitigation`` and sums
+    ``input_tokens + output_tokens`` per phase. Returns a tuple
+    ``(diagnosis_by_pid, mitigation_by_pid)``. Files that predate the phase
+    split lack these fields and contribute 0 for that file.
+    """
+    pattern = os.path.join(log_dir, "**", "crucible_results_*.json")
+    files = glob.glob(pattern, recursive=True)
+    if not files:
+        return {}, {}
+
+    diag_by_pid: dict[str, int] = {}
+    mitig_by_pid: dict[str, int] = {}
+    for file_path in sorted(files):
+        basename = os.path.basename(file_path)
+        m = re.match(r"crucible_results_(.+)_\d{8}_\d{6}\.json", basename)
+        if not m:
+            continue
+        problem_id = m.group(1)
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            um = data.get("usage_metrics") or {}
+            for key, target in (("diagnosis", diag_by_pid), ("mitigation", mitig_by_pid)):
+                block = um.get(key) or {}
+                tokens = int(block.get("input_tokens", 0) or 0) + int(block.get("output_tokens", 0) or 0)
+                if tokens > 0:
+                    target[problem_id] = tokens
+        except Exception as e:
+            print(f"Warning: could not read {file_path}: {e}")
+    return diag_by_pid, mitig_by_pid
+
+
+def load_crucible_turns_by_phase(log_dir):
+    """Load per-problem diagnosis/mitigation turn counts from crucible_results_*.json.
+
+    Reads ``usage_metrics.diagnosis.turns`` and ``usage_metrics.mitigation.turns``
+    (emitted by ``_build_usage_metrics`` in the orchestrator). Returns a tuple
+    ``(diagnosis_by_pid, mitigation_by_pid)``. Files that predate the phase split
+    lack these fields and contribute 0 turns for that file.
+    """
+    pattern = os.path.join(log_dir, "**", "crucible_results_*.json")
+    files = glob.glob(pattern, recursive=True)
+    if not files:
+        return {}, {}
+
+    diag_by_pid: dict[str, int] = {}
+    mitig_by_pid: dict[str, int] = {}
+    for file_path in sorted(files):
+        basename = os.path.basename(file_path)
+        m = re.match(r"crucible_results_(.+)_\d{8}_\d{6}\.json", basename)
+        if not m:
+            continue
+        problem_id = m.group(1)
+
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            um = data.get("usage_metrics", {}) or {}
+            diag = int((um.get("diagnosis") or {}).get("turns", 0) or 0)
+            mitig = int((um.get("mitigation") or {}).get("turns", 0) or 0)
+            if diag > 0:
+                diag_by_pid[problem_id] = diag
+            if mitig > 0:
+                mitig_by_pid[problem_id] = mitig
+        except Exception as e:
+            print(f"Warning: could not read {file_path}: {e}")
+
+    return diag_by_pid, mitig_by_pid
+
+
 def load_gemini_tokens(log_dir):
     """Load token usage from Gemini gemini_cli_results_*.json files.
     Returns dict[problem_id, total_tokens] or empty dict if none found.
@@ -244,18 +396,22 @@ def _compute_group_stats(runs):
 
     ttls = []
     ttms = []
+    tres = []
     for r in runs:
         try:
             if r.get("TTL"):
                 ttls.append(float(r["TTL"]))
-            if r.get("has_mitigation") and r.get("TTM"):
-                ttms.append(float(r["TTM"]))
+            if r.get("has_mitigation") and r.get("TTM") and r.get("TTL"):
+                ttm_raw = float(r["TTM"])
+                ttms.append(ttm_raw - float(r["TTL"]))
+                tres.append(ttm_raw)
         except ValueError:
             pass
     avg_ttl = f"{sum(ttls) / len(ttls):.1f}" if ttls else "-"
     avg_ttm = f"{sum(ttms) / len(ttms):.1f}" if ttms else "-"
+    avg_tres = f"{sum(tres) / len(tres):.1f}" if tres else "-"
 
-    return count, diag_pct, mitig_pct, avg_ttl, avg_ttm
+    return count, diag_pct, mitig_pct, avg_ttl, avg_ttm, avg_tres
 
 
 def print_type_breakdown(completed_runs, type_mapping, table_width=130):
@@ -275,18 +431,26 @@ def print_type_breakdown(completed_runs, type_mapping, table_width=130):
     # Header
     type_w = 20
     print("-" * table_width)
-    header = f"{'Type':<{type_w}} | {'Count':>5} | {'Diag %':>7} | {'Mitig %':>7} | {'Avg TTL':>8} | {'Avg TTM':>8}"
+    header = (
+        f"{'Type':<{type_w}} | {'Count':>5} | {'Diag %':>7} | {'Mitig %':>7} | "
+        f"{'Avg Diag':>8} | {'Avg Mitig':>9} | {'Avg Res':>8}"
+    )
     print(header)
     print("-" * table_width)
 
     for type_name in sorted_types:
-        count, diag_pct, mitig_pct, avg_ttl, avg_ttm = _compute_group_stats(groups[type_name])
-        print(f"{type_name:<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>8}")
+        count, diag_pct, mitig_pct, avg_ttl, avg_ttm, avg_tres = _compute_group_stats(groups[type_name])
+        print(
+            f"{type_name:<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | "
+            f"{avg_ttl:>8} | {avg_ttm:>9} | {avg_tres:>8}"
+        )
 
     # Aggregate row across all problems (ungrouped)
     print("-" * table_width)
-    count, diag_pct, mitig_pct, avg_ttl, avg_ttm = _compute_group_stats(completed_runs)
-    print(f"{'all':<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>8}")
+    count, diag_pct, mitig_pct, avg_ttl, avg_ttm, avg_tres = _compute_group_stats(completed_runs)
+    print(
+        f"{'all':<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>9} | {avg_tres:>8}"
+    )
 
     print("-" * table_width + "\n")
 
@@ -309,12 +473,15 @@ def summarize_results(target_path=None):
 
     ttls = []
     ttms = []
+    t_resolutions = []
     for r in completed_runs:
         try:
             if r.get("TTL"):
                 ttls.append(float(r["TTL"]))
-            if r.get("has_mitigation") and r.get("TTM"):
-                ttms.append(float(r["TTM"]))
+            if r.get("has_mitigation") and r.get("TTM") and r.get("TTL"):
+                ttm_raw = float(r["TTM"])
+                ttms.append(ttm_raw - float(r["TTL"]))
+                t_resolutions.append(ttm_raw)
         except ValueError:
             pass
 
@@ -341,8 +508,10 @@ def summarize_results(target_path=None):
         )
     else:
         print("Mitigation Success Rate: No runs with mitigation.")
-    print(f"Average Time to Locate:   {avg_ttl:.2f}s")
-    print(f"Average Time to Mitigate: {avg_ttm:.2f}s")
+    avg_tres = sum(t_resolutions) / len(t_resolutions) if t_resolutions else 0.0
+    print(f"Average Diagnosis Time:   {avg_ttl:.2f}s")
+    print(f"Average Mitigation Time:  {avg_ttm:.2f}s")
+    print(f"Average Resolution Time:  {avg_tres:.2f}s")
     print("-" * table_width)
 
     def pad_emoji(s, width):
@@ -357,7 +526,7 @@ def summarize_results(target_path=None):
     header = (
         f"{'Run Date':<14} | {'Problem ID':<{problem_id_width}} | "
         f"{'Diag':<{diag_width}} | {'Mitig':<{mitig_width}} | "
-        f"{'TTL(s)':<7} | {'TTM(s)':<7} | {'Status':<{status_width}}"
+        f"{'Diag(s)':<8} | {'Mitig(s)':<8} | {'Res(s)':<8} | {'Status':<{status_width}}"
     )
     print(header)
     print("-" * table_width)
@@ -383,23 +552,32 @@ def summarize_results(target_path=None):
                 ttl = "N/A"
             if r.get("has_mitigation"):
                 try:
-                    ttm = f"{float(r.get('TTM', 0)):.1f}"
+                    ttm = f"{float(r.get('TTM', 0)) - float(r.get('TTL', 0)):.1f}"
                 except Exception:
                     ttm = "N/A"
+                try:
+                    tres = f"{float(r.get('TTM', 0)):.1f}"
+                except Exception:
+                    tres = "N/A"
             else:
                 ttm = "-"
+                tres = "-"
             status = "DONE"
         else:
             d_res = "-"
             m_res = "-"
             ttl = "-"
             ttm = "-"
+            tres = "-"
             status = "⚠️  INCOMPLETE"
 
         d_str = pad_emoji(d_res, diag_width)
         m_str = pad_emoji(m_res, mitig_width)
         status_str = pad_emoji(status, status_width)
-        print(f"{run_date:<14} | {pid:<{problem_id_width}} | {d_str} | {m_str} | {ttl:<7} | {ttm:<7} | {status_str}")
+        print(
+            f"{run_date:<14} | {pid:<{problem_id_width}} | {d_str} | {m_str} | "
+            f"{ttl:<8} | {ttm:<8} | {tres:<8} | {status_str}"
+        )
 
     print("=" * table_width + "\n")
 
@@ -432,7 +610,7 @@ def summarize_results(target_path=None):
             marker=".",
             linestyle="-",
             color="tab:blue",
-            label=f"Time to Diagnosis (n={len(valid_ttls)})",
+            label=f"Diagnosis Time (n={len(valid_ttls)})",
         )
 
     if valid_ttms:
@@ -444,7 +622,7 @@ def summarize_results(target_path=None):
             marker=".",
             linestyle="-",
             color="tab:orange",
-            label=f"Time to Mitigation (n={len(valid_ttms)})",
+            label=f"Mitigation Time (n={len(valid_ttms)})",
         )
 
     plt.xlabel("Time (s)")
@@ -454,20 +632,107 @@ def summarize_results(target_path=None):
     plt.legend()
 
     if target_path and os.path.isdir(target_path):
-        output_plot = os.path.join(target_path, "cdf_results.png")
+        plot_dir = os.path.join(target_path, "plots")
     else:
-        output_plot = "cdf_results.png"
+        plot_dir = "plots"
+    os.makedirs(plot_dir, exist_ok=True)
 
+    output_plot = os.path.join(plot_dir, "cdf_results.png")
     plt.savefig(output_plot)
+    plt.close()
     print(f"CDF plot saved to {output_plot}")
 
+    # --- Resolution Time CDF ---
+    valid_tres = [t for t in t_resolutions if t > 0]
+    if valid_tres:
+        plt.figure(figsize=(10, 6))
+        valid_tres.sort()
+        y_tres = np.arange(1, len(valid_tres) + 1) / len(valid_tres)
+        plt.plot(
+            valid_tres,
+            y_tres,
+            marker=".",
+            linestyle="-",
+            color="tab:green",
+            label=f"Resolution Time (n={len(valid_tres)})",
+        )
+        plt.xlabel("Time (s)")
+        plt.ylabel("CDF")
+        plt.title("CDF of Resolution Time")
+        plt.grid(True)
+        plt.legend()
 
-def diff_results(dirs, names=None):
+        res_plot = os.path.join(plot_dir, "cdf_resolution.png")
+        plt.savefig(res_plot)
+        plt.close()
+        print(f"Resolution CDF plot saved to {res_plot}")
+
+    # --- Turns CDF (crucible agents only) ---
+    search_root = target_path if (target_path and os.path.isdir(target_path)) else "."
+    turns_by_pid = load_crucible_turns(search_root)
+    valid_turns = sorted(t for t in turns_by_pid.values() if t and t > 0)
+    if valid_turns:
+        plt.figure(figsize=(10, 6))
+        y_turns = np.arange(1, len(valid_turns) + 1) / len(valid_turns)
+        plt.plot(
+            valid_turns,
+            y_turns,
+            marker=".",
+            linestyle="-",
+            color="tab:purple",
+            label=f"Turns (n={len(valid_turns)})",
+        )
+        plt.xlabel("Turns")
+        plt.ylabel("CDF")
+        plt.title("CDF of Number of Turns")
+        plt.grid(True)
+        plt.legend()
+
+        turns_plot = os.path.join(plot_dir, "cdf_turns.png")
+        plt.savefig(turns_plot)
+        plt.close()
+        print(f"Turns CDF plot saved to {turns_plot}")
+
+    # --- Per-phase Turns CDFs ---
+    diag_by_pid, mitig_by_pid = load_crucible_turns_by_phase(search_root)
+    for name, data_map, color in (
+        ("diagnosis", diag_by_pid, "tab:blue"),
+        ("mitigation", mitig_by_pid, "tab:orange"),
+    ):
+        vals = sorted(t for t in data_map.values() if t and t > 0)
+        if not vals:
+            continue
+        plt.figure(figsize=(10, 6))
+        y_phase = np.arange(1, len(vals) + 1) / len(vals)
+        plt.plot(
+            vals,
+            y_phase,
+            marker=".",
+            linestyle="-",
+            color=color,
+            label=f"{name.capitalize()} Turns (n={len(vals)})",
+        )
+        plt.xlabel("Turns")
+        plt.ylabel("CDF")
+        plt.title(f"CDF of {name.capitalize()}-Phase Turns")
+        plt.grid(True)
+        plt.legend()
+        phase_plot = os.path.join(plot_dir, f"cdf_turns_{name}.png")
+        plt.savefig(phase_plot)
+        plt.close()
+        print(f"{name.capitalize()} turns CDF plot saved to {phase_plot}")
+
+
+def diff_results(dirs, names=None, limit_to_index=None):
     if len(dirs) < 2:
         print("Error: --diff requires at least 2 directories.")
         sys.exit(1)
 
     n_dirs = len(dirs)
+
+    if limit_to_index is not None and not (0 <= limit_to_index < n_dirs):
+        print(f"Error: --limit-to-index must be in [0, {n_dirs - 1}], got {limit_to_index}.")
+        sys.exit(1)
 
     # Load results from each directory
     runs_maps = []
@@ -476,12 +741,28 @@ def diff_results(dirs, names=None):
         run_map, _ = load_results(d)
         runs_maps.append(run_map)
 
+    # Restrict every dataset to the pids present in runs_maps[limit_to_index].
+    # All downstream plots/tables iterate over these filtered maps, so the
+    # restriction flows through comparison tables, CDFs, and success-rate bars.
+    if limit_to_index is not None:
+        keep_pids = set(runs_maps[limit_to_index].keys())
+        print(
+            f"\n--limit-to-index={limit_to_index} ({dirs[limit_to_index]}): "
+            f"restricting all datasets to {len(keep_pids)} problem(s)."
+        )
+        runs_maps = [{pid: v for pid, v in rm.items() if pid in keep_pids} for rm in runs_maps]
+    else:
+        keep_pids = None
+
     # Derive names and output directory
     dir_basenames = [os.path.basename(os.path.normpath(d)) for d in dirs]
     if names is None:
         names = dir_basenames
     common_parent = os.path.commonpath([os.path.abspath(d) for d in dirs])
-    output_dir = os.path.join(common_parent, "diff", "--".join(dir_basenames))
+    output_basename = "--".join(dir_basenames)
+    if keep_pids is not None:
+        output_basename += f"__limit-to-{limit_to_index}"
+    output_dir = os.path.join(common_parent, "diff", output_basename)
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nDiff results will be stored in: {output_dir}")
 
@@ -504,9 +785,11 @@ def diff_results(dirs, names=None):
                 pass
             try:
                 if r.get("has_mitigation") and r.get("TTM"):
-                    ttms.append(float(r["TTM"]))
+                    ttm_raw = float(r["TTM"])
+                    ttl_val = float(r["TTL"]) if r.get("TTL") else 0
+                    ttms.append(ttm_raw - ttl_val)
                     if r.get("TTL"):
-                        tres.append(float(r["TTL"]) + float(r["TTM"]))
+                        tres.append(ttm_raw)
             except (ValueError, TypeError):
                 pass
         avg_ttl = sum(ttls) / len(ttls) if ttls else 0.0
@@ -558,7 +841,7 @@ def diff_results(dirs, names=None):
     atres = [s[7] for s in all_stats]
     print(
         fmt_row(
-            "Avg Resolution (Diag+Mitig)",
+            "Avg Resolution (TTM)",
             [f"{v:.1f}s" for v in atres],
             f"{atres[1] - atres[0]:+.1f}s" if n_dirs == 2 else None,
         )
@@ -628,7 +911,8 @@ def diff_results(dirs, names=None):
                 return None
 
         t_d = parse_float(r.get("TTL"))
-        t_m = parse_float(r.get("TTM"))
+        t_m_raw = parse_float(r.get("TTM"))
+        t_m = (t_m_raw - t_d) if (t_m_raw is not None and t_d is not None) else t_m_raw
 
         if r["status"] == "Completed":
             d_stat = "✅ PASS" if r.get("Diagnosis.success") == "True" else "❌ FAIL"
@@ -776,7 +1060,7 @@ def diff_results(dirs, names=None):
     plot_cdfs(
         res_per_dir,
         names,
-        "Time to Resolution (Diagnosis + Mitigation)",
+        "Time to Resolution (TTM)",
         os.path.join(output_dir, "cdf_resolution.png"),
         colors=res_colors,
     )
@@ -1037,7 +1321,10 @@ def diff_results(dirs, names=None):
         )
 
     # --- Token-based plots ---
-    tokens_maps = [load_stratus_tokens(d) or load_gemini_tokens(d) for d in dirs]
+    # Fall back through the known sources: Stratus CSV, Gemini CSV, crucible JSONs.
+    tokens_maps = [load_stratus_tokens(d) or load_gemini_tokens(d) or load_crucible_tokens(d) for d in dirs]
+    if keep_pids is not None:
+        tokens_maps = [{pid: v for pid, v in tm.items() if pid in keep_pids} for tm in tokens_maps]
     tokens_lists = [[t for t in tm.values() if t and t > 0] for tm in tokens_maps]
 
     if any(tokens_lists):
@@ -1046,6 +1333,114 @@ def diff_results(dirs, names=None):
             names,
             os.path.join(output_dir, "cdf_tokens.png"),
             colors=diag_colors,
+        )
+
+    # Per-phase token CDFs (requires usage_metrics.diagnosis / .mitigation in each JSON).
+    token_phase_maps = [load_crucible_tokens_by_phase(d) for d in dirs]
+    if keep_pids is not None:
+        token_phase_maps = [
+            (
+                {pid: v for pid, v in diag.items() if pid in keep_pids},
+                {pid: v for pid, v in mitig.items() if pid in keep_pids},
+            )
+            for diag, mitig in token_phase_maps
+        ]
+    diag_token_lists = [[t for t in m[0].values() if t > 0] for m in token_phase_maps]
+    mitig_token_lists = [[t for t in m[1].values() if t > 0] for m in token_phase_maps]
+
+    if any(diag_token_lists):
+        plot_cdf_tokens(
+            diag_token_lists,
+            names,
+            os.path.join(output_dir, "cdf_tokens_diagnosis.png"),
+            colors=diag_colors,
+            phase_label="Diagnosis",
+        )
+    if any(mitig_token_lists):
+        plot_cdf_tokens(
+            mitig_token_lists,
+            names,
+            os.path.join(output_dir, "cdf_tokens_mitigation.png"),
+            colors=diag_colors,
+            phase_label="Mitigation",
+        )
+
+    # --- Turn-count plots (crucible agents only) ---
+    turns_maps = [load_crucible_turns(d) for d in dirs]
+    if keep_pids is not None:
+        turns_maps = [{pid: v for pid, v in tm.items() if pid in keep_pids} for tm in turns_maps]
+    turns_lists = [[t for t in tm.values() if t and t > 0] for tm in turns_maps]
+
+    if any(turns_lists):
+        plot_cdf_turns(
+            turns_lists,
+            names,
+            os.path.join(output_dir, "cdf_turns.png"),
+            colors=diag_colors,
+        )
+
+    # Per-phase turn CDFs (requires usage_metrics.diagnosis / .mitigation in each JSON).
+    phase_maps = [load_crucible_turns_by_phase(d) for d in dirs]
+    if keep_pids is not None:
+        phase_maps = [
+            (
+                {pid: v for pid, v in diag.items() if pid in keep_pids},
+                {pid: v for pid, v in mitig.items() if pid in keep_pids},
+            )
+            for diag, mitig in phase_maps
+        ]
+    diag_lists = [[t for t in m[0].values() if t > 0] for m in phase_maps]
+    mitig_lists = [[t for t in m[1].values() if t > 0] for m in phase_maps]
+
+    if any(diag_lists):
+        plot_cdf_turns(
+            diag_lists,
+            names,
+            os.path.join(output_dir, "cdf_turns_diagnosis.png"),
+            colors=diag_colors,
+            title="CDF of Diagnosis-Phase Turns",
+        )
+    if any(mitig_lists):
+        plot_cdf_turns(
+            mitig_lists,
+            names,
+            os.path.join(output_dir, "cdf_turns_mitigation.png"),
+            colors=diag_colors,
+            title="CDF of Mitigation-Phase Turns",
+        )
+
+    if n_dirs == 2 and (turns_maps[0] or turns_maps[1]):
+        name1, name2 = names[0], names[1]
+        turns1_map, turns2_map = turns_maps[0], turns_maps[1]
+
+        comp_turns_data = []
+        for pid in all_pids:
+            t1 = turns1_map.get(pid)
+            t2 = turns2_map.get(pid)
+            if (t1 is not None and t1 > 0) or (t2 is not None and t2 > 0):
+                r1 = runs_maps[0].get(pid)
+                r2 = runs_maps[1].get(pid)
+                ds1 = r1 and r1.get("Diagnosis.success") == "True"
+                ms1 = r1 and r1.get("Mitigation.success") == "True"
+                ds2 = r2 and r2.get("Diagnosis.success") == "True"
+                ms2 = r2 and r2.get("Mitigation.success") == "True"
+                comp_turns_data.append((pid, t1 or 0, t2 or 0, ds1 and ms1, ds2 and ms2))
+        plot_turns_comparison_by_problem(
+            comp_turns_data,
+            name1,
+            name2,
+            os.path.join(output_dir, "comparison_turns.png"),
+            colors=["#004d99", "#66b3ff"],
+            use_status_colors=True,
+        )
+        plot_turns_comparison_by_problem(
+            comp_turns_data,
+            name1,
+            name2,
+            os.path.join(output_dir, "comparison_turns_by_name.png"),
+            colors=["#004d99", "#66b3ff"],
+            use_status_colors=True,
+            sort_by_name=True,
         )
 
     if n_dirs == 2 and (tokens_maps[0] or tokens_maps[1]):
@@ -1203,6 +1598,137 @@ def plot_cdf_tokens(data_list, labels, output_path, colors=None, phase_label=Non
         print(f"Token CDF plot saved to {output_path}")
     else:
         plt.close()
+
+
+def plot_cdf_turns(data_list, labels, output_path, colors=None, title="CDF of Number of Turns"):
+    """Plot CDF of turn counts for N agents."""
+    if not HAS_PLOTTING:
+        print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
+        return
+
+    if not any(data_list):
+        print("No turn-count data for CDF plot.")
+        return
+
+    _markers = [".", "x", "^", "s", "D", "v", "<", ">"]
+    _linestyles = ["-", "--", "-.", ":"]
+
+    if colors is None:
+        colors = [f"C{i}" for i in range(len(data_list))]
+
+    plt.figure(figsize=(10, 6))
+    has_data = False
+
+    for i, (data, label) in enumerate(zip(data_list, labels, strict=True)):
+        data = sorted(data)
+        if data:
+            y = np.arange(1, len(data) + 1) / len(data)
+            plt.plot(
+                data,
+                y,
+                marker=_markers[i % len(_markers)],
+                linestyle=_linestyles[i % len(_linestyles)],
+                color=colors[i % len(colors)],
+                label=f"{label} (n={len(data)})",
+            )
+            has_data = True
+
+    if has_data:
+        plt.xlabel("Turns")
+        plt.ylabel("CDF")
+        plt.title(title)
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(output_path)
+        plt.close()
+        print(f"Turns CDF plot saved to {output_path}")
+    else:
+        plt.close()
+
+
+def plot_turns_comparison_by_problem(
+    data,
+    name1,
+    name2,
+    output_path,
+    colors=None,
+    use_status_colors=False,
+    sort_by_name=False,
+):
+    """Plot scatter: Y=problem labels, X=turn count for both agents."""
+    if not HAS_PLOTTING:
+        print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
+        return
+
+    if not data:
+        print("No turn data for comparison plot.")
+        return
+
+    if colors is None:
+        colors = ["tab:blue", "tab:orange"]
+
+    if sort_by_name:
+        data = sorted(data, key=lambda x: x[0])
+    else:
+        data = sorted(data, key=lambda x: x[1] or 0)
+
+    pids = [d[0] for d in data]
+    fig_height = max(6, len(pids) * 0.3)
+    plt.figure(figsize=(10, fig_height))
+
+    y_vals = np.arange(len(pids))
+
+    x1_succ, x1_fail, y1_succ, y1_fail = [], [], [], []
+    x2_succ, x2_fail, y2_succ, y2_fail = [], [], [], []
+
+    for i, (_pid, t1, t2, s1, s2) in enumerate(data):
+        if t1 and t1 > 0:
+            if s1:
+                x1_succ.append(t1)
+                y1_succ.append(i)
+            else:
+                x1_fail.append(t1)
+                y1_fail.append(i)
+        if t2 and t2 > 0:
+            if s2:
+                x2_succ.append(t2)
+                y2_succ.append(i)
+            else:
+                x2_fail.append(t2)
+                y2_fail.append(i)
+
+    c_succ, c_fail = "tab:green", "tab:red"
+    m1, m2 = "o", "x"
+
+    if use_status_colors:
+        if x1_succ:
+            plt.scatter(x1_succ, y1_succ, color=c_succ, label=f"{name1} (Success)", marker=m1, alpha=0.7)
+        if x1_fail:
+            plt.scatter(x1_fail, y1_fail, color=c_fail, label=f"{name1} (Fail)", marker=m1, alpha=0.7)
+        if x2_succ:
+            plt.scatter(x2_succ, y2_succ, color=c_succ, label=f"{name2} (Success)", marker=m2, alpha=0.7)
+        if x2_fail:
+            plt.scatter(x2_fail, y2_fail, color=c_fail, label=f"{name2} (Fail)", marker=m2, alpha=0.7)
+    else:
+        x1_all = x1_succ + x1_fail
+        y1_all = y1_succ + y1_fail
+        x2_all = x2_succ + x2_fail
+        y2_all = y2_succ + y2_fail
+        if x1_all:
+            plt.scatter(x1_all, y1_all, color=colors[0], label=name1, marker=m1, alpha=0.7)
+        if x2_all:
+            plt.scatter(x2_all, y2_all, color=colors[1], label=name2, marker=m2, alpha=0.7)
+
+    plt.yticks(y_vals, pids)
+    plt.xlabel("Turns")
+    plt.title("Per-Problem Number of Turns")
+    plt.grid(True, axis="y", linestyle=":", alpha=0.3)
+    plt.grid(True, axis="x", linestyle="--", alpha=0.7)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+    print(f"Turns comparison plot saved to {output_path}")
 
 
 def plot_token_comparison_by_problem(
@@ -1529,8 +2055,7 @@ def plot_success_rates(d1, m1, n1, name1, d2, m2, n2, name2, output_path, colors
 
 def _load_sequence_rows(log_dir):
     """Shared helper: load all rows with sequence_index from a log directory."""
-    pattern = os.path.join(log_dir, "**", "*_results.csv")
-    files = glob.glob(pattern, recursive=True)
+    files = find_results_csvs(log_dir)
     rows = []
     for fpath in sorted(files):
         if "ALL_results" in fpath or "_output.csv" in fpath:
@@ -1627,7 +2152,9 @@ def plot_sequence_success_rate(log_dir, output_path=None, window=5):
     fig.tight_layout()
 
     if output_path is None:
-        output_path = os.path.join(log_dir, "sequence_success_rate.png")
+        plot_dir = os.path.join(log_dir, "plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        output_path = os.path.join(plot_dir, "sequence_success_rate.png")
     fig.savefig(output_path)
     plt.close(fig)
     print(f"Sequence success rate plot saved to {output_path}")
@@ -1662,7 +2189,8 @@ def plot_sequence_time(log_dir, output_path=None, window=5):
         except (ValueError, TypeError):
             ttl = None
         try:
-            ttm = float(row["TTM"]) if row.get("TTM") else None
+            ttm_raw = float(row["TTM"]) if row.get("TTM") else None
+            ttm = (ttm_raw - ttl) if (ttm_raw is not None and ttl is not None) else ttm_raw
         except (ValueError, TypeError):
             ttm = None
         ttls.append(ttl)
@@ -1705,7 +2233,9 @@ def plot_sequence_time(log_dir, output_path=None, window=5):
     fig.tight_layout()
 
     if output_path is None:
-        output_path = os.path.join(log_dir, "sequence_time.png")
+        plot_dir = os.path.join(log_dir, "plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        output_path = os.path.join(plot_dir, "sequence_time.png")
     fig.savefig(output_path)
     plt.close(fig)
     print(f"Sequence time plot saved to {output_path}")
@@ -1747,7 +2277,8 @@ def _load_timeline_rows(log_dir, end_time=False):
         except (ValueError, TypeError):
             ttl = None
         try:
-            ttm = float(r["TTM"]) if r.get("has_mitigation") and r.get("TTM") else None
+            ttm_raw = float(r["TTM"]) if r.get("has_mitigation") and r.get("TTM") else None
+            ttm = (ttm_raw - ttl) if (ttm_raw is not None and ttl is not None) else ttm_raw
         except (ValueError, TypeError):
             ttm = None
         diag_success = r.get("Diagnosis.success") == "True"
@@ -1895,8 +2426,8 @@ def timeline_results(dirs, names=None, window=5, end_time=False):
         ("timeline_mitigation.png", "Mitigation Time (TTM)", "TTM (seconds)", lambda e: e["ttm"]),
         (
             "timeline_resolution.png",
-            "Resolution Time (TTL+TTM)",
-            "TTL+TTM (seconds)",
+            "Resolution Time (TTM)",
+            "TTM (seconds)",
             lambda e: (e["ttl"] + e["ttm"]) if (e["ttl"] is not None and e["ttm"] is not None) else None,
         ),
     ]
@@ -1928,6 +2459,17 @@ if __name__ == "__main__":
         nargs="+",
         metavar="NAME",
         help="Custom legend names for --diff directories (one per directory).",
+    )
+    parser.add_argument(
+        "--limit-to-index",
+        type=int,
+        default=None,
+        metavar="INDEX",
+        help=(
+            "Restrict --diff comparisons to problems present in the dataset at this 0-indexed "
+            "position in --diff. All datasets are filtered to that subset of problem IDs before "
+            "plotting."
+        ),
     )
     parser.add_argument(
         "--sequence",
@@ -1972,7 +2514,7 @@ if __name__ == "__main__":
             parser.error(
                 f"--names requires exactly {len(args.diff)} values (one per --diff directory), got {len(args.names)}"
             )
-        diff_results(args.diff, names=args.names)
+        diff_results(args.diff, names=args.names, limit_to_index=args.limit_to_index)
     elif args.timeline:
         if args.names and len(args.names) != len(args.timeline):
             n_expected = len(args.timeline)

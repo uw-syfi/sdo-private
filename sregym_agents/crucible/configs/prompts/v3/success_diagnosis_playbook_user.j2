@@ -1,0 +1,18 @@
+You have already completed a successful diagnosis in this same session. Using your existing investigation context,
+convert that grounded diagnosis into a reusable diagnosis playbook candidate.
+
+Application: {{ app_name }} / Namespace: {{ namespace }}
+{% if descriptions %}
+{{ descriptions }}
+{% endif %}
+
+The grounded diagnosis you just established was:
+**Answer**: {{ diagnosis_answer }}
+**Justification**: {{ diagnosis_justification }}
+{% if diagnosis_causal_chain %}
+**Causal Chain**: {{ diagnosis_causal_chain }}
+{% endif %}
+
+Produce a diagnosis playbook candidate that captures this successful diagnosis as a reusable troubleshooting artifact.
+
+Before emitting each item in `when_to_consider`, `disambiguators`, `triage_checks`, `verification_checks`, and `required_evidence`, confirm that item is grounded in a specific observation, command, or output from your diagnosis investigation. If it is not — if it is a domain prior that sounds right but you did not actually observe it — omit it.

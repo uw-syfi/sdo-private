@@ -31,6 +31,10 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+from sregym_agents.crucible.kb_update_queue import (  # noqa: E402
+    snapshot_kb_queue,
+    wait_for_kb_queue_drain,
+)
 from sregym_agents.crucible.knowledge_base import seed_kb  # noqa: E402
 from sregym_agents.experiment_config import (  # noqa: E402
     ExperimentConfig,
@@ -58,6 +62,8 @@ from sregym_agents.pipeline_config import (  # noqa: E402
 )
 
 _SREGYM_DIR = _PROJECT_ROOT / "bench" / "sregym"
+_KB_QUEUE_DRAIN_TIMEOUT_S = 1800.0
+_KB_QUEUE_DRAIN_POLL_INTERVAL_S = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +264,8 @@ def run_pipeline(
         print("=" * 60)
 
         seed_kb(stage_exp_dir / "kb", exp_config.env.crucible_seed_kb_dir or None)
+        needs_kb_barrier = i + 1 < len(config.stages) and config.stages[i + 1].chain_kb
+        kb_queue_baseline = snapshot_kb_queue(stage_exp_dir / "kb") if needs_kb_barrier else None
 
         try:
             returncode = _run_stage(exp_config, stage_exp_dir, tasklist_path)
@@ -276,6 +284,30 @@ def run_pipeline(
             print(f"\nStage {i} failed (exit code {returncode}). Pipeline aborted.")
             print(f"Resume with: run_sregym.sh {pipeline_dir}")
             return 1
+
+        if needs_kb_barrier:
+            print("  Waiting for KB review queue to drain before chaining...")
+            try:
+                wait_for_kb_queue_drain(
+                    stage_exp_dir / "kb",
+                    baseline=kb_queue_baseline,
+                    timeout_s=_KB_QUEUE_DRAIN_TIMEOUT_S,
+                    poll_interval_s=_KB_QUEUE_DRAIN_POLL_INTERVAL_S,
+                )
+            except KeyboardInterrupt:
+                print(f"\nInterrupted while waiting for KB queue after stage {i}. Saving state for resume.")
+                stage_state.status = "failed"
+                stage_state.error = "interrupted while waiting for kb queue"
+                write_pipeline_state(state, pipeline_dir)
+                print(f"Resume with: run_sregym.sh {pipeline_dir}")
+                return 1
+            except Exception as exc:
+                stage_state.status = "failed"
+                stage_state.error = f"kb queue drain failed: {exc}"
+                write_pipeline_state(state, pipeline_dir)
+                print(f"\nStage {i} failed while waiting for KB queue: {exc}")
+                print(f"Resume with: run_sregym.sh {pipeline_dir}")
+                return 1
 
         # Mark completed
         stage_state.status = "completed"

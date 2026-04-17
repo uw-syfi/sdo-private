@@ -1,11 +1,16 @@
-"""RecoveryAgent — encapsulates recovery-phase behavior: diagnosis recovery,
-reflection, and mitigation recovery.
-"""
+"""RecoveryAgent — encapsulates grounded diagnosis and mitigation recovery."""
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
+
+from sregym_agents.crucible.knowledge_base.incident_review import (
+    DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
+    TriageAreaCandidate,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -13,19 +18,25 @@ if TYPE_CHECKING:
     from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver
-    from sregym_agents.crucible.recovery_reflection import RecoveryReflection
     from sregym_agents.crucible.tools import SharedFile, SRESubmission
 
 logger = logging.getLogger(__name__)
 
 
-class RecoveryAgent:
-    """Encapsulates recovery-phase behavior: diagnosis recovery, reflection,
-    and mitigation recovery.
+def _empty_message_history() -> list[object]:
+    return []
 
-    Each method renders its own prompts, calls ``driver.run()``, and writes
-    results to shared_file / stage_outputs_file.
-    """
+
+@dataclasses.dataclass(frozen=True)
+class RecoveryRunResult:
+    """Semantic recovery submission plus internal conversation history."""
+
+    submission: SRESubmission
+    message_history: list[object] = dataclasses.field(default_factory=_empty_message_history)
+
+
+class RecoveryAgent:
+    """Encapsulates grounded diagnosis and mitigation recovery."""
 
     def __init__(
         self,
@@ -66,7 +77,7 @@ class RecoveryAgent:
         original_justification: str = "",
         original_causal_chain: str = "",
         stage_outputs_file: Path | None = None,
-    ) -> SRESubmission | None:
+    ) -> RecoveryRunResult | None:
         """Run a recovery diagnosis agent to produce a causal chain for the correct root cause."""
 
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
@@ -133,7 +144,6 @@ class RecoveryAgent:
                 answer=state.answer or "",
                 justification=state.answer_justification or "",
                 causal_chain=state.answer_causal_chain or "",
-                reflection=state.answer_reflection or "",
             )
         else:
             # Update state from output
@@ -141,13 +151,10 @@ class RecoveryAgent:
             state.answer = result.output.answer
             state.answer_justification = result.output.justification
             state.answer_causal_chain = result.output.causal_chain
-            state.answer_reflection = result.output.reflection
             submission = SRESubmission(
                 answer=result.output.answer,
                 justification=result.output.justification,
                 causal_chain=result.output.causal_chain,
-                reflection=result.output.reflection,
-                message_history=result.messages,
             )
 
         # Append recovery result to shared file
@@ -158,8 +165,6 @@ class RecoveryAgent:
         )
         if submission.causal_chain:
             entry += f"**Causal Chain**: {submission.causal_chain}\n"
-        if submission.reflection:
-            entry += f"**Agent Reflection**: {submission.reflection}\n"
         try:
             shared_file.append(entry)
         except Exception as e:
@@ -172,73 +177,339 @@ class RecoveryAgent:
                 f.write(f"**Justification**: {submission.justification}\n")
                 if submission.causal_chain:
                     f.write(f"**Causal Chain**: {submission.causal_chain}\n")
-                if submission.reflection:
-                    f.write(f"**Agent Reflection**: {submission.reflection}\n")
 
         logger.info(f"Recovery diagnosis complete: {submission.answer}")
-        return submission
+        return RecoveryRunResult(submission=submission, message_history=result.messages)
 
-    async def run_reflection(
+    async def build_diagnosis_playbook_candidate(
         self,
         *,
         app_info: dict[str, Any],
         original_answer: str,
         original_justification: str = "",
         original_causal_chain: str = "",
-        stage_outputs_file: Path | None = None,
-        phase1_messages: list[Any] | None = None,
+        grounded_answer: str,
+        grounded_justification: str,
+        grounded_causal_chain: str = "",
+        recovery_message_history: list[Any] | None = None,
         usage_collector: UsageCollector | None = None,
-    ) -> RecoveryReflection:
-        """Produce a KB-focused reflection from grounded recovery context."""
-        from sregym_agents.crucible.recovery_reflection import RecoveryReflection
+        stage_outputs_file: Path | None = None,
+        diagnosis_oracle_reasoning: str = "",
+    ) -> DiagnosisPlaybookDraft | None:
+        """Build a reusable diagnosis playbook from the completed grounded diagnosis."""
 
-        stage_outputs = ""
-        if stage_outputs_file and stage_outputs_file.exists():
-            stage_outputs = stage_outputs_file.read_text().strip()
+        if not grounded_answer.strip() or not grounded_justification.strip() or not recovery_message_history:
+            logger.warning("Recovery playbook candidate: grounded diagnosis or message history missing, skipping.")
+            return None
 
-        system_prompt = self._renderer.render("recovery_reflection_system")
+        logger.info("=" * 60)
+        logger.info("RECOVERY PLAYBOOK: converting grounded diagnosis into diagnosis playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Recovery Diagnosis Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_diagnosis_playbook_system")
         user_prompt = self._renderer.render(
-            "recovery_reflection_user",
-            stage_outputs=stage_outputs or "(No stage outputs captured.)",
+            "recovery_diagnosis_playbook_user",
             original_answer=original_answer,
             original_justification=original_justification,
             original_causal_chain=original_causal_chain,
+            grounded_answer=grounded_answer,
+            grounded_justification=grounded_justification,
+            grounded_causal_chain=grounded_causal_chain,
+            diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
             app_name=app_info.get("app_name", "unknown"),
             namespace=app_info.get("namespace", "default"),
             descriptions=app_info.get("descriptions", ""),
         )
+        logger.info(f"[recovery-diagnosis-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[recovery-diagnosis-playbook] USER PROMPT:\n{user_prompt}")
 
         result = await self._driver.run(
             prompt=user_prompt,
             system_prompt=system_prompt,
-            tools=None,
-            output_type=RecoveryReflection,
-            agent_name="recovery-reflection",
+            output_type=DiagnosisPlaybookDraft,
+            agent_name="recovery-diagnosis-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=recovery_message_history,
             usage_collector=usage_collector,
-            message_history=phase1_messages,
         )
+        if not result.completed or result.output is None:
+            logger.warning("Recovery diagnosis playbook agent did not produce output.")
+            return None
 
-        if result.output is None:
-            logger.warning("Recovery reflection produced no output; returning empty reflection.")
-            return RecoveryReflection(summary="Recovery reflection failed to produce output.")
-
-        reflection = result.output
-
-        # Write to stage outputs file
+        draft = result.output
         if stage_outputs_file:
             with open(stage_outputs_file, "a") as f:
-                f.write("\n---\n## Recovery Reflection\n")
-                f.write(f"**Summary**: {reflection.summary}\n")
-                if reflection.investigation_observations:
-                    f.write("**Grounded Observations**:\n")
-                    f.writelines(f"- {obs}\n" for obs in reflection.investigation_observations)
-                for failure in reflection.stage_failures:
-                    f.write(f"### {failure.stage}\n")
-                    f.write(f"**Description**: {failure.description}\n")
-                    f.write(f"**Evidence**: {failure.evidence}\n")
-                    f.write(f"**Lesson**: {failure.lesson}\n")
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
 
-        return reflection
+        logger.info("Recovery diagnosis playbook candidate complete: %s", draft.slug)
+        return draft
+
+    async def build_success_diagnosis_playbook_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        diagnosis_answer: str,
+        diagnosis_justification: str,
+        diagnosis_causal_chain: str = "",
+        diagnosis_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        stage_outputs_file: Path | None = None,
+    ) -> DiagnosisPlaybookDraft | None:
+        """Build a reusable diagnosis playbook from a successful primary diagnosis run."""
+
+        if not diagnosis_answer.strip() or not diagnosis_justification.strip() or not diagnosis_message_history:
+            logger.warning("Success diagnosis playbook candidate: diagnosis or message history missing, skipping.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("SUCCESS DIAGNOSIS PLAYBOOK: converting successful diagnosis into diagnosis playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Success Diagnosis Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_diagnosis_playbook_system")
+        user_prompt = self._renderer.render(
+            "success_diagnosis_playbook_user",
+            diagnosis_answer=diagnosis_answer,
+            diagnosis_justification=diagnosis_justification,
+            diagnosis_causal_chain=diagnosis_causal_chain,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+        )
+        logger.info(f"[success-diagnosis-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[success-diagnosis-playbook] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=DiagnosisPlaybookDraft,
+            agent_name="success-diagnosis-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=diagnosis_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Success diagnosis playbook agent did not produce output.")
+            return None
+
+        draft = result.output
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
+
+        logger.info("Success diagnosis playbook candidate complete: %s", draft.slug)
+        return draft
+
+    async def build_triage_area_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        original_answer: str,
+        grounded_answer: str,
+        grounded_justification: str,
+        stage_outputs: str,
+        recovery_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        original_justification: str = "",
+    ) -> TriageAreaCandidate | None:
+        """Build a reusable triage-area candidate from a grounded diagnosis failure."""
+
+        if not grounded_answer.strip() or not grounded_justification.strip() or not stage_outputs.strip():
+            logger.warning("Recovery triage candidate: grounded diagnosis or stage outputs missing, skipping.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("RECOVERY TRIAGE CANDIDATE: extracting reusable triage lessons")
+        logger.info("=" * 60)
+
+        system_prompt = self._renderer.render("recovery_triage_area_candidate_system")
+        user_prompt = self._renderer.render(
+            "recovery_triage_area_candidate_user",
+            original_answer=original_answer,
+            original_justification=original_justification,
+            grounded_answer=grounded_answer,
+            grounded_justification=grounded_justification,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+            stage_outputs=stage_outputs,
+        )
+        logger.info(f"[recovery-triage-area-candidate] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[recovery-triage-area-candidate] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=TriageAreaCandidate,
+            agent_name="recovery-triage-area-candidate",
+            model_settings=self._sre_model_settings(),
+            message_history=recovery_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Recovery triage area candidate agent did not produce output.")
+            return None
+
+        candidate = result.output
+        logger.info("Recovery triage area candidate complete: %s", candidate.area_name)
+        return candidate
+
+    async def build_mitigation_playbook_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        root_cause_slug: str,
+        root_cause: str,
+        diagnosis_answer: str,
+        original_answer: str,
+        original_justification: str = "",
+        grounded_answer: str,
+        grounded_justification: str,
+        recovery_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        stage_outputs_file: Path | None = None,
+        diagnosis_oracle_reasoning: str = "",
+    ) -> MitigationPlaybookDraft | None:
+        """Build a reusable mitigation playbook from the completed grounded mitigation."""
+
+        if not (
+            root_cause_slug.strip()
+            and root_cause.strip()
+            and grounded_answer.strip()
+            and grounded_justification.strip()
+            and recovery_message_history
+        ):
+            logger.warning("Recovery mitigation playbook candidate: grounded mitigation or message history missing.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("RECOVERY MITIGATION PLAYBOOK: converting grounded mitigation into playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Recovery Mitigation Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_mitigation_playbook_system")
+        user_prompt = self._renderer.render(
+            "recovery_mitigation_playbook_user",
+            root_cause_slug=root_cause_slug,
+            root_cause=root_cause,
+            diagnosis_answer=diagnosis_answer,
+            original_answer=original_answer,
+            original_justification=original_justification,
+            grounded_answer=grounded_answer,
+            grounded_justification=grounded_justification,
+            diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+        )
+        logger.info(f"[recovery-mitigation-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[recovery-mitigation-playbook] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=MitigationPlaybookDraft,
+            agent_name="recovery-mitigation-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=recovery_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Recovery mitigation playbook agent did not produce output.")
+            return None
+
+        draft = result.output.model_copy(update={"slug": root_cause_slug, "root_cause": root_cause})
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
+
+        logger.info("Recovery mitigation playbook candidate complete: %s", draft.slug)
+        return draft
+
+    async def build_success_mitigation_playbook_candidate(
+        self,
+        *,
+        app_info: dict[str, Any],
+        root_cause_slug: str,
+        root_cause: str,
+        diagnosis_answer: str,
+        mitigation_answer: str,
+        mitigation_justification: str,
+        mitigation_message_history: list[Any] | None = None,
+        usage_collector: UsageCollector | None = None,
+        stage_outputs_file: Path | None = None,
+        diagnosis_oracle_reasoning: str = "",
+    ) -> MitigationPlaybookDraft | None:
+        """Build a reusable mitigation playbook from a successful primary mitigation run."""
+
+        if not (
+            root_cause_slug.strip()
+            and root_cause.strip()
+            and mitigation_answer.strip()
+            and mitigation_justification.strip()
+            and mitigation_message_history
+        ):
+            logger.warning("Success mitigation playbook candidate: mitigation or message history missing.")
+            return None
+
+        logger.info("=" * 60)
+        logger.info("SUCCESS MITIGATION PLAYBOOK: converting successful mitigation into playbook candidate")
+        logger.info("=" * 60)
+
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write("\n---\n## Success Mitigation Playbook Candidate\n")
+
+        system_prompt = self._renderer.render("recovery_mitigation_playbook_system")
+        user_prompt = self._renderer.render(
+            "success_mitigation_playbook_user",
+            root_cause_slug=root_cause_slug,
+            root_cause=root_cause,
+            diagnosis_answer=diagnosis_answer,
+            mitigation_answer=mitigation_answer,
+            mitigation_justification=mitigation_justification,
+            diagnosis_oracle_reasoning=diagnosis_oracle_reasoning,
+            app_name=app_info.get("app_name", "unknown"),
+            namespace=app_info.get("namespace", "default"),
+            descriptions=app_info.get("descriptions", ""),
+        )
+        logger.info(f"[success-mitigation-playbook] SYSTEM PROMPT:\n{system_prompt}")
+        logger.info(f"[success-mitigation-playbook] USER PROMPT:\n{user_prompt}")
+
+        result = await self._driver.run(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            output_type=MitigationPlaybookDraft,
+            agent_name="success-mitigation-playbook",
+            model_settings=self._sre_model_settings(),
+            message_history=mitigation_message_history,
+            usage_collector=usage_collector,
+        )
+        if not result.completed or result.output is None:
+            logger.warning("Success mitigation playbook agent did not produce output.")
+            return None
+
+        draft = result.output.model_copy(update={"slug": root_cause_slug, "root_cause": root_cause})
+        if stage_outputs_file:
+            with open(stage_outputs_file, "a") as f:
+                f.write(f"**Slug**: {draft.slug}\n")
+                f.write(f"**Root Cause**: {draft.root_cause}\n")
+
+        logger.info("Success mitigation playbook candidate complete: %s", draft.slug)
+        return draft
 
     async def run_mitigation(
         self,
@@ -251,7 +522,7 @@ class RecoveryAgent:
         original_justification: str = "",
         diagnosis_answer: str = "",
         stage_outputs_file: Path | None = None,
-    ) -> SRESubmission | None:
+    ) -> RecoveryRunResult | None:
         """Run a recovery mitigation agent to investigate and apply the correct fix."""
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
 
@@ -314,17 +585,14 @@ class RecoveryAgent:
             submission = SRESubmission(
                 answer=state.answer or "",
                 justification=state.answer_justification or "",
-                reflection=state.answer_reflection or "",
             )
         else:
             state.submitted = True
             state.answer = result.output.answer
             state.answer_justification = result.output.justification
-            state.answer_reflection = result.output.reflection
             submission = SRESubmission(
                 answer=result.output.answer,
                 justification=result.output.justification,
-                reflection=result.output.reflection,
             )
 
         # Append recovery result to shared file
@@ -333,8 +601,6 @@ class RecoveryAgent:
             f"**Mitigation**: {submission.answer}\n"
             f"**Justification**: {submission.justification}\n"
         )
-        if submission.reflection:
-            entry += f"**Agent Reflection**: {submission.reflection}\n"
         try:
             shared_file.append(entry)
         except Exception as e:
@@ -345,11 +611,9 @@ class RecoveryAgent:
             with open(stage_outputs_file, "a") as f:
                 f.write(f"**Mitigation**: {submission.answer}\n")
                 f.write(f"**Justification**: {submission.justification}\n")
-                if submission.reflection:
-                    f.write(f"**Agent Reflection**: {submission.reflection}\n")
 
         logger.info(f"Recovery mitigation complete: {submission.answer}")
-        return submission
+        return RecoveryRunResult(submission=submission, message_history=result.messages)
 
     @staticmethod
     def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:

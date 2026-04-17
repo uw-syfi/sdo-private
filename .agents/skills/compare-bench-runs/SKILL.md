@@ -17,9 +17,9 @@ behavioral differences, and synthesizing findings.
 ## Prerequisites
 
 Each run directory (`bench/sregym/logs/<run_name>/`) contains:
-- `sregym_*_w*_<problem>.md` — per-problem trajectory files (see `references/trajectory-format.md`)
-- `*_crucible_results.csv` — result CSVs
-- `<problem>.log` — execution logs
+- `problem_runs/<ts>_<problem>/agent/diagnosis.md`, `.../mitigation.md` — per-problem trajectory files (see `references/trajectory-format.md`)
+- `problem_runs/<ts>_<problem>/results_<iter_ts>.csv` — benchmark result CSVs (one per iteration)
+- `problem_runs/<ts>_<problem>/run.log` — execution logs
 
 ## Workflow
 
@@ -64,9 +64,11 @@ Each subagent prompt should include:
 Analyze benchmark problem "<problem>" across two runs.
 <OUTCOME>. Run1 (<label1>) TTL: <ttl1>s, Run2 (<label2>) TTL: <ttl2>s.
 
-Read these MD trajectory files:
-- Run1: <run1_dir>/<run1_md_file>
-- Run2: <run2_dir>/<run2_md_file>
+Read these MD trajectory files (diagnosis and mitigation):
+- Run1: <run1_dir>/problem_runs/<ts>_<problem>/agent/{diagnosis,mitigation}.md
+- Run2: <run2_dir>/problem_runs/<ts>_<problem>/agent/{diagnosis,mitigation}.md
+
+(The `dir` field returned by `extract_results.py` gives the exact relative path for each run.)
 
 Compare: (1) diagnoses produced, (2) why each succeeded/failed,
 (3) investigation approach differences, (4) judge behavior and correctness,

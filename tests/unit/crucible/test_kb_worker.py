@@ -1,252 +1,786 @@
-"""Tests for sregym_agents.crucible.kb_worker."""
-
 from __future__ import annotations
 
-import asyncio
 import json
-import os
-import threading
-import time
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
-from sregym_agents.crucible.kb_update_queue import ensure_kb_worker
-from sregym_agents.crucible.kb_worker import (
-    process_task,
-    run_worker,
+from sregym_agents.crucible.agents.base import AgentResult
+from sregym_agents.crucible.knowledge_base.incident_review import (
+    DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
+    PlaceholderResolutionRule,
+    ReviewDecision,
+    TriageAreaCandidate,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from sregym_agents.crucible.knowledge_base.root_cause import RootCauseStore
 
 
-def _write_task(pending_dir: Path, problem_id: str = "test_problem", **overrides) -> Path:
-    """Helper to write a valid KB update task file."""
-    task = {
-        "session_files": {"diagnosis": None, "mitigation": None},
-        "stage_outputs_file": None,
-        "kb_dir": str(pending_dir.parent),
-        "kb_type": "structured",
-        "model_id": "test-model",
-        "app_name": "test-app",
-        "include_benchmark_results": False,
-        "enable_reflection": True,
-        "recovery_phase2_enabled": False,
-        "problem_id": problem_id,
-        "prompt_version": "v1",
-        "timestamp": "20260401_120000",
-        **overrides,
+def _candidate(slug: str = "coredns-nxdomain") -> DiagnosisPlaybookDraft:
+    return DiagnosisPlaybookDraft(
+        slug=slug,
+        root_cause="CoreDNS returns NXDOMAIN for backend service names.",
+        when_to_consider=["Application logs show host resolution failures to internal services."],
+        disambiguators=["Backend services exist but DNS lookups still fail."],
+        summary="Inspect cluster DNS behavior for targeted NXDOMAIN responses.",
+        triage_checks=["1. Review application logs for repeated service-name resolution failures."],
+        fault_localization_checks=["1. Trace the failing request path to the backend hostname being resolved."],
+        verification_checks=["1. Inspect CoreDNS config for rules matching the failing service names."],
+        required_evidence=["CoreDNS config contains a rule returning NXDOMAIN for the failing service FQDN."],
+        known_confounders=["The Service object is missing entirely."],
+    )
+
+
+def _mitigation_candidate(slug: str = "coredns-nxdomain") -> MitigationPlaybookDraft:
+    return MitigationPlaybookDraft(
+        slug=slug,
+        root_cause="CoreDNS returns NXDOMAIN for backend service names.",
+        summary="Remove the targeted CoreDNS rule and verify service-name resolution recovers.",
+        mitigation_procedure=["1. Patch the CoreDNS ConfigMap to remove the targeted NXDOMAIN rule."],
+        placeholder_resolution=[
+            PlaceholderResolutionRule(
+                symbol="<AFFECTED_SERVICE_FQDNS>",
+                resolution_guidance=(
+                    "Resolve from the diagnosis-confirmed service names. This may be one FQDN or a set "
+                    "of service names covered by the same CoreDNS override."
+                ),
+            )
+        ],
+        verification_checks=["1. Verify the affected service names resolve from the application pod."],
+        rollback_stop_conditions=["Stop if the correct CoreDNS ConfigMap cannot be identified confidently."],
+    )
+
+
+def test_review_decision_rejects_merge_without_targets():
+    with pytest.raises(ValueError, match="target slug"):
+        ReviewDecision(
+            primary_failure_mode="retrieval_failure",
+            relevant_existing_playbooks=["dns-failure"],
+            recommended_action="merge_playbooks",
+            target_slugs=[],
+            reasoning="A relevant playbook existed and should be merged.",
+        )
+
+
+def test_review_decision_rejects_validation_failure_without_existing_playbooks():
+    with pytest.raises(ValueError, match="requires at least one relevant existing playbook"):
+        ReviewDecision(
+            primary_failure_mode="playbook_validation_failure",
+            relevant_existing_playbooks=[],
+            recommended_action="reject_playbook",
+            rejection_reason="The candidate is too incident-specific.",
+            reasoning="The schema should reject this inconsistent combination.",
+        )
+
+
+def test_review_decision_rejects_retrieval_failure_with_add_playbook():
+    with pytest.raises(ValueError, match="incoherent with add_playbook"):
+        ReviewDecision(
+            primary_failure_mode="retrieval_failure",
+            relevant_existing_playbooks=["some-adjacent-playbook"],
+            recommended_action="add_playbook",
+            reasoning=(
+                "Classifier lists an adjacent playbook but wants to add a new one — "
+                "this should be missing_playbook + add_playbook instead."
+            ),
+        )
+
+
+def test_review_decision_rejects_playbook_validation_failure_with_add_playbook():
+    with pytest.raises(ValueError, match="incoherent with add_playbook"):
+        ReviewDecision(
+            primary_failure_mode="playbook_validation_failure",
+            relevant_existing_playbooks=["some-adjacent-playbook"],
+            recommended_action="add_playbook",
+            reasoning="Same incoherence as retrieval_failure + add.",
+        )
+
+
+def test_review_decision_rejects_add_with_targets():
+    with pytest.raises(ValueError, match="cannot specify target_slugs"):
+        ReviewDecision(
+            primary_failure_mode="missing_playbook",
+            relevant_existing_playbooks=[],
+            recommended_action="add_playbook",
+            target_slugs=["dns-failure"],
+            reasoning="An add action cannot target an existing slug.",
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_task_adds_candidate_playbook(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    diagnosis_path = tmp_path / "diagnosis_run.md"
+    recovery_path = tmp_path / "recovery_diagnosis_run.md"
+    candidate_path = tmp_path / "candidate.json"
+    diagnosis_path.write_text("# Diagnosis")
+    recovery_path.write_text("# Recovery")
+    candidate_path.write_text(json.dumps(_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": str(diagnosis_path),
+                "recovery_diagnosis_run_file": str(recovery_path),
+                "diagnosis_playbook_candidate_file": str(candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": False,
+                "mitigation_succeeded": False,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            return AgentResult(
+                output=ReviewDecision(
+                    primary_failure_mode="missing_playbook",
+                    relevant_existing_playbooks=[],
+                    recommended_action="add_playbook",
+                    reasoning="The candidate captures a novel diagnosis pattern.",
+                )
+            )
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    await kb_worker.process_task(task_path)
+
+    saved = store.load_diagnosis("coredns-nxdomain")
+    assert saved is not None
+    assert saved.front_matter.root_cause == "CoreDNS returns NXDOMAIN for backend service names."
+
+
+@pytest.mark.asyncio
+async def test_process_task_merges_candidate_into_existing_playbook(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+    from sregym_agents.crucible.knowledge_base.root_cause import DiagnosisFrontMatter, DiagnosisPlaybook
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    diagnosis_path = tmp_path / "diagnosis_run.md"
+    recovery_path = tmp_path / "recovery_diagnosis_run.md"
+    candidate_path = tmp_path / "candidate.json"
+    diagnosis_path.write_text("# Diagnosis")
+    recovery_path.write_text("# Recovery")
+    candidate_path.write_text(json.dumps(_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": str(diagnosis_path),
+                "recovery_diagnosis_run_file": str(recovery_path),
+                "diagnosis_playbook_candidate_file": str(candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": False,
+                "mitigation_succeeded": False,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    store.save_diagnosis(
+        DiagnosisPlaybook(
+            front_matter=DiagnosisFrontMatter(
+                slug="dns-failure",
+                root_cause="DNS is broken for service lookups.",
+                when_to_consider=["Pods cannot resolve service hostnames."],
+                disambiguators=["Service objects exist."],
+            ),
+            summary="Check cluster DNS for application service resolution failures.",
+            triage_checks=["1. Confirm the app is failing on DNS resolution."],
+            fault_localization_checks=["1. Identify which upstream hostname the failing request path depends on."],
+            verification_checks=["1. Run DNS lookups for the failing service names."],
+            required_evidence=["DNS lookups fail for existing service names."],
+            known_confounders=["Backend pods are crashing."],
+        ),
+        created_from="seed",
+    )
+    store.save_diagnosis(
+        DiagnosisPlaybook(
+            front_matter=DiagnosisFrontMatter(
+                slug="dns-targeted-nxdomain",
+                root_cause="CoreDNS injects NXDOMAIN for selected service names.",
+                when_to_consider=["Only specific service names fail to resolve."],
+                disambiguators=["CoreDNS config contains name-specific overrides."],
+            ),
+            summary="Check for targeted NXDOMAIN rules in cluster DNS.",
+            triage_checks=["1. Compare healthy and failing DNS lookups."],
+            fault_localization_checks=["1. Map the failing symptom to the dependent service FQDN."],
+            verification_checks=["1. Inspect CoreDNS config for the failing names."],
+            required_evidence=["CoreDNS config mentions the failing service names."],
+            known_confounders=["The failing service names are misspelled."],
+        ),
+        created_from="seed",
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+            self.calls = 0
+
+        async def run(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResult(
+                    output=ReviewDecision(
+                        primary_failure_mode="playbook_validation_failure",
+                        relevant_existing_playbooks=["dns-failure", "dns-targeted-nxdomain"],
+                        recommended_action="merge_playbooks",
+                        target_slugs=["dns-failure", "dns-targeted-nxdomain"],
+                        reasoning="The candidate should become the merged canonical DNS diagnosis playbook.",
+                    )
+                )
+            return AgentResult(output=_candidate(slug="merged-ignored"))
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    await kb_worker.process_task(task_path)
+
+    merged = store.load_diagnosis("dns-failure")
+    deprecated_meta = store.load_meta("dns-targeted-nxdomain")
+    assert merged is not None
+    assert merged.front_matter.root_cause == "CoreDNS returns NXDOMAIN for backend service names."
+    assert deprecated_meta.status == "deprecated"
+
+
+@pytest.mark.asyncio
+async def test_process_task_accepts_missing_optional_recovery_run(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    diagnosis_path = tmp_path / "diagnosis_run.md"
+    candidate_path = tmp_path / "candidate.json"
+    diagnosis_path.write_text("# Diagnosis")
+    candidate_path.write_text(json.dumps(_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": str(diagnosis_path),
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": str(candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": False,
+                "mitigation_succeeded": False,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            return AgentResult(
+                output=ReviewDecision(
+                    primary_failure_mode="missing_playbook",
+                    relevant_existing_playbooks=[],
+                    recommended_action="add_playbook",
+                    reasoning="The diagnosis run and candidate are sufficient without recovery context.",
+                )
+            )
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    await kb_worker.process_task(task_path)
+
+    saved = store.load_diagnosis("coredns-nxdomain")
+    assert saved is not None
+
+
+@pytest.mark.asyncio
+async def test_process_task_reviews_success_authored_diagnosis_candidate_with_success_prompt(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    diagnosis_path = tmp_path / "diagnosis_run.md"
+    candidate_path = tmp_path / "candidate.json"
+    diagnosis_path.write_text("# Diagnosis")
+    candidate_path.write_text(json.dumps(_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": str(diagnosis_path),
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": str(candidate_path),
+                "diagnosis_playbook_candidate_origin": "success",
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": False,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            assert "successful diagnosis workflow" in kwargs["prompt"].lower()
+            assert "recovery-produced diagnosis playbook candidate" not in kwargs["prompt"].lower()
+            return AgentResult(
+                output=ReviewDecision(
+                    primary_failure_mode="missing_playbook",
+                    relevant_existing_playbooks=[],
+                    recommended_action="add_playbook",
+                    reasoning="The successful run demonstrates a novel reusable diagnosis pattern.",
+                )
+            )
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    await kb_worker.process_task(task_path)
+
+    saved = store.load_diagnosis("coredns-nxdomain")
+    assert saved is not None
+
+
+@pytest.mark.asyncio
+async def test_process_task_refines_triage_priors_from_candidate(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+    from sregym_agents.crucible.tools import TriageArea, TriagePriors
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    diagnosis_path = tmp_path / "diagnosis_run.md"
+    recovery_path = tmp_path / "recovery_diagnosis_run.md"
+    triage_candidate_path = tmp_path / "triage_candidate.json"
+    diagnosis_path.write_text("# Diagnosis")
+    recovery_path.write_text("# Recovery")
+    triage_candidate_path.write_text(
+        json.dumps(
+            TriageAreaCandidate(
+                area_name="DNS and Service Discovery",
+                hints=[
+                    (
+                        "Inspect entrypoint logs for hostname-resolution failures when smoke tests only "
+                        "show generic HTTP errors."
+                    ),
+                    "Test the failing service FQDN and one known-good service name from the same pod.",
+                ],
+                grounding=[
+                    "Initial triage only surfaced generic HTTP failures.",
+                    "Recovery found a targeted DNS failure.",
+                ],
+            ).model_dump(mode="python")
+        )
+    )
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": str(diagnosis_path),
+                "recovery_diagnosis_run_file": str(recovery_path),
+                "diagnosis_playbook_candidate_file": None,
+                "triage_area_candidate_file": str(triage_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": False,
+                "mitigation_succeeded": False,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
+
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
+
+        async def run(self, **kwargs):
+            return AgentResult(
+                output=TriagePriors(
+                    areas=[
+                        TriageArea(
+                            name="DNS and Service Discovery",
+                            hints=[
+                                (
+                                    "Inspect entrypoint logs for hostname-resolution failures when smoke tests "
+                                    "only show generic HTTP errors."
+                                ),
+                                "Test the failing service FQDN and one known-good service name from the same pod.",
+                            ],
+                        )
+                    ]
+                )
+            )
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    await kb_worker.process_task(task_path)
+
+    triage_priors_path = kb_dir / "v3" / "apps" / "social-network" / "triage_priors.yaml"
+    assert triage_priors_path.exists()
+    saved = yaml.safe_load(triage_priors_path.read_text())
+    assert saved == {
+        "areas": [
+            {
+                "name": "DNS and Service Discovery",
+                "hints": [
+                    (
+                        "Inspect entrypoint logs for hostname-resolution failures when smoke tests only show "
+                        "generic HTTP errors."
+                    ),
+                    "Test the failing service FQDN and one known-good service name from the same pod.",
+                ],
+            }
+        ]
     }
-    pending_dir.mkdir(parents=True, exist_ok=True)
-    path = pending_dir / f"{task['timestamp']}_{problem_id}.json"
-    path.write_text(json.dumps(task))
-    return path
 
 
-class TestProcessTask:
-    @pytest.mark.asyncio
-    async def test_calls_kb_update_and_moves_to_completed(self, tmp_path: Path):
-        """Task is processed and moved to completed/."""
-        pending_dir = tmp_path / "pending"
-        session_file = tmp_path / "session.md"
-        session_file.write_text("session content")
-        task_path = _write_task(
-            pending_dir,
-            session_files={"diagnosis": str(session_file), "mitigation": None},
+@pytest.mark.asyncio
+async def test_process_task_saves_mitigation_candidate_for_existing_diagnosis(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    mitigation_path = tmp_path / "mitigation_run.md"
+    mitigation_candidate_path = tmp_path / "mitigation_candidate.json"
+    mitigation_path.write_text("# Mitigation")
+    mitigation_candidate_path.write_text(json.dumps(_mitigation_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": None,
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": None,
+                "mitigation_run_file": str(mitigation_path),
+                "recovery_mitigation_run_file": None,
+                "mitigation_playbook_candidate_file": str(mitigation_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": True,
+                "timestamp": "20260414_000000",
+            }
         )
+    )
 
-        mock_kb = AsyncMock()
-        with patch(
-            "sregym_agents.crucible.kb_worker.create_knowledge_base",
-            return_value=mock_kb,
-        ):
-            await process_task(task_path)
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    store.save_diagnosis(kb_worker._draft_to_playbook(_candidate()), created_from="seed")
 
-        mock_kb.update.assert_awaited_once()
-        assert not task_path.exists()
-        completed = tmp_path / "completed"
-        assert (completed / task_path.name).exists()
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
 
-    @pytest.mark.asyncio
-    async def test_passes_recovery_reflection_to_kb_update(self, tmp_path: Path):
-        pending_dir = tmp_path / "pending"
-        task_path = _write_task(
-            pending_dir,
-            recovery_reflection={
-                "summary": "Grounded recovery narrative",
-                "stage_failures": [],
-                "investigation_observations": ["Observed failing readiness checks"],
-            },
+        async def run(self, **kwargs):
+            return AgentResult(output=SimpleNamespace())
+
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
+
+    await kb_worker.process_task(task_path)
+
+    saved = store.load_mitigation("coredns-nxdomain")
+    assert saved is not None
+    assert saved.summary == "Remove the targeted CoreDNS rule and verify service-name resolution recovers."
+
+
+@pytest.mark.asyncio
+async def test_process_task_merges_mitigation_candidate_into_existing_playbook(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
+    from sregym_agents.crucible.knowledge_base.root_cause import MitigationFrontMatter, MitigationPlaybook
+
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    mitigation_path = tmp_path / "mitigation_run.md"
+    recovery_path = tmp_path / "recovery_mitigation_run.md"
+    mitigation_candidate_path = tmp_path / "mitigation_candidate.json"
+    mitigation_path.write_text("# Mitigation")
+    recovery_path.write_text("# Recovery Mitigation")
+    mitigation_candidate_path.write_text(json.dumps(_mitigation_candidate().model_dump(mode="python")))
+
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": None,
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": None,
+                "mitigation_run_file": str(mitigation_path),
+                "recovery_mitigation_run_file": str(recovery_path),
+                "mitigation_playbook_candidate_file": str(mitigation_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": True,
+                "timestamp": "20260414_000000",
+            }
         )
+    )
 
-        mock_kb = AsyncMock()
-        with patch(
-            "sregym_agents.crucible.kb_worker.create_knowledge_base",
-            return_value=mock_kb,
-        ):
-            await process_task(task_path)
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    store.save_diagnosis(kb_worker._draft_to_playbook(_candidate()), created_from="seed")
+    store.save_mitigation(
+        MitigationPlaybook(
+            front_matter=MitigationFrontMatter(
+                slug="coredns-nxdomain",
+                root_cause="CoreDNS returns NXDOMAIN for backend service names.",
+            ),
+            summary="Restart the application pods and hope DNS recovers.",
+            mitigation_procedure=["1. Restart the affected pods."],
+            verification_checks=["1. Confirm the application error rate drops."],
+            rollback_stop_conditions=["Stop if the restart does not improve symptoms."],
+        ),
+        created_from="seed",
+    )
 
-        _args, kwargs = mock_kb.update.await_args
-        assert kwargs["recovery_reflection"].summary == "Grounded recovery narrative"
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
 
-    @pytest.mark.asyncio
-    async def test_moves_to_failed_on_error(self, tmp_path: Path):
-        """On kb.update() failure, process_task raises (run_worker moves to failed/)."""
-        pending_dir = tmp_path / "pending"
-        task_path = _write_task(pending_dir)
+        async def run(self, **kwargs):
+            assert kwargs["agent_name"] == "kb-merge-mitigation-playbooks"
+            return AgentResult(output=_mitigation_candidate())
 
-        mock_kb = AsyncMock()
-        mock_kb.update.side_effect = RuntimeError("LLM error")
-        with patch(
-            "sregym_agents.crucible.kb_worker.create_knowledge_base",
-            return_value=mock_kb,
-        ):
-            with pytest.raises(RuntimeError, match="LLM error"):
-                await process_task(task_path)
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
 
+    await kb_worker.process_task(task_path)
 
-_FAST_POLL = 0.01  # fast poll interval for tests
-
-
-class TestRunWorker:
-    @pytest.mark.asyncio
-    async def test_exits_after_idle_timeout(self, tmp_path: Path):
-        """Worker exits when no tasks appear within idle timeout."""
-        start = time.monotonic()
-        await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
-        elapsed = time.monotonic() - start
-        assert elapsed >= 0.05
-        assert elapsed < 5
-
-    @pytest.mark.asyncio
-    async def test_cleans_up_pid_file(self, tmp_path: Path):
-        """PID file is removed on exit."""
-        pid_path = tmp_path / "kb_worker.pid"
-        await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
-        assert not pid_path.exists()
-
-    @pytest.mark.asyncio
-    async def test_writes_pid_file(self, tmp_path: Path):
-        """PID file is written on startup."""
-        pid_path = tmp_path / "kb_worker.pid"
-        pid_seen = []
-
-        original_sleep = asyncio.sleep
-
-        async def _capture_pid_and_timeout(*args, **kwargs):
-            if pid_path.exists():
-                pid_seen.append(int(pid_path.read_text().strip()))
-            await original_sleep(0)
-
-        with patch("sregym_agents.crucible.kb_worker.asyncio.sleep", side_effect=_capture_pid_and_timeout):
-            await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
-
-        assert len(pid_seen) > 0
-        assert pid_seen[0] == os.getpid()
-
-    @pytest.mark.asyncio
-    async def test_processes_task_and_continues(self, tmp_path: Path):
-        """Worker processes a task, then idles out."""
-        pending_dir = tmp_path / "pending"
-        session_file = tmp_path / "session.md"
-        session_file.write_text("content")
-        _write_task(pending_dir, session_files={"diagnosis": str(session_file), "mitigation": None})
-
-        mock_kb = AsyncMock()
-        with patch(
-            "sregym_agents.crucible.kb_worker.create_knowledge_base",
-            return_value=mock_kb,
-        ):
-            await run_worker(tmp_path, idle_timeout=0.05, poll_interval=_FAST_POLL)
-
-        mock_kb.update.assert_awaited_once()
-        assert not list(pending_dir.glob("*.json"))
-        assert list((tmp_path / "completed").glob("*.json"))
+    merged = store.load_mitigation("coredns-nxdomain")
+    assert merged is not None
+    assert merged.summary == "Remove the targeted CoreDNS rule and verify service-name resolution recovers."
 
 
-class TestEnsureKbWorker:
-    def test_spawns_worker_and_writes_pid(self, tmp_path: Path):
-        """ensure_kb_worker spawns a process and writes PID file."""
-        kb_dir = tmp_path / "kb"
-        kb_dir.mkdir()
-        (kb_dir / "pending").mkdir()
+@pytest.mark.asyncio
+async def test_process_task_skips_mitigation_candidate_without_matching_diagnosis(tmp_path, monkeypatch):
+    from sregym_agents.crucible import kb_worker
 
-        ensure_kb_worker(kb_dir)
+    kb_dir = tmp_path / "kb"
+    reviews_pending = kb_dir / "v3" / "reviews" / "pending"
+    reviews_pending.mkdir(parents=True)
+    mitigation_path = tmp_path / "mitigation_run.md"
+    mitigation_candidate_path = tmp_path / "mitigation_candidate.json"
+    mitigation_path.write_text("# Mitigation")
+    mitigation_candidate_path.write_text(json.dumps(_mitigation_candidate().model_dump(mode="python")))
 
-        pid_path = kb_dir / "kb_worker.pid"
-        assert pid_path.exists()
-        pid = int(pid_path.read_text().strip())
-        assert pid > 0
+    task_path = reviews_pending / "task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "diagnosis_run_file": None,
+                "recovery_diagnosis_run_file": None,
+                "diagnosis_playbook_candidate_file": None,
+                "mitigation_run_file": str(mitigation_path),
+                "recovery_mitigation_run_file": None,
+                "mitigation_playbook_candidate_file": str(mitigation_candidate_path),
+                "stage_outputs_file": None,
+                "kb_dir": str(kb_dir),
+                "kb_type": "structured",
+                "model_id": "test-model",
+                "app_name": "social-network",
+                "include_benchmark_results": True,
+                "kb_scope": "per_app",
+                "kb_runtime_mode": "playbook-first",
+                "kb_update_mode": "async-review",
+                "problem_id": "problem-1",
+                "prompt_version": "v3",
+                "diagnosis_succeeded": True,
+                "mitigation_succeeded": True,
+                "timestamp": "20260414_000000",
+            }
+        )
+    )
 
-        try:
-            os.kill(pid, 9)
-        except ProcessLookupError:
-            pass
+    class FakeDriver:
+        def __init__(self, model_id: str):
+            self.model_id = model_id
 
-    def test_does_not_spawn_duplicate(self, tmp_path: Path):
-        """Second call with live PID does not spawn another worker."""
-        kb_dir = tmp_path / "kb"
-        kb_dir.mkdir()
-        (kb_dir / "pending").mkdir()
+        async def run(self, **kwargs):
+            return AgentResult(output=SimpleNamespace())
 
-        ensure_kb_worker(kb_dir)
-        pid1 = int((kb_dir / "kb_worker.pid").read_text().strip())
+    monkeypatch.setattr("sregym_agents.crucible.agents.PydanticAIDriver", FakeDriver)
 
-        ensure_kb_worker(kb_dir)
-        pid2 = int((kb_dir / "kb_worker.pid").read_text().strip())
+    store = RootCauseStore(kb_dir / "v3" / "apps" / "social-network")
+    await kb_worker.process_task(task_path)
 
-        assert pid1 == pid2
+    assert store.load_mitigation("coredns-nxdomain") is None
 
-        try:
-            os.kill(pid1, 9)
-        except ProcessLookupError:
-            pass
 
-    def test_respawns_on_stale_pid(self, tmp_path: Path):
-        """Respawns when PID file references a dead process."""
-        kb_dir = tmp_path / "kb"
-        kb_dir.mkdir()
-        (kb_dir / "pending").mkdir()
+def test_read_playbook_tool_returns_diagnosis_markdown(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
+    from sregym_agents.crucible.knowledge_base.root_cause import DiagnosisFrontMatter, DiagnosisPlaybook
 
-        (kb_dir / "kb_worker.pid").write_text("999999999")
+    store = RootCauseStore(tmp_path / "kb")
+    store.save_diagnosis(
+        DiagnosisPlaybook(
+            front_matter=DiagnosisFrontMatter(
+                slug="my-pb",
+                root_cause="Root cause text",
+                when_to_consider=["signal A"],
+                disambiguators=["disambig 1"],
+            ),
+            summary="Summary text",
+            triage_checks=["1. First triage check"],
+            fault_localization_checks=["1. Localize"],
+            verification_checks=["1. Verify"],
+            required_evidence=["evidence 1"],
+            known_confounders=["confounder 1"],
+        ),
+        created_from="test",
+    )
 
-        ensure_kb_worker(kb_dir)
+    tool = _make_read_playbook_tool(store)
+    markdown = tool(ctx=None, playbook_type="diagnosis", slug="my-pb")
+    assert "my-pb" in markdown
+    assert "Summary text" in markdown
+    assert "First triage check" in markdown
+    assert "Verify" in markdown
 
-        pid = int((kb_dir / "kb_worker.pid").read_text().strip())
-        assert pid != 999999999
-        assert pid > 0
 
-        try:
-            os.kill(pid, 9)
-        except ProcessLookupError:
-            pass
+def test_read_playbook_tool_returns_mitigation_markdown(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
+    from sregym_agents.crucible.knowledge_base.root_cause import (
+        DiagnosisFrontMatter,
+        DiagnosisPlaybook,
+        MitigationFrontMatter,
+        MitigationPlaybook,
+    )
 
-    def test_concurrent_calls_spawn_single_worker(self, tmp_path: Path):
-        """Multiple threads calling ensure_kb_worker only spawn one process."""
-        kb_dir = tmp_path / "kb"
-        kb_dir.mkdir()
-        (kb_dir / "pending").mkdir()
+    store = RootCauseStore(tmp_path / "kb")
+    store.save_diagnosis(
+        DiagnosisPlaybook(
+            front_matter=DiagnosisFrontMatter(
+                slug="pb-slug",
+                root_cause="rc",
+                when_to_consider=["x"],
+                disambiguators=["y"],
+            ),
+            summary="s",
+            triage_checks=["1. t"],
+            fault_localization_checks=["1. fl"],
+            verification_checks=["1. v"],
+            required_evidence=["e"],
+        ),
+        created_from="test",
+    )
+    store.save_mitigation(
+        MitigationPlaybook(
+            front_matter=MitigationFrontMatter(slug="pb-slug", root_cause="rc"),
+            summary="mitigation summary",
+            mitigation_procedure=["1. Apply a patch"],
+            verification_checks=["1. Confirm recovery"],
+        ),
+        created_from="test",
+    )
 
-        results = []
-        barrier = threading.Barrier(4)
+    tool = _make_read_playbook_tool(store)
+    markdown = tool(ctx=None, playbook_type="mitigation", slug="pb-slug")
+    assert "mitigation summary" in markdown
+    assert "Apply a patch" in markdown
 
-        def _call():
-            barrier.wait()
-            ensure_kb_worker(kb_dir)
-            pid = int((kb_dir / "kb_worker.pid").read_text().strip())
-            results.append(pid)
 
-        threads = [threading.Thread(target=_call) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+def test_read_playbook_tool_raises_on_missing_slug(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
 
-        assert len(set(results)) == 1
+    store = RootCauseStore(tmp_path / "kb")
 
-        try:
-            os.kill(results[0], 9)
-        except ProcessLookupError:
-            pass
+    tool = _make_read_playbook_tool(store)
+    with pytest.raises(ValueError, match="not found"):
+        tool(ctx=None, playbook_type="diagnosis", slug="nope")
+
+
+def test_read_playbook_tool_raises_on_invalid_type(tmp_path):
+    from sregym_agents.crucible.kb_worker import _make_read_playbook_tool
+
+    store = RootCauseStore(tmp_path / "kb")
+
+    tool = _make_read_playbook_tool(store)
+    with pytest.raises(ValueError, match="Invalid playbook_type"):
+        tool(ctx=None, playbook_type="bogus", slug="whatever")

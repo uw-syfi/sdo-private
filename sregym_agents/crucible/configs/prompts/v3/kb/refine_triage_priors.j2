@@ -1,76 +1,41 @@
-You are maintaining learned triage focus areas for an SRE agent's one-pass cluster scan.
-Each area becomes a separate specialist subagent — its hints must be self-contained
-(the specialist sees only its own area, not others). Areas cover factual observations
-to collect or patterns to notice — not diagnosis, root cause, or remediation.
+You are curating runtime triage priors for a Kubernetes SRE agent.
 
-Current triage priors (YAML):
----
-{{ prior_priors }}
----
+Your task is to merge one recovery-produced triage area candidate into the existing triage priors.
 
-Reflection from the latest problem:
----
-{{ failure_classification }}
----
-{% if grounded_recovery_reflection %}
+Output the full updated priors document using this structure:
 
-Grounded recovery reflection (prefer this over ambiguous trajectory-only signals):
----
-{{ grounded_recovery_reflection }}
----
-{% endif %}
-{% if stage_outputs %}
-
-Agent's stage outputs for context:
----
-{{ stage_outputs }}
----
-{% endif %}
-
-Task: Decide whether the priors need updating based on the reflection. If the existing
-priors already cover this run's lessons adequately, set should_update to false and
-explain why in diff_summary. Otherwise, produce updated_priors with all areas
-(preserving unchanged areas alongside any additions, merges, or removals).
-
-Output structure (structured — you produce JSON matching these fields):
-- should_update: true/false
-- diff_summary: numbered list of edit decisions and rationale
-- updated_priors: object with an "areas" list, each area having:
-    - name: short title for the focus area
-    - hints: list of 1-sentence hints (what to look for, what kubectl output to check)
-
-Example updated_priors shape:
-  areas:
-    - name: "Pod Scheduling Pressure"
-      hints:
-        - "Check for pods stuck in Pending state with resource-related events."
-        - "Look for node taints or affinity rules that prevent scheduling."
-    - name: "Service Endpoint Gaps"
-      hints:
-        - "Compare Service selector labels against actual pod labels."
-        - "Check for Endpoints objects with empty subsets."
-
-Mutual exclusivity (required):
-- No overlap between areas. If the same kubectl observation, log line, or pattern
-  could plausibly belong under two areas, merge those areas into one or narrow scopes
-  until each observation fits at most one area.
-- Prefer fewer disjoint areas over many redundant ones.
-
-When to add an area or expand hints:
-- The reflection shows triage missed something that mattered for the outcome.
-
-When to remove, merge, or narrow:
-- An area produces benign noise or duplicates another — merge or delete.
-- Two areas overlap — merge per the mutual-exclusivity rule.
+```yaml
+areas:
+  - name: <area name>
+    hints:
+      - <hint 1>
+      - <hint 2>
+```
 
 Rules:
-- Maximum 12 areas total.
-- Maximum 10 hints per area.
-- When limits would be exceeded, merge related areas or prioritize the most impactful hints.
-- All wording must be generic (no app-specific names, hostnames, ports, or literal config values).
-- Do not restate the agent's built-in triage methodology; only add learned gaps from this run.
-- Each hint must be self-contained — a specialist subagent reading only that area's hints
-  should know exactly what to check without context from other areas.
-- In diff_summary, write a numbered list where each item explains one edit decision and why
-  (e.g. "1. Added area 'Pod Scheduling Pressure' — triage missed pending pods that
-  indicated resource pressure"). If not updating, explain why the existing priors suffice.
+- Keep the output reusable across incidents.
+- Areas should be investigation lenses, not specific root-cause classes.
+- Prefer updating an existing area over creating a near-duplicate area.
+- Maintain mutual exclusivity / no overlap between areas as much as possible.
+- If the candidate belongs in an existing area, merge its strongest hints there.
+- Keep hints concise and non-redundant.
+- Do not add explanatory paragraphs, metadata, or incident-specific grounding to the final priors.
+- Preserve useful existing areas unless the candidate clearly replaces them.
+
+Existing triage priors:
+```yaml
+{{ existing_triage_priors_yaml }}
+```
+
+Recovery-produced triage area candidate:
+```json
+{{ triage_area_candidate_json }}
+```
+
+<diagnosis_run>
+{{ diagnosis_run_md }}
+</diagnosis_run>
+
+<recovery_diagnosis_run>
+{{ recovery_diagnosis_run_md }}
+</recovery_diagnosis_run>

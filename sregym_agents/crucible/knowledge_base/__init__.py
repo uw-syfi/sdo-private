@@ -1,4 +1,4 @@
-"""Crucible knowledge base: cross-problem learning via pydantic-ai Agent."""
+"""Crucible knowledge base: root-cause playbooks and async review."""
 
 from __future__ import annotations
 
@@ -7,10 +7,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .append_only import AppendOnlyKnowledgeBase
 from .base import InjectedKB, KnowledgeBase, SessionFiles
-from .reflection import Reflector
-from .schema import CURRENT_SCHEMA_VERSION, KBSchema, get_schema, migrate_to_current
 from .structured import StructuredKnowledgeBase
 
 if TYPE_CHECKING:
@@ -19,15 +16,10 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.config import CrucibleConfig
 
 __all__ = [
-    "CURRENT_SCHEMA_VERSION",
     "InjectedKB",
-    "KBSchema",
     "KnowledgeBase",
-    "Reflector",
     "SessionFiles",
     "create_knowledge_base",
-    "get_schema",
-    "migrate_to_current",
     "seed_kb",
 ]
 
@@ -35,11 +27,24 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _is_runtime_seed_artifact(rel: Path) -> bool:
+    parts = rel.parts
+    if not parts:
+        return False
+    if parts[0] in {"pending", "completed", "failed"}:
+        return True
+    if parts[:2] == ("v3", "reviews"):
+        return True
+    return parts[0] in {"kb_worker.log", "kb_worker.pid", "kb_worker.lock"}
+
+
 def seed_kb(dest_kb_dir: Path, seed_kb_dir: Path | str | None) -> None:
     """Copy every file from seed_kb_dir into dest_kb_dir, preserving layout.
 
     Existing destination files are left untouched. Seed and destination are
     assumed to share the same on-disk layout; no restructuring is performed.
+    Runtime queue artifacts (worker logs, PID files, pending/completed review
+    queues) are intentionally excluded.
     No-op if seed_kb_dir is falsy or does not exist on disk.
     """
     if not seed_kb_dir:
@@ -56,6 +61,9 @@ def seed_kb(dest_kb_dir: Path, seed_kb_dir: Path | str | None) -> None:
         if not f.is_file():
             continue
         rel = f.relative_to(src)
+        if _is_runtime_seed_artifact(rel):
+            skipped += 1
+            continue
         out = dest_kb_dir / rel
         if out.exists():
             skipped += 1
@@ -84,12 +92,4 @@ def create_knowledge_base(
             renderer=renderer,
             driver=driver,
         )
-    if kb_type == "append-only":
-        return AppendOnlyKnowledgeBase(
-            kb_dir,
-            app_name,
-            config=config,
-            renderer=renderer,
-            driver=driver,
-        )
-    raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured' or 'append-only'.")
+    raise ValueError(f"Unknown kb_type: {kb_type!r}. Must be 'structured'.")

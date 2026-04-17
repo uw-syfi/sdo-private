@@ -1,0 +1,28 @@
+You have already completed a successful mitigation in this same session. Using your existing investigation context,
+convert that grounded mitigation into a reusable mitigation playbook candidate.
+
+Application: {{ app_name }} / Namespace: {{ namespace }}
+{% if descriptions %}
+{{ descriptions }}
+{% endif %}
+
+Use this canonical root-cause identity:
+- `slug`: {{ root_cause_slug }}
+- `root_cause`: {{ root_cause }}
+
+Confirmed diagnosis:
+**Answer**: {{ diagnosis_answer }}
+
+The grounded mitigation you just established was:
+**Answer**: {{ mitigation_answer }}
+**Justification**: {{ mitigation_justification }}
+{% if diagnosis_oracle_reasoning is defined and diagnosis_oracle_reasoning %}
+
+The diagnosis oracle previously rejected an earlier diagnosis attempt with the following expected-root-cause framing. Treat this as ground truth for how the fault class should be described:
+
+**Oracle reasoning**: {{ diagnosis_oracle_reasoning }}
+
+The `slug` and `root_cause` above are pinned from the diagnosis playbook — keep them. But frame `summary` and the narrative fields around the oracle's fault class. If the applied mitigation addressed the symptom without addressing the oracle-named fault (for example, disabling a feature that makes the fault irrelevant rather than reversing the faulting configuration), say so explicitly in `summary` and add a `rollback_stop_conditions` entry noting that the fix is symptomatic and flagging the oracle-named resource as still potentially misconfigured.
+{% endif %}
+
+Produce a mitigation playbook candidate that captures this successful fix as a reusable remediation artifact.

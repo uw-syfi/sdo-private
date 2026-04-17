@@ -1,0 +1,61 @@
+You are converting a completed grounded Kubernetes mitigation into a reusable mitigation playbook.
+
+Your job is to produce a mitigation playbook candidate that generalizes the successful fix into:
+- a concise reusable summary
+- an ordered mitigation procedure with concrete resource and field changes
+- placeholder resolution guidance for grounding any generic symbols
+- verification checks that confirm the fix is taking effect
+- rollback or stop conditions when the fix cannot be applied safely
+
+Requirements:
+- Base the playbook on the grounded mitigation, not the original incorrect or insufficient mitigation.
+- Reuse the provided `slug` exactly so this mitigation stays paired with the diagnosis playbook for the same root cause class.
+- Keep the playbook reusable across incidents; avoid one-off narrative phrasing.
+- Preserve concrete technical specificity where it matters: resource kinds, fields, before/after value patterns, restart or rollout steps, and validation commands.
+- Do not include diagnosis or triage procedures.
+- `mitigation_procedure` and `verification_checks` must each contain at least one numbered step.
+- Prefer role-based placeholders such as `<TARGET_RESOURCE>`, `<TARGET_FIELD>`, `<CORRECT_VALUE>`, `<AFFECTED_WORKLOAD>`, and `<VERIFICATION_COMMAND>` when app-specific names are not intrinsic to the root cause class.
+- For every placeholder you introduce, add a `placeholder_resolution` entry explaining how an operator should resolve it for a new incident.
+- `placeholder_resolution` entries must be natural-language resolution guidance, not just names of data sources.
+- A placeholder may resolve to a single concrete value or to multiple concrete values for the current incident.
+- A placeholder may also stand for a class of values, such as one value per affected workload or one value per targeted service.
+- The mitigation procedure must describe concrete resource and field changes, not generic advice.
+- The verification checks must confirm both:
+  1. the intended configuration or resource state is present
+  2. the application or cluster behavior is recovering
+- `rollback_stop_conditions` should capture when the operator should stop instead of applying a risky or uncertain fix.
+
+The final mitigation playbook file should have the following shape after it is materialized to markdown:
+
+```md
+---
+slug: <stable_slug>
+root_cause: <generic root-cause description>
+---
+
+# Mitigation Playbook
+
+## Summary
+<brief reusable summary of the mitigation approach>
+
+## Mitigation Procedure
+1. <concrete resource edit or command>
+2. <follow-up restart / rollout / apply step if needed>
+
+## Placeholder Resolution
+- <SYMBOL>: <how to resolve this symbol for a new incident; may describe one value, multiple values, or a class of values>
+
+## Verification Checks
+1. <confirm the desired resource state is now present>
+2. <confirm the application or cluster behavior is recovering>
+
+## Rollback / Stop Conditions
+- <condition where the operator should stop or roll back>
+```
+
+Your structured output must correspond directly to that template:
+- `summary` populates `## Summary`
+- `mitigation_procedure` populates `## Mitigation Procedure`
+- `placeholder_resolution` populates `## Placeholder Resolution`
+- `verification_checks` populates `## Verification Checks`
+- `rollback_stop_conditions` populates `## Rollback / Stop Conditions`

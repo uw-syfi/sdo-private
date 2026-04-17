@@ -31,6 +31,19 @@ If you cannot satisfy any of those conditions after honest execution, return
 ## Current Incident Context
 Namespace: {{ namespace }}
 Stage: {{ stage }}
+{% if diagnosis_shared_content|default('') %}
+
+## Diagnosis Context
+Use the diagnosis shared file as the authoritative source for the faulting
+component(s) in this incident. Extract those component(s) before choosing a
+resource to patch or substituting any playbook placeholders. Do not assume the
+symptom-bearing component is the one to change.
+
+The diagnosis shared file is at: {{ diagnosis_shared_file|default('') }}
+---
+{{ diagnosis_shared_content }}
+---
+{% endif %}
 {% if failed_attempts %}
 
 Prior failed mitigation attempts (do NOT repeat these):
@@ -43,25 +56,34 @@ Mitigation approach: {{ mitigation_approach }}
 
 ## Instructions
 
-1. **Translate the Mitigation Procedure into concrete commands.** Substitute
-   each `<PLACEHOLDER>` with the value appropriate for THIS incident's
+1. **Extract the faulting component(s) from the diagnosis shared file first.**
+   Use the diagnosed component(s) to decide which workload, Service, ConfigMap,
+   or dependency this mitigation should target for THIS incident.
+
+2. **Consult the playbook's Placeholder Resolution guidance before grounding any symbol.**
+   A placeholder may resolve to a single concrete value or to multiple concrete values
+   for THIS incident. It may also denote a class of values, such as one image per
+   affected workload or one port per targeted service. Ground the symbol accordingly.
+
+3. **Translate the Mitigation Procedure into concrete commands.** Substitute
+   each `<PLACEHOLDER>` with the value or values appropriate for THIS incident's
    resources in the namespace above. Run the patch commands.
 
-2. **Run the Post-Mitigation Verification steps** and capture their output.
+4. **Run the Post-Mitigation Verification steps** and capture their output.
    Wait for the cluster to settle if a rollout is in progress.
 
-3. **Check each Required Evidence item.** For each `- [ ]` line, cite the
+5. **Check each Required Evidence item.** For each `- [ ]` line, cite the
    specific command output that proves the check is satisfied. Do NOT
    paraphrase output — quote it.
 
-4. **If APPLIED (`applied=True`):** Fill `mitigation_summary` with a single
+6. **If APPLIED (`applied=True`):** Fill `mitigation_summary` with a single
    concise sentence describing what you did (e.g. "Patched the
    <service-name> Service targetPort from <old> to <new>"). Fill
    `applied_steps` with the abstract steps you executed and
    `verification_evidence` with the verbatim outputs that satisfied each
    Required Evidence item.
 
-5. **If NOT APPLIED (`applied=False`):** Explain in `reasoning` which step
+7. **If NOT APPLIED (`applied=False`):** Explain in `reasoning` which step
    failed or which evidence item could not be satisfied. Leave
    `mitigation_summary` empty.
 

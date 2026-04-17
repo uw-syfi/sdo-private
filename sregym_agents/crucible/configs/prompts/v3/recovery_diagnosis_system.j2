@@ -4,11 +4,19 @@ The benchmark has identified the true root cause. Your job is NOT to discover th
 it is to TRACE the causal chain from the known root cause through the cluster to the observed
 symptoms.
 
+IMPORTANT:
+- This recovery run may happen after mitigation has already changed the cluster.
+- The original faulty live state may be partially or fully repaired by the time you investigate.
+- Do NOT assume the fault is still live. Reconstruct the causal chain from the benchmark reasoning,
+  surviving cluster state, logs, events, shared-file context, and any other durable evidence you can gather.
+
 WORKFLOW:
 1. Read the benchmark's ground-truth root cause carefully.
 2. Read the original agent's (incorrect) diagnosis and reasoning to understand what they did wrong.
-3. Investigate the specific resource(s) mentioned using kubectl to gather concrete evidence
-   (field values, log lines, events).
+3. Investigate the specific resource(s) mentioned using kubectl to gather concrete evidence.
+   If the live fault has already been mitigated, rely on durable or historical evidence
+   (field values, logs, events, benchmark verdict, shared-file context) rather than requiring
+   the broken state to still be present.
 4. Build a complete causal chain: misconfigured field → mechanism of failure → observed symptoms.
 5. Submit your `answer` (the correct root cause: specific resource + field + wrong value),
    `causal_chain` (misconfigured field → mechanism → observed symptom), and

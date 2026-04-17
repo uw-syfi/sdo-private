@@ -15,13 +15,11 @@ class CrucibleConfig:
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     enable_ltm_verified_direct_submit: bool = False
+    enable_mitigation_kb: bool = True
     include_benchmark_results: bool = False
-    enable_reflection: bool = True
-    enable_playbooks: bool = False
-    enable_playbook_shortcut: bool = False
-    recovery_phase2_enabled: bool = False
-    include_incident_files: bool = True
-    per_app: bool = True
+    kb_scope: str = "per_app"
+    kb_runtime_mode: str = "playbook-first"
+    kb_update_mode: str = "async-review"
     prompt_version: str = "v2"
     max_diagnosis_iterations: int = 5
     max_mitigation_iterations: int = 5
@@ -33,27 +31,22 @@ class CrucibleConfig:
     def __post_init__(self) -> None:
         if self.backend not in ("pydantic-ai", "agent-cli"):
             raise ValueError(f"backend must be 'pydantic-ai' or 'agent-cli', got {self.backend!r}")
+        if self.kb_scope not in ("per_app", "shared"):
+            raise ValueError(f"kb_scope must be 'per_app' or 'shared', got {self.kb_scope!r}")
+        if self.kb_runtime_mode != "playbook-first":
+            raise ValueError(f"kb_runtime_mode must be 'playbook-first', got {self.kb_runtime_mode!r}")
+        if self.kb_update_mode not in ("async-review", "inline-review"):
+            raise ValueError(f"kb_update_mode must be async-review or inline-review, got {self.kb_update_mode!r}")
 
     def to_kb_task_fields(self) -> dict[str, Any]:
         """Return the config subset needed for KB update task serialization."""
         return {
             "include_benchmark_results": self.include_benchmark_results,
-            "enable_reflection": self.enable_reflection,
-            "enable_playbooks": self.enable_playbooks,
-            "recovery_phase2_enabled": self.recovery_phase2_enabled,
-            "include_incident_files": self.include_incident_files,
-            "per_app": self.per_app,
+            "kb_scope": self.kb_scope,
+            "kb_runtime_mode": self.kb_runtime_mode,
+            "kb_update_mode": self.kb_update_mode,
             "prompt_version": self.prompt_version,
         }
-
-
-def _reflection_from_mapping(mapping: Mapping[str, Any]) -> bool:
-    """Resolve enable_reflection with legacy alias enable_heuristic_refinement."""
-    if "enable_reflection" in mapping:
-        return bool(mapping["enable_reflection"])
-    if "enable_heuristic_refinement" in mapping:
-        return bool(mapping["enable_heuristic_refinement"])
-    return True
 
 
 def crucible_config_from_experiment_agent(
@@ -93,13 +86,11 @@ def crucible_config_from_experiment_agent(
         enable_ltm_verified_direct_submit=bool(
             agent_settings.get("enable_ltm_verified_direct_submit", base.enable_ltm_verified_direct_submit)
         ),
+        enable_mitigation_kb=bool(agent_settings.get("enable_mitigation_kb", base.enable_mitigation_kb)),
         include_benchmark_results=bool(agent_settings.get("include_benchmark_results", base.include_benchmark_results)),
-        enable_reflection=_reflection_from_mapping(agent_settings),
-        enable_playbooks=bool(agent_settings.get("enable_playbooks", base.enable_playbooks)),
-        enable_playbook_shortcut=bool(agent_settings.get("enable_playbook_shortcut", base.enable_playbook_shortcut)),
-        recovery_phase2_enabled=bool(agent_settings.get("recovery_phase2_enabled", base.recovery_phase2_enabled)),
-        include_incident_files=bool(agent_settings.get("include_incident_files", base.include_incident_files)),
-        per_app=bool(agent_settings.get("per_app", base.per_app)),
+        kb_scope=str(agent_settings.get("kb_scope", base.kb_scope)),
+        kb_runtime_mode=str(agent_settings.get("kb_runtime_mode", base.kb_runtime_mode)),
+        kb_update_mode=str(agent_settings.get("kb_update_mode", base.kb_update_mode)),
         prompt_version=prompt_version,
         max_diagnosis_iterations=int(agent_settings.get("max_diagnosis_iterations", base.max_diagnosis_iterations)),
         max_mitigation_iterations=int(agent_settings.get("max_mitigation_iterations", base.max_mitigation_iterations)),
@@ -120,10 +111,8 @@ def crucible_config_from_kb_task(kb_task: Mapping[str, Any]) -> CrucibleConfig:
     return dataclasses.replace(
         base,
         include_benchmark_results=bool(kb_task.get("include_benchmark_results", base.include_benchmark_results)),
-        enable_reflection=_reflection_from_mapping(kb_task),
-        enable_playbooks=bool(kb_task.get("enable_playbooks", base.enable_playbooks)),
-        recovery_phase2_enabled=bool(kb_task.get("recovery_phase2_enabled", base.recovery_phase2_enabled)),
-        include_incident_files=bool(kb_task.get("include_incident_files", base.include_incident_files)),
-        per_app=bool(kb_task.get("per_app", base.per_app)),
+        kb_scope=str(kb_task.get("kb_scope", base.kb_scope)),
+        kb_runtime_mode=str(kb_task.get("kb_runtime_mode", base.kb_runtime_mode)),
+        kb_update_mode=str(kb_task.get("kb_update_mode", base.kb_update_mode)),
         prompt_version=str(prompt_version),
     )

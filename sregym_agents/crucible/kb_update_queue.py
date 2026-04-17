@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -21,30 +22,33 @@ from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 
-
-class SessionFilesPayload(TypedDict, total=False):
-    diagnosis: str | None
-    mitigation: str | None
+DEFAULT_QUEUE_DRAIN_TIMEOUT = 1800.0
+DEFAULT_QUEUE_DRAIN_POLL_INTERVAL = 2.0
 
 
 class KbUpdateTaskDict(TypedDict):
     """JSON shape for a pending KB update task (matches worker expectations)."""
 
-    session_files: SessionFilesPayload
+    diagnosis_run_file: str | None
+    recovery_diagnosis_run_file: str | None
+    diagnosis_playbook_candidate_file: str | None
+    diagnosis_playbook_candidate_origin: str | None
+    triage_area_candidate_file: str | None
+    mitigation_run_file: str | None
+    recovery_mitigation_run_file: str | None
+    mitigation_playbook_candidate_file: str | None
+    mitigation_playbook_candidate_origin: str | None
     stage_outputs_file: str | None
     kb_dir: str
     kb_type: str
     model_id: str
     app_name: str
     include_benchmark_results: bool
-    enable_reflection: bool
-    enable_playbooks: bool
-    recovery_phase2_enabled: bool
-    include_incident_files: bool
-    per_app: bool
+    kb_scope: str
+    kb_runtime_mode: str
+    kb_update_mode: str
     problem_id: str
     prompt_version: str
-    recovery_reflection: dict[str, Any] | None
     diagnosis_succeeded: bool
     mitigation_succeeded: bool
     timestamp: str
@@ -57,28 +61,40 @@ class KbQueuePaths:
     kb_dir: Path
 
     @property
+    def reviews_root(self) -> Path:
+        return self.kb_dir / "v3" / "reviews"
+
+    @property
     def pending(self) -> Path:
-        return self.kb_dir / "pending"
+        return self.reviews_root / "pending"
 
     @property
     def completed(self) -> Path:
-        return self.kb_dir / "completed"
+        return self.reviews_root / "completed"
 
     @property
     def failed(self) -> Path:
-        return self.kb_dir / "failed"
+        return self.reviews_root / "failed"
 
     @property
     def lock_path(self) -> Path:
-        return self.kb_dir / "kb_worker.lock"
+        return self.reviews_root / "kb_worker.lock"
 
     @property
     def pid_path(self) -> Path:
-        return self.kb_dir / "kb_worker.pid"
+        return self.reviews_root / "kb_worker.pid"
 
     @property
     def worker_log(self) -> Path:
-        return self.kb_dir / "kb_worker.log"
+        return self.reviews_root / "kb_worker.log"
+
+
+@dataclass(frozen=True)
+class KbQueueSnapshot:
+    """Snapshot of queue file names for one KB directory."""
+
+    pending: frozenset[str]
+    failed: frozenset[str]
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -88,6 +104,18 @@ def _pid_is_alive(pid: int) -> bool:
         return True
     except (OSError, ProcessLookupError):
         return False
+
+
+def is_kb_worker_alive(kb_dir: Path) -> bool:
+    """Return True if the detached KB worker PID file points to a live process."""
+    paths = KbQueuePaths(Path(kb_dir))
+    if not paths.pid_path.exists():
+        return False
+    try:
+        pid = int(paths.pid_path.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    return _pid_is_alive(pid)
 
 
 def ensure_kb_worker(kb_dir: Path) -> None:
@@ -126,6 +154,54 @@ def ensure_kb_worker(kb_dir: Path) -> None:
         )
         paths.pid_path.write_text(str(proc.pid))
         logger.info("Spawned KB worker (pid=%d), log at %s", proc.pid, paths.worker_log)
+
+
+def snapshot_kb_queue(kb_dir: Path) -> KbQueueSnapshot:
+    """Capture the current queue state for later diffing."""
+    paths = KbQueuePaths(Path(kb_dir))
+    pending: frozenset[str] = (
+        frozenset(p.name for p in paths.pending.glob("*.json")) if paths.pending.exists() else frozenset[str]()
+    )
+    failed: frozenset[str] = (
+        frozenset(p.name for p in paths.failed.glob("*.json")) if paths.failed.exists() else frozenset[str]()
+    )
+    return KbQueueSnapshot(pending=pending, failed=failed)
+
+
+def wait_for_kb_queue_drain(
+    kb_dir: Path,
+    *,
+    baseline: KbQueueSnapshot | None = None,
+    timeout_s: float = DEFAULT_QUEUE_DRAIN_TIMEOUT,
+    poll_interval_s: float = DEFAULT_QUEUE_DRAIN_POLL_INTERVAL,
+) -> None:
+    """Wait until all queue items added after *baseline* leave ``pending/``.
+
+    If new tasks show up in ``failed/``, raises ``RuntimeError``.
+    If new tasks are pending but the detached worker is not alive, respawns it.
+    """
+    kb_dir = Path(kb_dir)
+    baseline = baseline or snapshot_kb_queue(kb_dir)
+    deadline = time.monotonic() + timeout_s
+
+    while True:
+        current = snapshot_kb_queue(kb_dir)
+        new_failed = sorted(current.failed - baseline.failed)
+        if new_failed:
+            raise RuntimeError(f"KB review tasks failed: {', '.join(new_failed)}")
+
+        new_pending = sorted(current.pending - baseline.pending)
+        if not new_pending:
+            return
+
+        if not is_kb_worker_alive(kb_dir):
+            logger.warning("KB worker not running with pending tasks present; respawning for %s", kb_dir)
+            ensure_kb_worker(kb_dir)
+
+        now = time.monotonic()
+        if now >= deadline:
+            raise TimeoutError(f"Timed out waiting for KB review tasks: {', '.join(new_pending)}")
+        time.sleep(min(poll_interval_s, max(deadline - now, 0.0)))
 
 
 def enqueue_task(kb_dir: Path, payload: dict[str, Any], *, problem_id: str) -> Path:

@@ -15,19 +15,25 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import requests
-
-if TYPE_CHECKING:
-    from sregym_agents.crucible.agents.base import AgentDriver
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
-from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, SessionFiles, create_knowledge_base
+from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, create_knowledge_base
+from sregym_agents.crucible.knowledge_base.incident_review import (
+    DiagnosisPlaybookDraft,
+    MitigationPlaybookDraft,
+    TriageAreaCandidate,
+)
+
+if TYPE_CHECKING:
+    from sregym_agents.crucible.agents.base import AgentDriver
+    from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,13 +74,13 @@ def create_driver(
         )
 
     from sregym_agents.crucible.agents import PydanticAIDriver
-    from sregym_agents.crucible.tools import LTMMitigationShortCircuit, LTMShortCircuit
+    from sregym_agents.crucible.tools import LTMShortCircuit
 
     print(f"[crucible] Using PydanticAIDriver (model={model})")
     return PydanticAIDriver(
         model,
         trajectory_path=trajectory_path,
-        interrupt_exceptions=(LTMShortCircuit, LTMMitigationShortCircuit),
+        interrupt_exceptions=(LTMShortCircuit,),
     )
 
 
@@ -100,6 +106,20 @@ def _get_api_base() -> str:
     host = os.getenv("API_HOSTNAME", "localhost")
     port = os.getenv("API_PORT", "8000")
     return f"http://{host}:{port}"
+
+
+def _signal_cleanup(api_base: str) -> None:
+    """POST /cleanup to release the conductor's deferred-teardown gate.
+
+    Crucible always runs in deferred-cleanup mode (see agents.yaml). This
+    call never raises — cleanup failure must not mask orchestrator errors
+    or block the driver from exiting.
+    """
+    try:
+        resp = requests.post(f"{api_base}/cleanup", timeout=60)
+        logger.info(f"POST /cleanup -> status={resp.status_code} body={resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"POST /cleanup failed: {e}")
 
 
 def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
@@ -184,7 +204,7 @@ def _parse_args() -> argparse.Namespace:
         "--kb-type",
         type=str,
         default=None,
-        choices=["structured", "append-only"],
+        choices=["structured"],
         dest="kb_type",
         help="Knowledge base implementation (overrides crucible.toml; default: structured)",
     )
@@ -214,6 +234,23 @@ def _parse_args() -> argparse.Namespace:
 
 async def _async_main(args: argparse.Namespace) -> None:
     logger.info("Crucible driver starting...")
+
+    # Crucible always runs in deferred-cleanup mode: after submitting mitigation,
+    # the orchestrator runs recovery-diagnosis + playbook generation against the
+    # live cluster, then signals the sregym conductor to tear down via POST /cleanup.
+    # Opt-in is declared in `sregym_agents/agents.yaml` (`defer_cleanup: true` on
+    # the crucible entry); sregym's worker process propagates it via this env var
+    # when spawning the agent subprocess. If the env var is missing, sregym was
+    # misconfigured or the driver was invoked outside the harness — fail loudly
+    # so reflection doesn't silently run against a torn-down namespace.
+    if os.getenv("SREGYM_DEFER_CLEANUP") != "1":
+        raise RuntimeError(
+            "SREGYM_DEFER_CLEANUP=1 is required. Crucible depends on deferred "
+            "cleanup so its post-submit recovery/reflection step can inspect "
+            "the live cluster. Ensure `defer_cleanup: true` is set on the "
+            "crucible entry in agents.yaml (sregym sets this env var "
+            "automatically when spawning the agent)."
+        )
 
     crucible_cfg, config_source = _load_crucible_config()
     agent_cfg: dict[str, Any] = crucible_cfg.get("agent", {})
@@ -267,10 +304,10 @@ async def _async_main(args: argparse.Namespace) -> None:
 
     kb: KnowledgeBase | None = None
     injected_kb: InjectedKB | None = None
+    kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
 
     if args.kb_dir:
         model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
-        kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
         from sregym_agents.crucible.agents import PydanticAIDriver as _KBDriver
 
         kb_driver = _KBDriver(model_id)
@@ -289,52 +326,106 @@ async def _async_main(args: argparse.Namespace) -> None:
             else:
                 logger.info("Prior injection disabled by inject_priors=false")
                 injected_kb = InjectedKB(
-                    summary=injected.summary,
-                    lessons=injected.lessons,
                     architecture=injected.architecture,
-                    incidents_dir=injected.incidents_dir,
+                    kb_view_dir=injected.kb_view_dir,
                 )
 
     logger.info(f"Problem: {problem_id} | Stages: {planned_stages}")
 
     driver = create_driver(args.model, crucible_config, trajectory_path=trajectory_path)
 
-    usage_metrics = await orchestrator.run(
-        model=args.model,
-        app_info=app_info,
-        problem_id=problem_id,
-        diagnosis_shared_file=diagnosis_shared_file,
-        mitigation_shared_file=mitigation_shared_file,
-        planned_stages=planned_stages,
-        submit_mcp_url=submit_mcp_url,
-        renderer=renderer,
-        injected_kb=injected_kb,
-        trajectory_path=trajectory_path,
-        crucible_config=crucible_config,
-        driver=driver,
-    )
+    try:
+        usage_metrics = await orchestrator.run(
+            model=args.model,
+            app_info=app_info,
+            problem_id=problem_id,
+            diagnosis_shared_file=diagnosis_shared_file,
+            mitigation_shared_file=mitigation_shared_file,
+            planned_stages=planned_stages,
+            submit_mcp_url=submit_mcp_url,
+            renderer=renderer,
+            injected_kb=injected_kb,
+            trajectory_path=trajectory_path,
+            crucible_config=crucible_config,
+            driver=driver,
+        )
+    finally:
+        # Release the conductor's deferred-cleanup gate. Must run AFTER
+        # recovery/reflection inside orchestrator.run() completes and BEFORE
+        # this process exits, even if the orchestrator raised.
+        _signal_cleanup(api_base)
 
     stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
     stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None
-    recovery_reflection = usage_metrics.get("recovery_reflection")
     diagnosis_succeeded = bool(usage_metrics.get("diagnosis_succeeded", False))
     mitigation_succeeded = bool(usage_metrics.get("mitigation_succeeded", False))
+    diagnosis_run_md = str(usage_metrics.get("diagnosis_run_md", ""))
+    recovery_diagnosis_run_md = usage_metrics.get("recovery_diagnosis_run_md")
+    recovery_diagnosis_run_md = str(recovery_diagnosis_run_md) if recovery_diagnosis_run_md is not None else None
+    diagnosis_playbook_candidate_data = usage_metrics.get("diagnosis_playbook_candidate")
+    diagnosis_playbook_candidate_origin = usage_metrics.get("diagnosis_playbook_candidate_origin")
+    triage_area_candidate_data = usage_metrics.get("triage_area_candidate")
+    mitigation_run_md = usage_metrics.get("mitigation_run_md")
+    mitigation_run_md = str(mitigation_run_md) if mitigation_run_md is not None else None
+    recovery_mitigation_run_md = usage_metrics.get("recovery_mitigation_run_md")
+    recovery_mitigation_run_md = str(recovery_mitigation_run_md) if recovery_mitigation_run_md is not None else None
+    mitigation_playbook_candidate_data = usage_metrics.get("mitigation_playbook_candidate")
+    mitigation_playbook_candidate_origin = usage_metrics.get("mitigation_playbook_candidate_origin")
 
     if args.logs_dir:
         assert logs_dir is not None
         _save_results(logs_dir, problem_id, usage_metrics)
         logger.info(f"Usage metrics: {usage_metrics}")
 
-    env_log_file = os.environ.get("SREGYM_LOG_FILE")
-    if env_log_file:
-        stem = Path(env_log_file).stem
+    if logs_dir is not None:
         for sf, suffix in [(diagnosis_shared_file, "diagnosis"), (mitigation_shared_file, "mitigation")]:
             if sf.exists():
-                dest = Path(env_log_file).with_name(f"{stem}_{problem_id}_{suffix}.md")
+                dest = logs_dir / f"{suffix}.md"
                 shutil.copy2(sf, dest)
                 logger.info(f"Saved {suffix} session markdown to {dest}")
 
     if kb is not None and args.kb_dir:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        diagnosis_run_path = None
+        recovery_diagnosis_run_path = None
+        diagnosis_playbook_candidate_path = None
+        triage_area_candidate_path = None
+        mitigation_run_path = None
+        recovery_mitigation_run_path = None
+        mitigation_playbook_candidate_path = None
+        if kb_type == "structured":
+            structured_kb = cast("StructuredKnowledgeBase", kb)
+            if diagnosis_run_md:
+                diagnosis_run_path, recovery_diagnosis_run_path = structured_kb.write_incident_records(
+                    timestamp=timestamp,
+                    diagnosis_run_md=diagnosis_run_md,
+                    recovery_diagnosis_run_md=recovery_diagnosis_run_md,
+                )
+            if diagnosis_playbook_candidate_data:
+                draft = DiagnosisPlaybookDraft.model_validate(diagnosis_playbook_candidate_data)
+                diagnosis_playbook_candidate_path = structured_kb.write_diagnosis_playbook_candidate(
+                    timestamp=timestamp,
+                    draft=draft,
+                )
+            if triage_area_candidate_data:
+                candidate = TriageAreaCandidate.model_validate(triage_area_candidate_data)
+                triage_area_candidate_path = structured_kb.write_triage_area_candidate(
+                    timestamp=timestamp,
+                    candidate=candidate,
+                )
+            if mitigation_run_md:
+                mitigation_run_path, recovery_mitigation_run_path = structured_kb.write_mitigation_records(
+                    timestamp=timestamp,
+                    mitigation_run_md=mitigation_run_md,
+                    recovery_mitigation_run_md=recovery_mitigation_run_md,
+                )
+            if mitigation_playbook_candidate_data:
+                draft = MitigationPlaybookDraft.model_validate(mitigation_playbook_candidate_data)
+                mitigation_playbook_candidate_path = structured_kb.write_mitigation_playbook_candidate(
+                    timestamp=timestamp,
+                    draft=draft,
+                )
+
         # Copy stage_outputs_file to logs_dir so it survives exp_env cleanup
         saved_stage_outputs: str | None = None
         if stage_outputs_file and stage_outputs_file.exists() and args.logs_dir:
@@ -344,21 +435,35 @@ async def _async_main(args: argparse.Namespace) -> None:
             saved_stage_outputs = str(dest)
             logger.info(f"Saved stage outputs to {dest}")
 
-        # Collect paths to session markdown copies already saved above
-        session_files_task: dict[str, str | None] | None = None
-        if env_log_file:
-            stem = Path(env_log_file).stem
-            diag_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_diagnosis.md")
-            mit_p = Path(env_log_file).with_name(f"{stem}_{problem_id}_mitigation.md")
-            if diag_p.exists():
-                session_files_task = {
-                    "diagnosis": str(diag_p),
-                    "mitigation": str(mit_p) if mit_p.exists() else None,
-                }
-
-        if session_files_task:
+        if diagnosis_playbook_candidate_path or triage_area_candidate_path or mitigation_playbook_candidate_path:
             task_payload: dict[str, Any] = {
-                "session_files": session_files_task,
+                "diagnosis_run_file": str(diagnosis_run_path) if diagnosis_run_path is not None else None,
+                "recovery_diagnosis_run_file": (
+                    str(recovery_diagnosis_run_path) if recovery_diagnosis_run_path is not None else None
+                ),
+                "diagnosis_playbook_candidate_file": (
+                    str(diagnosis_playbook_candidate_path) if diagnosis_playbook_candidate_path is not None else None
+                ),
+                "diagnosis_playbook_candidate_origin": (
+                    str(diagnosis_playbook_candidate_origin)
+                    if diagnosis_playbook_candidate_origin is not None
+                    else None
+                ),
+                "triage_area_candidate_file": (
+                    str(triage_area_candidate_path) if triage_area_candidate_path is not None else None
+                ),
+                "mitigation_run_file": str(mitigation_run_path) if mitigation_run_path is not None else None,
+                "recovery_mitigation_run_file": (
+                    str(recovery_mitigation_run_path) if recovery_mitigation_run_path is not None else None
+                ),
+                "mitigation_playbook_candidate_file": (
+                    str(mitigation_playbook_candidate_path) if mitigation_playbook_candidate_path is not None else None
+                ),
+                "mitigation_playbook_candidate_origin": (
+                    str(mitigation_playbook_candidate_origin)
+                    if mitigation_playbook_candidate_origin is not None
+                    else None
+                ),
                 "stage_outputs_file": saved_stage_outputs,
                 "kb_dir": args.kb_dir,
                 "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
@@ -366,25 +471,16 @@ async def _async_main(args: argparse.Namespace) -> None:
                 "app_name": app_info.get("app_name", "unknown"),
                 **crucible_config.to_kb_task_fields(),
                 "problem_id": problem_id,
-                "recovery_reflection": recovery_reflection,
                 "diagnosis_succeeded": diagnosis_succeeded,
                 "mitigation_succeeded": mitigation_succeeded,
-                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "timestamp": timestamp,
             }
             task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)
             logger.info(f"KB update task written to {task_path}")
 
             ensure_kb_worker(Path(args.kb_dir))
         else:
-            # Standalone mode (no SREGYM_LOG_FILE) — run KB update inline
-            logger.info("Knowledge base: updating inline (no sregym harness detected).")
-            await kb.update(
-                SessionFiles(diagnosis=diagnosis_shared_file, mitigation=mitigation_shared_file),
-                stage_outputs_file=stage_outputs_file,
-                recovery_reflection=recovery_reflection,
-                diagnosis_succeeded=diagnosis_succeeded,
-                mitigation_succeeded=mitigation_succeeded,
-            )
+            logger.info("Knowledge base: missing playbook candidates; skipping async review enqueue.")
 
     logger.info("Crucible driver complete.")
 
