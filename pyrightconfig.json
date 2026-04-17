@@ -6,5 +6,5 @@
   "venvPath": ".",
   "venv": ".venv",
   "reportMissingTypeStubs": false,
-  "strict": ["libs", "sregym_agents", "lego_agent"]
+  "strict": ["app_operator", "lego_agent", "libs", "sregym_agents"]
 }

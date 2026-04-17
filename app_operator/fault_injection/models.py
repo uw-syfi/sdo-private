@@ -65,7 +65,7 @@ class FaultResult:
 
     fault: Fault
     target_service: str
-    modified_fields: dict[str, Any] = field(default_factory=dict)
+    modified_fields: dict[str, Any] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
     success: bool = True
     error_message: str | None = None
 

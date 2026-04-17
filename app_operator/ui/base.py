@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class OperatorUI(Protocol):
@@ -14,7 +14,7 @@ class OperatorUI(Protocol):
         """Handle agent thinking output."""
         ...
 
-    def on_tool_call(self, tool: str, args: dict | str | None = None) -> None:
+    def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
         """Handle tool execution start."""
         ...
 
@@ -46,7 +46,7 @@ class NullOperatorUI:
     def on_thinking(self, text: str) -> None:
         pass
 
-    def on_tool_call(self, tool: str, args: dict | str | None = None) -> None:
+    def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
         pass
 
     def on_tool_result(

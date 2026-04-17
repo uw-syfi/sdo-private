@@ -17,7 +17,7 @@ import sys
 import time
 from dataclasses import fields
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 try:
     import tomllib
@@ -140,17 +140,18 @@ def _validate_dspy_optimization_overrides(overrides: Any) -> dict[str, Any]:
     if not isinstance(overrides, dict):
         raise ValueError("[dspy_optimization] must be a TOML table")
 
+    overrides_dict = cast("dict[str, Any]", overrides)
     valid_keys = {field.name for field in fields(DSPyOptimizationConfig)}
-    invalid_keys = sorted(set(overrides.keys()) - valid_keys)
+    invalid_keys = sorted(set(overrides_dict.keys()) - valid_keys)
     if invalid_keys:
         raise ValueError(f"Invalid [dspy_optimization] keys: {invalid_keys}. Valid keys: {sorted(valid_keys)}")
 
     # Merge onto defaults to reuse existing type/range validation.
     defaults = DSPyOptimizationConfig()
-    merged = {field.name: getattr(defaults, field.name) for field in fields(DSPyOptimizationConfig)}
-    merged.update(overrides)
+    merged: dict[str, Any] = {field.name: getattr(defaults, field.name) for field in fields(DSPyOptimizationConfig)}
+    merged.update(overrides_dict)
     DSPyOptimizationConfig(**merged)
-    return dict(overrides)
+    return dict(overrides_dict)
 
 
 def _apply_dspy_optimization_overrides(
@@ -185,7 +186,7 @@ def _replace_in_agent_section(
 ) -> str:
     """Replace provider/model keys only within the [agent] TOML section."""
     lines = content.splitlines()
-    new_lines = []
+    new_lines: list[str] = []
     in_agent = False
     provider_replaced = False
     model_replaced = False
@@ -254,7 +255,7 @@ def _update_sds_toml(
     # or require a TOML writer. We'll append or replace the [dspy] section.
 
     dspy_section = "\n[dspy]\n"
-    dspy_settings = []
+    dspy_settings: list[str] = []
 
     if use_seeds:
         dspy_settings.append("use_seeds = true")
@@ -274,7 +275,7 @@ def _update_sds_toml(
     if "[dspy]" in content:
         # Remove existing [dspy] section (and subsections) and append new one
         lines = content.splitlines()
-        new_lines = []
+        new_lines: list[str] = []
         skip = False
         for line in lines:
             if re.match(r"^\[dspy(\..*)?\]$", line.strip()):
@@ -360,7 +361,7 @@ class StateManager:
         self.state = self._load_state()
 
     def _load_state(self) -> dict[str, Any]:
-        default_state = {
+        default_state: dict[str, Any] = {
             "current_iteration": 1,
             "optimization_done": False,
             "current_version": None,
@@ -463,6 +464,7 @@ def run_command(args: argparse.Namespace) -> int:
     if not isinstance(prompts, list):
         logger.error(f"prompts must be a list, got {type(prompts).__name__}")
         return 1
+    prompts = cast("list[str]", prompts)
     if not prompts:
         logger.error("prompts must contain at least one prompt name")
         return 1
@@ -477,8 +479,8 @@ def run_command(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        train_apps = [Path(p).resolve() for p in train_app_paths]
-        val_apps = [Path(p).resolve() for p in val_app_paths]
+        train_apps = [Path(p).resolve() for p in cast("list[Any]", train_app_paths)]
+        val_apps = [Path(p).resolve() for p in cast("list[Any]", val_app_paths)]
     except TypeError as e:
         logger.error(f"App paths must be strings or path-like values: {e}")
         return 1

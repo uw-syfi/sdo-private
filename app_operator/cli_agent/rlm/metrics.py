@@ -6,10 +6,13 @@ These metrics evaluate how well RLM-based prompts utilize the RLM paradigm:
 - Token savings (comparing RLM vs direct context passing)
 """
 
+from collections.abc import Callable
 from typing import Any
 
 from app_operator.logger import logger
 from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
+
+MetricCallable = Callable[[Any, Any, Any], float]
 
 
 class RLMEfficiencyMetric:
@@ -177,11 +180,11 @@ class RLMCompositeMetric:
         rlm_efficiency_weight: float = 0.15,
         rlm_context_weight: float = 0.15,
         # Metric instances (can inject for testing)
-        success_metric=None,
-        efficiency_metric=None,
-        token_metric=None,
-        rlm_efficiency_metric=None,
-        rlm_context_metric=None,
+        success_metric: MetricCallable | None = None,
+        efficiency_metric: MetricCallable | None = None,
+        token_metric: MetricCallable | None = None,
+        rlm_efficiency_metric: MetricCallable | None = None,
+        rlm_context_metric: MetricCallable | None = None,
     ):
         """Initialize composite RLM metric.
 

@@ -7,22 +7,27 @@ same formatting without having to call `setup_logger()` themselves.
 """
 
 import sys
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
+if TYPE_CHECKING:
+    from loguru import Record
 
-def formatter(record):
+
+def formatter(record: "Record") -> str:
     """Custom formatter that changes format based on presence of agent_prefix or stderr."""
-    node = record["extra"].get("node")
+    extra = record["extra"]
+    node = extra.get("node")
     node_prefix = f"<cyan>[{node}]</cyan> " if node else ""
-    if "agent_prefix" in record["extra"]:
+    if "agent_prefix" in extra:
         # Check if this is a stderr line
-        if record["extra"].get("stderr", False):
+        if extra.get("stderr", False):
             return "{extra[agent_prefix]} <red>{message}</red>\n"
         return "{extra[agent_prefix]} {message}\n"
     base = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | "
     # Check if this is a stderr line without agent_prefix
-    if record["extra"].get("stderr", False):
+    if extra.get("stderr", False):
         return f"{base}{node_prefix}<red>{{message}}</red>\n"
     return f"{base}{node_prefix}<level>{{message}}</level>\n"
 

@@ -265,7 +265,7 @@ class HealthCheckTask(MonitoringTask):
         health_log_path: Path | None = None,
     ) -> str:
         """Prepare health check context for analysis."""
-        context_parts = []
+        context_parts: list[str] = []
 
         context_parts.append(f"## Health Check #{check_count}")
         if health_log_path is not None:
@@ -300,7 +300,7 @@ class HealthCheckTask(MonitoringTask):
         health_result: CommandResult,
         check_count: int,
         dspy_config: DSPyConfig | None = None,
-        recorder=None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ) -> str:
         """Create a prompt for the coding agent to analyze health check results.
 

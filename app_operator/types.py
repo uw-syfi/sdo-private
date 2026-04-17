@@ -1,7 +1,7 @@
 """Shared type definitions for the app_operator package."""
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from libs.agent_cli.trajectory import FaultInjectionMetadata, TokenUsage
 
@@ -36,7 +36,7 @@ class HealthVerdict:
     false_negative_suspected: bool = False
 
     @classmethod
-    def from_dict(cls, d: dict) -> "HealthVerdict":
+    def from_dict(cls, d: dict[str, Any]) -> "HealthVerdict":
         return cls(
             healthy=d.get("healthy", False),
             assessment=d.get("assessment", ""),
@@ -51,7 +51,7 @@ class _TrajectoryCallRecordRequired(TypedDict):
     phase: str
     start_time: str
     end_time: str | None
-    context: dict
+    context: dict[str, Any]
 
 
 class TrajectoryCallRecord(_TrajectoryCallRecordRequired, total=False):
@@ -63,7 +63,7 @@ class TrajectoryCallRecord(_TrajectoryCallRecordRequired, total=False):
 
 class _ConversationEntryRequired(TypedDict):
     call_id: int
-    messages: list
+    messages: list[dict[str, Any]]
 
 
 class ConversationEntry(_ConversationEntryRequired, total=False):
@@ -71,5 +71,5 @@ class ConversationEntry(_ConversationEntryRequired, total=False):
 
     prompt_version: str
     fallback_occurred: bool
-    prompt_kwargs: dict
+    prompt_kwargs: dict[str, Any]
     rendered_prompt: str

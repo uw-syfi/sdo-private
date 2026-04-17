@@ -17,7 +17,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import litellm
 
@@ -113,13 +113,13 @@ class _TrajectoryEvidence:
     run_type: str
     status: str
     attempts: int
-    trajectory_insights: list[str] = field(default_factory=list)
-    error_insights: list[str] = field(default_factory=list)
-    script_insights: list[str] = field(default_factory=list)
-    repo_insights: list[str] = field(default_factory=list)
-    error_signals: list[str] = field(default_factory=list)
+    trajectory_insights: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    error_insights: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    script_insights: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    repo_insights: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    error_signals: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     classification_label: str = ""
-    classification_reasons: list[str] = field(default_factory=list)
+    classification_reasons: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     weight: float = 1.0
 
 
@@ -745,7 +745,7 @@ class EvalExecuteOptimizer:
             suffix += 1
         return candidate
 
-    def _run_candidate_subprocess(self, cmd: list[str]) -> subprocess.CompletedProcess:
+    def _run_candidate_subprocess(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
         """Run a single operator subprocess invocation.
 
         Extracted as a method so tests can monkeypatch it on the instance
@@ -853,7 +853,7 @@ class EvalExecuteOptimizer:
         if not metadata_path.exists():
             return None
         try:
-            metadata = json.loads(metadata_path.read_text())
+            metadata: dict[str, Any] = json.loads(metadata_path.read_text())
         except (OSError, json.JSONDecodeError):
             return None
 
@@ -867,22 +867,24 @@ class EvalExecuteOptimizer:
             best_idx = best_candidate_index - 1  # 1-indexed in metadata
         else:
             best_idx = 0
-        candidate_app_scores = metadata.get("candidate_app_scores", [])
+        candidate_app_scores: list[Any] = metadata.get("candidate_app_scores", [])
         per_app_scores: dict[str, float] = {}
         if 0 <= best_idx < len(candidate_app_scores):
             raw_per_app_scores = candidate_app_scores[best_idx]
             if isinstance(raw_per_app_scores, dict):
-                for app_name, app_score in raw_per_app_scores.items():
+                raw_per_app_dict = cast("dict[Any, Any]", raw_per_app_scores)
+                for app_name, app_score in raw_per_app_dict.items():
                     if isinstance(app_score, (int, float)):
                         per_app_scores[str(app_name)] = float(app_score)
 
         # Classification counts for the winning candidate
-        candidate_run_labels = metadata.get("candidate_run_labels", [])
+        candidate_run_labels: list[Any] = metadata.get("candidate_run_labels", [])
         classification_counts: dict[str, int] = {}
         if 0 <= best_idx < len(candidate_run_labels):
             raw_classification_counts = candidate_run_labels[best_idx]
             if isinstance(raw_classification_counts, dict):
-                for label, count in raw_classification_counts.items():
+                raw_cls_dict = cast("dict[Any, Any]", raw_classification_counts)
+                for label, count in raw_cls_dict.items():
                     if isinstance(count, (int, float)):
                         classification_counts[str(label)] = int(count)
 
@@ -998,9 +1000,9 @@ class EvalExecuteOptimizer:
         sections: list[str] = []
         for idx in candidate_pool:
             summary = summary_by_index.get(idx, {})
-            run_outcomes = summary.get("run_outcomes", [])
-            failures = []
-            classifier_evidence = []
+            run_outcomes: list[dict[str, Any]] = summary.get("run_outcomes", [])
+            failures: list[str] = []
+            classifier_evidence: list[str] = []
             for outcome in run_outcomes:
                 label = str(outcome.get("classification_label") or "").strip()
                 reasons = [str(r).strip() for r in list(outcome.get("classification_reasons") or []) if str(r).strip()]
@@ -1041,7 +1043,8 @@ class EvalExecuteOptimizer:
             ]
             classification_counts = summary.get("classification_counts")
             if isinstance(classification_counts, dict) and classification_counts:
-                label_summary = ", ".join(f"{label}={count}" for label, count in sorted(classification_counts.items()))
+                cc_dict = cast("dict[str, Any]", classification_counts)
+                label_summary = ", ".join(f"{label}={count}" for label, count in sorted(cc_dict.items()))
                 section_lines.append(f"- run_labels: {label_summary}")
             if classifier_evidence:
                 section_lines.append("- classifier_evidence:")
@@ -1104,8 +1107,8 @@ class EvalExecuteOptimizer:
             kwargs["vertex_location"] = location
 
         try:
-            response = litellm.completion(**kwargs)
-            raw = response.choices[0].message.content or ""  # type: ignore[reportAttributeAccessIssue]
+            response = litellm.completion(**kwargs)  # type: ignore[reportUnknownMemberType]
+            raw = cast("str", response.choices[0].message.content or "")  # type: ignore[reportAttributeAccessIssue]
             llm_info["llm_raw"] = raw
             json_match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not json_match:
@@ -1147,7 +1150,7 @@ class EvalExecuteOptimizer:
                 trajectory_context=prompt_context,
             )
 
-        candidates = []
+        candidates: list[dict[str, str]] = []
         for c_idx in range(self.n_candidates):
             candidate: dict[str, str] = {}
             for pname in prompt_names:
@@ -1171,7 +1174,7 @@ class EvalExecuteOptimizer:
         population: list[dict[str, Any]] = []
         for metadata_file in sorted(scoped_optimized_dir.glob("v*/metadata.json")):
             try:
-                metadata = json.loads(metadata_file.read_text())
+                metadata: dict[str, Any] = json.loads(metadata_file.read_text())
             except Exception:
                 continue
 
@@ -1182,13 +1185,16 @@ class EvalExecuteOptimizer:
             if meta_iteration <= 0 or meta_iteration >= before_iteration:
                 continue
 
-            all_scores = metadata.get("all_scores")
-            if not isinstance(all_scores, list):
+            all_scores_raw = metadata.get("all_scores")
+            if not isinstance(all_scores_raw, list):
                 continue
+            all_scores: list[Any] = cast("list[Any]", all_scores_raw)
 
-            candidate_app_scores = metadata.get("candidate_app_scores")
-            if not isinstance(candidate_app_scores, list):
-                candidate_app_scores = []
+            candidate_app_scores_raw = metadata.get("candidate_app_scores")
+            if not isinstance(candidate_app_scores_raw, list):
+                candidate_app_scores: list[Any] = []
+            else:
+                candidate_app_scores = cast("list[Any]", candidate_app_scores_raw)
 
             for idx, raw_score in enumerate(all_scores, start=1):
                 try:
@@ -1225,7 +1231,7 @@ class EvalExecuteOptimizer:
                 per_app: dict[str, float] = {}
                 raw_app_scores = candidate_app_scores[idx - 1] if idx - 1 < len(candidate_app_scores) else None
                 if isinstance(raw_app_scores, dict):
-                    per_app = raw_app_scores
+                    per_app = cast("dict[str, float]", raw_app_scores)
 
                 population.append(
                     {
@@ -1326,11 +1332,13 @@ class EvalExecuteOptimizer:
         parent_b_instructions = parent_b.get("instructions", {})
         if not isinstance(parent_a_instructions, dict) or not isinstance(parent_b_instructions, dict):
             return {}
+        parent_a_instr_dict = cast("dict[str, Any]", parent_a_instructions)
+        parent_b_instr_dict = cast("dict[str, Any]", parent_b_instructions)
 
         recombined: dict[str, str] = {}
         for prompt_name in prompt_names:
-            parent_a_instruction = str(parent_a_instructions.get(prompt_name) or "").strip()
-            parent_b_instruction = str(parent_b_instructions.get(prompt_name) or "").strip()
+            parent_a_instruction = str(parent_a_instr_dict.get(prompt_name) or "").strip()
+            parent_b_instruction = str(parent_b_instr_dict.get(prompt_name) or "").strip()
             if not parent_a_instruction and not parent_b_instruction:
                 continue
             if not parent_a_instruction:
@@ -1388,7 +1396,7 @@ class EvalExecuteOptimizer:
             kwargs["vertex_location"] = location
 
         try:
-            response = litellm.completion(**kwargs)
+            response = litellm.completion(**kwargs)  # type: ignore[reportUnknownMemberType]
             merged = self._extract_completion_text(response).strip()
             merged = self._strip_code_fences(merged)
             if merged:
@@ -1442,13 +1450,14 @@ class EvalExecuteOptimizer:
             kwargs["vertex_location"] = location
 
         try:
-            response = litellm.completion(**kwargs)
-            raw = response.choices[0].message.content or ""  # type: ignore[reportAttributeAccessIssue]
+            response = litellm.completion(**kwargs)  # type: ignore[reportUnknownMemberType]
+            raw = cast("str", response.choices[0].message.content or "")  # type: ignore[reportAttributeAccessIssue]
             json_match = re.search(r"\[.*?\]", raw, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group())
                 if isinstance(parsed, list) and parsed:
-                    filtered = self._filter_forbidden_variants(parsed, current_instruction, prompt_name)
+                    parsed_list = cast("list[Any]", parsed)
+                    filtered = self._filter_forbidden_variants(parsed_list, current_instruction, prompt_name)
                     return self._pad_variants(filtered, n, current_instruction)
         except (json.JSONDecodeError, ValueError, ConnectionError, TimeoutError) as e:
             logger.warning(f"[EvalExecute] Failed to generate variants for {prompt_name}: {e}")
@@ -1458,7 +1467,7 @@ class EvalExecuteOptimizer:
 
     @staticmethod
     def _filter_forbidden_variants(
-        variants: list,
+        variants: list[Any],
         fallback: str,
         prompt_name: str,
     ) -> list[str]:
@@ -1487,7 +1496,7 @@ class EvalExecuteOptimizer:
         return result
 
     @staticmethod
-    def _pad_variants(variants: list, n: int, fallback: str) -> list[str]:
+    def _pad_variants(variants: list[Any], n: int, fallback: str) -> list[str]:
         """Pad *variants* with *fallback* until it has exactly *n* entries."""
         result = [str(v) for v in variants]
         while len(result) < n:
@@ -1619,13 +1628,14 @@ class EvalExecuteOptimizer:
             phase_metrics = outcome.get("phase_metrics")
             if not isinstance(phase_metrics, dict) or not phase_metrics:
                 continue
+            phase_metrics_dict = cast("dict[str, Any]", phase_metrics)
 
             prompt_scores: list[float] = []
             for prompt_name in prompt_names:
                 metric_names = _PROMPT_PHASE_METRICS.get(prompt_name, ())
                 if not metric_names:
                     continue
-                metric_values = [float(phase_metrics[name]) for name in metric_names if name in phase_metrics]
+                metric_values = [float(phase_metrics_dict[name]) for name in metric_names if name in phase_metrics_dict]
                 if metric_values:
                     prompt_scores.append(sum(metric_values) / len(metric_values))
             if prompt_scores:
@@ -1855,13 +1865,13 @@ class EvalExecuteOptimizer:
             return None
 
         try:
-            trajectory = json.loads(traj_files[0].read_text())
+            trajectory: dict[str, Any] = json.loads(traj_files[0].read_text())
         except (json.JSONDecodeError, OSError, ValueError) as e:
             logger.warning(f"[EvalExecute] Failed to parse trajectory {traj_files[0]}: {e}")
             return None
 
         _iter, app_name = self._parse_run_dir_name(run_dir.name)
-        deployment = trajectory.get("deployment", [])
+        deployment: list[dict[str, Any]] = trajectory.get("deployment", [])
         run_type = "validation" if _VAL_RUN_RE.match(run_dir.name) else "training"
         evidence = _TrajectoryEvidence(
             run_name=run_dir.name,
@@ -1884,7 +1894,7 @@ class EvalExecuteOptimizer:
 
     def _process_trajectory_message(
         self,
-        msg: dict,
+        msg: dict[str, Any],
         evidence: _TrajectoryEvidence,
     ) -> None:
         """Classify one trajectory message and append insights to *evidence*."""
@@ -2093,7 +2103,7 @@ class EvalExecuteOptimizer:
             kwargs["vertex_location"] = location
 
         try:
-            response = litellm.completion(**kwargs)
+            response = litellm.completion(**kwargs)  # type: ignore[reportUnknownMemberType]
             summary = self._extract_completion_text(response).strip()
             summary = self._strip_code_fences(summary)
             if summary and len(summary) <= _TRAJECTORY_SUMMARY_TARGET_CHARS:
@@ -2117,7 +2127,7 @@ class EvalExecuteOptimizer:
             chosen = self._dedupe_limit(items, limit=_SUMMARY_ITEMS_PER_SECTION)
             if not chosen:
                 continue
-            compact_items = []
+            compact_items: list[str] = []
             for item in chosen:
                 text = item.strip()
                 if len(text) > _SUMMARY_ITEM_MAX_CHARS:
@@ -2188,7 +2198,8 @@ class EvalExecuteOptimizer:
 
         lineage = metadata.get("lineage", {})
         if isinstance(lineage, dict):
-            selected = str(lineage.get("selected_candidate_id") or "").strip()
+            lineage_dict = cast("dict[str, Any]", lineage)
+            selected = str(lineage_dict.get("selected_candidate_id") or "").strip()
             if selected:
                 return [self._candidate_id_for_tag(selected, output_prefix)]
 
@@ -2292,7 +2303,7 @@ class EvalExecuteOptimizer:
         version_dir.mkdir(parents=True, exist_ok=True)
         for prompt_name, instruction in candidate.items():
             sig = get_signature(prompt_name)
-            state = {
+            state: dict[str, Any] = {
                 "prompt_name": prompt_name,
                 "signature": sig.__name__,
                 "demos": [],

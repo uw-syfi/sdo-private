@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 from libs.sds_core.logger import formatter, logger, setup_logger
 
 if TYPE_CHECKING:
+    from loguru import Message
+
     from app_operator.ui_protocol import OperatorUI
 
 
@@ -18,7 +20,7 @@ def attach_ui_sink(ui: "OperatorUI", replace: bool = False) -> None:
     if replace:
         logger.remove()
 
-    def sink(message):
+    def sink(message: "Message") -> None:
         record = message.record
         text = record["message"]
         level = record["level"].name.lower()

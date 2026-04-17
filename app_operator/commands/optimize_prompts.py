@@ -3,6 +3,7 @@
 This command runs offline prompt optimization using trajectory data.
 """
 
+import argparse
 import copy
 import sys
 from pathlib import Path
@@ -11,7 +12,7 @@ from app_operator.config import load_config
 from app_operator.dspy_integration import SIGNATURES, PromptOptimizer
 
 
-def add_arguments(parser):
+def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for optimize-prompts command."""
     parser.add_argument(
         "--prompts",
@@ -73,7 +74,7 @@ def add_arguments(parser):
     )
 
 
-def run_command(args) -> int:
+def run_command(args: argparse.Namespace) -> int:
     """Execute optimize-prompts command.
 
     Args:

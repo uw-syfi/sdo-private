@@ -62,7 +62,7 @@ def map_kwargs_to_fields(prompt_name: str, kwargs: dict[str, Any]) -> dict[str, 
     explicit = EXPLICIT_MAPPINGS.get(prompt_name, {})
 
     # Apply mappings and type conversion
-    mapped = {}
+    mapped: dict[str, Any] = {}
     for key, value in kwargs.items():
         # Apply explicit mapping if exists
         field_name = explicit.get(key, key)

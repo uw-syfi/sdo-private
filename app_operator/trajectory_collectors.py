@@ -32,7 +32,7 @@ def collect_gemini_sessions(
     if not GEMINI_SESSION_DIR.exists():
         return []
 
-    sessions_copied = []
+    sessions_copied: list[str] = []
 
     try:
         # Parse as struct_time for comparison

@@ -5,16 +5,15 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from argparse import Namespace
-
+    import argparse
 
 _CANDIDATE_DIR_RE = re.compile(r"^eval_\d+_c\d+$")
 
 
-def add_arguments(parser) -> None:
+def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for lineage-report command."""
     default_optimized_dir = Path(__file__).resolve().parent.parent / "prompts" / "optimized"
     parser.add_argument(
@@ -63,9 +62,10 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _extract_selected_candidate_id(family: str, metadata: dict[str, Any]) -> str | None:
-    lineage = metadata.get("lineage", {})
+    lineage: Any = metadata.get("lineage", {})
     if isinstance(lineage, dict):
-        selected = str(lineage.get("selected_candidate_id") or "").strip()
+        lineage_dict = cast("dict[str, Any]", lineage)
+        selected = str(lineage_dict.get("selected_candidate_id") or "").strip()
         if selected:
             return _candidate_id(family, selected)
 
@@ -77,22 +77,26 @@ def _extract_selected_candidate_id(family: str, metadata: dict[str, Any]) -> str
 
 
 def _extract_parent_ids(family: str, metadata: dict[str, Any]) -> list[str]:
-    lineage = metadata.get("lineage", {})
+    lineage: Any = metadata.get("lineage", {})
     parent_ids: list[str] = []
     if isinstance(lineage, dict):
-        raw_parents = lineage.get("parent_candidate_ids", [])
+        lineage_dict = cast("dict[str, Any]", lineage)
+        raw_parents: Any = lineage_dict.get("parent_candidate_ids", [])
         if isinstance(raw_parents, list):
-            parent_ids.extend(str(p) for p in raw_parents if str(p).strip())
+            raw_parents_list = cast("list[Any]", raw_parents)
+            parent_ids.extend(str(p) for p in raw_parents_list if str(p).strip())
     if not parent_ids:
-        recombination = metadata.get("recombination", {})
+        recombination: Any = metadata.get("recombination", {})
         if isinstance(recombination, dict):
-            raw_parents = recombination.get("parent_candidates", [])
+            recombination_dict = cast("dict[str, Any]", recombination)
+            raw_parents = recombination_dict.get("parent_candidates", [])
             if isinstance(raw_parents, list):
-                parent_ids.extend(str(p) for p in raw_parents if str(p).strip())
+                raw_parents_list = cast("list[Any]", raw_parents)
+                parent_ids.extend(str(p) for p in raw_parents_list if str(p).strip())
     return [_candidate_id(family, parent) for parent in parent_ids]
 
 
-def run_command(args: Namespace) -> int:
+def run_command(args: argparse.Namespace) -> int:
     """Execute lineage report generation and validation."""
     optimized_dir = Path(args.optimized_dir)
     family = args.family.strip()
@@ -144,9 +148,10 @@ def run_command(args: Namespace) -> int:
                 version_issues.append(f"{version_dir.name}: parent candidate missing directory ({parent_id})")
 
         module_hashes: dict[str, dict[str, str]] = {}
-        prompts = metadata.get("prompts", {})
+        prompts: Any = metadata.get("prompts", {})
         if isinstance(prompts, dict) and selected_candidate_dir is not None and selected_candidate_dir.exists():
-            for prompt_name in prompts:
+            prompts_dict = cast("dict[str, Any]", prompts)
+            for prompt_name in prompts_dict:
                 candidate_module = selected_candidate_dir / f"{prompt_name}.dspy.json"
                 promoted_module = version_dir / f"{prompt_name}.dspy.json"
                 if not candidate_module.exists():

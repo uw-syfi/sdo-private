@@ -10,10 +10,11 @@ This class is retained as an internal building block for hybrid-style flows.
 
 import re
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
-from app_operator.cli_agent._rlm_utils import _FILE_GEN_RE, _FIX_ERROR_RE
+from app_operator.cli_agent._rlm_utils import FILE_GEN_RE, FIX_ERROR_RE
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.prompts import DSPyConfigProtocol
@@ -94,7 +95,7 @@ class RLMCodingAgent(CodingAgent):
 
         # Fix-error prompts mention .sds/deploy.sh as context but must go
         # through the RLM loop, not the file-generation path.
-        if not _FIX_ERROR_RE.search(prompt) and _FILE_GEN_RE.search(prompt):
+        if not FIX_ERROR_RE.search(prompt) and FILE_GEN_RE.search(prompt):
             return self._generate_files(prompt, repo_path)
 
         context = self._build_context(repo_path)
@@ -196,13 +197,13 @@ class RLMCodingAgent(CodingAgent):
             elif health_for_max.exists():
                 latest_health_log = health_for_max
 
-        previous_attempts: list[dict] = []
+        previous_attempts: list[dict[str, Any]] = []
         for log_path in deploy_attempt_logs:
             attempt = self._extract_attempt_number(log_path.name, "deploy_attempt_")
             if attempt is None:
                 continue
 
-            attempt_data = {
+            attempt_data: dict[str, Any] = {
                 "attempt": attempt,
                 "deploy_log": self._read(log_path),
             }
@@ -262,7 +263,7 @@ class RLMCodingAgent(CodingAgent):
         prefix: str,
     ) -> list[Path]:
         """Return attempt logs sorted by attempt number."""
-        logs = []
+        logs: list[tuple[int, Path]] = []
         for path in logs_dir.glob(pattern):
             attempt = self._extract_attempt_number(path.name, prefix)
             if attempt is None:

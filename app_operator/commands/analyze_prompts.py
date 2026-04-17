@@ -4,16 +4,18 @@ This command analyzes trajectory files to compute metrics on prompt performance,
 including success rates, iteration efficiency, and token costs.
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from tabulate import tabulate
 
 from app_operator.dspy_integration import MetricsAggregator
 
 
-def add_arguments(parser):
+def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for analyze-prompts command."""
     parser.add_argument(
         "--trajectories-dir",
@@ -43,7 +45,7 @@ def add_arguments(parser):
     )
 
 
-def run_command(args) -> int:
+def run_command(args: argparse.Namespace) -> int:
     """Execute analyze-prompts command.
 
     Args:
@@ -121,7 +123,7 @@ def _compare_mode(
     return 0
 
 
-def _print_table_format(metrics: dict, trajectories_dir: Path):
+def _print_table_format(metrics: dict[str, Any], trajectories_dir: Path) -> None:
     """Print metrics in human-readable table format."""
     print("\n" + "=" * 60)
     print(f"Trajectory Analysis: {trajectories_dir}")
@@ -206,7 +208,7 @@ def _print_table_format(metrics: dict, trajectories_dir: Path):
     # By-phase breakdown
     if "by_phase" in metrics and len(metrics["by_phase"]) > 1:
         print("By Phase:")
-        phase_rows = []
+        phase_rows: list[list[Any]] = []
         for phase_name, phase_metrics in metrics["by_phase"].items():
             phase_rows.append(
                 [
@@ -227,14 +229,14 @@ def _print_table_format(metrics: dict, trajectories_dir: Path):
         print()
 
 
-def _format_pct_improvement(value) -> str:
+def _format_pct_improvement(value: float | None) -> str:
     """Format a percentage improvement value, handling None as N/A."""
     if value is None:
         return "N/A"
     return f"{value:+.2f}%"
 
 
-def _print_comparison_table(comparison: dict):
+def _print_comparison_table(comparison: dict[str, Any]) -> None:
     """Print comparison results in table format."""
     print("\n" + "=" * 60)
     print("Baseline vs Optimized Comparison")
@@ -361,7 +363,7 @@ def _print_comparison_table(comparison: dict):
     by_phase = comparison.get("by_phase", {})
     if by_phase:
         print("Per-Phase Comparison:")
-        phase_rows = []
+        phase_rows: list[list[Any]] = []
         for phase_name, phase_data in by_phase.items():
             b = phase_data["baseline"]
             o = phase_data["optimized"]

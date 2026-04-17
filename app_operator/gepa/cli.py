@@ -14,16 +14,18 @@ Usage:
 
 import argparse
 import json
-from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from app_operator.cli_agent import CodeAnalyzerRunner, DeployerRunner, MonitorRunner, create_agent_from_config
 from app_operator.config import GEPAConfig, load_config
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.evaluator import (
     METRICS_REGISTRY,
+    AgentFactory,
     EvaluationExample,
+    MetricFn,
     SDSEvaluator,
 )
 from app_operator.gepa.optimizer import GEPAOptimizer
@@ -178,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _handle_resume(args, parser) -> int:
+def _handle_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Handle --resume flag."""
     train_repos, val_repos = _resolve_repos(args, parser, context="--resume")
 
@@ -209,7 +211,11 @@ def _handle_resume(args, parser) -> int:
     return 0
 
 
-def _resolve_repos(args, parser, context: str = "") -> tuple[list[str], list[str]]:
+def _resolve_repos(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    context: str = "",
+) -> tuple[list[str], list[str]]:
     """Resolve train and validation repo lists from CLI args.
 
     Returns:
@@ -227,7 +233,7 @@ def _resolve_repos(args, parser, context: str = "") -> tuple[list[str], list[str
     return train_repos, val_repos
 
 
-def _build_config(args) -> GEPAConfig:
+def _build_config(args: argparse.Namespace) -> GEPAConfig:
     """Build a GEPAConfig from sds.toml defaults, overridden by CLI args.
 
     Layering: dataclass defaults → sds.toml [gepa] → CLI args.
@@ -255,7 +261,7 @@ def _build_config(args) -> GEPAConfig:
     return GEPAConfig(**merged)
 
 
-def _build_optimizer(args, adapter: SDSPromptAdapter) -> GEPAOptimizer:
+def _build_optimizer(args: argparse.Namespace, adapter: SDSPromptAdapter) -> GEPAOptimizer:
     """Build a fully assembled GEPAOptimizer from CLI args and adapter."""
     config = _build_config(args)
     agent_type = args.agent_type or "deployer"
@@ -279,7 +285,7 @@ def _build_optimizer(args, adapter: SDSPromptAdapter) -> GEPAOptimizer:
 
 def _get_metrics_for_agent(
     agent_type: str,
-) -> dict[str, Callable]:
+) -> dict[str, MetricFn]:
     """Return appropriate metrics for the agent type from the registry."""
     return METRICS_REGISTRY.get(agent_type, METRICS_REGISTRY["deployer"])
 
@@ -297,10 +303,10 @@ def _build_examples(repo_paths: list[str], agent_type: str) -> list[EvaluationEx
     ]
 
 
-def _create_agent_factory() -> Callable:
+def _create_agent_factory() -> AgentFactory:
     """Create a factory for CodingAgent instances."""
 
-    def factory():
+    def factory() -> Any:
         config = load_config(".")
         return create_agent_from_config(".", config=config)
 
