@@ -248,8 +248,8 @@ def _compute_group_stats(runs):
         try:
             if r.get("TTL"):
                 ttls.append(float(r["TTL"]))
-            if r.get("has_mitigation") and r.get("TTM"):
-                ttms.append(float(r["TTM"]))
+            if r.get("has_mitigation") and r.get("TTM") and r.get("TTL"):
+                ttms.append(float(r["TTM"]) - float(r["TTL"]))
         except ValueError:
             pass
     avg_ttl = f"{sum(ttls) / len(ttls):.1f}" if ttls else "-"
@@ -309,12 +309,15 @@ def summarize_results(target_path=None):
 
     ttls = []
     ttms = []
+    t_resolutions = []
     for r in completed_runs:
         try:
             if r.get("TTL"):
                 ttls.append(float(r["TTL"]))
-            if r.get("has_mitigation") and r.get("TTM"):
-                ttms.append(float(r["TTM"]))
+            if r.get("has_mitigation") and r.get("TTM") and r.get("TTL"):
+                ttm_raw = float(r["TTM"])
+                ttms.append(ttm_raw - float(r["TTL"]))
+                t_resolutions.append(ttm_raw)
         except ValueError:
             pass
 
@@ -357,7 +360,7 @@ def summarize_results(target_path=None):
     header = (
         f"{'Run Date':<14} | {'Problem ID':<{problem_id_width}} | "
         f"{'Diag':<{diag_width}} | {'Mitig':<{mitig_width}} | "
-        f"{'TTL(s)':<7} | {'TTM(s)':<7} | {'Status':<{status_width}}"
+        f"{'Diag(s)':<7} | {'Mitig(s)':<7} | {'Status':<{status_width}}"
     )
     print(header)
     print("-" * table_width)
@@ -383,7 +386,7 @@ def summarize_results(target_path=None):
                 ttl = "N/A"
             if r.get("has_mitigation"):
                 try:
-                    ttm = f"{float(r.get('TTM', 0)):.1f}"
+                    ttm = f"{float(r.get('TTM', 0)) - float(r.get('TTL', 0)):.1f}"
                 except Exception:
                     ttm = "N/A"
             else:
@@ -432,7 +435,7 @@ def summarize_results(target_path=None):
             marker=".",
             linestyle="-",
             color="tab:blue",
-            label=f"Time to Diagnosis (n={len(valid_ttls)})",
+            label=f"Diagnosis Time (n={len(valid_ttls)})",
         )
 
     if valid_ttms:
@@ -444,7 +447,7 @@ def summarize_results(target_path=None):
             marker=".",
             linestyle="-",
             color="tab:orange",
-            label=f"Time to Mitigation (n={len(valid_ttms)})",
+            label=f"Mitigation Time (n={len(valid_ttms)})",
         )
 
     plt.xlabel("Time (s)")
@@ -459,7 +462,37 @@ def summarize_results(target_path=None):
         output_plot = "cdf_results.png"
 
     plt.savefig(output_plot)
+    plt.close()
     print(f"CDF plot saved to {output_plot}")
+
+    # --- Resolution Time CDF ---
+    valid_tres = [t for t in t_resolutions if t > 0]
+    if valid_tres:
+        plt.figure(figsize=(10, 6))
+        valid_tres.sort()
+        y_tres = np.arange(1, len(valid_tres) + 1) / len(valid_tres)
+        plt.plot(
+            valid_tres,
+            y_tres,
+            marker=".",
+            linestyle="-",
+            color="tab:green",
+            label=f"Resolution Time (n={len(valid_tres)})",
+        )
+        plt.xlabel("Time (s)")
+        plt.ylabel("CDF")
+        plt.title("CDF of Resolution Time")
+        plt.grid(True)
+        plt.legend()
+
+        if target_path and os.path.isdir(target_path):
+            res_plot = os.path.join(target_path, "cdf_resolution.png")
+        else:
+            res_plot = "cdf_resolution.png"
+
+        plt.savefig(res_plot)
+        plt.close()
+        print(f"Resolution CDF plot saved to {res_plot}")
 
 
 def diff_results(dirs, names=None):
@@ -504,9 +537,11 @@ def diff_results(dirs, names=None):
                 pass
             try:
                 if r.get("has_mitigation") and r.get("TTM"):
-                    ttms.append(float(r["TTM"]))
+                    ttm_raw = float(r["TTM"])
+                    ttl_val = float(r["TTL"]) if r.get("TTL") else 0
+                    ttms.append(ttm_raw - ttl_val)
                     if r.get("TTL"):
-                        tres.append(float(r["TTL"]) + float(r["TTM"]))
+                        tres.append(ttm_raw)
             except (ValueError, TypeError):
                 pass
         avg_ttl = sum(ttls) / len(ttls) if ttls else 0.0
@@ -558,7 +593,7 @@ def diff_results(dirs, names=None):
     atres = [s[7] for s in all_stats]
     print(
         fmt_row(
-            "Avg Resolution (Diag+Mitig)",
+            "Avg Resolution (TTM)",
             [f"{v:.1f}s" for v in atres],
             f"{atres[1] - atres[0]:+.1f}s" if n_dirs == 2 else None,
         )
@@ -628,7 +663,8 @@ def diff_results(dirs, names=None):
                 return None
 
         t_d = parse_float(r.get("TTL"))
-        t_m = parse_float(r.get("TTM"))
+        t_m_raw = parse_float(r.get("TTM"))
+        t_m = (t_m_raw - t_d) if (t_m_raw is not None and t_d is not None) else t_m_raw
 
         if r["status"] == "Completed":
             d_stat = "✅ PASS" if r.get("Diagnosis.success") == "True" else "❌ FAIL"
@@ -776,7 +812,7 @@ def diff_results(dirs, names=None):
     plot_cdfs(
         res_per_dir,
         names,
-        "Time to Resolution (Diagnosis + Mitigation)",
+        "Time to Resolution (TTM)",
         os.path.join(output_dir, "cdf_resolution.png"),
         colors=res_colors,
     )
@@ -1662,7 +1698,8 @@ def plot_sequence_time(log_dir, output_path=None, window=5):
         except (ValueError, TypeError):
             ttl = None
         try:
-            ttm = float(row["TTM"]) if row.get("TTM") else None
+            ttm_raw = float(row["TTM"]) if row.get("TTM") else None
+            ttm = (ttm_raw - ttl) if (ttm_raw is not None and ttl is not None) else ttm_raw
         except (ValueError, TypeError):
             ttm = None
         ttls.append(ttl)
@@ -1747,7 +1784,8 @@ def _load_timeline_rows(log_dir, end_time=False):
         except (ValueError, TypeError):
             ttl = None
         try:
-            ttm = float(r["TTM"]) if r.get("has_mitigation") and r.get("TTM") else None
+            ttm_raw = float(r["TTM"]) if r.get("has_mitigation") and r.get("TTM") else None
+            ttm = (ttm_raw - ttl) if (ttm_raw is not None and ttl is not None) else ttm_raw
         except (ValueError, TypeError):
             ttm = None
         diag_success = r.get("Diagnosis.success") == "True"
@@ -1895,8 +1933,8 @@ def timeline_results(dirs, names=None, window=5, end_time=False):
         ("timeline_mitigation.png", "Mitigation Time (TTM)", "TTM (seconds)", lambda e: e["ttm"]),
         (
             "timeline_resolution.png",
-            "Resolution Time (TTL+TTM)",
-            "TTL+TTM (seconds)",
+            "Resolution Time (TTM)",
+            "TTM (seconds)",
             lambda e: (e["ttl"] + e["ttm"]) if (e["ttl"] is not None and e["ttm"] is not None) else None,
         ),
     ]
