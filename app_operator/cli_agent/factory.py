@@ -36,9 +36,8 @@ def create_agent_from_config(
 
     if backend in AGENT_REGISTRY:
         kwargs = {"model": model}
-        if backend in ("rlm", "rlm-official", "subagent", "hybrid"):
+        if backend in ("rlm-official", "subagent", "hybrid"):
             kwargs["location"] = config.agent.location
-        if backend in ("rlm", "rlm-official", "subagent", "hybrid"):
             kwargs["dspy_config"] = config.dspy  # type: ignore[reportArgumentType]
         if backend == "hybrid":
             kwargs["rlm_mode"] = config.rlm.mode
