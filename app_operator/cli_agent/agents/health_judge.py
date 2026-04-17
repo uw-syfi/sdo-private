@@ -173,7 +173,7 @@ class AppHealthJudge:
 
             last_response = response or ""
 
-            verdict = _parse_verdict(response)
+            verdict = _parse_verdict(last_response)
             if verdict is not None:
                 self._record_verdict(verdict)
                 return verdict

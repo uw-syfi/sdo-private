@@ -378,7 +378,7 @@ class AgentConfig:
         validate_field(self.retry_base_delay, "retry_base_delay", int, positive=True)
         validate_field(self.rate_limit_backoff, "rate_limit_backoff", int, positive=True)
 
-        validate_type(self.model_config, "model_config", ModelConfig, nullable=True)
+        validate_type(self.model_config, "model_config", ModelConfig, nullable=True, type_label="a ModelConfig")
 
     @property
     def model(self) -> str | None:
