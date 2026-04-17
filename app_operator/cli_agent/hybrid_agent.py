@@ -13,10 +13,11 @@ Register with ``provider = "hybrid"`` in ``sds.toml``.
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
-from app_operator.cli_agent._rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
+from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
@@ -69,7 +70,7 @@ class HybridCodingAgent(CodingAgent):
         self.location = location
         self.dspy_config = dspy_config
         self.rlm_mode = rlm_mode
-        self._total_token_usage: dict = {
+        self._total_token_usage: dict[str, int] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
@@ -83,14 +84,14 @@ class HybridCodingAgent(CodingAgent):
         silent: bool = False,
     ) -> str:
         repo_path = Path(cwd) if cwd else Path.cwd()
-        call_tokens: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        call_tokens: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-        is_fix = _FIX_ERROR_RE.search(prompt)
-        if not is_fix and _DIRECT_TEXT_RE.search(prompt):
+        is_fix = FIX_ERROR_RE.search(prompt)
+        if not is_fix and DIRECT_TEXT_RE.search(prompt):
             # Reuse SubagentCodingAgent's direct-text path (same implementation)
             helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
             result = helper._generate_direct(prompt, call_tokens)
-        elif not is_fix and _FILE_GEN_RE.search(prompt):
+        elif not is_fix and FILE_GEN_RE.search(prompt):
             helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
             result = helper._generate_files(prompt, repo_path, call_tokens)
         else:
@@ -108,7 +109,7 @@ class HybridCodingAgent(CodingAgent):
         self,
         prompt: str,
         repo_path: Path,
-        token_acc: dict | None = None,
+        token_acc: dict[str, int] | None = None,
     ) -> str:
         """Start the RLM loop and let it call specialists lazily."""
         helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
@@ -174,7 +175,7 @@ class HybridCodingAgent(CodingAgent):
             )
         result = agent.run_task(task=rlm_task, context=context, repo_path=str(repo_path))
 
-        rlm_tokens = agent.get_rlm_statistics().get("token_usage", {})
+        rlm_tokens: dict[str, Any] = agent.get_rlm_statistics().get("token_usage", {})
         for k in ("prompt_tokens", "completion_tokens", "total_tokens"):
             if token_acc is not None:
                 token_acc[k] = token_acc.get(k, 0) + rlm_tokens.get(k, 0)
@@ -187,7 +188,7 @@ class HybridCodingAgent(CodingAgent):
         repo_path: Path,
         specialist: str,
         task: str,
-        token_acc: dict | None = None,
+        token_acc: dict[str, int] | None = None,
     ) -> str:
         """Run one specialist analysis against the latest repo state."""
         sds = repo_path / ".sds"

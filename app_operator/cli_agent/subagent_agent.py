@@ -12,10 +12,11 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
-from app_operator.cli_agent._rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
+from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
 from app_operator.prompts import (
     DSPyConfigProtocol,
     render_error_log_analyst_prompt,
@@ -58,7 +59,7 @@ class SubagentCodingAgent(CodingAgent):
         self.event_handler = event_handler
         self.location = location
         self.dspy_config = dspy_config
-        self._total_token_usage: dict = {
+        self._total_token_usage: dict[str, int] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
@@ -72,12 +73,12 @@ class SubagentCodingAgent(CodingAgent):
         silent: bool = False,
     ) -> str:
         repo_path = Path(cwd) if cwd else Path.cwd()
-        call_tokens: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        call_tokens: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-        is_fix = _FIX_ERROR_RE.search(prompt)
-        if not is_fix and _DIRECT_TEXT_RE.search(prompt):
+        is_fix = FIX_ERROR_RE.search(prompt)
+        if not is_fix and DIRECT_TEXT_RE.search(prompt):
             result = self._generate_direct(prompt, call_tokens)
-        elif not is_fix and _FILE_GEN_RE.search(prompt):
+        elif not is_fix and FILE_GEN_RE.search(prompt):
             result = self._generate_files(prompt, repo_path, call_tokens)
         else:
             result = self._generate_fix(prompt, repo_path, call_tokens)
@@ -92,10 +93,10 @@ class SubagentCodingAgent(CodingAgent):
 
     # -- Direct / file-gen paths (same as RLMCodingAgent) ---------------------
 
-    def _generate_direct(self, prompt: str, token_acc: dict | None = None) -> str:
+    def _generate_direct(self, prompt: str, token_acc: dict[str, int] | None = None) -> str:
         import os
 
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "cache": {"no-cache": True},
@@ -112,10 +113,10 @@ class SubagentCodingAgent(CodingAgent):
             logger.error(f"[Subagent] Direct text LLM call failed: {type(e).__name__}: {e}")
             return f"LLM call failed: {type(e).__name__}: {e}"
 
-    def _generate_files(self, prompt: str, repo_path: Path, token_acc: dict | None = None) -> str:
+    def _generate_files(self, prompt: str, repo_path: Path, token_acc: dict[str, int] | None = None) -> str:
         import os
 
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": FILE_GEN_SYSTEM_PROMPT},
@@ -144,7 +145,7 @@ class SubagentCodingAgent(CodingAgent):
         self,
         prompt: str,
         repo_path: Path,
-        token_acc: dict | None = None,
+        token_acc: dict[str, int] | None = None,
     ) -> str:
         """Fan out 4 subagent analyses, then synthesise the fix with a root call."""
         sds = repo_path / ".sds"
@@ -257,7 +258,7 @@ class SubagentCodingAgent(CodingAgent):
         task_prompt: str,
         summaries: dict[str, str],
         deploy_script: str,
-        token_acc: dict | None = None,
+        token_acc: dict[str, int] | None = None,
     ) -> str:
         """Single root LLM call that receives all subagent summaries."""
         import os
@@ -278,7 +279,7 @@ class SubagentCodingAgent(CodingAgent):
         ]
         user_prompt = "\n".join(p for p in user_parts if p)
 
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_msg},
@@ -342,7 +343,7 @@ class SubagentCodingAgent(CodingAgent):
 
     def _gather_repo_context(self, repo_path: Path, sds_dir: Path) -> str:
         """Gather repository-level context files into a single string."""
-        parts = []
+        parts: list[str] = []
 
         dockerfile = self._read(repo_path / "Dockerfile")
         if dockerfile:

@@ -33,7 +33,7 @@ class DSPyFeedbackCollector:
         # Placeholder - to be implemented in Phase 5
         raise NotImplementedError("DSPyFeedbackCollector.should_collect_feedback() not yet implemented")
 
-    def collect_feedback(self, trajectory: Any, metadata: dict | None = None) -> None:
+    def collect_feedback(self, trajectory: Any, metadata: dict[str, Any] | None = None) -> None:
         """Collect feedback from a run.
 
         Args:

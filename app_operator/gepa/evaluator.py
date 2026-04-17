@@ -9,10 +9,13 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app_operator.gepa.reflector import ExecutionTrace
 from app_operator.logger import logger
+
+MetricFn = Callable[["EvaluationExample", dict[str, Any]], float]
+AgentFactory = Callable[[], Any]
 
 
 @dataclass
@@ -103,7 +106,7 @@ class EvaluationResult:
     candidate_id: str
     scores: dict[str, float]
     overall_score: float
-    traces: list[ExecutionTrace] = field(default_factory=list)
+    traces: list[ExecutionTrace] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     efficiency: EfficiencyMetrics | None = None
 
 
@@ -112,8 +115,8 @@ class SDSEvaluator:
 
     def __init__(
         self,
-        metrics: dict[str, Callable],
-        agent_factory: Callable,
+        metrics: dict[str, MetricFn],
+        agent_factory: AgentFactory,
         templates_dir: Path,
         runners: dict[str, Any] | None = None,
     ) -> None:
@@ -227,7 +230,7 @@ class SDSEvaluator:
             trajectory_data = self._execute_agent(example, templates_dir=tmp_templates)
 
             phase_key = self._agent_type_to_phase(example.agent_type)
-            messages = []
+            messages: list[dict[str, Any]] = []
             for conv in trajectory_data.get(phase_key, []):
                 messages.extend(conv.get("messages", []))
 
@@ -308,7 +311,14 @@ class SDSEvaluator:
             return {}
 
     @staticmethod
-    def _run_agent(example, repo_path, agent, filesystem, recorder, runners):
+    def _run_agent(
+        example: EvaluationExample,
+        repo_path: Path,
+        agent: Any,
+        filesystem: Any,
+        recorder: Any,
+        runners: dict[str, Any],
+    ) -> None:
         """Dispatch to the appropriate agent based on example type."""
         runner = runners.get(example.agent_type)
         if runner is None:
@@ -327,7 +337,7 @@ class SDSEvaluator:
         return mapping.get(agent_type, agent_type)
 
     @staticmethod
-    def _check_success(trajectory_data: dict) -> bool:
+    def _check_success(trajectory_data: dict[str, Any]) -> bool:
         """Check if the agent run was successful from trajectory data."""
         status = trajectory_data.get("metadata", {}).get("status", "")
         return status == "completed"
@@ -362,9 +372,10 @@ def extract_generated_scripts(
                     continue
             if not isinstance(args, dict):
                 continue
+            args_dict = cast("dict[str, Any]", args)
 
-            path = str(args.get("path", args.get("file_path", "")))
-            content = str(args.get("content", args.get("file_content", "")))
+            path = str(args_dict.get("path", args_dict.get("file_path", "")))
+            content = str(args_dict.get("content", args_dict.get("file_content", "")))
 
             if path.endswith(".sh") and content:
                 name = path.rsplit("/", 1)[-1]
@@ -863,7 +874,7 @@ def analysis_accuracy_metric(
 
 # --- METRICS REGISTRY ---
 
-METRICS_REGISTRY: dict[str, dict[str, Callable]] = {
+METRICS_REGISTRY: dict[str, dict[str, MetricFn]] = {
     "deployer": {
         "script_completeness": script_completeness_metric,
         "deployment_progress": deployment_progress_metric,

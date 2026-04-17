@@ -29,7 +29,7 @@ def analyze_repository(
     if filesystem is None:
         filesystem = RealFilesystem()
 
-    context_parts = []
+    context_parts: list[str] = []
 
     # Check for common deployment files
     if filesystem.exists(repo_path / ".sds" / "code_analysis.md"):

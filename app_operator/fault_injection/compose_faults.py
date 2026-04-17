@@ -7,7 +7,7 @@ modifications to Docker Compose YAML data structures.
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -260,7 +260,7 @@ class ComposeFaultInjector(FaultInjector):
 
         # Faults with specific service-role requirements
         if fault.applicable_services:
-            result = []
+            result: list[str] = []
             for svc_name, svc_cfg in services.items():
                 role = ComposeManipulator.classify_service(svc_name, svc_cfg)
                 if role in fault.applicable_services:
@@ -293,7 +293,8 @@ class ComposeFaultInjector(FaultInjector):
         """Check if a service has authentication-related env vars."""
         env = svc_cfg.get("environment", [])
         if isinstance(env, dict):
-            keys = [k.lower() for k in env]
+            env_dict = cast("dict[str, Any]", env)
+            keys = [str(k).lower() for k in env_dict]
         else:
             keys = [str(e).split("=")[0].lower() for e in env]
 
@@ -328,12 +329,13 @@ class ComposeFaultInjector(FaultInjector):
         env = svc.get("environment", [])
 
         if isinstance(env, dict):
-            if not env:
+            env_dict = cast("dict[str, Any]", env)
+            if not env_dict:
                 return FaultResult(
                     fault=fault, target_service=service, success=False, error_message="No environment variables"
                 )
-            key = self._rng.choice(list(env.keys()))
-            old_val = env.pop(key)
+            key = self._rng.choice(list(env_dict.keys()))
+            old_val = env_dict.pop(key)
             return FaultResult(
                 fault=fault,
                 target_service=service,
@@ -435,14 +437,15 @@ class ComposeFaultInjector(FaultInjector):
     def _inject_removed_auth_config(self, fault: Fault, data: dict[str, Any], service: str) -> FaultResult:
         svc = data["services"][service]
         env = svc.get("environment", [])
-        removed = []
+        removed: list[str] = []
 
         if isinstance(env, dict):
-            keys_to_remove = [k for k in env if any(p in k.lower() for p in AUTH_ENV_PATTERNS)]
+            env_dict = cast("dict[str, Any]", env)
+            keys_to_remove = [k for k in env_dict if any(p in str(k).lower() for p in AUTH_ENV_PATTERNS)]
             for k in keys_to_remove:
-                removed.append(f"{k}={env.pop(k)}")  # noqa: PERF401
+                removed.append(f"{k}={env_dict.pop(k)}")  # noqa: PERF401
         else:
-            new_env = []
+            new_env: list[Any] = []
             for e in env:
                 var_name = str(e).split("=")[0].lower()
                 if any(p in var_name for p in AUTH_ENV_PATTERNS):
@@ -566,12 +569,15 @@ class ComposeFaultInjector(FaultInjector):
                 fault=fault, target_service=service, success=False, error_message="Service has no depends_on"
             )
 
+        removed: dict[str, Any] | Any
         if isinstance(deps, dict):
-            key = self._rng.choice(list(deps.keys()))
-            removed = {key: deps.pop(key)}
+            deps_dict = cast("dict[str, Any]", deps)
+            key = self._rng.choice(list(deps_dict.keys()))
+            removed = {key: deps_dict.pop(key)}
         elif isinstance(deps, list):
-            idx = self._rng.randrange(len(deps))
-            removed = deps.pop(idx)
+            deps_list = cast("list[Any]", deps)
+            idx = self._rng.randrange(len(deps_list))
+            removed = deps_list.pop(idx)
         else:
             return FaultResult(
                 fault=fault, target_service=service, success=False, error_message="Unexpected depends_on format"
@@ -589,14 +595,15 @@ class ComposeFaultInjector(FaultInjector):
         db_patterns = ["database", "db_host", "db_url", "mongo", "mysql", "postgres", "redis"]
 
         if isinstance(env, dict):
-            db_keys = [k for k in env if any(p in k.lower() for p in db_patterns)]
+            env_dict = cast("dict[str, Any]", env)
+            db_keys = [k for k in env_dict if any(p in str(k).lower() for p in db_patterns)]
             if not db_keys:
                 return FaultResult(
                     fault=fault, target_service=service, success=False, error_message="No database env vars found"
                 )
             key = self._rng.choice(db_keys)
-            old_val = env[key]
-            env[key] = "broken-host-sds-fault:65535"
+            old_val = env_dict[key]
+            env_dict[key] = "broken-host-sds-fault:65535"
             return FaultResult(
                 fault=fault,
                 target_service=service,
@@ -653,15 +660,19 @@ class ComposeFaultInjector(FaultInjector):
         removed_config = networks.pop(net_name)
 
         # Also remove from services that reference it
-        affected_services = []
+        affected_services: list[str] = []
         for svc_name, svc_cfg in data.get("services", {}).items():
             svc_networks = svc_cfg.get("networks")
-            if isinstance(svc_networks, list) and net_name in svc_networks:
-                svc_networks.remove(net_name)
-                affected_services.append(svc_name)
-            elif isinstance(svc_networks, dict) and net_name in svc_networks:
-                del svc_networks[net_name]
-                affected_services.append(svc_name)
+            if isinstance(svc_networks, list):
+                svc_networks_list = cast("list[Any]", svc_networks)
+                if net_name in svc_networks_list:
+                    svc_networks_list.remove(net_name)
+                    affected_services.append(svc_name)
+            elif isinstance(svc_networks, dict):
+                svc_networks_dict = cast("dict[str, Any]", svc_networks)
+                if net_name in svc_networks_dict:
+                    del svc_networks_dict[net_name]
+                    affected_services.append(svc_name)
 
         return FaultResult(
             fault=fault,
@@ -683,12 +694,13 @@ class ComposeFaultInjector(FaultInjector):
         removed_config = volumes.pop(vol_name)
 
         # Also remove service-level references to the volume
-        affected_services = []
+        affected_services: list[str] = []
         for svc_name, svc_cfg in data.get("services", {}).items():
             svc_volumes = svc_cfg.get("volumes", [])
             if isinstance(svc_volumes, list):
-                new_volumes = [v for v in svc_volumes if not str(v).startswith(f"{vol_name}:")]
-                if len(new_volumes) != len(svc_volumes):
+                svc_volumes_list = cast("list[Any]", svc_volumes)
+                new_volumes = [v for v in svc_volumes_list if not str(v).startswith(f"{vol_name}:")]
+                if len(new_volumes) != len(svc_volumes_list):
                     svc_cfg["volumes"] = new_volumes
                     affected_services.append(svc_name)
 

@@ -32,11 +32,11 @@ class EnrichedTrajectoryExample:
     prompt_kwargs: dict[str, Any] | None = None  # Original template kwargs
 
     # Enriched data from Gemini sessions
-    full_conversation: list[dict[str, Any]] = field(default_factory=list)
+    full_conversation: list[dict[str, Any]] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     token_usage: TokenUsage = field(
         default_factory=lambda: TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     )
-    session_metadata: dict[str, Any] = field(default_factory=dict)
+    session_metadata: dict[str, Any] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
     # Success metrics (from trajectory)
     success: bool = False
@@ -45,14 +45,14 @@ class EnrichedTrajectoryExample:
 
 
 def extract_prompt_kwargs_from_content(
-    prompt_type: str, rendered_prompt: str, conversation: list[dict]
+    prompt_type: str, rendered_prompt: str, conversation: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Extract prompt kwargs by reverse-engineering from rendered prompt.
 
     This attempts to extract the original template variables from the
     fully-rendered prompt text.
     """
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     if prompt_type == "deployer_fix_error":
         # Look for common patterns
@@ -125,7 +125,7 @@ class EnrichedTrajectoryDataLoader:
         Returns:
             list of enriched training examples
         """
-        examples = []
+        examples: list[EnrichedTrajectoryExample] = []
 
         # Find all enriched trajectory files
         traj_files = list(self.enriched_dir.glob("**/enriched_trajectory.json"))
@@ -144,12 +144,12 @@ class EnrichedTrajectoryDataLoader:
         """Load examples from a single enriched trajectory file."""
 
         with open(traj_file) as f:
-            traj = json.load(f)
+            traj: dict[str, Any] = json.load(f)
 
         if not traj.get("_enriched"):
             raise ValueError(f"{traj_file} is not an enriched trajectory")
 
-        examples = []
+        examples: list[EnrichedTrajectoryExample] = []
         metadata = traj["metadata"]
         overall_success = metadata.get("status") == "completed"
 

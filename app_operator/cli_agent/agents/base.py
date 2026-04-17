@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 if TYPE_CHECKING:
     from app_operator.cli_agent.agents.context import AgentContext
@@ -16,7 +16,7 @@ class OperatorAgent(ABC, Generic[T]):
         self.ctx = ctx
 
     @abstractmethod
-    def prepare(self, **kwargs) -> str:
+    def prepare(self, **kwargs: Any) -> str:
         """Build the prompt. All pre-agent logic lives here."""
 
     def execute(self, prompt: str, timeout: int | None = None) -> str:
@@ -31,7 +31,7 @@ class OperatorAgent(ABC, Generic[T]):
     def parse(self, response: str) -> T:
         """Extract structured result from raw response."""
 
-    def run(self, **kwargs) -> T:
+    def run(self, **kwargs: Any) -> T:
         """Template: prepare -> execute -> parse."""
         prompt = self.prepare(**kwargs)
         response = self.execute(prompt)

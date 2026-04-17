@@ -42,7 +42,7 @@ def glob_files(ctx: RunContext[OperatorDeps], pattern: str) -> list[str]:
             except ValueError:
                 return [f"Error: Pattern escapes repository root: {pattern}"]
 
-        results = []
+        results: list[str] = []
         for path in ctx.deps.filesystem.glob(ctx.deps.repo_path, pattern):
             if ctx.deps.filesystem.is_file(path) or ctx.deps.filesystem.is_dir(path):
                 try:
@@ -74,8 +74,8 @@ def read_file(ctx: RunContext[OperatorDeps], path: str, start_line: int, end_lin
         return f"Error: {e!s}"
 
 
-def _grep_file(regex: re.Pattern, file_path: Path, repo_root: Path, filesystem: FileSystemInterface) -> list[str]:
-    results = []
+def _grep_file(regex: re.Pattern[str], file_path: Path, repo_root: Path, filesystem: FileSystemInterface) -> list[str]:
+    results: list[str] = []
     try:
         content = filesystem.read_text(file_path)
     except OSError:
@@ -191,7 +191,7 @@ def bash(ctx: RunContext[OperatorDeps], command: str, timeout: int = SUBPROCESS_
         return {"success": False, "exit_code": -1, "stdout": "", "stderr": f"Error: {e!s}"}
 
 
-def build_tools() -> list[Callable]:
+def build_tools() -> list[Callable[..., Any]]:
     """Return list of tool functions."""
     return [
         ls_dir,

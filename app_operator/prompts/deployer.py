@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 from app_operator.prompts._core import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
+    from app_operator.trajectory import TrajectoryRecorderProtocol
     from app_operator.types import CommandResult
 
 
@@ -35,7 +36,7 @@ def prepare_error_context(
     Returns:
         str: Formatted error context.
     """
-    context_parts = []
+    context_parts: list[str] = []
 
     if log_file_path:
         context_parts.append(f"Full deployment logs available at: {log_file_path}")
@@ -71,7 +72,7 @@ def create_generate_script_prompt(
     target_dir: str,
     platform: str,
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder=None,
+    recorder: TrajectoryRecorderProtocol | None = None,
     previous_violations: str | None = None,
     system_prompt: str | None = None,
 ) -> str:
@@ -137,7 +138,7 @@ def create_fix_prompt(
     health_check_script_path: Path,
     platform: str = "auto",
     dspy_config: DSPyConfigProtocol | None = None,
-    recorder=None,
+    recorder: TrajectoryRecorderProtocol | None = None,
     deployment_progress_path: Path | None = None,
     structured_output: bool = False,
     fix_summary_consolidation: bool = True,

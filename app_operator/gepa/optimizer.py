@@ -139,7 +139,7 @@ class GEPAOptimizer:
     ) -> dict[str, Any]:
         """Optimize all templates for a given agent type."""
         templates = self.adapter.get_templates_for_agent(agent_type)
-        results = {}
+        results: dict[str, Any] = {}
         for template_name in templates:
             self._log(f"\n{'=' * 60}\nOptimizing: {template_name}\n{'=' * 60}")
             results[template_name] = self.optimize(template_name, train_examples, val_examples)
@@ -368,7 +368,7 @@ class GEPAOptimizer:
                 scripts = extract_generated_scripts({"script_generation": [{"messages": trace.messages}]})
             trace.generated_scripts = scripts
 
-    def _make_candidate(self, **kwargs) -> PromptCandidate:
+    def _make_candidate(self, **kwargs: Any) -> PromptCandidate:
         """Create a new PromptCandidate with a unique ID."""
         return PromptCandidate(id=str(uuid.uuid4())[:12], **kwargs)
 
@@ -478,7 +478,7 @@ class GEPAOptimizer:
         if not parent.scores or not child.scores:
             return
         all_keys = sorted(set(parent.scores) | set(child.scores))
-        parts = []
+        parts: list[str] = []
         for key in all_keys:
             old = parent.scores.get(key, 0.0)
             new = child.scores.get(key, 0.0)

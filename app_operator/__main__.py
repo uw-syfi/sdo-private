@@ -38,7 +38,7 @@ INSTALL_HINTS = {
 }
 
 
-def check_dependencies():
+def check_dependencies() -> None:
     """Check if required system dependencies are installed."""
     missing = [tool for tool in REQUIRED_DEPENDENCIES if not shutil.which(tool)]
 
@@ -101,11 +101,11 @@ Examples:
     analyze_prompts_parser = subparsers.add_parser(
         "analyze-prompts", help="Analyze prompt performance from trajectory data"
     )
-    analyze_prompts.add_arguments(analyze_prompts_parser)
+    analyze_prompts.add_arguments(analyze_prompts_parser)  # pyright: ignore[reportUnknownMemberType]
 
     # 'optimize-prompts' command
     optimize_prompts_parser = subparsers.add_parser("optimize-prompts", help="Optimize prompts using DSPy")
-    optimize_prompts.add_arguments(optimize_prompts_parser)
+    optimize_prompts.add_arguments(optimize_prompts_parser)  # pyright: ignore[reportUnknownMemberType]
 
     # 'e2e-optimize' command
     e2e_optimize_parser = subparsers.add_parser("e2e-optimize", help="Run end-to-end optimization loop")
@@ -130,7 +130,7 @@ Examples:
         "lineage-report",
         help="Render and validate prompt lineage DAG metadata",
     )
-    lineage_report.add_arguments(lineage_report_parser)
+    lineage_report.add_arguments(lineage_report_parser)  # pyright: ignore[reportUnknownMemberType]
 
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
@@ -148,9 +148,9 @@ Examples:
     if args.command == "init-exp":
         return init_exp.run_command(args)
     if args.command == "analyze-prompts":
-        return analyze_prompts.run_command(args)
+        return analyze_prompts.run_command(args)  # pyright: ignore[reportUnknownMemberType]
     if args.command == "optimize-prompts":
-        return optimize_prompts.run_command(args)
+        return optimize_prompts.run_command(args)  # pyright: ignore[reportUnknownMemberType]
     if args.command == "e2e-optimize":
         return e2e_optimize.run_command(args)
     if args.command == "run-exp":

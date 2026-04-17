@@ -277,7 +277,7 @@ class PromptLoader:
         output_lower = output.lower()
         return any(token in output_lower for token in _DOCKER_INCOMPATIBLE_DSPY_TOKENS)
 
-    def _should_use_dspy(self, prompt_name: str, kwargs: dict) -> bool:
+    def _should_use_dspy(self, prompt_name: str, kwargs: dict[str, Any]) -> bool:
         """Determine if DSPy should be used for this prompt.
 
         Returns False early if no optimized module exists for this prompt,
@@ -366,7 +366,7 @@ class PromptLoader:
     def _render_dspy(
         self,
         prompt_name: str,
-        kwargs: dict,
+        kwargs: dict[str, Any],
         recorder: TrajectoryRecorderProtocol | None = None,
     ) -> str:
         """Render using DSPy optimized module.
@@ -421,14 +421,14 @@ class PromptLoader:
 
         return output
 
-    def render_template(self, template_name: str, kwargs: dict) -> str:
+    def render_template(self, template_name: str, kwargs: dict[str, Any]) -> str:
         """Render a Jinja2 template by name with the given kwargs."""
         return self._render_jinja2(template_name, kwargs)
 
     def _render_jinja2(
         self,
         template_name: str,
-        kwargs: dict,
+        kwargs: dict[str, Any],
         recorder: TrajectoryRecorderProtocol | None = None,
     ) -> str:
         """Render using Jinja2 template.

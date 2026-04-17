@@ -8,10 +8,14 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import IO, TYPE_CHECKING, Any
 
 from app_operator.logger import logger
 from app_operator.types import CommandResult
 from app_operator.ui_protocol import OperatorUI
+
+if TYPE_CHECKING:
+    from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
 
 
 class SubprocessRunner:
@@ -33,10 +37,10 @@ class SubprocessRunner:
         check_shutdown: Callable[[], bool] | None = None,
         time_func: Callable[[], float] | None = None,
         sleep_func: Callable[[float], None] | None = None,
-        popen_func: Callable | None = None,
+        popen_func: Callable[..., "subprocess.Popen[str]"] | None = None,
         ui: OperatorUI | None = None,
         tool_name: str | None = None,
-        tool_args: dict | str | None = None,
+        tool_args: dict[str, Any] | str | None = None,
     ):
         """Initialize the subprocess runner.
 
@@ -65,7 +69,7 @@ class SubprocessRunner:
         self.tool_name = tool_name
         self.tool_args = tool_args
 
-        self.process: subprocess.Popen | None = None
+        self.process: subprocess.Popen[str] | None = None
         self._pgid: int | None = None
         self.stdout_lines: list[str] = []
         self.stderr_lines: list[str] = []
@@ -81,7 +85,7 @@ class SubprocessRunner:
         """
         return self._run_impl(self._wait_for_completion)
 
-    def run_with_progress_monitoring(self, summarizer) -> CommandResult:
+    def run_with_progress_monitoring(self, summarizer: "ProgressSummarizer") -> CommandResult:
         """Run subprocess with integrated progress monitoring.
 
         This method starts the subprocess and monitors it, providing periodic
@@ -94,12 +98,12 @@ class SubprocessRunner:
             CommandResult with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
 
-        def progress_callback():
+        def progress_callback() -> None:
             if summarizer.should_summarize():
                 recent_output = self.get_recent_output(num_lines=20)
                 summarizer.summarize(recent_output)
 
-        def wait_fn():
+        def wait_fn() -> CommandResult:
             return self._wait_for_completion(progress_callback=progress_callback, summarizer=summarizer)
 
         return self._run_impl(wait_fn)
@@ -214,13 +218,15 @@ class SubprocessRunner:
             self._log_stack.close()
             self._ensure_process_terminated()
 
-    def _read_pipe(self, pipe, buffer: list[str]):
+    def _read_pipe(self, pipe: IO[str] | None, buffer: list[str]) -> None:
         """Read pipe line by line and capture to buffer.
 
         Args:
             pipe: The pipe to read from (stdout or stderr).
             buffer: list to append lines to.
         """
+        if pipe is None:
+            return
         try:
             for line in iter(pipe.readline, ""):
                 if not line:
@@ -239,7 +245,7 @@ class SubprocessRunner:
     def _wait_for_completion(
         self,
         progress_callback: Callable[[], None] | None = None,
-        summarizer=None,
+        summarizer: "ProgressSummarizer | None" = None,
     ) -> CommandResult:
         """Wait for process completion with timeout and shutdown checks.
 
@@ -354,7 +360,7 @@ class SubprocessRunner:
         except OSError:
             pass
 
-    def _ensure_process_terminated(self):
+    def _ensure_process_terminated(self) -> None:
         """Ensure process is terminated (cleanup)."""
         if self.process and self.process.poll() is None:
             try:

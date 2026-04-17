@@ -171,9 +171,7 @@ class AppHealthJudge:
                     raw_response="",
                 )
 
-            if response is None:
-                response = ""
-            last_response = response
+            last_response = response or ""
 
             verdict = _parse_verdict(response)
             if verdict is not None:

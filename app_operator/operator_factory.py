@@ -1,12 +1,13 @@
 """Factory for creating operator instances based on runtime configuration."""
 
 import importlib
+from typing import Any
 
 from app_operator.config import Config
 from app_operator.operator_base import OperatorBase
 
 
-def create_operator(shared_kwargs: dict, config: Config) -> OperatorBase:
+def create_operator(shared_kwargs: dict[str, Any], config: Config) -> OperatorBase:
     """Create the appropriate operator instance based on the runtime configuration.
 
     Runtime modules are loaded via ``importlib`` so that this module does not

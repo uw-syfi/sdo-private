@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from app_operator.logger import logger
 from app_operator.prompts import get_loader
+from app_operator.trajectory import TrajectoryRecorderProtocol
 
 
 class ProgressSummarizer:
@@ -24,7 +25,7 @@ class ProgressSummarizer:
         initial_delay: float = 15.0,
         summary_interval: float = 30.0,
         time_func: Callable[[], float] | None = None,
-        recorder=None,
+        recorder: TrajectoryRecorderProtocol | None = None,
     ):
         """Initialize the progress summarizer.
 

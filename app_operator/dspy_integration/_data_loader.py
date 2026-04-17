@@ -33,9 +33,9 @@ class TrajectoryExample:
     fallback_occurred: bool = False
     health_check_script: str | None = None  # Content of health_check.sh for quality validation
     fault_injected: bool = False
-    fault_ids: list[str] = field(default_factory=list)
-    fault_categories: list[str] = field(default_factory=list)
-    fault_severities: list[str] = field(default_factory=list)
+    fault_ids: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    fault_categories: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    fault_severities: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 class TrajectoryDataLoader:
@@ -62,14 +62,14 @@ class TrajectoryDataLoader:
         Returns:
             List of parsed trajectory dictionaries
         """
-        trajectories = []
+        trajectories: list[dict[str, Any]] = []
         if not self.trajectories_dir.exists():
             return trajectories
 
         for traj_file in sorted(self.trajectories_dir.glob(pattern)):
             try:
                 with open(traj_file) as f:
-                    trajectory = json.load(f)
+                    trajectory: dict[str, Any] = json.load(f)
                     trajectory["_file_path"] = str(traj_file)
                     trajectories.append(trajectory)
             except (OSError, json.JSONDecodeError) as e:
@@ -93,7 +93,7 @@ class TrajectoryDataLoader:
             List of training examples with inputs, outputs, and metrics
         """
         trajectories = self.load_trajectories()
-        examples = []
+        examples: list[TrajectoryExample] = []
 
         for trajectory in trajectories:
             file_path = trajectory.get("_file_path", "unknown")
