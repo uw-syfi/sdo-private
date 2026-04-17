@@ -24,6 +24,7 @@ from typing import (
 from app_operator.logger import logger
 from app_operator.prompts import get_system_prompt
 from app_operator.trajectory.collectors import collect_gemini_sessions
+from app_operator.trajectory.utils import extract_rlm_statistics_from_trajectory
 
 if TYPE_CHECKING:
     from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
@@ -37,6 +38,28 @@ from libs.agent_cli.trajectory import (
 from libs.agent_cli.trajectory import (
     register_context_providers as _register_context_providers,
 )
+
+__all__ = [
+    "DEFAULT_MAX_OUTPUT_LENGTH",
+    "MessageRole",
+    "NullTrajectoryRecorder",
+    "Phase",
+    "TrajectoryMessage",
+    "TrajectoryRecorder",
+    "TrajectoryRecorderProtocol",
+    "collect_gemini_sessions",
+    "extract_rlm_statistics_from_trajectory",
+    "finalize_trajectory",
+    "get_current_call_id",
+    "get_run_id",
+    "get_trajectory",
+    "init_trajectory",
+    "record_assistant_message",
+    "record_phase_end",
+    "record_phase_start",
+    "record_tool_call",
+    "record_user_message",
+]
 
 DEFAULT_MAX_OUTPUT_LENGTH = 10000  # characters captured per tool output
 

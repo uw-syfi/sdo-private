@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app_operator.logger import logger
-from app_operator.trajectory.utils import extract_rlm_statistics_from_trajectory
+from app_operator.trajectory import extract_rlm_statistics_from_trajectory
 
 MetricCallable = Callable[[Any, Any, Any], float]
 
