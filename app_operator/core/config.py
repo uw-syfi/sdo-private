@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, cast
 
-from app_operator.core.exceptions import ConfigurationError
+from app_operator.core.exceptions import ConfigurationError, UnrecognizedSectionError
 from app_operator.core.logger import logger
 from app_operator.core.validation import (
     validate_dataclass_fields,
@@ -17,15 +17,6 @@ from app_operator.core.validation import (
     validate_type,
 )
 from libs.model_config import ModelConfig, from_provider_and_model
-
-
-class UnrecognizedSectionError(ConfigurationError):
-    """Raised when an unrecognized section is found in the config file."""
-
-
-class UnrecognizedFieldError(ConfigurationError):
-    """Raised when an unrecognized field is found in a recognized section."""
-
 
 # ---------------------------------------------------------------------------
 # DSPy configuration dataclasses

@@ -24,8 +24,6 @@ from app_operator.core.config import (
     OperatorPhaseConfig,
     RLMConfig,
     RuntimeConfig,
-    UnrecognizedFieldError,
-    UnrecognizedSectionError,
     load_config,
     qualify_model_for_litellm,
 )
@@ -46,6 +44,8 @@ from app_operator.core.exceptions import (
     MonitoringError,
     ProcessError,
     SdsOperatorError,
+    UnrecognizedFieldError,
+    UnrecognizedSectionError,
 )
 from app_operator.core.filesystem import (
     FileSystemInterface,

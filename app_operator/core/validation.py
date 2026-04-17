@@ -8,6 +8,8 @@ from collections.abc import Collection
 from dataclasses import fields
 from typing import Any
 
+from app_operator.core.exceptions import UnrecognizedFieldError
+
 
 def validate_type(
     value: Any,
@@ -179,7 +181,7 @@ def validate_dataclass_fields(
     """Check that all keys in *section_data* are recognised dataclass fields.
 
     Raises:
-        UnrecognizedFieldError: (imported lazily) when unknown keys are found.
+        UnrecognizedFieldError: when unknown keys are found.
     """
     if not section_data:
         return
@@ -188,8 +190,6 @@ def validate_dataclass_fields(
     unrecognized = set(section_data.keys()) - recognized
 
     if unrecognized:
-        from app_operator.core.config import UnrecognizedFieldError
-
         raise UnrecognizedFieldError(
             f"Unrecognized field(s) in [{section_name}] section: "
             f"{', '.join(sorted(unrecognized))}. "

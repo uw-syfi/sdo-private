@@ -315,7 +315,7 @@ Prioritize code-based analysis over LLM reasoning.
 
 ```python
 # app_operator/cli_agent/agents.py
-from app_operator.rlm import RecursiveDeploymentAgent
+from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 
 def fix_deployment_error(self, error_log, ...):
     if len(error_log) > 50000:  # Auto-enable for long logs
@@ -334,7 +334,7 @@ Already works! `RecursiveDeploymentAgent` uses trajectory callback.
 
 ```python
 # app_operator/dspy_integration/optimizer.py
-from app_operator.rlm.metrics import RLMCompositeMetric
+from app_operator.cli_agent.rlm.metrics import RLMCompositeMetric
 
 def optimize_prompts(self, ...):
     if self.config.rlm.enabled:
