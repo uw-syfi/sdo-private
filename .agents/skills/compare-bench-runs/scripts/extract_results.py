@@ -15,37 +15,42 @@ import sys
 
 
 def extract_problems(logdir):
-    """Extract problem results from trajectory MD files in a run directory."""
+    """Extract problem results from crucible/<problem>/{diagnosis,mitigation}.md files."""
     results = {}
-    for f in os.listdir(logdir):
-        if f.startswith("sregym_") and f.endswith(".md"):
-            m = re.match(r"sregym_\d+_\d+_w\d+_(.*?)\.md", f)
-            if not m:
-                continue
-            problem = m.group(1)
-            filepath = os.path.join(logdir, f)
-            with open(filepath) as fh:
-                content = fh.read()
+    crucible_dir = os.path.join(logdir, "crucible")
+    if not os.path.isdir(crucible_dir):
+        return results
+    for problem in os.listdir(crucible_dir):
+        problem_dir = os.path.join(crucible_dir, problem)
+        if not os.path.isdir(problem_dir):
+            continue
 
-            success_m = re.search(r"success: (True|False)", content)
-            ttl_m = re.search(r'"TTL": ([0-9.]+)', content)
-            ttm_m = re.search(r'"TTM": ([0-9.]+)', content)
-            accuracy_m = re.search(r'"accuracy": ([0-9.]+)', content)
+        content = ""
+        for name in ("diagnosis.md", "mitigation.md"):
+            path = os.path.join(problem_dir, name)
+            if os.path.exists(path):
+                with open(path) as fh:
+                    content += fh.read()
+        if not content:
+            continue
 
-            # Count diagnosis iterations
-            diag_iters = len(re.findall(r"### Iteration \d+ — Agent Hypothesis", content))
-            # Count mitigation iterations
-            mit_iters = len(re.findall(r"### Iteration \d+ — Agent Strategy", content))
+        success_m = re.search(r"success: (True|False)", content)
+        ttl_m = re.search(r'"TTL": ([0-9.]+)', content)
+        ttm_m = re.search(r'"TTM": ([0-9.]+)', content)
+        accuracy_m = re.search(r'"accuracy": ([0-9.]+)', content)
 
-            results[problem] = {
-                "success": success_m.group(1) == "True" if success_m else None,
-                "ttl": float(ttl_m.group(1)) if ttl_m else None,
-                "ttm": float(ttm_m.group(1)) if ttm_m else None,
-                "accuracy": float(accuracy_m.group(1)) if accuracy_m else None,
-                "diagnosis_iterations": diag_iters,
-                "mitigation_iterations": mit_iters,
-                "file": f,
-            }
+        diag_iters = len(re.findall(r"### Iteration \d+ — Agent Hypothesis", content))
+        mit_iters = len(re.findall(r"### Iteration \d+ — Agent Strategy", content))
+
+        results[problem] = {
+            "success": success_m.group(1) == "True" if success_m else None,
+            "ttl": float(ttl_m.group(1)) if ttl_m else None,
+            "ttm": float(ttm_m.group(1)) if ttm_m else None,
+            "accuracy": float(accuracy_m.group(1)) if accuracy_m else None,
+            "diagnosis_iterations": diag_iters,
+            "mitigation_iterations": mit_iters,
+            "dir": os.path.join("crucible", problem),
+        }
     return results
 
 

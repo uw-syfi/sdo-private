@@ -377,12 +377,10 @@ async def _async_main(args: argparse.Namespace) -> None:
         _save_results(logs_dir, problem_id, usage_metrics)
         logger.info(f"Usage metrics: {usage_metrics}")
 
-    env_log_file = os.environ.get("SREGYM_LOG_FILE")
-    if env_log_file:
-        stem = Path(env_log_file).stem
+    if logs_dir is not None:
         for sf, suffix in [(diagnosis_shared_file, "diagnosis"), (mitigation_shared_file, "mitigation")]:
             if sf.exists():
-                dest = Path(env_log_file).with_name(f"{stem}_{problem_id}_{suffix}.md")
+                dest = logs_dir / f"{suffix}.md"
                 shutil.copy2(sf, dest)
                 logger.info(f"Saved {suffix} session markdown to {dest}")
 
