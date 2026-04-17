@@ -379,14 +379,14 @@ class TestSubagentRegistration:
         assert AGENT_REGISTRY["subagent"] is SubagentCodingAgent
 
     def test_subagent_valid_provider(self):
-        from app_operator.config import AgentConfig
+        from app_operator.core import AgentConfig
 
         config = AgentConfig(backend="subagent")
         assert config.backend == "subagent"
 
     def test_factory_creates_subagent(self):
         from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config
+        from app_operator.core import AgentConfig, Config
 
         config = Config(agent=AgentConfig(backend="subagent", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config("/tmp", config=config)
@@ -394,7 +394,7 @@ class TestSubagentRegistration:
 
     def test_factory_forwards_location(self):
         from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config
+        from app_operator.core import AgentConfig, Config
 
         config = Config(
             agent=AgentConfig(
@@ -407,7 +407,7 @@ class TestSubagentRegistration:
 
     def test_factory_forwards_dspy_config(self):
         from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config, DSPyConfig
+        from app_operator.core import AgentConfig, Config, DSPyConfig
 
         dspy_cfg = DSPyConfig()
         config = Config(

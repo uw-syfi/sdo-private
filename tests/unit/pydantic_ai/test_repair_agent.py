@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def _make_repair_agent(repo_path: Path, config):
     """Construct a RepairAgent with mocked pydantic_ai internals."""
-    from app_operator.filesystem import InMemoryFilesystem
+    from app_operator.core import InMemoryFilesystem
     from app_operator.prompts import get_loader
     from app_operator.pydantic_ai._deps import OperatorDeps
     from app_operator.pydantic_ai.agents.repair import RepairAgent

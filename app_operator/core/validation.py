@@ -188,7 +188,7 @@ def validate_dataclass_fields(
     unrecognized = set(section_data.keys()) - recognized
 
     if unrecognized:
-        from app_operator.config import UnrecognizedFieldError
+        from app_operator.core.config import UnrecognizedFieldError
 
         raise UnrecognizedFieldError(
             f"Unrecognized field(s) in [{section_name}] section: "

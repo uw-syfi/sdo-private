@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
-from app_operator.config import OperatorConfig
+from app_operator.core import OperatorConfig
 from tests.fixtures.agents import ErrorAgent, StubAgent
 
 

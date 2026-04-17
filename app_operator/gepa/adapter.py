@@ -5,7 +5,7 @@ from pathlib import Path
 
 from jinja2 import Environment, TemplateSyntaxError, meta
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 
 @dataclass(frozen=True)

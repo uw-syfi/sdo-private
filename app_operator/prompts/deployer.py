@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Protocol
 from app_operator.prompts._core import DSPyConfigProtocol, get_loader
 
 if TYPE_CHECKING:
+    from app_operator.core import CommandResult
     from app_operator.trajectory import TrajectoryRecorderProtocol
-    from app_operator.types import CommandResult
 
 
 class HealthVerdictLike(Protocol):

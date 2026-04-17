@@ -6,7 +6,7 @@ import shutil
 import time
 from pathlib import Path
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 # Gemini CLI session storage location
 GEMINI_SESSION_DIR = Path.home() / ".gemini" / "tmp"

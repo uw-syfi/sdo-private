@@ -4,8 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.config import AgentConfig, Config, DeploymentConfig
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import AgentConfig, Config, DeploymentConfig, InMemoryFilesystem
 from libs.model_config import ModelConfig
 from tests.fixtures.agents import StubAgent
 

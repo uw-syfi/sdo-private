@@ -9,13 +9,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app_operator.cli_agent.agents.context import AgentContext
-    from app_operator.types import CommandResult, HealthVerdict
+    from app_operator.core import CommandResult, HealthVerdict
 
 from app_operator.agent_response_files import apply_agent_response_file_writes
-from app_operator.config import DeploymentConfig
-from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
-from app_operator.exceptions import AgentError
-from app_operator.logger import logger
+from app_operator.core import DEPLOYMENT_PROGRESS_FILENAME, AgentError, DeploymentConfig, logger
 from app_operator.prompts import (
     create_fix_prompt,  # pyright: ignore[reportUnknownVariableType]
     create_fix_system_prompt,

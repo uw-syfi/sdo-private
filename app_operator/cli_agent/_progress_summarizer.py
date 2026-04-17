@@ -4,11 +4,11 @@ import re
 import time
 from collections.abc import Callable
 
-from app_operator.constants import (
+from app_operator.core import (
     PROGRESS_INITIAL_DELAY_SECS,
     PROGRESS_SUMMARY_INTERVAL_SECS,
+    logger,
 )
-from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.trajectory import TrajectoryRecorderProtocol
 

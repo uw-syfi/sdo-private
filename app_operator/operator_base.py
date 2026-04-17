@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from app_operator.config import Config
-from app_operator.filesystem import FileSystemInterface
-from app_operator.logger import logger
+from app_operator.core import Config, FileSystemInterface, logger
 
 
 class OperatorBase(ABC):

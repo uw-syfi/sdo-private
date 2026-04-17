@@ -24,11 +24,10 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[reportMissingImports]
 
-from app_operator.config import DSPyOptimizationConfig
-from app_operator.config import load_config as load_app_config
+from app_operator.core import DSPyOptimizationConfig, logger
+from app_operator.core import load_config as load_app_config
 from app_operator.dspy_integration import EvalExecuteOptimizer
 from app_operator.experiment_naming import normalize_experiment_token
-from app_operator.logger import logger
 from app_operator.rate_limit_handler import run_subprocess_with_rate_limit_handling
 
 

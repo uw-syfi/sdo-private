@@ -3,13 +3,9 @@
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
-from libs.agent_cli.trajectory import FaultInjectionMetadata, TokenUsage
-
 __all__ = [
     "CommandResult",
     "HealthVerdict",
-    "TokenUsage",
-    "FaultInjectionMetadata",
     "TrajectoryCallRecord",
     "ConversationEntry",
 ]

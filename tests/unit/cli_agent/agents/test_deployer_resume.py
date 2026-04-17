@@ -1,7 +1,7 @@
 import pytest
 
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
-from app_operator.exceptions import DeploymentError
+from app_operator.core import DeploymentError
 from tests.fixtures import bind_method
 from tests.fixtures.agents import StubAgent
 

@@ -9,12 +9,12 @@ Tests for prepare_error_context and create_fix_prompt functions covering:
 
 from pathlib import Path
 
+from app_operator.core import HealthVerdict
 from app_operator.prompts.deployer import (
     create_fix_prompt,
     create_generate_script_prompt,
     prepare_error_context,
 )
-from app_operator.types import HealthVerdict
 
 
 class TestPrepareErrorContext:

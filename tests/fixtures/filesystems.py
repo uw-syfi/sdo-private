@@ -6,7 +6,7 @@ test scenarios.
 
 from pathlib import Path
 
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import InMemoryFilesystem
 
 
 def create_test_filesystem_with_scripts(repo_path: Path) -> InMemoryFilesystem:

@@ -288,14 +288,14 @@ class TestHybridRegistration:
         assert "rlm" not in AGENT_REGISTRY
 
     def test_hybrid_valid_provider(self):
-        from app_operator.config import AgentConfig
+        from app_operator.core import AgentConfig
 
         config = AgentConfig(backend="hybrid")
         assert config.backend == "hybrid"
 
     def test_factory_creates_hybrid(self):
         from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config
+        from app_operator.core import AgentConfig, Config
 
         config = Config(agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config("/tmp", config=config)
@@ -303,7 +303,7 @@ class TestHybridRegistration:
 
     def test_factory_forwards_location(self):
         from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config
+        from app_operator.core import AgentConfig, Config
 
         config = Config(
             agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model", location="us-west1"))
@@ -313,7 +313,7 @@ class TestHybridRegistration:
 
     def test_factory_forwards_dspy_config(self):
         from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config, DSPyConfig
+        from app_operator.core import AgentConfig, Config, DSPyConfig
 
         dspy_cfg = DSPyConfig()
         config = Config(
@@ -326,7 +326,7 @@ class TestHybridRegistration:
 
     def test_factory_forwards_rlm_mode(self):
         from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config, RLMConfig
+        from app_operator.core import AgentConfig, Config, RLMConfig
 
         config = Config(
             agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")),

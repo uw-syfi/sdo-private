@@ -8,8 +8,7 @@ import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-from app_operator.config import AgentConfig, Config, DeploymentConfig, RuntimeConfig
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import AgentConfig, Config, DeploymentConfig, InMemoryFilesystem, RuntimeConfig
 from app_operator.prompts import PromptLoader
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import HealthVerdictResponse

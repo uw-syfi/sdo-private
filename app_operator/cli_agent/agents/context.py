@@ -9,13 +9,11 @@ if TYPE_CHECKING:
     from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
-from app_operator.config import OperatorConfig
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.core import FileSystemInterface, NullOperatorUI, OperatorConfig, OperatorUI, RealFilesystem
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     TrajectoryRecorderProtocol,
 )
-from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
 
 @dataclass

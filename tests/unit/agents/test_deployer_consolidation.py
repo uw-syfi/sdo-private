@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
-from app_operator.exceptions import DeploymentError
+from app_operator.core import DeploymentError
 from tests.fixtures.agents import ConfigurableAgent, StubAgent
 
 

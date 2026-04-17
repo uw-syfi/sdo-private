@@ -6,7 +6,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from loguru import Message, Record
 
-    from app_operator.ui_protocol import OperatorUI
+    from app_operator.core.ui_protocol import OperatorUI
 
 
 def formatter(record: "Record") -> str:

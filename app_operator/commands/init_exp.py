@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.core import FileSystemInterface, RealFilesystem
 from app_operator.prompts._core import get_loader
 
 

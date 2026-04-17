@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.config import Config, OperatorPhaseConfig, UnrecognizedFieldError
+from app_operator.core import Config, OperatorPhaseConfig, UnrecognizedFieldError
 
 
 class TestOperatorPhaseConfig:

@@ -2,8 +2,7 @@
 
 import pytest
 
-from app_operator.config import AgentConfig, Config, DeploymentConfig, RuntimeConfig
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import AgentConfig, Config, DeploymentConfig, InMemoryFilesystem, RuntimeConfig
 from libs.model_config import ModelConfig
 
 

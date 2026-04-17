@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app_operator.trajectory import Phase
-from app_operator.types import TokenUsage
+from libs.agent_cli.trajectory import TokenUsage
 
 
 @dataclass

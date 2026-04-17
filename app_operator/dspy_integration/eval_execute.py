@@ -21,10 +21,10 @@ from typing import Any, cast
 
 import litellm
 
+from app_operator.core import logger
 from app_operator.dspy_integration.config import DSPyConfig
 from app_operator.dspy_integration.signatures import SIGNATURES, get_signature
 from app_operator.experiment_naming import normalize_experiment_token
-from app_operator.logger import logger
 from app_operator.rate_limit_handler import (
     detect_rate_limit_error,
     exponential_backoff,

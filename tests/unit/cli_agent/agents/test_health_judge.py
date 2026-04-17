@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge
-from app_operator.exceptions import AgentError
+from app_operator.core import AgentError
 from app_operator.prompts import PromptLoader
 from libs.agent_cli.base import CodingAgent
 
@@ -388,7 +388,7 @@ def test_assess_survives_prompt_render_error(repo_path, health_check_script, mon
 
 
 def test_assess_survives_filesystem_error(repo_path, health_check_script):
-    from app_operator.filesystem import RealFilesystem
+    from app_operator.core import RealFilesystem
 
     class BrokenFS(RealFilesystem):
         def exists(self, path):

@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
+from app_operator.core import logger
 from app_operator.gepa.reflector import ExecutionTrace
-from app_operator.logger import logger
 
 MetricFn = Callable[["EvaluationExample", dict[str, Any]], float]
 AgentFactory = Callable[[], Any]
@@ -288,7 +288,7 @@ class SDSEvaluator:
         """
         from contextlib import nullcontext
 
-        from app_operator.filesystem import RealFilesystem
+        from app_operator.core import RealFilesystem
         from app_operator.prompts import override_loader
         from app_operator.trajectory import TrajectoryRecorder
 

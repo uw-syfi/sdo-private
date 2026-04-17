@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 from pydantic_ai import RunContext  # noqa: TC002 — pydantic-ai evaluates @agent.instructions annotations at runtime
 
-from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
+from app_operator.core import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai._responses import HealthVerdictResponse

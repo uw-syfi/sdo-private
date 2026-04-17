@@ -21,7 +21,7 @@ from app_operator.commands.run_exp import (
     add_arguments,
     run_command,
 )
-from app_operator.config import load_config
+from app_operator.core import load_config
 
 
 class TestWriteTomlSimple:

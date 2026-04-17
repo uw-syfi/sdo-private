@@ -11,8 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.config import AgentConfig, Config
-from app_operator.exceptions import DeploymentError
+from app_operator.core import AgentConfig, Config, DeploymentError
 from libs.model_config import ModelConfig
 from tests.fixtures.agents import StubAgent
 

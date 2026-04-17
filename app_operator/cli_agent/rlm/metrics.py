@@ -9,7 +9,7 @@ These metrics evaluate how well RLM-based prompts utilize the RLM paradigm:
 from collections.abc import Callable
 from typing import Any
 
-from app_operator.logger import logger
+from app_operator.core import logger
 from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
 
 MetricCallable = Callable[[Any, Any, Any], float]

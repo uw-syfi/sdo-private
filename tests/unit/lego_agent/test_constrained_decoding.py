@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app_operator.config import AgentConfig, Config, OperatorConfig
+from app_operator.core import AgentConfig, Config, OperatorConfig
 from lego_agent.engine import LegoAgentEngine
 from libs.model_config import ModelConfig
 

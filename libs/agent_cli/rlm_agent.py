@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app_operator.logger import logger
+from app_operator.core import logger
 from app_operator.rlm import RecursiveDeploymentAgent, RLMContext
 from libs.agent_cli.llm_client import LiteLLMClient
 from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol

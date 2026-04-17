@@ -5,9 +5,7 @@ import time
 from pathlib import Path
 from typing import TextIO
 
-from app_operator.logger import logger
-from app_operator.types import CommandResult
-from app_operator.ui_protocol import OperatorUI
+from app_operator.core import CommandResult, OperatorUI, logger
 
 DEFAULT_HEALTH_CHECK_TIMEOUT = 120  # seconds
 _EXIT_CODE_RE = re.compile(r"^Exit Code:\s*(-?\d+)", re.MULTILINE)

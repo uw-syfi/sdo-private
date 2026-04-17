@@ -31,7 +31,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from app_operator.logger import logger
+from app_operator.core import logger
 from app_operator.progress import parse_progress
 
 

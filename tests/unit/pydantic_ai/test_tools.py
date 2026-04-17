@@ -4,8 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app_operator.config import AgentConfig, Config
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import AgentConfig, Config, InMemoryFilesystem
 from app_operator.prompts import PromptLoader
 from app_operator.pydantic_ai._deps import OperatorDeps
 from app_operator.pydantic_ai.tools import (

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, cast
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 RecursiveLLMFunction = Callable[[str], str] | Callable[[str, dict[str, Any] | None], str]
 

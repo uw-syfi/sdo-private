@@ -9,7 +9,7 @@ re-exports them so that existing callers of
 ``app_operator.dspy_integration.config`` continue to work unchanged.
 """
 
-from app_operator.config import (
+from app_operator.core import (
     DSPyAutoRollbackConfig,
     DSPyConfig,
     DSPyOptimizationConfig,

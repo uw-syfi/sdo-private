@@ -18,7 +18,7 @@ from app_operator.commands import (
     run,
     run_exp,
 )
-from app_operator.logger import logger
+from app_operator.core import logger
 
 # Load environment variables from .env file
 # Find the SDS repo root (where .env should be) by looking for this file's parent directory

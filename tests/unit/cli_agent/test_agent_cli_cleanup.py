@@ -566,7 +566,7 @@ def test_multiple_generates_dont_leak_resources(agent_type, mock_which):
 def test_factory_creates_all_agent_types(mock_which):
     """Test factory can create all agent types."""
     from app_operator.cli_agent.factory import create_agent_from_config
-    from app_operator.config import AgentConfig, Config, OperatorConfig
+    from app_operator.core import AgentConfig, Config, OperatorConfig
 
     agents_to_test = [
         ("claude", ClaudeCodeCodingAgent),
@@ -589,7 +589,7 @@ def test_factory_creates_all_agent_types(mock_which):
 
 def test_factory_defaults_to_codex(mock_which):
     """Test that invalid provider raises ValueError with validation."""
-    from app_operator.config import AgentConfig, Config, OperatorConfig
+    from app_operator.core import AgentConfig, Config, OperatorConfig
 
     # With the new validation, invalid providers should raise ValueError
     with pytest.raises(ValueError, match="Invalid backend"):

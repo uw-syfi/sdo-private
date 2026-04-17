@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from loguru import logger
 
-from app_operator.logger import formatter
+from app_operator.core import formatter
 from libs.agent_cli.gemini import GeminiCodingAgent
 
 

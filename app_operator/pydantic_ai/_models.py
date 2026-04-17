@@ -5,7 +5,7 @@ Maps SDS provider/model config to Pydantic AI model identifiers.
 
 from pydantic_ai.settings import ModelSettings
 
-from app_operator.config import Config
+from app_operator.core import Config
 from libs.model_config import from_string
 from libs.pydantic_agent import thinking_settings
 

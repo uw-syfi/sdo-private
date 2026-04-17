@@ -3,8 +3,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.config import AgentConfig, Config
-from app_operator.ui_protocol import OperatorUI
+from app_operator.core import AgentConfig, Config, OperatorUI
 from libs.model_config import ModelConfig
 
 

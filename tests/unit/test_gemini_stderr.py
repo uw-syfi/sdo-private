@@ -63,7 +63,7 @@ def test_stderr_output_in_red(gemini_agent, mock_popen):
 
     # Capture logger output to verify red coloring
     # Use the actual formatter from logger.py to get proper color codes
-    from app_operator.logger import formatter
+    from app_operator.core import formatter
 
     captured_output = io.StringIO()
     handler_id = logger.add(captured_output, format=formatter, colorize=True)
@@ -111,7 +111,7 @@ def test_multiple_stderr_lines_in_red(gemini_agent, mock_popen):
     mock_popen.return_value = mock_process
 
     # Use the actual formatter from logger.py to get proper color codes
-    from app_operator.logger import formatter
+    from app_operator.core import formatter
 
     captured_output = io.StringIO()
     handler_id = logger.add(captured_output, format=formatter, colorize=True)
@@ -148,7 +148,7 @@ def test_mixed_stdout_stderr_coloring(gemini_agent, mock_popen):
     mock_popen.return_value = mock_process
 
     # Use the actual formatter from logger.py to get proper color codes
-    from app_operator.logger import formatter
+    from app_operator.core import formatter
 
     captured_output = io.StringIO()
     handler_id = logger.add(captured_output, format=formatter, colorize=True)

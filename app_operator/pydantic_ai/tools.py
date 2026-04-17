@@ -11,8 +11,7 @@ from typing import Any
 
 from pydantic_ai import RunContext
 
-from app_operator.command_validation import DangerousCommandError, validate_command
-from app_operator.filesystem import FileSystemInterface
+from app_operator.core import DangerousCommandError, FileSystemInterface, validate_command
 from app_operator.pydantic_ai._deps import OperatorDeps
 
 SUBPROCESS_TIMEOUT_SECS = 120

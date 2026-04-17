@@ -6,8 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app_operator.commands.run import EXIT_INTERRUPTED, add_arguments, run_command
-from app_operator.config import AgentConfig, Config, OperatorConfig, RuntimeConfig
-from app_operator.exceptions import DeploymentError, MonitoringError
+from app_operator.core import AgentConfig, Config, DeploymentError, MonitoringError, OperatorConfig, RuntimeConfig
 from libs.model_config import ModelConfig
 
 

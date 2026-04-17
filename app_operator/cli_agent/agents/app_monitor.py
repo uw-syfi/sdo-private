@@ -10,23 +10,28 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app_operator.cli_agent.agents.context import AgentContext
+    from app_operator.core import CommandResult, HealthVerdict
     from app_operator.dspy_integration import DSPyConfig
-    from app_operator.types import CommandResult, HealthVerdict
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge
-from app_operator.config import DeploymentConfig, OperatorConfig
-from app_operator.exceptions import AgentError
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.core import (
+    AgentError,
+    DeploymentConfig,
+    FileSystemInterface,
+    NullOperatorUI,
+    OperatorConfig,
+    OperatorUI,
+    RealFilesystem,
+    logger,
+)
 from app_operator.healthcheck import parse_health_check_log, run_health_check
-from app_operator.logger import logger
 from app_operator.prompts import get_loader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
     TrajectoryRecorderProtocol,
 )
-from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
 HEALTH_OUTPUT_MAX_LENGTH = 5000  # characters before truncating health check stdout
 HEALTH_OUTPUT_TRUNCATE_AT = 2000  # characters to keep when truncating health check stderr

@@ -10,7 +10,7 @@ from app_operator.commands.chat import (
     add_arguments,
     run_command,
 )
-from app_operator.config import AgentConfig, Config, RuntimeConfig
+from app_operator.core import AgentConfig, Config, RuntimeConfig
 from libs.model_config import ModelConfig
 
 

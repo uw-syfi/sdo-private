@@ -1,13 +1,13 @@
 import pytest
 
-import app_operator.config as _config_module
-from app_operator.config import (
+import app_operator.core.config as _config_module
+from app_operator.core import (
     Config,
+    ConfigurationError,
     UnrecognizedFieldError,
     UnrecognizedSectionError,
     load_config,
 )
-from app_operator.exceptions import ConfigurationError
 
 
 @pytest.fixture

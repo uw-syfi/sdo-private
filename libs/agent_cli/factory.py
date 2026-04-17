@@ -1,7 +1,6 @@
 import importlib
 
-from app_operator.config import Config, load_config
-from app_operator.logger import logger
+from app_operator.core import Config, load_config, logger
 
 from .base import AGENT_REGISTRY, CodingAgent
 

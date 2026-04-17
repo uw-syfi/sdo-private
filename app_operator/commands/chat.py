@@ -5,8 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING
 
-from app_operator.config import load_config
-from app_operator.logger import logger
+from app_operator.core import load_config, logger
 
 if TYPE_CHECKING:
     import argparse

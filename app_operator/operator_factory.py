@@ -3,7 +3,7 @@
 import importlib
 from typing import Any
 
-from app_operator.config import Config
+from app_operator.core import Config
 from app_operator.operator_base import OperatorBase
 
 

@@ -33,17 +33,32 @@ depends_on = [
 path = "libs.agent_cli"
 depends_on = [
     "libs.sds_core",
+    # Pre-existing reverse import: factory.py + rlm_agent.py pull Config/logger
+    # from app_operator.core. Surfaced by #84; cleanup tracked separately.
+    "app_operator.core",
 ]
 
-# --- Layer 1: shared infrastructure ---
+# --- Layer 1: app_operator foundation ---
+
+[[modules]]
+path = "app_operator.core"
+depends_on = [
+    "libs.model_config",
+    "libs.sds_core",
+]
+
+# --- Layer 1.5: shared infrastructure ---
 
 [[modules]]
 path = "app_operator.prompts"
-depends_on = []
+depends_on = [
+    "app_operator.core",
+]
 
 [[modules]]
 path = "app_operator.trajectory"
 depends_on = [
+    "app_operator.core",
     "app_operator.prompts",
     "libs.agent_cli",
 ]
@@ -53,19 +68,25 @@ depends_on = [
 [[modules]]
 path = "app_operator.dspy_integration"
 depends_on = [
+    "app_operator.core",
     "app_operator.prompts",
     "app_operator.trajectory",
+    "libs.agent_cli",
 ]
 
 [[modules]]
 path = "app_operator.fault_injection"
-depends_on = []
+depends_on = [
+    "app_operator.core",
+    "libs.agent_cli",
+]
 
 # --- Layer 3: runtimes (independent of each other) ---
 
 [[modules]]
 path = "app_operator.cli_agent"
 depends_on = [
+    "app_operator.core",
     "app_operator.prompts",
     "app_operator.trajectory",
     "libs.agent_cli",
@@ -74,6 +95,7 @@ depends_on = [
 [[modules]]
 path = "app_operator.gepa"
 depends_on = [
+    "app_operator.core",
     "app_operator.cli_agent",
     "app_operator.prompts",
     "app_operator.trajectory",
@@ -83,13 +105,16 @@ depends_on = [
 
 [[modules]]
 path = "app_operator.ui"
-depends_on = []
+depends_on = [
+    "app_operator.core",
+]
 
 # --- Layer 4: commands ---
 
 [[modules]]
 path = "app_operator.commands"
 depends_on = [
+    "app_operator.core",
     "app_operator.dspy_integration",
 ]
 
@@ -98,6 +123,7 @@ depends_on = [
 [[modules]]
 path = "app_operator.__main__"
 depends_on = [
+    "app_operator.core",
     "app_operator.commands",
 ]
 
@@ -114,6 +140,9 @@ path = "lego_agent"
 depends_on = [
     "libs.model_config",
     "libs.sds_core",
+    # Pre-existing reverse import: llm.py imports logger from app_operator.core.
+    # Surfaced by #84; cleanup tracked separately.
+    "app_operator.core",
 ]
 
 # --- sregym_agents (independent of app_operator) ---

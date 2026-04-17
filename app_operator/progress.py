@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 _MARKER_PREFIX = "[SDS:PROGRESS]"
 _PARSE_RE = re.compile(r"\[SDS:PROGRESS\] phase=(\w+)(.*)")

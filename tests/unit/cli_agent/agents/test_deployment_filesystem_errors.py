@@ -7,7 +7,7 @@ errors such as permission denied, disk full, and other I/O failures.
 import pytest
 
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
-from app_operator.exceptions import DeploymentError, SdsOperatorError
+from app_operator.core import DeploymentError, SdsOperatorError
 from tests.fixtures.agents import StubAgent
 
 

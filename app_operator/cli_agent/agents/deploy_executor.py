@@ -9,14 +9,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app_operator.cli_agent.agents.context import AgentContext
-    from app_operator.types import CommandResult
+    from app_operator.core import CommandResult
 
 from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
-from app_operator.constants import (
+from app_operator.core import (
     PROGRESS_INITIAL_DELAY_SECS,
     PROGRESS_SUMMARY_INTERVAL_SECS,
+    logger,
 )
-from app_operator.logger import logger
 from app_operator.subprocess_runner import SubprocessRunner
 
 

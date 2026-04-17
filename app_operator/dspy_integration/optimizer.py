@@ -305,7 +305,7 @@ class PromptOptimizer:
 
     def _configure_dspy_lm(self) -> None:
         """Configure DSPy language model."""
-        from app_operator.config import qualify_model_for_litellm
+        from app_operator.core import qualify_model_for_litellm
 
         teacher_model = self.config.optimization.teacher_model
 

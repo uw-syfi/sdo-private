@@ -8,14 +8,13 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from app_operator.config import (
-    _FAULT_VALID_CATEGORIES,
-    _FAULT_VALID_SEVERITIES,
+from app_operator.core import (
     AgentConfig,
     DSPyOptimizationConfig,
     FaultInjectionConfig,
     OperatorConfig,
 )
+from app_operator.core.config import _FAULT_VALID_CATEGORIES, _FAULT_VALID_SEVERITIES
 
 VALID_PROVIDERS = AgentConfig.VALID_BACKENDS
 

@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from app_operator.cli_agent.factory import create_agent_from_config
-from app_operator.config import AgentConfig, Config
+from app_operator.core import AgentConfig, Config
 from libs.agent_cli.base import CodingAgent, register_provider
 from libs.agent_cli.cli_agent import CLICodingAgent
 from libs.model_config import ModelConfig
@@ -41,7 +41,7 @@ class MockAgent(CodingAgent):
 def test_create_agent_registered_provider(tmp_path):
     # Patch VALID_BACKENDS to allow mock_provider
     with patch(
-        "app_operator.config.AgentConfig.VALID_BACKENDS",
+        "app_operator.core.config.AgentConfig.VALID_BACKENDS",
         {
             "mock_provider",
             "codex",
@@ -95,7 +95,7 @@ def test_create_agent_unregistered_provider_raises_valueerror(tmp_path):
     """Factory raises ValueError with available providers for unregistered provider."""
     # Bypass AgentConfig validation by patching VALID_BACKENDS
     with patch(
-        "app_operator.config.AgentConfig.VALID_BACKENDS",
+        "app_operator.core.config.AgentConfig.VALID_BACKENDS",
         {"not_registered", "codex", "gemini", "claude", "claude-code", "opencode", "anthropic", "vertex", "openai"},
     ):
         config = Config(agent=AgentConfig(backend="not_registered", model_config=ModelConfig.from_string("m")))
