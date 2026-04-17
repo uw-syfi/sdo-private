@@ -357,6 +357,7 @@ class AgentConfig:
         "vertex",
         "openai",
         "rlm",
+        "rlm-official",
         "subagent",
         "hybrid",
     }

@@ -17,7 +17,7 @@ Full schema in `config.py`. Invalid values raise `ValueError`/`TypeError` at ini
 
 ```toml
 [agent]
-backend = "gemini"  # gemini | codex | claude | claude-code | opencode | openai | anthropic
+backend = "gemini"  # gemini | codex | claude | claude-code | opencode | openai | anthropic | rlm | rlm-official
 model = "gemini-1.5-pro"
 
 [runtime]
