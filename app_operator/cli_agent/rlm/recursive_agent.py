@@ -9,7 +9,7 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import litellm
 
@@ -18,7 +18,7 @@ from app_operator.cli_agent.rlm.environment import (
     RLMCall,
     RLMContext,
     RLMEnvironment,
-    _validate_file_refs,
+    validate_file_refs,
 )
 from app_operator.logger import logger
 from app_operator.prompts import DSPyConfigProtocol, render_fix_error_task_prompt
@@ -145,7 +145,11 @@ class RecursiveDeploymentAgent:
             logger.warning(f"Failed to read some context files: {e}")
 
         # Get trajectory data
-        trajectory_data = self.trajectory.trajectory if self.trajectory else {}  # type: ignore[reportAttributeAccessIssue]
+        trajectory_data: dict[str, Any] = (
+            cast("dict[str, Any]", self.trajectory.trajectory)  # type: ignore[reportAttributeAccessIssue]
+            if self.trajectory
+            else {}
+        )
 
         return RLMContext(
             error_log=error_log,
@@ -223,13 +227,13 @@ class RecursiveDeploymentAgent:
                 subtask = subtask_match.group(1).strip() if subtask_match else ""
 
                 context_start = response.find("CONTEXT:")
-                filtered_context = None
+                filtered_context: dict[str, Any] | None = None
                 if context_start != -1:
                     context_str = response[context_start + 8 :].strip()
                     try:
                         parsed_ctx = json.loads(context_str)
                         if isinstance(parsed_ctx, dict) and parsed_ctx:
-                            filtered_context = parsed_ctx
+                            filtered_context = cast("dict[str, Any]", parsed_ctx)
                         else:
                             logger.warning("CONTEXT parsed but empty or not a dict, using full context")
                     except json.JSONDecodeError:
@@ -365,7 +369,7 @@ class RecursiveDeploymentAgent:
             task_guidance=self._recursive_task_guidance(filtered_context),
         )
 
-    def _call_llm_isolated(self, sub_prompt: str, filtered_context: dict | None = None) -> str:
+    def _call_llm_isolated(self, sub_prompt: str, filtered_context: dict[str, Any] | None = None) -> str:
         """Make an isolated LLM call for recursive sub-tasks.
 
         Unlike ``_call_llm``, this builds a completely fresh ``messages``
@@ -385,7 +389,7 @@ class RecursiveDeploymentAgent:
 
         context_section = ""
         if filtered_context:
-            parts = []
+            parts: list[str] = []
             for key, value in filtered_context.items():
                 parts.append(f"--- {key} ---\n{value}")
             context_section = "\n\n".join(parts)
@@ -403,7 +407,7 @@ class RecursiveDeploymentAgent:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             location=self.vertex_location,
-            token_acc=self._llm_client._token_usage,
+            token_acc=self._llm_client._token_usage,  # pyright: ignore[reportPrivateUsage]
         )
 
     def _call_llm(self, prompt: str) -> str:
@@ -429,7 +433,9 @@ class RecursiveDeploymentAgent:
         if not self.compaction:
             return False
         try:
-            count = litellm.token_counter(model=self.llm_provider, messages=self._messages)
+            count = litellm.token_counter(  # pyright: ignore[reportUnknownMemberType]
+                model=self.llm_provider, messages=self._messages
+            )
         except (ValueError, RuntimeError):
             count = sum(len(m.get("content", "")) for m in self._messages) // 4
         return count >= self.model_context_tokens * self.compaction_threshold
@@ -762,7 +768,7 @@ class RecursiveDeploymentAgent:
 
         try:
             script_content = deploy_sh.read_text()
-            validation = _validate_file_refs(script_content, repo_path)
+            validation = validate_file_refs(script_content, repo_path)
             if "MISSING" in validation:
                 warning = f"\n[AUTO-VALIDATION WARNING] deploy.sh references missing paths:\n{validation}"
                 logger.warning(f"[RLM]{warning}")
@@ -783,7 +789,7 @@ class RecursiveDeploymentAgent:
         than a single call would have, which is expected for short tasks.
         """
         stats = self.rlm_env.get_statistics() if self.rlm_env else {}
-        token_usage = self._llm_client._token_usage
+        token_usage = self._llm_client._token_usage  # pyright: ignore[reportPrivateUsage]
         actual_prompt_tokens = token_usage.get("prompt_tokens", 0)
         baseline_context_tokens = stats.get("baseline_context_tokens", 0)
         stats["actual_prompt_tokens"] = actual_prompt_tokens

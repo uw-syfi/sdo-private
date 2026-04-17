@@ -10,6 +10,7 @@ import random
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any, cast
 
 from app_operator.fault_injection.compose_faults import COMPOSE_FAULTS, ComposeFaultInjector
 from app_operator.fault_injection.config import FaultInjectionConfig
@@ -65,6 +66,7 @@ class FaultInjectionOrchestrator:
 
         if not isinstance(compose_data, dict) or "services" not in compose_data:
             raise ValueError(f"Invalid compose file: {compose_file}")
+        compose_data = cast("dict[str, Any]", compose_data)
 
         # Select and inject faults with retry logic
         effective_seed = seed if seed is not None else self.config.seed

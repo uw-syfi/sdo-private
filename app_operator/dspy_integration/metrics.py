@@ -10,11 +10,15 @@ Metrics for evaluating prompt performance:
 
 import logging
 import re
-from typing import Any
+from typing import Any, Protocol
 
 import dspy
 
 logger = logging.getLogger(__name__)
+
+
+class _MetricCallable(Protocol):
+    def __call__(self, example: Any, prediction: Any, trace: Any = None) -> float: ...
 
 
 class DeploymentSuccessMetric:
@@ -220,11 +224,11 @@ class PredictionQualityMetric:
     bad call does not crash the optimisation loop.
     """
 
-    def __init__(self):
-        self._judge = None
+    def __init__(self) -> None:
+        self._judge: Any = None
 
     @property
-    def judge(self):
+    def judge(self) -> Any:
         if self._judge is None:
             self._judge = dspy.Predict(_PromptJudgeSignature)
         return self._judge
@@ -428,7 +432,7 @@ class CompositeMetric:
         health_check_weight: float = 0.1,
         max_iterations: int = 20,
         baseline_tokens: int = 10000,
-        prediction_metric=None,
+        prediction_metric: _MetricCallable | None = None,
         include_health_check_quality: bool = True,
     ):
         """Initialize composite metric.

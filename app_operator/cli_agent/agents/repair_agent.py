@@ -17,7 +17,7 @@ from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.exceptions import AgentError
 from app_operator.logger import logger
 from app_operator.prompts import (
-    create_fix_prompt,
+    create_fix_prompt,  # pyright: ignore[reportUnknownVariableType]
     create_fix_system_prompt,
     prepare_error_context,
 )
@@ -29,7 +29,7 @@ FIX_SUMMARY_TRUNCATE_AT = 1900
 class RepairAgent:
     """Handles fix attempts: builds prompt, calls agent, extracts summary."""
 
-    def __init__(self, ctx: AgentContext, deployment_config=None):
+    def __init__(self, ctx: AgentContext, deployment_config: DeploymentConfig | None = None):
         self.ctx = ctx
         self.deployment_config = deployment_config or DeploymentConfig()
 

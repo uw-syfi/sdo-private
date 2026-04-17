@@ -3,6 +3,7 @@ import signal
 import subprocess
 import threading
 from pathlib import Path
+from types import FrameType
 
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
@@ -220,7 +221,7 @@ class AppOperator(OperatorBase):
             self._cleanup()
             self.recorder.finalize("completed" if run_succeeded else "failed")
 
-    def _handle_shutdown_signal(self, signum: int, frame) -> None:
+    def _handle_shutdown_signal(self, signum: int, frame: FrameType | None) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).
 
         Sets the ``_shutdown_requested`` flag so that running loops exit

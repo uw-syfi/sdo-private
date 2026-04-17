@@ -17,7 +17,7 @@ from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.prompts import (
     analyze_repository,
-    create_generate_script_prompt,
+    create_generate_script_prompt,  # pyright: ignore[reportUnknownVariableType]
     create_system_prompt,
 )
 from app_operator.trajectory import (
@@ -71,7 +71,7 @@ class ScriptGeneratorAgent:
                     r.set_phase_status("failed")
                     return False, f"Failed to generate deploy.sh: {deploy_msg}"
 
-                health_check_success, health_check_msg = self._generate_script(
+                _health_check_success, _health_check_msg = self._generate_script(
                     system_prompt,
                     repo_context,
                     abs_target_dir,

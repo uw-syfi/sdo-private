@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
@@ -34,7 +34,7 @@ class ScriptAgent(OperatorAgent):
         self,
         model: str,
         model_settings: ModelSettings | None,
-        tools: list[Callable],
+        tools: list[Callable[..., Any]],
         deps: OperatorDeps,
         recorder: PydanticAITrajectoryRecorder,
     ):
@@ -49,7 +49,7 @@ class ScriptAgent(OperatorAgent):
         )
 
         @self._agent.instructions
-        def system_prompt(ctx: RunContext[OperatorDeps]) -> str:
+        def system_prompt(ctx: RunContext[OperatorDeps]) -> str:  # pyright: ignore[reportUnusedFunction]
             return ctx.deps.loader.render(
                 "script_generator/system.jinja2",
                 platform=ctx.deps.config.deployment.platform,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from libs.pydantic_agent import AgentMiddleware
 
@@ -16,7 +16,7 @@ def _fmt_args(args: str | dict[str, Any] | None) -> str:
         return ""
     if isinstance(args, str):
         return args
-    parts = []
+    parts: list[str] = []
     for k, v in args.items():
         if k in ("content", "new_str"):
             parts.append(f"{k}=<{len(str(v))} chars>")
@@ -33,7 +33,9 @@ def _fmt_k(n: int | None) -> str:
 
 def _tool_failed(content: Any) -> bool:
     """Return True if a tool returned a failure result dict."""
-    return isinstance(content, dict) and not content.get("success", True)
+    if not isinstance(content, dict):
+        return False
+    return not cast("dict[str, Any]", content).get("success", True)
 
 
 class ConsoleLoggingMiddleware(AgentMiddleware):

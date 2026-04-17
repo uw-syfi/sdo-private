@@ -170,7 +170,7 @@ def run_subprocess_with_rate_limit_handling(
     rate_limit_backoff: int = 60,
     operation_name: str = "subprocess",
     **subprocess_kwargs: Any,
-) -> tuple[subprocess.CompletedProcess | None, bool, str | None]:
+) -> tuple[subprocess.CompletedProcess[str] | None, bool, str | None]:
     """Run a subprocess command with rate limit error handling.
 
     Args:

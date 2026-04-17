@@ -6,6 +6,7 @@ except ImportError:
     import tomli as tomllib  # type: ignore[reportMissingImports]
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any, cast
 
 from app_operator.exceptions import ConfigurationError
 from app_operator.logger import logger
@@ -79,14 +80,13 @@ class DSPyOptimizationConfig:
         }
     )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         if self.optimizer not in self.VALID_OPTIMIZERS:
             raise ValueError(f"optimizer must be one of {self.VALID_OPTIMIZERS}, got '{self.optimizer}'")
 
         # teacher_model: non-empty string
-        if not isinstance(self.teacher_model, str) or not self.teacher_model.strip():
-            raise ValueError(f"teacher_model must be a non-empty string, got '{self.teacher_model}'")
+        validate_field(self.teacher_model, "teacher_model", str, non_empty_str=True)
 
         validate_field(self.num_examples, "num_examples", int, positive=True)
         validate_field(self.n_candidates, "n_candidates", int, min_val=1)
@@ -138,8 +138,7 @@ class DSPyOptimizationConfig:
             )
 
         for metric, weight in self.metric_weights.items():
-            if not isinstance(weight, (int, float)):
-                raise TypeError(f"metric_weights['{metric}'] must be numeric, got {type(weight).__name__}")
+            validate_type(weight, f"metric_weights['{metric}']", (int, float), type_label=_NUMERIC_LABEL)
             if not 0.0 <= weight <= 1.0:
                 raise ValueError(f"metric_weights['{metric}'] must be in range [0.0, 1.0], got {weight}")
 
@@ -162,7 +161,7 @@ class DSPyAutoRollbackConfig:
     success_rate_threshold: float = 0.05
     evaluation_window: int = 100
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         validate_field(self.enabled, "enabled", bool)
 
@@ -212,13 +211,12 @@ class DSPyConfig:
     optimization: DSPyOptimizationConfig = field(default_factory=DSPyOptimizationConfig)
     auto_rollback: DSPyAutoRollbackConfig = field(default_factory=DSPyAutoRollbackConfig)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         validate_field(self.use_optimized, "use_optimized", bool)
         validate_field(self.use_seeds, "use_seeds", bool)
 
-        if not isinstance(self.optimized_version, str) or not self.optimized_version.strip():
-            raise ValueError(f"optimized_version must be a non-empty string, got '{self.optimized_version}'")
+        validate_field(self.optimized_version, "optimized_version", str, non_empty_str=True)
 
         validate_field(self.fallback_to_baseline, "fallback_to_baseline", bool)
         validate_field(self.enable_online_learning, "enable_online_learning", bool)
@@ -305,14 +303,14 @@ class FaultInjectionConfig:
 
     enabled: bool = False
     num_faults: int = 2
-    categories: list[str] = field(default_factory=list)
-    severities: list[str] = field(default_factory=list)
-    exclude_faults: list[str] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    severities: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    exclude_faults: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     seed: int | None = None
     backup_compose: bool = True
     platform: str = "compose"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         validate_field(self.enabled, "enabled", bool)
 
@@ -362,7 +360,7 @@ class AgentConfig:
         "hybrid",
     }
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
         validate_field(self.backend, "backend", str)
 
@@ -380,8 +378,7 @@ class AgentConfig:
         validate_field(self.retry_base_delay, "retry_base_delay", int, positive=True)
         validate_field(self.rate_limit_backoff, "rate_limit_backoff", int, positive=True)
 
-        if self.model_config is not None and not isinstance(self.model_config, ModelConfig):
-            raise TypeError(f"model_config must be a ModelConfig or None, got {type(self.model_config).__name__}")
+        validate_type(self.model_config, "model_config", ModelConfig, nullable=True, type_label="a ModelConfig")
 
     @property
     def model(self) -> str | None:
@@ -454,7 +451,7 @@ class DeploymentConfig:
     VALID_PLATFORMS = {"docker", "k8s"}
     VALID_TARGETS = {"local", "remote"}
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
         validate_field(self.platform, "platform", str, valid_values=self.VALID_PLATFORMS)
 
@@ -471,7 +468,7 @@ class FeaturesConfig:
 
     git_integration: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         validate_field(self.git_integration, "git_integration", bool)
 
 
@@ -485,7 +482,7 @@ class OperatorPhaseConfig:
     )
     health_monitoring: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         validate_field(self.code_analysis, "code_analysis", bool)
         validate_field(self.fix_summary_consolidation, "fix_summary_consolidation", bool)
         validate_field(self.health_monitoring, "health_monitoring", bool)
@@ -501,7 +498,7 @@ class OperatorConfig:
     agent_timeout: int = 900
     phase: OperatorPhaseConfig = field(default_factory=OperatorPhaseConfig)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
         validate_field(self.interval, "interval", int, positive=True)
         if self.interval > 86400:
@@ -524,7 +521,7 @@ class RuntimeConfig:
 
     VALID_IMPLS = {"cli_agent", "pydantic_ai"}
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         validate_field(self.impl, "impl", str, valid_values=self.VALID_IMPLS)
 
 
@@ -536,7 +533,7 @@ class RLMConfig:
 
     mode: str = "compatibility"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         validate_field(self.mode, "mode", str)
         if self.mode not in self.VALID_MODES:
             raise ValueError(f"mode must be one of {sorted(self.VALID_MODES)}, got '{self.mode}'")
@@ -570,7 +567,7 @@ class GEPAConfig:
     seed: int | None = None
     output_dir: str = "gepa_runs"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
         for field_name in [
             "max_steps",
@@ -623,12 +620,12 @@ class Config:
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
     @staticmethod
-    def _validate_fields(section_data: dict, section_name: str, config_class: type) -> None:
+    def _validate_fields(section_data: dict[str, Any], section_name: str, config_class: type) -> None:
         """Validate that all fields in a section are recognized."""
         validate_dataclass_fields(section_data, section_name, config_class)
 
     @classmethod
-    def from_dict(cls, data: dict) -> Config:
+    def from_dict(cls, data: dict[str, Any]) -> Config:
         # Derive recognized sections from Config's own dataclass fields
         recognized_sections = {f.name for f in fields(cls)}
         unrecognized_sections = set(data.keys()) - recognized_sections
@@ -716,7 +713,7 @@ class Config:
         )
 
     @classmethod
-    def _validate_dspy_fields(cls, dspy_data: dict) -> None:
+    def _validate_dspy_fields(cls, dspy_data: dict[str, Any]) -> None:
         """Validate DSPy configuration fields."""
         if not dspy_data:
             return
@@ -728,16 +725,18 @@ class Config:
         if "optimization" in dspy_data:
             opt_data = dspy_data["optimization"]
             if isinstance(opt_data, dict):
-                validate_dataclass_fields(opt_data, "dspy.optimization", DSPyOptimizationConfig)
+                validate_dataclass_fields(cast("dict[str, Any]", opt_data), "dspy.optimization", DSPyOptimizationConfig)
 
         # Validate nested auto_rollback section
         if "auto_rollback" in dspy_data:
             rollback_data = dspy_data["auto_rollback"]
             if isinstance(rollback_data, dict):
-                validate_dataclass_fields(rollback_data, "dspy.auto_rollback", DSPyAutoRollbackConfig)
+                validate_dataclass_fields(
+                    cast("dict[str, Any]", rollback_data), "dspy.auto_rollback", DSPyAutoRollbackConfig
+                )
 
     @classmethod
-    def _validate_operator_phase_fields(cls, operator_data: dict) -> None:
+    def _validate_operator_phase_fields(cls, operator_data: dict[str, Any]) -> None:
         """Validate operator.phase configuration fields."""
         if not operator_data or "phase" not in operator_data:
             return
@@ -746,10 +745,10 @@ class Config:
         if not isinstance(phase_data, dict):
             return
 
-        validate_dataclass_fields(phase_data, "operator.phase", OperatorPhaseConfig)
+        validate_dataclass_fields(cast("dict[str, Any]", phase_data), "operator.phase", OperatorPhaseConfig)
 
     @classmethod
-    def _parse_dspy_config(cls, dspy_data: dict, agent_config: AgentConfig) -> DSPyConfig:
+    def _parse_dspy_config(cls, dspy_data: dict[str, Any], agent_config: AgentConfig) -> DSPyConfig:
         """Parse DSPy configuration with nested sections.
 
         Args:
@@ -809,7 +808,7 @@ class Config:
         )
 
     @classmethod
-    def _parse_operator_config(cls, operator_data: dict) -> OperatorConfig:
+    def _parse_operator_config(cls, operator_data: dict[str, Any]) -> OperatorConfig:
         """Parse Operator configuration with nested phase section."""
         if not operator_data:
             return OperatorConfig()
@@ -822,11 +821,11 @@ class Config:
         return OperatorConfig(**operator_data, phase=phase)
 
 
-def _deep_merge(base: dict, update: dict) -> dict:
+def _deep_merge(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge update dict into base dict."""
     for k, v in update.items():
         if isinstance(v, dict) and k in base and isinstance(base[k], dict):
-            _deep_merge(base[k], v)
+            _deep_merge(cast("dict[str, Any]", base[k]), cast("dict[str, Any]", v))
         else:
             base[k] = v
     return base
@@ -843,7 +842,7 @@ def load_config(target_dir: str, config_path: str | None = None) -> Config:
         Config: The loaded configuration object.
     """
     target_path = Path(target_dir)
-    merged_data = {}
+    merged_data: dict[str, Any] = {}
 
     if config_path:
         # If explicit path provided, load only that
@@ -855,7 +854,7 @@ def load_config(target_dir: str, config_path: str | None = None) -> Config:
         # Define hierarchy: Repo root -> Target dir -> App .sds override
         # Each layer merges on top of the previous.
 
-        files_to_load = []
+        files_to_load: list[tuple[Path, bool]] = []
 
         # 1. Always load repo root sds.toml as the base (if it exists and differs from target)
         root_sds = project_root / "sds.toml"

@@ -13,7 +13,7 @@ class PromptCandidate:
     prompt_text: str
     parent_id: str | None = None
     generation: int = 0
-    scores: dict[str, float] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
     validation_score: float | None = None
     mutation_type: str | None = None
     mutation_rationale: str | None = None
@@ -79,7 +79,7 @@ class CandidatePool:
 
         frontier = self._get_pareto_frontier()
 
-        weights = []
+        weights: list[float] = []
         for c in frontier:
             w = c.validation_score if c.validation_score is not None else 0.0
             weights.append(max(w, 0.01))

@@ -1,3 +1,5 @@
+from typing import Any
+
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -11,9 +13,9 @@ def _build_vertex_kwargs(
     model: str,
     location: str | None = None,
     thinking_budget: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build kwargs for ChatGoogleGenerativeAI with Vertex AI."""
-    kwargs: dict = {"model": model, "vertexai": True}
+    kwargs: dict[str, Any] = {"model": model, "vertexai": True}
     if location:
         kwargs["location"] = location
     if thinking_budget:
@@ -37,7 +39,7 @@ def create_chat_model(
     if normalized == "openai":
         return ChatOpenAI(model=model)
     if normalized == "anthropic":
-        kwargs: dict = {"model": model}
+        kwargs: dict[str, Any] = {"model": model}
         if thinking_budget:
             kwargs["thinking"] = {
                 "type": "enabled",
