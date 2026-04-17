@@ -19,7 +19,7 @@ behavioral differences, and synthesizing findings.
 Each run directory (`bench/sregym/logs/<run_name>/`) contains:
 - `sregym_*_w*_<problem>.md` — per-problem trajectory files (see `references/trajectory-format.md`)
 - `*_crucible_results.csv` — result CSVs
-- `<problem>.log` — execution logs
+- `problem_logs/<problem>.log` — execution logs
 
 ## Workflow
 
