@@ -10,7 +10,7 @@ import os
 import signal
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from pydantic_ai import RunContext  # noqa: TC002 — required at runtime for pydantic-ai tool introspection
@@ -36,6 +36,8 @@ from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledge
 from sregym_agents.crucible.tools import TriagePriors
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
 
 logger = logging.getLogger(__name__)

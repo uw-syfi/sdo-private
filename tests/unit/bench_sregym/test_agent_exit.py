@@ -8,6 +8,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_ROOT = REPO_ROOT / "bench" / "sregym"
+if not (BENCH_ROOT / "sregym" / "agent_exit.py").exists():
+    pytest.skip(
+        "bench/sregym submodule not checked out — skipping agent_exit tests",
+        allow_module_level=True,
+    )
 if str(BENCH_ROOT) not in sys.path:
     sys.path.insert(0, str(BENCH_ROOT))
 
