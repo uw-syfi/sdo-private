@@ -35,8 +35,8 @@ class SingleResult:
 class ExperimentData:
     name: str
     is_multi_repeat: bool
-    aggregated: list[AggregatedResult] = field(default_factory=list)
-    single: list[SingleResult] = field(default_factory=list)
+    aggregated: list[AggregatedResult] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    single: list[SingleResult] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -80,7 +80,7 @@ def _load_experiment(name: str) -> ExperimentData | None:
         return None
 
     if "aggregated" in data:
-        aggregated = []
+        aggregated: list[AggregatedResult] = []
         for entry in data["aggregated"]:
             success_rate = entry.get("success_rate", "0/0")
             aggregated.append(
@@ -113,7 +113,7 @@ def _normalize_to_aggregated(exp: ExperimentData) -> list[AggregatedResult]:
         return exp.aggregated
 
     # Normalize single-repeat into AggregatedResult
-    results = []
+    results: list[AggregatedResult] = []
     for r in exp.single:
         is_success = r.status == "completed"
         success_rate = "1/1" if is_success else "0/1"
@@ -181,7 +181,7 @@ def _color_best(values: list[float | None], higher_is_better: bool) -> list[str 
     if best == worst:
         return [None] * len(values)
 
-    colors = []
+    colors: list[str | None] = []
     for v in values:
         if v is None:
             colors.append(None)
@@ -285,14 +285,14 @@ def _save_chart(experiments: list[ExperimentData], output_path: Path) -> None:
     x = np.arange(n_apps)
     width = 0.8 / n_exps
 
-    fig, (ax_succ, ax_iter) = plt.subplots(2, 1, figsize=(max(8, n_apps * 2), 8))
+    fig, (ax_succ, ax_iter) = plt.subplots(2, 1, figsize=(max(8, n_apps * 2), 8))  # pyright: ignore[reportUnknownMemberType]
     fig.tight_layout(pad=4.0)
 
     for i, exp in enumerate(experiments):
-        succ_vals = []
-        iter_vals = []
-        iter_err_low = []
-        iter_err_high = []
+        succ_vals: list[float] = []
+        iter_vals: list[float] = []
+        iter_err_low: list[float] = []
+        iter_err_high: list[float] = []
         for app in all_apps:
             r = lookup[exp.name].get(app)
             succ_vals.append(r.success_frac * 100 if r else 0)
@@ -331,7 +331,7 @@ def _save_chart(experiments: list[ExperimentData], output_path: Path) -> None:
     ax_iter.legend()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")  # pyright: ignore[reportUnknownMemberType]
     plt.close(fig)
     console.print(f"Chart saved to: {output_path}")
 

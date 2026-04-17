@@ -5,10 +5,12 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any, cast
 
 try:
     import tomllib
@@ -20,6 +22,8 @@ from rich.progress import (
     BarColumn,
     Progress,
     SpinnerColumn,
+    Task,
+    TaskID,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
@@ -34,10 +38,10 @@ from app_operator.progress import parse_progress
 class _ActiveSpinnerColumn(SpinnerColumn):
     """Spinner that only animates once the task has been started."""
 
-    def render(self, task):
+    def render(self, task: Task) -> Text:
         if task.start_time is None:
             return Text(" ")
-        return super().render(task)
+        return cast("Text", super().render(task))
 
 
 class AppStatus(str, Enum):
@@ -53,22 +57,22 @@ class AppResult:
     deployment_iterations: int | None
     repeat: int | None = None
     elapsed_seconds: float | None = None
-    phase_durations: dict | None = None
+    phase_durations: dict[str, float] | None = None
     total_tokens: int | None = None
 
 
-def _write_toml_simple(data: dict) -> str:
+def _write_toml_simple(data: dict[str, Any]) -> str:
     """Serialize a dict to TOML format.
 
     Handles: bool, int, str, list[str], and nested dicts (as [section] tables).
     """
-    lines = []
-    top_level = {}
-    tables = {}
+    lines: list[str] = []
+    top_level: dict[str, Any] = {}
+    tables: dict[str, dict[str, Any]] = {}
 
     for key, value in data.items():
         if isinstance(value, dict):
-            tables[key] = value
+            tables[key] = cast("dict[str, Any]", value)
         else:
             top_level[key] = value
 
@@ -76,11 +80,11 @@ def _write_toml_simple(data: dict) -> str:
         lines.append(f"{key} = {_toml_value(value)}")
 
     for section, fields in tables.items():
-        sub_tables = {}
-        plain_fields = {}
+        sub_tables: dict[str, dict[str, Any]] = {}
+        plain_fields: dict[str, Any] = {}
         for k, v in fields.items():
             if isinstance(v, dict):
-                sub_tables[k] = v
+                sub_tables[k] = cast("dict[str, Any]", v)
             else:
                 plain_fields[k] = v
 
@@ -97,7 +101,7 @@ def _write_toml_simple(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _toml_value(value) -> str:
+def _toml_value(value: Any) -> str:
     """Format a Python value as a TOML value string."""
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -107,12 +111,12 @@ def _toml_value(value) -> str:
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
     if isinstance(value, list):
-        items = ", ".join(_toml_value(item) for item in value)
+        items = ", ".join(_toml_value(item) for item in cast("list[Any]", value))
         return f"[{items}]"
     raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
 
 
-def _write_experiment_sds_config(exp_dir: Path, experiment_config: dict) -> None:
+def _write_experiment_sds_config(exp_dir: Path, experiment_config: dict[str, Any]) -> None:
     """Write non-apps sections from experiment config as sds.toml in the experiment dir."""
     sds_sections = {k: v for k, v in experiment_config.items() if k not in ("apps", "repeats")}
     if not sds_sections:
@@ -142,7 +146,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _extract_results(exp_dir: Path) -> dict:
+def _extract_results(exp_dir: Path) -> dict[str, Any]:
     """Extract deployment iterations, status, and token usage from trajectory files."""
     traj_dir = exp_dir / ".sds" / "trajectories"
     if not traj_dir.exists():
@@ -177,7 +181,7 @@ def _load_existing_results(log_dir: Path) -> list[AppResult]:
     try:
         with open(results_path) as f:
             data = json.load(f)
-        results = []
+        results: list[AppResult] = []
         for entry in data.get("results", []):
             try:
                 status = AppStatus(entry.get("status", "unknown"))
@@ -218,9 +222,9 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
     """Write per-app results as JSON to the log directory."""
     has_repeats = any(r.repeat is not None for r in results)
 
-    entries = []
+    entries: list[dict[str, Any]] = []
     for r in results:
-        entry: dict = {
+        entry: dict[str, Any] = {
             "app": r.app,
             "status": r.status.value,
             "deployment_iterations": r.deployment_iterations,
@@ -232,21 +236,21 @@ def _write_results(log_dir: Path, exp_name: str, results: list[AppResult]) -> No
             entry["repeat"] = r.repeat
         entries.append(entry)
 
-    output: dict = {"experiment": exp_name, "results": entries}
+    output: dict[str, Any] = {"experiment": exp_name, "results": entries}
 
     if has_repeats:
         apps_seen: dict[str, list[AppResult]] = {}
         for r in results:
             apps_seen.setdefault(r.app, []).append(r)
 
-        aggregated = []
+        aggregated: list[dict[str, Any]] = []
         for app_name, app_results in sorted(apps_seen.items()):
             total = len(app_results)
             successes = sum(1 for r in app_results if r.status == AppStatus.COMPLETED)
             iters = [r.deployment_iterations for r in app_results if r.deployment_iterations is not None]
             elapsed = [r.elapsed_seconds for r in app_results if r.elapsed_seconds is not None]
             tokens = [r.total_tokens for r in app_results if r.total_tokens is not None]
-            agg: dict = {
+            agg: dict[str, Any] = {
                 "app": app_name,
                 "success_rate": f"{successes}/{total}",
             }
@@ -288,9 +292,9 @@ _PHASE_LABELS = {
 }
 
 
-def _fmt_phase_durations(phases: dict) -> str:
+def _fmt_phase_durations(phases: dict[str, float]) -> str:
     """Format phase durations as a compact string, e.g. 'analysis:2m deploy:5m mon:3m'."""
-    parts = []
+    parts: list[str] = []
     for key, label in _PHASE_LABELS.items():
         if key in phases:
             parts.append(f"{label}:{_fmt_seconds(phases[key])}")
@@ -361,7 +365,7 @@ def _print_summary(console: Console, results: list[AppResult]) -> None:
     console.print(table)
 
 
-def tail_file(file_path: Path, stop_event: threading.Event, callback):
+def tail_file(file_path: Path, stop_event: threading.Event, callback: Callable[[str], None]) -> None:
     """Tails a file and calls callback with new lines."""
     # Wait for file to exist
     while not stop_event.is_set():
@@ -389,10 +393,10 @@ def run_experiment_task(
     app_path_str: str,
     exp_name: str,
     progress: Progress,
-    task_id,
-    overall_task_id,
+    task_id: TaskID,
+    overall_task_id: TaskID,
     log_dir: Path,
-    experiment_config: dict | None = None,
+    experiment_config: dict[str, Any] | None = None,
     repeat_idx: int = 0,
     total_repeats: int = 1,
 ) -> AppResult:
@@ -487,7 +491,7 @@ def run_experiment_task(
 
         # Phase timing state
         run_start = time.monotonic()
-        phase_state: dict = {"current": None, "start": None, "durations": {}}
+        phase_state: dict[str, Any] = {"current": None, "start": None, "durations": {}}
 
         def _transition_phase(name: str) -> None:
             now = time.monotonic()
@@ -500,7 +504,7 @@ def run_experiment_task(
         # Start a thread to monitor the log file for status updates
         stop_tail = threading.Event()
 
-        def check_status(line):
+        def check_status(line: str) -> None:
             marker = parse_progress(line)
             if marker is None:
                 return
@@ -602,13 +606,13 @@ def run_app_repeats(
     app_path_str: str,
     exp_name: str,
     progress: Progress,
-    repeat_task_ids: list[tuple[int, object]],
-    overall_task_id,
+    repeat_task_ids: list[tuple[int, TaskID]],
+    overall_task_id: TaskID,
     log_dir: Path,
-    experiment_config: dict | None = None,
+    experiment_config: dict[str, Any] | None = None,
     total_repeats: int = 1,
 ) -> list[AppResult]:
-    results = []
+    results: list[AppResult] = []
     for repeat_idx, task_id in repeat_task_ids:
         result = run_experiment_task(
             app_path_str,
@@ -625,7 +629,7 @@ def run_app_repeats(
     return results
 
 
-def _resolve_experiment(experiment_str: str) -> tuple[str, Path, dict, Path] | None:
+def _resolve_experiment(experiment_str: str) -> tuple[str, Path, dict[str, Any], Path] | None:
     """Resolve an experiment string to (exp_name, config_path, config, log_dir).
 
     Returns None and logs an error if resolution fails.
@@ -668,15 +672,18 @@ def _resolve_experiment(experiment_str: str) -> tuple[str, Path, dict, Path] | N
 
 def run_command(args: argparse.Namespace) -> int:
     console = Console()
-    experiments = getattr(args, "experiments", None)
-    if isinstance(experiments, str):
-        experiments = [experiments]
-    elif not isinstance(experiments, (list, tuple)):
-        experiments = [args.experiment]
+    raw_experiments: Any = getattr(args, "experiments", None)
+    experiments: list[str]
+    if isinstance(raw_experiments, str):
+        experiments = [raw_experiments]
+    elif isinstance(raw_experiments, (list, tuple)):
+        experiments = [str(e) for e in cast("list[Any]", raw_experiments)]
+    else:
+        experiments = [str(args.experiment)]
     multi = len(experiments) > 1
 
     # Resolve all experiments up front
-    resolved = []
+    resolved: list[tuple[str, Path, dict[str, Any], Path]] = []
     for experiment_str in experiments:
         result = _resolve_experiment(experiment_str)
         if result is None:
@@ -759,7 +766,7 @@ def run_command(args: argparse.Namespace) -> int:
         )
 
         # futures maps future -> (app, exp_name, log_dir, config)
-        futures = {}
+        futures: dict[Future[list[AppResult]], tuple[str, str, Path, dict[str, Any]]] = {}
         with ThreadPoolExecutor(max_workers=args.parallel) as executor:
             for exp_name, _config_path, config, log_dir in resolved:
                 apps = config.get("apps", [])
@@ -767,7 +774,7 @@ def run_command(args: argparse.Namespace) -> int:
                 completed_keys = completed_keys_by_exp[exp_name]
                 for app in apps:
                     app_name = Path(app).name
-                    repeat_task_ids = []
+                    repeat_task_ids: list[tuple[int, TaskID]] = []
                     for i in range(repeats):
                         repeat = i + 1 if repeats > 1 else None
                         if (app_name, repeat) in completed_keys:
