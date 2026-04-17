@@ -12,7 +12,7 @@ from libs.sds_core.logger import formatter, logger, setup_logger
 if TYPE_CHECKING:
     from loguru import Message
 
-    from app_operator.ui_protocol import OperatorUI
+    from app_operator.core.ui_protocol import OperatorUI
 
 
 def attach_ui_sink(ui: "OperatorUI", replace: bool = False) -> None:

@@ -13,8 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from app_operator.exceptions import SdsOperatorError
-from app_operator.logger import logger
+from app_operator.core import SdsOperatorError, logger
 
 T = TypeVar("T")
 

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app_operator.exceptions import (
+from app_operator.core import (
     DeploymentError,
     FileSystemError,
     ProcessError,
@@ -26,7 +26,7 @@ class TestProcessErrorInScriptRunner:
     """ProcessError is raised on timeout and OS/subprocess errors."""
 
     def test_timeout_raises_process_error(self, tmp_path):
-        from app_operator.filesystem import RealFilesystem
+        from app_operator.core import RealFilesystem
         from app_operator.script_runner import run_script
 
         repo = tmp_path / "repo"
@@ -45,7 +45,7 @@ class TestProcessErrorInScriptRunner:
         assert isinstance(exc_info.value, SdsOperatorError)
 
     def test_missing_command_raises_process_error(self, tmp_path):
-        from app_operator.filesystem import RealFilesystem
+        from app_operator.core import RealFilesystem
         from app_operator.script_runner import run_script
 
         repo = tmp_path / "nonexistent_dir_abc123"
@@ -61,7 +61,7 @@ class TestProcessErrorInScriptRunner:
         assert exc_info.value.timeout is False
 
     def test_successful_run_returns_command_result(self, tmp_path):
-        from app_operator.filesystem import RealFilesystem
+        from app_operator.core import RealFilesystem
         from app_operator.script_runner import run_script
 
         repo = tmp_path / "repo"
@@ -79,7 +79,7 @@ class TestProcessErrorInScriptRunner:
 
     def test_nonzero_exit_returns_result_not_exception(self, tmp_path):
         """Non-zero exit code is a normal failure, not an exception."""
-        from app_operator.filesystem import RealFilesystem
+        from app_operator.core import RealFilesystem
         from app_operator.script_runner import run_script
 
         repo = tmp_path / "repo"
@@ -96,7 +96,7 @@ class TestProcessErrorInScriptRunner:
 
     def test_log_file_still_written_on_process_error(self, tmp_path):
         """Even when ProcessError is raised, the log file should be written."""
-        from app_operator.filesystem import RealFilesystem
+        from app_operator.core import RealFilesystem
         from app_operator.script_runner import run_script
 
         repo = tmp_path / "repo"

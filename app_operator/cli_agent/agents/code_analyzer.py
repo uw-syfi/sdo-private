@@ -10,17 +10,21 @@ if TYPE_CHECKING:
     from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
-from app_operator.config import OperatorConfig
-from app_operator.exceptions import AgentError
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.logger import logger
+from app_operator.core import (
+    AgentError,
+    FileSystemInterface,
+    NullOperatorUI,
+    OperatorConfig,
+    OperatorUI,
+    RealFilesystem,
+    logger,
+)
 from app_operator.prompts import get_loader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     Phase,
     TrajectoryRecorderProtocol,
 )
-from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 from libs.agent_cli.utils import generate_and_write_files
 
 

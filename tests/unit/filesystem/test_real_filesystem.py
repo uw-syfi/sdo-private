@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from app_operator.filesystem import RealFilesystem
+from app_operator.core import RealFilesystem
 
 
 def test_real_filesystem_wrappers():

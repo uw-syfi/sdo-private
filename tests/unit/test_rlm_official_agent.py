@@ -10,7 +10,7 @@ from app_operator.cli_agent.rlm_official_agent import (
     _build_context_text,
     _build_custom_tools,
 )
-from app_operator.config import AgentConfig, Config
+from app_operator.core import AgentConfig, Config
 from libs.agent_cli.base import AGENT_REGISTRY
 
 

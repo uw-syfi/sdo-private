@@ -5,8 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app_operator.config import Config
-from app_operator.filesystem import FileSystemInterface
+from app_operator.core import Config, FileSystemInterface
 from app_operator.prompts import PromptLoader
 
 

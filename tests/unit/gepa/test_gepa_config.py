@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.config import GEPAConfig
+from app_operator.core import GEPAConfig
 
 
 class TestGEPAConfigIntegerFields:

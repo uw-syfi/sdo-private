@@ -7,7 +7,7 @@ dictionaries, decoupled from any specific metric or optimization framework.
 import json
 from typing import Any
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 
 def extract_rlm_statistics_from_trajectory(trajectory_dict: dict[str, Any]) -> dict[str, Any]:

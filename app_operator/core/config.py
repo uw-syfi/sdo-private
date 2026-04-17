@@ -8,13 +8,9 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, cast
 
-# UnrecognizedFieldError is re-exported here (as `X as X`) so callers that
-# import it from `app_operator.config` keep working; the canonical definition
-# lives in `app_operator.exceptions`.
-from app_operator.exceptions import ConfigurationError, UnrecognizedSectionError
-from app_operator.exceptions import UnrecognizedFieldError as UnrecognizedFieldError
-from app_operator.logger import logger
-from app_operator.validation import (
+from app_operator.core.exceptions import ConfigurationError, UnrecognizedSectionError
+from app_operator.core.logger import logger
+from app_operator.core.validation import (
     validate_dataclass_fields,
     validate_field,
     validate_range,

@@ -1,6 +1,6 @@
 import pytest
 
-from app_operator.config import Config, RuntimeConfig
+from app_operator.core import Config, RuntimeConfig
 
 
 def test_runtime_valid_impls_are_cli_agent_and_pydantic_ai():

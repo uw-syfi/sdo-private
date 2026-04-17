@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.exceptions import (
+from app_operator.core import (
     AgentError,
     ConfigurationError,
     DeploymentError,

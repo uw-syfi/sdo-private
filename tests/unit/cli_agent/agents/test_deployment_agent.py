@@ -4,12 +4,11 @@ import pytest
 
 import app_operator.cli_agent.agents.deploy_executor as executor_module
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
-from app_operator.exceptions import DeploymentError
+from app_operator.core import DeploymentError, HealthVerdict
 from app_operator.prompts.deployer import (
     create_fix_prompt,
     prepare_error_context,
 )
-from app_operator.types import HealthVerdict
 from tests.fixtures import bind_method
 from tests.fixtures.agents import TrackingAgent
 
@@ -414,7 +413,7 @@ def test_create_fix_prompt_includes_repo_and_scripts(agent):
 
 def test_run_health_unhealthy_triggers_fix(agent, monkeypatch):
     """Unhealthy assessment triggers fix agent and retry."""
-    from app_operator.types import HealthVerdict
+    from app_operator.core import HealthVerdict
 
     deploy_call_count = {"n": 0}
     assess_call_count = {"n": 0}
@@ -464,7 +463,7 @@ def test_run_health_unhealthy_triggers_fix(agent, monkeypatch):
 
 def test_run_health_unhealthy_exhausts_retries(agent, monkeypatch):
     """All health assessments unhealthy + fix fails → deployment fails."""
-    from app_operator.types import HealthVerdict
+    from app_operator.core import HealthVerdict
 
     def fake_run_deploy(
         self,

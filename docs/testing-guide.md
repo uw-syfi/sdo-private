@@ -250,7 +250,7 @@ def test_interaction_tracking():
 For testing filesystem operations without disk I/O:
 
 ```python
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import InMemoryFilesystem
 
 def test_filesystem():
     fs = InMemoryFilesystem()

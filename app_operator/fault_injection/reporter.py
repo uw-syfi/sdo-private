@@ -5,7 +5,7 @@ for embedding in trajectory JSON files.
 """
 
 from app_operator.fault_injection.models import FaultResult
-from app_operator.types import FaultInjectionMetadata
+from libs.agent_cli.trajectory import FaultInjectionMetadata
 
 
 class FaultReport:

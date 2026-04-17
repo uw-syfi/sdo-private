@@ -8,7 +8,7 @@ import copy
 import sys
 from pathlib import Path
 
-from app_operator.config import load_config
+from app_operator.core import load_config
 from app_operator.dspy_integration import SIGNATURES, PromptOptimizer
 
 

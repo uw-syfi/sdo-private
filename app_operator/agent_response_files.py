@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 if TYPE_CHECKING:
-    from app_operator.filesystem import FileSystemInterface
+    from app_operator.core import FileSystemInterface
 
 _FILE_CHANGE_RE = re.compile(
     r"<file_change\s+path=(['\"])(?P<path>.*?)\1\s*>(?P<content>.*?)</file_change>",

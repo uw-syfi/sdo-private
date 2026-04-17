@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.command_validation import (
+from app_operator.core import (
     DangerousCommandError,
     validate_command,
 )

@@ -51,35 +51,25 @@ depends_on = [
 path = "app_operator"
 depends_on = []
 
-# --- app_operator Layer 0: pure foundation (no internal deps) ---
+# --- app_operator Layer 0: foundation package ---
+# `app_operator.core` consolidates the former top-level foundation files
+# (config, logger, exceptions, filesystem, types, validation, constants,
+# ui_protocol, command_validation) into a single coherent package with a
+# curated public surface in `app_operator/core/__init__.py`.
 
 [[modules]]
-path = "app_operator.constants"
-depends_on = []
+path = "app_operator.core"
+depends_on = [
+    "libs.agent_cli",
+    "libs.model_config",
+    "libs.sds_core",
+]
 
-[[modules]]
-path = "app_operator.exceptions"
-depends_on = []
+# --- app_operator Layer 0: pure foundation files (no internal deps) ---
 
 [[modules]]
 path = "app_operator.experiment_naming"
 depends_on = []
-
-[[modules]]
-path = "app_operator.logger"
-depends_on = [
-    "libs.sds_core",
-]
-
-[[modules]]
-path = "app_operator.ui_protocol"
-depends_on = []
-
-[[modules]]
-path = "app_operator.validation"
-depends_on = [
-    "app_operator.exceptions",
-]
 
 [[modules]]
 path = "app_operator.agent_runner"
@@ -97,85 +87,43 @@ depends_on = []
 path = "app_operator.subprocess_runner"
 depends_on = []
 
-[[modules]]
-path = "app_operator.command_validation"
-depends_on = [
-    "libs.sds_core",
-]
-
-[[modules]]
-path = "app_operator.filesystem"
-depends_on = [
-    "libs.sds_core",
-]
-
-[[modules]]
-path = "app_operator.types"
-depends_on = [
-    "libs.agent_cli",
-]
-
 # --- app_operator Layer 1: composes Layer 0 ---
 
 [[modules]]
 path = "app_operator.llm"
 depends_on = [
-    "app_operator.logger",
+    "app_operator.core",
     "libs.model_config",
 ]
 
 [[modules]]
 path = "app_operator.progress"
 depends_on = [
-    "app_operator.logger",
+    "app_operator.core",
 ]
 
 [[modules]]
 path = "app_operator.agent_response_files"
 depends_on = [
-    "app_operator.logger",
-]
-
-[[modules]]
-path = "app_operator.trajectory_utils"
-depends_on = [
-    "app_operator.logger",
-]
-
-[[modules]]
-path = "app_operator.trajectory_collectors"
-depends_on = [
-    "app_operator.logger",
+    "app_operator.core",
 ]
 
 [[modules]]
 path = "app_operator.rate_limit_handler"
 depends_on = [
-    "app_operator.exceptions",
-    "app_operator.logger",
-]
-
-[[modules]]
-path = "app_operator.config"
-depends_on = [
-    "app_operator.exceptions",
-    "app_operator.logger",
-    "app_operator.validation",
-    "libs.model_config",
+    "app_operator.core",
 ]
 
 [[modules]]
 path = "app_operator.guardrails"
 depends_on = [
-    "app_operator.filesystem",
+    "app_operator.core",
 ]
 
 [[modules]]
 path = "app_operator.healthcheck"
 depends_on = [
-    "app_operator.logger",
-    "app_operator.types",
-    "app_operator.ui_protocol",
+    "app_operator.core",
 ]
 
 # --- app_operator Layer 2: shared infrastructure subpackages ---
@@ -183,39 +131,35 @@ depends_on = [
 [[modules]]
 path = "app_operator.prompts"
 depends_on = [
-    "app_operator.filesystem",
+    "app_operator.core",
 ]
 
 [[modules]]
 path = "app_operator.trajectory"
 depends_on = [
-    "app_operator.logger",
+    "app_operator.core",
     "app_operator.prompts",
-    "app_operator.trajectory_collectors",
     "libs.agent_cli",
 ]
 
 [[modules]]
 path = "app_operator.health_validation"
 depends_on = [
-    "app_operator.logger",
+    "app_operator.core",
     "app_operator.prompts",
 ]
 
 [[modules]]
 path = "app_operator.script_runner"
 depends_on = [
-    "app_operator.filesystem",
+    "app_operator.core",
     "app_operator.trajectory",
-    "app_operator.types",
 ]
 
 [[modules]]
 path = "app_operator.operator_base"
 depends_on = [
-    "app_operator.config",
-    "app_operator.filesystem",
-    "app_operator.logger",
+    "app_operator.core",
 ]
 
 # --- app_operator Layer 3: integration + runtimes ---
@@ -223,40 +167,32 @@ depends_on = [
 [[modules]]
 path = "app_operator.dspy_integration"
 depends_on = [
-    "app_operator.config",
-    "app_operator.exceptions",
+    "app_operator.core",
     "app_operator.experiment_naming",
-    "app_operator.logger",
     "app_operator.prompts",
     "app_operator.rate_limit_handler",
     "app_operator.run_classifier",
     "app_operator.trajectory",
-    "app_operator.trajectory_utils",
-    "app_operator.types",
+    "libs.agent_cli",
 ]
 
 [[modules]]
 path = "app_operator.fault_injection"
 depends_on = [
-    "app_operator.config",
-    "app_operator.types",
+    "app_operator.core",
+    "libs.agent_cli",
 ]
 
 [[modules]]
 path = "app_operator.pydantic_ai"
 depends_on = [
-    "app_operator.command_validation",
-    "app_operator.config",
-    "app_operator.constants",
-    "app_operator.filesystem",
+    "app_operator.core",
     "app_operator.guardrails",
-    "app_operator.logger",
     "app_operator.operator_base",
     "app_operator.progress",
     "app_operator.prompts",
     "app_operator.script_runner",
     "app_operator.trajectory",
-    "app_operator.types",
     "libs.agent_mw",
     "libs.model_config",
     "libs.pydantic_agent",
@@ -265,14 +201,10 @@ depends_on = [
 [[modules]]
 path = "app_operator.cli_agent"
 depends_on = [
+    "app_operator.core",
     "app_operator.agent_response_files",
-    "app_operator.config",
-    "app_operator.constants",
-    "app_operator.exceptions",
-    "app_operator.filesystem",
     "app_operator.guardrails",
     "app_operator.healthcheck",
-    "app_operator.logger",
     "app_operator.operator_base",
     "app_operator.progress",
     "app_operator.prompts",
@@ -282,20 +214,15 @@ depends_on = [
     "app_operator.script_runner",
     "app_operator.subprocess_runner",
     "app_operator.trajectory",
-    "app_operator.trajectory_utils",
-    "app_operator.types",
-    "app_operator.ui_protocol",
     "libs.agent_cli",
 ]
 
 [[modules]]
 path = "app_operator.gepa"
 depends_on = [
+    "app_operator.core",
     "app_operator.cli_agent",
-    "app_operator.config",
-    "app_operator.filesystem",
     "app_operator.llm",
-    "app_operator.logger",
     "app_operator.prompts",
     "app_operator.trajectory",
 ]
@@ -311,17 +238,16 @@ depends_on = []
 [[modules]]
 path = "app_operator.operator_factory"
 depends_on = [
-    "app_operator.config",
+    "app_operator.core",
     "app_operator.operator_base",
 ]
 
 [[modules]]
 path = "app_operator.commands"
 depends_on = [
-    "app_operator.config",
+    "app_operator.core",
     "app_operator.dspy_integration",
     "app_operator.experiment_naming",
-    "app_operator.logger",
     "app_operator.operator_factory",
     "app_operator.progress",
     "app_operator.rate_limit_handler",
@@ -334,8 +260,8 @@ depends_on = [
 [[modules]]
 path = "app_operator.__main__"
 depends_on = [
+    "app_operator.core",
     "app_operator.commands",
-    "app_operator.logger",
 ]
 
 # --- app_operator_dspy (independent of app_operator) ---

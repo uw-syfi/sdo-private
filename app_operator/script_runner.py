@@ -4,10 +4,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from app_operator.exceptions import FileSystemError, ProcessError
-from app_operator.filesystem import FileSystemInterface
+from app_operator.core import CommandResult, FileSystemError, FileSystemInterface, ProcessError
 from app_operator.trajectory import TrajectoryRecorderProtocol
-from app_operator.types import CommandResult
 
 
 def write_log_file(filesystem: FileSystemInterface, path: Path, content: str) -> None:

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app_operator.config import GEPAConfig
+from app_operator.core import GEPAConfig
 from app_operator.gepa.reflector import ExecutionTrace, PromptReflector
 
 

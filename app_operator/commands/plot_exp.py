@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from app_operator.logger import logger
+from app_operator.core import logger
 
 console = Console()
 

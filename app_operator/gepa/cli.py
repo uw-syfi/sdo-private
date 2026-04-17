@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from app_operator.cli_agent import CodeAnalyzerRunner, DeployerRunner, MonitorRunner, create_agent_from_config
-from app_operator.config import GEPAConfig, load_config
+from app_operator.core import GEPAConfig, load_config, logger
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.evaluator import (
     METRICS_REGISTRY,
@@ -30,7 +30,6 @@ from app_operator.gepa.evaluator import (
 )
 from app_operator.gepa.optimizer import GEPAOptimizer
 from app_operator.gepa.reflector import PromptReflector
-from app_operator.logger import logger
 
 
 def build_parser() -> argparse.ArgumentParser:

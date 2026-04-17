@@ -8,8 +8,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from app_operator.core import CommandResult
     from app_operator.dspy_integration import DSPyConfig
-    from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.agents.context import AgentContext
@@ -22,11 +22,17 @@ from app_operator.cli_agent.agents.script_generator_agent import (
 from app_operator.cli_agent.agents.script_generator_agent import (
     generate_scripts as generate_scripts,
 )
-from app_operator.config import DeploymentConfig, OperatorConfig
-from app_operator.exceptions import DeploymentError
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
+from app_operator.core import (
+    DeploymentConfig,
+    DeploymentError,
+    FileSystemInterface,
+    NullOperatorUI,
+    OperatorConfig,
+    OperatorUI,
+    RealFilesystem,
+    logger,
+)
 from app_operator.healthcheck import append_validation_verdict, run_health_check
-from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.prompts import get_loader
 from app_operator.repo_evidence import RepoEvidence, extract_repo_evidence
@@ -35,7 +41,6 @@ from app_operator.trajectory import (
     Phase,
     TrajectoryRecorderProtocol,
 )
-from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
 FIX_SUMMARY_CONSOLIDATION_INTERVAL = 1
 

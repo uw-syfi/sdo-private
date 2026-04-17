@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from app_operator.filesystem import FileSystemInterface
+from app_operator.core import FileSystemInterface
 
 
 @dataclass

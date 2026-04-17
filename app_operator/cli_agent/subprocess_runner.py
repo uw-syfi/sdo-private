@@ -10,14 +10,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
-from app_operator.constants import (
+from app_operator.core import (
     PROCESS_CLEANUP_TIMEOUT_SECS,
     PROCESS_TERM_WAIT_TIMEOUT_SECS,
     THREAD_JOIN_TIMEOUT_SECS,
+    CommandResult,
+    OperatorUI,
+    logger,
 )
-from app_operator.logger import logger
-from app_operator.types import CommandResult
-from app_operator.ui_protocol import OperatorUI
 
 if TYPE_CHECKING:
     from app_operator.cli_agent._progress_summarizer import ProgressSummarizer

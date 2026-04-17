@@ -12,7 +12,7 @@ from pathlib import Path
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import InMemoryFilesystem
 
 # Custom strategies for filesystem testing
 

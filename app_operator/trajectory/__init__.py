@@ -21,13 +21,14 @@ from typing import (
     Any,
 )
 
-from app_operator.logger import logger
+from app_operator.core import logger
 from app_operator.prompts import get_system_prompt
 from app_operator.trajectory.collectors import collect_gemini_sessions
 from app_operator.trajectory.utils import extract_rlm_statistics_from_trajectory
 
 if TYPE_CHECKING:
-    from app_operator.types import ConversationEntry, FaultInjectionMetadata, TokenUsage, TrajectoryCallRecord
+    from app_operator.core import ConversationEntry, TrajectoryCallRecord
+    from libs.agent_cli.trajectory import FaultInjectionMetadata, TokenUsage
 
 from libs.agent_cli.trajectory import (
     NullTrajectoryRecorder as NullTrajectoryRecorder,

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 from pydantic_ai import RunContext  # noqa: TC002 — pydantic-ai evaluates @agent.instructions annotations at runtime
 
-from app_operator.constants import DEPLOYMENT_PROGRESS_FILENAME
+from app_operator.core import DEPLOYMENT_PROGRESS_FILENAME
 from app_operator.prompts import create_fix_prompt, prepare_error_context
 from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps
@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 
     from pydantic_ai.settings import ModelSettings
 
+    from app_operator.core import CommandResult
     from app_operator.pydantic_ai._trajectory import PydanticAITrajectoryRecorder
-    from app_operator.types import CommandResult
 
 
 class RepairAgent(OperatorAgent):

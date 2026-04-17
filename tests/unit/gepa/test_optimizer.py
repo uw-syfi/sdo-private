@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app_operator.config import GEPAConfig
+from app_operator.core import GEPAConfig
 from app_operator.gepa.evaluator import (
     EfficiencyMetrics,
     EvaluationExample,

@@ -8,7 +8,7 @@ from collections.abc import Collection
 from dataclasses import fields
 from typing import Any
 
-from app_operator.exceptions import UnrecognizedFieldError
+from app_operator.core.exceptions import UnrecognizedFieldError
 
 
 def validate_type(

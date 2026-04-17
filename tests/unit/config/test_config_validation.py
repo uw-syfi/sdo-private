@@ -8,7 +8,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from app_operator.config import AgentConfig, Config, OperatorConfig
+from app_operator.core import AgentConfig, Config, OperatorConfig
 from libs.model_config import ModelConfig
 
 
@@ -300,7 +300,7 @@ class TestConfigIntegration:
 
     def test_config_from_dict_rejects_unknown_gepa_field(self):
         """Config.from_dict should reject unknown fields in [gepa]."""
-        from app_operator.config import UnrecognizedFieldError
+        from app_operator.core import UnrecognizedFieldError
 
         with pytest.raises(UnrecognizedFieldError, match="unknown_field"):
             Config.from_dict({"gepa": {"unknown_field": "value"}})

@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 
 from pydantic_ai import RunContext  # noqa: TC002 — pydantic-ai evaluates @agent.instructions annotations at runtime
 
+from app_operator.core import logger
 from app_operator.guardrails import ArtifactGuardrail
-from app_operator.logger import logger
 from app_operator.progress import emit_progress
 from app_operator.pydantic_ai._base_agent import OperatorAgent
 from app_operator.pydantic_ai._deps import OperatorDeps

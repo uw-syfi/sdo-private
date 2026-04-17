@@ -2,8 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app_operator.filesystem import InMemoryFilesystem
-from app_operator.logger import logger
+from app_operator.core import InMemoryFilesystem, logger
 from tests.fixtures.agents import (
     ConfigurableAgent,
     ErrorAgent,

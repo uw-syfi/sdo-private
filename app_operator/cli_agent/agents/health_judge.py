@@ -10,16 +10,21 @@ if TYPE_CHECKING:
     from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
-from app_operator.config import DeploymentConfig, OperatorConfig
-from app_operator.filesystem import FileSystemInterface, RealFilesystem
-from app_operator.logger import logger
+from app_operator.core import (
+    DeploymentConfig,
+    FileSystemInterface,
+    HealthVerdict,
+    NullOperatorUI,
+    OperatorConfig,
+    OperatorUI,
+    RealFilesystem,
+    logger,
+)
 from app_operator.prompts import create_health_system_prompt, get_loader
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     TrajectoryRecorderProtocol,
 )
-from app_operator.types import HealthVerdict
-from app_operator.ui_protocol import NullOperatorUI, OperatorUI
 
 
 def _parse_verdict(response: str) -> HealthVerdict | None:

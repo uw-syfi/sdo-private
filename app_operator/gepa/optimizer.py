@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import IO, Any
 
-from app_operator.config import GEPAConfig
+from app_operator.core import GEPAConfig, logger
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.candidate import CandidatePool, PromptCandidate
 from app_operator.gepa.evaluator import (
@@ -18,7 +18,6 @@ from app_operator.gepa.evaluator import (
     extract_generated_scripts,
 )
 from app_operator.gepa.reflector import ExecutionTrace, PromptReflector
-from app_operator.logger import logger
 
 
 class GEPAOptimizer:

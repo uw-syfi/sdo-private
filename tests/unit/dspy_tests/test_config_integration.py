@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.config import AgentConfig, Config, RLMConfig, UnrecognizedFieldError
+from app_operator.core import AgentConfig, Config, RLMConfig, UnrecognizedFieldError
 from app_operator.dspy_integration.config import (
     DSPyAutoRollbackConfig,
     DSPyConfig,

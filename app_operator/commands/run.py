@@ -1,8 +1,6 @@
 import argparse
 
-from app_operator.config import load_config
-from app_operator.exceptions import SdsOperatorError
-from app_operator.logger import logger
+from app_operator.core import SdsOperatorError, load_config, logger
 from app_operator.operator_factory import create_operator
 
 # POSIX exit code for processes terminated by SIGINT (128 + SIGINT=2).

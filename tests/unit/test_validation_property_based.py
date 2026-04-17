@@ -8,7 +8,7 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from app_operator.validation import (
+from app_operator.core import (
     validate_field,
     validate_in,
     validate_non_empty_str,

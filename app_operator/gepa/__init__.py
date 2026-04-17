@@ -1,6 +1,6 @@
 """GEPA (Genetic-Pareto Prompt Evolution) integration for SDS."""
 
-from app_operator.config import GEPAConfig
+from app_operator.core import GEPAConfig
 from app_operator.gepa.adapter import SDSPromptAdapter
 from app_operator.gepa.candidate import CandidatePool, PromptCandidate
 from app_operator.gepa.evaluator import (

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app_operator.config import Config
+from app_operator.core import Config
 
 
 class TestLangGraphPhaseControl:

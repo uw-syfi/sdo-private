@@ -7,9 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.config import Config
-from app_operator.filesystem import InMemoryFilesystem
-from app_operator.ui_protocol import NullOperatorUI
+from app_operator.core import Config, InMemoryFilesystem, NullOperatorUI
 from tests.fixtures.agents import StubAgent
 
 

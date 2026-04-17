@@ -2,7 +2,7 @@
 
 import pytest
 
-from app_operator.config import AgentConfig, Config, RuntimeConfig
+from app_operator.core import AgentConfig, Config, RuntimeConfig
 from app_operator.pydantic_ai._models import build_model_str
 from libs.model_config import ModelConfig
 

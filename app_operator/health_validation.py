@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from app_operator.core import CommandResult
     from app_operator.dspy_integration import DSPyConfig
     from app_operator.trajectory import TrajectoryRecorderProtocol
-    from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
 
-from app_operator.logger import logger
+from app_operator.core import logger
 from app_operator.prompts import get_loader
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")

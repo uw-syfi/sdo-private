@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app_operator.filesystem import InMemoryFilesystem
+from app_operator.core import InMemoryFilesystem
 
 
 @pytest.fixture
