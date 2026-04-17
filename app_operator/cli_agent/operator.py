@@ -10,6 +10,7 @@ from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import Config, load_config
+from app_operator.constants import COMMAND_EXEC_TIMEOUT_SECS
 from app_operator.exceptions import AgentError, SdsOperatorError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
@@ -246,7 +247,7 @@ class AppOperator(OperatorBase):
         logger.info("Running deployment script stop command...")
 
         try:
-            result = self.deployer.run_deploy_command("stop", timeout=120)
+            result = self.deployer.run_deploy_command("stop", timeout=COMMAND_EXEC_TIMEOUT_SECS)
             if result["success"]:
                 logger.success("Application stopped successfully")
             else:

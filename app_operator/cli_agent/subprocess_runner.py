@@ -9,6 +9,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from app_operator.constants import (
+    PROCESS_CLEANUP_TIMEOUT_SECS,
+    PROCESS_TERM_WAIT_TIMEOUT_SECS,
+    THREAD_JOIN_TIMEOUT_SECS,
+)
 from app_operator.logger import logger
 from app_operator.types import CommandResult
 from app_operator.ui_protocol import OperatorUI
@@ -159,8 +164,8 @@ class SubprocessRunner:
             result = wait_fn()
 
             # Wait for threads to finish reading
-            stdout_thread.join(timeout=5)
-            stderr_thread.join(timeout=5)
+            stdout_thread.join(timeout=THREAD_JOIN_TIMEOUT_SECS)
+            stderr_thread.join(timeout=THREAD_JOIN_TIMEOUT_SECS)
 
             # Update stdout/stderr with full content captured by threads
             result["stdout"] = "".join(self.stdout_lines)
@@ -293,7 +298,7 @@ class SubprocessRunner:
             if elapsed >= self.timeout and self.process.poll() is None:
                 self._kill_process_group(signal.SIGTERM)
                 try:
-                    self.process.wait(timeout=5)
+                    self.process.wait(timeout=PROCESS_TERM_WAIT_TIMEOUT_SECS)
                 except subprocess.TimeoutExpired:
                     self._kill_process_group(signal.SIGKILL)
                 return {
@@ -311,7 +316,7 @@ class SubprocessRunner:
             if self.check_shutdown and self.check_shutdown():
                 self._kill_process_group(signal.SIGTERM)
                 try:
-                    self.process.wait(timeout=5)
+                    self.process.wait(timeout=PROCESS_TERM_WAIT_TIMEOUT_SECS)
                 except subprocess.TimeoutExpired:
                     self._kill_process_group(signal.SIGKILL)
                 return {
@@ -359,7 +364,7 @@ class SubprocessRunner:
         if self.process and self.process.poll() is None:
             try:
                 self._kill_process_group(signal.SIGTERM)
-                self.process.wait(timeout=2)
+                self.process.wait(timeout=PROCESS_CLEANUP_TIMEOUT_SECS)
             except (subprocess.TimeoutExpired, OSError):
                 try:
                     self._kill_process_group(signal.SIGKILL)
