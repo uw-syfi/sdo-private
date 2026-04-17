@@ -78,9 +78,20 @@ def _parse_numbered(text: str) -> list[str]:
     return result
 
 
+def _strip_bullet_prefix(item: str) -> str:
+    s = item.strip()
+    if s.startswith("- [ ] "):
+        return s[6:].strip()
+    if s.startswith("- [x] "):
+        return s[6:].strip()
+    if s.startswith("- "):
+        return s[2:].strip()
+    return s
+
+
 def _render_bullets(items: list[str], *, checkbox: bool = False) -> str:
     marker = "- [ ]" if checkbox else "-"
-    return "\n".join(f"{marker} {item}" for item in items)
+    return "\n".join(f"{marker} {_strip_bullet_prefix(item)}" for item in items)
 
 
 def _render_numbered(items: list[str]) -> str:
