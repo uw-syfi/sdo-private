@@ -457,10 +457,12 @@ def summarize_results(target_path=None):
     plt.legend()
 
     if target_path and os.path.isdir(target_path):
-        output_plot = os.path.join(target_path, "cdf_results.png")
+        plot_dir = os.path.join(target_path, "plots")
     else:
-        output_plot = "cdf_results.png"
+        plot_dir = "plots"
+    os.makedirs(plot_dir, exist_ok=True)
 
+    output_plot = os.path.join(plot_dir, "cdf_results.png")
     plt.savefig(output_plot)
     plt.close()
     print(f"CDF plot saved to {output_plot}")
@@ -485,11 +487,7 @@ def summarize_results(target_path=None):
         plt.grid(True)
         plt.legend()
 
-        if target_path and os.path.isdir(target_path):
-            res_plot = os.path.join(target_path, "cdf_resolution.png")
-        else:
-            res_plot = "cdf_resolution.png"
-
+        res_plot = os.path.join(plot_dir, "cdf_resolution.png")
         plt.savefig(res_plot)
         plt.close()
         print(f"Resolution CDF plot saved to {res_plot}")
@@ -1663,7 +1661,9 @@ def plot_sequence_success_rate(log_dir, output_path=None, window=5):
     fig.tight_layout()
 
     if output_path is None:
-        output_path = os.path.join(log_dir, "sequence_success_rate.png")
+        plot_dir = os.path.join(log_dir, "plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        output_path = os.path.join(plot_dir, "sequence_success_rate.png")
     fig.savefig(output_path)
     plt.close(fig)
     print(f"Sequence success rate plot saved to {output_path}")
@@ -1742,7 +1742,9 @@ def plot_sequence_time(log_dir, output_path=None, window=5):
     fig.tight_layout()
 
     if output_path is None:
-        output_path = os.path.join(log_dir, "sequence_time.png")
+        plot_dir = os.path.join(log_dir, "plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        output_path = os.path.join(plot_dir, "sequence_time.png")
     fig.savefig(output_path)
     plt.close(fig)
     print(f"Sequence time plot saved to {output_path}")
