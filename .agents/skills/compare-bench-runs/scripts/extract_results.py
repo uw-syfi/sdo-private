@@ -13,21 +13,28 @@ import os
 import re
 import sys
 
+_DIRNAME_RE = re.compile(r"^\d{4}_\d{4}_(?:\d{5}_)?(.+)$")
+
 
 def extract_problems(logdir):
-    """Extract problem results from crucible/<problem>/{diagnosis,mitigation}.md files."""
+    """Extract problem results from problem_runs/<ts>_<pid>/agent/{diagnosis,mitigation}.md."""
     results = {}
-    crucible_dir = os.path.join(logdir, "crucible")
-    if not os.path.isdir(crucible_dir):
+    runs_dir = os.path.join(logdir, "problem_runs")
+    if not os.path.isdir(runs_dir):
         return results
-    for problem in os.listdir(crucible_dir):
-        problem_dir = os.path.join(crucible_dir, problem)
-        if not os.path.isdir(problem_dir):
+    for dirname in os.listdir(runs_dir):
+        run_dir = os.path.join(runs_dir, dirname)
+        if not os.path.isdir(run_dir):
             continue
+        m = _DIRNAME_RE.match(dirname)
+        if not m:
+            continue
+        problem = m.group(1)
 
+        agent_dir = os.path.join(run_dir, "agent")
         content = ""
         for name in ("diagnosis.md", "mitigation.md"):
-            path = os.path.join(problem_dir, name)
+            path = os.path.join(agent_dir, name)
             if os.path.exists(path):
                 with open(path) as fh:
                     content += fh.read()
@@ -49,7 +56,7 @@ def extract_problems(logdir):
             "accuracy": float(accuracy_m.group(1)) if accuracy_m else None,
             "diagnosis_iterations": diag_iters,
             "mitigation_iterations": mit_iters,
-            "dir": os.path.join("crucible", problem),
+            "dir": os.path.join("problem_runs", dirname),
         }
     return results
 

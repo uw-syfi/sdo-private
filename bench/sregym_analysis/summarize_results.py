@@ -36,15 +36,28 @@ except ImportError:
     HAS_YAML = False
 
 
+def find_results_csvs(log_dir):
+    """Return SREGym results CSV paths under *log_dir*.
+
+    Prefers the current layout (``problem_runs/<ts>_<pid>/results_<ts>.csv``).
+    Falls back to the legacy flat layout (``*_results.csv`` at any depth)
+    when no new-layout files are present. The two layouts are never mixed.
+    """
+    new_pattern = os.path.join(log_dir, "**", "problem_runs", "*", "results_*.csv")
+    new_files = glob.glob(new_pattern, recursive=True)
+    if new_files:
+        return new_files
+    legacy_pattern = os.path.join(log_dir, "**", "*_results.csv")
+    return glob.glob(legacy_pattern, recursive=True)
+
+
 def load_results(target_path=None):
     # Determine which files to process
     if target_path:
         if os.path.isdir(target_path):
             # If user provided a directory, search recursively for results inside
             print(f"Searching for result files in directory: '{target_path}'")
-            # recursive=True requires the pattern to include ** for that part
-            pattern = os.path.join(target_path, "**", "*_results.csv")
-            files = glob.glob(pattern, recursive=True)
+            files = find_results_csvs(target_path)
         elif not os.path.exists(target_path) and not any(c in target_path for c in "*?[]"):
             print(f"Error: The path '{target_path}' does not exist.")
             sys.exit(1)
@@ -54,8 +67,8 @@ def load_results(target_path=None):
             print(f"Searching for files matching: '{target_path}'")
     else:
         # Default behavior: find all CSV files recursively in current directory
-        print("Searching for *_results.csv files recursively in current directory...")
-        files = glob.glob("**/*_results.csv", recursive=True)
+        print("Searching for results CSVs recursively in current directory...")
+        files = find_results_csvs(".")
 
     all_runs_raw = []
 
@@ -297,8 +310,7 @@ def print_type_breakdown(completed_runs, type_mapping, table_width=130):
     print("-" * table_width)
     count, diag_pct, mitig_pct, avg_ttl, avg_ttm, avg_tres = _compute_group_stats(completed_runs)
     print(
-        f"{'all':<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | "
-        f"{avg_ttl:>8} | {avg_ttm:>9} | {avg_tres:>8}"
+        f"{'all':<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>9} | {avg_tres:>8}"
     )
 
     print("-" * table_width + "\n")
@@ -1587,8 +1599,7 @@ def plot_success_rates(d1, m1, n1, name1, d2, m2, n2, name2, output_path, colors
 
 def _load_sequence_rows(log_dir):
     """Shared helper: load all rows with sequence_index from a log directory."""
-    pattern = os.path.join(log_dir, "**", "*_results.csv")
-    files = glob.glob(pattern, recursive=True)
+    files = find_results_csvs(log_dir)
     rows = []
     for fpath in sorted(files):
         if "ALL_results" in fpath or "_output.csv" in fpath:

@@ -17,9 +17,9 @@ behavioral differences, and synthesizing findings.
 ## Prerequisites
 
 Each run directory (`bench/sregym/logs/<run_name>/`) contains:
-- `crucible/<problem>/diagnosis.md`, `crucible/<problem>/mitigation.md` — per-problem trajectory files (see `references/trajectory-format.md`)
-- `*_crucible_results.csv` — result CSVs
-- `problem_logs/<problem>.log` — execution logs
+- `problem_runs/<ts>_<problem>/agent/diagnosis.md`, `.../mitigation.md` — per-problem trajectory files (see `references/trajectory-format.md`)
+- `problem_runs/<ts>_<problem>/results_<iter_ts>.csv` — benchmark result CSVs (one per iteration)
+- `problem_runs/<ts>_<problem>/run.log` — execution logs
 
 ## Workflow
 
@@ -65,8 +65,10 @@ Analyze benchmark problem "<problem>" across two runs.
 <OUTCOME>. Run1 (<label1>) TTL: <ttl1>s, Run2 (<label2>) TTL: <ttl2>s.
 
 Read these MD trajectory files (diagnosis and mitigation):
-- Run1: <run1_dir>/crucible/<problem>/diagnosis.md, <run1_dir>/crucible/<problem>/mitigation.md
-- Run2: <run2_dir>/crucible/<problem>/diagnosis.md, <run2_dir>/crucible/<problem>/mitigation.md
+- Run1: <run1_dir>/problem_runs/<ts>_<problem>/agent/{diagnosis,mitigation}.md
+- Run2: <run2_dir>/problem_runs/<ts>_<problem>/agent/{diagnosis,mitigation}.md
+
+(The `dir` field returned by `extract_results.py` gives the exact relative path for each run.)
 
 Compare: (1) diagnoses produced, (2) why each succeeded/failed,
 (3) investigation approach differences, (4) judge behavior and correctness,

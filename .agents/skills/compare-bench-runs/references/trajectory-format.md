@@ -1,6 +1,6 @@
 # SREGym Trajectory MD Format
 
-Each problem's trajectory is stored under `<run_dir>/crucible/<problem_name>/` as two markdown files: `diagnosis.md` (diagnosis phase) and `mitigation.md` (mitigation phase). The two are concatenated for analysis.
+Each problem's trajectory is stored under `<run_dir>/problem_runs/<ts>_<problem_name>/agent/` as two markdown files: `diagnosis.md` (diagnosis phase) and `mitigation.md` (mitigation phase). The two are concatenated for analysis.
 
 ## Structure
 
