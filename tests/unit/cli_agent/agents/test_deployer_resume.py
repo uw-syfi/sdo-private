@@ -1,6 +1,7 @@
 import pytest
 
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.exceptions import DeploymentError
 from tests.fixtures import bind_method
 from tests.fixtures.agents import StubAgent
 
@@ -76,8 +77,9 @@ def test_run_resumes_from_existing_attempts(agent, repo_path, monkeypatch):
     bind_method(agent, "run_deploy_command", fake_run_deploy)
     bind_method(agent, "_fix_with_agent", fake_fix)
 
-    # Run up to absolute ceiling 4
-    agent.run(max_attempts=4)
+    # Run up to absolute ceiling 4 (all attempts fail → DeploymentError)
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=4)
 
     # Should run attempt 3 and 4
     assert executed_attempts == [3, 4]
@@ -102,7 +104,8 @@ def test_run_refuses_resume_beyond_absolute_ceiling(agent, repo_path):
 
     bind_method(agent, "run_deploy_command", fake_run_deploy)
 
-    assert agent.run(max_attempts=2) is False
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=2)
     assert executed_attempts == []
 
 
@@ -129,6 +132,7 @@ def test_run_starts_fresh_without_logs(agent, monkeypatch):
     bind_method(agent, "run_deploy_command", fake_run_deploy)
     bind_method(agent, "_fix_with_agent", fake_fix)
 
-    agent.run(max_attempts=2)
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=2)
 
     assert executed_attempts == [1, 2]

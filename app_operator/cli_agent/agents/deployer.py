@@ -23,6 +23,7 @@ from app_operator.cli_agent.agents.script_generator_agent import (
     generate_scripts as generate_scripts,
 )
 from app_operator.config import DeploymentConfig, OperatorConfig
+from app_operator.exceptions import DeploymentError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.healthcheck import append_validation_verdict, run_health_check
 from app_operator.logger import logger
@@ -331,10 +332,18 @@ class DeploymentAgent:
             logger.info(f"--- Deployment Attempt #{attempt} ---")
 
             result = self._run_single_attempt(attempt, max_attempts, absolute_max_attempts, check_shutdown)
-            if result is not None:
-                return result
+            if result is True:
+                return True
+            if result is False:
+                raise DeploymentError(
+                    f"Deployment failed after {attempt} attempt(s)",
+                    attempt=attempt,
+                )
 
-        return False
+        raise DeploymentError(
+            f"All {absolute_max_attempts} deployment attempts exhausted",
+            attempt=absolute_max_attempts,
+        )
 
     def _prepare_fix_summary_for_run(self, start_attempt: int) -> None:
         """Remove stale consolidated summary when starting from attempt 1."""

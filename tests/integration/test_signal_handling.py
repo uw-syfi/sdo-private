@@ -8,8 +8,11 @@ import signal
 import threading
 from unittest.mock import patch
 
+import pytest
+
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config
+from app_operator.exceptions import DeploymentError
 from libs.model_config import ModelConfig
 from tests.fixtures.agents import StubAgent
 
@@ -166,10 +169,10 @@ class TestSignalHandling:
             ),
         )
 
-        exit_code = operator.run()
+        # Deployment failure → DeploymentError
+        with pytest.raises(DeploymentError):
+            operator.run()
 
-        # Deployment should have failed
-        assert exit_code == 1
         # _deployed flag should be False
         assert operator._deployed is False
 

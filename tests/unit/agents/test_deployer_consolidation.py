@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.exceptions import DeploymentError
 from tests.fixtures.agents import ConfigurableAgent, StubAgent
 
 
@@ -131,7 +132,9 @@ def test_run_keeps_summary_on_resume(repo_path, monkeypatch):
         lambda *args, **kwargs: {"success": True, "exit_code": 0},
     )
 
-    agent.run(max_attempts=1)
+    # Resume beyond ceiling → DeploymentError (no attempts executed)
+    with pytest.raises(DeploymentError):
+        agent.run(max_attempts=1)
 
     assert summary_file.exists()
     assert summary_file.read_text() == "Old summary"

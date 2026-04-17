@@ -7,6 +7,7 @@ errors such as permission denied, disk full, and other I/O failures.
 import pytest
 
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
+from app_operator.exceptions import DeploymentError, SdsOperatorError
 from tests.fixtures.agents import StubAgent
 
 
@@ -41,11 +42,12 @@ class TestDeploymentFilesystemErrors:
 
         try:
             # This should handle the permission error gracefully
-            # The deployment may fail, but it should not crash
-            result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
-
-            # Verify it attempted to deploy (result may be True or False)
-            assert isinstance(result, bool)
+            # The deployment may succeed or raise DeploymentError, but not crash
+            try:
+                result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
+                assert isinstance(result, bool)
+            except DeploymentError:
+                pass  # Expected on terminal failure
         finally:
             # Restore permissions for cleanup
             logs_dir.chmod(0o755)
@@ -75,9 +77,12 @@ class TestDeploymentFilesystemErrors:
         agent = StubAgent()
         deployer = DeploymentAgent(repo, agent)
 
-        # Should handle this error gracefully
-        result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
-        assert isinstance(result, bool)
+        # Should handle this error gracefully (may succeed or raise DeploymentError)
+        try:
+            result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
+            assert isinstance(result, bool)
+        except DeploymentError:
+            pass  # Expected on terminal failure
 
     def test_script_chmod_fails_gracefully(self, tmp_path):
         """Should handle chmod failures on generated scripts."""
@@ -101,9 +106,12 @@ class TestDeploymentFilesystemErrors:
         agent = StubAgent()
         deployer = DeploymentAgent(repo, agent)
 
-        # Deployment will likely fail, but should not crash
-        result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
-        assert isinstance(result, bool)
+        # Deployment will likely fail with DeploymentError, but should not crash
+        try:
+            result = deployer.run(max_attempts=1, check_shutdown=lambda: False)
+            assert isinstance(result, bool)
+        except DeploymentError:
+            pass  # Expected on terminal failure
 
 
 class TestScriptGenerationFilesystemErrors:
@@ -122,13 +130,13 @@ class TestScriptGenerationFilesystemErrors:
         agent = StubAgent()
 
         try:
-            # Should fail gracefully (either returns False or raises PermissionError)
+            # Should fail gracefully (either returns False or raises an error)
             try:
                 success, message = generate_scripts(str(repo), agent)
                 # If it returns, should indicate failure
                 assert success is False or "Permission denied" in message or "Read-only" in message
-            except PermissionError:
-                # Also acceptable - permission error is raised
+            except (PermissionError, SdsOperatorError):
+                # Also acceptable - permission or filesystem error is raised
                 pass
         finally:
             # Restore permissions

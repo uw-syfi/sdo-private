@@ -46,10 +46,9 @@ def test_run_success_flow_updates_ui_stages(app_operator_with_ui):
     # Setup mocks
     mock_deployer_cls.return_value.run.return_value = True
     mock_monitor_cls.return_value.run.side_effect = None
+    mock_monitor_cls.return_value.healthy = True
 
-    exit_code = op.run()
-
-    assert exit_code == 0
+    op.run()
 
     # Verify agents were initialized with ui
     # We check that ui kwarg was passed

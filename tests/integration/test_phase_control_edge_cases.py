@@ -98,10 +98,8 @@ class TestPhaseControlEdgeCases:
         operator.deployer.run = Mock(return_value=True)
         operator.monitor.run = Mock()
 
-        result = operator.run()
-
-        # Should complete successfully
-        assert result == 0
+        # Success → returns normally
+        operator.run()
         operator.deployer.run.assert_called_once()
 
     def test_multiple_runs_same_repo_different_configs(self, temp_repo):
@@ -181,10 +179,9 @@ class TestPhaseControlEdgeCases:
 
         operator.deployer.run = Mock(side_effect=trigger_shutdown)
 
-        result = operator.run()
+        # Shutdown during deploy: operator returns quietly (no exception)
+        operator.run()
 
-        # Should handle shutdown gracefully
-        assert result == 1
         assert operator._shutdown_requested
 
     def test_concurrent_operations_different_configs(self, temp_repo):
@@ -253,10 +250,8 @@ class TestPhaseControlEdgeCases:
         operator.deployer.run = Mock(return_value=True)
         operator.monitor.run = Mock()
 
-        result = operator.run()
-
-        # Should succeed despite missing analysis
-        assert result == 0
+        # Should succeed (no exception) despite missing analysis
+        operator.run()
 
     def test_fault_injection_with_analysis_disabled(self, temp_repo):
         """Test that fault injection works independently of analysis phase."""

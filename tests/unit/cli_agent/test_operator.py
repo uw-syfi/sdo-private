@@ -5,6 +5,7 @@ import pytest
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.config import AgentConfig, Config
+from app_operator.exceptions import MonitoringError
 from app_operator.ui_protocol import OperatorUI
 from libs.model_config import ModelConfig
 
@@ -51,32 +52,43 @@ def test_operator_init_validates_path(tmp_path):
 def test_run_success_flow(app_operator):
     op, mock_deployer, mock_monitor, mock_analyzer = app_operator
 
-    # Setup mocks
+    # Setup mocks: deployer succeeds, monitor reports healthy
     mock_deployer.run.return_value = True
-
-    # Stop the monitor loop immediately
     mock_monitor.run.side_effect = None
+    mock_monitor.healthy = True
 
-    exit_code = op.run()
+    # Success → returns normally (no exception)
+    op.run()
 
-    assert exit_code == 0
     mock_analyzer.run.assert_called_once()
     mock_deployer.run.assert_called_once()
     mock_monitor.run.assert_called_once()
 
 
-def test_run_deployment_failure(app_operator):
+def test_run_deployment_shutdown_returns_quietly(app_operator):
+    """Deployer returning False means shutdown was requested — exit quietly."""
     op, mock_deployer, mock_monitor, mock_analyzer = app_operator
 
-    # Deployment fails
     mock_deployer.run.return_value = False
 
-    exit_code = op.run()
+    # Shutdown case returns normally (no exception)
+    op.run()
 
-    assert exit_code == 1
     mock_analyzer.run.assert_called_once()
     mock_deployer.run.assert_called_once()
     mock_monitor.run.assert_not_called()
+
+
+def test_run_unhealthy_monitor_raises_monitoring_error(app_operator):
+    """When monitor reports unhealthy after deploy, raise MonitoringError."""
+    op, mock_deployer, mock_monitor, _ = app_operator
+
+    mock_deployer.run.return_value = True
+    mock_monitor.run.side_effect = None
+    mock_monitor.healthy = False
+
+    with pytest.raises(MonitoringError):
+        op.run()
 
 
 def test_cleanup_stops_application(app_operator):
@@ -126,35 +138,32 @@ def test_handle_shutdown_signal_sigterm(app_operator):
     assert op._shutdown_requested is True
 
 
-def test_run_handles_keyboard_interrupt(app_operator):
+def test_run_propagates_keyboard_interrupt(app_operator):
+    """KeyboardInterrupt should propagate; cleanup still runs via finally."""
     op, mock_deployer, _, _ = app_operator
 
     # Simulate KeyboardInterrupt during deployment
     mock_deployer.run.side_effect = KeyboardInterrupt()
 
-    # We also want to verify cleanup is called.
-    # Since _cleanup relies on _deployed flag, let's set it or mock it.
-    # But _cleanup is called in finally block.
-
-    # Mock _cleanup to verify it's called
+    # Mock _cleanup to verify it's called from the finally block
     with patch.object(op, "_cleanup") as mock_cleanup:
-        exit_code = op.run()
-
-        assert exit_code == 1
+        with pytest.raises(KeyboardInterrupt):
+            op.run()
         mock_cleanup.assert_called_once()
 
 
-def test_run_handles_exception_gracefully(app_operator):
+def test_run_propagates_unexpected_exceptions(app_operator):
+    """Unexpected exceptions propagate to the CLI boundary for translation."""
     op, mock_deployer, _, _ = app_operator
 
     mock_deployer.run.side_effect = RuntimeError("Unexpected crash")
 
-    exit_code = op.run()
-
-    assert exit_code == 1
+    with pytest.raises(RuntimeError, match="Unexpected crash"):
+        op.run()
 
 
 def test_run_monitor_failure_marks_failed_status(repo_path, mock_agent):
+    """When monitor raises, finally-block still marks status as failed."""
     mock_ui = Mock(spec=OperatorUI)
 
     with (
@@ -170,8 +179,8 @@ def test_run_monitor_failure_marks_failed_status(repo_path, mock_agent):
         )
         op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui, config=config)
         with patch.object(op.recorder, "finalize") as mock_finalize:
-            exit_code = op.run()
+            with pytest.raises(RuntimeError, match="monitor failed"):
+                op.run()
 
-    assert exit_code == 1
     mock_ui.close.assert_called_once_with(status="failed", exit_code=1)
     mock_finalize.assert_called_once_with("failed")

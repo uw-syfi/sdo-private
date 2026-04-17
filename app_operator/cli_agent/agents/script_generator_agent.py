@@ -50,7 +50,10 @@ class ScriptGeneratorAgent:
         if not filesystem.is_dir(target_path):
             return False, f"Target path is not a directory: {target_path}"
 
-        filesystem.mkdir(sds_dir, exist_ok=True)
+        try:
+            filesystem.mkdir(sds_dir, exist_ok=True)
+        except OSError as e:
+            raise FileSystemError(f"Failed to create .sds directory {sds_dir}: {e}") from e
 
         abs_target_dir = str(target_path)
 
@@ -82,11 +85,14 @@ class ScriptGeneratorAgent:
                 deploy_script_path = sds_dir / "deploy.sh"
                 health_check_script_path = sds_dir / "health_check.sh"
 
-                if filesystem.exists(deploy_script_path):
-                    filesystem.chmod(deploy_script_path, 0o755)
+                try:
+                    if filesystem.exists(deploy_script_path):
+                        filesystem.chmod(deploy_script_path, 0o755)
 
-                if filesystem.exists(health_check_script_path):
-                    filesystem.chmod(health_check_script_path, 0o755)
+                    if filesystem.exists(health_check_script_path):
+                        filesystem.chmod(health_check_script_path, 0o755)
+                except OSError as e:
+                    raise FileSystemError(f"Failed to set script permissions: {e}") from e
 
                 return True, f"Successfully generated scripts in {sds_dir}"
 

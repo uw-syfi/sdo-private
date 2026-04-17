@@ -104,12 +104,13 @@ class TestCLIOperatorPhaseControl:
         # Mock deployer to succeed
         operator.deployer.run = Mock(return_value=True)
         operator.monitor.run = Mock()
+        operator.monitor.healthy = True
 
-        result = operator.run()
+        # Success → returns normally (no exception)
+        operator.run()
 
         # Verify deployment was attempted and succeeded
         operator.deployer.run.assert_called_once()
-        assert result == 0  # Success
 
     def test_analysis_files_not_created_when_disabled(self, temp_repo):
         """Test that analysis files are not created when disabled."""

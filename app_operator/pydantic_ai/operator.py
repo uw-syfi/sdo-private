@@ -7,6 +7,7 @@ from pathlib import Path
 from types import FrameType
 
 from app_operator.config import Config, load_config
+from app_operator.exceptions import DeploymentError, ProcessError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
@@ -98,7 +99,7 @@ class PydanticAIOperator(OperatorBase):
 
         self._deployed = False
 
-    def run(self) -> int:
+    def run(self) -> None:
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, self._handle_shutdown_signal)
             signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
@@ -121,37 +122,37 @@ class PydanticAIOperator(OperatorBase):
 
             if self._shutdown_requested:
                 _status = "interrupted"
-                return 1
+                return
 
             # Phase 2: Script Generation
             self._generate_scripts()
 
             if self._shutdown_requested:
                 _status = "interrupted"
-                return 1
+                return
 
             # Phase 3: Deploy with retries
             self._deployed = self._deploy_with_retries()
 
-            # Phase 4: Monitoring
-            if self._deployed and self.config.operator.phase.health_monitoring:
-                self._monitor()
-            elif not self._deployed:
-                logger.error("Deployment failed after max attempts.")
+            if not self._deployed:
+                if self._shutdown_requested:
+                    _status = "interrupted"
+                    return
+                raise DeploymentError(
+                    f"Deployment failed after {self.max_deployment_attempts} attempts",
+                    attempt=self.max_deployment_attempts,
+                )
 
-            _status = "completed" if self._deployed else "failed"
+            # Phase 4: Monitoring
+            if self.config.operator.phase.health_monitoring:
+                self._monitor()
+
             logger.info(f"Total Token Usage: {self.recorder.total_usage}")
             emit_progress("finishing")
-            return 0
-
+            _status = "completed"
         except KeyboardInterrupt:
-            logger.info("Received interrupt signal. Shutting down gracefully...")
             _status = "interrupted"
-            return 1
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}", exc_info=True)
-            return 1
+            raise
         finally:
             self.recorder.finalize(_status)
 
@@ -174,13 +175,22 @@ class PydanticAIOperator(OperatorBase):
 
             # Run deploy script
             log_file = self.repo_path / ".sds" / "logs" / f"deploy_attempt_{attempt}.log"
-            deploy_result = run_script(
-                self.repo_path,
-                self.filesystem,
-                ".sds/deploy.sh start",
-                log_file_path=log_file,
-                timeout=self.config.operator.deploy_timeout,
-            )
+            try:
+                deploy_result = run_script(
+                    self.repo_path,
+                    self.filesystem,
+                    ".sds/deploy.sh start",
+                    log_file_path=log_file,
+                    timeout=self.config.operator.deploy_timeout,
+                )
+            except ProcessError as e:
+                logger.error(f"Process error during deployment: {e}")
+                deploy_result: CommandResult = {
+                    "success": False,
+                    "exit_code": e.exit_code if e.exit_code is not None else -1,
+                    "stdout": "",
+                    "stderr": str(e),
+                }
 
             # Run health check
             verdict = self._run_health_check(attempt)

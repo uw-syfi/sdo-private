@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app_operator.config import AgentConfig, Config, DeploymentConfig, RuntimeConfig
+from app_operator.exceptions import DeploymentError
 from app_operator.filesystem import InMemoryFilesystem
 from app_operator.pydantic_ai.operator import PydanticAIOperator
 from libs.model_config import ModelConfig
@@ -113,9 +114,8 @@ def test_run_success(repo_path, mock_config, memory_fs):
         operator = PydanticAIOperator(
             repo_path=str(repo_path), filesystem=memory_fs, config=mock_config, health_check_interval=0
         )
-        exit_code = operator.run()
+        operator.run()
 
-        assert exit_code == 0
         assert operator._deployed is True
         mock_recorder.finalize.assert_called_with("completed")
 
@@ -156,9 +156,11 @@ def test_run_deployment_failure(repo_path, mock_config, memory_fs):
             config=mock_config,
             max_deployment_attempts=2,
         )
-        exit_code = operator.run()
+        # Deployment failure now raises DeploymentError (fixes latent bug
+        # where run() used to return 0 even when deployment failed).
+        with pytest.raises(DeploymentError):
+            operator.run()
 
-        assert exit_code == 0  # run() returns 0 but _deployed is False
         assert operator._deployed is False
         mock_recorder.finalize.assert_called_with("failed")
 
@@ -178,9 +180,9 @@ def test_run_exception(repo_path, mock_config, memory_fs):
         patch("app_operator.pydantic_ai.operator.PydanticAITrajectoryRecorder", return_value=mock_recorder),
     ):
         operator = PydanticAIOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
-        exit_code = operator.run()
+        with pytest.raises(RuntimeError, match="Unexpected"):
+            operator.run()
 
-        assert exit_code == 1
         mock_recorder.finalize.assert_called_with("failed")
 
 
@@ -199,9 +201,9 @@ def test_run_keyboard_interrupt(repo_path, mock_config, memory_fs):
         patch("app_operator.pydantic_ai.operator.PydanticAITrajectoryRecorder", return_value=mock_recorder),
     ):
         operator = PydanticAIOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
-        exit_code = operator.run()
+        with pytest.raises(KeyboardInterrupt):
+            operator.run()
 
-        assert exit_code == 1
         mock_recorder.finalize.assert_any_call("interrupted")
 
 
@@ -236,9 +238,9 @@ def test_run_pydantic_ai_exception(repo_path, mock_config, memory_fs):
         patch("app_operator.pydantic_ai.operator.PydanticAITrajectoryRecorder", return_value=mock_recorder),
     ):
         operator = PydanticAIOperator(repo_path=str(repo_path), filesystem=memory_fs, config=mock_config)
-        exit_code = operator.run()
+        with pytest.raises(UnexpectedModelBehavior):
+            operator.run()
 
-        assert exit_code == 1
         mock_recorder.finalize.assert_called_with("failed")
 
 

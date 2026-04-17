@@ -191,8 +191,7 @@ def test_dspy_disabled_uses_jinja2(temp_repo, dspy_config_disabled):
         config=config,
     )
 
-    exit_code = operator.run()
-    assert exit_code == 0
+    operator.run()
 
     # Verify scripts were created
     assert (temp_repo / ".sds" / "deploy.sh").exists()
@@ -240,8 +239,7 @@ def test_dspy_fallback_to_jinja2(temp_repo, dspy_config_enabled):
     )
 
     # No optimized modules exist, so should fall back to Jinja2
-    exit_code = operator.run()
-    assert exit_code == 0
+    operator.run()
 
     # Verify scripts were created (via fallback)
     assert (temp_repo / ".sds" / "deploy.sh").exists()
@@ -277,8 +275,7 @@ def test_dspy_enabled_uses_optimized_modules(temp_repo, dspy_config_enabled):
     )
 
     # DSPy is enabled but no optimized modules exist, so will fall back to Jinja2
-    exit_code = operator.run()
-    assert exit_code == 0
+    operator.run()
 
     # Verify scripts were created (via fallback)
     assert (temp_repo / ".sds" / "deploy.sh").exists()
@@ -390,8 +387,7 @@ def test_trajectory_tracks_prompt_version(temp_repo, dspy_config_disabled):
         config=config,
     )
 
-    exit_code = operator.run()
-    assert exit_code == 0
+    operator.run()
 
     # Read trajectory
     trajectory_files = list((temp_repo / ".sds" / "trajectories").glob("trajectory_*.json"))
@@ -441,8 +437,7 @@ def test_dspy_fallback_recorded_in_trajectory(temp_repo, dspy_config_enabled):
     )
 
     # No optimized modules exist, so fallback will occur
-    exit_code = operator.run()
-    assert exit_code == 0
+    operator.run()
 
     # Read trajectory
     trajectory_files = list((temp_repo / ".sds" / "trajectories").glob("trajectory_*.json"))
@@ -499,8 +494,7 @@ def test_dspy_module_invocation_error_falls_back(mock_load, temp_repo, dspy_conf
     )
 
     # Should succeed via fallback
-    exit_code = operator.run()
-    assert exit_code == 0
+    operator.run()
 
     # Verify scripts were created (via fallback)
     assert (temp_repo / ".sds" / "deploy.sh").exists()
@@ -570,8 +564,7 @@ def test_multiple_deployments_with_canary(tmp_path, dspy_config_canary):
             config=config,
         )
 
-        exit_code = operator.run()
-        assert exit_code == 0
+        operator.run()
 
         # Track which version was used (stored for verification)
         results[str(repo)] = "success"
