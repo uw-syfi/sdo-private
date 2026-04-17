@@ -12,11 +12,12 @@ if TYPE_CHECKING:
     from app_operator.types import CommandResult
 
 from app_operator.cli_agent._progress_summarizer import ProgressSummarizer
+from app_operator.constants import (
+    PROGRESS_INITIAL_DELAY_SECS,
+    PROGRESS_SUMMARY_INTERVAL_SECS,
+)
 from app_operator.logger import logger
 from app_operator.subprocess_runner import SubprocessRunner
-
-MONITOR_INITIAL_DELAY_SECS = 15.0
-MONITOR_SUMMARY_INTERVAL_SECS = 30.0
 
 
 class DeployExecutor:
@@ -77,8 +78,8 @@ class DeployExecutor:
             agent_generate_fn=lambda prompt, silent, timeout: self.ctx.coding_agent.generate(
                 prompt, silent=silent, timeout=timeout
             ),
-            initial_delay=MONITOR_INITIAL_DELAY_SECS,
-            summary_interval=MONITOR_SUMMARY_INTERVAL_SECS,
+            initial_delay=PROGRESS_INITIAL_DELAY_SECS,
+            summary_interval=PROGRESS_SUMMARY_INTERVAL_SECS,
             time_func=self._get_time,
             recorder=self.ctx.recorder,
         )
