@@ -85,6 +85,7 @@ experiment.toml
 rlm_runs/
 rlm_results/
 rlm_output/
+gepa_runs/
 rlm[0-9]*/
 *_results*.png
 exp_config/
