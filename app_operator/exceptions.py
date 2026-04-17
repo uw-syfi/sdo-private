@@ -67,3 +67,12 @@ class AgentError(SdsOperatorError):
 
     Raised when the coding agent fails to generate, fix, or analyze.
     """
+
+
+class MonitoringError(SdsOperatorError):
+    """Post-deployment health monitoring detected an unhealthy state.
+
+    Raised when deployment completed but the health monitor subsequently
+    reported the application as unhealthy.  Distinguishes "deployed but
+    unhealthy" from "deployment failed" (``DeploymentError``).
+    """

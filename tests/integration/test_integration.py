@@ -176,9 +176,7 @@ def test_cold_start_success(temp_repo):
     )
 
     # Run the operator
-    exit_code = operator.run()
-
-    assert exit_code == 0
+    operator.run()
 
     # Verify scripts were created
     assert (temp_repo / ".sds" / "deploy.sh").exists()
@@ -215,9 +213,8 @@ def test_deployment_fix_loop(temp_repo):
         ),
     )
 
-    exit_code = operator.run()
+    operator.run()
 
-    assert exit_code == 0
     assert agent.has_fixed_deploy is True
 
     # Verify we had to retry.
@@ -250,9 +247,7 @@ def test_monitoring_execution(temp_repo):
         ),
     )
 
-    exit_code = operator.run()
-
-    assert exit_code == 0
+    operator.run()
 
     # Check that we have 3 monitoring logs
     monitor_logs = list((temp_repo / ".sds" / "logs" / "monitor").glob("check_*.log"))

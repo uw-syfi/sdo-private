@@ -7,6 +7,7 @@ from app_operator.exceptions import (
     ConfigurationError,
     DeploymentError,
     FileSystemError,
+    MonitoringError,
     ProcessError,
     SdsOperatorError,
 )
@@ -74,6 +75,13 @@ def test_agent_error():
     assert isinstance(error, SdsOperatorError)
 
 
+def test_monitoring_error():
+    """Test MonitoringError inherits from SdsOperatorError."""
+    error = MonitoringError("unhealthy after deploy")
+    assert str(error) == "unhealthy after deploy"
+    assert isinstance(error, SdsOperatorError)
+
+
 def test_exception_hierarchy():
     """Test all custom exceptions inherit from SdsOperatorError."""
     exceptions = [
@@ -82,6 +90,7 @@ def test_exception_hierarchy():
         FileSystemError("test"),
         ProcessError("test"),
         AgentError("test"),
+        MonitoringError("test"),
     ]
 
     for exc in exceptions:

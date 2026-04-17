@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from app_operator.config import Config, load_config
-from app_operator.exceptions import ProcessError
+from app_operator.exceptions import DeploymentError, ProcessError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
@@ -98,7 +98,7 @@ class PydanticAIOperator(OperatorBase):
 
         self._deployed = False
 
-    def run(self) -> int:
+    def run(self) -> None:
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, self._handle_shutdown_signal)
             signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
@@ -121,37 +121,37 @@ class PydanticAIOperator(OperatorBase):
 
             if self._shutdown_requested:
                 _status = "interrupted"
-                return 1
+                return
 
             # Phase 2: Script Generation
             self._generate_scripts()
 
             if self._shutdown_requested:
                 _status = "interrupted"
-                return 1
+                return
 
             # Phase 3: Deploy with retries
             self._deployed = self._deploy_with_retries()
 
-            # Phase 4: Monitoring
-            if self._deployed and self.config.operator.phase.health_monitoring:
-                self._monitor()
-            elif not self._deployed:
-                logger.error("Deployment failed after max attempts.")
+            if not self._deployed:
+                if self._shutdown_requested:
+                    _status = "interrupted"
+                    return
+                raise DeploymentError(
+                    f"Deployment failed after {self.max_deployment_attempts} attempts",
+                    attempt=self.max_deployment_attempts,
+                )
 
-            _status = "completed" if self._deployed else "failed"
+            # Phase 4: Monitoring
+            if self.config.operator.phase.health_monitoring:
+                self._monitor()
+
             logger.info(f"Total Token Usage: {self.recorder.total_usage}")
             emit_progress("finishing")
-            return 0
-
+            _status = "completed"
         except KeyboardInterrupt:
-            logger.info("Received interrupt signal. Shutting down gracefully...")
             _status = "interrupted"
-            return 1
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}", exc_info=True)
-            return 1
+            raise
         finally:
             self.recorder.finalize(_status)
 

@@ -1,8 +1,12 @@
 import argparse
 
 from app_operator.config import load_config
+from app_operator.exceptions import SdsOperatorError
 from app_operator.logger import logger
 from app_operator.operator_factory import create_operator
+
+# POSIX exit code for processes terminated by SIGINT (128 + SIGINT=2).
+EXIT_INTERRUPTED = 130
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -16,7 +20,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run_command(args: argparse.Namespace) -> int:
-    """Execute the 'run' command logic."""
+    """Execute the 'run' command logic.
+
+    Translates operator exceptions into POSIX process exit codes.  The
+    operator itself raises on failure; this boundary decides the exit code.
+    """
     if not args.directory:
         # This case should ideally be handled by argparse if 'directory' was required
         # but including for robustness.
@@ -39,15 +47,24 @@ def run_command(args: argparse.Namespace) -> int:
     }
 
     try:
-        exit_code = create_operator(shared_kwargs, config).run()
-
+        create_operator(shared_kwargs, config).run()
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        return EXIT_INTERRUPTED
+    except SdsOperatorError as e:
+        # Domain failures: DeploymentError, MonitoringError, AgentError, etc.
+        logger.error(f"Operator failed: {e}")
+        return 1
     except ValueError as e:
         logger.error(f"Error: {e}")
         return 1
-
     except (OSError, RuntimeError) as e:
-        # Top-level catch to prevent uncaught exception — specific types are too numerous
+        logger.error(f"✗ Unexpected error: {e}", exc_info=True)
+        return 1
+    except Exception as e:
+        # Top-level safety net: log with traceback and return non-zero so the
+        # CLI always terminates cleanly rather than emitting a bare traceback.
         logger.error(f"✗ Unexpected error: {e}", exc_info=True)
         return 1
 
-    return exit_code
+    return 0

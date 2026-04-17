@@ -30,6 +30,15 @@ class OperatorBase(ABC):
             self.filesystem.write_text(sds_config_path, config_content)
 
     @abstractmethod
-    def run(self) -> int:
-        """Run the operator. Returns exit code."""
+    def run(self) -> None:
+        """Run the operator.
+
+        Returns normally on success.  Raises an exception on failure:
+        ``DeploymentError`` for terminal deployment failures,
+        ``MonitoringError`` when post-deploy monitoring is unhealthy,
+        other ``SdsOperatorError`` subclasses for domain errors, or
+        ``KeyboardInterrupt`` for user-initiated shutdown.  The CLI
+        boundary (``commands/run.py``) translates exceptions into
+        process exit codes.
+        """
         ...

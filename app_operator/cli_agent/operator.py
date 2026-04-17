@@ -10,7 +10,7 @@ from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deployer import DeploymentAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.config import Config, load_config
-from app_operator.exceptions import AgentError, DeploymentError, SdsOperatorError
+from app_operator.exceptions import AgentError, MonitoringError
 from app_operator.filesystem import FileSystemInterface, RealFilesystem
 from app_operator.logger import logger
 from app_operator.operator_base import OperatorBase
@@ -145,18 +145,20 @@ class AppOperator(OperatorBase):
             ctx=self._ctx,
         )
 
-    def run(self) -> int:
+    def run(self) -> None:
         """Main entry point for application operation.
 
-        Returns:
-            int: Exit code (0 for success, 1 for failure).
+        Returns normally on success.  Raises ``DeploymentError`` on terminal
+        deployment failure, ``MonitoringError`` when post-deploy monitoring
+        reports unhealthy, or other exceptions for unexpected failures.
+        The CLI boundary translates these into process exit codes.
         """
         # Setup signal handlers for graceful shutdown
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, self._handle_shutdown_signal)
             signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
 
-        run_succeeded = False
+        succeeded = False
         try:
             logger.info("Starting App Operator Mode")
             logger.info(f"Repository: {self.repo_path}")
@@ -174,18 +176,15 @@ class AppOperator(OperatorBase):
                 logger.info("Code analysis disabled by configuration, skipping")
 
             # Step 2: Deploy with automatic error fixing (includes script
-            # generation)
+            # generation).  Raises DeploymentError on terminal failure;
+            # returns False only on shutdown request.
             self.ui.set_stage("Deployment")
-            try:
-                if not self.deployer.run(
-                    max_attempts=self.max_deployment_attempts,
-                    check_shutdown=lambda: self._shutdown_requested,
-                ):
-                    logger.error("Failed to deploy application after multiple attempts")
-                    return 1
-            except DeploymentError as e:
-                logger.error(f"Deployment failed: {e}")
-                return 1
+            if not self.deployer.run(
+                max_attempts=self.max_deployment_attempts,
+                check_shutdown=lambda: self._shutdown_requested,
+            ):
+                logger.info("Deployment aborted due to shutdown request")
+                return
 
             self._deployed = True
 
@@ -201,27 +200,16 @@ class AppOperator(OperatorBase):
                 logger.info("Health monitoring disabled by configuration, skipping")
 
             if not self.monitor.healthy:
-                logger.warning("Monitor reported unhealthy status after deployment")
+                raise MonitoringError("Monitor reported unhealthy status after deployment")
 
-            run_succeeded = self.monitor.healthy
-            return 0 if run_succeeded else 1
-
-        except KeyboardInterrupt:
-            # Graceful shutdown initiated by signal handler
-            logger.info("Shutting down due to interrupt...")
-            return 1
-
-        except (SdsOperatorError, AgentError, OSError, RuntimeError, ValueError) as e:
-            # Top-level catch to prevent uncaught exception — specific types are too numerous
-            logger.error(f"Unexpected error: {e}", exc_info=True)
-            return 1
+            succeeded = True
         finally:
             self.ui.close(
-                status="completed" if run_succeeded else "failed",
-                exit_code=0 if run_succeeded else 1,
+                status="completed" if succeeded else "failed",
+                exit_code=0 if succeeded else 1,
             )
             self._cleanup()
-            self.recorder.finalize("completed" if run_succeeded else "failed")
+            self.recorder.finalize("completed" if succeeded else "failed")
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
         """Handle shutdown signals (SIGINT, SIGTERM).

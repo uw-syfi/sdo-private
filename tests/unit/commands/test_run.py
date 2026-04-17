@@ -5,8 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app_operator.commands.run import add_arguments, run_command
+from app_operator.commands.run import EXIT_INTERRUPTED, add_arguments, run_command
 from app_operator.config import AgentConfig, Config, OperatorConfig, RuntimeConfig
+from app_operator.exceptions import DeploymentError, MonitoringError
 from libs.model_config import ModelConfig
 
 
@@ -127,7 +128,7 @@ def test_run_command_returns_1_on_generic_exception(mock_args, mock_config):
 def test_run_command_runs_cli_agent_operator(mock_args, mock_config):
     """Test that run_command creates and runs AppOperator for cli_agent."""
     mock_operator = MagicMock()
-    mock_operator.run.return_value = 0
+    mock_operator.run.return_value = None  # operator.run() returns None on success
 
     with patch("app_operator.commands.run.load_config", return_value=mock_config):
         with patch(
@@ -143,13 +144,49 @@ def test_run_command_runs_cli_agent_operator(mock_args, mock_config):
     assert exit_code == 0
 
 
+def test_run_command_returns_1_on_deployment_error(mock_args, mock_config):
+    """DeploymentError from operator → exit code 1."""
+    mock_operator = MagicMock()
+    mock_operator.run.side_effect = DeploymentError("deploy failed", attempt=3)
+
+    with patch("app_operator.commands.run.load_config", return_value=mock_config):
+        with patch("app_operator.commands.run.create_operator", return_value=mock_operator):
+            exit_code = run_command(mock_args)
+
+    assert exit_code == 1
+
+
+def test_run_command_returns_1_on_monitoring_error(mock_args, mock_config):
+    """MonitoringError (deployed but unhealthy) → exit code 1."""
+    mock_operator = MagicMock()
+    mock_operator.run.side_effect = MonitoringError("unhealthy after deploy")
+
+    with patch("app_operator.commands.run.load_config", return_value=mock_config):
+        with patch("app_operator.commands.run.create_operator", return_value=mock_operator):
+            exit_code = run_command(mock_args)
+
+    assert exit_code == 1
+
+
+def test_run_command_returns_130_on_keyboard_interrupt(mock_args, mock_config):
+    """KeyboardInterrupt → POSIX exit code 130 (128 + SIGINT)."""
+    mock_operator = MagicMock()
+    mock_operator.run.side_effect = KeyboardInterrupt()
+
+    with patch("app_operator.commands.run.load_config", return_value=mock_config):
+        with patch("app_operator.commands.run.create_operator", return_value=mock_operator):
+            exit_code = run_command(mock_args)
+
+    assert exit_code == EXIT_INTERRUPTED == 130
+
+
 def test_run_command_passes_custom_config_path(mock_config):
     """Test that run_command passes custom config path to load_config."""
     args = argparse.Namespace()
     args.directory = "/test/repo"
     args.config = "/custom/sds.toml"
     mock_operator = MagicMock()
-    mock_operator.run.return_value = 0
+    mock_operator.run.return_value = None
 
     with patch("app_operator.commands.run.load_config", return_value=mock_config) as mock_load:
         with patch(
@@ -183,7 +220,7 @@ def test_run_command_uses_config_intervals():
     )
 
     mock_operator = MagicMock()
-    mock_operator.run.return_value = 0
+    mock_operator.run.return_value = None
 
     with patch("app_operator.commands.run.load_config", return_value=custom_config):
         with patch(
