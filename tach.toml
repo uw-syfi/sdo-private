@@ -61,12 +61,6 @@ depends_on = [
     "libs.pydantic_agent",
 ]
 
-[[modules]]
-path = "app_operator.rlm"
-depends_on = [
-    "app_operator.cli_agent",
-]
-
 # --- Layer 1: shared infrastructure ---
 
 [[modules]]
