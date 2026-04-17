@@ -109,18 +109,6 @@ depends_on = [
 ]
 
 [[modules]]
-path = "app_operator.trajectory_utils"
-depends_on = [
-    "app_operator.core",
-]
-
-[[modules]]
-path = "app_operator.trajectory_collectors"
-depends_on = [
-    "app_operator.core",
-]
-
-[[modules]]
 path = "app_operator.rate_limit_handler"
 depends_on = [
     "app_operator.core",
@@ -151,7 +139,6 @@ path = "app_operator.trajectory"
 depends_on = [
     "app_operator.core",
     "app_operator.prompts",
-    "app_operator.trajectory_collectors",
     "libs.agent_cli",
 ]
 
@@ -186,7 +173,6 @@ depends_on = [
     "app_operator.rate_limit_handler",
     "app_operator.run_classifier",
     "app_operator.trajectory",
-    "app_operator.trajectory_utils",
     "libs.agent_cli",
 ]
 
@@ -228,7 +214,6 @@ depends_on = [
     "app_operator.script_runner",
     "app_operator.subprocess_runner",
     "app_operator.trajectory",
-    "app_operator.trajectory_utils",
     "libs.agent_cli",
 ]
 

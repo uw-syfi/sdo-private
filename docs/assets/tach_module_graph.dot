@@ -13,15 +13,12 @@ digraph tach_modules {
     "app_operator.llm" -> "libs.model_config";
     "app_operator.progress" -> "app_operator.core";
     "app_operator.agent_response_files" -> "app_operator.core";
-    "app_operator.trajectory_utils" -> "app_operator.core";
-    "app_operator.trajectory_collectors" -> "app_operator.core";
     "app_operator.rate_limit_handler" -> "app_operator.core";
     "app_operator.guardrails" -> "app_operator.core";
     "app_operator.healthcheck" -> "app_operator.core";
     "app_operator.prompts" -> "app_operator.core";
     "app_operator.trajectory" -> "app_operator.core";
     "app_operator.trajectory" -> "app_operator.prompts";
-    "app_operator.trajectory" -> "app_operator.trajectory_collectors";
     "app_operator.trajectory" -> "libs.agent_cli";
     "app_operator.health_validation" -> "app_operator.core";
     "app_operator.health_validation" -> "app_operator.prompts";
@@ -34,7 +31,6 @@ digraph tach_modules {
     "app_operator.dspy_integration" -> "app_operator.rate_limit_handler";
     "app_operator.dspy_integration" -> "app_operator.run_classifier";
     "app_operator.dspy_integration" -> "app_operator.trajectory";
-    "app_operator.dspy_integration" -> "app_operator.trajectory_utils";
     "app_operator.dspy_integration" -> "libs.agent_cli";
     "app_operator.fault_injection" -> "app_operator.core";
     "app_operator.fault_injection" -> "libs.agent_cli";
@@ -61,7 +57,6 @@ digraph tach_modules {
     "app_operator.cli_agent" -> "app_operator.script_runner";
     "app_operator.cli_agent" -> "app_operator.subprocess_runner";
     "app_operator.cli_agent" -> "app_operator.trajectory";
-    "app_operator.cli_agent" -> "app_operator.trajectory_utils";
     "app_operator.cli_agent" -> "libs.agent_cli";
     "app_operator.gepa" -> "app_operator.core";
     "app_operator.gepa" -> "app_operator.cli_agent";

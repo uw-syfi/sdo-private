@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app_operator.core import logger
-from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
+from app_operator.trajectory import extract_rlm_statistics_from_trajectory
 
 MetricCallable = Callable[[Any, Any, Any], float]
 
@@ -278,7 +278,7 @@ class RLMCompositeMetric:
         return composite
 
 
-# Re-exported for backwards compatibility — canonical definition is in trajectory_utils.
+# Re-exported for backwards compatibility — canonical definition is in trajectory.utils.
 __all__ = [
     "RLMEfficiencyMetric",
     "RLMContextUtilizationMetric",
