@@ -244,18 +244,22 @@ def _compute_group_stats(runs):
 
     ttls = []
     ttms = []
+    tres = []
     for r in runs:
         try:
             if r.get("TTL"):
                 ttls.append(float(r["TTL"]))
             if r.get("has_mitigation") and r.get("TTM") and r.get("TTL"):
-                ttms.append(float(r["TTM"]) - float(r["TTL"]))
+                ttm_raw = float(r["TTM"])
+                ttms.append(ttm_raw - float(r["TTL"]))
+                tres.append(ttm_raw)
         except ValueError:
             pass
     avg_ttl = f"{sum(ttls) / len(ttls):.1f}" if ttls else "-"
     avg_ttm = f"{sum(ttms) / len(ttms):.1f}" if ttms else "-"
+    avg_tres = f"{sum(tres) / len(tres):.1f}" if tres else "-"
 
-    return count, diag_pct, mitig_pct, avg_ttl, avg_ttm
+    return count, diag_pct, mitig_pct, avg_ttl, avg_ttm, avg_tres
 
 
 def print_type_breakdown(completed_runs, type_mapping, table_width=130):
@@ -275,18 +279,27 @@ def print_type_breakdown(completed_runs, type_mapping, table_width=130):
     # Header
     type_w = 20
     print("-" * table_width)
-    header = f"{'Type':<{type_w}} | {'Count':>5} | {'Diag %':>7} | {'Mitig %':>7} | {'Avg TTL':>8} | {'Avg TTM':>8}"
+    header = (
+        f"{'Type':<{type_w}} | {'Count':>5} | {'Diag %':>7} | {'Mitig %':>7} | "
+        f"{'Avg Diag':>8} | {'Avg Mitig':>9} | {'Avg Res':>8}"
+    )
     print(header)
     print("-" * table_width)
 
     for type_name in sorted_types:
-        count, diag_pct, mitig_pct, avg_ttl, avg_ttm = _compute_group_stats(groups[type_name])
-        print(f"{type_name:<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>8}")
+        count, diag_pct, mitig_pct, avg_ttl, avg_ttm, avg_tres = _compute_group_stats(groups[type_name])
+        print(
+            f"{type_name:<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | "
+            f"{avg_ttl:>8} | {avg_ttm:>9} | {avg_tres:>8}"
+        )
 
     # Aggregate row across all problems (ungrouped)
     print("-" * table_width)
-    count, diag_pct, mitig_pct, avg_ttl, avg_ttm = _compute_group_stats(completed_runs)
-    print(f"{'all':<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | {avg_ttl:>8} | {avg_ttm:>8}")
+    count, diag_pct, mitig_pct, avg_ttl, avg_ttm, avg_tres = _compute_group_stats(completed_runs)
+    print(
+        f"{'all':<{type_w}} | {count:>5} | {diag_pct:>7} | {mitig_pct:>7} | "
+        f"{avg_ttl:>8} | {avg_ttm:>9} | {avg_tres:>8}"
+    )
 
     print("-" * table_width + "\n")
 
@@ -344,8 +357,10 @@ def summarize_results(target_path=None):
         )
     else:
         print("Mitigation Success Rate: No runs with mitigation.")
-    print(f"Average Time to Locate:   {avg_ttl:.2f}s")
-    print(f"Average Time to Mitigate: {avg_ttm:.2f}s")
+    avg_tres = sum(t_resolutions) / len(t_resolutions) if t_resolutions else 0.0
+    print(f"Average Diagnosis Time:   {avg_ttl:.2f}s")
+    print(f"Average Mitigation Time:  {avg_ttm:.2f}s")
+    print(f"Average Resolution Time:  {avg_tres:.2f}s")
     print("-" * table_width)
 
     def pad_emoji(s, width):
@@ -360,7 +375,7 @@ def summarize_results(target_path=None):
     header = (
         f"{'Run Date':<14} | {'Problem ID':<{problem_id_width}} | "
         f"{'Diag':<{diag_width}} | {'Mitig':<{mitig_width}} | "
-        f"{'Diag(s)':<7} | {'Mitig(s)':<7} | {'Status':<{status_width}}"
+        f"{'Diag(s)':<8} | {'Mitig(s)':<8} | {'Res(s)':<8} | {'Status':<{status_width}}"
     )
     print(header)
     print("-" * table_width)
@@ -389,20 +404,29 @@ def summarize_results(target_path=None):
                     ttm = f"{float(r.get('TTM', 0)) - float(r.get('TTL', 0)):.1f}"
                 except Exception:
                     ttm = "N/A"
+                try:
+                    tres = f"{float(r.get('TTM', 0)):.1f}"
+                except Exception:
+                    tres = "N/A"
             else:
                 ttm = "-"
+                tres = "-"
             status = "DONE"
         else:
             d_res = "-"
             m_res = "-"
             ttl = "-"
             ttm = "-"
+            tres = "-"
             status = "⚠️  INCOMPLETE"
 
         d_str = pad_emoji(d_res, diag_width)
         m_str = pad_emoji(m_res, mitig_width)
         status_str = pad_emoji(status, status_width)
-        print(f"{run_date:<14} | {pid:<{problem_id_width}} | {d_str} | {m_str} | {ttl:<7} | {ttm:<7} | {status_str}")
+        print(
+            f"{run_date:<14} | {pid:<{problem_id_width}} | {d_str} | {m_str} | "
+            f"{ttl:<8} | {ttm:<8} | {tres:<8} | {status_str}"
+        )
 
     print("=" * table_width + "\n")
 
