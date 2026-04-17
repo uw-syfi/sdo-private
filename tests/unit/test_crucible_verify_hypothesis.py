@@ -391,13 +391,72 @@ class TestSubmissionGatePydanticAIPath:
         )
         return result, shared_file, submission
 
-    def test_submission_rejected_if_not_verified(self, tmp_path: Path) -> None:
-        result, shared_file, _ = self._make_agent_and_run(tmp_path, hypothesis_verified_after_run=False)
-        assert result.completed is False
-        assert result.output is None
+    def test_submission_allowed_after_max_gate_rejections(self, tmp_path: Path) -> None:
+        """When verify_hypothesis is never called, the gate rejects up to
+        MAX_GATE_REJECTIONS times then lets the submission through."""
+        result, shared_file, submission = self._make_agent_and_run(tmp_path, hypothesis_verified_after_run=False)
+        # After MAX_GATE_REJECTIONS the gate allows submission for forward progress
+        assert result.completed is True
+        assert result.output == submission
         content = shared_file.read()
         assert "Submission blocked" in content
         assert "verify_hypothesis" in content
+
+    def test_gate_resumes_agent_with_message_history(self, tmp_path: Path) -> None:
+        """The gate should resume the agent (pass message_history) rather than
+        restarting a fresh orchestrator iteration."""
+        from sregym_agents.crucible.agents import SREAgent
+        from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
+        from sregym_agents.crucible.tools import SRESubmission
+
+        shared_path = tmp_path / "session.md"
+        shared_path.write_text("")
+        shared_file = SharedFile(shared_path)
+
+        submission = SRESubmission(answer="diag", justification="reasons", causal_chain="x→y")
+        fake_messages = [{"role": "assistant", "content": "hello"}]
+
+        call_log: list[dict] = []
+
+        class _TrackingDriver(AgentDriver):
+            async def run(self, **kwargs):  # type: ignore[override]
+                call_log.append(kwargs)
+                deps = kwargs.get("deps")
+                if deps is not None:
+                    deps.hypothesis_verified = False
+                return AgentResult(completed=True, output=submission, messages=fake_messages)
+
+        class _MockRenderer:
+            def render(self, *args, **kwargs) -> str:
+                return "rendered"
+
+            def render_user(self, *args, **kwargs) -> str:
+                return "user"
+
+        agent = SREAgent(
+            driver=_TrackingDriver(),
+            model_id="test-model",
+            renderer=_MockRenderer(),  # type: ignore[arg-type]
+        )
+        agent._render_prompts = MagicMock(return_value=("sys", "usr"))
+
+        asyncio.run(
+            agent.run(
+                app_info={"namespace": "default"},
+                stage="diagnosis",
+                iteration=1,
+                shared_file=shared_file,
+                shared_content="",
+            )
+        )
+
+        # Driver called twice: initial + 1 rejection retry (2nd hits MAX and allows)
+        assert len(call_log) == 2
+        # First call has no message_history
+        assert "message_history" not in call_log[0]
+        # Second call resumes with message_history from the first run
+        assert call_log[1]["message_history"] == fake_messages
+        assert "Submission blocked" in call_log[1]["prompt"]
 
     def test_submission_accepted_if_verified(self, tmp_path: Path) -> None:
         result, shared_file, submission = self._make_agent_and_run(tmp_path, hypothesis_verified_after_run=True)
@@ -406,3 +465,97 @@ class TestSubmissionGatePydanticAIPath:
         content = shared_file.read()
         assert "Submission blocked" not in content
         assert "Agent Hypothesis" in content
+
+
+# ---------------------------------------------------------------------------
+# SubmissionGate unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestSubmissionGate:
+    def _make_result(self, *, completed: bool = True, has_output: bool = True):
+        from sregym_agents.crucible.agents.base import AgentResult
+        from sregym_agents.crucible.tools import SRESubmission
+
+        output = SRESubmission(answer="diag", justification="j", causal_chain="c") if has_output else None
+        return AgentResult(completed=completed, output=output)
+
+    def test_passes_through_when_verified(self, tmp_path: Path) -> None:
+        from sregym_agents.crucible.agents.sre_agent import SubmissionGate
+
+        shared_path = tmp_path / "s.md"
+        shared_path.write_text("")
+        gate = SubmissionGate()
+        result = self._make_result()
+        reminder = gate.check(
+            result,
+            stage="diagnosis",
+            hypothesis_verified=True,
+            iteration=1,
+            shared_file=SharedFile(shared_path),
+        )
+        assert reminder is None
+        assert gate.rejections == 0
+
+    def test_passes_through_for_mitigation(self, tmp_path: Path) -> None:
+        from sregym_agents.crucible.agents.sre_agent import SubmissionGate
+
+        shared_path = tmp_path / "s.md"
+        shared_path.write_text("")
+        gate = SubmissionGate()
+        result = self._make_result()
+        reminder = gate.check(
+            result,
+            stage="mitigation",
+            hypothesis_verified=False,
+            iteration=1,
+            shared_file=SharedFile(shared_path),
+        )
+        assert reminder is None
+
+    def test_rejects_then_allows_on_max(self, tmp_path: Path) -> None:
+        from sregym_agents.crucible.agents.sre_agent import SubmissionGate
+
+        shared_path = tmp_path / "s.md"
+        shared_path.write_text("")
+        sf = SharedFile(shared_path)
+        gate = SubmissionGate(max_rejections=2)
+
+        # First attempt — rejected
+        r1 = gate.check(
+            self._make_result(),
+            stage="diagnosis",
+            hypothesis_verified=False,
+            iteration=1,
+            shared_file=sf,
+        )
+        assert r1 is not None
+        assert "Submission blocked" in r1
+        assert gate.rejections == 1
+
+        # Second attempt — hits max, allowed through
+        r2 = gate.check(
+            self._make_result(),
+            stage="diagnosis",
+            hypothesis_verified=False,
+            iteration=1,
+            shared_file=sf,
+        )
+        assert r2 is None
+        assert gate.rejections == 2
+
+    def test_passes_through_when_incomplete(self, tmp_path: Path) -> None:
+        from sregym_agents.crucible.agents.sre_agent import SubmissionGate
+
+        shared_path = tmp_path / "s.md"
+        shared_path.write_text("")
+        gate = SubmissionGate()
+        result = self._make_result(completed=False)
+        reminder = gate.check(
+            result,
+            stage="diagnosis",
+            hypothesis_verified=False,
+            iteration=1,
+            shared_file=SharedFile(shared_path),
+        )
+        assert reminder is None

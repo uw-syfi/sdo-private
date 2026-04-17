@@ -24,6 +24,83 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Submission gate — rejects diagnosis submissions that skip verify_hypothesis
+# ---------------------------------------------------------------------------
+
+_GATE_REMINDER_TEMPLATE = (
+    "\n### Iteration {iteration} — Submission blocked "
+    "({rejections}/{max_rejections})\n"
+    "You attempted to submit a diagnosis without calling "
+    "`verify_hypothesis` and receiving an `accept` or "
+    "`accept_partial` verdict. Every diagnosis must be verified "
+    "by calling `verify_hypothesis(root_cause_description, "
+    "causal_chain, root_cause_resources)` before submission. "
+    "If the verifier rejected your last attempt, revise the "
+    "hypothesis to address `causal_chain_rejection` and "
+    "re-verify — do not submit until accepted.\n"
+)
+
+
+class SubmissionGate:
+    """Tracks verify_hypothesis gate rejections for a single SREAgent.run() call.
+
+    The gate rejects up to ``max_rejections`` times, then allows the
+    submission through to ensure forward progress.  On rejection it
+    returns a reminder prompt so the caller can resume the agent in the
+    same context window.
+    """
+
+    def __init__(self, *, max_rejections: int = 2) -> None:
+        self.max_rejections = max_rejections
+        self.rejections = 0
+
+    def check(
+        self,
+        result: AgentResult[SRESubmission],
+        *,
+        stage: str,
+        hypothesis_verified: bool,
+        iteration: int,
+        shared_file: SharedFile,
+    ) -> str | None:
+        """Return a reminder prompt if the submission should be rejected, else ``None``.
+
+        When ``None`` is returned the caller should accept the result as-is.
+        """
+        if stage != "diagnosis":
+            return None
+        if not (result.completed and result.output is not None):
+            return None
+        if hypothesis_verified:
+            return None
+
+        self.rejections += 1
+        if self.rejections >= self.max_rejections:
+            logger.warning(
+                "[submission-gate] Allowing submission after %d rejections to ensure forward progress.",
+                self.rejections,
+            )
+            return None
+
+        logger.warning(
+            "[submission-gate] Rejecting diagnosis submission (%d/%d): "
+            "verify_hypothesis was not called or did not return "
+            "accept/accept_partial.",
+            self.rejections,
+            self.max_rejections,
+        )
+        reminder = _GATE_REMINDER_TEMPLATE.format(
+            iteration=iteration,
+            rejections=self.rejections,
+            max_rejections=self.max_rejections,
+        )
+        try:
+            shared_file.append(reminder)
+        except Exception as e:
+            logger.warning("Error writing submission-gate reminder to shared file: %s", e)
+        return reminder
+
 
 @dataclass
 class SREAgentConfig:
@@ -260,42 +337,40 @@ class SREAgent:
 
         tools = self._assemble_tools(stage)
 
-        result: AgentResult[SRESubmission] = await self._driver.run(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            tools=tools,
-            output_type=SRESubmission,
-            agent_name=f"sre-{stage}",
-            model_settings=self._model_settings(),
-            usage_collector=usage_collector,
-            deps=deps,
-            run_ctx={"stage": stage, "iteration": iteration, "role": "sre"},
-        )
+        gate = SubmissionGate()
+        current_prompt = user_prompt
+        message_history: list[Any] | None = None
 
-        # Gate: reject diagnosis submissions that did not go through verify_hypothesis.
-        # LTM short-circuit path bypasses this entirely (it raises an exception before
-        # the agent ever returns output), so reaching here on diagnosis means the agent
-        # produced structured output and must have called verify_hypothesis first.
-        if stage == "diagnosis" and result.completed and result.output is not None and not deps.hypothesis_verified:
-            logger.warning(
-                "[submission-gate] Rejecting diagnosis submission: verify_hypothesis "
-                "was not called or did not return accept/accept_partial."
+        while True:
+            run_kwargs: dict[str, Any] = {
+                "prompt": current_prompt,
+                "system_prompt": system_prompt,
+                "tools": tools,
+                "output_type": SRESubmission,
+                "agent_name": f"sre-{stage}",
+                "model_settings": self._model_settings(),
+                "usage_collector": usage_collector,
+                "deps": deps,
+                "run_ctx": {"stage": stage, "iteration": iteration, "role": "sre"},
+            }
+            if message_history is not None:
+                run_kwargs["message_history"] = message_history
+
+            result: AgentResult[SRESubmission] = await self._driver.run(**run_kwargs)
+
+            # Check the verify_hypothesis gate; on rejection the agent is
+            # resumed in the same context window with a reminder prompt.
+            reminder = gate.check(
+                result,
+                stage=stage,
+                hypothesis_verified=deps.hypothesis_verified,
+                iteration=iteration,
+                shared_file=shared_file,
             )
-            reminder = (
-                f"\n### Iteration {iteration} — Submission blocked\n"
-                "You attempted to submit a diagnosis without calling `verify_hypothesis` "
-                "and receiving an `accept` or `accept_partial` verdict. Every diagnosis "
-                "must be verified by calling `verify_hypothesis(root_cause_description, "
-                "causal_chain, root_cause_resources)` before submission. If the verifier "
-                "rejected your last attempt, revise the hypothesis to address "
-                "`causal_chain_rejection` and re-verify — do not submit until accepted.\n"
-            )
-            try:
-                shared_file.append(reminder)
-            except Exception as e:
-                logger.warning(f"Error writing submission-gate reminder to shared file: {e}")
-            result.completed = False
-            result.output = None
+            if reminder is None:
+                break
+            message_history = list(result.messages or [])
+            current_prompt = reminder
 
         # Post-run: extract state from deps (tools update state directly)
         if result.completed and result.output is not None:
