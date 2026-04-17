@@ -30,7 +30,7 @@ from app_operator.rate_limit_handler import (
     exponential_backoff,
 )
 from app_operator.run_classifier import RunClassification, classify_run
-from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
+from app_operator.trajectory import extract_rlm_statistics_from_trajectory
 
 _TRAIN_RUN_RE = re.compile(r"^iter(\d+)_c\d+_(.+)$")
 _VAL_RUN_RE = re.compile(r"^(.+)_iter(\d+)_val$")

@@ -38,7 +38,7 @@ See [`../docs/feature-flags.md`](../docs/feature-flags.md) for all feature flags
 - **DeploymentAgent** (`cli_agent/agents/deployer.py`): Generates deploy.sh/health_check.sh, self-healing loop.
 - **CodeAnalyzerAgent** (`cli_agent/agents/code_analyzer.py`): Proactive codebase analysis, generates `.sds/code_analysis.md`.
 - **AppMonitor** (`cli_agent/agents/app_monitor.py`): Periodic health checks.
-- **Trajectory** (`trajectory.py`): Records all agent calls with sequential IDs, saves to `.sds/trajectories/*.json`.
+- **Trajectory** (`trajectory/`): Records all agent calls with sequential IDs, saves to `.sds/trajectories/*.json`.
 - **PromptLoader** (`prompts/__init__.py`): Supports both Jinja2 (default) and DSPy-optimized rendering with fallback.
 
 See [`../docs/dspy-optimization.md`](../docs/dspy-optimization.md) and [`../docs/fault-injection.md`](../docs/fault-injection.md) for details.
@@ -53,5 +53,5 @@ See [`../docs/dspy-optimization.md`](../docs/dspy-optimization.md) and [`../docs
 
 ## Notes
 
-- When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `../.agents/skills/analyze-experiment/references/`.
+- When changing trajectory format (`trajectory/`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `../.agents/skills/analyze-experiment/references/`.
 - When adding or moving feature flags in `config.py`, update `../docs/feature-flags.md` to match.
