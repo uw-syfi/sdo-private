@@ -119,6 +119,7 @@ class SREDeps:
     stage_outputs_file: Path | None = None
     usage_collector: UsageCollector | None = None
     run_subagent: RunSubagent | None = None
+    hypothesis_verified: bool = False
 
     @property
     def enable_ltm_verified_direct_submit(self) -> bool:

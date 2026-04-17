@@ -36,7 +36,6 @@ from sregym_agents.crucible.tools._judge_tools import (
     submit_verdict,
 )
 from sregym_agents.crucible.tools._kb_tools import (
-    COVERAGE_THINKING_BUDGET,
     MAX_HINTS_PER_AREA,
     MAX_OUTPUT_TOKENS,
     MAX_TRIAGE_AREAS,
@@ -46,7 +45,7 @@ from sregym_agents.crucible.tools._kb_tools import (
     CandidateRootCause,
     CandidateVerification,
     DifferentialDiagnosis,
-    HypothesisCoverageVerdict,
+    HypothesisVerdict,
     LTMShortCircuit,
     MitigationApplication,
     MitigationPlaybookMatch,
@@ -60,7 +59,6 @@ from sregym_agents.crucible.tools._kb_tools import (
     TriageSpecialistReport,
     VerifiedDifferentialDiagnosis,
     VerifiedMitigationSearchResult,
-    check_hypothesis_coverage,
     format_triage_report,
     load_mitigation_playbook_text,
     load_triage_priors,
@@ -68,6 +66,7 @@ from sregym_agents.crucible.tools._kb_tools import (
     search_prior_incidents,
     search_prior_mitigations,
     triage_cluster,
+    verify_hypothesis,
 )
 
 __all__ = [
@@ -101,7 +100,6 @@ __all__ = [
     "submit_verdict",
     # _kb_tools
     "AreaAssessment",
-    "COVERAGE_THINKING_BUDGET",
     "MAX_HINTS_PER_AREA",
     "MAX_OUTPUT_TOKENS",
     "MAX_TRIAGE_AREAS",
@@ -110,7 +108,7 @@ __all__ = [
     "CandidateRootCause",
     "CandidateVerification",
     "DifferentialDiagnosis",
-    "HypothesisCoverageVerdict",
+    "HypothesisVerdict",
     "LTMShortCircuit",
     "MitigationApplication",
     "MitigationPlaybookMatch",
@@ -124,7 +122,6 @@ __all__ = [
     "TriageReport",
     "TriageSpecialistReport",
     "VerifiedDifferentialDiagnosis",
-    "check_hypothesis_coverage",
     "format_triage_report",
     "load_mitigation_playbook_text",
     "load_triage_priors",
@@ -132,4 +129,5 @@ __all__ = [
     "search_prior_incidents",
     "search_prior_mitigations",
     "triage_cluster",
+    "verify_hypothesis",
 ]

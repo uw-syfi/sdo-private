@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 THINKING_BUDGET = 4096
 MAX_OUTPUT_TOKENS = 16_384
 VERIFICATION_THINKING_BUDGET = 2048
-COVERAGE_THINKING_BUDGET = 2048
 
 MAX_TRIAGE_AREAS = 12
 MAX_HINTS_PER_AREA = 10
@@ -255,23 +254,39 @@ def _format_investigated_hypotheses_md(
     return "\n".join(lines)
 
 
-HypothesisCoverageVerdictLiteral = Literal["accept", "reject", "accept_partial"]
+HypothesisVerdictLiteral = Literal["accept", "reject", "accept_partial"]
 
 
-class HypothesisCoverageVerdict(BaseModel):
-    """Result of checking a hypothesis against triage (full, partial, or rejected)."""
+class HypothesisVerdict(BaseModel):
+    """Result of adversarially verifying a proposed root-cause hypothesis."""
 
-    verdict: HypothesisCoverageVerdictLiteral = Field(
+    verdict: HypothesisVerdictLiteral = Field(
         description=(
-            "'accept' if every anomaly is explained or noise; "
-            "'accept_partial' if the hypothesis is sound for a scoped fault but some "
+            "'accept' if every chain link is supported by cited evidence and all implicated "
+            "resources match the claim; "
+            "'accept_partial' if the chain is sound for a scoped fault but some triage "
             "anomalies are plausibly separate or out of scope; "
-            "'reject' if the hypothesis is wrong or incomplete for what it claims"
+            "'reject' if any link in the causal chain is broken, any implicated resource "
+            "fails the claim, or any evidence contradicts the hypothesis"
         )
     )
-    explained_anomalies: list[str] = Field(
+    reasoning: str = Field(description="Overall assessment grounded in cited evidence")
+    causal_chain_rejection: str = Field(
+        default="",
+        description=(
+            "Required on 'reject' (and on 'accept_partial' if applicable). Must (a) name the "
+            "specific link in the causal chain that is broken (e.g., 'step 2: claim that "
+            "missing key X causes crash') AND (b) explain what is broken with cited evidence "
+            "(e.g., 'refuted by `kubectl get cm -o yaml` showing the key is present'). "
+            "Empty on 'accept'."
+        ),
+    )
+    evidence: list[str] = Field(
         default_factory=list,
-        description="Triage anomalies that the hypothesis explains (including pre-existing noise)",
+        description=(
+            "Tool-call outputs cited verbatim to support or refute the hypothesis "
+            "(command excerpts, log lines, field values). Do not paraphrase."
+        ),
     )
     unexplained_anomalies: list[str] = Field(
         default_factory=list,
@@ -283,11 +298,10 @@ class HypothesisCoverageVerdict(BaseModel):
     residual_rationale: str = Field(
         default="",
         description=(
-            "When verdict is accept_partial: why listed unexplained anomalies do not "
-            "block accepting this hypothesis. Empty for accept/reject unless optional notes."
+            "Required on accept_partial: why listed unexplained anomalies do not block "
+            "accepting this hypothesis. Empty for accept/reject unless optional notes."
         ),
     )
-    reasoning: str = Field(description="Explanation of coverage assessment")
 
 
 class MitigationStrategy(BaseModel):
@@ -918,15 +932,23 @@ async def triage_cluster(
     return await triage_cluster_impl(ctx.deps)
 
 
-async def check_hypothesis_coverage_impl(
+async def verify_hypothesis_impl(
     deps: SREDeps,
-    hypothesis: str,
+    root_cause_description: str,
+    causal_chain: str,
+    root_cause_resources: list[str],
 ) -> str:
-    """Cross-check a hypothesis against the triage report (multi-fault aware).
+    """Adversarially verify a proposed root-cause hypothesis against the live cluster.
+
+    Spawns a subagent with cluster-probing tools that walks the causal chain link by
+    link and tries to refute the hypothesis. On accept/accept_partial, sets
+    ``deps.hypothesis_verified = True`` so the downstream submission gate passes.
 
     Args:
         deps: SRE dependency context.
-        hypothesis: Proposed root cause to check against triage findings.
+        root_cause_description: Natural-language description of the proposed root cause.
+        causal_chain: Chain from observable symptom back to the root cause.
+        root_cause_resources: Resources implicated as the root cause.
     """
     triage_report = deps.triage_report
     if triage_report is None:
@@ -939,51 +961,70 @@ async def check_hypothesis_coverage_impl(
     model_id = deps.model_id
     triage_context = format_triage_report(triage_report)
     prompt = deps.renderer.render(
-        "check_hypothesis_coverage",
+        "verify_hypothesis",
         triage_context=triage_context,
-        hypothesis=hypothesis,
+        root_cause_description=root_cause_description,
+        causal_chain=causal_chain,
+        root_cause_resources=root_cause_resources,
     )
-    logger.info("[hypothesis-coverage] PROMPT:\n%s", prompt)
+    logger.info("[hypothesis-verifier] PROMPT:\n%s", prompt)
 
-    ms = dict(thinking_settings(model_id, COVERAGE_THINKING_BUDGET)) if model_id else None
+    ms = dict(thinking_settings(model_id, VERIFICATION_THINKING_BUDGET)) if model_id else None
     try:
-        output: HypothesisCoverageVerdict = await run_subagent(
+        output: HypothesisVerdict = await run_subagent(
             prompt=prompt,
-            output_type=HypothesisCoverageVerdict,
-            agent_name="hypothesis-coverage",
+            output_type=HypothesisVerdict,
+            tools=[read_file, exec_bash_any, grep],
+            agent_name="hypothesis-verifier",
             model_settings=ms,
             usage_collector=deps.usage_collector,
         )
 
         output_json = output.model_dump_json(indent=2)
         logger.info(
-            "[hypothesis-coverage] done: verdict=%s, unexplained=%s, residual_rationale=%s, reasoning=%s",
+            "[hypothesis-verifier] done: verdict=%s, causal_chain_rejection=%s, reasoning=%s",
             output.verdict,
-            output.unexplained_anomalies,
-            output.residual_rationale,
+            output.causal_chain_rejection,
             output.reasoning,
         )
+        if output.verdict in ("accept", "accept_partial"):
+            deps.hypothesis_verified = True
         return output_json
     except Exception as e:
-        logger.warning("[hypothesis-coverage] failed: %s", e)
-        return f"Coverage check failed with error: {e}. Submit your best hypothesis."
+        logger.warning("[hypothesis-verifier] failed: %s", e)
+        return (
+            f"Verification failed with error: {e}. Revise your hypothesis and call "
+            "verify_hypothesis again — you may not submit until an accept or "
+            "accept_partial verdict is returned."
+        )
 
 
-async def check_hypothesis_coverage(
+async def verify_hypothesis(
     ctx: RunContext[SREDeps],
-    hypothesis: str,
+    root_cause_description: str,
+    causal_chain: str,
+    root_cause_resources: list[str],
 ) -> str:
-    """Cross-check your hypothesis against the triage report (multi-fault aware).
+    """Adversarially verify your proposed root-cause hypothesis against the live cluster.
 
-    Call this BEFORE submitting your diagnosis. Pass your proposed root cause
-    (resource, misconfigured field, causal chain). Returns structured JSON:
-    `accept` when every anomaly is explained or noise; `accept_partial` when the
-    hypothesis is sound for a scoped fault but some triage lines are plausibly
-    separate faults or out of scope (see `residual_rationale`); `reject` when the
-    hypothesis is wrong or incomplete for what it claims. If rejected, revise or
-    narrow scope before resubmitting.
+    Call this AFTER you have formed a hypothesis (and after `search_prior_incidents`
+    did not confirm a candidate). A subagent will probe the live cluster to prove or
+    refute your hypothesis. You may NOT submit your diagnosis until this tool returns
+    `accept` or `accept_partial`.
+
+    On `reject`, read `causal_chain_rejection` and `reasoning` carefully — this
+    identifies which link in your causal chain is broken and why. Revise your
+    hypothesis to address that specific break (new investigation, different resource,
+    corrected mechanism), then call again.
+
+    Args:
+        root_cause_description: Natural-language description of the proposed root cause.
+        causal_chain: Chain from observable symptom back to the root cause
+            (symptom → mechanism → ... → root cause).
+        root_cause_resources: Resources implicated as the root cause
+            (e.g., ["deployment/frontend in astronomy-shop", "configmap/app-config"]).
     """
-    return await check_hypothesis_coverage_impl(ctx.deps, hypothesis)
+    return await verify_hypothesis_impl(ctx.deps, root_cause_description, causal_chain, root_cause_resources)
 
 
 async def search_prior_incidents_impl(

@@ -312,7 +312,7 @@ class TestRoleAgentConstruction:
         assert "read_file" in tool_names
         assert "triage_cluster" in tool_names
         assert "search_prior_incidents" in tool_names
-        assert "check_hypothesis_coverage" in tool_names
+        assert "verify_hypothesis" in tool_names
         assert "search_prior_mitigations" not in tool_names
 
     def test_sre_agent_tool_assembly_mitigation(self):
@@ -328,7 +328,7 @@ class TestRoleAgentConstruction:
         assert "exec_bash" in tool_names
         assert "triage_cluster" not in tool_names
         assert "search_prior_incidents" not in tool_names
-        assert "check_hypothesis_coverage" not in tool_names
+        assert "verify_hypothesis" not in tool_names
 
     def test_judge_agent_construction(self):
         from sregym_agents.crucible.agents import JudgeAgent

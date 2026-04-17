@@ -33,10 +33,10 @@ from sregym_agents.crucible.tools._judge_tools import (
 )
 from sregym_agents.crucible.tools._kb_tools import (
     LTMShortCircuit,
-    check_hypothesis_coverage_impl,
     search_prior_incidents_impl,
     search_prior_mitigations_impl,
     triage_cluster_impl,
+    verify_hypothesis_impl,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,16 +142,22 @@ def register_sre_tools(
                 _write_result_file(result_file_path, signal)
             return json.dumps(signal)
 
-    @mcp.tool(name="check_hypothesis_coverage")
-    async def check_hypothesis_coverage(hypothesis: str) -> str:  # pyright: ignore[reportUnusedFunction]
-        """Cross-check your hypothesis against the triage report.
+    @mcp.tool(name="verify_hypothesis")
+    async def verify_hypothesis(  # pyright: ignore[reportUnusedFunction]
+        root_cause_description: str,
+        causal_chain: str,
+        root_cause_resources: list[str],
+    ) -> str:
+        """Adversarially verify your proposed root-cause hypothesis against the live cluster.
 
-        Call BEFORE submitting your diagnosis.
+        You may NOT submit your diagnosis until this returns `accept` or `accept_partial`.
 
         Args:
-            hypothesis: Proposed root cause (resource, misconfigured field, causal chain).
+            root_cause_description: Natural-language description of the proposed root cause.
+            causal_chain: Chain from observable symptom back to the root cause.
+            root_cause_resources: Resources implicated as the root cause.
         """
-        return await check_hypothesis_coverage_impl(deps, hypothesis)
+        return await verify_hypothesis_impl(deps, root_cause_description, causal_chain, root_cause_resources)
 
     # submit_answer — structured output for AgentCLIDriver
     if result_file_path:
@@ -169,6 +175,15 @@ def register_sre_tools(
                 justification: Evidence and reasoning supporting the answer.
                 causal_chain: Full causal chain (diagnosis only). Leave empty for mitigation.
             """
+            if deps.stage == "diagnosis" and not deps.hypothesis_verified:
+                return (
+                    "Submission blocked: every diagnosis must be verified by calling "
+                    "`verify_hypothesis(root_cause_description, causal_chain, "
+                    "root_cause_resources)` and receiving an `accept` or `accept_partial` "
+                    "verdict before submitting. If the verifier rejected your last attempt, "
+                    "revise the hypothesis to address `causal_chain_rejection` and re-verify "
+                    "— do not submit until accepted."
+                )
             _write_result_file(
                 result_file_path,
                 {

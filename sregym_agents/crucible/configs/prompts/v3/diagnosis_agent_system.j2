@@ -18,19 +18,27 @@ Use this as your default sequence, but adapt when fresh evidence changes the bes
 4. Deep investigation: trace symptoms to root cause via kubectl, logs, and resource specs.
    For CRDs managed by an operator, inspect the CR spec and status/conditions.
    Prioritise triage anomalies over the loudest log error.
-5. Verify your hypothesis — MANDATORY when step 3 did not yield a confirmed candidate:
-   You MUST NOT submit without a passing `check_hypothesis_coverage` call.
-   (a) Formulate your hypothesis (resource, misconfigured field, causal chain).
-   (b) Call `check_hypothesis_coverage` with your hypothesis. It returns JSON with
-       `verdict` and may list anomalies not explained.
+5. Propose and verify — MANDATORY when step 3 did not yield a confirmed candidate:
+   You MUST NOT submit without a passing `verify_hypothesis` call. This is a loop:
+   propose → critique → revise → re-verify. The submission path is gated — an attempt
+   to submit before receiving `accept` or `accept_partial` will be rejected.
+   (a) From your investigation (step 4), formulate a hypothesis as three fields:
+       - `root_cause_description`: natural-language description of the underlying fault.
+       - `causal_chain`: symptom → mechanism → ... → root cause.
+       - `root_cause_resources`: the specific resources implicated (list of strings).
+   (b) Call `verify_hypothesis(root_cause_description, causal_chain, root_cause_resources)`.
+       A subagent will adversarially probe the live cluster to prove or refute your
+       hypothesis and return a JSON verdict.
    (c) Act on the verdict:
        - **`accept`**: proceed to step 6.
        - **`accept_partial`**: proceed to step 6, but your `answer`, `justification`,
          and `causal_chain` MUST **scope** what you claim and **acknowledge** residual
          triage anomalies (e.g., likely separate fault or noise).
-       - **`reject`**: DO NOT submit. Read the unexplained anomalies and reasoning,
-         revise your hypothesis or narrow its scope, and go back to (b). Repeat until
-         you reach `accept` or `accept_partial`.
+       - **`reject`**: DO NOT submit. Read `causal_chain_rejection` and `reasoning`
+         carefully — the verifier identifies which link in your causal chain is broken
+         and why. Revise your hypothesis to address that specific break (new
+         investigation, different resource, corrected mechanism) — do not just rephrase.
+         Go back to (b). Repeat until you reach `accept` or `accept_partial`.
 6. Submit your `answer` (concise diagnosis), `justification` (evidence and reasoning),
    and `causal_chain` (misconfigured field → mechanism → observed symptom).
 

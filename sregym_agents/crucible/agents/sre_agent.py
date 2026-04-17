@@ -67,7 +67,6 @@ class SREAgent:
     def _assemble_tools(self, stage: str) -> list[Any]:
         """Return the tool list for the given stage."""
         from sregym_agents.crucible.tools import (
-            check_hypothesis_coverage,
             exec_bash,
             grep,
             read_file,
@@ -75,6 +74,7 @@ class SREAgent:
             search_prior_mitigations,
             str_replace_file,
             triage_cluster,
+            verify_hypothesis,
             write_file,
         )
 
@@ -85,7 +85,7 @@ class SREAgent:
             tools.append(triage_cluster)
             tools.append(search_prior_incidents)
         if stage != "mitigation":
-            tools.append(check_hypothesis_coverage)
+            tools.append(verify_hypothesis)
         return tools
 
     @property
@@ -271,6 +271,31 @@ class SREAgent:
             deps=deps,
             run_ctx={"stage": stage, "iteration": iteration, "role": "sre"},
         )
+
+        # Gate: reject diagnosis submissions that did not go through verify_hypothesis.
+        # LTM short-circuit path bypasses this entirely (it raises an exception before
+        # the agent ever returns output), so reaching here on diagnosis means the agent
+        # produced structured output and must have called verify_hypothesis first.
+        if stage == "diagnosis" and result.completed and result.output is not None and not deps.hypothesis_verified:
+            logger.warning(
+                "[submission-gate] Rejecting diagnosis submission: verify_hypothesis "
+                "was not called or did not return accept/accept_partial."
+            )
+            reminder = (
+                f"\n### Iteration {iteration} — Submission blocked\n"
+                "You attempted to submit a diagnosis without calling `verify_hypothesis` "
+                "and receiving an `accept` or `accept_partial` verdict. Every diagnosis "
+                "must be verified by calling `verify_hypothesis(root_cause_description, "
+                "causal_chain, root_cause_resources)` before submission. If the verifier "
+                "rejected your last attempt, revise the hypothesis to address "
+                "`causal_chain_rejection` and re-verify — do not submit until accepted.\n"
+            )
+            try:
+                shared_file.append(reminder)
+            except Exception as e:
+                logger.warning(f"Error writing submission-gate reminder to shared file: {e}")
+            result.completed = False
+            result.output = None
 
         # Post-run: extract state from deps (tools update state directly)
         if result.completed and result.output is not None:
