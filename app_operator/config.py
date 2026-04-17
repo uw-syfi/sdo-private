@@ -7,7 +7,11 @@ except ImportError:
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-from app_operator.exceptions import ConfigurationError
+# UnrecognizedFieldError is re-exported here (as `X as X`) so callers that
+# import it from `app_operator.config` keep working; the canonical definition
+# lives in `app_operator.exceptions`.
+from app_operator.exceptions import ConfigurationError, UnrecognizedSectionError
+from app_operator.exceptions import UnrecognizedFieldError as UnrecognizedFieldError
 from app_operator.logger import logger
 from app_operator.validation import (
     validate_dataclass_fields,
@@ -16,15 +20,6 @@ from app_operator.validation import (
     validate_type,
 )
 from libs.model_config import ModelConfig, from_provider_and_model
-
-
-class UnrecognizedSectionError(ConfigurationError):
-    """Raised when an unrecognized section is found in the config file."""
-
-
-class UnrecognizedFieldError(ConfigurationError):
-    """Raised when an unrecognized field is found in a recognized section."""
-
 
 # ---------------------------------------------------------------------------
 # DSPy configuration dataclasses

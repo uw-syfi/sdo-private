@@ -17,6 +17,14 @@ class ConfigurationError(SdsOperatorError):
     """
 
 
+class UnrecognizedSectionError(ConfigurationError):
+    """Raised when an unrecognized section is found in the config file."""
+
+
+class UnrecognizedFieldError(ConfigurationError):
+    """Raised when an unrecognized field is found in a recognized section."""
+
+
 class DeploymentError(SdsOperatorError):
     """Deployment-related errors.
 
