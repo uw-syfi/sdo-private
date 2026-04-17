@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app_operator.trajectory_collectors import (
+from app_operator.trajectory.collectors import (
     collect_gemini_sessions,
 )
 
@@ -16,7 +16,7 @@ def mock_gemini_home(tmp_path, monkeypatch):
     """Create a mock Gemini session directory."""
     mock_home = tmp_path / "mock_gemini_home"
     mock_sessions = mock_home / ".gemini" / "tmp"
-    monkeypatch.setattr("app_operator.trajectory_collectors.GEMINI_SESSION_DIR", mock_sessions)
+    monkeypatch.setattr("app_operator.trajectory.collectors.GEMINI_SESSION_DIR", mock_sessions)
     return mock_sessions
 
 
@@ -28,7 +28,7 @@ def test_collect_gemini_sessions_no_sessions_dir(tmp_path):
     start_time_str = "2024-01-01 12:00:00"
 
     with patch(
-        "app_operator.trajectory_collectors.GEMINI_SESSION_DIR",
+        "app_operator.trajectory.collectors.GEMINI_SESSION_DIR",
         tmp_path / "nonexistent",
     ):
         sessions = collect_gemini_sessions(sds_dir, trajectories_dir, run_timestamp, start_time_str)

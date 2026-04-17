@@ -21,7 +21,7 @@ from app_operator.dspy_integration.metrics import (
     IterationEfficiencyMetric,
     TokenEfficiencyMetric,
 )
-from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
+from app_operator.trajectory.utils import extract_rlm_statistics_from_trajectory
 
 
 class TestRLMContext:

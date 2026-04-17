@@ -42,7 +42,7 @@ Use `glab` command (if available) to access the remote repo on GitLab, including
 - When code changes impact CLI, update README.md.
 - When removing code, delete it — do not comment it out.
 - **Avoid nested event loops:** Code that already runs inside an async event loop (e.g. a pydantic-ai tool handler) must never call `run_sync()`, `asyncio.run()`, or `loop.run_until_complete()` — these create a second event loop, and any objects bound to the outer loop (httpx connection pools, anyio locks, etc.) will raise `RuntimeError: is bound to a different event loop`. Instead, make the function `async` and `await` the coroutine directly so it stays on the same loop.
-- When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `.agents/skills/analyze-experiment/references/`.
+- When changing trajectory format (`trajectory/`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `.agents/skills/analyze-experiment/references/`.
 - When adding or moving feature flags in `app_operator/config.py`, update `docs/feature-flags.md` to match.
 - When introducing a new top-level project or library (e.g. `libs/`, `sregym_agents/`), add it to `tach.toml` with the correct `depends_on` entries.
 
