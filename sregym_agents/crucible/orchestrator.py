@@ -61,6 +61,53 @@ class StageLoopResult:
     message_history: list[object] = dataclasses.field(default_factory=lambda: cast("list[object]", []))
 
 
+# Explicit agent->phase mapping. Every agent_name that can appear in a crucible
+# UsageCollector is classified here. Adding a new agent requires a decision:
+# add it to one of the sets (or a prefix tuple for dynamic-suffix names) or it
+# will be logged as unclassified and excluded from the per-phase totals.
+_DIAGNOSIS_AGENTS: frozenset[str] = frozenset(
+    {
+        "hypothesis-verifier",
+        "judge-diagnosis",
+        "ltm-search",
+        "playbook-shortcut",
+        "recovery-diagnosis",
+        "recovery-diagnosis-playbook",
+        "recovery-triage-area-candidate",
+        "sre-diagnosis",
+        "success-diagnosis-playbook",
+        "triage-coordinator",
+    }
+)
+_MITIGATION_AGENTS: frozenset[str] = frozenset(
+    {
+        "judge-mitigation",
+        "ltm-mitigate-0",
+        "ltm-mitigation-search",
+        "recovery-mitigation",
+        "recovery-mitigation-playbook",
+        "sre-mitigation",
+        "success-mitigation-playbook",
+    }
+)
+# Prefix rules for dynamic-suffix agent names (e.g. triage-<slug>, ltm-verify-<idx>).
+_DIAGNOSIS_AGENT_PREFIXES: tuple[str, ...] = ("ltm-verify-", "triage-")
+_MITIGATION_AGENT_PREFIXES: tuple[str, ...] = ()
+
+
+def _agent_phase(agent_name: str) -> str | None:
+    """Classify a crucible agent name into 'diagnosis' or 'mitigation'.
+
+    Returns ``None`` for unknown names so the caller can warn and exclude
+    them from phase totals without crashing.
+    """
+    if agent_name in _DIAGNOSIS_AGENTS or agent_name.startswith(_DIAGNOSIS_AGENT_PREFIXES):
+        return "diagnosis"
+    if agent_name in _MITIGATION_AGENTS or agent_name.startswith(_MITIGATION_AGENT_PREFIXES):
+        return "mitigation"
+    return None
+
+
 def _build_usage_metrics(
     primary: UsageCollector,
     recovery: UsageCollector,
@@ -70,18 +117,43 @@ def _build_usage_metrics(
     Schema::
 
         {
-          "primary":  {"by_agent": {...}, "total": {...}},
-          "recovery": {"by_agent": {...}, "total": {...}},
-          "total":    {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ..., "turns": ...}
+          "primary":    {"by_agent": {...}, "total": {...}},
+          "recovery":   {"by_agent": {...}, "total": {...}},
+          "total":      {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ..., "turns": ...},
+          "diagnosis":  {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ..., "turns": ...},
+          "mitigation": {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ..., "turns": ...},
         }
+
+    ``diagnosis`` / ``mitigation`` sum token usage across primary + recovery
+    collectors, partitioned by the explicit phase mapping above. Agents whose
+    phase cannot be determined are still counted in ``total`` but excluded
+    from the per-phase fields (and logged as a warning).
     """
     primary_dict = primary.to_dict()
     recovery_dict = recovery.to_dict()
     grand_total = TokenUsage(**primary_dict["total"]) + TokenUsage(**recovery_dict["total"])
+
+    phase_totals: dict[str, TokenUsage] = {"diagnosis": TokenUsage(), "mitigation": TokenUsage()}
+    unknown: set[str] = set()
+    for sub in (primary_dict, recovery_dict):
+        for agent_name, agent_stats in sub.get("by_agent", {}).items():
+            phase = _agent_phase(agent_name)
+            if phase is None:
+                unknown.add(agent_name)
+                continue
+            phase_totals[phase] = phase_totals[phase] + TokenUsage(**agent_stats["total"])
+    if unknown:
+        logger.warning(
+            "usage_metrics: agent(s) not mapped to a phase, excluded from diagnosis/mitigation totals: %s",
+            sorted(unknown),
+        )
+
     return {
         "primary": primary_dict,
         "recovery": recovery_dict,
         "total": grand_total.to_dict(),
+        "diagnosis": phase_totals["diagnosis"].to_dict(),
+        "mitigation": phase_totals["mitigation"].to_dict(),
     }
 
 

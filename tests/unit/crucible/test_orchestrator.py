@@ -15,6 +15,7 @@ from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 from sregym_agents.crucible.orchestrator import (
+    _agent_phase,
     _build_usage_metrics,
     _replace_hypothesis_placeholder,
     _wait_for_mitigation_stage,
@@ -72,6 +73,120 @@ class TestBuildUsageMetrics:
         assert result["primary"]["by_agent"] == {}
         assert result["recovery"]["by_agent"] == {}
         assert result["total"] == {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0, "turns": 0}
+        assert result["diagnosis"] == {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0, "turns": 0}
+        assert result["mitigation"] == {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0, "turns": 0}
+
+    def test_phase_totals_split_diagnosis_and_mitigation(self):
+        primary = UsageCollector()
+        primary.add("sre-diagnosis", TokenUsage(input_tokens=10, output_tokens=1, turns=3))
+        primary.add("hypothesis-verifier", TokenUsage(input_tokens=4, turns=2))
+        primary.add("sre-mitigation", TokenUsage(input_tokens=20, output_tokens=2, turns=5))
+        primary.add("ltm-mitigation-search", TokenUsage(input_tokens=1, turns=1))
+
+        result = _build_usage_metrics(primary, UsageCollector())
+
+        assert result["diagnosis"] == {
+            "input_tokens": 14,
+            "output_tokens": 1,
+            "cached_input_tokens": 0,
+            "turns": 5,
+        }
+        assert result["mitigation"] == {
+            "input_tokens": 21,
+            "output_tokens": 2,
+            "cached_input_tokens": 0,
+            "turns": 6,
+        }
+
+    def test_phase_totals_include_recovery_collector(self):
+        primary = UsageCollector()
+        primary.add("sre-diagnosis", TokenUsage(turns=3))
+        primary.add("sre-mitigation", TokenUsage(turns=2))
+
+        recovery = UsageCollector()
+        recovery.add("recovery-diagnosis", TokenUsage(turns=4))
+        recovery.add("recovery-mitigation", TokenUsage(turns=1))
+
+        result = _build_usage_metrics(primary, recovery)
+
+        assert result["diagnosis"]["turns"] == 7
+        assert result["mitigation"]["turns"] == 3
+        assert result["total"]["turns"] == 10
+
+    def test_phase_totals_handle_dynamic_prefixes(self):
+        primary = UsageCollector()
+        primary.add("triage-kubernetes-service-discovery", TokenUsage(turns=2))
+        primary.add("triage-coordinator", TokenUsage(turns=1))
+        primary.add("ltm-verify-0", TokenUsage(turns=3))
+        primary.add("ltm-verify-1", TokenUsage(turns=4))
+
+        result = _build_usage_metrics(primary, UsageCollector())
+
+        # All four dynamic-prefix agents are diagnosis phase.
+        assert result["diagnosis"]["turns"] == 10
+        assert result["mitigation"]["turns"] == 0
+
+    def test_unknown_agent_excluded_from_phases_but_in_total(self, caplog):
+        primary = UsageCollector()
+        primary.add("sre-diagnosis", TokenUsage(input_tokens=5, turns=1))
+        primary.add("some-new-agent", TokenUsage(input_tokens=7, turns=2))
+
+        with caplog.at_level("WARNING"):
+            result = _build_usage_metrics(primary, UsageCollector())
+
+        assert result["diagnosis"] == {
+            "input_tokens": 5,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "turns": 1,
+        }
+        assert result["mitigation"]["turns"] == 0
+        # Unknown agent still contributes to the grand total.
+        assert result["total"]["input_tokens"] == 12
+        assert result["total"]["turns"] == 3
+        assert any("some-new-agent" in rec.message for rec in caplog.records)
+
+
+class TestAgentPhase:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "sre-diagnosis",
+            "hypothesis-verifier",
+            "ltm-search",
+            "playbook-shortcut",
+            "triage-coordinator",
+            "triage-container-health-check-configuration",
+            "ltm-verify-0",
+            "ltm-verify-12",
+            "recovery-diagnosis",
+            "recovery-diagnosis-playbook",
+            "success-diagnosis-playbook",
+            "recovery-triage-area-candidate",
+            "judge-diagnosis",
+        ],
+    )
+    def test_diagnosis_phase(self, name):
+        assert _agent_phase(name) == "diagnosis"
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "sre-mitigation",
+            "ltm-mitigation-search",
+            "ltm-mitigate-0",
+            "recovery-mitigation",
+            "recovery-mitigation-playbook",
+            "success-mitigation-playbook",
+            "judge-mitigation",
+        ],
+    )
+    def test_mitigation_phase(self, name):
+        assert _agent_phase(name) == "mitigation"
+
+    @pytest.mark.parametrize("name", ["kb-review-classifier", "unknown-agent", ""])
+    def test_unknown_returns_none(self, name):
+        assert _agent_phase(name) is None
 
 
 # ---------------------------------------------------------------------------
