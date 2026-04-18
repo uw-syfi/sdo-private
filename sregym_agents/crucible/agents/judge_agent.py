@@ -106,7 +106,7 @@ class JudgeAgent:
             namespace=app_info.get("namespace", "default"),
             iteration=iteration,
             shared_content=shared_content,
-            shared_file=str(shared_file),
+            shared_file=shared_file.display_path(),
             architecture_content=architecture_content,
             lt_summary_content=lt_summary_content,
             lessons_content=lessons_content,

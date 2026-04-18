@@ -581,8 +581,8 @@ class TestOrchestratorRun:
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import StageLoopResult, run
 
-        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
-        diagnosis_shared.write_text(
+        diagnosis_path = tmp_path / "diagnosis_session_state.md"
+        diagnosis_path.write_text(
             "# SRE Judged Session State\n"
             "## Session\n"
             "- App: Blueprint Hotel Reservation / Namespace: blueprint-hotel-reservation\n\n"
@@ -590,12 +590,14 @@ class TestOrchestratorRun:
             "\n### Iteration 1 — LTM Direct Submission (diagnosis)\n"
             "stale state from previous run\n"
         )
-        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        mitigation_path = tmp_path / "mitigation_session_state.md"
+        diagnosis_shared = SharedFile(diagnosis_path)
+        mitigation_shared = SharedFile(mitigation_path)
         driver = MagicMock()
         observed_shared_content: dict[str, str] = {}
 
         async def fake_run_stage_loop(*args, **kwargs):
-            observed_shared_content["diagnosis"] = diagnosis_shared.read_text()
+            observed_shared_content["diagnosis"] = diagnosis_path.read_text()
             return StageLoopResult(
                 approved=True,
                 benchmark_block="<benchmark_result>\nsuccess: True\n</benchmark_result>\n",
@@ -680,7 +682,7 @@ class TestOrchestratorRun:
         assert result is None
         assert playbook_runner.await_args is not None
         kwargs = playbook_runner.await_args.kwargs
-        assert kwargs["diagnosis_shared_file"] == str(diagnosis_path)
+        assert kwargs["diagnosis_shared_file"] == diagnosis_shared.display_path()
         assert kwargs["diagnosis_shared_content"] == diagnosis_path.read_text()
 
     @pytest.mark.asyncio
@@ -688,8 +690,8 @@ class TestOrchestratorRun:
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import StageLoopResult, run
 
-        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
-        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_shared = SharedFile(tmp_path / "diagnosis_session_state.md")
+        mitigation_shared = SharedFile(tmp_path / "mitigation_session_state.md")
         stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
         stage_outputs.write_text("# stage outputs\n")
 
@@ -752,8 +754,8 @@ class TestOrchestratorRun:
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import StageLoopResult, run
 
-        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
-        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_shared = SharedFile(tmp_path / "diagnosis_session_state.md")
+        mitigation_shared = SharedFile(tmp_path / "mitigation_session_state.md")
         diagnosis_stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
         mitigation_stage_outputs = tmp_path / "mitigation_stage_outputs.md"
         diagnosis_stage_outputs.write_text("# diagnosis outputs\n")
@@ -830,8 +832,8 @@ class TestOrchestratorRun:
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import StageLoopResult, run
 
-        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
-        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_shared = SharedFile(tmp_path / "diagnosis_session_state.md")
+        mitigation_shared = SharedFile(tmp_path / "mitigation_session_state.md")
         stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
         stage_outputs.write_text("# stage outputs\n")
 
@@ -882,8 +884,8 @@ class TestOrchestratorRun:
         from sregym_agents.crucible.config import CrucibleConfig
         from sregym_agents.crucible.orchestrator import StageLoopResult, run
 
-        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
-        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_shared = SharedFile(tmp_path / "diagnosis_session_state.md")
+        mitigation_shared = SharedFile(tmp_path / "mitigation_session_state.md")
         diagnosis_stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
         mitigation_stage_outputs = tmp_path / "mitigation_stage_outputs.md"
         diagnosis_stage_outputs.write_text("# diagnosis outputs\n")
@@ -988,8 +990,8 @@ class TestOrchestratorRun:
         from sregym_agents.crucible.orchestrator import StageLoopResult, run
         from sregym_agents.crucible.tools import SRESubmission
 
-        diagnosis_shared = tmp_path / "diagnosis_session_state.md"
-        mitigation_shared = tmp_path / "mitigation_session_state.md"
+        diagnosis_shared = SharedFile(tmp_path / "diagnosis_session_state.md")
+        mitigation_shared = SharedFile(tmp_path / "mitigation_session_state.md")
         diagnosis_stage_outputs = tmp_path / "diagnosis_stage_outputs.md"
         mitigation_stage_outputs = tmp_path / "mitigation_stage_outputs.md"
         diagnosis_stage_outputs.write_text("# diagnosis outputs\n")

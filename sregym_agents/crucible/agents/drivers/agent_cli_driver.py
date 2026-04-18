@@ -59,6 +59,23 @@ _SHORT_CIRCUIT_TOOLS = frozenset(
 )
 
 
+def _shared_file_arg(sf: Any) -> str:
+    """Extract the path string from a SharedFile for the MCP subprocess CLI.
+
+    The MCP subprocess receives ``--shared-file <path>`` on the command line
+    and reconstructs a ``SharedFile`` on its side. SharedFile deliberately
+    does not implement ``__fspath__`` or ``__str__`` → path, so we ask for
+    the path explicitly via ``display_path()``. Returns the empty string
+    when the dependency has no ``shared_file`` attribute (defensive — this
+    path is only hit by badly-formed test doubles).
+    """
+    if sf is None:
+        return ""
+    if hasattr(sf, "display_path"):
+        return sf.display_path()
+    return ""
+
+
 class _AgentCLIEventHandler:
     """``AgentEventHandler`` that logs events and fast-kills on short-circuit.
 
@@ -225,7 +242,7 @@ class AgentCLIDriver(AgentDriver):
             "--stage",
             str(getattr(deps, "stage", "diagnosis")),
             "--shared-file",
-            str(getattr(deps, "shared_file", "")),
+            _shared_file_arg(getattr(deps, "shared_file", None)),
             "--model",
             str(getattr(deps, "model_id", self._model)),
             "--iteration",

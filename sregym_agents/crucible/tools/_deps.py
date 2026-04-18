@@ -44,17 +44,33 @@ class SRESubmission(BaseModel):
 
 
 class SharedFile:
+    """Lock-protected wrapper around a shared session-state file.
+
+    All mutations go through ``append``/``write_text``/``replace``, each of
+    which holds ``fcntl.LOCK_EX`` across the read-modify-write window. The
+    class deliberately does NOT expose a raw ``open()`` method, does NOT
+    implement ``__fspath__``, and does NOT override ``__str__`` to return the
+    underlying path — those would all be escape hatches that let callers
+    bypass the lock. When a caller genuinely needs the path string (e.g. to
+    embed in an LLM prompt for display), it must say so explicitly via
+    ``display_path()``; that method name is greppable and makes every
+    raw-path crossing visible at code review.
+    """
+
     def __init__(self, path: Path) -> None:
-        self._path = path
+        # Name-mangled to ``_SharedFile__path`` — attempting to read
+        # ``shared_file._path`` from outside the class raises AttributeError,
+        # making accidental bypass impossible and deliberate bypass obvious.
+        self.__path = path
 
     def init(self, content: str) -> None:
-        if self._path.exists():
-            logger.warning("Shared file already exists, skipping init: %s", self._path)
+        if self.__path.exists():
+            logger.warning("Shared file already exists, skipping init: %s", self.__path)
             return
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(".tmp")
+        self.__path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.__path.with_suffix(".tmp")
         tmp.write_text(content)
-        tmp.rename(self._path)
+        tmp.rename(self.__path)
 
     def append(self, text: str) -> None:
         # IMPORTANT: re-seek to end under the lock before writing. A
@@ -62,7 +78,7 @@ class SharedFile:
         # the file after this FD was opened, invalidating the cached
         # append offset. Also flush() before releasing the lock so buffered
         # bytes reach the kernel while we still hold it.
-        with self._path.open("a") as fh:
+        with self.__path.open("a") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             try:
                 fh.seek(0, 2)  # SEEK_END
@@ -72,21 +88,21 @@ class SharedFile:
                 fcntl.flock(fh, fcntl.LOCK_UN)
 
     def read(self) -> str:
-        return self._path.read_text()
+        return self.__path.read_text()
 
     def read_text(self) -> str:
-        return self._path.read_text()
+        return self.__path.read_text()
 
     def write_text(self, text: str) -> None:
         # Open with r+ so we can hold an exclusive lock across truncate+write,
         # preventing concurrent append() calls from losing data. Create the
         # file if it does not exist yet.
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        if not self._path.exists():
+        self.__path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.__path.exists():
             # A benign race here only results in an extra empty-file
             # creation; the real mutation happens under the lock below.
-            self._path.touch()
-        with self._path.open("r+") as fh:
+            self.__path.touch()
+        with self.__path.open("r+") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             try:
                 fh.seek(0)
@@ -101,10 +117,10 @@ class SharedFile:
 
         Returns True if at least one replacement occurred.
         """
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        if not self._path.exists():
-            self._path.touch()
-        with self._path.open("r+") as fh:
+        self.__path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.__path.exists():
+            self.__path.touch()
+        with self.__path.open("r+") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             try:
                 fh.seek(0)
@@ -120,11 +136,15 @@ class SharedFile:
             finally:
                 fcntl.flock(fh, fcntl.LOCK_UN)
 
-    def open(self, mode: str = "r"):
-        return self._path.open(mode)
+    def display_path(self) -> str:
+        """Return the underlying path as a string, for display/prompt use only.
 
-    def __str__(self) -> str:
-        return str(self._path)
+        This is the one explicit, greppable leak of the path outside the class.
+        Callers must NOT reconstruct a ``Path`` from this value and mutate the
+        file directly — doing so bypasses ``fcntl.LOCK_EX`` and can corrupt
+        concurrent writes.
+        """
+        return str(self.__path)
 
 
 @dataclass
@@ -142,7 +162,7 @@ class SharedState:
 @dataclass
 class TriageDeps:
     namespace: str
-    shared_file: Path
+    shared_file: SharedFile
 
 
 @dataclass
