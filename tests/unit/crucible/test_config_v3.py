@@ -113,6 +113,8 @@ def test_crucible_config_accepts_default_numerics() -> None:
     assert cfg.max_mitigation_iterations == 5
     assert cfg.wait_stage_timeout == 300
     assert cfg.stage_timeout == 900
+
+
 # -- Feature flags + prompt_version validation (issue #88) --
 
 
