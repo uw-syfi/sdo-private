@@ -61,10 +61,35 @@ _GREP_SKIP_DIRS: frozenset[str] = frozenset(
 # Private helpers
 # ---------------------------------------------------------------------------
 
+# Env var read by `_truncation_artifact_dir` to group per-run `/tmp` artifacts
+# (bash_out_*, grep_out_*) under a single directory so they can be cleaned up
+# atomically at end-of-run (see driver._async_main). When unset, artifacts fall
+# back to a flat `/tmp/` layout to preserve unit-test and standalone behavior.
+RUN_PREFIX_ENV = "SREGYM_CRUCIBLE_RUN_PREFIX"
+
 
 def _agent_cwd() -> Path:
     """Return the working directory for agent tools (from ``SREGYM_EXP_ENV`` or ``'.'``)."""
     return Path(os.getenv("SREGYM_EXP_ENV", "."))
+
+
+def _truncation_artifact_dir() -> Path:
+    """Return the directory where truncation artifacts should be written.
+
+    When ``SREGYM_CRUCIBLE_RUN_PREFIX`` is set, use that directory (creating it
+    lazily) so every per-run artifact lands under a single parent and can be
+    cleaned up atomically. Otherwise fall back to ``/tmp`` (flat layout).
+    """
+    prefix = os.getenv(RUN_PREFIX_ENV)
+    if prefix:
+        out_dir = Path(prefix)
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning("Failed to create run-prefix dir %s (%s); falling back to /tmp", out_dir, e)
+            return Path("/tmp")
+        return out_dir
+    return Path("/tmp")
 
 
 def run_bash_sync(cmd: str) -> str:
@@ -112,7 +137,7 @@ def run_bash_sync(cmd: str) -> str:
         return f"Error executing command: {e}"
 
     if len(output) > MAX_OUTPUT_CHARS:
-        tmp_path = f"/tmp/bash_out_{uuid.uuid4().hex}.txt"
+        tmp_path = str(_truncation_artifact_dir() / f"bash_out_{uuid.uuid4().hex}.txt")
         Path(tmp_path).write_text(output)
         return (
             f"Output truncated ({len(output)} chars). Written to {tmp_path}. "
@@ -291,7 +316,7 @@ def grep_impl(
 
     result = "\n".join(matches)
     if truncated:
-        tmp_path = f"/tmp/grep_out_{uuid.uuid4().hex}.txt"
+        tmp_path = str(_truncation_artifact_dir() / f"grep_out_{uuid.uuid4().hex}.txt")
         Path(tmp_path).write_text(result)
         result += (
             f"\n\n... truncated ({len(matches)} matches shown). "

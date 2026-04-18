@@ -8,11 +8,8 @@ import os
 import signal
 import subprocess
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 import pytest
 
@@ -327,6 +324,81 @@ class TestRunBashSync:
         assert "Error executing command" in output
         mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
         mock_proc.wait.assert_called_once()
+
+
+class TestTruncationArtifactRouting:
+    """Per-run prefix routing for bash/grep truncation artifacts (issue #93)."""
+
+    def test_bash_truncation_uses_run_prefix_when_env_set(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """With RUN_PREFIX_ENV set, bash truncation artifacts land under the prefix dir."""
+        from sregym_agents.crucible.tools._bash_tools import RUN_PREFIX_ENV
+
+        prefix = tmp_path / "crucible_run_abc123"
+        monkeypatch.setenv(RUN_PREFIX_ENV, str(prefix))
+
+        mock_proc = _mock_popen(returncode=0, stdout="x" * 5000, stderr="")
+        with patch("subprocess.Popen", return_value=mock_proc):
+            output = run_bash_sync("bigcmd")
+
+        assert "truncated" in output.lower()
+        # The returned message must reference the per-run prefix path, not bare /tmp.
+        assert str(prefix) in output
+        assert "/tmp/bash_out_" not in output
+        # A single artifact file should live under the prefix dir.
+        artifacts = list(prefix.glob("bash_out_*.txt"))
+        assert len(artifacts) == 1
+        assert artifacts[0].read_text() == "x" * 5000
+
+    def test_bash_truncation_falls_back_to_tmp_when_env_unset(self, monkeypatch: pytest.MonkeyPatch):
+        """Without RUN_PREFIX_ENV, fall back to flat /tmp/ layout (unit-test behavior)."""
+        from sregym_agents.crucible.tools._bash_tools import RUN_PREFIX_ENV
+
+        monkeypatch.delenv(RUN_PREFIX_ENV, raising=False)
+
+        written: dict[str, str] = {}
+
+        def _fake_write_text(self: Path, data: str) -> None:
+            written[str(self)] = data
+
+        mock_proc = _mock_popen(returncode=0, stdout="x" * 5000, stderr="")
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch.object(Path, "write_text", _fake_write_text),
+        ):
+            output = run_bash_sync("bigcmd")
+
+        assert "truncated" in output.lower()
+        assert "/tmp/bash_out_" in output
+        # Exactly one artifact path under /tmp was "written" (mocked away).
+        matching = [p for p in written if p.startswith("/tmp/bash_out_")]
+        assert len(matching) == 1
+
+    def test_grep_truncation_uses_run_prefix_when_env_set(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Grep truncation artifacts also honor the per-run prefix."""
+        from sregym_agents.crucible.tools._bash_tools import (
+            MAX_GREP_RESULTS,
+            RUN_PREFIX_ENV,
+            grep_impl,
+        )
+
+        prefix = tmp_path / "crucible_run_grep"
+        monkeypatch.setenv(RUN_PREFIX_ENV, str(prefix))
+
+        # Create a large source file that forces grep truncation.
+        src = tmp_path / "haystack.txt"
+        matching_lines = [f"match-{i}" for i in range(MAX_GREP_RESULTS + 50)]
+        src.write_text("\n".join(matching_lines))
+
+        # grep_impl resolves path via _agent_cwd(); set SREGYM_EXP_ENV so it reads our tmp file.
+        monkeypatch.setenv("SREGYM_EXP_ENV", str(tmp_path))
+
+        result = grep_impl("match-", path="haystack.txt")
+
+        assert "truncated" in result.lower()
+        assert str(prefix) in result
+        assert "/tmp/grep_out_" not in result
+        artifacts = list(prefix.glob("grep_out_*.txt"))
+        assert len(artifacts) == 1
 
 
 class TestRunBashSyncIntegration:
