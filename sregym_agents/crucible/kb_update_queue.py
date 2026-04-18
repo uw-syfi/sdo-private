@@ -1,7 +1,7 @@
 """KB update task queue: enqueue/dequeue paths and worker lifecycle.
 
 Each JSON file under ``<kb_dir>/pending/`` is a *KB update task* describing
-session files and KB settings for one ``KnowledgeBase.update()`` run.
+the incident record files and KB settings for one ``kb_worker`` review run.
 """
 
 from __future__ import annotations
