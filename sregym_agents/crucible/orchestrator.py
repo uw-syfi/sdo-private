@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 import logging
 import os
-import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -21,7 +19,7 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.knowledge_base.root_cause import KBView
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
-from sregym_agents.crucible._benchmark import extract_benchmark_reasoning
+from sregym_agents.crucible._benchmark import BenchmarkResult, Stage
 from sregym_agents.crucible._conductor import poll_stage
 from sregym_agents.crucible.agents import (
     JudgeAgent,
@@ -256,9 +254,7 @@ async def _run_diagnosis_recovery_if_needed(
             recovery_message_history=diagnosis_recovery.message_history,
             usage_collector=recovery_collector,
             stage_outputs_file=None,
-            diagnosis_oracle_reasoning=extract_benchmark_reasoning(
-                original_diag_result.benchmark_block or "", stage="diagnosis"
-            ),
+            diagnosis_oracle_reasoning=_oracle_reasoning(original_diag_result.benchmark_block or "", stage="diagnosis"),
         )
 
         if crucible_config.enable_triage_priors and original_diag_result.stage_outputs_file is not None:
@@ -390,14 +386,12 @@ async def _direct_submit_confirmed(
         f"step; submitting directly.\n\n"
         f"{list_header}\n{bullet_list}\n"
     )
+    stage_literal: Stage = stage if stage in ("diagnosis", "mitigation") else "diagnosis"
     try:
-        success, message, oracle = await submit_to_benchmark(submit_mcp_url, confirmed, stage)
-        oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
-        benchmark_block = (
-            f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n{oracle_text}\n</benchmark_result>\n"
-        )
+        bench_result = await submit_to_benchmark(submit_mcp_url, confirmed, stage)
     except Exception as e:
-        benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+        bench_result = BenchmarkResult(stage=stage_literal, error=str(e))
+    benchmark_block = bench_result.render()
 
     shared_file.append(
         f"\n### Iteration {iteration} — Judge Verdict ({stage})\n"
@@ -562,42 +556,31 @@ async def _run_stage_loop(
                     )
                     already_submitted = True
 
+            stage_literal: Stage = stage if stage in ("diagnosis", "mitigation") else "diagnosis"
             if already_submitted:
                 # The agent submitted directly — don't re-submit.
                 # We can't fetch results without an API endpoint, so mark it
                 # as externally submitted. The conductor already graded it.
-                benchmark_block = (
-                    f"\n<benchmark_result>\n"
-                    f"message: Stage '{stage}' was submitted directly by the agent "
-                    f"(conductor already advanced to next stage).\n"
-                    f"</benchmark_result>\n"
-                )
-            elif not answer:
-                logger.warning(
-                    "[%s] Submitting empty answer to benchmark (no-judge mode, iteration %d). "
-                    "This likely means the SRE agent did not produce a valid answer.",
-                    stage,
-                    iteration,
-                )
-                try:
-                    success, message, oracle = await submit_to_benchmark(submit_mcp_url, answer, stage)
-                    oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
-                    benchmark_block = (
-                        f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n"
-                        f"{oracle_text}\n</benchmark_result>\n"
-                    )
-                except Exception as e:
-                    benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+                benchmark_block = BenchmarkResult(
+                    stage=stage_literal,
+                    note=(
+                        f"Stage '{stage}' was submitted directly by the agent "
+                        f"(conductor already advanced to next stage)."
+                    ),
+                ).render()
             else:
-                try:
-                    success, message, oracle = await submit_to_benchmark(submit_mcp_url, answer, stage)
-                    oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
-                    benchmark_block = (
-                        f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n"
-                        f"{oracle_text}\n</benchmark_result>\n"
+                if not answer:
+                    logger.warning(
+                        "[%s] Submitting empty answer to benchmark (no-judge mode, iteration %d). "
+                        "This likely means the SRE agent did not produce a valid answer.",
+                        stage,
+                        iteration,
                     )
+                try:
+                    bench_result = await submit_to_benchmark(submit_mcp_url, answer, stage)
                 except Exception as e:
-                    benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+                    bench_result = BenchmarkResult(stage=stage_literal, error=str(e))
+                benchmark_block = bench_result.render()
 
             entry = (
                 f"\n### Iteration {iteration} — Judge Verdict ({stage})\n"
@@ -685,21 +668,24 @@ async def _run_stage_loop(
     )
 
 
+def _oracle_reasoning(benchmark_block: str, stage: Stage = "diagnosis") -> str:
+    """Extract ``oracle.reasoning`` from a rendered ``<benchmark_result>`` block."""
+    parsed = BenchmarkResult.parse(benchmark_block or "", stage=stage)
+    if parsed is None or parsed.oracle is None:
+        return ""
+    return parsed.oracle.reasoning
+
+
 def _extract_matched_candidate_index(benchmark_block: str) -> int | None:
     """Extract ``matched_candidate_index`` from a benchmark oracle JSON.
 
     Returns the 0-based index of the first passing candidate in the submitted
     list, or ``None`` if the field is absent or the oracle cannot be parsed.
     """
-    match = re.search(r"<oracle>\s*(.*?)\s*</oracle>", benchmark_block, re.DOTALL)
-    if not match:
+    parsed = BenchmarkResult.parse(benchmark_block or "", stage="diagnosis")
+    if parsed is None or parsed.oracle is None:
         return None
-    try:
-        data = json.loads(match.group(1))
-        idx = data.get("Diagnosis", {}).get("matched_candidate_index")
-        return int(idx) if idx is not None else None
-    except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
-        return None
+    return parsed.oracle.matched_candidate_index
 
 
 def _parse_short_circuit(interrupt_data: Any) -> ShortCircuitSignal | None:
@@ -1152,9 +1138,7 @@ async def run(
     mitigation_identity = _resolve_mitigation_playbook_identity(diag_result, diagnosis_playbook_candidate)
     if crucible_config.enable_mitigation_playbook_curation and mitigation_identity is not None:
         slug, root_cause = mitigation_identity
-        diagnosis_oracle_reasoning = extract_benchmark_reasoning(
-            original_diag_result.benchmark_block or "", stage="diagnosis"
-        )
+        diagnosis_oracle_reasoning = _oracle_reasoning(original_diag_result.benchmark_block or "", stage="diagnosis")
         if mitigation_recovery and mitigation_recovery.message_history:
             mitigation_playbook_candidate = await recovery_agent.build_mitigation_playbook_candidate(
                 app_info=app_info,
