@@ -159,7 +159,7 @@ def _build_usage_metrics(
 
 
 def _replace_hypothesis_placeholder(
-    shared_file: SharedFile | Path,
+    shared_file: SharedFile,
     iteration: int,
     diagnosis: str,
     justification: str,
@@ -174,9 +174,7 @@ def _replace_hypothesis_placeholder(
     )
     if causal_chain:
         real_content += f"**Causal Chain**: {causal_chain}\n"
-    content = shared_file.read_text()
-    if placeholder in content:
-        shared_file.write_text(content.replace(placeholder, real_content, 1))
+    shared_file.replace(placeholder, real_content, 1)
 
 
 def _resolve_mitigation_playbook_identity(

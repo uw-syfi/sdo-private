@@ -57,10 +57,17 @@ class SharedFile:
         tmp.rename(self._path)
 
     def append(self, text: str) -> None:
+        # IMPORTANT: re-seek to end under the lock before writing. A
+        # concurrent write_text/replace on another FD may have truncated
+        # the file after this FD was opened, invalidating the cached
+        # append offset. Also flush() before releasing the lock so buffered
+        # bytes reach the kernel while we still hold it.
         with self._path.open("a") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             try:
+                fh.seek(0, 2)  # SEEK_END
                 fh.write(text)
+                fh.flush()
             finally:
                 fcntl.flock(fh, fcntl.LOCK_UN)
 
@@ -71,7 +78,47 @@ class SharedFile:
         return self._path.read_text()
 
     def write_text(self, text: str) -> None:
-        self._path.write_text(text)
+        # Open with r+ so we can hold an exclusive lock across truncate+write,
+        # preventing concurrent append() calls from losing data. Create the
+        # file if it does not exist yet.
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._path.exists():
+            # A benign race here only results in an extra empty-file
+            # creation; the real mutation happens under the lock below.
+            self._path.touch()
+        with self._path.open("r+") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                fh.seek(0)
+                fh.truncate()
+                fh.write(text)
+                fh.flush()
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    def replace(self, old: str, new: str, count: int = 1) -> bool:
+        """Atomically read-modify-write under a single exclusive lock.
+
+        Returns True if at least one replacement occurred.
+        """
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._path.exists():
+            self._path.touch()
+        with self._path.open("r+") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                fh.seek(0)
+                content = fh.read()
+                if old not in content:
+                    return False
+                updated = content.replace(old, new, count)
+                fh.seek(0)
+                fh.truncate()
+                fh.write(updated)
+                fh.flush()
+                return True
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
 
     def open(self, mode: str = "r"):
         return self._path.open(mode)

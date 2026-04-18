@@ -404,36 +404,39 @@ class TestWaitForMitigationStage:
 
 class TestReplaceHypothesisPlaceholder:
     def test_hypothesis_placeholder_replaced_after_judge(self, tmp_path: Path):
-        shared = tmp_path / "session.md"
-        shared.write_text(
+        shared_path = tmp_path / "session.md"
+        shared_path.write_text(
             "# header\n"
             "\n### Iteration 1 — Agent Hypothesis\n"
             "[Submitted — pending judge review]\n"
             "\n### Iteration 1 — Judge Verdict\n"
         )
+        shared = SharedFile(shared_path)
         _replace_hypothesis_placeholder(shared, 1, "disk full", "saw 100% usage")
-        content = shared.read_text()
+        content = shared_path.read_text()
         assert "[Submitted — pending judge review]" not in content
         assert "**Diagnosis**: disk full" in content
         assert "**Justification**: saw 100% usage" in content
 
     def test_no_placeholder_is_noop(self, tmp_path: Path):
-        shared = tmp_path / "session.md"
+        shared_path = tmp_path / "session.md"
         original = "# header\nsome content\n"
-        shared.write_text(original)
+        shared_path.write_text(original)
+        shared = SharedFile(shared_path)
         _replace_hypothesis_placeholder(shared, 1, "diag", "just")
-        assert shared.read_text() == original
+        assert shared_path.read_text() == original
 
     def test_only_matching_iteration_replaced(self, tmp_path: Path):
-        shared = tmp_path / "session.md"
-        shared.write_text(
+        shared_path = tmp_path / "session.md"
+        shared_path.write_text(
             "\n### Iteration 1 — Agent Hypothesis\n"
             "**Diagnosis**: old\n**Justification**: old\n"
             "\n### Iteration 2 — Agent Hypothesis\n"
             "[Submitted — pending judge review]\n"
         )
+        shared = SharedFile(shared_path)
         _replace_hypothesis_placeholder(shared, 2, "new diag", "new just")
-        content = shared.read_text()
+        content = shared_path.read_text()
         assert "**Diagnosis**: old" in content  # iteration 1 unchanged
         assert "**Diagnosis**: new diag" in content  # iteration 2 replaced
 
