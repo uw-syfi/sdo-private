@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 if TYPE_CHECKING:
@@ -21,7 +20,6 @@ from sregym_agents.crucible.orchestrator import (
     _build_sre_agent_config,
     _build_usage_metrics,
     _replace_hypothesis_placeholder,
-    _wait_for_mitigation_stage,
 )
 from sregym_agents.crucible.tools import SharedFile
 
@@ -280,121 +278,6 @@ class TestBuildSREAgentConfigTriagePriors:
         config = CrucibleConfig(prompt_version="v3")
         result = _build_sre_agent_config(None, config)
         assert result.triage_priors is None
-
-
-# ---------------------------------------------------------------------------
-# _wait_for_mitigation_stage
-# ---------------------------------------------------------------------------
-
-
-def _mock_httpx_response(stage: str) -> MagicMock:
-    """Build a fake httpx-style response with the given stage in the JSON body."""
-    resp = MagicMock()
-    resp.json.return_value = {"stage": stage}
-    resp.raise_for_status = MagicMock()
-    return resp
-
-
-def _make_mock_client(**kwargs) -> AsyncMock:
-    """Build a mock httpx.AsyncClient with async context-manager support."""
-    client = AsyncMock(spec=httpx.AsyncClient)
-    for k, v in kwargs.items():
-        setattr(client, k, v)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=False)
-    return client
-
-
-def _counter_clock(step: float = 1.0):
-    """Return a callable that increments by *step* on each call (starts at 0)."""
-    n = {"v": -step}
-
-    def tick():
-        n["v"] += step
-        return n["v"]
-
-    return tick
-
-
-class TestWaitForMitigationStage:
-    @pytest.mark.asyncio
-    async def test_returns_immediately_when_stage_is_mitigation(self):
-        client = _make_mock_client(
-            get=AsyncMock(return_value=_mock_httpx_response("mitigation")),
-        )
-
-        with (
-            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=_counter_clock()),
-        ):
-            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
-
-        mock_sleep.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_polls_until_stage_matches(self):
-        call_count = 0
-
-        async def staged_get(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                return _mock_httpx_response("diagnosis")
-            return _mock_httpx_response("mitigation")
-
-        client = _make_mock_client(get=AsyncMock(side_effect=staged_get))
-
-        with (
-            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=_counter_clock()),
-        ):
-            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
-
-        assert mock_sleep.await_count == 2  # slept after two "diagnosis" responses
-
-    @pytest.mark.asyncio
-    async def test_logs_warning_and_returns_on_timeout(self):
-        client = _make_mock_client(
-            get=AsyncMock(return_value=_mock_httpx_response("diagnosis")),
-        )
-
-        # First call returns 0; all subsequent calls return past-timeout.
-        call_count = 0
-
-        def fake_monotonic():
-            nonlocal call_count
-            call_count += 1
-            return 0.0 if call_count == 1 else 400.0
-
-        with (
-            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock),
-            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=fake_monotonic),
-        ):
-            # Should return without raising
-            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
-
-    @pytest.mark.asyncio
-    async def test_handles_connection_error_gracefully(self):
-        call_count = 0
-
-        async def fake_get(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise httpx.ConnectError("refused")
-            return _mock_httpx_response("mitigation")
-
-        client = _make_mock_client(get=AsyncMock(side_effect=fake_get))
-
-        with (
-            patch("sregym_agents.crucible.orchestrator.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible.orchestrator.asyncio.sleep", new_callable=AsyncMock),
-            patch("sregym_agents.crucible.orchestrator.time.monotonic", side_effect=_counter_clock()),
-        ):
-            await _wait_for_mitigation_stage("http://localhost:8000", timeout=300)
 
 
 # ---------------------------------------------------------------------------
@@ -907,7 +790,7 @@ class TestOrchestratorRun:
                 "sregym_agents.crucible.orchestrator._run_stage_loop",
                 new=AsyncMock(side_effect=[diag_result, mit_result]),
             ),
-            patch("sregym_agents.crucible.orchestrator._wait_for_mitigation_stage", new=AsyncMock()),
+            patch("sregym_agents.crucible.orchestrator.poll_stage", new=AsyncMock()),
             patch("sregym_agents.crucible.orchestrator._try_playbook_shortcut", new=AsyncMock(return_value=None)),
             patch(
                 "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_success_mitigation_playbook_candidate",
@@ -1070,7 +953,7 @@ class TestOrchestratorRun:
                 "sregym_agents.crucible.orchestrator._run_stage_loop",
                 new=fake_run_stage_loop,
             ),
-            patch("sregym_agents.crucible.orchestrator._wait_for_mitigation_stage", new=AsyncMock()),
+            patch("sregym_agents.crucible.orchestrator.poll_stage", new=AsyncMock()),
             patch("sregym_agents.crucible.orchestrator._try_playbook_shortcut", new=AsyncMock(return_value=None)),
             patch(
                 "sregym_agents.crucible.agents.recovery_agent.RecoveryAgent.build_success_diagnosis_playbook_candidate",
@@ -1164,7 +1047,7 @@ class TestOrchestratorRun:
                 known_confounders=["The Service object is missing."],
             )
 
-        async def fake_wait_for_mitigation_stage(*args, **kwargs):
+        async def fake_poll_stage(*args, **kwargs):
             return None
 
         async def fake_try_recovery_playbook_shortcut(*args, **kwargs):
@@ -1173,8 +1056,8 @@ class TestOrchestratorRun:
         with (
             patch("sregym_agents.crucible.orchestrator._run_stage_loop", new=fake_run_stage_loop),
             patch(
-                "sregym_agents.crucible.orchestrator._wait_for_mitigation_stage",
-                new=fake_wait_for_mitigation_stage,
+                "sregym_agents.crucible.orchestrator.poll_stage",
+                new=fake_poll_stage,
             ),
             patch(
                 "sregym_agents.crucible.orchestrator._try_recovery_playbook_shortcut",

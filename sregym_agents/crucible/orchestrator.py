@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import json
 import logging
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible._benchmark import extract_benchmark_reasoning
+from sregym_agents.crucible._conductor import poll_stage
 from sregym_agents.crucible.agents import (
     JudgeAgent,
     RecoveryAgent,
@@ -330,24 +330,6 @@ async def _get_conductor_stage() -> str | None:
     except Exception as e:
         logger.debug("Failed to query conductor stage: %s", e)
         return None
-
-
-async def _wait_for_mitigation_stage(api_base: str, timeout: int = 300) -> None:
-    """Poll until conductor reaches mitigation stage."""
-    start = time.monotonic()
-    async with httpx.AsyncClient() as client:
-        while time.monotonic() - start < timeout:
-            try:
-                resp = await client.get(f"{api_base}/status", timeout=5)
-                resp.raise_for_status()
-                stage = resp.json().get("stage")
-                if stage == "mitigation":
-                    return
-                logger.debug(f"Stage: {stage!r}, waiting for mitigation...")
-            except Exception as e:
-                logger.debug(f"Status check failed: {e}")
-            await asyncio.sleep(1)
-    logger.warning(f"Timed out waiting for mitigation stage after {timeout}s — proceeding anyway.")
 
 
 def _read_kb_content(path: Path | None) -> str:
@@ -1032,7 +1014,7 @@ async def run(
 
     api_base = f"http://{os.getenv('API_HOSTNAME', 'localhost')}:{os.getenv('API_PORT', '8000')}"
     logger.info("Waiting for benchmark to reach mitigation stage...")
-    await _wait_for_mitigation_stage(api_base, timeout=wait_stage_timeout)
+    await poll_stage(api_base, wait_for="mitigation", timeout=wait_stage_timeout, on_timeout="warn")
 
     # Playbook shortcut (gated by enable_mitigation_kb)
     mit_result: StageLoopResult | None = None
