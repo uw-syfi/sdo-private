@@ -8,10 +8,8 @@ import dataclasses
 import json
 import logging
 import os
-import random
 import shutil
 import sys
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +19,7 @@ import requests
 
 from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
+from sregym_agents.crucible._conductor import poll_stage
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import KbUpdateTask, enqueue_task, ensure_kb_worker
@@ -52,7 +51,7 @@ def _setup_logging() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-_READY_STAGES = {"diagnosis", "mitigation"}
+_READY_STAGES: frozenset[str] = frozenset({"diagnosis", "mitigation"})
 
 
 def create_driver(
@@ -130,26 +129,6 @@ def _signal_cleanup(api_base: str) -> None:
         logger.info(f"POST /cleanup -> status={resp.status_code} body={resp.text[:200]}")
     except Exception as e:
         logger.warning(f"POST /cleanup failed: {e}")
-
-
-def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
-    """Poll until conductor reaches a submission-ready stage."""
-    start = time.time()
-    delay = 1.0
-    while time.time() - start < timeout:
-        try:
-            resp = requests.get(f"{api_base}/status", timeout=5)
-            resp.raise_for_status()
-            stage = resp.json().get("stage")
-            if stage in _READY_STAGES:
-                logger.info(f"Conductor ready at stage: {stage!r}")
-                return stage
-            logger.debug(f"Stage: {stage!r}, waiting...")
-        except Exception as e:
-            logger.debug(f"Status check failed: {e}")
-        time.sleep(delay + random.uniform(0, delay * 0.1))
-        delay = min(delay * 1.5, 30)
-    raise TimeoutError(f"Conductor did not reach ready stage within {timeout}s")
 
 
 def _get_app_info(api_base: str) -> dict[str, Any]:
@@ -292,7 +271,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     for field in dataclasses.fields(crucible_config):
         print(f"  {field.name}: {getattr(crucible_config, field.name)!r}")
     print("=" * 60 + "\n")
-    _wait_for_stage(api_base, timeout=300)
+    await poll_stage(api_base, wait_for=_READY_STAGES, timeout=300, on_timeout="raise")
 
     app_info = _get_app_info(api_base)
     problem_id = _get_problem_id(api_base)
