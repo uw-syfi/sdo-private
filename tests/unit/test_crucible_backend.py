@@ -231,42 +231,6 @@ class TestContextWindowDetection:
         assert _context_window_for("some-unknown-model") == 128_000
 
 
-# ── RecoveryAgent._extract_benchmark_reasoning ───────────────────────────
-
-
-class TestExtractBenchmarkReasoning:
-    def test_extracts_diagnosis(self):
-        from sregym_agents.crucible.agents import RecoveryAgent
-
-        block = (
-            "<benchmark_result>\nsuccess: False\n"
-            '<oracle>\n{"Diagnosis": {"reasoning": "the real cause"}}\n</oracle>\n'
-            "</benchmark_result>\n"
-        )
-        assert RecoveryAgent._extract_benchmark_reasoning(block) == "the real cause"
-
-    def test_extracts_mitigation(self):
-        from sregym_agents.crucible.agents import RecoveryAgent
-
-        block = (
-            "<benchmark_result>\nsuccess: False\n"
-            '<oracle>\n{"Mitigation": {"reasoning": "apply the fix"}}\n</oracle>\n'
-            "</benchmark_result>\n"
-        )
-        assert RecoveryAgent._extract_benchmark_reasoning(block, stage="mitigation") == "apply the fix"
-
-    def test_empty_on_no_oracle(self):
-        from sregym_agents.crucible.agents import RecoveryAgent
-
-        assert RecoveryAgent._extract_benchmark_reasoning("no oracle here") == ""
-
-    def test_empty_on_invalid_json(self):
-        from sregym_agents.crucible.agents import RecoveryAgent
-
-        block = "<oracle>\nnot json\n</oracle>"
-        assert RecoveryAgent._extract_benchmark_reasoning(block) == ""
-
-
 # ── Role agent construction ──────────────────────────────────────────────
 
 
