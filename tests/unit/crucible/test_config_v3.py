@@ -113,3 +113,100 @@ def test_crucible_config_accepts_default_numerics() -> None:
     assert cfg.max_mitigation_iterations == 5
     assert cfg.wait_stage_timeout == 300
     assert cfg.stage_timeout == 900
+
+
+# -- Feature flags + prompt_version validation (issue #88) --
+
+
+def test_crucible_config_rejects_non_vN_prompt_version() -> None:
+    with pytest.raises(ValueError, match="prompt_version"):
+        CrucibleConfig(prompt_version="nonsense")
+
+
+def test_crucible_config_rejects_empty_prompt_version() -> None:
+    with pytest.raises(ValueError, match="prompt_version"):
+        CrucibleConfig(prompt_version="")
+
+
+def test_crucible_config_rejects_prompt_version_with_missing_template_dir() -> None:
+    with pytest.raises(ValueError, match="v999"):
+        CrucibleConfig(prompt_version="v999")
+
+
+def test_crucible_config_accepts_v1_v2_v3_prompt_versions() -> None:
+    # All three versions have template directories shipped with the repo.
+    for pv in ("v1", "v2", "v3"):
+        cfg = CrucibleConfig(prompt_version=pv)
+        assert cfg.prompt_version == pv
+
+
+def test_flags_default_off_for_v2_prompt_version() -> None:
+    cfg = CrucibleConfig(prompt_version="v2")
+    assert cfg.enable_triage_priors is False
+    assert cfg.enable_success_playbook_candidates is False
+    assert cfg.enable_mitigation_playbook_curation is False
+    assert cfg.enable_diagnosis_playbook_candidates is False
+
+
+def test_flags_can_be_overridden_explicitly() -> None:
+    cfg = CrucibleConfig(
+        prompt_version="v2",
+        enable_triage_priors=True,
+        enable_success_playbook_candidates=True,
+        enable_mitigation_playbook_curation=True,
+        enable_diagnosis_playbook_candidates=True,
+    )
+    assert cfg.enable_triage_priors is True
+    assert cfg.enable_success_playbook_candidates is True
+    assert cfg.enable_mitigation_playbook_curation is True
+    assert cfg.enable_diagnosis_playbook_candidates is True
+
+
+def test_config_from_experiment_enables_flags_for_v3() -> None:
+    cfg = crucible_config_from_experiment_agent({"prompt_version": "v3"})
+    assert cfg.prompt_version == "v3"
+    assert cfg.enable_triage_priors is True
+    assert cfg.enable_success_playbook_candidates is True
+    assert cfg.enable_mitigation_playbook_curation is True
+    assert cfg.enable_diagnosis_playbook_candidates is True
+
+
+def test_config_from_experiment_disables_flags_for_non_v3() -> None:
+    cfg = crucible_config_from_experiment_agent({"prompt_version": "v2"})
+    assert cfg.prompt_version == "v2"
+    assert cfg.enable_triage_priors is False
+    assert cfg.enable_success_playbook_candidates is False
+    assert cfg.enable_mitigation_playbook_curation is False
+    assert cfg.enable_diagnosis_playbook_candidates is False
+
+
+def test_config_from_experiment_respects_explicit_flag_overrides() -> None:
+    cfg = crucible_config_from_experiment_agent(
+        {
+            "prompt_version": "v3",
+            "enable_triage_priors": False,
+            "enable_success_playbook_candidates": False,
+            "enable_mitigation_playbook_curation": False,
+            "enable_diagnosis_playbook_candidates": False,
+        }
+    )
+    assert cfg.enable_triage_priors is False
+    assert cfg.enable_success_playbook_candidates is False
+    assert cfg.enable_mitigation_playbook_curation is False
+    assert cfg.enable_diagnosis_playbook_candidates is False
+
+
+def test_config_from_experiment_can_enable_flags_without_v3() -> None:
+    cfg = crucible_config_from_experiment_agent(
+        {
+            "prompt_version": "v2",
+            "enable_triage_priors": True,
+            "enable_diagnosis_playbook_candidates": True,
+        }
+    )
+    assert cfg.prompt_version == "v2"
+    assert cfg.enable_triage_priors is True
+    assert cfg.enable_diagnosis_playbook_candidates is True
+    # Un-overridden flags still default off.
+    assert cfg.enable_success_playbook_candidates is False
+    assert cfg.enable_mitigation_playbook_curation is False

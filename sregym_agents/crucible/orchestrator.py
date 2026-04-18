@@ -242,7 +242,11 @@ async def _run_diagnosis_recovery_if_needed(
             diag_result.agent_justification = diagnosis_recovery.submission.justification
             diag_result.agent_causal_chain = diagnosis_recovery.submission.causal_chain
 
-    if diagnosis_recovery and diagnosis_recovery.message_history and crucible_config.prompt_version >= "v3":
+    if (
+        diagnosis_recovery
+        and diagnosis_recovery.message_history
+        and crucible_config.enable_diagnosis_playbook_candidates
+    ):
         diagnosis_playbook_candidate = await recovery_agent.build_diagnosis_playbook_candidate(
             app_info=app_info,
             original_answer=original_diag_result.agent_answer,
@@ -259,7 +263,7 @@ async def _run_diagnosis_recovery_if_needed(
             ),
         )
 
-        if crucible_config.prompt_version >= "v3" and original_diag_result.stage_outputs_file is not None:
+        if crucible_config.enable_triage_priors and original_diag_result.stage_outputs_file is not None:
             triage_area_candidate = await recovery_agent.build_triage_area_candidate(
                 app_info=app_info,
                 original_answer=original_diag_result.agent_answer,
@@ -838,11 +842,10 @@ def _build_sre_agent_config(
     verification_priors_file = injected_kb.verification_priors if injected_kb else None
 
     # v3 priors (learned rules from reflection)
-    is_v3 = crucible_config.prompt_version >= "v3"
     triage_priors = None
     verification_guidance = ""
     stage_outputs_file: Path | None = None
-    if is_v3:
+    if crucible_config.enable_triage_priors:
         stage_outputs_file = Path("diagnosis_stage_outputs.md")
         if triage_priors_file:
             yaml_path = triage_priors_file.with_suffix(".yaml")
@@ -959,7 +962,7 @@ async def run(
         if diagnosis_playbook_candidate is not None:
             diagnosis_playbook_candidate_origin = "recovery"
         elif (
-            crucible_config.prompt_version >= "v3"
+            crucible_config.enable_success_playbook_candidates
             and "success: True" in (diag_result.benchmark_block or "")
             and not diag_result.confirmed_slugs
             and diag_result.message_history
@@ -1126,7 +1129,7 @@ async def run(
     if diagnosis_playbook_candidate is not None:
         diagnosis_playbook_candidate_origin = "recovery"
     elif (
-        crucible_config.prompt_version >= "v3"
+        crucible_config.enable_success_playbook_candidates
         and "success: True" in (diag_result.benchmark_block or "")
         and not diag_result.confirmed_slugs
         and diag_result.message_history
@@ -1167,7 +1170,7 @@ async def run(
     mitigation_playbook_candidate = None
     mitigation_playbook_candidate_origin: str | None = None
     mitigation_identity = _resolve_mitigation_playbook_identity(diag_result, diagnosis_playbook_candidate)
-    if crucible_config.prompt_version >= "v3" and mitigation_identity is not None:
+    if crucible_config.enable_mitigation_playbook_curation and mitigation_identity is not None:
         slug, root_cause = mitigation_identity
         diagnosis_oracle_reasoning = extract_benchmark_reasoning(
             original_diag_result.benchmark_block or "", stage="diagnosis"
