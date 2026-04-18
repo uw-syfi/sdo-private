@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic_ai import RunContext  # noqa: TC002 — needed at runtime for pydantic-ai tool introspection
 
+from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle, Stage
 from sregym_agents.crucible.tools._deps import JudgeDeps  # noqa: TC001 — needed at runtime for _impl functions
 
 logger = logging.getLogger(__name__)
@@ -32,17 +33,20 @@ async def submit_to_benchmark(
     submit_mcp_url: str,
     submission_ans: str | list[str],
     stage: str,
-) -> tuple[bool, str, dict[str, Any] | None]:
+) -> BenchmarkResult:
     """Submit *submission_ans* to the benchmark MCP server.
 
     ``submission_ans`` may be a single string (a single diagnosis answer) or
     a list of candidate diagnosis strings (the multi-diagnosis path —
     benchmark grades success if any candidate matches the ground truth).
 
-    Returns (success, message, oracle_result_dict).
+    Returns a :class:`BenchmarkResult` describing the outcome. Callers that
+    need the textual ``<benchmark_result>`` block should call ``.render()``.
     """
     from mcp import ClientSession
     from mcp.client.sse import sse_client
+
+    stage_literal: Stage = stage if stage in ("diagnosis", "mitigation") else "diagnosis"
 
     result: Any = None
     for attempt in range(_MCP_MAX_RETRIES + 1):
@@ -73,15 +77,27 @@ async def submit_to_benchmark(
     try:
         parsed = ast.literal_eval(raw)
     except Exception:
-        return False, f"Failed to parse benchmark response: {raw}", None
+        return BenchmarkResult(
+            stage=stage_literal,
+            success=False,
+            message=f"Failed to parse benchmark response: {raw}",
+        )
 
     if parsed.get("status") != "200":
-        return False, f"Benchmark returned non-200 status: {parsed}", None
+        return BenchmarkResult(
+            stage=stage_literal,
+            success=False,
+            message=f"Benchmark returned non-200 status: {parsed}",
+        )
 
     try:
-        oracle = json.loads(parsed.get("text", "{}"))
+        oracle_raw = json.loads(parsed.get("text", "{}"))
     except json.JSONDecodeError:
-        return False, f"Benchmark text is not valid JSON: {parsed.get('text')}", None
+        return BenchmarkResult(
+            stage=stage_literal,
+            success=False,
+            message=f"Benchmark text is not valid JSON: {parsed.get('text')}",
+        )
 
     # Filter oracle to only include current stage results — the conductor
     # returns a cumulative dict (e.g. Diagnosis + Mitigation), but each
@@ -90,16 +106,27 @@ async def submit_to_benchmark(
     stage_key = stage.capitalize()
     timing_key = STAGE_TIMING_KEYS.get(stage_key)
     filtered_oracle: dict[str, Any] = {}
-    if stage_key in oracle:
-        filtered_oracle[stage_key] = oracle[stage_key]
-    if timing_key and timing_key in oracle:
-        filtered_oracle[timing_key] = oracle[timing_key]
+    if stage_key in oracle_raw:
+        filtered_oracle[stage_key] = oracle_raw[stage_key]
+    if timing_key and timing_key in oracle_raw:
+        filtered_oracle[timing_key] = oracle_raw[timing_key]
 
+    oracle = Oracle(stage=stage_literal, data=filtered_oracle)
     stage_result: dict[str, Any] = filtered_oracle.get(stage_key, {})
     if not stage_result.get("success"):
-        return False, f"Benchmark rejected submission for stage '{stage_key}'.", filtered_oracle
+        return BenchmarkResult(
+            stage=stage_literal,
+            success=False,
+            message=f"Benchmark rejected submission for stage '{stage_key}'.",
+            oracle=oracle,
+        )
 
-    return True, f"Benchmark accepted submission for stage '{stage_key}'.", filtered_oracle
+    return BenchmarkResult(
+        stage=stage_literal,
+        success=True,
+        message=f"Benchmark accepted submission for stage '{stage_key}'.",
+        oracle=oracle,
+    )
 
 
 def submit_independent_findings_impl(
@@ -214,14 +241,12 @@ async def submit_verdict_impl(
 
     benchmark_block = ""
     if verdict:
+        stage_literal: Stage = stage if stage in ("diagnosis", "mitigation") else "diagnosis"
         try:
-            success, message, oracle = await submit_to_benchmark(deps.submit_mcp_url, submission_ans, stage)
-            oracle_text = f"<oracle>\n{json.dumps(oracle, indent=2)}\n</oracle>" if oracle is not None else ""
-            benchmark_block = (
-                f"\n<benchmark_result>\nsuccess: {success}\nmessage: {message}\n{oracle_text}\n</benchmark_result>\n"
-            )
+            bench_result = await submit_to_benchmark(deps.submit_mcp_url, submission_ans, stage)
         except Exception as e:
-            benchmark_block = f"\n<benchmark_result>\nError submitting to benchmark: {e}\n</benchmark_result>\n"
+            bench_result = BenchmarkResult(stage=stage_literal, error=str(e))
+        benchmark_block = bench_result.render()
 
     deps.state.benchmark_block = benchmark_block
     full_entry = entry + benchmark_block

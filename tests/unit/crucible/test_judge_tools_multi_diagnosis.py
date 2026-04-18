@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 if TYPE_CHECKING:
     from pathlib import Path
 
+from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle
 from sregym_agents.crucible.tools import (
     JudgeDeps,
     SharedFile,
@@ -50,7 +51,12 @@ class TestSubmitVerdictMultiDiagnosis:
         with patch(
             "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
-            return_value=(True, "ok", {"Diagnosis": {"success": True}}),
+            return_value=BenchmarkResult(
+                stage="diagnosis",
+                success=True,
+                message="ok",
+                oracle=Oracle(stage="diagnosis", data={"Diagnosis": {"success": True}}),
+            ),
         ) as mock_submit:
             asyncio.run(submit_verdict(ctx, True, "looks good", "single answer"))
 
@@ -65,7 +71,12 @@ class TestSubmitVerdictMultiDiagnosis:
         with patch(
             "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
-            return_value=(True, "ok", {"Diagnosis": {"success": True}}),
+            return_value=BenchmarkResult(
+                stage="diagnosis",
+                success=True,
+                message="ok",
+                oracle=Oracle(stage="diagnosis", data={"Diagnosis": {"success": True}}),
+            ),
         ) as mock_submit:
             asyncio.run(submit_verdict(ctx, True, "ambiguous", ["cand A", "cand B"]))
 
@@ -110,7 +121,12 @@ class TestSubmitVerdictMultiDiagnosis:
         with patch(
             "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
-            return_value=(True, "ok", {"Diagnosis": {"success": True}}),
+            return_value=BenchmarkResult(
+                stage="diagnosis",
+                success=True,
+                message="ok",
+                oracle=Oracle(stage="diagnosis", data={"Diagnosis": {"success": True}}),
+            ),
         ) as mock_submit:
             asyncio.run(submit_verdict(ctx, True, "five total", exact))
 
@@ -151,11 +167,9 @@ class TestSubmitToBenchmarkListPayload:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(
-                submit_to_benchmark("http://x/sse", ["cand A", "cand B"], "diagnosis")
-            )
+            result = self._run(submit_to_benchmark("http://x/sse", ["cand A", "cand B"], "diagnosis"))
 
-        assert success is True
+        assert result.success is True
         # call_tool was invoked with the list as `ans`, not stringified.
         call_kwargs = mock_session.call_tool.call_args
         assert call_kwargs.kwargs["arguments"] == {"ans": ["cand A", "cand B"]}

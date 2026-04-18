@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 import pytest
 
 from libs.pydantic_agent import UsageCollector
+from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentResult
 from sregym_agents.crucible.config import CrucibleConfig
@@ -84,10 +85,11 @@ def test_no_judge_submits_directly_and_returns_approved(shared_file: SharedFile)
     with patch(
         "sregym_agents.crucible.orchestrator.submit_to_benchmark",
         new_callable=AsyncMock,
-        return_value=(
-            True,
-            "Benchmark accepted submission for stage 'Diagnosis'.",
-            {"Diagnosis": {"success": True}},
+        return_value=BenchmarkResult(
+            stage="diagnosis",
+            success=True,
+            message="Benchmark accepted submission for stage 'Diagnosis'.",
+            oracle=Oracle(stage="diagnosis", data={"Diagnosis": {"success": True}}),
         ),
     ):
         from sregym_agents.crucible.orchestrator import _run_stage_loop

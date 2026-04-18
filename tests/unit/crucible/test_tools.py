@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 import pytest
 
+from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle
 from sregym_agents.crucible.tools import (
     MUTATING_KUBECTL_VERBS,
     JudgeDeps,
@@ -447,11 +448,12 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "my answer", "diagnosis"))
+            result = self._run(submit_to_benchmark("http://x/sse", "my answer", "diagnosis"))
 
-        assert success is True
-        assert "accepted" in msg.lower()
-        assert result_oracle == oracle
+        assert result.success is True
+        assert "accepted" in result.message.lower()
+        assert result.oracle is not None
+        assert result.oracle.data == oracle
 
     def test_non_200_status(self):
         raw = repr({"status": "500", "text": "{}"})
@@ -463,10 +465,10 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            result = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
-        assert success is False
-        assert oracle is None
+        assert result.success is False
+        assert result.oracle is None
 
     def test_unparseable_response(self):
         mock_session = self._make_mock_session("not a dict at all !!!{}")
@@ -477,11 +479,11 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            result = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
-        assert success is False
-        assert "Failed to parse" in msg
-        assert oracle is None
+        assert result.success is False
+        assert "Failed to parse" in result.message
+        assert result.oracle is None
 
     def test_invalid_json_in_text_field(self):
         raw = repr({"status": "200", "text": "not valid json"})
@@ -493,10 +495,10 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            result = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
-        assert success is False
-        assert "not valid JSON" in msg
+        assert result.success is False
+        assert "not valid JSON" in result.message
 
     def test_stage_not_in_oracle(self):
         oracle = {"Mitigation": {"success": True}}
@@ -509,11 +511,12 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            result = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
-        assert success is False
-        assert "rejected" in msg.lower()
-        assert result_oracle == {}
+        assert result.success is False
+        assert "rejected" in result.message.lower()
+        assert result.oracle is not None
+        assert result.oracle.data == {}
 
     def test_success_false_in_oracle(self):
         oracle = {"Diagnosis": {"success": False}}
@@ -526,10 +529,11 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            result = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
-        assert success is False
-        assert result_oracle == oracle
+        assert result.success is False
+        assert result.oracle is not None
+        assert result.oracle.data == oracle
 
     def test_mitigation_filters_out_diagnosis(self):
         oracle = {
@@ -547,13 +551,13 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "", "mitigation"))
+            result = self._run(submit_to_benchmark("http://x/sse", "", "mitigation"))
 
-        assert success is True
-        assert "accepted" in msg.lower()
-        assert result_oracle == {"Mitigation": {"success": True}, "TTM": 166.5}
-        assert result_oracle is not None
-        assert "Diagnosis" not in result_oracle
+        assert result.success is True
+        assert "accepted" in result.message.lower()
+        assert result.oracle is not None
+        assert result.oracle.data == {"Mitigation": {"success": True}, "TTM": 166.5}
+        assert "Diagnosis" not in result.oracle.data
 
 
 # ---------------------------------------------------------------------------
@@ -770,7 +774,12 @@ class TestSubmitVerdict:
         with patch(
             "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
-            return_value=(True, "Benchmark accepted...", oracle),
+            return_value=BenchmarkResult(
+                stage="diagnosis",
+                success=True,
+                message="Benchmark accepted...",
+                oracle=Oracle(stage="diagnosis", data=oracle),
+            ),
         ):
             asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
 
@@ -805,7 +814,12 @@ class TestSubmitVerdict:
         with patch(
             "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
-            return_value=(True, "Benchmark accepted...", oracle),
+            return_value=BenchmarkResult(
+                stage="diagnosis",
+                success=True,
+                message="Benchmark accepted...",
+                oracle=Oracle(stage="diagnosis", data=oracle),
+            ),
         ):
             result = asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
 
@@ -821,7 +835,12 @@ class TestSubmitVerdict:
         with patch(
             "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
-            return_value=(True, "Benchmark accepted...", oracle),
+            return_value=BenchmarkResult(
+                stage="diagnosis",
+                success=True,
+                message="Benchmark accepted...",
+                oracle=Oracle(stage="diagnosis", data=oracle),
+            ),
         ):
             asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
 
@@ -837,7 +856,12 @@ class TestSubmitVerdict:
         with patch(
             "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
             new_callable=AsyncMock,
-            return_value=(True, "Benchmark accepted...", oracle),
+            return_value=BenchmarkResult(
+                stage="diagnosis",
+                success=True,
+                message="Benchmark accepted...",
+                oracle=Oracle(stage="diagnosis", data=oracle),
+            ),
         ) as mock_submit:
             asyncio.run(submit_verdict(ctx, True, "great work", "answer"))
             assert mock_submit.call_count == 1
@@ -1041,7 +1065,12 @@ class TestJudgeToolSequence:
             with patch(
                 "sregym_agents.crucible.tools._judge_tools.submit_to_benchmark",
                 new_callable=AsyncMock,
-                return_value=(True, "Benchmark accepted", {"Diagnosis": {"success": True}}),
+                return_value=BenchmarkResult(
+                    stage="diagnosis",
+                    success=True,
+                    message="Benchmark accepted",
+                    oracle=Oracle(stage="diagnosis", data={"Diagnosis": {"success": True}}),
+                ),
             ):
                 return await submit_verdict(ctx, True, "great work", "answer")
 

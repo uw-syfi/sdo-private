@@ -6,7 +6,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
 
-from sregym_agents.crucible._benchmark import extract_benchmark_reasoning
+from sregym_agents.crucible._benchmark import BenchmarkResult
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,
@@ -83,7 +83,8 @@ class RecoveryAgent:
 
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
 
-        reasoning = extract_benchmark_reasoning(benchmark_block)
+        parsed = BenchmarkResult.parse(benchmark_block, stage="diagnosis")
+        reasoning = parsed.oracle.reasoning if parsed and parsed.oracle else ""
         if not reasoning:
             logger.warning("Recovery diagnosis: no benchmark reasoning found, skipping.")
             return None
@@ -527,7 +528,8 @@ class RecoveryAgent:
         """Run a recovery mitigation agent to investigate and apply the correct fix."""
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
 
-        reasoning = extract_benchmark_reasoning(benchmark_block, stage="mitigation")
+        parsed = BenchmarkResult.parse(benchmark_block, stage="mitigation")
+        reasoning = parsed.oracle.reasoning if parsed and parsed.oracle else ""
         if not reasoning:
             logger.warning("Recovery mitigation: no benchmark reasoning found, skipping.")
             return None
