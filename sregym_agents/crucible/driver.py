@@ -35,12 +35,22 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+
+def _setup_logging() -> None:
+    """Apply the driver's default logging configuration.
+
+    Called from ``main()`` rather than at module import time so that importing
+    this module (e.g. from tests) does not mutate global logging state. See
+    GitLab issue #95.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 _READY_STAGES = {"diagnosis", "mitigation"}
 
@@ -486,6 +496,7 @@ async def _async_main(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    _setup_logging()
     args = _parse_args()
     asyncio.run(_async_main(args))
 
