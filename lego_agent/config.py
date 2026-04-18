@@ -12,16 +12,17 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[reportMissingImports]
 
-from dataclasses import dataclass, field
+from dataclasses import field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+from pydantic import ConfigDict, field_validator
+from pydantic.dataclasses import dataclass
 
 from libs.model_config import ModelConfig, from_provider_and_model
 
-
-@dataclass
-class AgentConfig:
-    VALID_BACKENDS = {
+_AGENT_VALID_BACKENDS: frozenset[str] = frozenset(
+    {
         "codex",
         "gemini",
         "claude",
@@ -34,6 +35,13 @@ class AgentConfig:
         "subagent",
         "hybrid",
     }
+)
+
+
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+class AgentConfig:
+    # Kept as a class-level constant for external reference (legacy API).
+    VALID_BACKENDS: ClassVar[frozenset[str]] = _AGENT_VALID_BACKENDS
 
     backend: str = "codex"
     max_retries: int = 3
@@ -41,17 +49,22 @@ class AgentConfig:
     rate_limit_backoff: int = 60
     model_config: ModelConfig | None = None
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.backend, str):  # pyright: ignore[reportUnnecessaryIsInstance]
-            raise TypeError(f"backend must be a str, got {type(self.backend)}")
-        self.backend = self.backend.lower()
-        if self.backend not in self.VALID_BACKENDS:
-            raise ValueError(
-                f"Invalid backend: '{self.backend}'. Valid backends: {', '.join(sorted(self.VALID_BACKENDS))}"
-            )
+    @field_validator("backend", mode="before")
+    @classmethod
+    def _normalize_backend(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise TypeError(f"backend must be a str, got {type(value)}")
+        value = value.lower()
+        if value not in _AGENT_VALID_BACKENDS:
+            raise ValueError(f"Invalid backend: '{value}'. Valid backends: {', '.join(sorted(_AGENT_VALID_BACKENDS))}")
+        return value
 
-        if self.model_config is not None and not isinstance(self.model_config, ModelConfig):  # pyright: ignore[reportUnnecessaryIsInstance]
-            raise TypeError(f"model_config must be a ModelConfig or None, got {type(self.model_config).__name__}")
+    @field_validator("model_config", mode="before")
+    @classmethod
+    def _check_model_config(cls, value: Any) -> Any:
+        if value is not None and not isinstance(value, ModelConfig):
+            raise TypeError(f"model_config must be a ModelConfig or None, got {type(value).__name__}")
+        return value
 
     @property
     def model(self) -> str | None:
@@ -87,12 +100,15 @@ class AgentConfig:
 class OperatorConfig:
     agent_timeout: int = 900
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.agent_timeout, int):  # pyright: ignore[reportUnnecessaryIsInstance]
-            raise TypeError(f"agent_timeout must be an int, got {type(self.agent_timeout)}")
+    @field_validator("agent_timeout", mode="before")
+    @classmethod
+    def _check_agent_timeout(cls, value: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"agent_timeout must be an int, got {type(value)}")
+        return value
 
 
-@dataclass
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     operator: OperatorConfig = field(default_factory=OperatorConfig)

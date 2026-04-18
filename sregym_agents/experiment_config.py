@@ -12,7 +12,10 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import model_validator
+from pydantic.dataclasses import dataclass
 
 try:
     import tomllib
@@ -22,22 +25,22 @@ except ModuleNotFoundError:
 import yaml
 
 _VARIANT_ORDERS = ("flat", "round_robin", "grouped", "adaptive")
+VariantOrder = Literal["flat", "round_robin", "grouped", "adaptive"]
 
 
-@dataclasses.dataclass
+@dataclass
 class VariantConfig:
     enabled: bool = False
     count: int = 0
     offset: int = 0
     seed: int = 42
-    order: str = "round_robin"  # one of _VARIANT_ORDERS
+    order: VariantOrder = "round_robin"
     max_per_class: int | None = None
     consec_solves_to_stop: int | None = None
-    spec_names: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    spec_names: list[str] = dataclasses.field(default_factory=list)
 
-    def __post_init__(self) -> None:
-        if self.order not in _VARIANT_ORDERS:
-            raise ValueError(f"variants.order must be one of {'|'.join(_VARIANT_ORDERS)}, got {self.order!r}")
+    @model_validator(mode="after")
+    def _validate(self) -> VariantConfig:
         if self.max_per_class is not None:
             if self.order not in ("grouped", "adaptive"):
                 raise ValueError("variants.max_per_class is only valid when variants.order in {'grouped', 'adaptive'}")
@@ -54,6 +57,7 @@ class VariantConfig:
             raise ValueError("variants.consec_solves_to_stop is only valid when variants.order='adaptive'")
         if self.spec_names and not self.enabled:
             raise ValueError("variants.spec_names requires variants.enabled = true")
+        return self
 
 
 _BOOL_ENV_TRUE = {"1", "true", "yes", "on"}
@@ -63,7 +67,7 @@ def _parse_bool_env(value: str) -> bool:
     return value.strip().lower() in _BOOL_ENV_TRUE
 
 
-@dataclasses.dataclass
+@dataclass
 class RunnerEnv:
     judge_model_id: str = ""
     crucible_seed_kb_dir: str = ""
@@ -72,7 +76,7 @@ class RunnerEnv:
     force_recreate_cluster: bool = False
 
 
-@dataclasses.dataclass
+@dataclass
 class ExperimentConfig:
     # Runner settings (become CLI args to bench/sregym/main.py)
     agent: str = "crucible"
@@ -86,8 +90,8 @@ class ExperimentConfig:
 
     # Problem selection (mutually exclusive with variants)
     tasklist: str = ""  # named set or path to YAML
-    problems: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
-    spec_names: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    problems: list[str] = dataclasses.field(default_factory=list)
+    spec_names: list[str] = dataclasses.field(default_factory=list)
 
     # Variant mode
     variants: VariantConfig = dataclasses.field(default_factory=VariantConfig)
@@ -96,9 +100,10 @@ class ExperimentConfig:
     env: RunnerEnv = dataclasses.field(default_factory=RunnerEnv)
 
     # Agent-specific config (keyed by agent name)
-    agent_config: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
+    agent_config: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def _validate_mutual_exclusion(self) -> ExperimentConfig:
         if self.variants.enabled and (self.tasklist or self.problems):
             raise ValueError("runner.variants.enabled is mutually exclusive with runner.tasklist and runner.problems")
         if self.tasklist and self.problems:
@@ -107,6 +112,7 @@ class ExperimentConfig:
             raise ValueError("runner.spec_names cannot be used with runner.variants.enabled")
         if self.spec_names and (self.tasklist or self.problems):
             raise ValueError("runner.spec_names is mutually exclusive with runner.tasklist and runner.problems")
+        return self
 
 
 def variant_config_from_raw(variants_raw: dict[str, Any]) -> VariantConfig:
