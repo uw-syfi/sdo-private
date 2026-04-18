@@ -23,7 +23,7 @@ from libs.agent_mw import request_with_retry
 from sregym_agents.crucible import orchestrator
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
-from sregym_agents.crucible.kb_update_queue import enqueue_task, ensure_kb_worker
+from sregym_agents.crucible.kb_update_queue import KbUpdateTask, enqueue_task, ensure_kb_worker
 from sregym_agents.crucible.knowledge_base import InjectedKB, KnowledgeBase, create_knowledge_base
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
@@ -446,46 +446,46 @@ async def _async_main(args: argparse.Namespace) -> None:
             logger.info(f"Saved stage outputs to {dest}")
 
         if diagnosis_playbook_candidate_path or triage_area_candidate_path or mitigation_playbook_candidate_path:
-            task_payload: dict[str, Any] = {
-                "diagnosis_run_file": str(diagnosis_run_path) if diagnosis_run_path is not None else None,
-                "recovery_diagnosis_run_file": (
+            kb_task = KbUpdateTask(
+                diagnosis_run_file=str(diagnosis_run_path) if diagnosis_run_path is not None else None,
+                recovery_diagnosis_run_file=(
                     str(recovery_diagnosis_run_path) if recovery_diagnosis_run_path is not None else None
                 ),
-                "diagnosis_playbook_candidate_file": (
+                diagnosis_playbook_candidate_file=(
                     str(diagnosis_playbook_candidate_path) if diagnosis_playbook_candidate_path is not None else None
                 ),
-                "diagnosis_playbook_candidate_origin": (
+                diagnosis_playbook_candidate_origin=(
                     str(diagnosis_playbook_candidate_origin)
                     if diagnosis_playbook_candidate_origin is not None
                     else None
                 ),
-                "triage_area_candidate_file": (
+                triage_area_candidate_file=(
                     str(triage_area_candidate_path) if triage_area_candidate_path is not None else None
                 ),
-                "mitigation_run_file": str(mitigation_run_path) if mitigation_run_path is not None else None,
-                "recovery_mitigation_run_file": (
+                mitigation_run_file=str(mitigation_run_path) if mitigation_run_path is not None else None,
+                recovery_mitigation_run_file=(
                     str(recovery_mitigation_run_path) if recovery_mitigation_run_path is not None else None
                 ),
-                "mitigation_playbook_candidate_file": (
+                mitigation_playbook_candidate_file=(
                     str(mitigation_playbook_candidate_path) if mitigation_playbook_candidate_path is not None else None
                 ),
-                "mitigation_playbook_candidate_origin": (
+                mitigation_playbook_candidate_origin=(
                     str(mitigation_playbook_candidate_origin)
                     if mitigation_playbook_candidate_origin is not None
                     else None
                 ),
-                "stage_outputs_file": saved_stage_outputs,
-                "kb_dir": args.kb_dir,
-                "kb_type": args.kb_type or agent_cfg.get("kb_type", "structured"),
-                "model_id": args.kb_model or os.environ.get("MODEL_ID", args.model),
-                "app_name": app_info.get("app_name", "unknown"),
+                stage_outputs_file=saved_stage_outputs,
+                kb_dir=args.kb_dir,
+                kb_type=args.kb_type or agent_cfg.get("kb_type", "structured"),
+                model_id=str(args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model),
+                app_name=app_info.get("app_name", "unknown"),
+                problem_id=problem_id,
+                diagnosis_succeeded=diagnosis_succeeded,
+                mitigation_succeeded=mitigation_succeeded,
+                timestamp=timestamp,
                 **crucible_config.to_kb_task_fields(),
-                "problem_id": problem_id,
-                "diagnosis_succeeded": diagnosis_succeeded,
-                "mitigation_succeeded": mitigation_succeeded,
-                "timestamp": timestamp,
-            }
-            task_path = enqueue_task(Path(args.kb_dir), task_payload, problem_id=problem_id)
+            )
+            task_path = enqueue_task(Path(args.kb_dir), kb_task, problem_id=problem_id)
             logger.info(f"KB update task written to {task_path}")
 
             ensure_kb_worker(Path(args.kb_dir))
