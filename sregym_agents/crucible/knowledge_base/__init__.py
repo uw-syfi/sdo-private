@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .base import InjectedKB, KnowledgeBase, SessionFiles
+from .base import InjectedKB, KnowledgeBase
 from .structured import StructuredKnowledgeBase
 
 if TYPE_CHECKING:
@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 __all__ = [
     "InjectedKB",
     "KnowledgeBase",
-    "SessionFiles",
     "create_knowledge_base",
     "seed_kb",
 ]

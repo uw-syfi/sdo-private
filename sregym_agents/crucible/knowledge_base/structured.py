@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import json
-import logging
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .base import InjectedKB, KnowledgeBase, SessionFiles, sanitize_app_name
+from .base import InjectedKB, KnowledgeBase, sanitize_app_name
 from .root_cause import RootCauseStore
 
 if TYPE_CHECKING:
-    from libs.pydantic_agent import UsageCollector
     from sregym_agents.crucible._prompts import PromptRenderer
     from sregym_agents.crucible.agents.base import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
 
     from .incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft, TriageAreaCandidate
-
-logger = logging.getLogger(__name__)
 
 
 class StructuredKnowledgeBase(KnowledgeBase):
@@ -76,26 +72,6 @@ class StructuredKnowledgeBase(KnowledgeBase):
             result.triage_priors = triage_priors_dest
 
         return result
-
-    async def update(
-        self,
-        session_files: SessionFiles,
-        stage_outputs_file: Path | None = None,
-        diagnosis_succeeded: bool = False,
-        mitigation_succeeded: bool = False,
-        usage_collector: UsageCollector | None = None,
-    ) -> None:
-        """Legacy no-op path.
-
-        The v3 root-cause KB is updated by the dedicated KB worker from
-        ``diagnosis_run.md`` and optional ``recovery_diagnosis_run.md`` incident
-        records, not from
-        inline session-summary merging.
-        """
-        logger.info(
-            "StructuredKnowledgeBase.update() is unused in v3 root-cause mode; "
-            "driver/kb_worker should write incident records and process review tasks instead."
-        )
 
     def write_incident_records(
         self,
