@@ -6,6 +6,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
 
+from sregym_agents.crucible._benchmark import extract_benchmark_reasoning
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,
@@ -82,7 +83,7 @@ class RecoveryAgent:
 
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
 
-        reasoning = self._extract_benchmark_reasoning(benchmark_block)
+        reasoning = extract_benchmark_reasoning(benchmark_block)
         if not reasoning:
             logger.warning("Recovery diagnosis: no benchmark reasoning found, skipping.")
             return None
@@ -526,7 +527,7 @@ class RecoveryAgent:
         """Run a recovery mitigation agent to investigate and apply the correct fix."""
         from sregym_agents.crucible.tools import SharedState, SREDeps, SRESubmission
 
-        reasoning = self._extract_benchmark_reasoning(benchmark_block, stage="mitigation")
+        reasoning = extract_benchmark_reasoning(benchmark_block, stage="mitigation")
         if not reasoning:
             logger.warning("Recovery mitigation: no benchmark reasoning found, skipping.")
             return None
@@ -614,19 +615,3 @@ class RecoveryAgent:
 
         logger.info(f"Recovery mitigation complete: {submission.answer}")
         return RecoveryRunResult(submission=submission, message_history=result.messages)
-
-    @staticmethod
-    def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:
-        """Extract the 'reasoning' field from a benchmark_result block."""
-        import json
-        import re
-
-        match = re.search(r"<oracle>\s*(.*?)\s*</oracle>", benchmark_block, re.DOTALL)
-        if not match:
-            return ""
-        try:
-            data = json.loads(match.group(1))
-            key = "Mitigation" if stage == "mitigation" else "Diagnosis"
-            return data.get(key, {}).get("reasoning", "")
-        except (json.JSONDecodeError, AttributeError):
-            return ""

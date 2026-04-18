@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.knowledge_base.root_cause import KBView
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
+from sregym_agents.crucible._benchmark import extract_benchmark_reasoning
 from sregym_agents.crucible.agents import (
     JudgeAgent,
     RecoveryAgent,
@@ -253,7 +254,7 @@ async def _run_diagnosis_recovery_if_needed(
             recovery_message_history=diagnosis_recovery.message_history,
             usage_collector=recovery_collector,
             stage_outputs_file=None,
-            diagnosis_oracle_reasoning=_extract_benchmark_reasoning(
+            diagnosis_oracle_reasoning=extract_benchmark_reasoning(
                 original_diag_result.benchmark_block or "", stage="diagnosis"
             ),
         )
@@ -698,25 +699,6 @@ async def _run_stage_loop(
         stage_outputs_file=stage_outputs_file,
         message_history=[],
     )
-
-
-def _extract_benchmark_reasoning(benchmark_block: str, stage: str = "diagnosis") -> str:
-    """Extract the 'reasoning' field from a benchmark_result block.
-
-    Args:
-        benchmark_block: Raw benchmark result block containing ``<oracle>`` tags.
-        stage: ``"diagnosis"`` or ``"mitigation"`` — determines which key to
-            look up inside the oracle JSON (``Diagnosis`` vs ``Mitigation``).
-    """
-    match = re.search(r"<oracle>\s*(.*?)\s*</oracle>", benchmark_block, re.DOTALL)
-    if not match:
-        return ""
-    try:
-        data = json.loads(match.group(1))
-        key = "Mitigation" if stage == "mitigation" else "Diagnosis"
-        return data.get(key, {}).get("reasoning", "")
-    except (json.JSONDecodeError, AttributeError):
-        return ""
 
 
 def _extract_matched_candidate_index(benchmark_block: str) -> int | None:
@@ -1211,7 +1193,7 @@ async def run(
     mitigation_identity = _resolve_mitigation_playbook_identity(diag_result, diagnosis_playbook_candidate)
     if crucible_config.prompt_version >= "v3" and mitigation_identity is not None:
         slug, root_cause = mitigation_identity
-        diagnosis_oracle_reasoning = _extract_benchmark_reasoning(
+        diagnosis_oracle_reasoning = extract_benchmark_reasoning(
             original_diag_result.benchmark_block or "", stage="diagnosis"
         )
         if mitigation_recovery and mitigation_recovery.message_history:
