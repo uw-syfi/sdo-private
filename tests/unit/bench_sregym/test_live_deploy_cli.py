@@ -12,7 +12,7 @@ MAIN_PATH = BENCH_ROOT / "main.py"
 
 
 def _module(name: str) -> Any:
-    return cast(Any, sys.modules.setdefault(name, types.ModuleType(name)))
+    return cast("Any", sys.modules.setdefault(name, types.ModuleType(name)))
 
 
 def _import_bench_main() -> Any:
@@ -70,3 +70,220 @@ def test_live_cluster_name_is_kind_compatible():
 
     assert "_" not in cluster_name
     assert cluster_name == "sregym-live-hotel-reservation-0418-0141"
+
+
+def test_live_undeploy_keeps_shared_cluster_and_reconciles(tmp_path: Path, monkeypatch):
+    mod = _import_bench_main()
+    created_clusters: set[str] = set()
+    deleted_clusters: list[str] = []
+    conductors: list[Any] = []
+    app = _FakeApp()
+    problem = _FakeProblem(app)
+
+    def fake_create_kind_cluster(cluster_name: str, kubeconfig_path: str) -> None:
+        created_clusters.add(cluster_name)
+        path = Path(kubeconfig_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("apiVersion: v1\n", encoding="utf-8")
+
+    def fake_existing_cluster_is_reusable(cluster_name: str, kubeconfig_path: str) -> tuple[bool, str]:
+        if cluster_name in created_clusters and Path(kubeconfig_path).exists():
+            return True, ""
+        return False, "missing"
+
+    def fake_delete_live_cluster(cluster_name: str) -> None:
+        deleted_clusters.append(cluster_name)
+        created_clusters.discard(cluster_name)
+
+    def fake_conductor_factory() -> Any:
+        conductor = _FakeConductor(app=app, problem=problem)
+        conductors.append(conductor)
+        return conductor
+
+    monkeypatch.setattr(mod, "Conductor", fake_conductor_factory)
+    monkeypatch.setattr(mod, "_create_kind_cluster", fake_create_kind_cluster)
+    monkeypatch.setattr(mod, "_existing_cluster_is_reusable", fake_existing_cluster_is_reusable)
+    monkeypatch.setattr(mod, "_delete_live_cluster", fake_delete_live_cluster)
+    monkeypatch.setattr(mod, "_start_frontend_port_forward", lambda **_: None)
+    monkeypatch.setattr(mod, "_stop_trace_port_forward", lambda app: None)
+
+    state = mod.deploy_live_environment(
+        app_name="hotel_reservation",
+        problem_id=None,
+        deployment_name="first-live",
+        deployments_root=str(tmp_path),
+    )
+    result = mod.undeploy_live_environment(state.deployment_name, deployments_root=str(tmp_path))
+
+    assert result.cluster_deleted is False
+    assert deleted_clusters == []
+    assert len(created_clusters) == 1
+    assert conductors[1].cluster_state.baseline is not None
+    assert conductors[1].cluster_state.reconcile_calls == 1
+    assert conductors[1].undeploy_app_calls == 1
+    assert app.cleanup_calls == 1
+
+    shared_state_path = Path(mod._shared_live_cluster_state_path(str(tmp_path)))
+    assert shared_state_path.exists()
+
+
+def test_live_redeploy_reuses_existing_shared_cluster(tmp_path: Path, monkeypatch):
+    mod = _import_bench_main()
+    created_clusters: set[str] = set()
+    create_calls: list[str] = []
+    app = _FakeApp()
+    problem = _FakeProblem(app)
+
+    def fake_create_kind_cluster(cluster_name: str, kubeconfig_path: str) -> None:
+        create_calls.append(cluster_name)
+        created_clusters.add(cluster_name)
+        path = Path(kubeconfig_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("apiVersion: v1\n", encoding="utf-8")
+
+    def fake_existing_cluster_is_reusable(cluster_name: str, kubeconfig_path: str) -> tuple[bool, str]:
+        if cluster_name in created_clusters and Path(kubeconfig_path).exists():
+            return True, ""
+        return False, "missing"
+
+    monkeypatch.setattr(mod, "Conductor", lambda: _FakeConductor(app=app, problem=problem))
+    monkeypatch.setattr(mod, "_create_kind_cluster", fake_create_kind_cluster)
+    monkeypatch.setattr(mod, "_existing_cluster_is_reusable", fake_existing_cluster_is_reusable)
+    monkeypatch.setattr(mod, "_delete_live_cluster", lambda cluster_name: created_clusters.discard(cluster_name))
+    monkeypatch.setattr(mod, "_start_frontend_port_forward", lambda **_: None)
+    monkeypatch.setattr(mod, "_stop_trace_port_forward", lambda app: None)
+
+    first = mod.deploy_live_environment(
+        app_name="hotel_reservation",
+        problem_id=None,
+        deployment_name="first-live",
+        deployments_root=str(tmp_path),
+    )
+    mod.undeploy_live_environment(first.deployment_name, deployments_root=str(tmp_path))
+    second = mod.deploy_live_environment(
+        app_name="hotel_reservation",
+        problem_id=None,
+        deployment_name="second-live",
+        deployments_root=str(tmp_path),
+    )
+
+    assert len(create_calls) == 1
+    assert second.cluster_name == first.cluster_name
+    assert second.shared_cluster is True
+
+
+def test_live_undeploy_delete_cluster_flag_removes_shared_cluster(tmp_path: Path, monkeypatch):
+    mod = _import_bench_main()
+    created_clusters: set[str] = set()
+    deleted_clusters: list[str] = []
+    app = _FakeApp()
+    problem = _FakeProblem(app)
+
+    def fake_create_kind_cluster(cluster_name: str, kubeconfig_path: str) -> None:
+        created_clusters.add(cluster_name)
+        path = Path(kubeconfig_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("apiVersion: v1\n", encoding="utf-8")
+
+    def fake_existing_cluster_is_reusable(cluster_name: str, kubeconfig_path: str) -> tuple[bool, str]:
+        if cluster_name in created_clusters and Path(kubeconfig_path).exists():
+            return True, ""
+        return False, "missing"
+
+    def fake_delete_live_cluster(cluster_name: str) -> None:
+        deleted_clusters.append(cluster_name)
+        created_clusters.discard(cluster_name)
+
+    monkeypatch.setattr(mod, "Conductor", lambda: _FakeConductor(app=app, problem=problem))
+    monkeypatch.setattr(mod, "_create_kind_cluster", fake_create_kind_cluster)
+    monkeypatch.setattr(mod, "_existing_cluster_is_reusable", fake_existing_cluster_is_reusable)
+    monkeypatch.setattr(mod, "_delete_live_cluster", fake_delete_live_cluster)
+    monkeypatch.setattr(mod, "_start_frontend_port_forward", lambda **_: None)
+    monkeypatch.setattr(mod, "_stop_trace_port_forward", lambda app: None)
+
+    state = mod.deploy_live_environment(
+        app_name="hotel_reservation",
+        problem_id=None,
+        deployment_name="first-live",
+        deployments_root=str(tmp_path),
+    )
+    result = mod.undeploy_live_environment(
+        state.deployment_name,
+        deployments_root=str(tmp_path),
+        delete_cluster=True,
+    )
+
+    assert result.cluster_deleted is True
+    assert deleted_clusters == [state.cluster_name]
+    assert not Path(mod._shared_live_cluster_state_path(str(tmp_path))).exists()
+
+
+class _FakeApp:
+    def __init__(self) -> None:
+        self.name = "Hotel Reservation"
+        self.namespace = "hotel-reservation"
+        self.frontend_service = "frontend"
+        self.frontend_port = 5000
+        self.cleanup_calls = 0
+
+    def cleanup(self) -> None:
+        self.cleanup_calls += 1
+
+
+class _FakeProblem:
+    def __init__(self, app: _FakeApp) -> None:
+        self.app = app
+        self._inject_calls = 0
+        self._recover_calls = 0
+
+    def requires_khaos(self) -> bool:
+        return False
+
+    def inject_fault(self) -> None:
+        self._inject_calls += 1
+
+    def recover_fault(self) -> None:
+        self._recover_calls += 1
+
+
+class _FakeClusterState:
+    def __init__(self) -> None:
+        self.baseline: Any = None
+        self.reconcile_calls = 0
+
+    def reconcile_to_baseline(self) -> dict[str, list[str]]:
+        self.reconcile_calls += 1
+        return {"namespaces_deleted": []}
+
+
+class _FakeConductor:
+    def __init__(self, *, app: _FakeApp, problem: _FakeProblem) -> None:
+        self.apps = types.SimpleNamespace(get_app_instance=lambda name: app)
+        self.problems = types.SimpleNamespace(get_problem_instance=lambda problem_id: problem)
+        self.kubectl = types.SimpleNamespace(is_emulated_cluster=lambda: False)
+        self.cluster_state = _FakeClusterState()
+        self.problem_id: str | None = None
+        self.problem: Any = None
+        self.app: Any = None
+        self.deploy_app_calls = 0
+        self.undeploy_app_calls = 0
+        self._baseline_captured = False
+        self._app = app
+
+    def deploy_app(self) -> None:
+        self.deploy_app_calls += 1
+        self.cluster_state.baseline = types.SimpleNamespace(
+            namespaces={"default", "openebs"},
+            cluster_roles={"cluster-role"},
+            cluster_role_bindings={"cluster-role-binding"},
+            persistent_volumes={"pv-a"},
+            storage_classes={"openebs-device"},
+            crds={"example.test"},
+            node_labels={"node-1": {"beta.kubernetes.io/os": "linux"}},
+            node_taints={"node-1": [{"key": "dedicated", "value": "live", "effect": "NoSchedule"}]},
+            coredns_configmap_data={"Corefile": ".:53 {}"},
+        )
+
+    def undeploy_app(self) -> None:
+        self.undeploy_app_calls += 1
+        self._app.cleanup()
