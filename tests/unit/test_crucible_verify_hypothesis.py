@@ -262,7 +262,7 @@ class TestVerifyHypothesisSubagent:
         _, kwargs = mock_run_subagent.call_args
         passed_tools = kwargs["tools"]
         tool_names = {t.__name__ for t in passed_tools}
-        assert "exec_bash_any" in tool_names
+        assert "exec_bash" in tool_names
         assert "read_file" in tool_names
         assert "grep" in tool_names
         assert kwargs["agent_name"] == "hypothesis-verifier"

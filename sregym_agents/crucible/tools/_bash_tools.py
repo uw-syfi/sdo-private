@@ -164,15 +164,6 @@ def exec_bash(ctx: RunContext[Any], cmd: str) -> str:
     return run_bash_sync(cmd)
 
 
-def exec_bash_any(ctx: RunContext[Any], cmd: str) -> str:
-    """Execute a shell command and return its output.
-
-    Args:
-        cmd: The shell command to run.
-    """
-    return run_bash_sync(cmd)
-
-
 def read_file_impl(
     path: str,
     start_line: int = 0,

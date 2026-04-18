@@ -11,7 +11,7 @@ from sregym_agents.crucible.knowledge_base.root_cause import (
     RootCauseStore,
 )
 from sregym_agents.crucible.tools import SharedFile, SREDeps
-from sregym_agents.crucible.tools._bash_tools import exec_bash_any, grep, read_file
+from sregym_agents.crucible.tools._bash_tools import exec_bash, grep, read_file
 from sregym_agents.crucible.tools._kb_tools import DifferentialDiagnosis, search_prior_incidents_impl
 
 
@@ -66,7 +66,7 @@ async def test_search_prior_incidents_gives_ltm_search_read_only_tools(tmp_path)
 
     call = run_subagent.await_args_list[0]
     assert call.kwargs["agent_name"] == "ltm-search"
-    assert call.kwargs["tools"] == [read_file, exec_bash_any, grep]
+    assert call.kwargs["tools"] == [read_file, exec_bash, grep]
 
 
 def test_v3_ltm_search_prompt_encourages_read_only_disambiguation() -> None:

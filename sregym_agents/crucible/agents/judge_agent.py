@@ -36,7 +36,7 @@ class JudgeAgent:
     def _assemble_tools(self) -> list[Any]:
         """Return the tool list for the judge."""
         from sregym_agents.crucible.tools import (
-            exec_bash_any,
+            exec_bash,
             grep,
             read_file,
             reveal_agent_hypothesis,
@@ -47,7 +47,7 @@ class JudgeAgent:
         )
 
         return [
-            exec_bash_any,
+            exec_bash,
             read_file,
             grep,
             write_file,

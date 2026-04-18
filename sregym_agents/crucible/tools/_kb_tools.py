@@ -14,7 +14,7 @@ from libs.pydantic_agent import UsageCollector, thinking_settings
 from sregym_agents.crucible._prompts import (
     PromptRenderer,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
 )
-from sregym_agents.crucible.tools._bash_tools import exec_bash_any, grep, read_file, str_replace_file, write_file
+from sregym_agents.crucible.tools._bash_tools import exec_bash, grep, read_file, str_replace_file, write_file
 from sregym_agents.crucible.tools._deps import (
     SREDeps,  # noqa: TC001 — needed at runtime for pydantic-ai tool introspection
 )
@@ -507,7 +507,7 @@ async def run_single_mitigation_playbook(
     output: MitigationApplication = await run_subagent(
         prompt=prompt,
         output_type=MitigationApplication,
-        tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+        tools=[read_file, exec_bash, grep, write_file, str_replace_file],
         agent_name=agent_name,
         model_settings=ms,
         usage_collector=usage_collector,
@@ -721,7 +721,7 @@ async def _run_verification_phase(
             output: CandidateVerification = await run_subagent(
                 prompt=prompt,
                 output_type=CandidateVerification,
-                tools=[read_file, exec_bash_any, grep, write_file, str_replace_file],
+                tools=[read_file, exec_bash, grep, write_file, str_replace_file],
                 agent_name=f"ltm-verify-{idx}",
                 model_settings=ms,
                 usage_collector=usage_collector,
@@ -813,7 +813,7 @@ async def triage_cluster_impl(
             coord_report = await run_subagent(
                 prompt=current_prompt,
                 output_type=TriageCoordinatorReport,
-                tools=[read_file, exec_bash_any, grep],
+                tools=[read_file, exec_bash, grep],
                 agent_name="triage-coordinator",
                 model_settings=ms,
                 usage_collector=deps.usage_collector,
@@ -827,7 +827,7 @@ async def triage_cluster_impl(
                     _TRIAGE_COORDINATOR_MAX_RETRIES + 1,
                 )
                 current_prompt = (
-                    coordinator_prompt + "\n\nYou MUST use exec_bash_any to run kubectl commands before "
+                    coordinator_prompt + "\n\nYou MUST use exec_bash to run kubectl commands before "
                     "producing the triage report. Run the recommended kubectl commands now."
                 )
         assert coord_report is not None
@@ -865,7 +865,7 @@ async def triage_cluster_impl(
         return await run_subagent(
             prompt=prompt,
             output_type=TriageSpecialistReport,
-            tools=[read_file, exec_bash_any, grep, write_file],
+            tools=[read_file, exec_bash, grep, write_file],
             agent_name=f"triage-{slug}",
             model_settings=ms_spec,
             usage_collector=deps.usage_collector,
@@ -974,7 +974,7 @@ async def verify_hypothesis_impl(
         output: HypothesisVerdict = await run_subagent(
             prompt=prompt,
             output_type=HypothesisVerdict,
-            tools=[read_file, exec_bash_any, grep],
+            tools=[read_file, exec_bash, grep],
             agent_name="hypothesis-verifier",
             model_settings=ms,
             usage_collector=deps.usage_collector,
@@ -1078,7 +1078,7 @@ async def search_prior_incidents_impl(
     diagnosis: DifferentialDiagnosis = await run_subagent(
         prompt=prompt,
         output_type=DifferentialDiagnosis,
-        tools=[read_file, exec_bash_any, grep],
+        tools=[read_file, exec_bash, grep],
         agent_name="ltm-search",
         model_settings=ms,
         usage_collector=deps.usage_collector,

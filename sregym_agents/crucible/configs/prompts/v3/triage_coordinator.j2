@@ -22,7 +22,7 @@ STEP 1 — END-USER SMOKE TEST
    - kubectl exec -n {{ namespace }} <any-running-pod> -- curl -s -o /dev/null -w '%{http_code}' http://<frontend-service>:<port>
 
 INSTRUCTIONS:
-- Execute the commands above using exec_bash_any.
+- Execute the commands above using exec_bash.
 - The cluster_snapshot field should contain the condensed output of all kubectl overview
   commands (pods, services, endpoints, events). This will be shared with specialist agents.
 - The base_anomalies field should contain any user-facing symptoms you discovered (HTTP errors,
