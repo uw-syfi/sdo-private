@@ -480,3 +480,62 @@ def test_write_report_includes_agent_verification(tmp_path):
     assert av_json["other_faults"] == ["y"]
     assert av_json["reasoning"] == "r"
     assert av_json["elapsed_s"] == 2.5
+
+
+# --- --with-k8s-proxy flag integration ------------------------------------
+
+
+def test_make_agent_verifier_fn_threads_kubeconfig_path_to_subprocess(tmp_path, monkeypatch):
+    """The kubeconfig passed into `_make_agent_verifier_fn` is the one the
+    verifier subprocess sees — so routing through the proxy kubeconfig is a
+    one-line change at the call site."""
+    st = _import_stress()
+    captured: dict[str, Any] = {}
+
+    def fake_subproc(**kwargs):
+        captured.update(kwargs)
+        return st.AgentVerification(fault_confirmed=True)
+
+    monkeypatch.setattr(st, "_invoke_fault_verifier_subprocess", fake_subproc)
+
+    conductor = SimpleNamespace(problem_id="pid-1")
+    proxy_kc = str(tmp_path / "agent-proxy.kubeconfig")
+    fn = st._make_agent_verifier_fn(
+        conductor=conductor,
+        kubeconfig_path=proxy_kc,
+        out_dir=tmp_path,
+        model="haiku",
+        timeout_s=123,
+    )
+    problem = SimpleNamespace(
+        root_cause="scale-to-zero",
+        namespace="social-net",
+        app=SimpleNamespace(name="social_network"),
+    )
+
+    out = fn(problem=problem, worker_id=7)
+
+    assert out.fault_confirmed is True
+    assert captured["kubeconfig_path"] == proxy_kc
+    assert captured["model"] == "haiku"
+    assert captured["timeout_s"] == 123
+    assert captured["worker_id"] == 7
+    assert captured["problem_id"] == "pid-1"
+    assert captured["root_cause"] == "scale-to-zero"
+    assert captured["app_name"] == "social_network"
+    assert captured["namespace"] == "social-net"
+
+
+def test_main_rejects_with_k8s_proxy_without_agent_verify(capsys):
+    st = _import_stress()
+    rc = st.main(["--with-k8s-proxy", "--problems", "x"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--with-k8s-proxy requires --agent-verify" in err
+
+
+def test_parse_args_accepts_with_k8s_proxy_flag():
+    st = _import_stress()
+    args = st._parse_args(["--agent-verify", "--with-k8s-proxy", "--problems", "p1"])
+    assert args.with_k8s_proxy is True
+    assert args.agent_verify is True

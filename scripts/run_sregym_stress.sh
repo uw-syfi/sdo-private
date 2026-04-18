@@ -10,6 +10,7 @@
 #                                [--no-loadgen-probe] [--probe-duration-sec S]
 #                                [--agent-verify] [--agent-verify-model M]
 #                                [--agent-verify-timeout-sec S]
+#                                [--with-k8s-proxy]
 #                                [--out-dir DIR]
 #
 # Reports land in bench/sregym/logs/stress/<timestamp>/ by default. When
