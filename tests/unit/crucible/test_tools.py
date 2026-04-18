@@ -102,6 +102,95 @@ class TestSharedFile:
         assert _fcntl.LOCK_EX in calls
         assert _fcntl.LOCK_UN in calls
 
+    def test_write_text_acquires_exclusive_lock(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("")
+        sf = SharedFile(p)
+        with patch("fcntl.flock") as mock_flock:
+            sf.write_text("text")
+        calls = [c.args[1] for c in mock_flock.call_args_list]
+        import fcntl as _fcntl
+
+        assert _fcntl.LOCK_EX in calls
+        assert _fcntl.LOCK_UN in calls
+
+    def test_write_text_writes_content(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("original")
+        sf = SharedFile(p)
+        sf.write_text("new content")
+        assert p.read_text() == "new content"
+
+    def test_replace_substitutes_first_occurrence(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("foo bar foo")
+        sf = SharedFile(p)
+        assert sf.replace("foo", "baz") is True
+        assert p.read_text() == "baz bar foo"
+
+    def test_replace_returns_false_when_missing(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("foo bar")
+        sf = SharedFile(p)
+        assert sf.replace("xyz", "abc") is False
+        assert p.read_text() == "foo bar"
+
+    def test_replace_acquires_exclusive_lock(self, tmp_path: Path):
+        p = tmp_path / "state.md"
+        p.write_text("foo")
+        sf = SharedFile(p)
+        with patch("fcntl.flock") as mock_flock:
+            sf.replace("foo", "bar")
+        calls = [c.args[1] for c in mock_flock.call_args_list]
+        import fcntl as _fcntl
+
+        assert _fcntl.LOCK_EX in calls
+        assert _fcntl.LOCK_UN in calls
+
+    def test_concurrent_append_and_replace_no_data_loss(self, tmp_path: Path):
+        """Interleave many appends with many replaces; assert all appended
+        lines are present and all replacements applied atomically."""
+        import threading
+
+        p = tmp_path / "state.md"
+        # Seed with N placeholders that will each be replaced exactly once.
+        num_replacements = 50
+        num_appends = 200
+        seed_lines = [f"[PLACEHOLDER-{i}]\n" for i in range(num_replacements)]
+        p.write_text("".join(seed_lines))
+        sf = SharedFile(p)
+
+        barrier = threading.Barrier(2)
+
+        def appender() -> None:
+            barrier.wait()
+            for i in range(num_appends):
+                sf.append(f"APPEND-{i}\n")
+
+        def replacer() -> None:
+            barrier.wait()
+            for i in range(num_replacements):
+                ok = sf.replace(f"[PLACEHOLDER-{i}]\n", f"REAL-{i}\n")
+                assert ok, f"replacement {i} should have succeeded"
+
+        t1 = threading.Thread(target=appender)
+        t2 = threading.Thread(target=replacer)
+        t1.start()
+        t2.start()
+        t1.join(timeout=30)
+        t2.join(timeout=30)
+        assert not t1.is_alive()
+        assert not t2.is_alive()
+
+        final = p.read_text()
+        # All appends must be present.
+        for i in range(num_appends):
+            assert f"APPEND-{i}\n" in final, f"lost append {i}"
+        # All placeholders must have been replaced exactly once.
+        for i in range(num_replacements):
+            assert f"REAL-{i}\n" in final, f"missing replacement {i}"
+            assert f"[PLACEHOLDER-{i}]" not in final, f"placeholder {i} still present"
+
     def test_read_returns_file_contents(self, tmp_path: Path):
         p = tmp_path / "state.md"
         p.write_text("hello world")
