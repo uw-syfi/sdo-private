@@ -37,6 +37,15 @@ class CrucibleConfig:
             raise ValueError(f"kb_runtime_mode must be 'playbook-first', got {self.kb_runtime_mode!r}")
         if self.kb_update_mode not in ("async-review", "inline-review"):
             raise ValueError(f"kb_update_mode must be async-review or inline-review, got {self.kb_update_mode!r}")
+        for name in (
+            "max_diagnosis_iterations",
+            "max_mitigation_iterations",
+            "wait_stage_timeout",
+            "stage_timeout",
+        ):
+            val = getattr(self, name)
+            if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
+                raise ValueError(f"{name} must be a positive int, got {val!r}")
 
     def to_kb_task_fields(self) -> dict[str, Any]:
         """Return the config subset needed for KB update task serialization."""
