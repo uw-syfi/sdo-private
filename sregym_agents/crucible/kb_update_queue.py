@@ -16,9 +16,9 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict
 
 from filelock import FileLock
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -26,19 +26,31 @@ DEFAULT_QUEUE_DRAIN_TIMEOUT = 1800.0
 DEFAULT_QUEUE_DRAIN_POLL_INTERVAL = 2.0
 
 
-class KbUpdateTaskDict(TypedDict):
-    """JSON shape for a pending KB update task (matches worker expectations)."""
+class KbUpdateTask(BaseModel):
+    """Typed, validated payload for a pending KB update task.
 
-    diagnosis_run_file: str | None
-    recovery_diagnosis_run_file: str | None
-    diagnosis_playbook_candidate_file: str | None
-    diagnosis_playbook_candidate_origin: str | None
-    triage_area_candidate_file: str | None
-    mitigation_run_file: str | None
-    recovery_mitigation_run_file: str | None
-    mitigation_playbook_candidate_file: str | None
-    mitigation_playbook_candidate_origin: str | None
-    stage_outputs_file: str | None
+    Enforced at the queue boundary: :func:`enqueue_task` accepts only instances
+    of this model, and :func:`kb_worker.process_task` validates the JSON on
+    disk against this schema before use. Unknown or misspelled fields are
+    rejected so typos surface at enqueue/dequeue time rather than silently
+    corrupting a KB update at worker runtime.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Session files (paths as strings; ``None`` when the stage produced nothing).
+    diagnosis_run_file: str | None = None
+    recovery_diagnosis_run_file: str | None = None
+    diagnosis_playbook_candidate_file: str | None = None
+    diagnosis_playbook_candidate_origin: str | None = None
+    triage_area_candidate_file: str | None = None
+    mitigation_run_file: str | None = None
+    recovery_mitigation_run_file: str | None = None
+    mitigation_playbook_candidate_file: str | None = None
+    mitigation_playbook_candidate_origin: str | None = None
+    stage_outputs_file: str | None = None
+
+    # KB + run identity (required).
     kb_dir: str
     kb_type: str
     model_id: str
@@ -51,7 +63,9 @@ class KbUpdateTaskDict(TypedDict):
     prompt_version: str
     diagnosis_succeeded: bool
     mitigation_succeeded: bool
-    timestamp: str
+
+    # Stamped by :func:`enqueue_task` when absent.
+    timestamp: str | None = None
 
 
 @dataclass(frozen=True)
@@ -204,13 +218,20 @@ def wait_for_kb_queue_drain(
         time.sleep(min(poll_interval_s, max(deadline - now, 0.0)))
 
 
-def enqueue_task(kb_dir: Path, payload: dict[str, Any], *, problem_id: str) -> Path:
-    """Write *payload* as JSON under ``pending/{timestamp}_{problem_id}.json``.
+def enqueue_task(kb_dir: Path, task: KbUpdateTask, *, problem_id: str) -> Path:
+    """Write *task* as JSON under ``pending/{timestamp}_{problem_id}.json``.
 
-    Sets ``timestamp`` on the serialized body if missing (``%Y%m%d_%H%M%S``).
+    Accepts only a validated :class:`KbUpdateTask` — raw dicts are rejected so
+    field typos surface at enqueue time, not inside the worker. Stamps
+    ``timestamp`` if the caller left it unset (``%Y%m%d_%H%M%S``).
     """
-    body = dict(payload)
-    if "timestamp" not in body:
+    if not isinstance(task, KbUpdateTask):  # type: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"enqueue_task requires a KbUpdateTask; got {type(task).__name__}. "
+            "Construct a KbUpdateTask(...) at the call site."
+        )
+    body = task.model_dump(mode="json")
+    if not body.get("timestamp"):
         body["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
     paths = KbQueuePaths(Path(kb_dir))
     paths.pending.mkdir(parents=True, exist_ok=True)
