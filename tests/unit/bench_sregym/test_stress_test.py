@@ -325,3 +325,158 @@ def test_write_report_emits_valid_json(tmp_path):
     assert data["counts"]["fail"] == 1
     pid_to_verdict = {p["problem_id"]: p["verdict"] for p in data["problems"]}
     assert pid_to_verdict == {"p1": "pass", "p2": "fail"}
+
+
+# --- Agent verifier integration -------------------------------------------
+
+
+def _build_av(st, **kwargs):
+    defaults = {
+        "fault_confirmed": True,
+        "other_faults": [],
+        "reasoning": "ok",
+        "raw_output": "",
+        "parse_error": None,
+        "elapsed_s": 1.0,
+    }
+    defaults.update(kwargs)
+    return st.AgentVerification(**defaults)
+
+
+def test_run_stress_problem_invokes_agent_verifier_after_verify():
+    st = _import_stress()
+    problem = _StubProblem()
+    conductor = _StubConductor(problem, emulated=True)
+    snap = st.PodSnapshot(pods={("social-net", "x"): st.PodState("Running", True, 0)})
+    calls: list[tuple[Any, int]] = []
+
+    def fake_av(*, problem, worker_id):
+        calls.append((problem, worker_id))
+        return _build_av(st, fault_confirmed=True, reasoning="confirmed")
+
+    result = st.run_stress_problem(
+        conductor,
+        "pid",
+        worker_id=3,
+        probe_enabled=False,
+        snapshot_fn=lambda _kc: snap,
+        sleep_fn=lambda _s: None,
+        agent_verifier_fn=fake_av,
+    )
+    assert len(calls) == 1
+    _p, wid = calls[0]
+    assert wid == 3
+    assert result.agent_verification is not None
+    assert result.agent_verification.fault_confirmed is True
+    assert any(s.stage == "agent_verify" and s.ok for s in result.stages)
+
+
+def test_run_stress_problem_skips_agent_verifier_on_inject_failure():
+    st = _import_stress()
+    problem = _StubProblem(inject_raises=RuntimeError("boom"))
+    conductor = _StubConductor(problem, emulated=True)
+    calls: list[Any] = []
+
+    def fake_av(**kw):
+        calls.append(kw)
+        return _build_av(st)
+
+    result = st.run_stress_problem(
+        conductor,
+        "pid",
+        worker_id=0,
+        probe_enabled=False,
+        snapshot_fn=lambda _kc: st.PodSnapshot(pods={}),
+        sleep_fn=lambda _s: None,
+        agent_verifier_fn=fake_av,
+    )
+    assert calls == []
+    assert result.agent_verification is None
+    assert result.verdict == st.Verdict.FAIL
+
+
+def test_run_stress_problem_skips_agent_verifier_on_verify_failure():
+    st = _import_stress()
+    problem = _StubProblem(verify_raises=RuntimeError("nope"))
+    conductor = _StubConductor(problem, emulated=True)
+    calls: list[Any] = []
+
+    result = st.run_stress_problem(
+        conductor,
+        "pid",
+        worker_id=0,
+        probe_enabled=False,
+        snapshot_fn=lambda _kc: st.PodSnapshot(pods={}),
+        sleep_fn=lambda _s: None,
+        agent_verifier_fn=lambda **kw: calls.append(kw) or _build_av(st),
+    )
+    assert calls == []
+    assert result.agent_verification is None
+
+
+def test_run_stress_problem_records_agent_verify_stage_failure_on_exception():
+    st = _import_stress()
+    problem = _StubProblem()
+    conductor = _StubConductor(problem, emulated=True)
+
+    def boom(**kw):
+        raise RuntimeError("verifier crashed")
+
+    result = st.run_stress_problem(
+        conductor,
+        "pid",
+        worker_id=0,
+        probe_enabled=False,
+        snapshot_fn=lambda _kc: st.PodSnapshot(pods={}),
+        sleep_fn=lambda _s: None,
+        agent_verifier_fn=boom,
+    )
+    # The verifier crashing should NOT fail the run — it's an augmentation.
+    # It gets recorded as a not-ok agent_verify stage without setting error_stage.
+    av_stages = [s for s in result.stages if s.stage == "agent_verify"]
+    assert len(av_stages) == 1
+    assert av_stages[0].ok is False
+    assert "verifier crashed" in (av_stages[0].error or "")
+    assert result.error_stage is None  # not treated as a failure
+    assert result.agent_verification is None
+
+
+def test_verdict_downgrades_to_yellow_when_agent_reports_fault_not_confirmed():
+    st = _import_stress()
+    result = _build_result(st)
+    result.agent_verification = _build_av(st, fault_confirmed=False, reasoning="no policy found")
+    verdict = st.compute_verdict(result)
+    assert verdict == st.Verdict.YELLOW
+    assert any("not confirmed" in r.lower() for r in result.yellow_reasons)
+
+
+def test_verdict_downgrades_to_yellow_when_agent_reports_other_faults():
+    st = _import_stress()
+    result = _build_result(st)
+    result.agent_verification = _build_av(st, fault_confirmed=True, other_faults=["unexpected crashloop in svc X"])
+    verdict = st.compute_verdict(result)
+    assert verdict == st.Verdict.YELLOW
+    assert any("unexpected crashloop" in r for r in result.yellow_reasons)
+
+
+def test_verdict_unchanged_when_agent_parse_error():
+    st = _import_stress()
+    result = _build_result(st)
+    result.agent_verification = _build_av(st, fault_confirmed=None, parse_error="no json block")
+    verdict = st.compute_verdict(result)
+    # No loadgen probe, no fail, no agent signal -> PASS.
+    assert verdict == st.Verdict.PASS
+
+
+def test_write_report_includes_agent_verification(tmp_path):
+    st = _import_stress()
+    av = _build_av(st, fault_confirmed=True, other_faults=["y"], reasoning="r", elapsed_s=2.5)
+    results = [_build_result(st, problem_id="p1", verdict=st.Verdict.PASS, agent_verification=av)]
+    out_path = tmp_path / "report.json"
+    st.write_report(results, out_path)
+    data = json.loads(out_path.read_text())
+    av_json = data["problems"][0]["agent_verification"]
+    assert av_json["fault_confirmed"] is True
+    assert av_json["other_faults"] == ["y"]
+    assert av_json["reasoning"] == "r"
+    assert av_json["elapsed_s"] == 2.5

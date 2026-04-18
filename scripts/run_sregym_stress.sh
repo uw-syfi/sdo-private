@@ -8,9 +8,13 @@
 #                                [--filter substr] [--max-per-worker M]
 #                                [--stop-on-first-failure]
 #                                [--no-loadgen-probe] [--probe-duration-sec S]
+#                                [--agent-verify] [--agent-verify-model M]
+#                                [--agent-verify-timeout-sec S]
 #                                [--out-dir DIR]
 #
-# Reports land in bench/sregym/logs/stress/<timestamp>/ by default.
+# Reports land in bench/sregym/logs/stress/<timestamp>/ by default. When
+# --agent-verify is set, per-problem verifier outputs also land under
+# <out-dir>/agent_verify/.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
