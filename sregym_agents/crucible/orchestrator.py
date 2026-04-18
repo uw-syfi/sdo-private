@@ -850,7 +850,6 @@ def _build_sre_agent_config(
     crucible_config: CrucibleConfig,
 ) -> SREAgentConfig:
     """Build SREAgentConfig from injected_kb and crucible_config."""
-    from sregym_agents.crucible.tools import TriagePriors as _TP
     from sregym_agents.crucible.tools import load_triage_priors
 
     triage_priors_file = injected_kb.triage_priors if injected_kb else None
@@ -867,29 +866,6 @@ def _build_sre_agent_config(
             yaml_path = triage_priors_file.with_suffix(".yaml")
             if yaml_path.exists():
                 triage_priors = load_triage_priors(yaml_path)
-            elif triage_priors_file.exists():
-                import re as _re
-
-                content = triage_priors_file.read_text().strip()
-                if content:
-                    areas: list[dict[str, Any]] = []
-                    current_name = None
-                    current_hints: list[str] = []
-                    for line in content.splitlines():
-                        header_match = _re.match(r"^##\\s+(.+)$", line)
-                        if header_match:
-                            if current_name and current_hints:
-                                areas.append({"name": current_name, "hints": current_hints})
-                            current_name = header_match.group(1).strip()
-                            current_hints = []
-                        elif line.strip().startswith("- "):
-                            hint = line.strip()[2:].strip()
-                            if hint:
-                                current_hints.append(hint)
-                    if current_name and current_hints:
-                        areas.append({"name": current_name, "hints": current_hints})
-                    if areas:
-                        triage_priors = _TP.model_validate({"areas": areas})
         if verification_priors_file and verification_priors_file.exists():
             verification_guidance = verification_priors_file.read_text().strip()
 

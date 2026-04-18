@@ -13,9 +13,12 @@ if TYPE_CHECKING:
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
 from sregym_agents.crucible._prompts import PromptRenderer
+from sregym_agents.crucible.config import CrucibleConfig
+from sregym_agents.crucible.knowledge_base.base import InjectedKB
 from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, MitigationPlaybookDraft
 from sregym_agents.crucible.orchestrator import (
     _agent_phase,
+    _build_sre_agent_config,
     _build_usage_metrics,
     _replace_hypothesis_placeholder,
     _wait_for_mitigation_stage,
@@ -221,6 +224,62 @@ class TestSharedFileInit:
         self._init(shared, {})
         content = shared.read_text()
         assert len(content) > 0
+
+
+# ---------------------------------------------------------------------------
+# _build_sre_agent_config (triage-priors loading)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSREAgentConfigTriagePriors:
+    """Guardrails for how _build_sre_agent_config consumes injected triage priors.
+
+    The KB write path (kb_worker._refine_triage_priors) only emits YAML, and
+    StructuredKnowledgeBase.inject only sets ``InjectedKB.triage_priors`` to a
+    ``triage_priors.yaml`` path. No production code writes a legacy
+    ``triage_priors.md``; this test locks in the YAML-only contract.
+    """
+
+    def test_yaml_priors_loaded_when_present(self, tmp_path: Path):
+        yaml_path = tmp_path / "triage_priors.yaml"
+        yaml_path.write_text(
+            "areas:\n  - name: database\n    hints:\n      - check slow queries\n      - inspect connection pool\n"
+        )
+
+        injected = InjectedKB(triage_priors=yaml_path)
+        config = CrucibleConfig(prompt_version="v3")
+
+        result = _build_sre_agent_config(injected, config)
+
+        assert result.triage_priors is not None
+        assert [a.name for a in result.triage_priors.areas] == ["database"]
+        assert result.triage_priors.areas[0].hints == [
+            "check slow queries",
+            "inspect connection pool",
+        ]
+
+    def test_md_injected_path_is_not_parsed_as_legacy_format(self, tmp_path: Path):
+        """Legacy ``triage_priors.md`` must NOT be parsed — only YAML is honored.
+
+        Simulates a stale legacy on-disk KB where ``InjectedKB.triage_priors``
+        points directly at a ``.md`` file (the old pre-YAML format). The helper
+        must ignore the markdown content and return a None triage_priors —
+        neither silently converting it nor raising.
+        """
+        md_path = tmp_path / "triage_priors.md"
+        md_path.write_text("## database\n- check slow queries\n- inspect connection pool\n")
+
+        injected = InjectedKB(triage_priors=md_path)
+        config = CrucibleConfig(prompt_version="v3")
+
+        result = _build_sre_agent_config(injected, config)
+
+        assert result.triage_priors is None
+
+    def test_no_injected_kb_yields_none(self):
+        config = CrucibleConfig(prompt_version="v3")
+        result = _build_sre_agent_config(None, config)
+        assert result.triage_priors is None
 
 
 # ---------------------------------------------------------------------------
