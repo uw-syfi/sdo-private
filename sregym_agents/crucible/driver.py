@@ -29,6 +29,7 @@ from sregym_agents.crucible.knowledge_base.incident_review import (
     MitigationPlaybookDraft,
     TriageAreaCandidate,
 )
+from sregym_agents.crucible.tools import SharedFile
 
 if TYPE_CHECKING:
     from sregym_agents.crucible.agents.base import AgentDriver
@@ -311,8 +312,10 @@ async def _async_main(args: argparse.Namespace) -> None:
         problem_id = _get_problem_id(api_base)
         planned_stages = _get_planned_stages(api_base)
 
-        diagnosis_shared_file = Path("diagnosis_session_state.md")
-        mitigation_shared_file = Path("mitigation_session_state.md")
+        diagnosis_shared_path = Path("diagnosis_session_state.md")
+        mitigation_shared_path = Path("mitigation_session_state.md")
+        diagnosis_shared_file = SharedFile(diagnosis_shared_path.resolve())
+        mitigation_shared_file = SharedFile(mitigation_shared_path.resolve())
         # Write trajectory to logs_dir (bench/sregym/logs/…) when available, matching
         # the convention used by other sregym agents (claudecode, gemini_cli, codex).
         # Fall back to cwd (exp_env after chdir) for local/standalone runs.
@@ -400,7 +403,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             logger.info(f"Usage metrics: {usage_metrics}")
 
         if logs_dir is not None:
-            for sf, suffix in [(diagnosis_shared_file, "diagnosis"), (mitigation_shared_file, "mitigation")]:
+            for sf, suffix in [(diagnosis_shared_path, "diagnosis"), (mitigation_shared_path, "mitigation")]:
                 if sf.exists():
                     dest = logs_dir / f"{suffix}.md"
                     shutil.copy2(sf, dest)

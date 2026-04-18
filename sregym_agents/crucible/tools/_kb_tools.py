@@ -644,7 +644,9 @@ async def search_prior_mitigations_impl(
         model_id=deps.model_id,
         usage_collector=deps.usage_collector,
         agent_name="ltm-mitigate-0",
-        diagnosis_shared_file=str(deps.diagnosis_shared_file) if deps.diagnosis_shared_file is not None else "",
+        diagnosis_shared_file=deps.diagnosis_shared_file.display_path()
+        if deps.diagnosis_shared_file is not None
+        else "",
         diagnosis_shared_content=deps.diagnosis_shared_file.read() if deps.diagnosis_shared_file is not None else "",
     )
 

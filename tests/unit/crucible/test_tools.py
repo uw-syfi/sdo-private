@@ -194,9 +194,45 @@ class TestSharedFile:
         sf = SharedFile(p)
         assert sf.read() == "hello world"
 
-    def test_str_returns_path_string(self, tmp_path: Path):
+    def test_display_path_returns_absolute_path_string(self, tmp_path: Path):
         p = tmp_path / "state.md"
-        assert str(SharedFile(p)) == str(p)
+        assert SharedFile(p).display_path() == str(p)
+
+    def test_private_path_attribute_is_inaccessible(self, tmp_path: Path):
+        """Callers must not be able to reach the underlying Path and bypass locking."""
+        sf = SharedFile(tmp_path / "state.md")
+        with pytest.raises(AttributeError):
+            _ = sf._path  # type: ignore[attr-defined]
+
+    def test_str_does_not_leak_path(self, tmp_path: Path):
+        """str(SharedFile) must not silently return the filesystem path —
+        callers should use display_path() explicitly when they intend to
+        surface the path (e.g. to an LLM prompt)."""
+        p = tmp_path / "state.md"
+        assert str(SharedFile(p)) != str(p)
+
+    def test_no_open_method(self, tmp_path: Path):
+        """SharedFile must not expose a raw open() escape hatch that would
+        allow writes bypassing fcntl.LOCK_EX."""
+        sf = SharedFile(tmp_path / "state.md")
+        assert not hasattr(sf, "open")
+
+    def test_not_fspath_convertible(self, tmp_path: Path):
+        """os.fspath(SharedFile) must fail — implementing __fspath__ would
+        let callers pass a SharedFile anywhere a path is accepted, bypassing
+        the lock-protected mutators."""
+        import os as _os
+
+        sf = SharedFile(tmp_path / "state.md")
+        with pytest.raises(TypeError):
+            _os.fspath(sf)  # type: ignore[arg-type]
+
+    def test_round_trip_init_append_read(self, tmp_path: Path):
+        sf = SharedFile(tmp_path / "state.md")
+        sf.init("# header\n")
+        sf.append("line1\n")
+        sf.append("line2\n")
+        assert sf.read() == "# header\nline1\nline2\n"
 
 
 # ---------------------------------------------------------------------------
@@ -922,7 +958,7 @@ class TestSubmitVerdict:
 
     def test_file_write_error_returns_error_string(self, tmp_path: Path):
         ctx = _make_judge_ctx(tmp_path)
-        ctx.deps.shared_file = SharedFile(tmp_path)  # directory — open will fail
+        ctx.deps.shared_file = SharedFile(tmp_path)  # directory — append will fail to open
         ctx.deps.state.hypothesis_revealed = True
 
         result = asyncio.run(submit_verdict(ctx, False, "reason", "answer"))
@@ -971,17 +1007,19 @@ class TestSubmitIndependentFindings:
         assert ctx.deps.state.independent_findings_submitted is False
 
     def test_uses_append_not_direct_open(self, tmp_path: Path):
-        """Writes must go through SharedFile.append() to ensure fcntl locking."""
+        """Writes must go through SharedFile.append() to ensure fcntl locking.
+
+        SharedFile no longer exposes a raw ``open()`` escape hatch (see
+        TestSharedFile.test_no_open_method), so the class guarantees no other
+        bypass is reachable here. This test remains to pin the contract that
+        submit_independent_findings delegates to SharedFile.append().
+        """
         shared = tmp_path / "shared.md"
         shared.write_text("")
         ctx = _make_judge_ctx(tmp_path)
-        with (
-            patch.object(ctx.deps.shared_file, "append") as mock_append,
-            patch.object(ctx.deps.shared_file, "open") as mock_open,
-        ):
+        with patch.object(ctx.deps.shared_file, "append") as mock_append:
             submit_independent_findings(ctx, "some findings")
         mock_append.assert_called_once()
-        mock_open.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

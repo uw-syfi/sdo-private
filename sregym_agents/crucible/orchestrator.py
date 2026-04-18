@@ -277,7 +277,7 @@ async def _run_diagnosis_recovery_if_needed(
 
 
 def _init_mitigation_file(
-    mitigation_file: Path,
+    mitigation_file: SharedFile,
     app_info: dict[str, Any],
     benchmark_block: str,
     diagnosis_answer: str,
@@ -310,9 +310,8 @@ def _init_mitigation_file(
 
     content += "## Mitigation\n"
 
-    mitigation_file.parent.mkdir(parents=True, exist_ok=True)
     mitigation_file.write_text(content)
-    logger.info(f"Initialized mitigation shared file: {mitigation_file}")
+    logger.info(f"Initialized mitigation shared file: {mitigation_file.display_path()}")
 
 
 async def _get_conductor_stage() -> str | None:
@@ -777,7 +776,7 @@ async def _try_playbook_shortcut(
             model_id=model_id,
             usage_collector=usage_collector,
             agent_name="playbook-shortcut",
-            diagnosis_shared_file=str(diagnosis_shared_file) if diagnosis_shared_file is not None else "",
+            diagnosis_shared_file=diagnosis_shared_file.display_path() if diagnosis_shared_file is not None else "",
             diagnosis_shared_content=diagnosis_shared_file.read() if diagnosis_shared_file is not None else "",
         )
     except Exception as exc:
@@ -847,8 +846,8 @@ async def run(
     model: str,
     app_info: dict[str, Any],
     problem_id: str,
-    diagnosis_shared_file: Path,
-    mitigation_shared_file: Path,
+    diagnosis_shared_file: SharedFile,
+    mitigation_shared_file: SharedFile,
     planned_stages: list[str],
     submit_mcp_url: str,
     renderer: PromptRenderer,
@@ -884,7 +883,7 @@ async def run(
     # Create run_subagent closure for playbook shortcut
     playbook_run_subagent = sre_agent.make_run_subagent(primary_collector)
 
-    diagnosis_sf = SharedFile(diagnosis_shared_file.resolve())
+    diagnosis_sf = diagnosis_shared_file
     diagnosis_header = (
         "# SRE Judged Session State\n"
         "## Session\n"
@@ -892,9 +891,8 @@ async def run(
         f"/ Namespace: {app_info.get('namespace', 'default')}\n\n"
         "## Diagnosis\n"
     )
-    diagnosis_shared_file.resolve().parent.mkdir(parents=True, exist_ok=True)
     diagnosis_sf.write_text(diagnosis_header)
-    logger.info(f"Initialized diagnosis shared file: {diagnosis_sf}")
+    logger.info(f"Initialized diagnosis shared file: {diagnosis_sf.display_path()}")
 
     diag_result = await _run_stage_loop(
         sre_agent,
@@ -1010,7 +1008,7 @@ async def run(
         diag_result.agent_justification,
         diagnosis_causal_chain=diag_result.agent_causal_chain,
     )
-    mitigation_sf = SharedFile(mitigation_shared_file.resolve())
+    mitigation_sf = mitigation_shared_file
 
     api_base = f"http://{os.getenv('API_HOSTNAME', 'localhost')}:{os.getenv('API_PORT', '8000')}"
     logger.info("Waiting for benchmark to reach mitigation stage...")

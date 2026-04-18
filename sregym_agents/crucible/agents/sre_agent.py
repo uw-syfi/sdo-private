@@ -313,14 +313,14 @@ class SREAgent:
         diagnosis_shared_file_str = ""
         if diagnosis_shared_file is not None:
             diagnosis_shared_content = diagnosis_shared_file.read()
-            diagnosis_shared_file_str = str(diagnosis_shared_file)
+            diagnosis_shared_file_str = diagnosis_shared_file.display_path()
 
         system_prompt, user_prompt = self._render_prompts(
             stage,
             app_info=app_info,
             iteration=iteration,
             shared_content=shared_content,
-            shared_file_str=str(shared_file),
+            shared_file_str=shared_file.display_path(),
             diagnosis_shared_content=diagnosis_shared_content,
             diagnosis_shared_file_str=diagnosis_shared_file_str,
             architecture_content=architecture_content,
