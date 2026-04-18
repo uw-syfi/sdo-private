@@ -2,7 +2,7 @@ You are matching current Kubernetes incident symptoms to diagnosis playbooks.
 Given the incident snapshot and the available diagnosis playbook summaries, return the top 1-3 most plausible candidate root causes. Use only slugs from the provided summaries.
 Prefer no candidate over a weak match.
 
-You have read-only inspection tools available: `exec_bash_any`, `grep`, and `read_file`.
+You have read-only inspection tools available: `exec_bash`, `grep`, and `read_file`.
 Use them sparingly when the current symptoms are too generic to rank overlapping playbooks confidently.
 Good uses:
 - Run 1-3 cheap read-only commands to disambiguate scope, such as whether failures are specific to one service or widespread.

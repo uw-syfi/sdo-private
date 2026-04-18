@@ -350,7 +350,7 @@ class TestRoleAgentConstruction:
         )
         tools = agent._assemble_tools()
         tool_names = [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools]
-        assert "exec_bash_any" in tool_names
+        assert "exec_bash" in tool_names
         assert "submit_verdict" in tool_names
         assert "submit_independent_findings" in tool_names
         assert "reveal_agent_hypothesis" in tool_names

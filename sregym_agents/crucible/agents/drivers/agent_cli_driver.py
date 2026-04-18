@@ -42,7 +42,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _NATIVE_TOOL_NAMES = frozenset(
     {
         "exec_bash",
-        "exec_bash_any",
         "read_file",
         "grep",
         "write_file",

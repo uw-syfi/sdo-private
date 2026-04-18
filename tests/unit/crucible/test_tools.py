@@ -959,3 +959,41 @@ class TestJudgeToolSequence:
         result = asyncio.run(_run())
         assert ctx.deps.state.verdict == "APPROVED"
         assert "Verdict submitted" in result
+
+
+# ---------------------------------------------------------------------------
+# exec_bash is the sole bash tool (regression for issue #90)
+# ---------------------------------------------------------------------------
+
+
+class TestExecBashSingleDefinition:
+    """Regression for issue #90 — ensure exec_bash and exec_bash_any aren't
+    duplicated. Both the SRE and judge agents should register the same
+    ``exec_bash`` function."""
+
+    def test_no_exec_bash_any_alias(self) -> None:
+        from sregym_agents.crucible.tools import _bash_tools
+
+        assert not hasattr(_bash_tools, "exec_bash_any"), (
+            "exec_bash_any was merged into exec_bash (issue #90). Use exec_bash."
+        )
+
+    def test_tools_module_does_not_reexport_exec_bash_any(self) -> None:
+        from sregym_agents.crucible import tools as tools_pkg
+
+        assert "exec_bash_any" not in tools_pkg.__all__
+        assert not hasattr(tools_pkg, "exec_bash_any")
+
+    def test_sre_and_judge_share_same_exec_bash(self) -> None:
+        from unittest.mock import MagicMock
+
+        from sregym_agents.crucible.agents import JudgeAgent, SREAgent
+        from sregym_agents.crucible.tools import exec_bash
+
+        driver = MagicMock()
+        renderer = MagicMock()
+        sre_tools = SREAgent(driver=driver, model_id="m", renderer=renderer)._assemble_tools("diagnosis")
+        judge_tools = JudgeAgent(driver=driver, model_id="m", renderer=renderer)._assemble_tools()
+
+        assert exec_bash in sre_tools
+        assert exec_bash in judge_tools
