@@ -11,10 +11,14 @@ _PROMPTS_DIR = _CONFIG_DIR / "prompts"
 
 
 def _make_env(prompt_version: str) -> Environment:
-    """Create a Jinja2 environment for the given prompt version directory."""
+    """Create a Jinja2 environment for the given prompt version directory.
+
+    Directory existence is validated by :class:`CrucibleConfig`'s
+    ``__post_init__``. A direct :class:`PromptRenderer` caller that passes a
+    missing version will only see an error when it first tries to render a
+    template (``jinja2.TemplateNotFound``).
+    """
     prompts_dir = _PROMPTS_DIR / prompt_version
-    if not prompts_dir.is_dir():
-        raise ValueError(f"Prompt version {prompt_version!r} not found at {prompts_dir}")
     return Environment(
         loader=FileSystemLoader(str(prompts_dir)),
         undefined=StrictUndefined,

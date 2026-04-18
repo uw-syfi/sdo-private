@@ -15,8 +15,14 @@ def test_configure_valid_version() -> None:
 
 
 def test_configure_invalid_version() -> None:
-    with pytest.raises(ValueError, match="not found"):
-        PromptRenderer("nonexistent_version")
+    # Existence is validated at CrucibleConfig construction time; a direct
+    # PromptRenderer with a missing version surfaces the error lazily when
+    # rendering a template.
+    renderer = PromptRenderer("nonexistent_version")
+    import jinja2
+
+    with pytest.raises(jinja2.TemplateNotFound):
+        renderer.render("diagnosis_agent_system")
 
 
 def test_render_raises_on_missing_variable() -> None:
