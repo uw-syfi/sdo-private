@@ -36,6 +36,89 @@ except ImportError:
     HAS_YAML = False
 
 
+try:
+    import tomllib  # py311+
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None
+
+
+def _is_autonomous_submit_experiment(csv_path):
+    """Return True iff the experiment producing ``csv_path`` ran in
+    autonomous-submit mode.
+
+    Detected by walking up from the CSV until we find an adjacent
+    ``experiment_config.toml`` and reading
+    ``[agent.cli_agent].autonomous_submit``. In that mode TTL and TTM are
+    both measured from fault injection, so the analytics must not treat
+    ``TTM`` as ``TTL + mitigation_phase``.
+    """
+    if tomllib is None:
+        return False
+    d = os.path.dirname(os.path.abspath(csv_path))
+    for _ in range(8):  # bounded walk-up; experiment dir is always shallow
+        cfg = os.path.join(d, "experiment_config.toml")
+        if os.path.isfile(cfg):
+            try:
+                with open(cfg, "rb") as f:
+                    data = tomllib.load(f)
+            except Exception:
+                return False
+            agents_block = data.get("agent", {}) if isinstance(data, dict) else {}
+            cli_cfg = agents_block.get("cli_agent", {}) if isinstance(agents_block, dict) else {}
+            return bool(cli_cfg.get("autonomous_submit"))
+        parent = os.path.dirname(d)
+        if parent == d:
+            return False
+        d = parent
+    return False
+
+
+def _time_to_mitigation(row):
+    """Mitigation-phase duration (seconds), or None when unavailable.
+
+    Sequential mode: ``TTM`` is wall-clock from fault injection through
+    mitigation submit, so the mitigation-phase-only time is ``TTM - TTL``.
+    Autonomous mode: ``TTM`` is already wall-clock from fault injection to
+    the agent's ``submit_mitigation`` call, independent of when/if
+    diagnosis was submitted; return it directly.
+    """
+    try:
+        ttm = float(row["TTM"])
+    except (ValueError, TypeError, KeyError):
+        return None
+    if row.get("autonomous"):
+        return ttm
+    try:
+        ttl = float(row["TTL"])
+    except (ValueError, TypeError, KeyError):
+        return None
+    return ttm - ttl
+
+
+def _time_to_resolution(row):
+    """Wall-clock from fault injection to full resolution, or None.
+
+    Sequential mode: diagnosis then mitigation, so resolution is just
+    ``TTM`` (which already includes the diagnosis phase).
+    Autonomous mode: diagnosis and mitigation are submitted independently
+    and in either order, so resolution is ``max(TTL, TTM)``.
+    """
+    try:
+        ttm = float(row["TTM"])
+    except (ValueError, TypeError, KeyError):
+        return None
+    try:
+        ttl = float(row["TTL"])
+    except (ValueError, TypeError, KeyError):
+        return ttm
+    if row.get("autonomous"):
+        return max(ttl, ttm)
+    return ttm
+
+
 def find_results_csvs(log_dir):
     """Return SREGym results CSV paths under *log_dir*.
 
@@ -87,6 +170,7 @@ def load_results(target_path=None):
 
                 has_results_columns = "Diagnosis.success" in reader.fieldnames
                 has_mitigation = "Mitigation.success" in reader.fieldnames or "Mitigation.judgment" in reader.fieldnames
+                autonomous = _is_autonomous_submit_experiment(file_path)
 
                 for row in reader:
                     pid = row.get("problem_id")
@@ -95,6 +179,7 @@ def load_results(target_path=None):
 
                     row["source_file"] = os.path.basename(file_path)
                     row["has_mitigation"] = has_mitigation
+                    row["autonomous"] = autonomous
 
                     if has_results_columns:
                         if has_mitigation:
@@ -401,12 +486,15 @@ def _compute_group_stats(runs):
         try:
             if r.get("TTL"):
                 ttls.append(float(r["TTL"]))
-            if r.get("has_mitigation") and r.get("TTM") and r.get("TTL"):
-                ttm_raw = float(r["TTM"])
-                ttms.append(ttm_raw - float(r["TTL"]))
-                tres.append(ttm_raw)
         except ValueError:
             pass
+        if r.get("has_mitigation") and r.get("TTM"):
+            tm = _time_to_mitigation(r)
+            tr = _time_to_resolution(r)
+            if tm is not None:
+                ttms.append(tm)
+            if tr is not None:
+                tres.append(tr)
     avg_ttl = f"{sum(ttls) / len(ttls):.1f}" if ttls else "-"
     avg_ttm = f"{sum(ttms) / len(ttms):.1f}" if ttms else "-"
     avg_tres = f"{sum(tres) / len(tres):.1f}" if tres else "-"
@@ -478,12 +566,15 @@ def summarize_results(target_path=None):
         try:
             if r.get("TTL"):
                 ttls.append(float(r["TTL"]))
-            if r.get("has_mitigation") and r.get("TTM") and r.get("TTL"):
-                ttm_raw = float(r["TTM"])
-                ttms.append(ttm_raw - float(r["TTL"]))
-                t_resolutions.append(ttm_raw)
         except ValueError:
             pass
+        if r.get("has_mitigation") and r.get("TTM"):
+            tm = _time_to_mitigation(r)
+            tr = _time_to_resolution(r)
+            if tm is not None:
+                ttms.append(tm)
+            if tr is not None:
+                t_resolutions.append(tr)
 
     avg_ttl = sum(ttls) / len(ttls) if ttls else 0.0
     avg_ttm = sum(ttms) / len(ttms) if ttms else 0.0
@@ -551,14 +642,10 @@ def summarize_results(target_path=None):
             except Exception:
                 ttl = "N/A"
             if r.get("has_mitigation"):
-                try:
-                    ttm = f"{float(r.get('TTM', 0)) - float(r.get('TTL', 0)):.1f}"
-                except Exception:
-                    ttm = "N/A"
-                try:
-                    tres = f"{float(r.get('TTM', 0)):.1f}"
-                except Exception:
-                    tres = "N/A"
+                tm_val = _time_to_mitigation(r)
+                ttm = f"{tm_val:.1f}" if tm_val is not None else "N/A"
+                tr_val = _time_to_resolution(r)
+                tres = f"{tr_val:.1f}" if tr_val is not None else "N/A"
             else:
                 ttm = "-"
                 tres = "-"
@@ -783,15 +870,13 @@ def diff_results(dirs, names=None, limit_to_index=None):
                     ttls.append(float(r["TTL"]))
             except (ValueError, TypeError):
                 pass
-            try:
-                if r.get("has_mitigation") and r.get("TTM"):
-                    ttm_raw = float(r["TTM"])
-                    ttl_val = float(r["TTL"]) if r.get("TTL") else 0
-                    ttms.append(ttm_raw - ttl_val)
-                    if r.get("TTL"):
-                        tres.append(ttm_raw)
-            except (ValueError, TypeError):
-                pass
+            if r.get("has_mitigation") and r.get("TTM"):
+                tm = _time_to_mitigation(r)
+                if tm is not None:
+                    ttms.append(tm)
+                tr = _time_to_resolution(r)
+                if tr is not None and r.get("TTL"):
+                    tres.append(tr)
         avg_ttl = sum(ttls) / len(ttls) if ttls else 0.0
         avg_ttm = sum(ttms) / len(ttms) if ttms else 0.0
         avg_tres = sum(tres) / len(tres) if tres else 0.0
@@ -911,8 +996,7 @@ def diff_results(dirs, names=None, limit_to_index=None):
                 return None
 
         t_d = parse_float(r.get("TTL"))
-        t_m_raw = parse_float(r.get("TTM"))
-        t_m = (t_m_raw - t_d) if (t_m_raw is not None and t_d is not None) else t_m_raw
+        t_m = _time_to_mitigation(r)
 
         if r["status"] == "Completed":
             d_stat = "✅ PASS" if r.get("Diagnosis.success") == "True" else "❌ FAIL"
@@ -941,10 +1025,10 @@ def diff_results(dirs, names=None, limit_to_index=None):
                 if r.get("Mitigation.success") == "True":
                     ttm_success_per_dir[i].append(tm)
 
-            tres = (td + tm) if (td is not None and td > 0 and tm is not None and tm > 0) else None
-            if tres is not None:
+            tres = _time_to_resolution(r) if r else None
+            if tres is not None and tres > 0:
                 res_per_dir[i].append(tres)
-                if r and r.get("Mitigation.success") == "True":
+                if r.get("Mitigation.success") == "True":
                     res_success_per_dir[i].append(tres)
 
         # 2-dir specific comparison data collection
@@ -983,8 +1067,12 @@ def diff_results(dirs, names=None, limit_to_index=None):
             if (tm1_fail is not None and tm1_fail > 0) and (tm2_fail is not None and tm2_fail > 0):
                 comp_mitig_fail_data.append((pid, tm1_fail, tm2_fail, False, False))
 
-            tres1 = (td1 + tm1) if (td1 is not None and td1 > 0 and tm1 is not None and tm1 > 0) else None
-            tres2 = (td2 + tm2) if (td2 is not None and td2 > 0 and tm2 is not None and tm2 > 0) else None
+            tres1 = _time_to_resolution(r1) if r1 else None
+            tres2 = _time_to_resolution(r2) if r2 else None
+            if tres1 is not None and tres1 <= 0:
+                tres1 = None
+            if tres2 is not None and tres2 <= 0:
+                tres2 = None
 
             if tres1 is not None or tres2 is not None:
                 comp_res_data.append((pid, tres1, tres2, mitig_s1, mitig_s2))
