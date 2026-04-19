@@ -20,7 +20,7 @@ def test_crucible_config_defaults_are_v3_root_cause() -> None:
 
 def test_crucible_config_rejects_invalid_scope() -> None:
     with pytest.raises(ValueError, match="kb_scope"):
-        CrucibleConfig(kb_scope="bad")
+        CrucibleConfig(kb_scope="bad")  # type: ignore[arg-type]
 
 
 def test_config_from_experiment_reads_kb_v3_fields() -> None:

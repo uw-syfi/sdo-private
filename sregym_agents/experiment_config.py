@@ -37,7 +37,7 @@ class VariantConfig:
     order: VariantOrder = "round_robin"
     max_per_class: int | None = None
     consec_solves_to_stop: int | None = None
-    spec_names: list[str] = dataclasses.field(default_factory=list)
+    spec_names: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     @model_validator(mode="after")
     def _validate(self) -> VariantConfig:
@@ -90,8 +90,8 @@ class ExperimentConfig:
 
     # Problem selection (mutually exclusive with variants)
     tasklist: str = ""  # named set or path to YAML
-    problems: list[str] = dataclasses.field(default_factory=list)
-    spec_names: list[str] = dataclasses.field(default_factory=list)
+    problems: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    spec_names: list[str] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     # Variant mode
     variants: VariantConfig = dataclasses.field(default_factory=VariantConfig)
@@ -100,7 +100,7 @@ class ExperimentConfig:
     env: RunnerEnv = dataclasses.field(default_factory=RunnerEnv)
 
     # Agent-specific config (keyed by agent name)
-    agent_config: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    agent_config: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
     @model_validator(mode="after")
     def _validate_mutual_exclusion(self) -> ExperimentConfig:

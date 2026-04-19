@@ -130,28 +130,40 @@ def crucible_config_from_experiment_agent(
         enable_judge = False
 
     base = CrucibleConfig()
-    return CrucibleConfig(
-        enable_judge=enable_judge,
-        enable_ltm_retrieval=bool(agent_settings.get("enable_ltm_retrieval", base.enable_ltm_retrieval)),
-        enable_ltm_verified_direct_submit=bool(
-            agent_settings.get("enable_ltm_verified_direct_submit", base.enable_ltm_verified_direct_submit)
-        ),
-        enable_mitigation_kb=bool(agent_settings.get("enable_mitigation_kb", base.enable_mitigation_kb)),
-        include_benchmark_results=bool(agent_settings.get("include_benchmark_results", base.include_benchmark_results)),
-        kb_scope=str(agent_settings.get("kb_scope", base.kb_scope)),
-        kb_runtime_mode=str(agent_settings.get("kb_runtime_mode", base.kb_runtime_mode)),
-        kb_update_mode=str(agent_settings.get("kb_update_mode", base.kb_update_mode)),
-        prompt_version=prompt_version,
-        enable_triage_priors=_optional_bool(agent_settings, "enable_triage_priors"),
-        enable_success_playbook_candidates=_optional_bool(agent_settings, "enable_success_playbook_candidates"),
-        enable_mitigation_playbook_curation=_optional_bool(agent_settings, "enable_mitigation_playbook_curation"),
-        enable_diagnosis_playbook_candidates=_optional_bool(agent_settings, "enable_diagnosis_playbook_candidates"),
-        max_diagnosis_iterations=int(agent_settings.get("max_diagnosis_iterations", base.max_diagnosis_iterations)),
-        max_mitigation_iterations=int(agent_settings.get("max_mitigation_iterations", base.max_mitigation_iterations)),
-        wait_stage_timeout=int(agent_settings.get("wait_stage_timeout", base.wait_stage_timeout)),
-        stage_timeout=int(agent_settings.get("stage_timeout", base.stage_timeout)),
-        backend=str(agent_settings.get("backend", base.backend)),
-        agent_cli_provider=str(agent_settings.get("agent_cli_provider", base.agent_cli_provider)),
+    return CrucibleConfig.model_validate(
+        {
+            "enable_judge": enable_judge,
+            "enable_ltm_retrieval": bool(agent_settings.get("enable_ltm_retrieval", base.enable_ltm_retrieval)),
+            "enable_ltm_verified_direct_submit": bool(
+                agent_settings.get("enable_ltm_verified_direct_submit", base.enable_ltm_verified_direct_submit)
+            ),
+            "enable_mitigation_kb": bool(agent_settings.get("enable_mitigation_kb", base.enable_mitigation_kb)),
+            "include_benchmark_results": bool(
+                agent_settings.get("include_benchmark_results", base.include_benchmark_results)
+            ),
+            "kb_scope": str(agent_settings.get("kb_scope", base.kb_scope)),
+            "kb_runtime_mode": str(agent_settings.get("kb_runtime_mode", base.kb_runtime_mode)),
+            "kb_update_mode": str(agent_settings.get("kb_update_mode", base.kb_update_mode)),
+            "prompt_version": prompt_version,
+            "enable_triage_priors": _optional_bool(agent_settings, "enable_triage_priors"),
+            "enable_success_playbook_candidates": _optional_bool(agent_settings, "enable_success_playbook_candidates"),
+            "enable_mitigation_playbook_curation": _optional_bool(
+                agent_settings, "enable_mitigation_playbook_curation"
+            ),
+            "enable_diagnosis_playbook_candidates": _optional_bool(
+                agent_settings, "enable_diagnosis_playbook_candidates"
+            ),
+            "max_diagnosis_iterations": int(
+                agent_settings.get("max_diagnosis_iterations", base.max_diagnosis_iterations)
+            ),
+            "max_mitigation_iterations": int(
+                agent_settings.get("max_mitigation_iterations", base.max_mitigation_iterations)
+            ),
+            "wait_stage_timeout": int(agent_settings.get("wait_stage_timeout", base.wait_stage_timeout)),
+            "stage_timeout": int(agent_settings.get("stage_timeout", base.stage_timeout)),
+            "backend": str(agent_settings.get("backend", base.backend)),
+            "agent_cli_provider": str(agent_settings.get("agent_cli_provider", base.agent_cli_provider)),
+        }
     )
 
 
@@ -164,10 +176,12 @@ def crucible_config_from_kb_task(kb_task: Mapping[str, Any]) -> CrucibleConfig:
     base = CrucibleConfig()
     # Capability flags are left unset here so CrucibleConfig derives them
     # from ``prompt_version`` in the post-init validator.
-    return CrucibleConfig(
-        include_benchmark_results=bool(kb_task.get("include_benchmark_results", base.include_benchmark_results)),
-        kb_scope=str(kb_task.get("kb_scope", base.kb_scope)),
-        kb_runtime_mode=str(kb_task.get("kb_runtime_mode", base.kb_runtime_mode)),
-        kb_update_mode=str(kb_task.get("kb_update_mode", base.kb_update_mode)),
-        prompt_version=str(prompt_version),
+    return CrucibleConfig.model_validate(
+        {
+            "include_benchmark_results": bool(kb_task.get("include_benchmark_results", base.include_benchmark_results)),
+            "kb_scope": str(kb_task.get("kb_scope", base.kb_scope)),
+            "kb_runtime_mode": str(kb_task.get("kb_runtime_mode", base.kb_runtime_mode)),
+            "kb_update_mode": str(kb_task.get("kb_update_mode", base.kb_update_mode)),
+            "prompt_version": str(prompt_version),
+        }
     )
