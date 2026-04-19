@@ -17,7 +17,7 @@ SDS autonomously explores, validates, and evolves infrastructure using agentic L
 - **Red/Green TDD**: write failing tests first, then implement.
 - **Python**: type hints, `autopep8` formatting, `ruff` linting, `pytest` tests
 - **Structured data**: use dataclasses instead of raw `dict` for shapes constructed/consumed in multiple places
-- **Config**: dataclasses with `__post_init__` validation (`TypeError`/`ValueError`)
+- **Config**: prefer Pydantic v2 for new config classes — `BaseModel` with `ConfigDict(extra="forbid")` when no field name collides with `model_config`, otherwise `pydantic.dataclasses.dataclass`. Use `@field_validator` / `@model_validator` for constraints and cross-field rules. Plain data containers (no validation) stay as `@dataclass`. `app_operator/core/config.py` still uses `@dataclass` + `__post_init__` + helpers in `app_operator/core/validation.py` for historical reasons (extensive tests assert specific `TypeError`/`ValueError` contracts); leave as-is unless migrating the tests too.
 - **Exceptions**: custom hierarchy in `app_operator/exceptions.py`
 - **Adding a new feature**: Think about tests first. Test public behavior, not internal details.
 - **Fixing bugs**: Write a reproducing test first, then fix. Test must be part of the fix.

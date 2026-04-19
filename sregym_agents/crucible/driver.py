@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import dataclasses
 import json
 import logging
 import os
@@ -298,8 +297,8 @@ async def _async_main(args: argparse.Namespace) -> None:
     print("\n" + "=" * 60)
     print("[crucible] CONFIGURATION")
     print("=" * 60)
-    for field in dataclasses.fields(crucible_config):
-        print(f"  {field.name}: {getattr(crucible_config, field.name)!r}")
+    for field_name in type(crucible_config).model_fields:
+        print(f"  {field_name}: {getattr(crucible_config, field_name)!r}")
     print("=" * 60 + "\n")
     await poll_stage(api_base, wait_for=_READY_STAGES, timeout=300, on_timeout="raise")
 

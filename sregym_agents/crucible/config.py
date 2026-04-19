@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import dataclasses
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 if TYPE_CHECKING:
     import argparse
@@ -16,19 +17,20 @@ _PROMPT_VERSION_RE = re.compile(r"^v\d+$")
 _PROMPTS_DIR = Path(__file__).parent / "configs" / "prompts"
 
 
-@dataclasses.dataclass(frozen=True)
-class CrucibleConfig:
+class CrucibleConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     enable_judge: bool = True
     enable_ltm_retrieval: bool = False
     enable_ltm_verified_direct_submit: bool = False
     enable_mitigation_kb: bool = True
     include_benchmark_results: bool = False
-    kb_scope: str = "per_app"
-    kb_runtime_mode: str = "playbook-first"
-    kb_update_mode: str = "async-review"
+    kb_scope: Literal["per_app", "shared"] = "per_app"
+    kb_runtime_mode: Literal["playbook-first"] = "playbook-first"
+    kb_update_mode: Literal["async-review", "inline-review"] = "async-review"
     prompt_version: str = "v2"
     # Explicit capability flags (historically gated by prompt_version >= "v3").
-    # When left at ``None``, ``__post_init__`` derives the flag from
+    # When left at ``None``, the post-init validator derives the flag from
     # ``prompt_version == "v3"`` so existing call sites that only set
     # ``prompt_version`` keep working. Pass an explicit ``True``/``False``
     # to override.
@@ -40,27 +42,24 @@ class CrucibleConfig:
     max_mitigation_iterations: int = 5
     wait_stage_timeout: int = 300
     stage_timeout: int = 900  # 15 minutes max per diagnosis/mitigation stage
-    backend: str = "pydantic-ai"  # "pydantic-ai" or "agent-cli"
+    backend: Literal["pydantic-ai", "agent-cli"] = "pydantic-ai"
     agent_cli_provider: str = "claude"  # provider for agent-cli backend
 
-    def __post_init__(self) -> None:
-        if self.backend not in ("pydantic-ai", "agent-cli"):
-            raise ValueError(f"backend must be 'pydantic-ai' or 'agent-cli', got {self.backend!r}")
-        if self.kb_scope not in ("per_app", "shared"):
-            raise ValueError(f"kb_scope must be 'per_app' or 'shared', got {self.kb_scope!r}")
-        if self.kb_runtime_mode != "playbook-first":
-            raise ValueError(f"kb_runtime_mode must be 'playbook-first', got {self.kb_runtime_mode!r}")
-        if self.kb_update_mode not in ("async-review", "inline-review"):
-            raise ValueError(f"kb_update_mode must be async-review or inline-review, got {self.kb_update_mode!r}")
-        for name in (
-            "max_diagnosis_iterations",
-            "max_mitigation_iterations",
-            "wait_stage_timeout",
-            "stage_timeout",
-        ):
-            val = getattr(self, name)
-            if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
-                raise ValueError(f"{name} must be a positive int, got {val!r}")
+    @field_validator(
+        "max_diagnosis_iterations",
+        "max_mitigation_iterations",
+        "wait_stage_timeout",
+        "stage_timeout",
+        mode="before",
+    )
+    @classmethod
+    def _check_positive_int(cls, value: Any, info: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{info.field_name} must be a positive int, got {value!r}")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_prompt_version_and_derive_flags(self) -> CrucibleConfig:
         if not _PROMPT_VERSION_RE.match(self.prompt_version):
             raise ValueError(
                 f"prompt_version must match r'^v\\d+$' (e.g. 'v1', 'v2', 'v3'), got {self.prompt_version!r}"
@@ -77,6 +76,7 @@ class CrucibleConfig:
         ):
             if getattr(self, flag) is None:
                 object.__setattr__(self, flag, v3_default)
+        return self
 
     def to_kb_task_fields(self) -> dict[str, Any]:
         """Return the config subset needed for KB update task serialization."""
@@ -93,7 +93,7 @@ def _optional_bool(settings: Mapping[str, Any], key: str) -> bool | None:
     """Return ``settings[key]`` as ``bool`` if present, else ``None``.
 
     ``None`` lets :class:`CrucibleConfig` derive the default from
-    ``prompt_version`` in ``__post_init__`` instead of the parser.
+    ``prompt_version`` in its post-init validator instead of the parser.
     """
     if key not in settings:
         return None
@@ -130,28 +130,40 @@ def crucible_config_from_experiment_agent(
         enable_judge = False
 
     base = CrucibleConfig()
-    return CrucibleConfig(
-        enable_judge=enable_judge,
-        enable_ltm_retrieval=bool(agent_settings.get("enable_ltm_retrieval", base.enable_ltm_retrieval)),
-        enable_ltm_verified_direct_submit=bool(
-            agent_settings.get("enable_ltm_verified_direct_submit", base.enable_ltm_verified_direct_submit)
-        ),
-        enable_mitigation_kb=bool(agent_settings.get("enable_mitigation_kb", base.enable_mitigation_kb)),
-        include_benchmark_results=bool(agent_settings.get("include_benchmark_results", base.include_benchmark_results)),
-        kb_scope=str(agent_settings.get("kb_scope", base.kb_scope)),
-        kb_runtime_mode=str(agent_settings.get("kb_runtime_mode", base.kb_runtime_mode)),
-        kb_update_mode=str(agent_settings.get("kb_update_mode", base.kb_update_mode)),
-        prompt_version=prompt_version,
-        enable_triage_priors=_optional_bool(agent_settings, "enable_triage_priors"),
-        enable_success_playbook_candidates=_optional_bool(agent_settings, "enable_success_playbook_candidates"),
-        enable_mitigation_playbook_curation=_optional_bool(agent_settings, "enable_mitigation_playbook_curation"),
-        enable_diagnosis_playbook_candidates=_optional_bool(agent_settings, "enable_diagnosis_playbook_candidates"),
-        max_diagnosis_iterations=int(agent_settings.get("max_diagnosis_iterations", base.max_diagnosis_iterations)),
-        max_mitigation_iterations=int(agent_settings.get("max_mitigation_iterations", base.max_mitigation_iterations)),
-        wait_stage_timeout=int(agent_settings.get("wait_stage_timeout", base.wait_stage_timeout)),
-        stage_timeout=int(agent_settings.get("stage_timeout", base.stage_timeout)),
-        backend=str(agent_settings.get("backend", base.backend)),
-        agent_cli_provider=str(agent_settings.get("agent_cli_provider", base.agent_cli_provider)),
+    return CrucibleConfig.model_validate(
+        {
+            "enable_judge": enable_judge,
+            "enable_ltm_retrieval": bool(agent_settings.get("enable_ltm_retrieval", base.enable_ltm_retrieval)),
+            "enable_ltm_verified_direct_submit": bool(
+                agent_settings.get("enable_ltm_verified_direct_submit", base.enable_ltm_verified_direct_submit)
+            ),
+            "enable_mitigation_kb": bool(agent_settings.get("enable_mitigation_kb", base.enable_mitigation_kb)),
+            "include_benchmark_results": bool(
+                agent_settings.get("include_benchmark_results", base.include_benchmark_results)
+            ),
+            "kb_scope": str(agent_settings.get("kb_scope", base.kb_scope)),
+            "kb_runtime_mode": str(agent_settings.get("kb_runtime_mode", base.kb_runtime_mode)),
+            "kb_update_mode": str(agent_settings.get("kb_update_mode", base.kb_update_mode)),
+            "prompt_version": prompt_version,
+            "enable_triage_priors": _optional_bool(agent_settings, "enable_triage_priors"),
+            "enable_success_playbook_candidates": _optional_bool(agent_settings, "enable_success_playbook_candidates"),
+            "enable_mitigation_playbook_curation": _optional_bool(
+                agent_settings, "enable_mitigation_playbook_curation"
+            ),
+            "enable_diagnosis_playbook_candidates": _optional_bool(
+                agent_settings, "enable_diagnosis_playbook_candidates"
+            ),
+            "max_diagnosis_iterations": int(
+                agent_settings.get("max_diagnosis_iterations", base.max_diagnosis_iterations)
+            ),
+            "max_mitigation_iterations": int(
+                agent_settings.get("max_mitigation_iterations", base.max_mitigation_iterations)
+            ),
+            "wait_stage_timeout": int(agent_settings.get("wait_stage_timeout", base.wait_stage_timeout)),
+            "stage_timeout": int(agent_settings.get("stage_timeout", base.stage_timeout)),
+            "backend": str(agent_settings.get("backend", base.backend)),
+            "agent_cli_provider": str(agent_settings.get("agent_cli_provider", base.agent_cli_provider)),
+        }
     )
 
 
@@ -163,11 +175,13 @@ def crucible_config_from_kb_task(kb_task: Mapping[str, Any]) -> CrucibleConfig:
 
     base = CrucibleConfig()
     # Capability flags are left unset here so CrucibleConfig derives them
-    # from ``prompt_version`` in ``__post_init__``.
-    return CrucibleConfig(
-        include_benchmark_results=bool(kb_task.get("include_benchmark_results", base.include_benchmark_results)),
-        kb_scope=str(kb_task.get("kb_scope", base.kb_scope)),
-        kb_runtime_mode=str(kb_task.get("kb_runtime_mode", base.kb_runtime_mode)),
-        kb_update_mode=str(kb_task.get("kb_update_mode", base.kb_update_mode)),
-        prompt_version=str(prompt_version),
+    # from ``prompt_version`` in the post-init validator.
+    return CrucibleConfig.model_validate(
+        {
+            "include_benchmark_results": bool(kb_task.get("include_benchmark_results", base.include_benchmark_results)),
+            "kb_scope": str(kb_task.get("kb_scope", base.kb_scope)),
+            "kb_runtime_mode": str(kb_task.get("kb_runtime_mode", base.kb_runtime_mode)),
+            "kb_update_mode": str(kb_task.get("kb_update_mode", base.kb_update_mode)),
+            "prompt_version": str(prompt_version),
+        }
     )
