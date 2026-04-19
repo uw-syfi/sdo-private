@@ -31,6 +31,12 @@ class OpencodeGenerationSession(CLIGenerationSession):
             return
         try:
             data = json.loads(line)
+            # Opencode echoes ``sessionID`` on every event; capture the first
+            # one so callers can resume via ``opencode run --session <id>``.
+            if self.session_id is None:
+                sid = data.get("sessionID")
+                if isinstance(sid, str) and sid:
+                    self.session_id = sid
             event = OpencodeEvent.from_dict(data)
             if event:
                 self._handle_event(event)
@@ -132,8 +138,13 @@ class OpencodeCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Opencode]"
 
-    def _get_command(self, prompt: str) -> list[str]:
-        cmd = [self.binary_path, "run", f'"{prompt}"']
+    def _get_command(self, prompt: str, resume_session_id: str | None = None) -> list[str]:
+        cmd = [self.binary_path, "run"]
+
+        if resume_session_id:
+            cmd.extend(["--session", resume_session_id])
+
+        cmd.append(f'"{prompt}"')
 
         if self.model:
             cmd.extend(["--model", self.model])

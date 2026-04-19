@@ -12,7 +12,7 @@ from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 from .base import register_provider
 from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
-from .gemini_events import GeminiEvent, MessageEvent, ToolResultEvent, ToolUseEvent
+from .gemini_events import GeminiEvent, InitEvent, MessageEvent, ToolResultEvent, ToolUseEvent
 from .sandbox import SandboxConfig
 
 _logger = logging.getLogger(__name__)
@@ -96,6 +96,11 @@ class GeminiGenerationSession(CLIGenerationSession):
 
     def _update_state(self, event: GeminiEvent):
         """Update internal state based on the event."""
+        if isinstance(event, InitEvent):
+            if self.session_id is None and event.session_id:
+                self.session_id = event.session_id
+            return
+
         if isinstance(event, MessageEvent):
             if event.role == "assistant":
                 self.stdout_lines.append(event.content)
@@ -192,7 +197,7 @@ class GeminiCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Gemini]"
 
-    def _get_command(self, prompt: str) -> list[str]:
+    def _get_command(self, prompt: str, resume_session_id: str | None = None) -> list[str]:
         cmd = [self.binary_path]
 
         # Enable yolo mode
@@ -203,6 +208,9 @@ class GeminiCodingAgent(CLICodingAgent):
 
         # Output in stream-json format
         cmd.extend(["-o", "stream-json"])
+
+        if resume_session_id:
+            cmd.extend(["--resume", resume_session_id])
 
         return cmd
 

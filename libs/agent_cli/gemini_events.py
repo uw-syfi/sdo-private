@@ -18,6 +18,8 @@ class GeminiEvent(ABC):
         """Factory method to create events from JSON data."""
         msg_type = data.get("type")
 
+        if msg_type == "init":
+            return InitEvent(session_id=data.get("session_id"))
         if msg_type == "message":
             return MessageEvent(role=data.get("role", ""), content=data.get("content", ""))
         if msg_type == "tool_use":
@@ -28,6 +30,16 @@ class GeminiEvent(ABC):
             )
         if msg_type == "tool_result":
             return ToolResultEvent(output=data.get("output", ""), tool_id=data.get("tool_id"))
+        return None
+
+
+class InitEvent(GeminiEvent):
+    """Session initialization event; carries the resumable ``session_id``."""
+
+    def __init__(self, session_id: str | None):
+        self.session_id = session_id
+
+    def render(self, log_prefix: str) -> str | None:
         return None
 
 
