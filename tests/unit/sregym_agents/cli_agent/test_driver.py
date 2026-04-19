@@ -77,6 +77,61 @@ def test_build_prompt_names_the_mcp_server() -> None:
     assert driver._SUBMIT_MCP_SERVER_NAME in prompt
 
 
+# --- Autonomous-submit prompt variant ---------------------------------------
+
+
+def test_build_prompt_autonomous_uses_per_stage_tool_names() -> None:
+    """When autonomous_submit is on, the prompt must reference
+    ``submit_diagnosis`` / ``submit_mitigation`` instead of ``submit``, and
+    must tell the agent no grading verdict will come back."""
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "submit_diagnosis" in prompt
+    assert "submit_mitigation" in prompt
+    # Must not describe a stage-routing single-`submit` workflow — that is
+    # the non-autonomous contract and would mislead the agent here.
+    assert "whichever stage is currently active" not in prompt
+    # The self-verification framing is the whole point of autonomous mode.
+    assert "kubectl" in prompt.lower()
+    # Must not promise a grading verdict from the tool response.
+    assert "verdict" not in prompt.lower()
+    assert "whether the answer was accepted" not in prompt
+
+
+def test_build_prompt_non_autonomous_is_unchanged() -> None:
+    """Default (autonomous=False) still produces the legacy
+    single-``submit`` prompt so existing runs don't regress."""
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+    )
+    assert "submit_diagnosis" not in prompt
+    assert "submit_mitigation" not in prompt
+
+
+def test_build_prompt_autonomous_diagnosis_only() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "submit_diagnosis" in prompt
+    assert "submit_mitigation" not in prompt
+
+
+def test_build_prompt_autonomous_mitigation_only() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "submit_mitigation" in prompt
+    assert "submit_diagnosis" not in prompt
+
+
 # --- Agent factory ---------------------------------------------------------
 
 
@@ -179,12 +234,69 @@ def _args(**overrides: Any) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
+def test_run_autonomous_does_not_block_on_terminal_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In autonomous mode the conductor never advances to a terminal stage
+    (submit_autonomous deliberately does not touch the sequential state
+    machine). The driver must not spin for _POST_STAGE_TIMEOUT_S waiting
+    for a transition that will never happen — otherwise every autonomous
+    run burns 5 minutes between problems."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+
+    # If the driver called _wait_for_post_stage it would poll /status
+    # forever against our non-advancing conductor; make the call blow up
+    # so the test fails loudly if the branch is wrong.
+    def _fail_post_stage(*_a: Any, **_kw: Any) -> str | None:
+        raise AssertionError("_wait_for_post_stage must not run in autonomous mode")
+
+    monkeypatch.setattr(driver, "_wait_for_post_stage", _fail_post_stage)
+
+    stub = _StubAgent()
+    mock = _mock_conductor(
+        stages=["diagnosis", "mitigation"],
+        status_sequence=["diagnosis", "diagnosis"],
+    )
+    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
+        driver._run(_args(), agent_factory=lambda p, m, u: stub)
+
+
+def test_run_autonomous_env_var_picks_autonomous_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``SREGYM_AUTONOMOUS_SUBMIT=1`` is set in the environment, the
+    driver must render the autonomous prompt variant (``submit_diagnosis``
+    / ``submit_mitigation``). Env-var plumbing is the critical path: the
+    worker sets this before the driver starts so the MCP server and the
+    prompt stay consistent."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+
+    stub = _StubAgent()
+    mock = _mock_conductor(
+        stages=["diagnosis", "mitigation"],
+        status_sequence=["diagnosis", "done"],
+    )
+    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
+        driver._run(_args(), agent_factory=lambda p, m, u: stub)
+
+    prompt = stub.calls[0]["prompt"]
+    assert "submit_diagnosis" in prompt
+    assert "submit_mitigation" in prompt
+
+
 def test_run_happy_path_single_session(monkeypatch: pytest.MonkeyPatch) -> None:
     """One CLI session per problem, with MCP submit URL wired through."""
     monkeypatch.setenv("API_HOSTNAME", "localhost")
     monkeypatch.setenv("API_PORT", "8000")
     monkeypatch.setenv("MCP_SERVER_PORT", "9954")
     monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
 
     stub = _StubAgent()
     factory_calls: list[tuple[str, str, str]] = []
