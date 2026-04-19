@@ -185,6 +185,36 @@ def test_config_to_env_omits_reuse_flags_when_false(tmp_path: Path) -> None:
     assert "SREGYM_FORCE_RECREATE_CLUSTER" not in env
 
 
+def test_config_to_env_promotes_autonomous_submit_flag(tmp_path: Path) -> None:
+    """[agent.cli_agent] autonomous_submit = true must surface as an env var
+    so that the MCP server (launched in the worker before the driver) can
+    register submit_diagnosis / submit_mitigation instead of submit."""
+    config = ExperimentConfig(
+        agent="cli_agent",
+        agent_config={"cli_agent": {"autonomous_submit": True}},
+    )
+    env = config_to_env(config, project_root=tmp_path)
+    assert env["SREGYM_AUTONOMOUS_SUBMIT"] == "1"
+
+
+def test_config_to_env_omits_autonomous_submit_when_disabled(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        agent="cli_agent",
+        agent_config={"cli_agent": {"autonomous_submit": False}},
+    )
+    env = config_to_env(config, project_root=tmp_path)
+    assert "SREGYM_AUTONOMOUS_SUBMIT" not in env
+
+
+def test_config_to_env_omits_autonomous_submit_when_absent(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        agent="cli_agent",
+        agent_config={"cli_agent": {}},
+    )
+    env = config_to_env(config, project_root=tmp_path)
+    assert "SREGYM_AUTONOMOUS_SUBMIT" not in env
+
+
 def test_roundtrip_reuse_cluster(tmp_path: Path) -> None:
     config = ExperimentConfig(env=RunnerEnv(reuse_cluster=True))
     toml_path = tmp_path / "snap.toml"

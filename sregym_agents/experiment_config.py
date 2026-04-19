@@ -373,6 +373,15 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
     if agent_cfg:
         env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(agent_cfg)
 
+    # Promote cli_agent's autonomous_submit flag to a dedicated env var. The
+    # MCP server that registers submit_* tools is launched in the worker
+    # process before the cli_agent driver starts, so it reads this env var
+    # at module load — ``SREGYM_EXPERIMENT_AGENT_CONFIG`` alone would not
+    # reach it in time. Conductor and driver also read this flag.
+    cli_agent_cfg = config.agent_config.get("cli_agent") or {}
+    if cli_agent_cfg.get("autonomous_submit"):
+        env["SREGYM_AUTONOMOUS_SUBMIT"] = "1"
+
     return env
 
 

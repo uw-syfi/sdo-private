@@ -70,14 +70,21 @@ def _jinja_env() -> Environment:
     )
 
 
-def _build_prompt(planned_stages: list[str], app_info: dict[str, Any]) -> str:
+def _build_prompt(
+    planned_stages: list[str],
+    app_info: dict[str, Any],
+    *,
+    autonomous: bool = False,
+) -> str:
     """Render the single-session prompt handed to the wrapped CLI agent.
 
-    One CLI session handles every planned stage: the agent investigates,
-    calls ``submit`` for diagnosis, sees the verdict, then (if mitigation
-    is also planned) acts on the cluster and calls ``submit`` again. The
-    conductor routes each ``submit`` to whichever stage is currently
-    active — the agent does not pass a stage name.
+    One CLI session handles every planned stage. In the default mode, the
+    agent calls the single ``submit`` tool once per stage and the conductor
+    routes each call to whichever stage is currently active — the tool
+    response carries the grading verdict. In autonomous mode (``autonomous=True``),
+    the agent instead calls per-stage ``submit_diagnosis`` / ``submit_mitigation``
+    tools that return only a neutral acknowledgement, so the agent must
+    self-verify by inspecting the cluster before submitting.
 
     The prompt deliberately omits the benchmark ``problem_id``: SREGym
     problem IDs are descriptive (``incorrect_image``,
@@ -85,9 +92,10 @@ def _build_prompt(planned_stages: list[str], app_info: dict[str, Any]) -> str:
     and including them would leak the answer to the agent. App name and
     namespace are kept because they're observable from the cluster anyway.
     """
+    template_name = "session_autonomous.j2" if autonomous else "session.j2"
     return (
         _jinja_env()
-        .get_template("session.j2")
+        .get_template(template_name)
         .render(
             planned_stages=list(planned_stages),
             app_name=app_info.get("app_name", "<unknown>"),
@@ -339,11 +347,13 @@ def _run(
 
     factory = agent_factory or _default_agent_factory
 
-    # Single CLI session for the whole problem: the agent investigates,
-    # calls submit (diagnosis), reads the oracle's verdict from the tool
-    # response, then continues to mitigate and calls submit again. The
-    # conductor routes each submit to the currently-active stage.
-    prompt = _build_prompt(planned_stages, app_info)
+    # Single CLI session for the whole problem. In the default mode the
+    # agent calls a stage-routing `submit` tool and reads the oracle verdict
+    # from its response. In autonomous mode (SREGYM_AUTONOMOUS_SUBMIT=1) the
+    # agent instead calls per-stage `submit_diagnosis` / `submit_mitigation`
+    # tools that return a neutral ack, and must self-verify via kubectl.
+    autonomous = os.getenv("SREGYM_AUTONOMOUS_SUBMIT", "").strip() == "1"
+    prompt = _build_prompt(planned_stages, app_info, autonomous=autonomous)
     started = time.monotonic()
     crashed_with: str | None = None
     try:
@@ -354,12 +364,21 @@ def _run(
         crashed_with = f"{type(exc).__name__}: {exc}"
     elapsed = time.monotonic() - started
 
-    # Brief grace wait so the conductor can finish the last
-    # `(verifying)` window if the agent's final submit returned just
-    # before the oracle finished grading.
-    expected: set[str] = set(_TERMINAL_STAGES) | {"awaiting_cleanup"}
-    final_stage = _wait_for_post_stage(api_base, expected=expected, timeout=_POST_STAGE_TIMEOUT_S)
-    completed = final_stage in expected
+    if autonomous:
+        # Autonomous mode: submit_autonomous grades synchronously and does not
+        # advance the sequential state machine, so the conductor will never
+        # reach a terminal stage on its own — the worker's force_cleanup runs
+        # after the agent process exits. Report the current stage without
+        # blocking for a transition that will never happen.
+        final_stage = _get_current_stage(api_base)
+        completed = final_stage is not None
+    else:
+        # Brief grace wait so the conductor can finish the last
+        # `(verifying)` window if the agent's final submit returned just
+        # before the oracle finished grading.
+        expected: set[str] = set(_TERMINAL_STAGES) | {"awaiting_cleanup"}
+        final_stage = _wait_for_post_stage(api_base, expected=expected, timeout=_POST_STAGE_TIMEOUT_S)
+        completed = final_stage in expected
     logger.info(
         "session done; elapsed=%.1fs final_stage=%r completed=%s crashed=%s",
         elapsed,
