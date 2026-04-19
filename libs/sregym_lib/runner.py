@@ -1,21 +1,13 @@
-#!/usr/bin/env python3
-"""SREGym experiment launcher.
+"""SREGym experiment + pipeline runner.
 
-Supports both single experiments and multi-stage pipelines with
-automatic knowledge base chaining.
+Pure orchestration — resolving configs, creating experiment directories,
+translating :class:`ExperimentConfig` into CLI args + env vars for
+``bench/sregym/main.py``, and running pipelines with resume/rerun support.
 
-Usage:
-    # New single experiment:
-    uv run python scripts/run_sregym.py sregym_agents/experiments/default.toml
-
-    # New pipeline (auto-detected by [[stages]] in TOML):
-    uv run python scripts/run_sregym.py sregym_agents/experiments/example_pipeline.toml
-
-    # Resume experiment or pipeline:
-    uv run python scripts/run_sregym.py bench/sregym/logs/<exp_or_pipeline_dir>/
-
-    # Rerun a specific pipeline stage:
-    uv run python scripts/run_sregym.py bench/sregym/logs/<pipeline_dir>/ --stage 1
+Agent-specific concerns (e.g. crucible's knowledge-base seeding and the
+between-stage KB drain barrier) are injected via :class:`StageHooks`.
+The top-level launcher module (``sregym_agents.run_sregym``) wires the
+crucible hooks in; this module stays agent-agnostic.
 """
 
 from __future__ import annotations
@@ -26,54 +18,70 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-# Ensure project root is on sys.path so sregym_agents is importable.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_PROJECT_ROOT))
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-from sregym_agents.crucible.kb_update_queue import (  # noqa: E402
-    snapshot_kb_queue,
-    wait_for_kb_queue_drain,
-)
-from sregym_agents.crucible.knowledge_base import seed_kb  # noqa: E402
-from sregym_agents.experiment_config import (  # noqa: E402
+from libs.sregym_lib.experiment import (
     ExperimentConfig,
     config_to_env,
     config_to_main_args,
-    load_experiment_config,
     read_snapshot,
     resolve_config,
     resolve_tasklist,
     write_snapshot,
 )
-from sregym_agents.pipeline_config import (  # noqa: E402
+from libs.sregym_lib.pipeline import (
     PipelineConfig,
     PipelineState,
     StageState,
-    has_pipeline_state,
-    is_pipeline_config,
-    load_pipeline_config,
     merge_stage_config,
-    read_pipeline_snapshot,
-    read_pipeline_state,
-    reset_stages_for_rerun,
     write_pipeline_snapshot,
     write_pipeline_state,
 )
 
-_SREGYM_DIR = _PROJECT_ROOT / "bench" / "sregym"
-_KB_QUEUE_DRAIN_TIMEOUT_S = 1800.0
-_KB_QUEUE_DRAIN_POLL_INTERVAL_S = 2.0
-
-
 # ---------------------------------------------------------------------------
-# Single experiment (unchanged logic, extracted to function)
+# Hooks
 # ---------------------------------------------------------------------------
 
 
-def _create_experiment_dir(config: ExperimentConfig) -> Path:
-    """Create a new experiment directory under bench/sregym/logs/."""
-    logs_root = _SREGYM_DIR / "logs"
+@dataclasses.dataclass
+class StageHooks:
+    """Agent-specific hooks invoked during stage lifecycle.
+
+    All hooks are optional.  Defaults are no-ops so an agent with no
+    extra stage needs can pass ``StageHooks()`` (or nothing at all).
+
+    Attributes:
+        before_stage: Called with ``(exp_dir, config)`` just before the
+            stage subprocess is launched.  Crucible uses this to seed
+            its knowledge base.
+        snapshot_before_drain: Called with ``(exp_dir, config)`` before
+            the stage subprocess starts, when the following stage will
+            chain from this one's KB.  Returns an opaque baseline object
+            that is passed back to ``wait_for_drain`` after the stage
+            finishes.  Crucible uses this to snapshot its KB review queue.
+        wait_for_drain: Called with ``(exp_dir, baseline)`` after a stage
+            whose successor chains KB.  Crucible uses this to wait for
+            its KB review queue to drain before chaining.
+    """
+
+    before_stage: Callable[[Path, ExperimentConfig], None] | None = None
+    snapshot_before_drain: Callable[[Path, ExperimentConfig], object] | None = None
+    wait_for_drain: Callable[[Path, object], None] | None = None
+
+
+_NOOP_HOOKS = StageHooks()
+
+
+# ---------------------------------------------------------------------------
+# Single experiment
+# ---------------------------------------------------------------------------
+
+
+def _create_experiment_dir(config: ExperimentConfig, sregym_dir: Path) -> Path:
+    logs_root = sregym_dir / "logs"
     logs_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dir_name = f"{timestamp}_{config.agent}"
@@ -96,49 +104,69 @@ def _print_experiment_info(config: ExperimentConfig, env: dict[str, str]) -> Non
         print(f"  agent config: {agent_cfg_json}")
 
 
-def _verify_sregym() -> None:
-    main_py = _SREGYM_DIR / "main.py"
+def _verify_sregym(sregym_dir: Path) -> None:
+    main_py = sregym_dir / "main.py"
     if not main_py.exists():
         print(
-            "Error: bench/sregym/main.py not found. Is the sregym submodule checked out?",
+            f"Error: {main_py} not found. Is the sregym submodule checked out?",
             file=sys.stderr,
         )
         sys.exit(1)
 
 
-def run_single_experiment(target: Path, extra_args: list[str]) -> None:
-    """Run or resume a single experiment (original behavior, uses execvpe)."""
+def run_single_experiment(
+    target: Path,
+    extra_args: list[str],
+    *,
+    project_root: Path,
+    sregym_dir: Path,
+    hooks: StageHooks | None = None,
+) -> None:
+    """Run or resume a single experiment.
+
+    Replaces the current process with ``uv run main.py ...`` via
+    ``os.execvpe`` — this function does not return on success.
+    """
+    hooks = hooks or _NOOP_HOOKS
+
     if target.is_dir():
         exp_dir = target.resolve()
         config = read_snapshot(exp_dir)
         config = resolve_config(config)
-        tasklist_path = exp_dir / "tasklist.yml"
+        tasklist_path: Path | None = exp_dir / "tasklist.yml"
         if not tasklist_path.exists():
             tasklist_path = None
         print(f"Resuming experiment from: {exp_dir}")
     else:
-        config = load_experiment_config(target)
-        config = resolve_config(config)
-        exp_dir = _create_experiment_dir(config)
+        config = load_experiment_config_or_resolve(target)
+        exp_dir = _create_experiment_dir(config, sregym_dir)
         write_snapshot(config, exp_dir)
-        tasklist_path = resolve_tasklist(config, _SREGYM_DIR, exp_dir)
+        tasklist_path = resolve_tasklist(config, sregym_dir, exp_dir)
         print(f"New experiment: {exp_dir}")
 
-    _verify_sregym()
+    _verify_sregym(sregym_dir)
 
     cli_args = config_to_main_args(config, exp_dir, tasklist_path)
     cli_args.extend(extra_args)
-    env = config_to_env(config, _PROJECT_ROOT)
+    env = config_to_env(config, project_root)
 
     _print_experiment_info(config, env)
     print()
 
-    seed_kb(exp_dir / "kb", config.env.crucible_seed_kb_dir or None)
+    if hooks.before_stage is not None:
+        hooks.before_stage(exp_dir, config)
 
-    os.chdir(_SREGYM_DIR)
+    os.chdir(sregym_dir)
     argv = ["uv", "run", "main.py"] + cli_args
     print(f"  exec: {' '.join(argv)}")
     os.execvpe("uv", argv, env)
+
+
+def load_experiment_config_or_resolve(path: Path) -> ExperimentConfig:
+    """Load a TOML experiment config and apply env-var overrides."""
+    from libs.sregym_lib.experiment import load_experiment_config
+
+    return resolve_config(load_experiment_config(path))
 
 
 # ---------------------------------------------------------------------------
@@ -146,9 +174,8 @@ def run_single_experiment(target: Path, extra_args: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _create_pipeline_dir(config: PipelineConfig) -> Path:
-    """Create a new pipeline directory under bench/sregym/logs/."""
-    logs_root = _SREGYM_DIR / "logs"
+def _create_pipeline_dir(config: PipelineConfig, sregym_dir: Path) -> Path:
+    logs_root = sregym_dir / "logs"
     logs_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = f"_{config.name}" if config.name else ""
@@ -162,17 +189,18 @@ def _run_stage(
     exp_config: ExperimentConfig,
     stage_exp_dir: Path,
     tasklist_path: Path | None,
+    sregym_dir: Path,
+    project_root: Path,
 ) -> int:
-    """Run a single pipeline stage via subprocess. Returns exit code."""
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
-    env = config_to_env(exp_config, _PROJECT_ROOT)
+    env = config_to_env(exp_config, project_root)
 
     _print_experiment_info(exp_config, env)
 
     argv = ["uv", "run", "main.py"] + cli_args
     print(f"  exec: {' '.join(argv)}")
     print()
-    result = subprocess.run(argv, cwd=str(_SREGYM_DIR), env=env)
+    result = subprocess.run(argv, cwd=str(sregym_dir), env=env)
     if result.returncode != 0:
         print(f"  ⚠️  Stage exited with code {result.returncode}", flush=True)
         if result.returncode < 0:
@@ -188,8 +216,12 @@ def _run_stage(
 
 def run_pipeline(
     config: PipelineConfig,
+    *,
+    project_root: Path,
+    sregym_dir: Path,
     pipeline_dir: Path | None = None,
     state: PipelineState | None = None,
+    hooks: StageHooks | None = None,
 ) -> int:
     """Run a multi-stage pipeline with automatic KB chaining.
 
@@ -199,11 +231,12 @@ def run_pipeline(
 
     Returns 0 on success, 1 on failure.
     """
-    _verify_sregym()
+    hooks = hooks or _NOOP_HOOKS
 
-    # New pipeline
+    _verify_sregym(sregym_dir)
+
     if pipeline_dir is None:
-        pipeline_dir = _create_pipeline_dir(config)
+        pipeline_dir = _create_pipeline_dir(config, sregym_dir)
         write_pipeline_snapshot(config, pipeline_dir)
         state = PipelineState(
             stages=[StageState(index=i, name=s.name, status="pending") for i, s in enumerate(config.stages)]
@@ -222,18 +255,15 @@ def run_pipeline(
     for i, stage_cfg in enumerate(config.stages):
         stage_state = state.stages[i]
 
-        # Skip completed stages, but track their KB dir for chaining
         if stage_state.status == "completed":
             if stage_state.experiment_dir:
                 prev_kb_dir = str(Path(stage_state.experiment_dir) / "kb")
             print(f"Stage {i}/{len(config.stages) - 1}: {stage_cfg.name or f'stage_{i}'} [skipped — already completed]")
             continue
 
-        # Build ExperimentConfig for this stage
         exp_config = merge_stage_config(config.defaults, stage_cfg.runner_overrides)
         exp_config = resolve_config(exp_config)
 
-        # KB chaining: set seed dir from previous completed stage
         if stage_cfg.chain_kb and prev_kb_dir:
             exp_config = dataclasses.replace(
                 exp_config,
@@ -243,32 +273,33 @@ def run_pipeline(
                 ),
             )
 
-        # Create stage experiment dir
         stage_name = stage_cfg.name or f"stage_{i}"
         stage_exp_dir = pipeline_dir / f"stage_{i}_{stage_name}"
         stage_exp_dir.mkdir(parents=True, exist_ok=True)
 
         write_snapshot(exp_config, stage_exp_dir)
-        tasklist_path = resolve_tasklist(exp_config, _SREGYM_DIR, stage_exp_dir)
+        tasklist_path = resolve_tasklist(exp_config, sregym_dir, stage_exp_dir)
 
-        # Update state
         stage_state.status = "running"
         stage_state.experiment_dir = str(stage_exp_dir)
         write_pipeline_state(state, pipeline_dir)
 
-        # Print stage header
         print("=" * 60)
         print(f"Stage {i}/{len(config.stages) - 1}: {stage_name}")
         if stage_cfg.chain_kb and prev_kb_dir:
             print(f"  KB seed: {prev_kb_dir}")
         print("=" * 60)
 
-        seed_kb(stage_exp_dir / "kb", exp_config.env.crucible_seed_kb_dir or None)
+        if hooks.before_stage is not None:
+            hooks.before_stage(stage_exp_dir, exp_config)
+
         needs_kb_barrier = i + 1 < len(config.stages) and config.stages[i + 1].chain_kb
-        kb_queue_baseline = snapshot_kb_queue(stage_exp_dir / "kb") if needs_kb_barrier else None
+        drain_baseline: object | None = None
+        if needs_kb_barrier and hooks.snapshot_before_drain is not None:
+            drain_baseline = hooks.snapshot_before_drain(stage_exp_dir, exp_config)
 
         try:
-            returncode = _run_stage(exp_config, stage_exp_dir, tasklist_path)
+            returncode = _run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root)
         except KeyboardInterrupt:
             print(f"\nInterrupted during stage {i}. Saving state for resume.")
             stage_state.status = "failed"
@@ -285,15 +316,10 @@ def run_pipeline(
             print(f"Resume with: run_sregym.sh {pipeline_dir}")
             return 1
 
-        if needs_kb_barrier:
+        if needs_kb_barrier and hooks.wait_for_drain is not None:
             print("  Waiting for KB review queue to drain before chaining...")
             try:
-                wait_for_kb_queue_drain(
-                    stage_exp_dir / "kb",
-                    baseline=kb_queue_baseline,
-                    timeout_s=_KB_QUEUE_DRAIN_TIMEOUT_S,
-                    poll_interval_s=_KB_QUEUE_DRAIN_POLL_INTERVAL_S,
-                )
+                hooks.wait_for_drain(stage_exp_dir, drain_baseline)
             except KeyboardInterrupt:
                 print(f"\nInterrupted while waiting for KB queue after stage {i}. Saving state for resume.")
                 stage_state.status = "failed"
@@ -309,7 +335,6 @@ def run_pipeline(
                 print(f"Resume with: run_sregym.sh {pipeline_dir}")
                 return 1
 
-        # Mark completed
         stage_state.status = "completed"
         write_pipeline_state(state, pipeline_dir)
         prev_kb_dir = str(stage_exp_dir / "kb")
@@ -320,80 +345,3 @@ def run_pipeline(
     print(f"  directory: {pipeline_dir}")
     print("=" * 60)
     return 0
-
-
-# ---------------------------------------------------------------------------
-# CLI argument parsing
-# ---------------------------------------------------------------------------
-
-
-def _parse_stage_arg(args: list[str]) -> tuple[int | None, list[str]]:
-    """Extract --stage N from args. Returns (stage_index, remaining_args)."""
-    remaining = []
-    stage_index = None
-    i = 0
-    while i < len(args):
-        if args[i] == "--stage" and i + 1 < len(args):
-            stage_index = int(args[i + 1])
-            i += 2
-        else:
-            remaining.append(args[i])
-            i += 1
-    return stage_index, remaining
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-
-def main() -> None:
-    if len(sys.argv) < 2:
-        print(
-            "Usage: run_sregym.py <config.toml | experiment_dir> [--stage N]",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    target = Path(sys.argv[1])
-    extra_args = sys.argv[2:]
-    stage_index, extra_args = _parse_stage_arg(extra_args)
-
-    # --- Directory target: resume pipeline or single experiment ---
-    if target.is_dir():
-        target = target.resolve()
-        if has_pipeline_state(target):
-            config = read_pipeline_snapshot(target)
-            state = read_pipeline_state(target)
-            if stage_index is not None:
-                reset_stages_for_rerun(config, state, stage_index, target)
-                write_pipeline_state(state, target)
-                print(f"Resetting from stage {stage_index} for rerun.")
-            sys.exit(run_pipeline(config, pipeline_dir=target, state=state))
-        else:
-            if stage_index is not None:
-                print("Error: --stage is only supported for pipeline directories.", file=sys.stderr)
-                sys.exit(1)
-            run_single_experiment(target, extra_args)
-
-    # --- TOML file target: new pipeline or single experiment ---
-    elif target.is_file() and target.suffix == ".toml":
-        if stage_index is not None:
-            print("Error: --stage is only supported when resuming a pipeline directory.", file=sys.stderr)
-            sys.exit(1)
-        if is_pipeline_config(target):
-            config = load_pipeline_config(target)
-            sys.exit(run_pipeline(config))
-        else:
-            run_single_experiment(target, extra_args)
-
-    else:
-        print(
-            f"Error: '{target}' is neither a .toml config file nor an existing experiment directory.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

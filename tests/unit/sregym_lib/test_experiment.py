@@ -1,4 +1,4 @@
-"""Tests for sregym_agents.experiment_config."""
+"""Tests for libs.sregym_lib.experiment."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from sregym_agents.experiment_config import (
+from libs.sregym_lib.experiment import (
     ExperimentConfig,
     RunnerEnv,
     VariantConfig,
