@@ -14,11 +14,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import requests
-
-from libs.agent_mw import request_with_retry
+from libs.sregym_lib.conductor import (
+    get_api_base,
+    get_app_info,
+    get_planned_stages,
+    get_problem_id,
+    poll_stage,
+    signal_cleanup,
+)
+from libs.sregym_lib.schema import READY_STAGES
 from sregym_agents.crucible import orchestrator
-from sregym_agents.crucible._conductor import poll_stage
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.config import CrucibleConfig, crucible_config_from_experiment_agent
 from sregym_agents.crucible.kb_update_queue import KbUpdateTask, enqueue_task, ensure_kb_worker
@@ -49,9 +54,6 @@ def _setup_logging() -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
-
-
-_READY_STAGES: frozenset[str] = frozenset({"diagnosis", "mitigation"})
 
 
 def create_driver(
@@ -111,12 +113,6 @@ def _load_crucible_config() -> tuple[dict[str, Any], str]:
     return {}, "defaults"
 
 
-def _get_api_base() -> str:
-    host = os.getenv("API_HOSTNAME", "localhost")
-    port = os.getenv("API_PORT", "8000")
-    return f"http://{host}:{port}"
-
-
 def _setup_run_tmp_prefix(run_uid: str) -> Path:
     """Create a per-run ``/tmp`` directory and publish it via env var.
 
@@ -144,35 +140,6 @@ def _cleanup_run_tmp_prefix(prefix: Path) -> None:
 
     shutil.rmtree(prefix, ignore_errors=True)
     os.environ.pop(RUN_PREFIX_ENV, None)
-
-
-def _signal_cleanup(api_base: str) -> None:
-    """POST /cleanup to release the conductor's deferred-teardown gate.
-
-    Crucible always runs in deferred-cleanup mode (see agents.yaml). This
-    call never raises — cleanup failure must not mask orchestrator errors
-    or block the driver from exiting.
-    """
-    try:
-        resp = requests.post(f"{api_base}/cleanup", timeout=60)
-        logger.info(f"POST /cleanup -> status={resp.status_code} body={resp.text[:200]}")
-    except Exception as e:
-        logger.warning(f"POST /cleanup failed: {e}")
-
-
-def _get_app_info(api_base: str) -> dict[str, Any]:
-    resp = request_with_retry("GET", f"{api_base}/get_app", timeout=10)
-    return resp.json()
-
-
-def _get_problem_id(api_base: str) -> str:
-    resp = request_with_retry("GET", f"{api_base}/get_problem", timeout=10)
-    return resp.json()["problem_id"]
-
-
-def _get_planned_stages(api_base: str) -> list[str]:
-    resp = request_with_retry("GET", f"{api_base}/stages", timeout=10)
-    return resp.json().get("stages", [])
 
 
 def _save_results(logs_dir: Path, problem_id: str, usage_metrics: dict[str, Any]) -> None:
@@ -280,7 +247,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         sys.exit(1)
     renderer = PromptRenderer(crucible_config.prompt_version)
 
-    api_base = _get_api_base()
+    api_base = get_api_base()
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
     submit_mcp_url = f"http://localhost:{mcp_port}/submit/sse"
 
@@ -300,16 +267,16 @@ async def _async_main(args: argparse.Namespace) -> None:
     for field_name in type(crucible_config).model_fields:
         print(f"  {field_name}: {getattr(crucible_config, field_name)!r}")
     print("=" * 60 + "\n")
-    await poll_stage(api_base, wait_for=_READY_STAGES, timeout=300, on_timeout="raise")
+    await poll_stage(api_base, wait_for=READY_STAGES, timeout=300, on_timeout="raise")
 
     # Route per-run truncation artifacts under a single /tmp subdir so they
     # can be cleaned up atomically on exit (see GitLab issue #93).
     _run_uid = uuid.uuid4().hex[:8]
     _run_tmp_prefix = _setup_run_tmp_prefix(_run_uid)
     try:
-        app_info = _get_app_info(api_base)
-        problem_id = _get_problem_id(api_base)
-        planned_stages = _get_planned_stages(api_base)
+        app_info = get_app_info(api_base)
+        problem_id = get_problem_id(api_base)
+        planned_stages = get_planned_stages(api_base)
 
         diagnosis_shared_path = Path("diagnosis_session_state.md")
         mitigation_shared_path = Path("mitigation_session_state.md")
@@ -377,7 +344,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             # Release the conductor's deferred-cleanup gate. Must run AFTER
             # recovery/reflection inside orchestrator.run() completes and BEFORE
             # this process exits, even if the orchestrator raised.
-            _signal_cleanup(api_base)
+            signal_cleanup(api_base)
 
         stage_outputs_file_str = usage_metrics.get("stage_outputs_file")
         stage_outputs_file = Path(stage_outputs_file_str) if stage_outputs_file_str else None

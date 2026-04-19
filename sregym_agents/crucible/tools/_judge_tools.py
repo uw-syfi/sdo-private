@@ -1,132 +1,22 @@
-"""Judge agent tools and MCP benchmark submission for the Crucible judge loop."""
+"""Judge agent tools for the Crucible judge loop.
+
+Benchmark MCP submission lives in :mod:`libs.sregym_lib.mcp_client` — this
+module re-exports :func:`submit_to_benchmark` for call sites inside
+``sregym_agents.crucible.tools``.
+"""
 
 from __future__ import annotations
 
-import ast
-import asyncio
-import json
 import logging
-import random
-from contextlib import AsyncExitStack
-from typing import Any
 
 from pydantic_ai import RunContext  # noqa: TC002 — needed at runtime for pydantic-ai tool introspection
 
-from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle, Stage
+from libs.sregym_lib.benchmark import BenchmarkResult, Stage
+from libs.sregym_lib.mcp_client import submit_to_benchmark
+from libs.sregym_lib.schema import MAX_DIAGNOSIS_CANDIDATES
 from sregym_agents.crucible.tools._deps import JudgeDeps  # noqa: TC001 — needed at runtime for _impl functions
 
 logger = logging.getLogger(__name__)
-
-_MCP_MAX_RETRIES = 5
-_MCP_INITIAL_DELAY = 1.0
-_MCP_BACKOFF_FACTOR = 2.0
-_MCP_MAX_DELAY = 60.0
-
-# Maximum number of candidate diagnoses the judge may submit at once. Mirrors
-# the cap in bench/sregym/sregym/conductor/constants.py — kept in sync by
-# value rather than import so the agent doesn't depend on the benchmark
-# package layout.
-MAX_DIAGNOSIS_CANDIDATES = 5
-
-
-async def submit_to_benchmark(
-    submit_mcp_url: str,
-    submission_ans: str | list[str],
-    stage: str,
-) -> BenchmarkResult:
-    """Submit *submission_ans* to the benchmark MCP server.
-
-    ``submission_ans`` may be a single string (a single diagnosis answer) or
-    a list of candidate diagnosis strings (the multi-diagnosis path —
-    benchmark grades success if any candidate matches the ground truth).
-
-    Returns a :class:`BenchmarkResult` describing the outcome. Callers that
-    need the textual ``<benchmark_result>`` block should call ``.render()``.
-    """
-    from mcp import ClientSession
-    from mcp.client.sse import sse_client
-
-    stage_literal: Stage = stage if stage in ("diagnosis", "mitigation") else "diagnosis"
-
-    result: Any = None
-    for attempt in range(_MCP_MAX_RETRIES + 1):
-        try:
-            async with AsyncExitStack() as stack:
-                transport = await stack.enter_async_context(sse_client(url=submit_mcp_url))
-                session = await stack.enter_async_context(ClientSession(*transport))
-                await session.initialize()
-                result = await session.call_tool("submit", arguments={"ans": submission_ans})
-            break
-        except Exception as exc:
-            if attempt == _MCP_MAX_RETRIES:
-                raise
-            delay = min(_MCP_INITIAL_DELAY * (_MCP_BACKOFF_FACTOR**attempt), _MCP_MAX_DELAY)
-            delay += random.uniform(0, delay)
-            logger.warning(
-                "MCP submit failed (attempt %d/%d): %s — retrying in %.1fs.",
-                attempt + 1,
-                _MCP_MAX_RETRIES,
-                exc,
-                delay,
-            )
-            await asyncio.sleep(delay)
-
-    assert result is not None
-    first_content = result.content[0] if result.content else None
-    raw: str = getattr(first_content, "text", "{}") if first_content is not None else "{}"
-    try:
-        parsed = ast.literal_eval(raw)
-    except Exception:
-        return BenchmarkResult(
-            stage=stage_literal,
-            success=False,
-            message=f"Failed to parse benchmark response: {raw}",
-        )
-
-    if parsed.get("status") != "200":
-        return BenchmarkResult(
-            stage=stage_literal,
-            success=False,
-            message=f"Benchmark returned non-200 status: {parsed}",
-        )
-
-    try:
-        oracle_raw = json.loads(parsed.get("text", "{}"))
-    except json.JSONDecodeError:
-        return BenchmarkResult(
-            stage=stage_literal,
-            success=False,
-            message=f"Benchmark text is not valid JSON: {parsed.get('text')}",
-        )
-
-    # Filter oracle to only include current stage results — the conductor
-    # returns a cumulative dict (e.g. Diagnosis + Mitigation), but each
-    # caller only needs its own stage.
-    STAGE_TIMING_KEYS = {"Diagnosis": "TTL", "Mitigation": "TTM"}
-    stage_key = stage.capitalize()
-    timing_key = STAGE_TIMING_KEYS.get(stage_key)
-    filtered_oracle: dict[str, Any] = {}
-    if stage_key in oracle_raw:
-        filtered_oracle[stage_key] = oracle_raw[stage_key]
-    if timing_key and timing_key in oracle_raw:
-        filtered_oracle[timing_key] = oracle_raw[timing_key]
-
-    oracle = Oracle(stage=stage_literal, data=filtered_oracle)
-    stage_result: dict[str, Any] = filtered_oracle.get(stage_key, {})
-    if not stage_result.get("success"):
-        return BenchmarkResult(
-            stage=stage_literal,
-            success=False,
-            message=f"Benchmark rejected submission for stage '{stage_key}'.",
-            oracle=oracle,
-        )
-
-    return BenchmarkResult(
-        stage=stage_literal,
-        success=True,
-        message=f"Benchmark accepted submission for stage '{stage_key}'.",
-        oracle=oracle,
-    )
 
 
 def submit_independent_findings_impl(

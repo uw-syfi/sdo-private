@@ -6,7 +6,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
 
-from sregym_agents.crucible._benchmark import BenchmarkResult
+from libs.sregym_lib.benchmark import BenchmarkResult
 from sregym_agents.crucible.knowledge_base.incident_review import (
     DiagnosisPlaybookDraft,
     MitigationPlaybookDraft,

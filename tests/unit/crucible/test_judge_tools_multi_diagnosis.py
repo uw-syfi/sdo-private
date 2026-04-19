@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 if TYPE_CHECKING:
     from pathlib import Path
 
-from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle
+from libs.sregym_lib.benchmark import BenchmarkResult, Oracle
 from sregym_agents.crucible.tools import (
     JudgeDeps,
     SharedFile,

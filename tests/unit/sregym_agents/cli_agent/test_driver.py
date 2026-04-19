@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -184,43 +183,41 @@ class _StubAgent(CodingAgent):
         return self.response
 
 
-def _mock_conductor(
+def _patch_conductor(
+    monkeypatch: pytest.MonkeyPatch,
     *,
     stages: list[str] | None = None,
     problem_id: str = "p-1",
     app: dict[str, Any] | None = None,
     status_sequence: list[str] | None = None,
-):
-    """Build a requests.get replacement that serves the conductor endpoints.
+) -> None:
+    """Patch the libs.sregym_lib.conductor helpers the driver imports.
 
-    ``status_sequence`` is the sequence of values returned by successive
-    ``/status`` calls. The first entry satisfies the startup
-    ``_wait_for_stage``; subsequent entries feed the post-session
-    ``_wait_for_post_stage`` poll.
+    ``status_sequence`` is the sequence of stage values observed by the
+    driver. The first entry is what the startup ``poll_stage_sync``
+    returns; subsequent entries feed the post-session
+    ``wait_for_stages_or_last_seen_sync`` — which the driver calls once
+    and is expected to return the final (last observed) stage.
     """
     stages = stages or ["diagnosis"]
     app = app or {"app_name": "myapp", "namespace": "myns"}
     seq = list(status_sequence) if status_sequence else [stages[0], "done"]
-    idx = [0]
 
-    def _get(url: str, timeout: float = 5, **_: Any) -> MagicMock:
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        if url.endswith("/status"):
-            i = min(idx[0], len(seq) - 1)
-            resp.json.return_value = {"stage": seq[i]}
-            idx[0] += 1
-        elif url.endswith("/get_problem"):
-            resp.json.return_value = {"problem_id": problem_id}
-        elif url.endswith("/get_app"):
-            resp.json.return_value = app
-        elif url.endswith("/stages"):
-            resp.json.return_value = {"stages": stages}
-        else:
-            raise AssertionError(f"unexpected URL: {url}")
-        return resp
-
-    return _get
+    monkeypatch.setattr(driver, "get_app_info", lambda _api_base: app)
+    monkeypatch.setattr(driver, "get_problem_id", lambda _api_base: problem_id)
+    monkeypatch.setattr(driver, "get_planned_stages", lambda _api_base: list(stages))
+    monkeypatch.setattr(
+        driver,
+        "poll_stage_sync",
+        lambda _api_base, *, wait_for, timeout, on_timeout="raise": seq[0],
+    )
+    # The last stage in status_sequence is what the driver treats as the
+    # final observed stage.
+    monkeypatch.setattr(
+        driver,
+        "wait_for_stages_or_last_seen_sync",
+        lambda _api_base, *, expected, timeout: seq[-1],
+    )
 
 
 def _args(**overrides: Any) -> argparse.Namespace:
@@ -247,21 +244,24 @@ def test_run_autonomous_does_not_block_on_terminal_stage(
     monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
     monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
 
-    # If the driver called _wait_for_post_stage it would poll /status
-    # forever against our non-advancing conductor; make the call blow up
-    # so the test fails loudly if the branch is wrong.
+    # If the driver called wait_for_stages_or_last_seen_sync it would poll
+    # /status forever against our non-advancing conductor; make the call
+    # blow up so the test fails loudly if the branch is wrong.
     def _fail_post_stage(*_a: Any, **_kw: Any) -> str | None:
-        raise AssertionError("_wait_for_post_stage must not run in autonomous mode")
+        raise AssertionError("wait_for_stages_or_last_seen_sync must not run in autonomous mode")
 
-    monkeypatch.setattr(driver, "_wait_for_post_stage", _fail_post_stage)
+    monkeypatch.setattr(driver, "wait_for_stages_or_last_seen_sync", _fail_post_stage)
 
     stub = _StubAgent()
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis", "mitigation"],
         status_sequence=["diagnosis", "diagnosis"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        driver._run(_args(), agent_factory=lambda p, m, u: stub)
+    # Autonomous path calls get_current_stage_sync instead of the polling
+    # helper — patch it so the driver reports a non-None final stage.
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "diagnosis")
+    driver._run(_args(), agent_factory=lambda p, m, u: stub)
 
 
 def test_run_autonomous_env_var_picks_autonomous_prompt(
@@ -278,12 +278,13 @@ def test_run_autonomous_env_var_picks_autonomous_prompt(
     monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
 
     stub = _StubAgent()
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis", "mitigation"],
         status_sequence=["diagnosis", "done"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        driver._run(_args(), agent_factory=lambda p, m, u: stub)
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(), agent_factory=lambda p, m, u: stub)
 
     prompt = stub.calls[0]["prompt"]
     assert "submit_diagnosis" in prompt
@@ -305,13 +306,13 @@ def test_run_happy_path_single_session(monkeypatch: pytest.MonkeyPatch) -> None:
         factory_calls.append((provider, model, submit_mcp_url))
         return stub
 
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis", "mitigation"],
         # startup -> diagnosis; post-session poll -> done
         status_sequence=["diagnosis", "done"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        driver._run(_args(), agent_factory=_factory)
+    driver._run(_args(), agent_factory=_factory)
 
     # Exactly ONE CLI session — both stages handled inside it.
     assert len(stub.calls) == 1
@@ -339,18 +340,13 @@ def test_run_waits_for_verifying_to_finish(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(driver.time, "sleep", lambda *_: None)
 
     stub = _StubAgent()
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis", "mitigation"],
-        # startup -> diagnosis; post-session polls -> verifying, verifying, done
-        status_sequence=[
-            "diagnosis",
-            "mitigation (verifying)",
-            "mitigation (verifying)",
-            "done",
-        ],
+        # startup -> diagnosis; post-session lib poll resolves to "done"
+        status_sequence=["diagnosis", "done"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        driver._run(_args(), agent_factory=lambda p, m, u: stub)
+    driver._run(_args(), agent_factory=lambda p, m, u: stub)
 
     assert len(stub.calls) == 1
 
@@ -365,13 +361,13 @@ def test_run_tolerates_missing_final_stage(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(driver.time, "sleep", lambda *_: None)
 
     stub = _StubAgent()
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis"],
         # Conductor stays on "diagnosis" — no terminal state.
-        status_sequence=["diagnosis", "diagnosis", "diagnosis"],
+        status_sequence=["diagnosis", "diagnosis"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        driver._run(_args(), agent_factory=lambda p, m, u: stub)
+    driver._run(_args(), agent_factory=lambda p, m, u: stub)
 
     assert len(stub.calls) == 1
 
@@ -382,13 +378,13 @@ def test_run_logs_dir_writes_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
 
     stub = _StubAgent()
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis", "mitigation"],
         problem_id="p-42",
         status_sequence=["diagnosis", "done"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        driver._run(_args(logs_dir=str(tmp_path)), agent_factory=lambda p, m, u: stub)
+    driver._run(_args(logs_dir=str(tmp_path)), agent_factory=lambda p, m, u: stub)
 
     files = list(tmp_path.glob("cli_agent_results_p-42_*.json"))
     assert len(files) == 1
@@ -414,13 +410,13 @@ def test_run_agent_exception_records_failure(monkeypatch: pytest.MonkeyPatch) ->
         def generate(self, *a: Any, **k: Any) -> str:
             raise RuntimeError("CLI died")
 
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis"],
         status_sequence=["diagnosis", "diagnosis"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        # Does not raise.
-        driver._run(_args(), agent_factory=lambda p, m, u: _Boom())
+    # Does not raise.
+    driver._run(_args(), agent_factory=lambda p, m, u: _Boom())
 
 
 def test_run_logs_crash_when_agent_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -434,15 +430,15 @@ def test_run_logs_crash_when_agent_exception(tmp_path: Path, monkeypatch: pytest
         def generate(self, *a: Any, **k: Any) -> str:
             raise RuntimeError("CLI died")
 
-    mock = _mock_conductor(
+    _patch_conductor(
+        monkeypatch,
         stages=["diagnosis"],
         status_sequence=["diagnosis", "diagnosis"],
     )
-    with patch("sregym_agents.cli_agent.driver.requests.get", side_effect=mock):
-        driver._run(
-            _args(logs_dir=str(tmp_path)),
-            agent_factory=lambda p, m, u: _Boom(),
-        )
+    driver._run(
+        _args(logs_dir=str(tmp_path)),
+        agent_factory=lambda p, m, u: _Boom(),
+    )
 
     files = list(tmp_path.glob("cli_agent_results_*.json"))
     assert len(files) == 1
@@ -504,6 +500,6 @@ def test_parse_args_tolerates_sregym_launcher_flags() -> None:
 
 
 def test_cli_agent_is_registered_as_external_agent() -> None:
-    from sregym_agents.experiment_config import _EXTERNAL_AGENTS
+    from libs.sregym_lib.experiment import _EXTERNAL_AGENTS
 
     assert "cli_agent" in _EXTERNAL_AGENTS
