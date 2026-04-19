@@ -6,9 +6,17 @@ import types
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_ROOT = REPO_ROOT / "bench" / "sregym"
 MAIN_PATH = BENCH_ROOT / "main.py"
+
+if not MAIN_PATH.exists():
+    pytest.skip(
+        "bench/sregym submodule not checked out — skipping live_deploy_cli tests",
+        allow_module_level=True,
+    )
 
 
 def _module(name: str) -> Any:

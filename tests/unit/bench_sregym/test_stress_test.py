@@ -7,9 +7,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_ROOT = REPO_ROOT / "bench" / "sregym"
 STRESS_PATH = BENCH_ROOT / "stress_test.py"
+
+if not STRESS_PATH.exists():
+    pytest.skip(
+        "bench/sregym submodule not checked out — skipping stress_test tests",
+        allow_module_level=True,
+    )
 
 
 def _import_stress() -> Any:
