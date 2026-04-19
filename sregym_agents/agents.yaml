@@ -22,6 +22,11 @@ agents:
     kickoff_workdir: ../..
     kickoff_env:
       PYTHONUNBUFFERED: "1"
-    wait_for_natural_exit: true
-    # Minimal wrapper around libs/agent_cli. No defer_cleanup: the agent
-    # submits and exits; the conductor tears down synchronously.
+    # No wait_for_natural_exit: in autonomous-submit mode the wrapped CLI
+    # has no terminal signal (submit tools return a neutral ack), so it
+    # frequently keeps looping after both submissions. Fall back to
+    # sregym's DEFAULT_GRACEFUL_EXIT_TIMEOUT_SECONDS (30s) after the
+    # conductor reaches a terminal stage; SIGTERM is sent if the CLI
+    # hasn't exited by then.
+    # No defer_cleanup: the agent submits and exits; the conductor tears
+    # down synchronously.
