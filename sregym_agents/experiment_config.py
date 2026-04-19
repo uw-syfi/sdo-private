@@ -284,7 +284,7 @@ def _resolve_tasklist_source(tasklist_ref: str, sregym_dir: Path) -> Path:
     )
 
 
-_EXTERNAL_AGENTS = {"crucible", "pydantic_agent"}
+_EXTERNAL_AGENTS = {"crucible", "pydantic_agent", "cli_agent"}
 
 
 def config_to_main_args(

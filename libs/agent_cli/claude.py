@@ -177,11 +177,23 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         return "[Claude]"
 
     def _build_mcp_config_json(self) -> str:
-        """Build the JSON string for --mcp-config."""
+        """Build the JSON string for --mcp-config.
+
+        Claude Code runs the rendered config through ``--strict-mcp-config``
+        validation, which requires HTTP servers to declare ``type``
+        explicitly (``"sse"`` or ``"http"``). ``HttpMcpServer`` represents
+        the SSE transport (the field doc says HTTP/SSE; current call sites
+        use ``…/sse`` URLs), so emit ``type: "sse"``. ``headers`` is
+        included only when non-empty, mirroring the schema's optional
+        nature.
+        """
         servers: dict[str, dict[str, Any]] = {}
         for s in self.mcp_servers:
             if isinstance(s, HttpMcpServer):
-                servers[s.name] = {"url": s.url}
+                http_entry: dict[str, Any] = {"type": "sse", "url": s.url}
+                if s.headers:
+                    http_entry["headers"] = dict(s.headers)
+                servers[s.name] = http_entry
             else:
                 entry: dict[str, Any] = {"command": s.command, "args": s.args}
                 if s.env:
