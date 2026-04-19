@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle
+from libs.sregym_lib.benchmark import BenchmarkResult, Oracle
 
 
 class TestBenchmarkResultRender:

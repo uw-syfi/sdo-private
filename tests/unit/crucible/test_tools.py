@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle
+from libs.sregym_lib.benchmark import BenchmarkResult, Oracle
 from sregym_agents.crucible.tools import (
     MUTATING_KUBECTL_VERBS,
     JudgeDeps,

@@ -1,4 +1,4 @@
-"""Unit tests for sregym_agents.crucible._conductor.poll_stage.
+"""Unit tests for libs.sregym_lib.conductor.poll_stage.
 
 ``poll_stage`` is the single shared polling helper used by both the driver
 (``_wait_for_stage``) and the orchestrator (``_wait_for_mitigation_stage``).
@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+import requests
 
-from sregym_agents.crucible._conductor import poll_stage
+from libs.sregym_lib.conductor import poll_stage, signal_cleanup
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -65,8 +66,8 @@ class TestPollStageHappyPath:
         client = _FakeClient(["diagnosis"])
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
         ):
             stage = await poll_stage(
                 "http://localhost:8000",
@@ -81,8 +82,8 @@ class TestPollStageHappyPath:
         client = _FakeClient(["mitigation"])
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
         ):
             stage = await poll_stage(
                 "http://localhost:8000",
@@ -97,9 +98,9 @@ class TestPollStageHappyPath:
         client = _FakeClient(["pending", "pending", "mitigation"])
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.0),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.0),
         ):
             stage = await poll_stage(
                 "http://localhost:8000",
@@ -116,9 +117,9 @@ class TestPollStageBackoff:
         client = _FakeClient(["pending"] * 4 + ["diagnosis"])
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.0),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.0),
         ):
             await poll_stage(
                 "http://localhost:8000",
@@ -138,9 +139,9 @@ class TestPollStageBackoff:
         client = _FakeClient(responses)
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.0),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.0),
         ):
             await poll_stage(
                 "http://localhost:8000",
@@ -155,9 +156,9 @@ class TestPollStageBackoff:
         client = _FakeClient(["pending", "diagnosis"])
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.05) as mock_uniform,
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.05) as mock_uniform,
         ):
             await poll_stage(
                 "http://localhost:8000",
@@ -176,10 +177,10 @@ class TestPollStageTimeoutRaise:
         times = iter([0.0] + [999.0] * 100)
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.0),
-            patch("sregym_agents.crucible._conductor.time.monotonic", lambda: next(times)),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.0),
+            patch("libs.sregym_lib.conductor.time.monotonic", lambda: next(times)),
         ):
             with pytest.raises(TimeoutError, match="300s"):
                 await poll_stage(
@@ -193,10 +194,10 @@ class TestPollStageTimeoutRaise:
         times = iter([0.0] + [999.0] * 100)
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.0),
-            patch("sregym_agents.crucible._conductor.time.monotonic", lambda: next(times)),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.0),
+            patch("libs.sregym_lib.conductor.time.monotonic", lambda: next(times)),
         ):
             with pytest.raises(TimeoutError):
                 await poll_stage(
@@ -212,12 +213,12 @@ class TestPollStageTimeoutWarn:
         client = _FakeClient(["pending"] * 1000)
         times = iter([0.0] + [999.0] * 100)
         sleep_mock = AsyncMock()
-        caplog.set_level(logging.WARNING, logger="sregym_agents.crucible._conductor")
+        caplog.set_level(logging.WARNING, logger="libs.sregym_lib.conductor")
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.0),
-            patch("sregym_agents.crucible._conductor.time.monotonic", lambda: next(times)),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.0),
+            patch("libs.sregym_lib.conductor.time.monotonic", lambda: next(times)),
         ):
             result = await poll_stage(
                 "http://localhost:8000",
@@ -236,9 +237,9 @@ class TestPollStageSwallowsTransientErrors:
         client = _FakeClient(responses)
         sleep_mock = AsyncMock()
         with (
-            patch("sregym_agents.crucible._conductor.httpx.AsyncClient", return_value=client),
-            patch("sregym_agents.crucible._conductor.asyncio.sleep", sleep_mock),
-            patch("sregym_agents.crucible._conductor.random.uniform", return_value=0.0),
+            patch("libs.sregym_lib.conductor.httpx.AsyncClient", return_value=client),
+            patch("libs.sregym_lib.conductor.asyncio.sleep", sleep_mock),
+            patch("libs.sregym_lib.conductor.random.uniform", return_value=0.0),
         ):
             stage = await poll_stage(
                 "http://localhost:8000",
@@ -247,3 +248,31 @@ class TestPollStageSwallowsTransientErrors:
             )
         assert stage == "diagnosis"
         assert sleep_mock.call_count == 1
+
+
+class TestSignalCleanup:
+    """``signal_cleanup`` POSTs /cleanup to release the conductor's deferred
+    teardown gate.  Network errors must be swallowed so a flaky conductor
+    cannot mask the driver's real exit path."""
+
+    def test_posts_cleanup_to_api(self) -> None:
+        resp = MagicMock(status_code=200, text='{"status":"ok"}')
+        with patch("libs.sregym_lib.conductor.requests.post", return_value=resp) as mock_post:
+            signal_cleanup("http://localhost:8000")
+        mock_post.assert_called_once()
+        url = mock_post.call_args.args[0]
+        assert url == "http://localhost:8000/cleanup"
+
+    def test_swallows_exceptions(self) -> None:
+        with patch(
+            "libs.sregym_lib.conductor.requests.post",
+            side_effect=requests.ConnectionError("refused"),
+        ):
+            # Must not raise.
+            signal_cleanup("http://localhost:8000")
+
+    def test_uses_timeout(self) -> None:
+        resp = MagicMock(status_code=200, text="")
+        with patch("libs.sregym_lib.conductor.requests.post", return_value=resp) as mock_post:
+            signal_cleanup("http://localhost:8000")
+        assert mock_post.call_args.kwargs.get("timeout") is not None

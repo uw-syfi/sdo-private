@@ -1,10 +1,30 @@
-"""Shared SREGym library — experiment/pipeline configs, runner, conductor comms.
+"""Shared SREGym library.
 
-Currently exports the launcher-side surface (experiment + pipeline configs and
-the runner orchestration).  Conductor-side client code (status polling,
-benchmark result schema, MCP submission) will migrate here in a follow-up.
+Covers both the **launcher side** (experiment + pipeline configs, runner
+orchestration) and the **agent side** (conductor HTTP client, benchmark
+result schema, MCP submission client, shared contract constants) of the
+SREGym contract.  Any agent under ``sregym_agents/`` should depend on
+this library rather than duplicating HTTP/schema code.
 """
 
+from libs.sregym_lib.benchmark import (
+    BenchmarkResult,
+    Oracle,
+    Stage,
+)
+from libs.sregym_lib.conductor import (
+    get_api_base,
+    get_app_info,
+    get_current_stage,
+    get_current_stage_sync,
+    get_planned_stages,
+    get_problem_id,
+    poll_stage,
+    poll_stage_sync,
+    signal_cleanup,
+    wait_for_stages_or_last_seen,
+    wait_for_stages_or_last_seen_sync,
+)
 from libs.sregym_lib.experiment import (
     ExperimentConfig,
     RunnerEnv,
@@ -19,6 +39,7 @@ from libs.sregym_lib.experiment import (
     variant_config_from_raw,
     write_snapshot,
 )
+from libs.sregym_lib.mcp_client import submit_to_benchmark
 from libs.sregym_lib.pipeline import (
     PipelineConfig,
     PipelineState,
@@ -39,12 +60,23 @@ from libs.sregym_lib.runner import (
     run_pipeline,
     run_single_experiment,
 )
+from libs.sregym_lib.schema import (
+    MAX_DIAGNOSIS_CANDIDATES,
+    READY_STAGES,
+    TERMINAL_STAGES,
+)
 
 __all__ = [
+    "MAX_DIAGNOSIS_CANDIDATES",
+    "READY_STAGES",
+    "TERMINAL_STAGES",
+    "BenchmarkResult",
     "ExperimentConfig",
+    "Oracle",
     "PipelineConfig",
     "PipelineState",
     "RunnerEnv",
+    "Stage",
     "StageConfig",
     "StageHooks",
     "StageState",
@@ -52,20 +84,32 @@ __all__ = [
     "VariantOrder",
     "config_to_env",
     "config_to_main_args",
+    "get_api_base",
+    "get_app_info",
+    "get_current_stage",
+    "get_current_stage_sync",
+    "get_planned_stages",
+    "get_problem_id",
     "has_pipeline_state",
     "is_pipeline_config",
     "load_experiment_config",
     "load_pipeline_config",
     "merge_stage_config",
+    "poll_stage",
+    "poll_stage_sync",
     "read_pipeline_snapshot",
     "read_pipeline_state",
     "read_snapshot",
+    "reset_stages_for_rerun",
     "resolve_config",
     "resolve_tasklist",
-    "reset_stages_for_rerun",
     "run_pipeline",
     "run_single_experiment",
+    "signal_cleanup",
+    "submit_to_benchmark",
     "variant_config_from_raw",
+    "wait_for_stages_or_last_seen",
+    "wait_for_stages_or_last_seen_sync",
     "write_pipeline_snapshot",
     "write_pipeline_state",
     "write_snapshot",

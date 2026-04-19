@@ -6,6 +6,7 @@ digraph tach_modules {
     "libs.pydantic_agent" -> "libs.model_config";
     "libs.agent_mw" -> "libs.pydantic_agent";
     "libs.agent_cli" -> "libs.sds_core";
+    "libs.sregym_lib" -> "libs.agent_mw";
     "app_operator.core" -> "libs.agent_cli";
     "app_operator.core" -> "libs.model_config";
     "app_operator.core" -> "libs.sds_core";
@@ -80,4 +81,5 @@ digraph tach_modules {
     "sregym_agents" -> "libs.agent_cli";
     "sregym_agents" -> "libs.agent_mw";
     "sregym_agents" -> "libs.pydantic_agent";
+    "sregym_agents" -> "libs.sregym_lib";
 }
