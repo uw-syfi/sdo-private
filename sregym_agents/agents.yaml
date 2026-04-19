@@ -17,3 +17,11 @@ agents:
     # would tear down synchronously inside the final /submit response, and
     # the reflection agent would see an empty namespace.
     defer_cleanup: true
+  - name: cli_agent
+    kickoff_command: uv run python -m sregym_agents.cli_agent
+    kickoff_workdir: ../..
+    kickoff_env:
+      PYTHONUNBUFFERED: "1"
+    wait_for_natural_exit: true
+    # Minimal wrapper around libs/agent_cli. No defer_cleanup: the agent
+    # submits and exits; the conductor tears down synchronously.
