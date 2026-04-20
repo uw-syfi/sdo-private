@@ -1,12 +1,21 @@
 import json
 import subprocess
+import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
 from .base import register_provider
 from .cli_agent import CLICodingAgent, CLIGenerationSession
+from .codex_events import (
+    CodexEvent,
+    ErrorEvent,
+    TextEvent,
+    ThreadStartedEvent,
+    ToolResultEvent,
+    ToolUseEvent,
+)
 from .events import AgentEventHandler
 from .mcp_config import HttpMcpServer, McpServerConfig
 from .sandbox import SandboxConfig
@@ -15,24 +24,32 @@ from .sandbox import SandboxConfig
 class CodexGenerationSession(CLIGenerationSession):
     """Session that parses Codex ``--json`` event stream.
 
-    Codex emits one JSON event per line (JSONL). We only need two for
-    resume + correct return value:
+    Codex emits one JSON event per line (JSONL). Relevant frames:
 
     - ``thread.started`` carries ``thread_id`` (the resumable session id).
     - ``item.completed`` with ``item.type == "agent_message"`` carries the
-      assistant's final text reply.
+      assistant's text reply.
+    - ``item.started`` / ``item.completed`` with ``item.type ==
+      "command_execution"`` carry tool-call start and result; we drive
+      ``event_handler.on_tool_call`` / ``on_tool_result`` and record each
+      completed call on the trajectory recorder.
 
-    Other event types are ignored for state purposes but still rendered as
-    raw lines so terminal output isn't lost.
+    Non-JSON lines (e.g. the trailing ``Shell cwd was reset…`` notice)
+    fall through to raw rendering so nothing is lost.
     """
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.tool_map: dict[str, str] = {}
+        self.tool_start_times: dict[str, float] = {}
+        self.tool_args: dict[str, Any] = {}
 
     def _process_stdout(self, line: str) -> None:
         if not line:
             return
         try:
-            data: dict[str, Any] = json.loads(line)
+            data = json.loads(line)
         except json.JSONDecodeError:
-            # Non-JSON line (e.g. the trailing "Shell cwd was reset…" notice).
             self.stdout_lines.append(line.rstrip())
             if not self.silent:
                 if self._at_line_start:
@@ -41,27 +58,81 @@ class CodexGenerationSession(CLIGenerationSession):
                 self._at_line_start = True
             return
 
-        ev_type = data.get("type")
-        if ev_type == "thread.started":
-            tid = data.get("thread_id")
-            if isinstance(tid, str) and tid and self.session_id is None:
-                self.session_id = tid
-        elif ev_type == "item.completed":
-            item_raw = data.get("item")
-            if not isinstance(item_raw, dict):
-                return
-            item = cast("dict[str, Any]", item_raw)
-            if item.get("type") != "agent_message":
-                return
-            text_raw = item.get("text", "")
-            text = text_raw if isinstance(text_raw, str) else ""
-            if text:
-                self.stdout_lines.append(text)
+        event = CodexEvent.from_dict(data)
+        if event is None:
+            return
+        self._handle_event(event)
+
+    def _handle_event(self, event: CodexEvent):
+        self._update_state(event)
+        if not self.silent:
+            self._render_event(event)
+
+    def _update_state(self, event: CodexEvent):
+        if isinstance(event, ThreadStartedEvent):
+            if self.session_id is None and event.thread_id:
+                self.session_id = event.thread_id
+            return
+
+        if isinstance(event, TextEvent):
+            if event.text:
+                self.stdout_lines.append(event.text)
                 if self.event_handler:
-                    self.event_handler.on_thinking(text)
-                if not self.silent:
-                    self._log_raw(f"{self.log_prefix} {text}\n")
-                    self._at_line_start = True
+                    self.event_handler.on_thinking(event.text)
+            return
+
+        if isinstance(event, ToolUseEvent):
+            if event.tool_id:
+                self.tool_map[event.tool_id] = event.tool_name
+                self.tool_start_times[event.tool_id] = time.time()
+                self.tool_args[event.tool_id] = event.parameters
+                if self.event_handler:
+                    self.event_handler.on_tool_call(event.tool_name, event.parameters)
+            return
+
+        if isinstance(event, ToolResultEvent):
+            if not event.tool_id:
+                return
+            event.tool_name_resolved = self.tool_map.get(event.tool_id, "Tool")
+
+            start_time = self.tool_start_times.get(event.tool_id)
+            duration = time.time() - start_time if start_time else None
+            args = self.tool_args.get(event.tool_id, {})
+
+            self.recorder.add_tool_call(
+                tool=event.tool_name_resolved,
+                args=args,
+                stdout=event.output,
+                exit_code=event.exit_code,
+                duration=duration,
+            )
+            if self.event_handler:
+                self.event_handler.on_tool_result(
+                    tool=event.tool_name_resolved,
+                    stdout=event.output,
+                    exit_code=event.exit_code,
+                    duration=duration,
+                )
+            return
+
+    def _render_event(self, event: CodexEvent):
+        if isinstance(event, TextEvent):
+            if event.text:
+                self._log_raw(f"{self.log_prefix} {event.text}\n")
+                self._at_line_start = True
+            return
+
+        if not self._at_line_start:
+            self._log_raw("\n")
+            self._at_line_start = True
+
+        output = event.render(self.log_prefix)
+        if output:
+            self._log_raw(output + "\n")
+
+        if isinstance(event, ErrorEvent):
+            # Surface error text to the accumulated transcript.
+            self.stdout_lines.append(event.message)
 
 
 @register_provider("openai", "codex")

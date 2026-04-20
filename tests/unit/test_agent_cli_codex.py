@@ -25,6 +25,7 @@ class TestCodexCommandConstruction:
         cmd = agent._get_command("test")
         assert "exec" in cmd
         assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+        assert "--json" in cmd
 
     def test_command_omits_mcp_when_no_servers(self, agent):
         cmd = agent._get_command("test")
