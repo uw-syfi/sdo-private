@@ -7,28 +7,29 @@ KUBECONFIG is already set in your environment — use `kubectl` and `bash` to in
 
 You have up to 2 tasks to complete:
 
-1. Mitigate the fault found in this cluster and restore the application to a healthy state.
-2. Diagnose the root cause of the fault.
+1. Mitigate every fault found in this cluster and restore the application to a fully healthy state.
+2. Diagnose the root cause(s) of the fault(s).
 
-You will submit your answers: one for diagnosis and one for mitigation. 
-While you should aim to reduce the e2e time, prioritize reducing time to mitigation -- that reduces customer impact. You can submit diagnosis after having mitigated the incident.
-
-These are the exact stages you need to complete in this problem. Note that you pick the order to do them in.
+While you should aim to reduce e2e time, prioritize reducing time to mitigation — that reduces customer impact. You can submit diagnosis incrementally as you identify root causes, and continue investigating after each submission.
 
 Your task is to work through {{ planned_stages | length }} stage{{ "s" if planned_stages | length != 1 else "" }}: {{ planned_stages | join(", ") }}.
 
 {% for stage in planned_stages -%}
 {{ loop.index }}. **{{ stage | capitalize }}**:
-{%- if stage == "diagnosis" %} Investigate the cluster and identify the fault's root cause. When you are confident — and only when you are confident — call `submit_diagnosis` with a concise one-line description of the fault. The tool returns only a neutral acknowledgement; it will not tell you whether your answer was right.
-{%- elif stage == "mitigation" %} Take concrete actions (kubectl/bash) to bring the cluster back to a healthy state. Verify the fix yourself by checking pod phase, container readiness, and application behaviour — a wrong hypothesis often surfaces as a mitigation that does not actually restore health. When the cluster looks fully recovered, call `submit_mitigation` with a short summary of the changes you made. The tool returns only a neutral acknowledgement.
+{%- if stage == "diagnosis" %} Investigate the cluster and identify all root causes. You may call `submit_diagnosis` multiple times — submit each new root cause as you find it, with a concise one-line description. The tool returns only a neutral acknowledgement; it will not tell you whether your answer was right.
+{%- elif stage == "mitigation" %} Take concrete actions (kubectl/bash) to bring the cluster back to a fully healthy state. Verify your fixes thoroughly before submitting:
+  - Check pod phase and container readiness across all affected namespaces.
+  - Verify application behaviour end-to-end (service connectivity, expected responses).
+  - Look for subtle issues that may not directly impact current traffic but indicate residual misconfiguration — e.g. wrong environment variables, stale config, misconfigured resource limits, auth issues on inactive code paths.
+  - Only call `submit_mitigation` once you are confident the application is genuinely healthy, not just "not crashing". You may call `submit_mitigation` exactly once.
 {%- endif %}
 {% endfor %}
 Submission tools (from the `{{ submit_mcp_server_name }}` MCP server):
 {%- if "diagnosis" in planned_stages %}
-- `submit_diagnosis(ans)` — record your root-cause diagnosis.
+- `submit_diagnosis(ans)` — record one root-cause finding. Can be called multiple times as you discover each cause.
 {%- endif %}
 {%- if "mitigation" in planned_stages %}
-- `submit_mitigation(ans)` — record the mitigation actions you took.
+- `submit_mitigation(ans)` — record the mitigation actions you took. Call this exactly once, only after the application is fully healthy.
 {%- endif %}
 
-Each tool returns only a neutral acknowledgement. Do not rely on the response to decide whether to continue — decide based on what you observe in the cluster. Do not exit until you have called each required submission tool exactly once.
+Each tool returns only a neutral acknowledgement. Do not rely on the response to decide whether to continue — decide based on what you observe in the cluster. Do not exit until you have called each required submission tool the required number of times (`submit_mitigation` exactly once; `submit_diagnosis` at least once).
