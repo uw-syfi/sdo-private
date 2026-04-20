@@ -1,4 +1,4 @@
-from libs.agent_cli.claude_events import (
+from libs.agent_cli.claude.events import (
     ClaudeEvent,
     MultiEvent,
     ResultEvent,

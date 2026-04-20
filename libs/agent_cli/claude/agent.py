@@ -6,8 +6,12 @@ from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
-from .base import register_provider
-from .claude_events import (
+from ..base import register_provider
+from ..cli_agent import CLICodingAgent, CLIGenerationSession
+from ..events import AgentEventHandler
+from ..mcp_config import HttpMcpServer, McpServerConfig
+from ..sandbox import SandboxConfig, build_claude_sandbox_settings, resolve_sandbox
+from .events import (
     ClaudeEvent,
     MultiEvent,
     ResultEvent,
@@ -16,10 +20,6 @@ from .claude_events import (
     ToolResultEvent,
     ToolUseEvent,
 )
-from .cli_agent import CLICodingAgent, CLIGenerationSession
-from .events import AgentEventHandler
-from .mcp_config import HttpMcpServer, McpServerConfig
-from .sandbox import SandboxConfig, build_claude_sandbox_settings, resolve_sandbox
 
 
 class ClaudeGenerationSession(CLIGenerationSession):

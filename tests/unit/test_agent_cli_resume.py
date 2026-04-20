@@ -6,11 +6,11 @@ import pytest
 
 from app_operator.trajectory import NullTrajectoryRecorder
 from libs.agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
-from libs.agent_cli.claude_events import ClaudeEvent, SystemEvent
+from libs.agent_cli.claude.events import ClaudeEvent, SystemEvent
 from libs.agent_cli.cli_agent import CLIAgentSession, CLICodingAgent
 from libs.agent_cli.codex import CodexCodingAgent, CodexGenerationSession
 from libs.agent_cli.gemini import GeminiCodingAgent, GeminiGenerationSession
-from libs.agent_cli.gemini_events import GeminiEvent, InitEvent
+from libs.agent_cli.gemini.events import GeminiEvent, InitEvent
 from libs.agent_cli.opencode import OpencodeCodingAgent, OpencodeGenerationSession
 
 
