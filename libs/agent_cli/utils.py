@@ -88,8 +88,13 @@ def generate_and_write_files(
     return written
 
 
-def truncate_params(params: Any, max_len: int = 200) -> str:
-    """Truncate a parameter representation to *max_len* characters."""
+def truncate_params(params: Any, max_len: int = 10000) -> str:
+    """Render a parameter representation, truncating only at very large sizes.
+
+    The default cap is deliberately generous so that tool-use calls (e.g.
+    ``store_incident`` or ``recall_incident`` payloads) are logged in full,
+    which is essential for debugging memory-server interactions.
+    """
     s = str(params)
     if len(s) > max_len:
         return s[:max_len] + "..."
