@@ -5,11 +5,11 @@ from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
-from .base import register_provider
-from .cli_agent import CLICodingAgent, CLIGenerationSession
-from .events import AgentEventHandler
-from .opencode_events import OpencodeEvent, TextEvent, ToolUseEvent
-from .sandbox import SandboxConfig
+from ..base import register_provider
+from ..cli_agent import CLICodingAgent, CLIGenerationSession
+from ..events import AgentEventHandler
+from ..sandbox import SandboxConfig
+from .events import OpencodeEvent, TextEvent, ToolUseEvent
 
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
