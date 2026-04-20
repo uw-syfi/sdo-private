@@ -11,6 +11,7 @@ from .claude_events import (
     ClaudeEvent,
     MultiEvent,
     ResultEvent,
+    SystemEvent,
     TextEvent,
     ToolResultEvent,
     ToolUseEvent,
@@ -65,6 +66,12 @@ class ClaudeGenerationSession(CLIGenerationSession):
 
     def _update_state(self, event: ClaudeEvent):
         """Update internal state based on the event."""
+        if isinstance(event, SystemEvent):
+            # Capture the first non-empty session id (Claude emits one per run)
+            if self.session_id is None and event.session_id:
+                self.session_id = event.session_id
+            return
+
         if isinstance(event, TextEvent):
             self.stdout_lines.append(event.text)
             if self.event_handler:
@@ -201,7 +208,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
                 servers[s.name] = entry
         return json.dumps({"mcpServers": servers})
 
-    def _get_command(self, prompt: str) -> list[str]:
+    def _get_command(self, prompt: str, resume_session_id: str | None = None) -> list[str]:
         cmd = [
             self.binary_path,
             "-p",  # Print mode, accepts prompt from stdin
@@ -209,8 +216,10 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             "--output-format",
             "stream-json",
             "--verbose",
-            prompt,
         ]
+        if resume_session_id:
+            cmd.extend(["--resume", resume_session_id])
+        cmd.append(prompt)
         if self.model:
             cmd.extend(["--model", self.model])
         if self.mcp_servers:

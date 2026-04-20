@@ -65,10 +65,15 @@ class MultiEvent(ClaudeEvent):
 
 
 class SystemEvent(ClaudeEvent):
-    """System initialization event."""
+    """System initialization event.
+
+    Carries the provider ``session_id`` on the ``init`` subtype, used to
+    enable conversation resumption via ``claude --resume <id>``.
+    """
 
     def __init__(self, data: dict[str, Any]):
         self.data = data
+        self.session_id: str | None = data.get("session_id")
 
     def render(self, log_prefix: str) -> str | None:
         # System events are silent
