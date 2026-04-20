@@ -14,6 +14,7 @@ from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
 from .gemini_events import GeminiEvent, MessageEvent, ToolResultEvent, ToolUseEvent
 from .sandbox import SandboxConfig
+from .usage import ProviderUsage, TokenUsage
 
 _logger = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ class GeminiGenerationSession(CLIGenerationSession):
         # Capture call_id and run_id for correlation
         self.call_id = _trajectory_module.get_current_call_id()
         self.run_id = _trajectory_module.get_run_id()
+        # Gemini's stream-json does not emit token usage. We count
+        # assistant MessageEvents as a turn proxy; token fields stay 0.
+        self._assistant_message_count: int = 0
 
     def _write_call_metadata(self):
         """Write metadata file to help correlate Gemini session with trajectory call."""
@@ -99,6 +103,11 @@ class GeminiGenerationSession(CLIGenerationSession):
         if isinstance(event, MessageEvent):
             if event.role == "assistant":
                 self.stdout_lines.append(event.content)
+                self._assistant_message_count += 1
+                self.usage = ProviderUsage(
+                    tokens=TokenUsage(turns=self._assistant_message_count),
+                    provider="gemini",
+                )
                 if self.event_handler:
                     self.event_handler.on_thinking(event.content)
 

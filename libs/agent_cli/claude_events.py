@@ -48,7 +48,12 @@ class ClaudeEvent(ABC):
                     )
             return None
         if event_type == "result":
-            return ResultEvent(data.get("result", ""))
+            return ResultEvent(
+                result=data.get("result", ""),
+                num_turns=data.get("num_turns"),
+                usage=data.get("usage"),
+                total_cost_usd=data.get("total_cost_usd"),
+            )
 
         return None
 
@@ -122,8 +127,17 @@ class ToolResultEvent(ClaudeEvent):
 class ResultEvent(ClaudeEvent):
     """Final session summary event."""
 
-    def __init__(self, result: str):
+    def __init__(
+        self,
+        result: str,
+        num_turns: int | None = None,
+        usage: dict[str, Any] | None = None,
+        total_cost_usd: float | None = None,
+    ):
         self.result = result
+        self.num_turns = num_turns
+        self.usage = usage
+        self.total_cost_usd = total_cost_usd
 
     def render(self, log_prefix: str) -> str | None:
         # Result events are silent (result is captured separately)

@@ -16,6 +16,7 @@ from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorder
 from .base import CodingAgent
 from .events import AgentEventHandler
 from .mcp_config import McpServerConfig
+from .usage import ProviderUsage
 from .utils import get_interactive_env
 
 
@@ -52,6 +53,9 @@ class CLIGenerationSession:
         self.stdout_lines: list[str] = []
         self.stderr_lines: list[str] = []
         self._at_line_start = True
+        # Providers populate this during event handling; stays at the
+        # empty default if the session crashes before any terminal event.
+        self.usage: ProviderUsage = ProviderUsage()
 
     def _log_raw(self, message: str) -> None:
         """Log a raw message directly to output if not silent."""
@@ -231,6 +235,8 @@ class CLICodingAgent(CodingAgent):
         self.binary_path = binary_path
         self._check_cli()
         self.logger = logger.bind(agent_prefix=self._log_prefix)
+        # Populated after each generate() call from the session's usage.
+        self.last_usage: ProviderUsage = ProviderUsage()
 
     def _check_cli(self):
         """Check if the CLI tool is available and executable."""
@@ -335,6 +341,7 @@ class CLICodingAgent(CodingAgent):
             on_process_started=on_process_started,
         )
         result = session.run(prompt)
+        self.last_usage = session.usage
 
         self.recorder.add_assistant_message(result)
         return result

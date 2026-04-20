@@ -103,6 +103,30 @@ class TestClaudeEventFromDict:
         event = ClaudeEvent.from_dict(data)
         assert isinstance(event, ResultEvent)
         assert event.result == "Task completed successfully."
+        assert event.num_turns is None
+        assert event.usage is None
+        assert event.total_cost_usd is None
+
+    def test_result_event_carries_usage_and_turns(self):
+        data = {
+            "type": "result",
+            "result": "done",
+            "num_turns": 7,
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_creation_input_tokens": 30,
+                "cache_read_input_tokens": 20,
+            },
+            "total_cost_usd": 0.0123,
+        }
+        event = ClaudeEvent.from_dict(data)
+        assert isinstance(event, ResultEvent)
+        assert event.num_turns == 7
+        assert event.usage is not None
+        assert event.usage["input_tokens"] == 100
+        assert event.usage["cache_read_input_tokens"] == 20
+        assert event.total_cost_usd == 0.0123
 
     def test_unknown_event_type_returns_none(self):
         data = {"type": "unknown_custom_type", "data": {}}

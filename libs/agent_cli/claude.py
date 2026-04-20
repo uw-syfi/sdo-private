@@ -19,6 +19,7 @@ from .cli_agent import CLICodingAgent, CLIGenerationSession
 from .events import AgentEventHandler
 from .mcp_config import HttpMcpServer, McpServerConfig
 from .sandbox import SandboxConfig, build_claude_sandbox_settings, resolve_sandbox
+from .usage import ProviderUsage, TokenUsage
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
@@ -103,6 +104,21 @@ class ClaudeGenerationSession(CLIGenerationSession):
         elif isinstance(event, ResultEvent):
             # Store the final result from the result event
             self.final_result = event.result
+            # Anthropic reports cache_creation + cache_read as disjoint
+            # from input_tokens; fold them into input_tokens to match the
+            # crucible invariant (cached ⊆ input).
+            u = event.usage or {}
+            cached = int(u.get("cache_creation_input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0)
+            self.usage = ProviderUsage(
+                tokens=TokenUsage(
+                    input_tokens=int(u.get("input_tokens") or 0) + cached,
+                    output_tokens=int(u.get("output_tokens") or 0),
+                    cached_input_tokens=cached,
+                    turns=int(event.num_turns or 0),
+                ),
+                total_cost_usd=event.total_cost_usd,
+                provider="claude",
+            )
 
     def _render_event(self, event: ClaudeEvent):
         """Render the event to stdout."""

@@ -14,10 +14,12 @@ from .codex_events import (
     TextEvent,
     ToolResultEvent,
     ToolUseEvent,
+    TurnCompletedEvent,
 )
 from .events import AgentEventHandler
 from .mcp_config import HttpMcpServer, McpServerConfig
 from .sandbox import SandboxConfig
+from .usage import ProviderUsage, TokenUsage
 
 
 class CodexGenerationSession(CLIGenerationSession):
@@ -29,6 +31,8 @@ class CodexGenerationSession(CLIGenerationSession):
         # Codex has no single "final message" frame; track the most recent
         # agent_message text so run() can return it as the final result.
         self.final_result: str | None = None
+        # Accumulator for per-turn usage; finalized into self.usage at end.
+        self._accumulated_tokens = TokenUsage()
 
     def _process_stdout(self, line: str) -> None:
         if not line:
@@ -67,6 +71,19 @@ class CodexGenerationSession(CLIGenerationSession):
                 self.tool_args[event.tool_id] = event.parameters
                 if self.event_handler:
                     self.event_handler.on_tool_call(event.tool_name, event.parameters)
+
+        elif isinstance(event, TurnCompletedEvent):
+            self._accumulated_tokens = self._accumulated_tokens + TokenUsage(
+                input_tokens=event.input_tokens,
+                output_tokens=event.output_tokens,
+                cached_input_tokens=event.cached_input_tokens,
+                turns=1,
+            )
+            self.usage = ProviderUsage(
+                tokens=self._accumulated_tokens,
+                total_cost_usd=None,
+                provider="codex",
+            )
 
         elif isinstance(event, ToolResultEvent):
             if event.tool_id:

@@ -452,6 +452,7 @@ def _run(
     )
     started = time.monotonic()
     crashed_with: str | None = None
+    agent = None
     try:
         agent = factory(args.provider, args.model, submit_mcp_url)
         agent.generate(prompt, cwd=os.getcwd(), timeout=args.timeout_sec)
@@ -488,6 +489,8 @@ def _run(
         logs_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out = logs_dir / f"cli_agent_results_{problem_id}_{ts}.json"
+        last_usage = getattr(agent, "last_usage", None) if agent is not None else None
+        usage_metrics: dict[str, Any] | None = {"total": last_usage.to_dict()} if last_usage is not None else None
         with open(out, "w") as f:
             json.dump(
                 {
@@ -499,6 +502,7 @@ def _run(
                     "completed": completed,
                     "final_stage": final_stage,
                     "crashed_with": crashed_with,
+                    "usage_metrics": usage_metrics,
                 },
                 f,
                 indent=2,

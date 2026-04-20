@@ -33,7 +33,7 @@ class CodexEvent(ABC):
             return LifecycleEvent(event_type)
 
         if event_type in ("item.started", "item.completed"):
-            item: dict[str, Any] = cast(dict[str, Any], data.get("item") or {})
+            item: dict[str, Any] = cast("dict[str, Any]", data.get("item") or {})
             item_type = cast("str | None", item.get("type"))
             item_id = cast("str | None", item.get("id"))
             completed = event_type == "item.completed"
@@ -43,14 +43,14 @@ class CodexEvent(ABC):
                     # Only the completed frame carries text; the started
                     # frame is a no-op for rendering and recording.
                     return None
-                return TextEvent(text=cast(str, item.get("text", "")))
+                return TextEvent(text=cast("str", item.get("text", "")))
 
             if item_type == "command_execution":
-                command = cast(str, item.get("command", ""))
+                command = cast("str", item.get("command", ""))
                 if completed:
                     return ToolResultEvent(
                         tool_id=item_id,
-                        output=cast(str, item.get("aggregated_output", "")),
+                        output=cast("str", item.get("aggregated_output", "")),
                         exit_code=cast("int | None", item.get("exit_code")),
                         status=cast("str | None", item.get("status")),
                     )
@@ -80,19 +80,24 @@ class CodexEvent(ABC):
             return None
 
         if event_type == "turn.completed":
-            return TurnCompletedEvent()
+            usage = cast("dict[str, Any]", data.get("usage") or {})
+            return TurnCompletedEvent(
+                input_tokens=int(usage.get("input_tokens") or 0),
+                cached_input_tokens=int(usage.get("cached_input_tokens") or 0),
+                output_tokens=int(usage.get("output_tokens") or 0),
+            )
 
         if event_type in ("turn.failed", "error"):
             message = ""
             if event_type == "turn.failed":
                 err: Any = data.get("error") or {}
                 if isinstance(err, dict):
-                    err_dict = cast(dict[str, Any], err)
-                    message = cast(str, err_dict.get("message", ""))
+                    err_dict = cast("dict[str, Any]", err)
+                    message = cast("str", err_dict.get("message", ""))
                 else:
                     message = str(err)
             else:
-                message = cast(str, data.get("message", ""))
+                message = cast("str", data.get("message", ""))
             return ErrorEvent(message=message)
 
         return None
@@ -156,7 +161,7 @@ class ToolResultEvent(CodexEvent):
         status: str | None = None,
     ):
         if isinstance(output, list):
-            output_list = cast(list[Any], output)
+            output_list = cast("list[Any]", output)
             self.output = "\n".join(str(item) for item in output_list)
         else:
             self.output = str(output) if output else ""
@@ -173,7 +178,22 @@ class ToolResultEvent(CodexEvent):
 
 
 class TurnCompletedEvent(CodexEvent):
-    """Final turn summary event."""
+    """Final turn summary event.
+
+    Carries per-turn usage. Codex already emits ``cached_input_tokens`` as
+    a subset of ``input_tokens`` (OpenAI billing semantics), so no schema
+    adapter is needed on the consumer side.
+    """
+
+    def __init__(
+        self,
+        input_tokens: int = 0,
+        cached_input_tokens: int = 0,
+        output_tokens: int = 0,
+    ):
+        self.input_tokens = input_tokens
+        self.cached_input_tokens = cached_input_tokens
+        self.output_tokens = output_tokens
 
     def render(self, log_prefix: str) -> str | None:
         return None

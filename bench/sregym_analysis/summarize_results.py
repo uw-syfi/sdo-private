@@ -327,6 +327,67 @@ def load_crucible_tokens(log_dir):
     return tokens_by_pid
 
 
+def load_cli_agent_turns(log_dir):
+    """Load per-problem turn counts from cli_agent_results_*.json files.
+
+    Mirrors ``load_crucible_turns`` — reads ``usage_metrics.total.turns``.
+    Returns empty dict if no cli_agent JSONs are found.
+    """
+    pattern = os.path.join(log_dir, "**", "cli_agent_results_*.json")
+    files = glob.glob(pattern, recursive=True)
+    if not files:
+        return {}
+
+    turns_by_pid: dict[str, int] = {}
+    for file_path in sorted(files):
+        basename = os.path.basename(file_path)
+        m = re.match(r"cli_agent_results_(.+)_\d{8}_\d{6}\.json", basename)
+        if not m:
+            continue
+        problem_id = m.group(1)
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            um = data.get("usage_metrics") or {}
+            total_block = um.get("total") or {} if isinstance(um, dict) else {}
+            turns = int(total_block.get("turns", 0) or 0)
+            if turns > 0:
+                turns_by_pid[problem_id] = turns
+        except Exception as e:
+            print(f"Warning: could not read {file_path}: {e}")
+    return turns_by_pid
+
+
+def load_cli_agent_tokens(log_dir):
+    """Load per-problem total token usage from cli_agent_results_*.json.
+
+    Gemini entries report 0 tokens by design (no usage in stream) and are
+    skipped so cross-provider comparisons aren't poisoned.
+    """
+    pattern = os.path.join(log_dir, "**", "cli_agent_results_*.json")
+    files = glob.glob(pattern, recursive=True)
+    if not files:
+        return {}
+
+    tokens_by_pid: dict[str, int] = {}
+    for file_path in sorted(files):
+        basename = os.path.basename(file_path)
+        m = re.match(r"cli_agent_results_(.+)_\d{8}_\d{6}\.json", basename)
+        if not m:
+            continue
+        problem_id = m.group(1)
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            total = (data.get("usage_metrics") or {}).get("total") or {}
+            tokens = int(total.get("input_tokens", 0) or 0) + int(total.get("output_tokens", 0) or 0)
+            if tokens > 0:
+                tokens_by_pid[problem_id] = tokens
+        except Exception as e:
+            print(f"Warning: could not read {file_path}: {e}")
+    return tokens_by_pid
+
+
 def load_crucible_tokens_by_phase(log_dir):
     """Load per-problem diagnosis/mitigation token usage from crucible_results_*.json.
 
@@ -713,6 +774,7 @@ def summarize_results(target_path=None):
         )
 
     plt.xlabel("Time (s)")
+    plt.xlim(left=0)
     plt.ylabel("CDF")
     plt.title("CDF of Time to Diagnosis and Mitigation")
     plt.grid(True)
@@ -744,6 +806,7 @@ def summarize_results(target_path=None):
             label=f"Resolution Time (n={len(valid_tres)})",
         )
         plt.xlabel("Time (s)")
+        plt.xlim(left=0)
         plt.ylabel("CDF")
         plt.title("CDF of Resolution Time")
         plt.grid(True)
@@ -754,9 +817,9 @@ def summarize_results(target_path=None):
         plt.close()
         print(f"Resolution CDF plot saved to {res_plot}")
 
-    # --- Turns CDF (crucible agents only) ---
+    # --- Turns CDF (crucible or cli_agent) ---
     search_root = target_path if (target_path and os.path.isdir(target_path)) else "."
-    turns_by_pid = load_crucible_turns(search_root)
+    turns_by_pid = load_crucible_turns(search_root) or load_cli_agent_turns(search_root)
     valid_turns = sorted(t for t in turns_by_pid.values() if t and t > 0)
     if valid_turns:
         plt.figure(figsize=(10, 6))
@@ -1409,8 +1472,11 @@ def diff_results(dirs, names=None, limit_to_index=None):
         )
 
     # --- Token-based plots ---
-    # Fall back through the known sources: Stratus CSV, Gemini CSV, crucible JSONs.
-    tokens_maps = [load_stratus_tokens(d) or load_gemini_tokens(d) or load_crucible_tokens(d) for d in dirs]
+    # Fall back through the known sources: Stratus CSV, Gemini CSV, crucible JSONs, cli_agent JSONs.
+    tokens_maps = [
+        load_stratus_tokens(d) or load_gemini_tokens(d) or load_crucible_tokens(d) or load_cli_agent_tokens(d)
+        for d in dirs
+    ]
     if keep_pids is not None:
         tokens_maps = [{pid: v for pid, v in tm.items() if pid in keep_pids} for tm in tokens_maps]
     tokens_lists = [[t for t in tm.values() if t and t > 0] for tm in tokens_maps]
@@ -1453,8 +1519,8 @@ def diff_results(dirs, names=None, limit_to_index=None):
             phase_label="Mitigation",
         )
 
-    # --- Turn-count plots (crucible agents only) ---
-    turns_maps = [load_crucible_turns(d) for d in dirs]
+    # --- Turn-count plots (crucible or cli_agent) ---
+    turns_maps = [load_crucible_turns(d) or load_cli_agent_turns(d) for d in dirs]
     if keep_pids is not None:
         turns_maps = [{pid: v for pid, v in tm.items() if pid in keep_pids} for tm in turns_maps]
     turns_lists = [[t for t in tm.values() if t and t > 0] for tm in turns_maps]
@@ -1939,6 +2005,7 @@ def plot_cdfs(data_list, labels, title_metric, output_path, colors=None):
         return
 
     plt.xlabel("Time (s)")
+    plt.xlim(left=0)
     plt.ylabel("CDF")
     plt.title(f"CDF of {title_metric}")
     plt.grid(True)
@@ -2062,6 +2129,7 @@ def plot_comparison_by_problem(
         plt.yticks([])
 
     plt.xlabel("Time (s)")
+    plt.xlim(left=0)
     plt.title(f"Per-Problem {title_metric}")
     plt.grid(True, axis="x", linestyle="--", alpha=0.7)
     plt.legend()
