@@ -59,6 +59,18 @@ def _import_bench_main() -> Any:
     constants_mod.StartProblemResult = types.SimpleNamespace(SUCCESS="success", SKIPPED_KHAOS_REQUIRED="skipped")
     kubeconfig_mod = _module("sregym.service.kubeconfig")
     kubeconfig_mod.require_kubeconfig_path = lambda: "/tmp/kubeconfig"
+    worker_infra_mod = _module("sregym.worker_infra")
+    worker_infra_mod.KIND_CLUSTER_PREFIX = "sregym"
+    worker_infra_mod.apply_worker_cpu_limit = lambda *args, **kwargs: None
+    worker_infra_mod.create_kind_cluster = lambda *args, **kwargs: None
+    worker_infra_mod.create_worker_cluster = lambda *args, **kwargs: None
+    worker_infra_mod.delete_kind_cluster = lambda *args, **kwargs: None
+    worker_infra_mod.delete_worker_cluster = lambda *args, **kwargs: None
+    worker_infra_mod.existing_cluster_is_reusable = lambda *args, **kwargs: (False, "stubbed")
+    worker_infra_mod.log_cpu_oversubscription = lambda *args, **kwargs: None
+    worker_infra_mod.reuse_cluster_enabled = lambda *args, **kwargs: False
+    worker_infra_mod.stable_kubeconfig_path = lambda *args, **kwargs: "/tmp/kubeconfig"
+    worker_infra_mod.worker_kind_config_path = lambda *args, **kwargs: "/tmp/kind.yaml"
 
     sregym_pkg.conductor = conductor_pkg
     sregym_pkg.service = service_pkg
@@ -78,6 +90,25 @@ def test_live_cluster_name_is_kind_compatible():
 
     assert "_" not in cluster_name
     assert cluster_name == "sregym-live-hotel-reservation-0418-0141"
+
+
+def test_cli_agent_launch_args_include_logs_dir_without_summary_flags():
+    mod = _import_bench_main()
+
+    extra_args = mod._build_agent_extra_args(
+        agent_to_run="cli_agent",
+        agent_log_dir="/tmp/problem/agent",
+        agent_base_dir="/tmp/experiment/cli_agent",
+        experiment_log_dir="/tmp/experiment",
+        enable_summary=True,
+        inject_summary=False,
+        summary_model="ignored-model",
+    )
+
+    assert "--logs-dir /tmp/problem/agent" in extra_args
+    assert "--no-inject-summary" in extra_args
+    assert "--summary-dir" not in extra_args
+    assert "--summary-model" not in extra_args
 
 
 def test_live_undeploy_keeps_shared_cluster_and_reconciles(tmp_path: Path, monkeypatch):
