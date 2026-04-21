@@ -87,7 +87,7 @@ def test_sse_returns_event_stream(base_url: str):
     assert b"text/event-stream" in raw
     # Body uses chunked encoding; search for the SSE field strings directly.
     assert b"event: endpoint" in raw
-    assert b"data: /messages?sessionId=" in raw
+    assert b"data: /messages?session_id=" in raw
 
 
 # ---------------------------------------------------------------------------
@@ -97,13 +97,28 @@ def test_sse_returns_event_stream(base_url: str):
 
 def _sse_rpc(base_url: str, request: dict) -> dict:
     """Send one JSON-RPC request via MCP SSE transport; return the response dict."""
+    return _sse_rpc_via_path(base_url, "/sse", request)
+
+
+def _sse_rpc_via_path(base_url: str, sse_path: str, request: dict) -> dict:
+    """Open one SSE session, perform MCP initialization, then send ``request``."""
     endpoint_ready = threading.Event()
-    response_ready = threading.Event()
     endpoint_path: list[str] = []
     response_data: list[dict] = []
+    response_lock = threading.Condition()
+    target_count = 1 if request.get("method") == "initialize" else 2
+
+    def wait_for_response(count: int) -> dict:
+        deadline = time.monotonic() + 2
+        with response_lock:
+            while len(response_data) < count:
+                remaining = deadline - time.monotonic()
+                assert remaining > 0, "SSE response not received"
+                response_lock.wait(timeout=remaining)
+        return response_data[count - 1]
 
     def sse_reader():
-        with requests.get(f"{base_url}/sse", stream=True, timeout=5) as resp:
+        with requests.get(f"{base_url}{sse_path}", stream=True, timeout=5) as resp:
             event_type = "message"
             for raw in resp.iter_lines(decode_unicode=True):
                 if raw.startswith("event: "):
@@ -115,13 +130,42 @@ def _sse_rpc(base_url: str, request: dict) -> dict:
                         endpoint_ready.set()
                         event_type = "message"
                     elif event_type == "message":
-                        response_data.append(json.loads(data))
-                        response_ready.set()
-                        return
+                        with response_lock:
+                            response_data.append(json.loads(data))
+                            response_lock.notify_all()
+                            if len(response_data) >= target_count:
+                                return
 
     t = threading.Thread(target=sse_reader, daemon=True)
     t.start()
     assert endpoint_ready.wait(timeout=2), "SSE endpoint event not received"
+
+    initialize_request = {
+        "jsonrpc": "2.0",
+        "id": request.get("id", 0) if request.get("method") == "initialize" else 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "pytest", "version": "0"},
+        },
+    }
+    resp = requests.post(
+        f"{base_url}{endpoint_path[0]}",
+        json=initialize_request,
+        timeout=2,
+    )
+    assert resp.status_code == 202
+    initialize_response = wait_for_response(1)
+    if request.get("method") == "initialize":
+        return initialize_response
+
+    resp = requests.post(
+        f"{base_url}{endpoint_path[0]}",
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+        timeout=2,
+    )
+    assert resp.status_code == 202
 
     resp = requests.post(
         f"{base_url}{endpoint_path[0]}",
@@ -129,8 +173,7 @@ def _sse_rpc(base_url: str, request: dict) -> dict:
         timeout=2,
     )
     assert resp.status_code == 202
-    assert response_ready.wait(timeout=2), "SSE response not received"
-    return response_data[0]
+    return wait_for_response(2)
 
 
 def test_initialize(base_url: str):
@@ -195,13 +238,13 @@ def test_store_then_recall(base_url: str):
     assert "check valkey auth first" in text
 
 
-def test_post_without_session_returns_202(base_url: str):
+def test_post_unknown_session_returns_404(base_url: str):
     resp = requests.post(
-        f"{base_url}/messages?sessionId=nonexistent",
+        f"{base_url}/messages?session_id={'0' * 32}",
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
         timeout=2,
     )
-    assert resp.status_code == 202
+    assert resp.status_code == 404
 
 
 def test_post_invalid_json_returns_400(base_url: str):
@@ -244,40 +287,7 @@ def test_concurrent_sessions(base_url: str):
 
 def _sse_rpc_store_only(base_url: str, request: dict) -> dict:
     """Like _sse_rpc but connects to /sse?store_only=1."""
-    endpoint_ready = threading.Event()
-    response_ready = threading.Event()
-    endpoint_path: list[str] = []
-    response_data: list[dict] = []
-
-    def sse_reader():
-        with requests.get(f"{base_url}/sse?store_only=1", stream=True, timeout=5) as resp:
-            event_type = "message"
-            for raw in resp.iter_lines(decode_unicode=True):
-                if raw.startswith("event: "):
-                    event_type = raw[7:]
-                elif raw.startswith("data: "):
-                    data = raw[6:]
-                    if event_type == "endpoint":
-                        endpoint_path.append(data)
-                        endpoint_ready.set()
-                        event_type = "message"
-                    elif event_type == "message":
-                        response_data.append(json.loads(data))
-                        response_ready.set()
-                        return
-
-    t = threading.Thread(target=sse_reader, daemon=True)
-    t.start()
-    assert endpoint_ready.wait(timeout=2), "SSE endpoint event not received"
-
-    resp = requests.post(
-        f"{base_url}{endpoint_path[0]}",
-        json=request,
-        timeout=2,
-    )
-    assert resp.status_code == 202
-    assert response_ready.wait(timeout=2), "SSE response not received"
-    return response_data[0]
+    return _sse_rpc_via_path(base_url, "/sse?store_only=1", request)
 
 
 def test_store_only_tools_list(base_url: str):
@@ -297,8 +307,11 @@ def test_store_only_recall_blocked(base_url: str):
             "params": {"name": "recall_incident", "arguments": {"query": "cart 503"}},
         },
     )
-    assert "error" in resp
-    assert "store-only" in resp["error"]["message"]
+    if "error" in resp:
+        assert "recall_incident" in resp["error"]["message"]
+        return
+    assert resp["result"]["isError"] is True
+    assert "recall_incident" in resp["result"]["content"][0]["text"]
 
 
 def test_store_only_store_works(base_url: str):
