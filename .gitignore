@@ -102,3 +102,4 @@ exp_config/*/*.log
 
 # tach cache
 .tach/
+sregym_agents/experiments/*
