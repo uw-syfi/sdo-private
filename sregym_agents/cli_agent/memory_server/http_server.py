@@ -38,7 +38,7 @@ class _MCPHandler(http.server.BaseHTTPRequestHandler):
 
     @property
     def _server(self) -> _MCPHTTPServer:
-        return cast(_MCPHTTPServer, self.server)
+        return cast("_MCPHTTPServer", self.server)
 
     def log_message(self, format: str, *args: Any) -> None:
         logger.debug(format, *args)

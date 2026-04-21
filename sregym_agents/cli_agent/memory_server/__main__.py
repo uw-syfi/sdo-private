@@ -38,7 +38,7 @@ def _agent_config() -> dict[str, Any]:
     if not raw:
         return {}
     try:
-        return cast(dict[str, Any], json.loads(raw))
+        return cast("dict[str, Any]", json.loads(raw))
     except json.JSONDecodeError:
         return {}
 
@@ -165,15 +165,9 @@ def _cmd_start_daemon(argv: list[str]) -> None:
     args = parser.parse_args(argv)
 
     cfg = _agent_config()
-    store_path: str | None = cast("str | None", args.store_path) or cast(
-        "str | None", cfg.get("memory_store")
-    )
-    merge_model: str | None = cast("str | None", args.merge_model) or cast(
-        "str | None", cfg.get("memory_merge_model")
-    )
-    port: int = cast("int | None", args.port) or int(
-        cast("int | str", cfg.get("memory_port", _DEFAULT_PORT))
-    )
+    store_path: str | None = cast("str | None", args.store_path) or cast("str | None", cfg.get("memory_store"))
+    merge_model: str | None = cast("str | None", args.merge_model) or cast("str | None", cfg.get("memory_merge_model"))
+    port: int = cast("int | None", args.port) or int(cast("int | str", cfg.get("memory_port", _DEFAULT_PORT)))
 
     if not store_path:
         # No memory configured for this run — nothing to start.
@@ -249,9 +243,7 @@ def _cmd_stop_daemon(argv: list[str]) -> None:
     args = parser.parse_args(argv)
 
     cfg = _agent_config()
-    store_path: str | None = cast("str | None", args.store_path) or cast(
-        "str | None", cfg.get("memory_store")
-    )
+    store_path: str | None = cast("str | None", args.store_path) or cast("str | None", cfg.get("memory_store"))
 
     if not store_path:
         sys.exit(0)

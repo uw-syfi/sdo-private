@@ -195,6 +195,9 @@ class CodexCodingAgent(CLICodingAgent):
             cmd.extend(["--model", self.model])
         if self.mcp_servers:
             cmd.extend(self._build_mcp_args())
+        # Tell Codex to read the prompt from stdin instead of expecting an
+        # inline positional prompt argument.
+        cmd.append("-")
         return cmd
 
     def _create_session(
