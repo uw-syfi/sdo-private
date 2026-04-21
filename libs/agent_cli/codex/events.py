@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, cast
 
-from ..utils import truncate_content, truncate_params
+from ..utils import truncate_content, truncate_tool_params
 
 
 class CodexEvent(ABC):
@@ -15,28 +15,25 @@ class CodexEvent(ABC):
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> CodexEvent | None:
-        """Factory method to create events from JSON data.
-
-        Codex emits JSONL of the form ``{"type": "...", ...}``. Observed
-        shapes from ``codex exec --json``:
-
-        - ``thread.started`` carries ``thread_id``.
-        - ``turn.started`` / ``turn.completed`` / ``turn.failed`` mark
-          turn lifecycle.
-        - ``item.started`` / ``item.completed`` carry an ``item`` payload
-          whose own ``type`` field disambiguates content (``agent_message``,
-          ``command_execution``, and so on).
-        - ``error`` is a top-level error frame.
-
-        Unrecognized frames return ``None`` so the caller can ignore them.
-        """
+        """Factory method to create events from JSON data."""
         event_type = data.get("type")
 
         if event_type == "thread.started":
-            return ThreadStartedEvent(thread_id=data.get("thread_id"))
+            thread_id_raw = data.get("thread_id")
+            thread_id = thread_id_raw if isinstance(thread_id_raw, str) else None
+            return ThreadStartedEvent(thread_id=thread_id)
 
-        if event_type in ("turn.started", "turn.completed"):
+        if event_type == "turn.started":
             return LifecycleEvent(event_type)
+
+        if event_type == "turn.completed":
+            usage_raw = data.get("usage")
+            usage = cast("dict[str, Any]", usage_raw) if isinstance(usage_raw, dict) else {}
+            return TurnCompletedEvent(
+                input_tokens=int(usage.get("input_tokens") or 0),
+                cached_input_tokens=int(usage.get("cached_input_tokens") or 0),
+                output_tokens=int(usage.get("output_tokens") or 0),
+            )
 
         if event_type in ("item.started", "item.completed"):
             item_raw = data.get("item")
@@ -50,7 +47,6 @@ class CodexEvent(ABC):
             completed = event_type == "item.completed"
 
             if item_type == "agent_message":
-                # Only the completed frame carries text; started is a no-op.
                 if not completed:
                     return None
                 text_raw = item.get("text", "")
@@ -76,9 +72,6 @@ class CodexEvent(ABC):
                     parameters={"command": command},
                 )
 
-            # Generic item types (reasoning, file_change, mcp_tool_call,
-            # web_search, todo_list, ...): surface as tool_use/result so
-            # event_handler consumers see call/result pairs.
             status_raw = item.get("status")
             status = status_raw if isinstance(status_raw, str) else None
             if completed:
@@ -105,7 +98,8 @@ class CodexEvent(ABC):
             return ErrorEvent(message=message)
 
         if event_type == "error":
-            return ErrorEvent(message=data.get("message", ""))
+            message_raw = data.get("message", "")
+            return ErrorEvent(message=message_raw if isinstance(message_raw, str) else str(message_raw))
 
         return None
 
@@ -119,9 +113,9 @@ def _item_parameters(item: dict[str, Any]) -> dict[str, Any]:
 def _summarize_item(item: dict[str, Any]) -> str:
     """Summarize a generic codex item for the tool-result output field."""
     for key in ("text", "summary", "output", "result"):
-        val = item.get(key)
-        if isinstance(val, str) and val:
-            return val
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
     return ""
 
 
@@ -164,7 +158,7 @@ class ToolUseEvent(CodexEvent):
         self.parameters = parameters
 
     def render(self, log_prefix: str) -> str:
-        truncated = truncate_params(self.parameters)
+        truncated = truncate_tool_params(self.tool_name, self.parameters)
         return f"{log_prefix} \033[34m[Tool Use] {self.tool_name} {truncated}\033[0m"
 
 
@@ -186,13 +180,30 @@ class ToolResultEvent(CodexEvent):
         self.tool_id = tool_id
         self.exit_code = exit_code
         self.status = status
-        self.tool_name_resolved: str = "Tool"  # Set by the session from tool_map
+        self.tool_name_resolved: str = "Tool"
 
     def render(self, log_prefix: str) -> str:
         if not self.output:
             return f"{log_prefix} \033[32m{self.tool_name_resolved} ran successfully\033[0m"
         truncated = truncate_content(self.output)
         return f"{log_prefix} \033[32m[Tool Result] {truncated}\033[0m"
+
+
+class TurnCompletedEvent(CodexEvent):
+    """Per-turn usage summary emitted by Codex."""
+
+    def __init__(
+        self,
+        input_tokens: int = 0,
+        cached_input_tokens: int = 0,
+        output_tokens: int = 0,
+    ):
+        self.input_tokens = input_tokens
+        self.cached_input_tokens = cached_input_tokens
+        self.output_tokens = output_tokens
+
+    def render(self, log_prefix: str) -> str | None:
+        return None
 
 
 class ErrorEvent(CodexEvent):

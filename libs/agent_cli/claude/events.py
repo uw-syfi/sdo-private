@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, cast
 
-from ..utils import truncate_content, truncate_params
+from ..utils import truncate_content, truncate_tool_params
 
 
 class ClaudeEvent(ABC):
@@ -48,7 +48,12 @@ class ClaudeEvent(ABC):
                     )
             return None
         if event_type == "result":
-            return ResultEvent(data.get("result", ""))
+            return ResultEvent(
+                result=data.get("result", ""),
+                num_turns=data.get("num_turns"),
+                usage=data.get("usage"),
+                total_cost_usd=data.get("total_cost_usd"),
+            )
 
         return None
 
@@ -100,7 +105,7 @@ class ToolUseEvent(ClaudeEvent):
         self.parameters = parameters
 
     def render(self, log_prefix: str) -> str:
-        truncated = truncate_params(self.parameters)
+        truncated = truncate_tool_params(self.tool_name, self.parameters)
         return f"{log_prefix} \033[34m[Tool Use] {self.tool_name} {truncated}\033[0m"
 
 
@@ -127,8 +132,17 @@ class ToolResultEvent(ClaudeEvent):
 class ResultEvent(ClaudeEvent):
     """Final session summary event."""
 
-    def __init__(self, result: str):
+    def __init__(
+        self,
+        result: str,
+        num_turns: int | None = None,
+        usage: dict[str, Any] | None = None,
+        total_cost_usd: float | None = None,
+    ):
         self.result = result
+        self.num_turns = num_turns
+        self.usage = usage
+        self.total_cost_usd = total_cost_usd
 
     def render(self, log_prefix: str) -> str | None:
         # Result events are silent (result is captured separately)

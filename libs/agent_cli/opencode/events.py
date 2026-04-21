@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..utils import truncate_params
+from ..utils import truncate_tool_params
 
 
 class OpencodeEvent(ABC):
@@ -60,7 +60,7 @@ class ToolUseEvent(OpencodeEvent):
 
     def render(self, log_prefix: str) -> str:
         # Render tool use and result
-        truncated_input = truncate_params(str(self.input_data))
+        truncated_input = truncate_tool_params(self.tool_name, self.input_data)
 
         output_str = ""
         if self.output_data:

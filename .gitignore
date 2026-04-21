@@ -97,6 +97,9 @@ exp_config/*/*.log
 
 .mcp.json
 .claude/worktrees/
+.claude/
+.local_tmp/
 
 # tach cache
 .tach/
+sregym_agents/experiments/*

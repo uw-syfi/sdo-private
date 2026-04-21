@@ -103,6 +103,30 @@ class TestClaudeEventFromDict:
         event = ClaudeEvent.from_dict(data)
         assert isinstance(event, ResultEvent)
         assert event.result == "Task completed successfully."
+        assert event.num_turns is None
+        assert event.usage is None
+        assert event.total_cost_usd is None
+
+    def test_result_event_carries_usage_and_turns(self):
+        data = {
+            "type": "result",
+            "result": "done",
+            "num_turns": 7,
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_creation_input_tokens": 30,
+                "cache_read_input_tokens": 20,
+            },
+            "total_cost_usd": 0.0123,
+        }
+        event = ClaudeEvent.from_dict(data)
+        assert isinstance(event, ResultEvent)
+        assert event.num_turns == 7
+        assert event.usage is not None
+        assert event.usage["input_tokens"] == 100
+        assert event.usage["cache_read_input_tokens"] == 20
+        assert event.total_cost_usd == 0.0123
 
     def test_unknown_event_type_returns_none(self):
         data = {"type": "unknown_custom_type", "data": {}}
@@ -163,6 +187,13 @@ class TestEventRendering:
         assert "Bash" in rendered
         assert "[Tool Use]" in rendered
 
+    def test_memory_tool_use_event_preserves_large_payload(self):
+        event = ToolUseEvent("store_incident", "t1", {"summary": "x" * 300})
+        rendered = event.render("[Claude]")
+        assert "[Tool Use]" in rendered
+        assert "..." not in rendered
+        assert "x" * 300 in rendered
+
     def test_tool_result_event_renders_with_output(self):
         event = ToolResultEvent(output="file.txt", tool_id="t1")
         event.tool_name_resolved = "Bash"
@@ -202,11 +233,23 @@ class TestCodexEventFromDict:
         event = CodexEvent.from_dict({"type": "turn.started"})
         assert isinstance(event, LifecycleEvent)
 
-    def test_turn_completed_is_lifecycle(self):
-        from libs.agent_cli.codex_events import CodexEvent, LifecycleEvent
+    def test_turn_completed_carries_usage(self):
+        from libs.agent_cli.codex_events import CodexEvent, TurnCompletedEvent
 
-        event = CodexEvent.from_dict({"type": "turn.completed", "usage": {}})
-        assert isinstance(event, LifecycleEvent)
+        event = CodexEvent.from_dict(
+            {
+                "type": "turn.completed",
+                "usage": {
+                    "input_tokens": 10,
+                    "cached_input_tokens": 3,
+                    "output_tokens": 4,
+                },
+            }
+        )
+        assert isinstance(event, TurnCompletedEvent)
+        assert event.input_tokens == 10
+        assert event.cached_input_tokens == 3
+        assert event.output_tokens == 4
 
     def test_agent_message_completed_is_text(self):
         from libs.agent_cli.codex_events import CodexEvent

@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 _POST_STAGE_TIMEOUT_S = 300
 
 _SUBMIT_MCP_SERVER_NAME = "sregym"
+_MEMORY_MCP_SERVER_NAME = "incident_memory"
 
 
 # --- Pure helpers ----------------------------------------------------------
@@ -81,6 +82,8 @@ def _build_prompt(
     app_info: dict[str, Any],
     *,
     autonomous: bool = False,
+    memory_mcp_server_name: str | None = None,
+    memory_store_only: bool = False,
 ) -> str:
     """Render the single-session prompt handed to the wrapped CLI agent.
 
@@ -107,6 +110,8 @@ def _build_prompt(
             app_name=app_info.get("app_name", "<unknown>"),
             namespace=app_info.get("namespace", "<unknown>"),
             submit_mcp_server_name=_SUBMIT_MCP_SERVER_NAME,
+            memory_mcp_server_name=memory_mcp_server_name,
+            memory_store_only=memory_store_only,
         )
     )
 
@@ -119,7 +124,39 @@ def _build_prompt(
 # --- Agent construction ----------------------------------------------------
 
 
-def _default_agent_factory(provider: str, model: str, submit_mcp_url: str) -> CodingAgent:
+def _build_memory_mcp_server(store_path: str, merge_model: str | None = None) -> Any:
+    """Build a ``StdioMcpServer`` that launches the incident memory server as a subprocess."""
+    from libs.agent_cli.mcp_config import StdioMcpServer
+
+    args = [
+        "run",
+        "python",
+        "-m",
+        "sregym_agents.cli_agent.memory_server",
+        "--store-path",
+        store_path,
+    ]
+    if merge_model:
+        args += ["--merge-model", merge_model]
+    return StdioMcpServer(name=_MEMORY_MCP_SERVER_NAME, command="uv", args=args, env={})
+
+
+def _build_memory_mcp_server_http(port: int, store_only: bool = False) -> Any:
+    """Build an ``HttpMcpServer`` pointing to the shared memory daemon."""
+    from libs.agent_cli.mcp_config import HttpMcpServer
+
+    url = f"http://localhost:{port}/sse"
+    if store_only:
+        url += "?store_only=1"
+    return HttpMcpServer(name=_MEMORY_MCP_SERVER_NAME, url=url)
+
+
+def _default_agent_factory(
+    provider: str,
+    model: str,
+    submit_mcp_url: str,
+    extra_mcp_servers: list[Any] | None = None,
+) -> CodingAgent:
     """Build a ``CodingAgent`` with the sregym submit MCP server wired in.
 
     Raises ``ValueError`` if the requested provider does not support MCP
@@ -139,10 +176,10 @@ def _default_agent_factory(provider: str, model: str, submit_mcp_url: str) -> Co
         raise ValueError(
             f"Unknown cli_agent provider {provider!r}. Available: {sorted(AGENT_REGISTRY.keys())}"
         ) from exc
-    return cls(
-        model=model,
-        mcp_servers=[HttpMcpServer(name=_SUBMIT_MCP_SERVER_NAME, url=submit_mcp_url)],
-    )
+    mcp_servers: list[Any] = [HttpMcpServer(name=_SUBMIT_MCP_SERVER_NAME, url=submit_mcp_url)]
+    if extra_mcp_servers:
+        mcp_servers.extend(extra_mcp_servers)
+    return cls(model=model, mcp_servers=mcp_servers)
 
 
 # --- Entry point -----------------------------------------------------------
@@ -212,6 +249,42 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "for the entire problem (default: 2000)"
         ),
     )
+    parser.add_argument(
+        "--memory-store",
+        default=toml_cfg.get("memory_store"),
+        help=(
+            "Path to the SQLite incident memory store. "
+            "When set, the agent gains recall_incident / store_incident MCP tools "
+            "backed by the incident_memory server (optional)."
+        ),
+    )
+    parser.add_argument(
+        "--memory-merge-model",
+        default=toml_cfg.get("memory_merge_model"),
+        help=(
+            "LLM model id (litellm) used to merge duplicate incidents when storing. "
+            "Requires --memory-store. If omitted, duplicate incidents are skipped without merging."
+        ),
+    )
+    parser.add_argument(
+        "--memory-port",
+        type=int,
+        default=toml_cfg.get("memory_port"),
+        help=(
+            "Port of the shared incident memory HTTP/SSE daemon (started by run_sregym.py "
+            "before_benchmark hook). When set, agents connect to the daemon instead of "
+            "spawning a per-agent stdio subprocess. Takes precedence over --memory-store."
+        ),
+    )
+    parser.add_argument(
+        "--memory-store-only",
+        action="store_true",
+        default=bool(toml_cfg.get("memory_store_only", False)),
+        help=(
+            "When set, only store_incident is available — recall_incident is disabled. "
+            "Useful for KB-building stages where agents should not read from prior memory."
+        ),
+    )
     # No-op flags accepted for compatibility with sregym's agent launcher
     # (`bench/sregym/main.py` ~L1314-L1330), which appends these to every
     # agent's argv depending on the experiment config — cli_agent has no
@@ -257,7 +330,24 @@ def _run(
         planned_stages,
     )
 
-    factory = agent_factory or _default_agent_factory
+    memory_port = getattr(args, "memory_port", None)
+    memory_store = getattr(args, "memory_store", None)
+    memory_merge_model = getattr(args, "memory_merge_model", None)
+    memory_store_only = getattr(args, "memory_store_only", False)
+    if memory_port:
+        extra_mcp_servers = [_build_memory_mcp_server_http(memory_port, store_only=memory_store_only)]
+        memory_server_name = _MEMORY_MCP_SERVER_NAME
+    elif memory_store:
+        extra_mcp_servers = [_build_memory_mcp_server(memory_store, memory_merge_model)]
+        memory_server_name = _MEMORY_MCP_SERVER_NAME
+    else:
+        extra_mcp_servers = []
+        memory_server_name = None
+
+    if agent_factory is not None:
+        factory = agent_factory
+    else:
+        factory = functools.partial(_default_agent_factory, extra_mcp_servers=extra_mcp_servers)
 
     # Single CLI session for the whole problem. In the default mode the
     # agent calls a stage-routing `submit` tool and reads the oracle verdict
@@ -265,9 +355,16 @@ def _run(
     # agent instead calls per-stage `submit_diagnosis` / `submit_mitigation`
     # tools that return a neutral ack, and must self-verify via kubectl.
     autonomous = os.getenv("SREGYM_AUTONOMOUS_SUBMIT", "").strip() == "1"
-    prompt = _build_prompt(planned_stages, app_info, autonomous=autonomous)
+    prompt = _build_prompt(
+        planned_stages,
+        app_info,
+        autonomous=autonomous,
+        memory_mcp_server_name=memory_server_name,
+        memory_store_only=memory_store_only,
+    )
     started = time.monotonic()
     crashed_with: str | None = None
+    agent = None
     try:
         agent = factory(args.provider, args.model, submit_mcp_url)
         agent.generate(prompt, cwd=os.getcwd(), timeout=args.timeout_sec)
@@ -304,6 +401,8 @@ def _run(
         logs_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out = logs_dir / f"cli_agent_results_{problem_id}_{ts}.json"
+        last_usage = getattr(agent, "last_usage", None) if agent is not None else None
+        usage_metrics: dict[str, Any] | None = {"total": last_usage.to_dict()} if last_usage is not None else None
         with open(out, "w") as f:
             json.dump(
                 {
@@ -315,6 +414,7 @@ def _run(
                     "completed": completed,
                     "final_stage": final_stage,
                     "crashed_with": crashed_with,
+                    "usage_metrics": usage_metrics,
                 },
                 f,
                 indent=2,

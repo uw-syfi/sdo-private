@@ -11,6 +11,7 @@ from ..cli_agent import CLICodingAgent, CLIGenerationSession
 from ..events import AgentEventHandler
 from ..mcp_config import HttpMcpServer, McpServerConfig
 from ..sandbox import SandboxConfig
+from ..usage import ProviderUsage, TokenUsage
 from .events import (
     CodexEvent,
     ErrorEvent,
@@ -18,31 +19,23 @@ from .events import (
     ThreadStartedEvent,
     ToolResultEvent,
     ToolUseEvent,
+    TurnCompletedEvent,
 )
 
 
 class CodexGenerationSession(CLIGenerationSession):
-    """Session that parses Codex ``--json`` event stream.
-
-    Codex emits one JSON event per line (JSONL). Relevant frames:
-
-    - ``thread.started`` carries ``thread_id`` (the resumable session id).
-    - ``item.completed`` with ``item.type == "agent_message"`` carries the
-      assistant's text reply.
-    - ``item.started`` / ``item.completed`` with ``item.type ==
-      "command_execution"`` carry tool-call start and result; we drive
-      ``event_handler.on_tool_call`` / ``on_tool_result`` and record each
-      completed call on the trajectory recorder.
-
-    Non-JSON lines (e.g. the trailing ``Shell cwd was reset…`` notice)
-    fall through to raw rendering so nothing is lost.
-    """
+    """Session that parses Codex ``--json`` event stream."""
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         self.tool_map: dict[str, str] = {}
         self.tool_start_times: dict[str, float] = {}
         self.tool_args: dict[str, Any] = {}
+        # Codex has no single "final message" frame; track the most recent
+        # agent_message text so run() can return it as the final result.
+        self.final_result: str | None = None
+        # Accumulator for per-turn usage; finalized into self.usage at end.
+        self._accumulated_tokens = TokenUsage()
 
     def _process_stdout(self, line: str) -> None:
         if not line:
@@ -77,6 +70,7 @@ class CodexGenerationSession(CLIGenerationSession):
         if isinstance(event, TextEvent):
             if event.text:
                 self.stdout_lines.append(event.text)
+                self.final_result = event.text
                 if self.event_handler:
                     self.event_handler.on_thinking(event.text)
             return
@@ -88,6 +82,20 @@ class CodexGenerationSession(CLIGenerationSession):
                 self.tool_args[event.tool_id] = event.parameters
                 if self.event_handler:
                     self.event_handler.on_tool_call(event.tool_name, event.parameters)
+            return
+
+        if isinstance(event, TurnCompletedEvent):
+            self._accumulated_tokens = self._accumulated_tokens + TokenUsage(
+                input_tokens=event.input_tokens,
+                output_tokens=event.output_tokens,
+                cached_input_tokens=event.cached_input_tokens,
+                turns=1,
+            )
+            self.usage = ProviderUsage(
+                tokens=self._accumulated_tokens,
+                total_cost_usd=None,
+                provider="codex",
+            )
             return
 
         if isinstance(event, ToolResultEvent):
@@ -118,8 +126,7 @@ class CodexGenerationSession(CLIGenerationSession):
     def _render_event(self, event: CodexEvent):
         if isinstance(event, TextEvent):
             if event.text:
-                self._log_raw(f"{self.log_prefix} {event.text}\n")
-                self._at_line_start = True
+                self._print_stream_content(event.text)
             return
 
         if not self._at_line_start:
@@ -131,8 +138,13 @@ class CodexGenerationSession(CLIGenerationSession):
             self._log_raw(output + "\n")
 
         if isinstance(event, ErrorEvent):
-            # Surface error text to the accumulated transcript.
             self.stdout_lines.append(event.message)
+
+    def run(self, prompt: str) -> str:
+        super().run(prompt)
+        if self.final_result:
+            return self.final_result
+        return "\n".join(self.stdout_lines)
 
 
 @register_provider("openai", "codex")
@@ -173,17 +185,17 @@ class CodexCodingAgent(CLICodingAgent):
     def _build_mcp_args(self) -> list[str]:
         """Build -c flag arguments for MCP server configuration."""
         args: list[str] = []
-        for s in self.mcp_servers:
-            prefix = f"mcp_servers.{s.name}"
-            if isinstance(s, HttpMcpServer):
-                args.extend(["-c", f'{prefix}.url="{s.url}"'])
+        for server in self.mcp_servers:
+            prefix = f"mcp_servers.{server.name}"
+            if isinstance(server, HttpMcpServer):
+                args.extend(["-c", f'{prefix}.url="{server.url}"'])
             else:
-                args.extend(["-c", f'{prefix}.command="{s.command}"'])
-                if s.args:
-                    toml_arr = "[" + ", ".join(f'"{a}"' for a in s.args) + "]"
+                args.extend(["-c", f'{prefix}.command="{server.command}"'])
+                if server.args:
+                    toml_arr = "[" + ", ".join(f'"{arg}"' for arg in server.args) + "]"
                     args.extend(["-c", f"{prefix}.args={toml_arr}"])
-                for k, v in s.env.items():
-                    args.extend(["-c", f'{prefix}.env.{k}="{v}"'])
+                for key, value in server.env.items():
+                    args.extend(["-c", f'{prefix}.env.{key}="{value}"'])
         return args
 
     def _get_command(self, prompt: str, resume_session_id: str | None = None) -> list[str]:
@@ -195,6 +207,9 @@ class CodexCodingAgent(CLICodingAgent):
             cmd.extend(["--model", self.model])
         if self.mcp_servers:
             cmd.extend(self._build_mcp_args())
+        # Tell Codex to read the prompt from stdin instead of expecting an
+        # inline positional prompt argument.
+        cmd.append("-")
         return cmd
 
     def _create_session(

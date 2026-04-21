@@ -16,6 +16,7 @@ from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorder
 from .base import CodingAgent
 from .events import AgentEventHandler
 from .mcp_config import McpServerConfig
+from .usage import ProviderUsage
 from .utils import get_interactive_env
 
 
@@ -52,6 +53,9 @@ class CLIGenerationSession:
         self.stdout_lines: list[str] = []
         self.stderr_lines: list[str] = []
         self._at_line_start = True
+        # Providers populate this during event handling; stays at the
+        # empty default if the session crashes before any terminal event.
+        self.usage: ProviderUsage = ProviderUsage()
         # Provider session id captured from the event stream (set by subclasses
         # that parse JSON events). ``None`` if the underlying CLI did not emit
         # an id during this run.
@@ -235,6 +239,8 @@ class CLICodingAgent(CodingAgent):
         self.binary_path = binary_path
         self._check_cli()
         self.logger = logger.bind(agent_prefix=self._log_prefix)
+        # Populated after each generate() call from the session's usage.
+        self.last_usage: ProviderUsage = ProviderUsage()
 
     def _check_cli(self):
         """Check if the CLI tool is available and executable."""
@@ -414,6 +420,7 @@ class CLIAgentSession:
             on_process_started=on_process_started,
         )
         result = run_session.run(prompt)
+        self.agent.last_usage = getattr(run_session, "usage", ProviderUsage())
 
         # Capture the id on first run; refresh on later runs only if the
         # underlying CLI actually emitted one (defensive — providers always
