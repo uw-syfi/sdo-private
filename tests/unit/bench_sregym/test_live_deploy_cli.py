@@ -40,6 +40,8 @@ def _import_bench_main() -> Any:
     sregym_pkg = _module("sregym")
     conductor_pkg = _module("sregym.conductor")
     service_pkg = _module("sregym.service")
+    source_deploy_mod = _module("sregym.service.source_deploy")
+    source_deploy_mod.ensure_app_supported = lambda app_name: None
 
     agent_launcher_mod = _module("sregym.agent_launcher")
     agent_launcher_mod.AgentLauncher = type("AgentLauncher", (), {})
@@ -56,7 +58,11 @@ def _import_bench_main() -> Any:
     conductor_api_mod.request_shutdown = lambda: None
     conductor_api_mod.run_api = lambda conductor: None
     constants_mod = _module("sregym.conductor.constants")
-    constants_mod.StartProblemResult = types.SimpleNamespace(SUCCESS="success", SKIPPED_KHAOS_REQUIRED="skipped")
+    constants_mod.StartProblemResult = types.SimpleNamespace(
+        SUCCESS="success",
+        SKIPPED_KHAOS_REQUIRED="skipped",
+        SKIPPED_SOURCE_DEPLOY_UNSUPPORTED="skipped_source",
+    )
     kubeconfig_mod = _module("sregym.service.kubeconfig")
     kubeconfig_mod.require_kubeconfig_path = lambda: "/tmp/kubeconfig"
     worker_infra_mod = _module("sregym.worker_infra")
@@ -109,6 +115,112 @@ def test_cli_agent_launch_args_include_logs_dir_without_summary_flags():
     assert "--no-inject-summary" in extra_args
     assert "--summary-dir" not in extra_args
     assert "--summary-model" not in extra_args
+
+
+def test_benchmark_parser_accepts_deploy_from_source_flag():
+    mod = _import_bench_main()
+
+    args = mod.parse_cli_args(["--agent", "cli_agent", "--deploy-from-source"])
+
+    assert args.deploy_from_source is True
+
+
+def test_benchmark_parser_accepts_app_filter():
+    mod = _import_bench_main()
+
+    args = mod.parse_cli_args(["--agent", "cli_agent", "--app-filter", "hotel_reservation"])
+
+    assert args.app_filter == "hotel_reservation"
+
+
+def test_live_parser_accepts_deploy_from_source_flag():
+    mod = _import_bench_main()
+
+    args = mod.parse_cli_args(["deploy", "--app", "hotel_reservation", "--deploy-from-source"])
+
+    assert args.deploy_from_source is True
+
+
+def test_filter_problem_ids_by_app_respects_aliases():
+    mod = _import_bench_main()
+
+    def hotel_factory():
+        return None
+
+    def social_factory():
+        return None
+
+    problem_source = types.SimpleNamespace(
+        get_problem=lambda problem_id: {
+            "hotel_problem": hotel_factory,
+            "social_problem": social_factory,
+        }[problem_id]
+    )
+
+    hotel_factory.__name__ = "hotel_factory"
+    social_factory.__name__ = "social_factory"
+    hotel_factory.__qualname__ = "hotel_factory"
+    social_factory.__qualname__ = "social_factory"
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        mod.inspect,
+        "getsource",
+        lambda obj: 'app_name="hotel_reservation"' if obj is hotel_factory else 'app_name="social_network"',
+    )
+    filtered = mod._filter_problem_ids_by_app(
+        problem_source,
+        ["hotel_problem", "social_problem"],
+        "hotel_reservation",
+    )
+    monkeypatch.undo()
+
+    assert filtered == ["hotel_problem"]
+
+
+def test_infer_problem_app_name_from_signature_default():
+    mod = _import_bench_main()
+
+    class _Factory:
+        def __init__(self, app_name: str = "hotel_reservation"):
+            self.app_name = app_name
+
+    assert mod._infer_problem_app_name(_Factory) == "Hotel Reservation"
+
+
+def test_live_deploy_from_source_rejects_unsupported_app(tmp_path: Path, monkeypatch):
+    mod = _import_bench_main()
+    created_clusters: set[str] = set()
+    app = _FakeApp()
+    app.name = "Fleet Cast"
+    problem = _FakeProblem(app)
+
+    def fake_create_kind_cluster(cluster_name: str, kubeconfig_path: str) -> None:
+        created_clusters.add(cluster_name)
+        path = Path(kubeconfig_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("apiVersion: v1\n", encoding="utf-8")
+
+    monkeypatch.setattr(mod, "_create_kind_cluster", fake_create_kind_cluster)
+    monkeypatch.setattr(mod, "_existing_cluster_is_reusable", lambda *args, **kwargs: (False, "missing"))
+    monkeypatch.setattr(mod, "_delete_live_cluster", lambda cluster_name: created_clusters.discard(cluster_name))
+    monkeypatch.setattr(mod, "Conductor", lambda: _FakeConductor(app=app, problem=problem))
+    monkeypatch.setattr(
+        mod,
+        "ensure_app_supported",
+        lambda app_name: (_ for _ in ()).throw(RuntimeError(f"unsupported: {app_name}")),
+    )
+    monkeypatch.setattr(mod, "_start_frontend_port_forward", lambda **_: None)
+    monkeypatch.setattr(mod, "_stop_trace_port_forward", lambda app: None)
+
+    with pytest.raises(RuntimeError, match="unsupported: Fleet Cast"):
+        mod.deploy_live_environment(
+            app_name="fleet_cast",
+            problem_id=None,
+            deployment_name="unsupported-live",
+            deployments_root=str(tmp_path),
+            deploy_from_source=True,
+        )
 
 
 def test_live_undeploy_keeps_shared_cluster_and_reconciles(tmp_path: Path, monkeypatch):

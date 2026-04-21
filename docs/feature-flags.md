@@ -107,6 +107,26 @@ Number of problems to run concurrently. Can be overridden with the `PARALLEL` en
 
 ---
 
+### `app_filter`
+
+**Default:** `""` (disabled)
+
+Restrict benchmark problems to a single application. This narrows whatever problem source is otherwise active: the default tasklist, a custom `tasklist`, inline `problems`, `spec_names`, or variant/sequence sampling.
+
+Accepted values use the same app aliases as `bench/sregym/main.py`, for example:
+
+- `hotel_reservation`
+- `social_network`
+- `astronomy_shop`
+- `fleet_cast`
+
+```toml
+[runner]
+app_filter = "hotel_reservation"
+```
+
+---
+
 ### `enable_summary`
 
 **Default:** `true`

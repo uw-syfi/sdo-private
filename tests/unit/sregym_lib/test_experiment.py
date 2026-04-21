@@ -106,6 +106,83 @@ def test_config_to_main_args_no_problem_spec_when_empty(tmp_path: Path) -> None:
     assert "--problem-spec" not in args
 
 
+def test_deploy_from_source_loaded_from_toml(tmp_path: Path) -> None:
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        deploy_from_source = true
+
+        [runner.variants]
+        enabled = false
+    """,
+    )
+    config = load_experiment_config(toml)
+    assert config.deploy_from_source is True
+
+
+def test_app_filter_loaded_from_toml(tmp_path: Path) -> None:
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        app_filter = "hotel_reservation"
+
+        [runner.variants]
+        enabled = false
+    """,
+    )
+    config = load_experiment_config(toml)
+    assert config.app_filter == "hotel_reservation"
+
+
+def test_config_to_main_args_emits_deploy_from_source_flag(tmp_path: Path) -> None:
+    config = ExperimentConfig(deploy_from_source=True)
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+    assert "--deploy-from-source" in args
+
+
+def test_config_to_main_args_emits_app_filter(tmp_path: Path) -> None:
+    config = ExperimentConfig(app_filter="social_network")
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+    assert "--app-filter" in args
+    assert "social_network" in args
+
+
+def test_config_to_main_args_omits_deploy_from_source_when_disabled(tmp_path: Path) -> None:
+    config = ExperimentConfig()
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+    assert "--deploy-from-source" not in args
+
+
+def test_serialize_includes_deploy_from_source() -> None:
+    config = ExperimentConfig(deploy_from_source=True)
+    serialized = _serialize_config(config)
+    assert "deploy_from_source = true" in serialized
+
+
+def test_serialize_includes_app_filter() -> None:
+    config = ExperimentConfig(app_filter="hotel_reservation")
+    serialized = _serialize_config(config)
+    assert 'app_filter = "hotel_reservation"' in serialized
+
+
+def test_roundtrip_deploy_from_source(tmp_path: Path) -> None:
+    config = ExperimentConfig(deploy_from_source=True)
+    toml_path = tmp_path / "snap.toml"
+    toml_path.write_text(_serialize_config(config))
+    loaded = load_experiment_config(toml_path)
+    assert loaded.deploy_from_source is True
+
+
+def test_roundtrip_app_filter(tmp_path: Path) -> None:
+    config = ExperimentConfig(app_filter="social_network")
+    toml_path = tmp_path / "snap.toml"
+    toml_path.write_text(_serialize_config(config))
+    loaded = load_experiment_config(toml_path)
+    assert loaded.app_filter == "social_network"
+
+
 def test_serialize_includes_spec_names(tmp_path: Path) -> None:
     config = ExperimentConfig(spec_names=["service_dns_resolution_failure"])
     serialized = _serialize_config(config)
@@ -169,6 +246,18 @@ def test_force_recreate_env_override() -> None:
     resolved = resolve_config(config, env_overrides={"SREGYM_FORCE_RECREATE_CLUSTER": "yes"})
     assert resolved.env.reuse_cluster is True
     assert resolved.env.force_recreate_cluster is True
+
+
+def test_deploy_from_source_env_override_enables() -> None:
+    config = ExperimentConfig(deploy_from_source=False)
+    resolved = resolve_config(config, env_overrides={"SREGYM_DEPLOY_FROM_SOURCE": "1"})
+    assert resolved.deploy_from_source is True
+
+
+def test_deploy_from_source_env_override_disables() -> None:
+    config = ExperimentConfig(deploy_from_source=True)
+    resolved = resolve_config(config, env_overrides={"SREGYM_DEPLOY_FROM_SOURCE": "false"})
+    assert resolved.deploy_from_source is False
 
 
 def test_config_to_env_emits_reuse_flags(tmp_path: Path) -> None:

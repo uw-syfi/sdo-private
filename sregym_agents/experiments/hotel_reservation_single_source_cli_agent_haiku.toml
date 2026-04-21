@@ -1,0 +1,30 @@
+# Single-problem Hotel Reservation run from local source using cli_agent on Claude Haiku.
+#
+# Usage:
+#   bash scripts/run_sregym.sh sregym_agents/experiments/hotel_reservation_single_source_cli_agent_haiku.toml
+
+[runner]
+agent = "cli_agent"
+model = "claude-haiku-4-5"
+parallel = 1
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = ["wrong_service_selector_hotel_reservation"]
+
+[runner.variants]
+enabled = false
+count = 0
+offset = 0
+seed = 42
+order = "round_robin"
+
+[runner.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+crucible_seed_kb_dir = ""
+worker_cpu_limit = "16"
+
+[agent.cli_agent]
+provider = "claude"
+timeout_sec = 2000

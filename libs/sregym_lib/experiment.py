@@ -82,6 +82,8 @@ class ExperimentConfig:
     agent: str = "crucible"
     model: str = "google-vertex:gemini-2.5-flash"
     parallel: int = 4
+    app_filter: str = ""
+    deploy_from_source: bool = False
     enable_summary: bool = True
     no_inject_summary: bool = True
     repeat: int = 1
@@ -164,6 +166,8 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         agent=runner.get("agent", "crucible"),
         model=runner.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=runner.get("parallel", 4),
+        app_filter=runner.get("app_filter", ""),
+        deploy_from_source=runner.get("deploy_from_source", False),
         enable_summary=runner.get("enable_summary", True),
         no_inject_summary=runner.get("no_inject_summary", True),
         repeat=runner.get("repeat", 1),
@@ -197,6 +201,8 @@ def resolve_config(
         updates["model"] = env_overrides["MODEL"]
     if "PARALLEL" in env_overrides:
         updates["parallel"] = int(env_overrides["PARALLEL"])
+    if "SREGYM_DEPLOY_FROM_SOURCE" in env_overrides:
+        updates["deploy_from_source"] = _parse_bool_env(env_overrides["SREGYM_DEPLOY_FROM_SOURCE"])
     if "JUDGE_MODEL_ID" in env_overrides:
         env_updates["judge_model_id"] = env_overrides["JUDGE_MODEL_ID"]
     if "SREGYM_WORKER_CPU_LIMIT" in env_overrides:
@@ -306,6 +312,10 @@ def config_to_main_args(
 
     if config.enable_summary:
         args.append("--enable-summary")
+    if config.app_filter:
+        args.extend(["--app-filter", config.app_filter])
+    if config.deploy_from_source:
+        args.append("--deploy-from-source")
     if config.no_inject_summary:
         args.append("--no-inject-summary")
     if config.repeat > 1:
@@ -403,6 +413,8 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"agent = {_toml_value(config.agent)}")
     lines.append(f"model = {_toml_value(config.model)}")
     lines.append(f"parallel = {_toml_value(config.parallel)}")
+    lines.append(f"app_filter = {_toml_value(config.app_filter)}")
+    lines.append(f"deploy_from_source = {_toml_value(config.deploy_from_source)}")
     lines.append(f"enable_summary = {_toml_value(config.enable_summary)}")
     lines.append(f"no_inject_summary = {_toml_value(config.no_inject_summary)}")
     lines.append(f"repeat = {_toml_value(config.repeat)}")
