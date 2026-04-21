@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..utils import truncate_content, truncate_params
+from ..utils import truncate_content, truncate_tool_params
 
 
 class GeminiEvent(ABC):
@@ -61,7 +61,7 @@ class ToolUseEvent(GeminiEvent):
         self.parameters = parameters
 
     def render(self, log_prefix: str) -> str:
-        truncated = truncate_params(self.parameters)
+        truncated = truncate_tool_params(self.tool_name, self.parameters)
         return f"{log_prefix} \033[34m[Tool Use] {self.tool_name} {truncated}\033[0m"
 
 

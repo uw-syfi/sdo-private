@@ -187,6 +187,13 @@ class TestEventRendering:
         assert "Bash" in rendered
         assert "[Tool Use]" in rendered
 
+    def test_memory_tool_use_event_preserves_large_payload(self):
+        event = ToolUseEvent("store_incident", "t1", {"summary": "x" * 300})
+        rendered = event.render("[Claude]")
+        assert "[Tool Use]" in rendered
+        assert "..." not in rendered
+        assert "x" * 300 in rendered
+
     def test_tool_result_event_renders_with_output(self):
         event = ToolResultEvent(output="file.txt", tool_id="t1")
         event.tool_name_resolved = "Bash"
