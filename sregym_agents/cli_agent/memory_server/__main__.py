@@ -149,7 +149,7 @@ def _cmd_stdio(argv: list[str]) -> None:
     args = parser.parse_args(argv)
     store = IncidentStore(args.store_path)
     server = MemoryMCPServer(store, merge_model=args.merge_model)
-    server.run()
+    server.run_stdio()
 
 
 # ---------------------------------------------------------------------------

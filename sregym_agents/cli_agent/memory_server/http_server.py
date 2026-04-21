@@ -1,155 +1,125 @@
 """HTTP/SSE MCP daemon for incident memory.
 
-Implements the MCP SSE transport (2024-11-05):
-- GET /sse          → opens a per-client SSE stream; sends endpoint URL
-- GET /health       → liveness probe
-- POST /messages    → receives JSON-RPC 2.0 request; delivers response via SSE
+Uses FastMCP's SSE transport instead of a hand-written JSON-RPC server.
+The only custom routing left is a thin compatibility layer that keeps the
+existing ``/sse?store_only=1`` entrypoint and ``/health`` endpoint.
 """
 
 from __future__ import annotations
 
-import http.server
-import json
 import logging
-import queue as queue_module
-import uuid
-from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import parse_qs, urlparse
+import socket
+import traceback
+from typing import TYPE_CHECKING, cast
+from urllib.parse import parse_qs
+
+import uvicorn
+from fastmcp.server.http import create_sse_app
+from starlette.responses import PlainTextResponse
 
 if TYPE_CHECKING:
+    from starlette.types import Receive, Scope, Send
+
     from .server import MemoryMCPServer
 
 logger = logging.getLogger(__name__)
 
-_KEEPALIVE_TIMEOUT_S = 25.0
 
+class _MemoryASGIApp:
+    def __init__(self, mcp_server: MemoryMCPServer) -> None:
+        self._full_app = create_sse_app(mcp_server.mcp, "/messages", "/sse")
+        self._store_only_app = create_sse_app(mcp_server.store_only_mcp, "/messages-store-only", "/sse")
 
-class _Session:
-    def __init__(self, store_only: bool = False) -> None:
-        self.id: str = str(uuid.uuid4())
-        self.queue: queue_module.Queue[dict[str, Any] | None] = queue_module.Queue()
-        self.store_only: bool = store_only
-
-
-class _MCPHandler(http.server.BaseHTTPRequestHandler):
-    # HTTP/1.1 is required so urllib3/requests reads SSE chunks as they arrive
-    # rather than buffering the entire body until connection close.
-    protocol_version = "HTTP/1.1"
-
-    @property
-    def _server(self) -> _MCPHTTPServer:
-        return cast("_MCPHTTPServer", self.server)
-
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-        logger.debug(format, *args)
-
-    def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        if parsed.path == "/sse":
-            self._handle_sse()
-        elif parsed.path == "/health":
-            body = b"ok"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_error(404)
-
-    def do_POST(self) -> None:
-        if self.path.startswith("/messages"):
-            self._handle_message()
-        else:
-            self.send_error(404)
-
-    def _send_chunk(self, data: bytes) -> None:
-        """Write one HTTP/1.1 chunked-encoding frame and flush."""
-        self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
-        self.wfile.flush()
-
-    def _handle_sse(self) -> None:
-        qs = parse_qs(urlparse(self.path).query)
-        store_only = qs.get("store_only", ["0"])[0] == "1"
-        session = _Session(store_only=store_only)
-        self._server.sessions[session.id] = session
-        logger.debug("SSE session opened: %s", session.id)
-
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Transfer-Encoding", "chunked")
-        self.send_header("Connection", "keep-alive")
-        self.end_headers()
-
-        try:
-            endpoint = f"/messages?sessionId={session.id}"
-            self._send_chunk(f"event: endpoint\ndata: {endpoint}\n\n".encode())
-
-            while True:
-                try:
-                    msg = session.queue.get(timeout=_KEEPALIVE_TIMEOUT_S)
-                    if msg is None:
-                        break
-                    self._send_chunk(f"event: message\ndata: {json.dumps(msg)}\n\n".encode())
-                except queue_module.Empty:
-                    self._send_chunk(b": keepalive\n\n")
-        except (BrokenPipeError, ConnectionResetError):
-            logger.debug("SSE session %s disconnected", session.id)
-        finally:
-            self._server.sessions.pop(session.id, None)
-
-    def _handle_message(self) -> None:
-        params = parse_qs(urlparse(self.path).query)
-        session_id = (params.get("sessionId") or [None])[0]
-        session = self._server.sessions.get(session_id) if session_id else None
-
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
-        try:
-            req = json.loads(body)
-        except json.JSONDecodeError:
-            self.send_response(400)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope_type = scope.get("type")
+        if scope_type == "lifespan":
+            await self._handle_lifespan(scope, receive, send)
             return
 
-        resp = self._server.mcp_server.dispatch(req, store_only=session.store_only if session else False)
+        if scope_type != "http":
+            await PlainTextResponse("Not Found", status_code=404)(scope, receive, send)
+            return
 
-        self.send_response(202)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        path = scope.get("path", "")
+        if path == "/health":
+            await PlainTextResponse("ok")(scope, receive, send)
+            return
 
-        if resp is not None and session is not None:
-            session.queue.put(resp)
+        if path == "/sse":
+            query_string = cast("bytes", scope.get("query_string", b""))
+            query = parse_qs(query_string.decode())
+            app = self._store_only_app if query.get("store_only", ["0"])[0] == "1" else self._full_app
+            await app(scope, receive, send)
+            return
 
+        if path == "/messages":
+            await self._full_app(self._with_path(scope, "/messages/"), receive, send)
+            return
 
-class _MCPHTTPServer(http.server.ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], mcp_server: MemoryMCPServer) -> None:
-        self.mcp_server = mcp_server
-        self.sessions: dict[str, _Session] = {}
-        super().__init__(address, _MCPHandler)
+        if path == "/messages-store-only":
+            await self._store_only_app(self._with_path(scope, "/messages-store-only/"), receive, send)
+            return
+
+        await PlainTextResponse("Not Found", status_code=404)(scope, receive, send)
+
+    @staticmethod
+    def _with_path(scope: Scope, path: str) -> Scope:
+        updated = dict(scope)
+        updated["path"] = path
+        return cast("Scope", updated)
+
+    async def _handle_lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:
+        started = False
+        await receive()
+        try:
+            async with self._full_app.router.lifespan_context(self._full_app):
+                async with self._store_only_app.router.lifespan_context(self._store_only_app):
+                    await send({"type": "lifespan.startup.complete"})
+                    started = True
+                    await receive()
+        except BaseException:
+            exc_text = traceback.format_exc()
+            if started:
+                await send({"type": "lifespan.shutdown.failed", "message": exc_text})
+            else:
+                await send({"type": "lifespan.startup.failed", "message": exc_text})
+            raise
+        else:
+            await send({"type": "lifespan.shutdown.complete"})
 
 
 class MemoryHTTPDaemon:
-    """HTTP/SSE MCP server wrapping a MemoryMCPServer.
-
-    Bind on construction (port 0 → OS-assigned); call run() to block.
-    """
+    """HTTP/SSE MCP server wrapping a MemoryMCPServer."""
 
     def __init__(self, mcp_server: MemoryMCPServer, host: str = "127.0.0.1", port: int = 0) -> None:
-        self._httpd = _MCPHTTPServer((host, port), mcp_server)
-        # server_address can be AF_INET6 4-tuple; we only use host/port
-        addr = self._httpd.server_address
+        self._app = _MemoryASGIApp(mcp_server)
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._socket.bind((host, port))
+        self._socket.listen(2048)
+
+        addr = self._socket.getsockname()
         self.host = str(addr[0])
         self.port = int(addr[1])
+
+        config = uvicorn.Config(
+            self._app,
+            host=self.host,
+            port=self.port,
+            log_level="warning",
+            access_log=False,
+        )
+        self._server = uvicorn.Server(config)
 
     def run(self) -> None:
         logger.info("Memory MCP HTTP daemon on %s:%d", self.host, self.port)
         try:
-            self._httpd.serve_forever()
+            self._server.run(sockets=[self._socket])
         finally:
-            self._httpd.server_close()
+            try:
+                self._socket.close()
+            except OSError:
+                pass
 
     def stop(self) -> None:
-        self._httpd.shutdown()
+        self._server.should_exit = True

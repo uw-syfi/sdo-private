@@ -1,12 +1,8 @@
-"""Minimal stdio MCP server (JSON-RPC 2.0) for incident memory.
+"""Incident memory MCP server.
 
-Exposes two tools:
-- ``recall_incident(query)``  — retrieve the closest past incident
-- ``store_incident(...)``     — save a resolved incident; merges with duplicate if found
-
-Designed to run as a subprocess launched by the cli_agent driver via
-``StdioMcpServer``.  The LLM merge path (``--merge-model``) is the only
-part that requires external dependencies (litellm via libs.agent_cli).
+Production transports use ``FastMCP`` for both stdio and SSE. The small
+``dispatch()`` / ``run()`` helpers remain as compatibility shims for the
+existing unit tests and local direct-call usage.
 """
 
 from __future__ import annotations
@@ -16,16 +12,22 @@ import logging
 import sys
 from typing import Any
 
+import anyio
+from fastmcp import FastMCP
+
 from .store import IncidentCase, IncidentStore, compute_embedding
 
 logger = logging.getLogger(__name__)
 
 _DUPLICATE_THRESHOLD = 0.7
+_PROTOCOL_VERSION = "2024-11-05"
+_SERVER_NAME = "incident_memory"
+_SERVER_VERSION = "0.1.0"
 
 _MERGE_SYSTEM = (
     "You are merging two incident reports for the same type of fault into one concise record. "
     "Keep the most informative content from each field. "
-    "Be concise — prefer one to two sentences per field."
+    "Be concise - prefer one to two sentences per field."
 )
 
 _MERGE_USER = """\
@@ -42,70 +44,13 @@ New incident:
   lesson: {new_lesson}
 
 Reply with a JSON object with exactly these keys: key_checks, root_causes, fix, lesson.
-No explanation, no markdown fences — raw JSON only.\
+No explanation, no markdown fences - raw JSON only.\
 """
-
-_TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "recall_incident",
-        "description": (
-            "Retrieve the most similar past incident from memory. "
-            "Pass a brief description of current symptoms or the output of an initial "
-            "health check (`kubectl get pods`, `kubectl get events`). "
-            "Returns a formatted prior incident for reference, or a message if none found. "
-            "The retrieved case is reference material only — your cluster may differ."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Current cluster symptoms or initial health-check output.",
-                }
-            },
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "store_incident",
-        "description": "Record a resolved incident in memory so it can be recalled in future runs.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "app": {
-                    "type": "string",
-                    "description": "Application name (e.g. astronomy-shop).",
-                },
-                "symptoms": {
-                    "type": "string",
-                    "description": "Observed symptoms that triggered the investigation.",
-                },
-                "key_checks": {
-                    "type": "string",
-                    "description": "Key kubectl/bash commands run and their notable output.",
-                },
-                "root_causes": {
-                    "type": "string",
-                    "description": "Root cause(s) identified.",
-                },
-                "fix": {
-                    "type": "string",
-                    "description": "Actions taken to resolve the fault.",
-                },
-                "lesson": {
-                    "type": "string",
-                    "description": "One-line heuristic for future investigations of similar symptoms.",
-                },
-            },
-            "required": ["app", "symptoms", "key_checks", "root_causes", "fix", "lesson"],
-        },
-    },
-]
 
 
 def _format_incident(case: IncidentCase) -> str:
     return (
-        "Prior incident on a similar cluster (for reference only — your cluster may differ):\n"
+        "Prior incident on a similar cluster (for reference only - your cluster may differ):\n"
         f"  App: {case.app}\n"
         f"  Symptoms: {case.symptoms}\n"
         f"  Key checks: {case.key_checks}\n"
@@ -153,8 +98,71 @@ class MemoryMCPServer:
     def __init__(self, store: IncidentStore, merge_model: str | None = None) -> None:
         self._store = store
         self._merge_model = merge_model
+        self._mcp = self._build_mcp(store_only=False)
+        self._store_only_mcp = self._build_mcp(store_only=True)
+
+    @property
+    def mcp(self) -> FastMCP:
+        return self._mcp
+
+    @property
+    def store_only_mcp(self) -> FastMCP:
+        return self._store_only_mcp
+
+    def _build_mcp(self, *, store_only: bool) -> FastMCP:
+        mcp = FastMCP(_SERVER_NAME, version=_SERVER_VERSION)
+
+        if not store_only:
+
+            @mcp.tool(name="recall_incident")
+            def recall_incident(query: str) -> str:  # pyright: ignore[reportUnusedFunction]
+                """Retrieve the most similar past incident from memory.
+
+                Args:
+                    query: Current cluster symptoms or initial health-check output.
+                """
+
+                return self._recall(query)
+
+        @mcp.tool(name="store_incident")
+        def store_incident(  # pyright: ignore[reportUnusedFunction]
+            app: str,
+            symptoms: str,
+            key_checks: str,
+            root_causes: str,
+            fix: str,
+            lesson: str,
+        ) -> str:
+            """Record a resolved incident in memory so it can be recalled in future runs.
+
+            Args:
+                app: Application name (for example ``astronomy-shop``).
+                symptoms: Observed symptoms that triggered the investigation.
+                key_checks: Key kubectl or shell commands and their notable output.
+                root_causes: Root cause or causes identified.
+                fix: Actions taken to resolve the fault.
+                lesson: Short heuristic for future investigations of similar symptoms.
+            """
+
+            return self._store_incident(
+                {
+                    "app": app,
+                    "symptoms": symptoms,
+                    "key_checks": key_checks,
+                    "root_causes": root_causes,
+                    "fix": fix,
+                    "lesson": lesson,
+                }
+            )
+
+        return mcp
+
+    def run_stdio(self) -> None:
+        """Run the production stdio MCP server via FastMCP."""
+        self._mcp.run(transport="stdio", show_banner=False)
 
     def run(self) -> None:
+        """Compatibility JSON-RPC loop used by the direct-dispatch unit tests."""
         for raw in sys.stdin:
             raw = raw.strip()
             if not raw:
@@ -162,7 +170,13 @@ class MemoryMCPServer:
             try:
                 req = json.loads(raw)
             except json.JSONDecodeError as exc:
-                self._write({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": f"Parse error: {exc}"}})
+                self._write(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32700, "message": f"Parse error: {exc}"},
+                    }
+                )
                 continue
             resp = self.dispatch(req)
             if resp is not None:
@@ -171,6 +185,15 @@ class MemoryMCPServer:
     def _write(self, obj: Any) -> None:
         sys.stdout.write(json.dumps(obj) + "\n")
         sys.stdout.flush()
+
+    def _list_tools(self, *, store_only: bool = False) -> list[dict[str, Any]]:
+        server = self._store_only_mcp if store_only else self._mcp
+
+        async def _load_tools() -> Any:
+            return await server.list_tools(run_middleware=False)
+
+        tools = anyio.run(_load_tools)
+        return [tool.to_mcp_tool(name=tool.name).model_dump(by_alias=True, exclude_none=True) for tool in tools]
 
     def dispatch(self, req: dict[str, Any], *, store_only: bool = False) -> dict[str, Any] | None:
         req_id = req.get("id")
@@ -182,16 +205,15 @@ class MemoryMCPServer:
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": _PROTOCOL_VERSION,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "incident_memory", "version": "0.1.0"},
+                    "serverInfo": {"name": _SERVER_NAME, "version": _SERVER_VERSION},
                 },
             }
         if method in ("notifications/initialized", "initialized"):
-            return None  # notification — no response expected
+            return None
         if method == "tools/list":
-            tools = [t for t in _TOOLS if not store_only or t["name"] != "recall_incident"]
-            return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": tools}}
+            return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": self._list_tools(store_only=store_only)}}
         if method == "tools/call":
             return self._call_tool(req_id, params, store_only=store_only)
         return {
@@ -262,7 +284,6 @@ class MemoryMCPServer:
                     lesson=merged["lesson"],
                 )
                 return f"Merged with existing incident (id={existing.id})."
-            # No merge model or merge failed — keep existing record as-is
             return f"Similar incident already in memory (id={existing.id}); skipped."
 
         incident_id = self._store.store(
