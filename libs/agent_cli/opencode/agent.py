@@ -5,12 +5,12 @@ from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
-from .base import register_provider
-from .cli_agent import CLICodingAgent, CLIGenerationSession
-from .events import AgentEventHandler
-from .opencode_events import OpencodeEvent, StepFinishEvent, TextEvent, ToolUseEvent
-from .sandbox import SandboxConfig
-from .usage import ProviderUsage, TokenUsage
+from ..base import register_provider
+from ..cli_agent import CLICodingAgent, CLIGenerationSession
+from ..events import AgentEventHandler
+from ..sandbox import SandboxConfig
+from ..usage import ProviderUsage, TokenUsage
+from .events import OpencodeEvent, StepFinishEvent, TextEvent, ToolUseEvent
 
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
@@ -36,11 +36,14 @@ class OpencodeGenerationSession(CLIGenerationSession):
             return
         try:
             data = json.loads(line)
+            if self.session_id is None:
+                sid = data.get("sessionID")
+                if isinstance(sid, str) and sid:
+                    self.session_id = sid
             event = OpencodeEvent.from_dict(data)
             if event:
                 self._handle_event(event)
         except json.JSONDecodeError:
-            # Fallback for non-JSON lines
             if not self.silent:
                 if self._at_line_start:
                     self._log_raw(f"{self.log_prefix} ")
@@ -49,7 +52,6 @@ class OpencodeGenerationSession(CLIGenerationSession):
 
     def _handle_event(self, event: OpencodeEvent):
         """Handle a single parsed Opencode event."""
-        # 1. Update State
         if isinstance(event, TextEvent):
             self.stdout_lines.append(event.text)
             if self.event_handler:
@@ -59,7 +61,6 @@ class OpencodeGenerationSession(CLIGenerationSession):
             self._update_usage_from_step(event)
 
         elif isinstance(event, ToolUseEvent):
-            # Record tool call if it has a completion status
             if event.status in ("success", "error"):
                 args = _to_args_dict(event.input_data)
                 stdout = str(event.output_data) if event.output_data is not None else ""
@@ -68,47 +69,28 @@ class OpencodeGenerationSession(CLIGenerationSession):
                     tool=event.tool_name,
                     args=args,
                     stdout=stdout,
-                    # duration is not easily available from event stream
                 )
 
                 if self.event_handler:
-                    # Emit both call and result since we only capture completion
                     self.event_handler.on_tool_call(event.tool_name, args)
                     self.event_handler.on_tool_result(
                         tool=event.tool_name,
                         stdout=stdout,
-                        # No duration available
                     )
 
-        # 2. Render Output
         if not self.silent:
             self._render_event(event)
 
     def _update_usage_from_step(self, event: StepFinishEvent) -> None:
-        """Fold a step_finish payload into the running usage totals.
-
-        Opencode's per-step ``tokens`` is
-        ``{input, output, reasoning, cache: {read, write}}``. We normalize
-        to the shared schema:
-
-        - ``input_tokens`` = raw input + cache.read + cache.write (full
-          billed input volume; makes ``cached`` a subset per the crucible
-          invariant).
-        - ``output_tokens`` = output + reasoning (reasoning is billed as
-          output for OpenAI-family models).
-        - ``cached_input_tokens`` = cache.read + cache.write.
-
-        Cost is accumulated across steps; opencode's ``cost`` field is
-        per-step.
-        """
-        t: dict[str, Any] = event.tokens or {}
-        cache: dict[str, Any] = t.get("cache") or {}
+        """Fold a step_finish payload into the running usage totals."""
+        tokens: dict[str, Any] = event.tokens or {}
+        cache: dict[str, Any] = tokens.get("cache") or {}
         cache_read = int(cache.get("read") or 0)
         cache_write = int(cache.get("write") or 0)
         cached = cache_read + cache_write
         step_usage = TokenUsage(
-            input_tokens=int(t.get("input") or 0) + cached,
-            output_tokens=int(t.get("output") or 0) + int(t.get("reasoning") or 0),
+            input_tokens=int(tokens.get("input") or 0) + cached,
+            output_tokens=int(tokens.get("output") or 0) + int(tokens.get("reasoning") or 0),
             cached_input_tokens=cached,
             turns=1,
         )
@@ -124,17 +106,14 @@ class OpencodeGenerationSession(CLIGenerationSession):
 
     def _render_event(self, event: OpencodeEvent):
         """Render the event to stdout."""
-        # Handle streaming text differently from block events
         if isinstance(event, TextEvent):
             self._print_stream_content(event.text)
             return
 
-        # Ensure we start block events on a new line
         if not self._at_line_start:
             self._log_raw("\n")
             self._at_line_start = True
 
-        # Render and print
         output = event.render(self.log_prefix)
         if output:
             self._log_raw(output + "\n")
@@ -178,13 +157,17 @@ class OpencodeCodingAgent(CLICodingAgent):
         """Return the log prefix for this agent."""
         return "[Opencode]"
 
-    def _get_command(self, prompt: str) -> list[str]:
-        cmd = [self.binary_path, "run", f'"{prompt}"']
+    def _get_command(self, prompt: str, resume_session_id: str | None = None) -> list[str]:
+        cmd = [self.binary_path, "run"]
+
+        if resume_session_id:
+            cmd.extend(["--session", resume_session_id])
+
+        cmd.append(f'"{prompt}"')
 
         if self.model:
             cmd.extend(["--model", self.model])
 
-        # Output in json format
         cmd.extend(["--format=json"])
 
         return cmd

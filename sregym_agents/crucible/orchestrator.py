@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-
-import httpx
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
@@ -19,8 +16,8 @@ if TYPE_CHECKING:
     from sregym_agents.crucible.knowledge_base.root_cause import KBView
 
 from libs.pydantic_agent import TokenUsage, UsageCollector
-from sregym_agents.crucible._benchmark import BenchmarkResult, Stage
-from sregym_agents.crucible._conductor import poll_stage
+from libs.sregym_lib.benchmark import BenchmarkResult, Stage
+from libs.sregym_lib.conductor import get_api_base, get_current_stage, poll_stage
 from sregym_agents.crucible.agents import (
     JudgeAgent,
     RecoveryAgent,
@@ -310,23 +307,6 @@ def _init_mitigation_file(
     logger.info(f"Initialized mitigation shared file: {mitigation_file.display_path()}")
 
 
-async def _get_conductor_stage() -> str | None:
-    """Query the conductor for the current stage.
-
-    Returns the stage name (e.g. ``"diagnosis"``, ``"mitigation"``, ``"done"``)
-    or ``None`` on failure.
-    """
-    api_base = f"http://{os.getenv('API_HOSTNAME', 'localhost')}:{os.getenv('API_PORT', '8000')}"
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{api_base}/status", timeout=5)
-            resp.raise_for_status()
-            return resp.json().get("stage")
-    except Exception as e:
-        logger.debug("Failed to query conductor stage: %s", e)
-        return None
-
-
 def _read_kb_content(path: Path | None) -> str:
     """Read knowledge base file content, returning empty string if missing."""
     if path is None or not path.exists():
@@ -545,7 +525,7 @@ async def _run_stage_loop(
             # the orchestrator gets a chance to submit).
             already_submitted = False
             if not answer:
-                current_stage = await _get_conductor_stage()
+                current_stage = await get_current_stage(get_api_base())
                 if current_stage and current_stage != stage:
                     logger.info(
                         "[%s] Conductor already at stage %r — agent submitted directly. "
@@ -996,7 +976,7 @@ async def run(
     )
     mitigation_sf = mitigation_shared_file
 
-    api_base = f"http://{os.getenv('API_HOSTNAME', 'localhost')}:{os.getenv('API_PORT', '8000')}"
+    api_base = get_api_base()
     logger.info("Waiting for benchmark to reach mitigation stage...")
     await poll_stage(api_base, wait_for="mitigation", timeout=wait_stage_timeout, on_timeout="warn")
 

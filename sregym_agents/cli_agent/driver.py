@@ -24,15 +24,24 @@ import functools
 import json
 import logging
 import os
-import random
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import requests
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+from libs.sregym_lib.conductor import (
+    get_api_base,
+    get_app_info,
+    get_current_stage_sync,
+    get_planned_stages,
+    get_problem_id,
+    poll_stage_sync,
+    wait_for_stages_or_last_seen_sync,
+)
+from libs.sregym_lib.schema import READY_STAGES, TERMINAL_STAGES
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -40,9 +49,6 @@ if TYPE_CHECKING:
     from libs.agent_cli import CodingAgent
 
 logger = logging.getLogger(__name__)
-
-_READY_STAGES = frozenset({"diagnosis", "mitigation"})
-_TERMINAL_STAGES = frozenset({"done", "completed", "finished"})
 
 # How long to wait after each stage for the conductor to finish grading
 # and advance. Overridable via monkeypatch in tests so the
@@ -111,102 +117,8 @@ def _build_prompt(
 
 
 # --- Conductor I/O ---------------------------------------------------------
-
-
-def _get_api_base() -> str:
-    host = os.getenv("API_HOSTNAME", "localhost")
-    port = os.getenv("API_PORT", "8000")
-    return f"http://{host}:{port}"
-
-
-def _wait_for_stage(api_base: str, timeout: int = 300) -> str:
-    """Poll ``/status`` until the conductor reaches a submission-ready stage."""
-    start = time.time()
-    delay = 1.0
-    while time.time() - start < timeout:
-        try:
-            resp = requests.get(f"{api_base}/status", timeout=5)
-            resp.raise_for_status()
-            stage = resp.json().get("stage")
-            if stage in _READY_STAGES:
-                logger.info("Conductor ready at stage: %r", stage)
-                return stage
-            logger.debug("Stage: %r, waiting...", stage)
-        except Exception as e:
-            logger.debug("Status check failed: %s", e)
-        time.sleep(delay + random.uniform(0, delay * 0.1))
-        delay = min(delay * 1.5, 30)
-    raise TimeoutError(f"Conductor did not reach ready stage within {timeout}s")
-
-
-def _get_current_stage(api_base: str) -> str | None:
-    try:
-        resp = requests.get(f"{api_base}/status", timeout=5)
-        resp.raise_for_status()
-        stage = resp.json().get("stage")
-        return str(stage) if stage is not None else None
-    except Exception as e:
-        logger.warning("status check failed: %s", e)
-        return None
-
-
-def _wait_for_post_stage(
-    api_base: str,
-    *,
-    expected: set[str],
-    timeout: int,
-) -> str | None:
-    """Poll ``/status`` until the conductor reaches one of ``expected``.
-
-    Returns the matched stage on success, or the last observed stage on
-    timeout (which the caller treats as "stage did not advance as
-    expected" — likely the agent never submitted).
-
-    This is the critical fix for transient grading states: right after
-    the CLI submits, the conductor moves to ``'diagnosis (verifying)'`` /
-    ``'mitigation (verifying)'`` while the oracle evaluates. Only once
-    verification completes does the conductor advance to the next planned
-    stage (or a terminal stage like ``done`` / ``awaiting_cleanup``).
-    Acting on the first stage change — as the initial implementation did
-    — means spawning the next CLI while the previous submission is still
-    being graded, which the conductor rejects with 400s and the CLI then
-    spins in a retry loop. See ``sregym_agents.crucible.orchestrator``'s
-    ``_wait_for_mitigation_stage`` for the same pattern.
-    """
-    start = time.time()
-    delay = 1.0
-    last_seen: str | None = None
-    while time.time() - start < timeout:
-        last_seen = _get_current_stage(api_base)
-        if last_seen in expected:
-            return last_seen
-        time.sleep(delay + random.uniform(0, delay * 0.1))
-        delay = min(delay * 1.5, 15)
-    logger.warning(
-        "timed out after %ds waiting for conductor to reach %s; last stage: %r",
-        timeout,
-        sorted(expected),
-        last_seen,
-    )
-    return last_seen
-
-
-def _get_problem_id(api_base: str) -> str:
-    resp = requests.get(f"{api_base}/get_problem", timeout=10)
-    resp.raise_for_status()
-    return resp.json()["problem_id"]
-
-
-def _get_app_info(api_base: str) -> dict[str, Any]:
-    resp = requests.get(f"{api_base}/get_app", timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _get_planned_stages(api_base: str) -> list[str]:
-    resp = requests.get(f"{api_base}/stages", timeout=10)
-    resp.raise_for_status()
-    return resp.json().get("stages", [])
+# Conductor HTTP client lives in libs/sregym_lib/conductor.py — this driver
+# only owns the cli_agent-specific orchestration below.
 
 
 # --- Agent construction ----------------------------------------------------
@@ -391,7 +303,7 @@ def _run(
 ) -> None:
     logger.info("cli_agent driver starting (provider=%s, model=%s)", args.provider, args.model)
 
-    api_base = _get_api_base()
+    api_base = get_api_base()
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
     submit_mcp_url = f"http://localhost:{mcp_port}/submit/sse"
 
@@ -405,11 +317,11 @@ def _run(
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
 
-    _wait_for_stage(api_base, timeout=300)
+    poll_stage_sync(api_base, wait_for=READY_STAGES, timeout=300, on_timeout="raise")
 
-    app_info = _get_app_info(api_base)
-    problem_id = _get_problem_id(api_base)
-    planned_stages = _get_planned_stages(api_base)
+    app_info = get_app_info(api_base)
+    problem_id = get_problem_id(api_base)
+    planned_stages = get_planned_stages(api_base)
 
     logger.info(
         "Problem: %s | App: %s | Stages: %s",
@@ -467,14 +379,14 @@ def _run(
         # reach a terminal stage on its own — the worker's force_cleanup runs
         # after the agent process exits. Report the current stage without
         # blocking for a transition that will never happen.
-        final_stage = _get_current_stage(api_base)
+        final_stage = get_current_stage_sync(api_base)
         completed = final_stage is not None
     else:
         # Brief grace wait so the conductor can finish the last
         # `(verifying)` window if the agent's final submit returned just
         # before the oracle finished grading.
-        expected: set[str] = set(_TERMINAL_STAGES) | {"awaiting_cleanup"}
-        final_stage = _wait_for_post_stage(api_base, expected=expected, timeout=_POST_STAGE_TIMEOUT_S)
+        expected: set[str] = set(TERMINAL_STAGES)
+        final_stage = wait_for_stages_or_last_seen_sync(api_base, expected=expected, timeout=_POST_STAGE_TIMEOUT_S)
         completed = final_stage in expected
     logger.info(
         "session done; elapsed=%.1fs final_stage=%r completed=%s crashed=%s",

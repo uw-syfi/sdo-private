@@ -40,7 +40,7 @@ class _MCPHandler(http.server.BaseHTTPRequestHandler):
     def _server(self) -> _MCPHTTPServer:
         return cast("_MCPHTTPServer", self.server)
 
-    def log_message(self, format: str, *args: Any) -> None:
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         logger.debug(format, *args)
 
     def do_GET(self) -> None:

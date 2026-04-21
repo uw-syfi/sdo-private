@@ -81,7 +81,7 @@ git_integration = true
 
 ## SREGym Runner Settings (`[runner]`)
 
-Runner settings live in experiment TOML files (e.g. `sregym_agents/experiments/default.toml`) under `[runner]` and are passed as CLI arguments to `bench/sregym/main.py` by `scripts/run_sregym.py`.
+Runner settings live in experiment TOML files (e.g. `sregym_agents/experiments/default.toml`) under `[runner]` and are passed as CLI arguments to `bench/sregym/main.py` by `sregym_agents/run_sregym.py`.
 
 ### `agent`
 

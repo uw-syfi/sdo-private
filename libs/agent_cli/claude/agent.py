@@ -6,20 +6,21 @@ from typing import Any
 
 from libs.agent_cli.trajectory import TrajectoryRecorderProtocol
 
-from .base import register_provider
-from .claude_events import (
+from ..base import register_provider
+from ..cli_agent import CLICodingAgent, CLIGenerationSession
+from ..events import AgentEventHandler
+from ..mcp_config import HttpMcpServer, McpServerConfig
+from ..sandbox import SandboxConfig, build_claude_sandbox_settings, resolve_sandbox
+from ..usage import ProviderUsage, TokenUsage
+from .events import (
     ClaudeEvent,
     MultiEvent,
     ResultEvent,
+    SystemEvent,
     TextEvent,
     ToolResultEvent,
     ToolUseEvent,
 )
-from .cli_agent import CLICodingAgent, CLIGenerationSession
-from .events import AgentEventHandler
-from .mcp_config import HttpMcpServer, McpServerConfig
-from .sandbox import SandboxConfig, build_claude_sandbox_settings, resolve_sandbox
-from .usage import ProviderUsage, TokenUsage
 
 
 class ClaudeGenerationSession(CLIGenerationSession):
@@ -51,21 +52,23 @@ class ClaudeGenerationSession(CLIGenerationSession):
 
     def _handle_event(self, event: ClaudeEvent):
         """Handle a single parsed Claude event."""
-        # Handle MultiEvent by processing each sub-event
         if isinstance(event, MultiEvent):
             for sub_event in event.events:
                 self._handle_event(sub_event)
             return
 
-        # 1. Update State (Accumulator, Tool Map, Context Injection)
         self._update_state(event)
 
-        # 2. Render Output
         if not self.silent:
             self._render_event(event)
 
     def _update_state(self, event: ClaudeEvent):
         """Update internal state based on the event."""
+        if isinstance(event, SystemEvent):
+            if self.session_id is None and event.session_id:
+                self.session_id = event.session_id
+            return
+
         if isinstance(event, TextEvent):
             self.stdout_lines.append(event.text)
             if self.event_handler:
@@ -81,7 +84,6 @@ class ClaudeGenerationSession(CLIGenerationSession):
 
         elif isinstance(event, ToolResultEvent):
             if event.tool_id:
-                # Inject resolved name into the event for rendering
                 event.tool_name_resolved = self.tool_map.get(event.tool_id, "Tool")
 
                 start_time = self.tool_start_times.get(event.tool_id)
@@ -102,17 +104,16 @@ class ClaudeGenerationSession(CLIGenerationSession):
                     )
 
         elif isinstance(event, ResultEvent):
-            # Store the final result from the result event
             self.final_result = event.result
             # Anthropic reports cache_creation + cache_read as disjoint
             # from input_tokens; fold them into input_tokens to match the
             # crucible invariant (cached ⊆ input).
-            u = event.usage or {}
-            cached = int(u.get("cache_creation_input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0)
+            usage = event.usage or {}
+            cached = int(usage.get("cache_creation_input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0)
             self.usage = ProviderUsage(
                 tokens=TokenUsage(
-                    input_tokens=int(u.get("input_tokens") or 0) + cached,
-                    output_tokens=int(u.get("output_tokens") or 0),
+                    input_tokens=int(usage.get("input_tokens") or 0) + cached,
+                    output_tokens=int(usage.get("output_tokens") or 0),
                     cached_input_tokens=cached,
                     turns=int(event.num_turns or 0),
                 ),
@@ -122,17 +123,14 @@ class ClaudeGenerationSession(CLIGenerationSession):
 
     def _render_event(self, event: ClaudeEvent):
         """Render the event to stdout."""
-        # Handle streaming text differently from block events
         if isinstance(event, TextEvent):
             self._print_stream_content(event.text)
             return
 
-        # Ensure we start block events on a new line
         if not self._at_line_start:
             self._log_raw("\n")
             self._at_line_start = True
 
-        # Render and print
         output = event.render(self.log_prefix)
         if output:
             self._log_raw(output + "\n")
@@ -140,7 +138,6 @@ class ClaudeGenerationSession(CLIGenerationSession):
     def run(self, prompt: str) -> str:
         """Execute the command and return the result."""
         super().run(prompt)
-        # Return the final result if available, otherwise join accumulated text
         if self.final_result:
             return self.final_result
         return "\n".join(self.stdout_lines)
@@ -204,20 +201,20 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         nature.
         """
         servers: dict[str, dict[str, Any]] = {}
-        for s in self.mcp_servers:
-            if isinstance(s, HttpMcpServer):
-                http_entry: dict[str, Any] = {"type": "sse", "url": s.url}
-                if s.headers:
-                    http_entry["headers"] = dict(s.headers)
-                servers[s.name] = http_entry
+        for server in self.mcp_servers:
+            if isinstance(server, HttpMcpServer):
+                http_entry: dict[str, Any] = {"type": "sse", "url": server.url}
+                if server.headers:
+                    http_entry["headers"] = dict(server.headers)
+                servers[server.name] = http_entry
             else:
-                entry: dict[str, Any] = {"command": s.command, "args": s.args}
-                if s.env:
-                    entry["env"] = s.env
-                servers[s.name] = entry
+                entry: dict[str, Any] = {"command": server.command, "args": server.args}
+                if server.env:
+                    entry["env"] = server.env
+                servers[server.name] = entry
         return json.dumps({"mcpServers": servers})
 
-    def _get_command(self, prompt: str) -> list[str]:
+    def _get_command(self, prompt: str, resume_session_id: str | None = None) -> list[str]:
         cmd = [
             self.binary_path,
             "-p",  # Print mode, accepts prompt from stdin
@@ -225,8 +222,10 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             "--output-format",
             "stream-json",
             "--verbose",
-            prompt,
         ]
+        if resume_session_id:
+            cmd.extend(["--resume", resume_session_id])
+        cmd.append(prompt)
         if self.model:
             cmd.extend(["--model", self.model])
         if self.mcp_servers:

@@ -1,15 +1,14 @@
-"""Tests for sregym_agents.pipeline_config."""
+"""Tests for libs.sregym_lib.pipeline."""
 
 from __future__ import annotations
 
-import importlib
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from sregym_agents.pipeline_config import (
+from libs.sregym_lib.pipeline import (
     PipelineConfig,
     PipelineState,
     StageConfig,
@@ -289,7 +288,7 @@ class TestPipelineSnapshot:
             ],
         )
         write_pipeline_snapshot(config, tmp_path)
-        from sregym_agents.pipeline_config import read_pipeline_snapshot
+        from libs.sregym_lib.pipeline import read_pipeline_snapshot
 
         loaded = read_pipeline_snapshot(tmp_path)
         assert loaded.name == "snap-test"
@@ -380,23 +379,12 @@ class TestResetStagesForRerun:
 # ---------------------------------------------------------------------------
 
 
-def _import_run_sregym():
-    """Import scripts/run_sregym.py as a module."""
-    spec = importlib.util.spec_from_file_location(  # type: ignore[attr-defined]
-        "run_sregym",
-        Path(__file__).resolve().parent.parent.parent / "scripts" / "run_sregym.py",
-    )
-    mod = importlib.util.module_from_spec(spec)  # type: ignore[attr-defined]
-    spec.loader.exec_module(mod)
-    return mod
+from libs.sregym_lib import runner as runner_mod  # noqa: E402
+from libs.sregym_lib.runner import StageHooks  # noqa: E402
 
 
 class TestPipelineRunner:
-    """Tests for the pipeline runner in scripts/run_sregym.py."""
-
-    @pytest.fixture
-    def runner(self):
-        return _import_run_sregym()
+    """Tests for ``libs.sregym_lib.runner.run_pipeline``."""
 
     @pytest.fixture
     def sregym_dir(self, tmp_path: Path):
@@ -416,7 +404,7 @@ class TestPipelineRunner:
             ],
         )
 
-    def test_runs_stages_sequentially(self, runner, sregym_dir, tmp_path: Path) -> None:
+    def test_runs_stages_sequentially(self, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()
         calls = []
 
@@ -427,11 +415,7 @@ class TestPipelineRunner:
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
 
-        with (
-            patch.object(runner, "_SREGYM_DIR", sregym_dir),
-            patch.object(runner, "_PROJECT_ROOT", tmp_path),
-            patch("subprocess.run", side_effect=mock_run),
-        ):
+        with patch("subprocess.run", side_effect=mock_run):
             state = PipelineState(
                 stages=[
                     StageState(index=0, name="build"),
@@ -440,12 +424,18 @@ class TestPipelineRunner:
             )
             write_pipeline_state(state, pipeline_dir)
             write_pipeline_snapshot(config, pipeline_dir)
-            rc = runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
 
         assert rc == 0
         assert len(calls) == 2
 
-    def test_abort_on_failure(self, runner, sregym_dir, tmp_path: Path) -> None:
+    def test_abort_on_failure(self, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()
         call_count = 0
 
@@ -457,11 +447,7 @@ class TestPipelineRunner:
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
 
-        with (
-            patch.object(runner, "_SREGYM_DIR", sregym_dir),
-            patch.object(runner, "_PROJECT_ROOT", tmp_path),
-            patch("subprocess.run", side_effect=mock_run),
-        ):
+        with patch("subprocess.run", side_effect=mock_run):
             state = PipelineState(
                 stages=[
                     StageState(index=0, name="build"),
@@ -470,17 +456,22 @@ class TestPipelineRunner:
             )
             write_pipeline_state(state, pipeline_dir)
             write_pipeline_snapshot(config, pipeline_dir)
-            rc = runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
 
         assert rc == 1
         assert call_count == 1  # stage 1 never ran
 
-        # Verify state was persisted
         loaded_state = read_pipeline_state(pipeline_dir)
         assert loaded_state.stages[0].status == "failed"
         assert loaded_state.stages[1].status == "pending"
 
-    def test_resume_skips_completed(self, runner, sregym_dir, tmp_path: Path) -> None:
+    def test_resume_skips_completed(self, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()
         calls = []
 
@@ -491,16 +482,11 @@ class TestPipelineRunner:
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
 
-        # Stage 0 already completed with a kb/ dir
         stage0_dir = pipeline_dir / "stage_0_build"
         stage0_dir.mkdir()
         (stage0_dir / "kb").mkdir()
 
-        with (
-            patch.object(runner, "_SREGYM_DIR", sregym_dir),
-            patch.object(runner, "_PROJECT_ROOT", tmp_path),
-            patch("subprocess.run", side_effect=mock_run),
-        ):
+        with patch("subprocess.run", side_effect=mock_run):
             state = PipelineState(
                 stages=[
                     StageState(index=0, name="build", status="completed", experiment_dir=str(stage0_dir)),
@@ -509,27 +495,29 @@ class TestPipelineRunner:
             )
             write_pipeline_state(state, pipeline_dir)
             write_pipeline_snapshot(config, pipeline_dir)
-            rc = runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
 
         assert rc == 0
         assert len(calls) == 1  # only stage 1 ran
 
-    def test_kb_chaining_sets_seed_on_config(self, runner, sregym_dir, tmp_path: Path) -> None:
+    def test_kb_chaining_sets_seed_on_config(self, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()
         captured_configs = []
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path):
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root):
             captured_configs.append(exp_config)
             return 0
 
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
 
-        with (
-            patch.object(runner, "_SREGYM_DIR", sregym_dir),
-            patch.object(runner, "_PROJECT_ROOT", tmp_path),
-            patch.object(runner, "_run_stage", side_effect=mock_run_stage),
-        ):
+        with patch.object(runner_mod, "_run_stage", side_effect=mock_run_stage):
             state = PipelineState(
                 stages=[
                     StageState(index=0, name="build"),
@@ -538,7 +526,13 @@ class TestPipelineRunner:
             )
             write_pipeline_state(state, pipeline_dir)
             write_pipeline_snapshot(config, pipeline_dir)
-            runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+            runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
 
         # Stage 0 should not have crucible_seed_kb_dir set (chain_kb=false)
         assert captured_configs[0].env.crucible_seed_kb_dir == ""
@@ -547,31 +541,38 @@ class TestPipelineRunner:
         seed_dir = captured_configs[1].env.crucible_seed_kb_dir
         assert seed_dir.endswith("/stage_0_build/kb")
 
-    def test_waits_for_kb_queue_drain_before_chaining(self, runner, sregym_dir, tmp_path: Path) -> None:
+    def test_hooks_invoked_for_kb_barrier(self, sregym_dir, tmp_path: Path) -> None:
+        """before_stage + snapshot_before_drain + wait_for_drain fire around
+        a stage whose successor chains its KB."""
         config = self._make_config()
-        wait_calls = []
+        before_calls = []
         snapshot_calls = []
+        wait_calls = []
+        sentinel = object()
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path):
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root):
             return 0
 
-        def mock_snapshot(kb_dir: Path):
-            snapshot_calls.append(kb_dir)
-            return object()
+        def before_stage(exp_dir, cfg):
+            before_calls.append(exp_dir)
 
-        def mock_wait(kb_dir: Path, *, baseline, timeout_s, poll_interval_s):
-            wait_calls.append((kb_dir, baseline, timeout_s, poll_interval_s))
+        def snap(exp_dir, cfg):
+            snapshot_calls.append(exp_dir)
+            return sentinel
+
+        def wait(exp_dir, baseline):
+            wait_calls.append((exp_dir, baseline))
+
+        hooks = StageHooks(
+            before_stage=before_stage,
+            snapshot_before_drain=snap,
+            wait_for_drain=wait,
+        )
 
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
 
-        with (
-            patch.object(runner, "_SREGYM_DIR", sregym_dir),
-            patch.object(runner, "_PROJECT_ROOT", tmp_path),
-            patch.object(runner, "_run_stage", side_effect=mock_run_stage),
-            patch.object(runner, "snapshot_kb_queue", side_effect=mock_snapshot),
-            patch.object(runner, "wait_for_kb_queue_drain", side_effect=mock_wait),
-        ):
+        with patch.object(runner_mod, "_run_stage", side_effect=mock_run_stage):
             state = PipelineState(
                 stages=[
                     StageState(index=0, name="build"),
@@ -580,27 +581,40 @@ class TestPipelineRunner:
             )
             write_pipeline_state(state, pipeline_dir)
             write_pipeline_snapshot(config, pipeline_dir)
-            rc = runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+                hooks=hooks,
+            )
 
         assert rc == 0
-        assert snapshot_calls == [pipeline_dir / "stage_0_build" / "kb"]
-        assert len(wait_calls) == 1
-        assert wait_calls[0][0] == pipeline_dir / "stage_0_build" / "kb"
-        assert wait_calls[0][1] is not None
+        # before_stage fires for both stages
+        assert before_calls == [
+            pipeline_dir / "stage_0_build",
+            pipeline_dir / "stage_1_eval",
+        ]
+        # snapshot + wait fire only around stage 0 (stage 1 chains from it)
+        assert snapshot_calls == [pipeline_dir / "stage_0_build"]
+        assert wait_calls == [(pipeline_dir / "stage_0_build", sentinel)]
 
-    def test_abort_on_kb_queue_drain_failure(self, runner, sregym_dir, tmp_path: Path) -> None:
+    def test_abort_on_kb_queue_drain_failure(self, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()
+
+        def wait_fails(exp_dir, baseline):
+            raise TimeoutError("queue stuck")
+
+        hooks = StageHooks(
+            snapshot_before_drain=lambda exp_dir, cfg: object(),
+            wait_for_drain=wait_fails,
+        )
 
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
 
-        with (
-            patch.object(runner, "_SREGYM_DIR", sregym_dir),
-            patch.object(runner, "_PROJECT_ROOT", tmp_path),
-            patch.object(runner, "_run_stage", return_value=0),
-            patch.object(runner, "snapshot_kb_queue", return_value=object()),
-            patch.object(runner, "wait_for_kb_queue_drain", side_effect=TimeoutError("queue stuck")),
-        ):
+        with patch.object(runner_mod, "_run_stage", return_value=0):
             state = PipelineState(
                 stages=[
                     StageState(index=0, name="build"),
@@ -609,7 +623,14 @@ class TestPipelineRunner:
             )
             write_pipeline_state(state, pipeline_dir)
             write_pipeline_snapshot(config, pipeline_dir)
-            rc = runner.run_pipeline(config, pipeline_dir=pipeline_dir, state=state)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+                hooks=hooks,
+            )
 
         assert rc == 1
         loaded_state = read_pipeline_state(pipeline_dir)

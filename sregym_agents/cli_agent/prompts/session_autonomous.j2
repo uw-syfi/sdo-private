@@ -43,11 +43,19 @@ Submission tools (from the `{{ submit_mcp_server_name }}` MCP server):
 {%- if "mitigation" in planned_stages %}
 - `submit_mitigation(ans)` — record the mitigation actions you took. Call this exactly once, only after the application is fully healthy.
 {%- endif %}
-- `submit_done()` — signal that your investigation is complete. Call this exactly once, **after** all `submit_diagnosis` calls and (if applicable) your single `submit_mitigation`. On this call the benchmark stops the TTL clock, grades your diagnoses, and returns rich feedback — judge reasoning, which candidate matched (if any), and the ground-truth root cause(s). Any further `submit_diagnosis` or `submit_mitigation` calls after `submit_done` will be rejected.
+- `submit_done()` — signal that your investigation is complete. Call this exactly once,{% if "diagnosis" in planned_stages and "mitigation" in planned_stages %} **after** all `submit_diagnosis` calls and your single `submit_mitigation`.{% elif "diagnosis" in planned_stages %} **after** all `submit_diagnosis` calls.{% elif "mitigation" in planned_stages %} **after** your single `submit_mitigation`.{% else %} after completing your investigation.{% endif %} On this call the benchmark stops the TTL clock, grades your diagnoses, and returns rich feedback — judge reasoning, which candidate matched (if any), and the ground-truth root cause(s).{% if "diagnosis" in planned_stages and "mitigation" in planned_stages %} Any further `submit_diagnosis` or `submit_mitigation` calls after `submit_done` will be rejected.{% elif "diagnosis" in planned_stages %} Any further `submit_diagnosis` calls after `submit_done` will be rejected.{% elif "mitigation" in planned_stages %} Any further `submit_mitigation` calls after `submit_done` will be rejected.{% endif %}
 
+{% if "diagnosis" in planned_stages and "mitigation" in planned_stages %}
 Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happen in any order, but **prefer calling `submit_mitigation` early** — lowering time-to-mitigation reduces customer impact. Then call `submit_done` once you're finished investigating.
+{% endif %}
 
-`submit_diagnosis` and `submit_mitigation` return only a neutral acknowledgement — do not rely on them to decide whether to continue. Decide based on what you observe in the cluster. Do not exit until you have called `submit_mitigation` exactly once (if applicable), `submit_diagnosis` at least once, and `submit_done` exactly once.
+{% if "diagnosis" in planned_stages and "mitigation" in planned_stages %}
+`submit_diagnosis` and `submit_mitigation` return only a neutral acknowledgement — do not rely on them to decide whether to continue. Decide based on what you observe in the cluster. Do not exit until you have called `submit_mitigation` exactly once, `submit_diagnosis` at least once, and `submit_done` exactly once.
+{% elif "diagnosis" in planned_stages %}
+`submit_diagnosis` returns only a neutral acknowledgement — do not rely on it to decide whether to continue. Decide based on what you observe in the cluster. Do not exit until you have called `submit_diagnosis` at least once and `submit_done` exactly once.
+{% elif "mitigation" in planned_stages %}
+`submit_mitigation` returns only a neutral acknowledgement — do not rely on it to decide whether to continue. Decide based on what you observe in the cluster. Do not exit until you have called `submit_mitigation` exactly once and `submit_done` exactly once.
+{% endif %}
 {% if memory_mcp_server_name %}
 **Only after `submit_done` returns** — use its ground-truth feedback to write an accurate `store_incident` record. If your own diagnosis was wrong or incomplete, use the feedback's `ground_truth_diagnosis` and judge `reasoning` to correct the `root_causes` and `lesson` fields before storing. Include `app`, `symptoms`, `key_checks` (the most useful commands and their output), `root_causes`, `fix`, and a one-line `lesson`. Do not store an incident whose diagnosis was judged wrong without first correcting it from the feedback.
 {% endif %}

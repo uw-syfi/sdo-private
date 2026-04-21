@@ -56,6 +56,10 @@ class CLIGenerationSession:
         # Providers populate this during event handling; stays at the
         # empty default if the session crashes before any terminal event.
         self.usage: ProviderUsage = ProviderUsage()
+        # Provider session id captured from the event stream (set by subclasses
+        # that parse JSON events). ``None`` if the underlying CLI did not emit
+        # an id during this run.
+        self.session_id: str | None = None
 
     def _log_raw(self, message: str) -> None:
         """Log a raw message directly to output if not silent."""
@@ -270,8 +274,13 @@ class CLICodingAgent(CodingAgent):
             raise RuntimeError(f"Failed to check {self.binary_name} CLI tool: {e}") from e
 
     @abstractmethod
-    def _get_command(self, prompt: str) -> list[str]:
-        """Construct the command line arguments."""
+    def _get_command(self, prompt: str, resume_session_id: str | None = None) -> list[str]:
+        """Construct the command line arguments.
+
+        Args:
+            prompt: The prompt to send to the agent.
+            resume_session_id: If set, the provider session id to resume.
+        """
 
     @property
     def _log_prefix(self) -> str:
@@ -305,6 +314,25 @@ class CLICodingAgent(CodingAgent):
             on_process_started=on_process_started,
         )
 
+    def start_session(
+        self,
+        cwd: str | None = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ) -> "CLIAgentSession":
+        """Open a stateful conversation with the underlying CLI.
+
+        Returns a :class:`CLIAgentSession` whose ``generate(prompt)`` may be
+        called repeatedly; each call after the first automatically resumes
+        the prior conversation via the provider's native resume flag.
+
+        Args:
+            cwd: Default working directory for ``session.generate`` calls.
+            timeout: Default timeout in seconds.
+            silent: If True, suppress stdout printing of the agent's output.
+        """
+        return CLIAgentSession(self, cwd=cwd, timeout=timeout, silent=silent)
+
     def generate(
         self,
         prompt: str,
@@ -313,35 +341,93 @@ class CLICodingAgent(CodingAgent):
         silent: bool = False,
         on_process_started: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> str:
-        """Generate text using the CLI tool.
+        """One-shot prompt → reply. Convenience wrapper around
+        ``start_session(...).generate(prompt)``; no conversation state is
+        retained across calls. Use :meth:`start_session` for multi-turn flows.
+        """
+        return self.start_session(cwd=cwd, timeout=timeout, silent=silent).generate(
+            prompt, on_process_started=on_process_started
+        )
+
+
+class CLIAgentSession:
+    """Stateful, resumable conversation with a CLI agent.
+
+    Holds the provider session id captured from the first ``generate`` call
+    so subsequent calls automatically pass the right native resume flag
+    (``claude --resume``, ``codex exec resume``, ``gemini --resume``,
+    ``opencode run --session``). Callers do not see provider-specific
+    plumbing.
+
+    A session is single-threaded — concurrent calls into ``generate`` on the
+    same instance are not supported.
+    """
+
+    def __init__(
+        self,
+        agent: CLICodingAgent,
+        *,
+        cwd: str | None = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ):
+        self.agent = agent
+        self._cwd = cwd
+        self._timeout = timeout
+        self._silent = silent
+        # Provider session id, set after the first ``generate`` call (None
+        # if the underlying CLI did not emit one).
+        self.session_id: str | None = None
+
+    def generate(
+        self,
+        prompt: str,
+        cwd: str | None = None,
+        timeout: int | None = None,
+        silent: bool | None = None,
+        on_process_started: Callable[[subprocess.Popen[str]], None] | None = None,
+    ) -> str:
+        """Send ``prompt``, returning the assistant's text reply.
+
+        Per-call ``cwd`` / ``timeout`` / ``silent`` override the defaults
+        captured by :meth:`CLICodingAgent.start_session`. The provider's
+        native resume flag is added automatically on every call after the
+        first.
 
         Args:
             prompt: The prompt to send.
-            cwd: Optional working directory.
-            timeout: Timeout in seconds (default: 300).
-            silent: If True, suppress stdout printing of the agent's output.
+            cwd: Override the session's default working directory.
+            timeout: Override the session's default timeout (seconds).
+            silent: Override the session's default silent flag.
             on_process_started: Optional callback invoked with the spawned
-                ``subprocess.Popen`` object immediately after the CLI
-                subprocess starts.  Used by callers that need to kill the
-                process from the outside (e.g. crucible's short-circuit).
-
-        Returns:
-            Generated text.
+                ``subprocess.Popen`` immediately after the CLI subprocess
+                starts (used by callers that need to kill it externally,
+                e.g. crucible's short-circuit).
         """
-        # Record the prompt in trajectory
-        self.recorder.add_user_message(prompt)
+        effective_cwd = cwd if cwd is not None else self._cwd
+        effective_timeout = timeout if timeout is not None else self._timeout
+        effective_silent = silent if silent is not None else self._silent
 
-        cmd = self._get_command(prompt)
-        session = self._create_session(
+        self.agent.recorder.add_user_message(prompt)
+
+        cmd = self.agent._get_command(prompt, resume_session_id=self.session_id)  # pyright: ignore[reportPrivateUsage]
+        run_session = self.agent._create_session(  # pyright: ignore[reportPrivateUsage]
             cmd,
-            cwd,
-            timeout,
-            silent,
-            recorder=self.recorder,
+            effective_cwd,
+            effective_timeout,
+            effective_silent,
+            recorder=self.agent.recorder,
             on_process_started=on_process_started,
         )
-        result = session.run(prompt)
-        self.last_usage = session.usage
+        result = run_session.run(prompt)
+        self.agent.last_usage = getattr(run_session, "usage", ProviderUsage())
 
-        self.recorder.add_assistant_message(result)
+        # Capture the id on first run; refresh on later runs only if the
+        # underlying CLI actually emitted one (defensive — providers always
+        # echo the same id back when resumed).
+        captured = getattr(run_session, "session_id", None)
+        if captured:
+            self.session_id = captured
+
+        self.agent.recorder.add_assistant_message(result)
         return result

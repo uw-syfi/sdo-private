@@ -23,7 +23,7 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-from sregym_agents.experiment_config import (
+from libs.sregym_lib.experiment import (
     ExperimentConfig,
     RunnerEnv,
     variant_config_from_raw,

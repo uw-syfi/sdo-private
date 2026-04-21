@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 import pytest
 
 from libs.pydantic_agent import UsageCollector
-from sregym_agents.crucible._benchmark import BenchmarkResult, Oracle
+from libs.sregym_lib.benchmark import BenchmarkResult, Oracle
 from sregym_agents.crucible._prompts import PromptRenderer
 from sregym_agents.crucible.agents.base import AgentResult
 from sregym_agents.crucible.config import CrucibleConfig

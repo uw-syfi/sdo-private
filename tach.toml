@@ -35,6 +35,12 @@ depends_on = [
     "libs.sds_core",
 ]
 
+[[modules]]
+path = "libs.sregym_lib"
+depends_on = [
+    "libs.agent_mw",
+]
+
 # --- app_operator catch-all (strict tripwire) ---
 # Any app_operator.* path not matched by a more specific [[modules]] block
 # below falls into this catch-all.  With `depends_on = []` it acts as a
@@ -287,4 +293,5 @@ depends_on = [
     "libs.agent_cli",
     "libs.agent_mw",
     "libs.pydantic_agent",
+    "libs.sregym_lib",
 ]

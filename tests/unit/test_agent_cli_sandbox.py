@@ -92,7 +92,7 @@ class TestConfineReadsHook:
         assert str(tmp_path) in command
 
     def _run_hook(self, payload: dict, roots: list[str]) -> tuple[int, str]:
-        hook_path = Path(__file__).resolve().parents[2] / "libs" / "agent_cli" / "hooks" / "confine_reads.py"
+        hook_path = Path(__file__).resolve().parents[2] / "libs" / "agent_cli" / "claude" / "hooks" / "confine_reads.py"
         proc = subprocess.run(
             [sys.executable, str(hook_path), *roots],
             input=json.dumps(payload),

@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
 if [ $# -eq 0 ]; then
-  exec uv run python scripts/run_sregym.py sregym_agents/experiments/default.toml
+  exec uv run python -m sregym_agents.run_sregym sregym_agents/experiments/default.toml
 else
-  exec uv run python scripts/run_sregym.py "$@"
+  exec uv run python -m sregym_agents.run_sregym "$@"
 fi
