@@ -40,6 +40,9 @@ def _import_bench_main() -> Any:
     sregym_pkg = _module("sregym")
     conductor_pkg = _module("sregym.conductor")
     service_pkg = _module("sregym.service")
+    app_workspace_mod = _module("sregym.service.app_workspace")
+    app_workspace_mod.prepare_application_workspace = lambda **kwargs: Path("/tmp/app-workspace")
+    app_workspace_mod.should_replay_completed_run = lambda **kwargs: False
     source_deploy_mod = _module("sregym.service.source_deploy")
     source_deploy_mod.ensure_app_supported = lambda app_name: None
 
@@ -133,12 +136,126 @@ def test_benchmark_parser_accepts_app_filter():
     assert args.app_filter == "hotel_reservation"
 
 
+def test_benchmark_parser_accepts_application_workspace_flag():
+    mod = _import_bench_main()
+
+    args = mod.parse_cli_args(
+        [
+            "--agent",
+            "cli_agent",
+            "--app-filter",
+            "hotel_reservation",
+            "--deploy-from-source",
+            "--application-workspace",
+        ]
+    )
+
+    assert args.application_workspace is True
+
+
+def test_application_workspace_requires_app_filter():
+    mod = _import_bench_main()
+
+    with pytest.raises(SystemExit):
+        mod.parse_cli_args(["--agent", "cli_agent", "--deploy-from-source", "--application-workspace"])
+
+
+def test_application_workspace_requires_deploy_from_source():
+    mod = _import_bench_main()
+
+    with pytest.raises(SystemExit):
+        mod.parse_cli_args(["--agent", "cli_agent", "--app-filter", "hotel_reservation", "--application-workspace"])
+
+
+def test_application_workspace_requires_single_worker():
+    mod = _import_bench_main()
+
+    with pytest.raises(SystemExit):
+        mod.parse_cli_args(
+            [
+                "--agent",
+                "cli_agent",
+                "--app-filter",
+                "hotel_reservation",
+                "--deploy-from-source",
+                "--application-workspace",
+                "--parallel",
+                "2",
+            ]
+        )
+
+
 def test_live_parser_accepts_deploy_from_source_flag():
     mod = _import_bench_main()
 
     args = mod.parse_cli_args(["deploy", "--app", "hotel_reservation", "--deploy-from-source"])
 
     assert args.deploy_from_source is True
+
+
+def test_experiment_dir_has_prior_results_requires_completed_csv(tmp_path: Path):
+    mod = _import_bench_main()
+    problem_dir = tmp_path / "problem_runs" / "0422_0000_wrong_service_selector_hotel_reservation"
+    problem_dir.mkdir(parents=True)
+    (problem_dir / "results_partial.csv").write_text("problem_id\nfoo\n", encoding="utf-8")
+    assert mod._experiment_dir_has_prior_results(str(tmp_path)) is False
+
+    (problem_dir / "results_complete.csv").write_text(
+        'problem_id,"Diagnosis.success","Mitigation.success"\n"foo","True","True"\n',
+        encoding="utf-8",
+    )
+    assert mod._experiment_dir_has_prior_results(str(tmp_path)) is True
+
+
+def test_count_completed_problem_results_reads_problem_run_directories(tmp_path: Path):
+    mod = _import_bench_main()
+    first_run = tmp_path / "problem_runs" / "0422_0000_wrong_service_selector_hotel_reservation"
+    first_run.mkdir(parents=True)
+    (first_run / "results_complete.csv").write_text(
+        'problem_id,"Diagnosis.success","Mitigation.success"\n'
+        '"wrong_service_selector_hotel_reservation","True","True"\n',
+        encoding="utf-8",
+    )
+
+    replay_run = tmp_path / "problem_runs" / "0422_0100_wrong_service_selector_hotel_reservation_replay1"
+    replay_run.mkdir(parents=True)
+    (replay_run / "results_complete.csv").write_text(
+        'problem_id,"Diagnosis.success","Mitigation.success"\n'
+        '"wrong_service_selector_hotel_reservation","True","True"\n',
+        encoding="utf-8",
+    )
+
+    other_problem = tmp_path / "problem_runs" / "0422_0200_wrong_dns_policy_hotel_reservation"
+    other_problem.mkdir(parents=True)
+    (other_problem / "results_complete.csv").write_text(
+        'problem_id,"Diagnosis.success","Mitigation.success"\n"wrong_dns_policy_hotel_reservation","True","True"\n',
+        encoding="utf-8",
+    )
+
+    assert mod._count_completed_problem_results(str(tmp_path), "wrong_service_selector_hotel_reservation") == 2
+
+
+def test_partition_resumed_problems_uses_problem_run_results(tmp_path: Path):
+    mod = _import_bench_main()
+    completed_dir = tmp_path / "problem_runs" / "0422_0000_wrong_service_selector_hotel_reservation"
+    completed_dir.mkdir(parents=True)
+    (completed_dir / "results_complete.csv").write_text(
+        'problem_id,"Diagnosis.success","Mitigation.success"\n'
+        '"wrong_service_selector_hotel_reservation","True","True"\n',
+        encoding="utf-8",
+    )
+
+    pending, completed = mod._partition_resumed_problems(
+        str(tmp_path),
+        [
+            "wrong_service_selector_hotel_reservation",
+            "wrong_dns_policy_hotel_reservation",
+        ],
+        repeat=1,
+    )
+
+    assert pending == ["wrong_dns_policy_hotel_reservation"]
+    assert completed == ["wrong_service_selector_hotel_reservation"]
 
 
 def test_filter_problem_ids_by_app_respects_aliases():
