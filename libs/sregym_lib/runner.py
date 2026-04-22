@@ -44,6 +44,7 @@ from libs.sregym_lib.pipeline import (
 
 _MEMORY_AGENT = "cli_agent"
 _DEFAULT_MEMORY_PORT = 9953
+_APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
 
 
 def _load_agent_hooks(agent_name: str, project_root: Path) -> tuple[str | None, str | None]:
@@ -254,6 +255,7 @@ def _run_stage(
     tasklist_path: Path | None,
     sregym_dir: Path,
     project_root: Path,
+    extra_env: dict[str, str] | None = None,
 ) -> int:
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
     env = config_to_env(exp_config, project_root)
@@ -265,6 +267,8 @@ def _run_stage(
     if (stage_exp_dir.parent / "pipeline_state.json").exists():
         memory_log_dir = stage_exp_dir.parent
     env = _inject_memory_defaults(env, exp_config.agent, memory_log_dir)
+    if extra_env:
+        env.update(extra_env)
 
     _print_experiment_info(exp_config, env)
 
@@ -283,6 +287,39 @@ def _run_stage(
                 sig_name = f"signal {-result.returncode}"
             print(f"  ⚠️  Process was killed by {sig_name}", flush=True)
     return result.returncode
+
+
+def _resolve_workspace_seed_env(
+    *,
+    current_stage: int,
+    state: PipelineState,
+    exp_config: ExperimentConfig,
+) -> dict[str, str]:
+    """Return env vars needed to seed a stage-local application workspace."""
+    if current_stage <= 0:
+        raise ValueError("chain_application_workspace requires a previous stage to copy from")
+    if not exp_config.application_workspace:
+        raise ValueError("chain_application_workspace requires application_workspace = true for the stage")
+
+    prev_state = state.stages[current_stage - 1]
+    if not prev_state.experiment_dir:
+        raise FileNotFoundError("Previous stage has no experiment directory to copy application workspace from")
+
+    prev_stage_dir = Path(prev_state.experiment_dir)
+    prev_workspace_dir = prev_stage_dir / "application_workspace"
+    if not prev_workspace_dir.is_dir():
+        raise FileNotFoundError(f"Previous stage application workspace is missing: {prev_workspace_dir}")
+
+    prev_config = read_snapshot(prev_stage_dir)
+    if not prev_config.application_workspace:
+        raise ValueError("chain_application_workspace requires the previous stage to enable application_workspace")
+    if prev_config.app_filter != exp_config.app_filter:
+        raise ValueError(
+            "chain_application_workspace requires matching app_filter values between consecutive stages "
+            f"(previous={prev_config.app_filter!r}, current={exp_config.app_filter!r})"
+        )
+
+    return {_APP_WORKSPACE_SEED_ENV_VAR: str(prev_workspace_dir)}
 
 
 def run_pipeline(
@@ -368,6 +405,22 @@ def run_pipeline(
             print(f"Stage {i}/{len(config.stages) - 1}: {stage_name}")
             if stage_cfg.chain_kb and prev_kb_dir:
                 print(f"  KB seed: {prev_kb_dir}")
+            stage_extra_env: dict[str, str] = {}
+            try:
+                if stage_cfg.chain_application_workspace:
+                    stage_extra_env = _resolve_workspace_seed_env(
+                        current_stage=i,
+                        state=state,
+                        exp_config=exp_config,
+                    )
+                    print(f"  Application workspace seed: {stage_extra_env[_APP_WORKSPACE_SEED_ENV_VAR]}")
+            except Exception as exc:
+                stage_state.status = "failed"
+                stage_state.error = str(exc)
+                write_pipeline_state(state, pipeline_dir)
+                print(f"\nStage {i} failed before launch: {exc}")
+                print(f"Resume with: run_sregym.sh {pipeline_dir}")
+                return 1
             print("=" * 60)
 
             if hooks.before_stage is not None:
@@ -379,7 +432,14 @@ def run_pipeline(
                 drain_baseline = hooks.snapshot_before_drain(stage_exp_dir, exp_config)
 
             try:
-                returncode = _run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root)
+                returncode = _run_stage(
+                    exp_config,
+                    stage_exp_dir,
+                    tasklist_path,
+                    sregym_dir,
+                    project_root,
+                    stage_extra_env,
+                )
             except KeyboardInterrupt:
                 print(f"\nInterrupted during stage {i}. Saving state for resume.")
                 stage_state.status = "failed"

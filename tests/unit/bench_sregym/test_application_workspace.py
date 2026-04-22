@@ -96,6 +96,33 @@ def test_prepare_application_workspace_reuses_existing_repo_on_resume(tmp_path: 
     assert _git(["rev-list", "--count", "HEAD"], resumed_dir) == "2"
 
 
+def test_prepare_application_workspace_copies_seeded_workspace(tmp_path: Path, monkeypatch):
+    source_root = tmp_path / "sources"
+    source_dir = source_root / "hotelReservation"
+    source_dir.mkdir(parents=True)
+    (source_dir / "README.md").write_text("source\n", encoding="utf-8")
+    monkeypatch.setattr(app_workspace, "_target_microservices_root", lambda: source_root)
+
+    previous_dir = tmp_path / "previous"
+    seeded_dir = previous_dir / "application_workspace"
+    seeded_dir.mkdir(parents=True)
+    (seeded_dir / "README.md").write_text("seeded\n", encoding="utf-8")
+    (seeded_dir / ".sds").mkdir()
+    (seeded_dir / ".sds" / "diagnose.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+
+    workspace_dir = app_workspace.prepare_application_workspace(
+        experiment_dir=tmp_path / "experiment",
+        app_filter="hotel_reservation",
+        resume=False,
+        seed_from=seeded_dir,
+    )
+
+    assert workspace_dir == tmp_path / "experiment" / "application_workspace"
+    assert (workspace_dir / "README.md").read_text(encoding="utf-8") == "seeded\n"
+    assert (workspace_dir / ".sds" / "diagnose.sh").read_text(encoding="utf-8") == "#!/bin/bash\n"
+    assert not (workspace_dir / ".git").exists()
+
+
 def test_should_replay_completed_run_only_when_workspace_mode_enabled():
     assert app_workspace.should_replay_completed_run(
         application_workspace_enabled=True,

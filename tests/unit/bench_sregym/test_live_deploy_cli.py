@@ -42,6 +42,7 @@ def _import_bench_main() -> Any:
     service_pkg = _module("sregym.service")
     app_workspace_mod = _module("sregym.service.app_workspace")
     app_workspace_mod.prepare_application_workspace = lambda **kwargs: Path("/tmp/app-workspace")
+    app_workspace_mod.application_workspace_seed_override = lambda: None
     app_workspace_mod.should_replay_completed_run = lambda **kwargs: False
     source_deploy_mod = _module("sregym.service.source_deploy")
     source_deploy_mod.ensure_app_supported = lambda app_name: None
