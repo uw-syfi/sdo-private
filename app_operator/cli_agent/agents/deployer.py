@@ -8,9 +8,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from agentshim.base import CodingAgent
+
     from app_operator.core import CommandResult
     from app_operator.dspy_integration import DSPyConfig
-    from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.agents.deploy_executor import DeployExecutor

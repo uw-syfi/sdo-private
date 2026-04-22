@@ -16,7 +16,6 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "sds-agent-cli",
     "sds-agent-mw",
     "sds-core",
     "sds-model-config",
@@ -35,6 +34,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/04/b5/fc0b65b561d00d88811c8a7d98ee735833f81554be244340950e7b65820c/ag_ui_protocol-0.1.13.tar.gz", hash = "sha256:811d7d7dcce4783dec252918f40b717ebfa559399bf6b071c4ba47c0c1e21bcb", size = 5671, upload-time = "2026-02-19T18:40:38.602Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cd/9f/b833c1ab1999da35ebad54841ae85d2c2764c931da9a6f52d8541b6901b2/ag_ui_protocol-0.1.13-py3-none-any.whl", hash = "sha256:1393fa894c1e8416efe184168a50689e760d05b32f4646eebb8ff423dddf8e8f", size = 8053, upload-time = "2026-02-19T18:40:37.27Z" },
+]
+
+[[package]]
+name = "agentshim"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "litellm" },
+    { name = "loguru" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3d/6d/eba163c1bdb4bb474609f5ceb04783c05dc03a79ddbfdcae5a2c4ec6d80a/agentshim-0.1.0.tar.gz", hash = "sha256:14b290db39aa09cc498fde9566c8c127af1d3db2ba05be1e89a1fe6174535ed0", size = 200992, upload-time = "2026-04-22T18:31:50.432Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/0f/1dcb4789fa2a94951c822d4156636b51410fb2ea6ea937a27f347b631cb3/agentshim-0.1.0-py3-none-any.whl", hash = "sha256:cf1a271b8f457d738bc7048a52d7074724e17be1ac1d71f499ea696e93f959e9", size = 37549, upload-time = "2026-04-22T18:31:48.929Z" },
 ]
 
 [[package]]
@@ -5606,21 +5618,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sds-agent-cli"
-version = "0.1.0"
-source = { editable = "libs/agent_cli" }
-dependencies = [
-    { name = "litellm" },
-    { name = "loguru" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "litellm", specifier = ">=1.0.0" },
-    { name = "loguru", specifier = ">=0.7.2" },
-]
-
-[[package]]
 name = "sds-agent-mw"
 version = "0.1.0"
 source = { editable = "libs/agent_mw" }
@@ -5650,6 +5647,7 @@ name = "sds-operator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agentshim" },
     { name = "click" },
     { name = "deepagents", marker = "python_full_version >= '3.11'" },
     { name = "dspy-ai" },
@@ -5706,6 +5704,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentshim", specifier = ">=0.1.0" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepagents", marker = "python_full_version >= '3.11'", specifier = ">=0.5.0a1" },
     { name = "dspy-ai", specifier = ">=2.4.0" },

@@ -62,7 +62,7 @@ def _format_incident(case: IncidentCase) -> str:
 
 def _llm_merge(existing: IncidentCase, new: dict[str, Any], model: str) -> dict[str, Any] | None:
     """Call the LLM to synthesize two incident records; returns merged fields or None on failure."""
-    from libs.agent_cli.llm_client import LiteLLMClient
+    from agentshim.llm_client import LiteLLMClient
 
     client = LiteLLMClient(model=model)
     prompt = _MERGE_USER.format(

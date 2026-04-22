@@ -7,7 +7,7 @@ This document explains how the components of SDS fit together, covering provider
 ## Component Map
 
 ```
-libs/agent_cli/          provider abstraction (CodingAgent ABC, AGENT_REGISTRY)
+agentshim/          provider abstraction (CodingAgent ABC, AGENT_REGISTRY)
      ├── app_operator/   sds_operator — deploy, monitor, optimize
      │     ├── cli_agent/    runtime: cli_agent (default)
      │     ├── trajectory.py recording
@@ -22,7 +22,7 @@ The graph below is generated from `tach.toml` by `scripts/generate_tach_graph.sh
 
 ![Module dependency graph](assets/tach_module_graph.png)
 
-Both `sds_operator` and `lego_agent` share `libs/agent_cli/` for provider access and read from `sds.toml`, but do not share business logic.
+Both `sds_operator` and `lego_agent` share `agentshim/` for provider access and read from `sds.toml`, but do not share business logic.
 
 ---
 
@@ -46,7 +46,7 @@ Layer 0  config, types,    foundational (no internal deps)
          constants, …
 ```
 
-`libs/` sits below everything: `libs.sds_core` is the foundation of `libs`; `libs.agent_cli` is the provider abstraction. Neither may import from `app_operator` or `lego_agent`.
+`libs/` sits below everything: `libs.sds_core` is the foundation of `libs`; `agentshim` is the provider abstraction. Neither may import from `app_operator` or `lego_agent`.
 
 ### Façade rule
 
@@ -87,7 +87,7 @@ Heavy symbols (those that transitively pull in `dspy` or `litellm`) are lazy-loa
 
 ## Provider Abstraction
 
-`libs/agent_cli/` provides a `CodingAgent` ABC and a `create_agent_from_config()` factory. Both tools instantiate agents through this layer; no provider-specific code lives in the tools themselves.
+`agentshim/` provides a `CodingAgent` ABC and a `create_agent_from_config()` factory. Both tools instantiate agents through this layer; no provider-specific code lives in the tools themselves.
 
 Supported providers and required credentials:
 

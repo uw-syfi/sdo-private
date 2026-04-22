@@ -27,16 +27,17 @@ from app_operator.trajectory.collectors import collect_gemini_sessions
 from app_operator.trajectory.utils import extract_rlm_statistics_from_trajectory
 
 if TYPE_CHECKING:
-    from app_operator.core import ConversationEntry, TrajectoryCallRecord
-    from libs.agent_cli.trajectory import FaultInjectionMetadata, TokenUsage
+    from agentshim.trajectory import FaultInjectionMetadata, TokenUsage
 
-from libs.agent_cli.trajectory import (
+    from app_operator.core import ConversationEntry, TrajectoryCallRecord
+
+from agentshim.trajectory import (
     NullTrajectoryRecorder as NullTrajectoryRecorder,
 )
-from libs.agent_cli.trajectory import (
+from agentshim.trajectory import (
     TrajectoryRecorderProtocol as TrajectoryRecorderProtocol,
 )
-from libs.agent_cli.trajectory import (
+from agentshim.trajectory import (
     register_context_providers as _register_context_providers,
 )
 
@@ -658,6 +659,6 @@ def record_user_message(content: str) -> None:
         recorder.add_user_message(content)
 
 
-# Wire libs.agent_cli.trajectory context providers to the real thread-local
+# Wire agentshim.trajectory context providers to the real thread-local
 # implementations so GeminiGenerationSession gets live call/run IDs.
 _register_context_providers(get_current_call_id, get_run_id)

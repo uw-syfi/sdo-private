@@ -1,6 +1,6 @@
-"""Minimal SRE Gym agent that wraps a ``libs.agent_cli`` CLI agent.
+"""Minimal SRE Gym agent that wraps a ``agentshim`` CLI agent.
 
-Per stage, spawns one ``CodingAgent`` from ``libs.agent_cli.AGENT_REGISTRY``
+Per stage, spawns one ``CodingAgent`` from ``agentshim.AGENT_REGISTRY``
 with the sregym ``/submit`` MCP server wired in. The wrapped CLI itself
 calls the ``submit`` tool when it has reached a conclusion — this driver
 just builds the prompt, launches the CLI, and after it returns checks
@@ -10,11 +10,11 @@ No judge, no knowledge base, no deferred cleanup — this agent is a
 baseline / smoke test. Contrast with ``sregym_agents.crucible.driver``.
 
 Provider support: submission is done by the wrapped CLI through the MCP
-server, so only providers whose ``libs.agent_cli`` class accepts
+server, so only providers whose ``agentshim`` class accepts
 ``mcp_servers`` are usable — currently ``claude`` and ``codex``. Gemini
 and Opencode raise ``ValueError`` inside their constructor when
 ``mcp_servers`` is non-empty (see
-``libs/agent_cli/gemini.py`` and ``libs/agent_cli/opencode.py``).
+``agentshim/gemini.py`` and ``agentshim/opencode.py``).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from libs.sregym_lib.schema import READY_STAGES, TERMINAL_STAGES
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from libs.agent_cli import CodingAgent
+    from agentshim import CodingAgent
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ def _build_prompt(
 
 def _build_memory_mcp_server(store_path: str, merge_model: str | None = None) -> Any:
     """Build a ``StdioMcpServer`` that launches the incident memory server as a subprocess."""
-    from libs.agent_cli.mcp_config import StdioMcpServer
+    from agentshim.mcp_config import StdioMcpServer
 
     args = [
         "run",
@@ -143,7 +143,7 @@ def _build_memory_mcp_server(store_path: str, merge_model: str | None = None) ->
 
 def _build_memory_mcp_server_http(port: int, store_only: bool = False) -> Any:
     """Build an ``HttpMcpServer`` pointing to the shared memory daemon."""
-    from libs.agent_cli.mcp_config import HttpMcpServer
+    from agentshim.mcp_config import HttpMcpServer
 
     url = f"http://localhost:{port}/sse"
     if store_only:
@@ -165,10 +165,10 @@ def _default_agent_factory(
     """
     # Deferred imports: keeps `--help` fast and avoids triggering heavy
     # litellm/claude-sdk loads when the driver is imported by tests.
-    # Importing `libs.agent_cli.base` transitively runs `libs/agent_cli/__init__.py`,
+    # Importing `agentshim.base` transitively runs `agentshim/__init__.py`,
     # which imports each CLI subclass and populates AGENT_REGISTRY as a side effect.
-    from libs.agent_cli.base import AGENT_REGISTRY
-    from libs.agent_cli.mcp_config import HttpMcpServer
+    from agentshim.base import AGENT_REGISTRY
+    from agentshim.mcp_config import HttpMcpServer
 
     try:
         cls = AGENT_REGISTRY[provider.lower()]
@@ -219,13 +219,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     toml_cfg = _load_toml_agent_config()
 
     parser = argparse.ArgumentParser(
-        description="Minimal SRE Gym agent that wraps a libs/agent_cli CLI.",
+        description="Minimal SRE Gym agent that wraps a agentshim CLI.",
     )
     parser.add_argument(
         "--provider",
         default=toml_cfg.get("provider", "claude"),
         help=(
-            "CLI provider from libs.agent_cli.AGENT_REGISTRY "
+            "CLI provider from agentshim.AGENT_REGISTRY "
             "(must support mcp_servers: currently claude or codex; default: claude)"
         ),
     )

@@ -1,9 +1,9 @@
 import pytest
+from agentshim.base import AGENT_REGISTRY, CodingAgent, register_provider
+from agentshim.cli_agent import CLICodingAgent
 
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.core import AgentConfig, Config
-from libs.agent_cli.base import AGENT_REGISTRY, CodingAgent, register_provider
-from libs.agent_cli.cli_agent import CLICodingAgent
 from libs.model_config import ModelConfig
 
 
@@ -14,7 +14,7 @@ def mock_binaries(monkeypatch):
     def mock_which(cmd, path=None):
         return f"/usr/bin/{cmd}"
 
-    monkeypatch.setattr("libs.agent_cli.cli_agent.shutil.which", mock_which)
+    monkeypatch.setattr("agentshim.cli_agent.shutil.which", mock_which)
     monkeypatch.setattr(CLICodingAgent, "_check_cli", lambda self: None)
 
 

@@ -1,5 +1,6 @@
+from agentshim.base import AGENT_REGISTRY, CodingAgent
+
 from app_operator.core import Config, load_config, logger
-from libs.agent_cli.base import AGENT_REGISTRY, CodingAgent
 
 
 def create_agent_from_config(

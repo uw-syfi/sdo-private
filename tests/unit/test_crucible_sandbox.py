@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 
 import pytest
+from agentshim import SandboxConfig
 
-from libs.agent_cli import SandboxConfig
 from sregym_agents.crucible.sandbox import build_crucible_sandbox
 
 

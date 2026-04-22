@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentshim.base import CodingAgent
+
     from app_operator.core import CommandResult
     from app_operator.dspy_integration import DSPyConfig
     from app_operator.trajectory import TrajectoryRecorderProtocol
-    from libs.agent_cli.base import CodingAgent
 
 from app_operator.core import logger
 from app_operator.prompts import get_loader

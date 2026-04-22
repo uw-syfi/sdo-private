@@ -13,11 +13,11 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+from agentshim.base import CodingAgent
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.core import AgentConfig, Config, DSPyConfig
 from app_operator.dspy_integration._loader import reset_cache
-from libs.agent_cli.base import CodingAgent
 from libs.model_config import ModelConfig
 
 # --- Fake Agent for DSPy Testing ---

@@ -3,9 +3,9 @@
 import unittest.mock as mock
 
 import pytest
+from agentshim import call_subagent
 
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
-from libs.agent_cli import call_subagent
 from libs.model_config import ModelConfig
 
 # ---------------------------------------------------------------------------
@@ -373,7 +373,7 @@ class TestSubagentRegistration:
     """Tests for provider registration."""
 
     def test_subagent_in_agent_registry(self):
-        from libs.agent_cli.base import AGENT_REGISTRY
+        from agentshim.base import AGENT_REGISTRY
 
         assert "subagent" in AGENT_REGISTRY
         assert AGENT_REGISTRY["subagent"] is SubagentCodingAgent

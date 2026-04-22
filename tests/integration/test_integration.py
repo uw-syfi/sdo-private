@@ -2,10 +2,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agentshim.base import CodingAgent
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.core import AgentConfig, Config
-from libs.agent_cli.base import CodingAgent
 from libs.model_config import ModelConfig
 
 # --- Fake Agent ---

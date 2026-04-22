@@ -3,6 +3,7 @@
 import unittest.mock as mock
 
 import pytest
+from agentshim.base import AGENT_REGISTRY
 
 from app_operator.cli_agent.rlm_official_agent import (
     _SDS_ROOT_PROMPT_PREFIX,
@@ -11,7 +12,6 @@ from app_operator.cli_agent.rlm_official_agent import (
     _build_custom_tools,
 )
 from app_operator.core import AgentConfig, Config
-from libs.agent_cli.base import AGENT_REGISTRY
 
 
 class TestRegistration:

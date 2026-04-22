@@ -277,13 +277,13 @@ class TestHybridFixPath:
 
 class TestHybridRegistration:
     def test_hybrid_in_agent_registry(self):
-        from libs.agent_cli.base import AGENT_REGISTRY
+        from agentshim.base import AGENT_REGISTRY
 
         assert "hybrid" in AGENT_REGISTRY
         assert AGENT_REGISTRY["hybrid"] is HybridCodingAgent
 
     def test_legacy_architecture_backends_not_in_registry(self):
-        from libs.agent_cli.base import AGENT_REGISTRY
+        from agentshim.base import AGENT_REGISTRY
 
         assert "rlm" not in AGENT_REGISTRY
 
