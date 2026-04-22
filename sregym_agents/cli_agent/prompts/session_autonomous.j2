@@ -12,8 +12,12 @@ You are allowed to add small, generic repository-local diagnostic scripts if you
 - Keep them diagnostic-only and low-risk. Do not encode benchmark IDs, injected-fault-specific keys, or exact oracle answers.
 - Put persistent diagnostics under `.sds/`.
 - The fixed entrypoint is `.sds/diagnose.sh`. Write or update that script when you want to encode quick triage checks for previously seen symptoms or errors.
+- When `.sds/diagnose.sh` identifies issues, it should also print which playbook file(s) under `.sds/playbooks/` are relevant to consult.
 - Aside from that fixed entrypoint, you may organize `.sds/` however you want.
+- Write generalizable incident playbooks as Markdown files under `.sds/playbooks/`. These should cover both diagnosis and mitigation guidance for recurring issue classes.
+- Maintain a concise table-of-contents Markdown file at `.sds/playbooks/README`. Keep it short and scannable, and use it as a lightweight routing layer that helps readers quickly find the right playbook(s).
 - Keep these checks quick to run and write the code in a well-organized way.
+- Use good Bash script best practices in `.sds/diagnose.sh`: prefer small functions, dispatch into helper scripts when useful, add comments that explain the context of non-obvious checks, and keep the code readable, maintainable, and easy to extend.
 - Prefer checks for general live symptoms or invariants such as selector-to-pod matching, missing service endpoints, probe/config references, DNS resolution, dependency reachability, crash loops, or recurring log/error signatures.
 - Treat any persistent diagnostic you find or create as a hinting layer. Verify its claims against the live cluster before relying on them.
 
@@ -21,26 +25,6 @@ Start every run with this preflight workflow before broader triage:
 1. Read the application source code and deployment manifests to contextualize the Kubernetes resources you are seeing. Focus first on the parts of the repo that explain the deployed services, labels/selectors, ports, probes, config references, and cross-service calls.
 2. Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist from prior runs.
 3. If `.sds/diagnose.sh` exists, run it at the beginning of the session to quickly triage the cluster and flag previously seen issues. Use its output to guide your initial investigation, but verify its claims against the live cluster before relying on them.
-{% if memory_mcp_server_name %}
-**Incident memory** (from the `{{ memory_mcp_server_name }}` MCP server):
-{%- if not memory_store_only %}
-- `recall_incident(query)` — retrieve a similar past incident after you have ONE concrete symptom from the live cluster (for example a pod state, probe failure, init-container state, specific log line, or failing service). Use a one-line query like "<app>: <pod/service> <error>". Prefer a symptom-specific query over a broad app-level query.
-  Treat the response as ONE HYPOTHESIS to verify against YOUR cluster, not as the answer:
-    - Verify every claimed root cause against your live cluster state before relying on it. Configs, versions, and injected faults vary run-to-run.
-    - Verify every recalled fix against your live cluster state before or after applying it; do not assume the prior remediation is sufficient as written.
-    - Assume the prior may be PARTIAL, stale, or only approximately matched. This benchmark frequently injects multiple unrelated faults per problem.
-    - Even if the prior's fix resolves the obvious symptom or makes pods `Running`, continue investigating until all major symptoms are explained and the application is verified end-to-end.
-    - If the prior's symptoms only partially overlap yours, or the match is only "same app" / "same namespace" / "similar outage class", treat it as a weak match and investigate independently.
-    - Before you commit to the recalled hypothesis, do a short local verification pass with 2-3 cluster checks targeted at the recalled fault. If those checks do not line up cleanly, drop the recall thread quickly.
-    - If your first direct observations point to a different failure mode than the recalled incident, prioritize the live evidence immediately and demote the recalled incident to background context.
-    - Never broaden a narrow symptom into a larger multi-fault theory just because the recalled incident had extra faults. Only add another root cause when you have direct cluster evidence for it.
-  Practical rule:
-    - Use recall to accelerate triage when the symptom match is strong.
-    - Skip or ignore recall when the current fault is already obvious from direct evidence.
-    - A weak or partly matching recall is a hint, not a plan.
-{%- endif %}
-- `store_incident(app, symptoms, key_checks, root_causes, fix, lesson)` — record this incident after you have called `submit_done` and received ground-truth feedback, so future runs can benefit from accurate findings.
-{% endif %}
 You have up to 2 tasks to complete:
 
 1. Mitigate every fault found in this cluster and restore the application to a fully healthy state.
@@ -80,6 +64,4 @@ Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happ
 {% elif "mitigation" in planned_stages %}
 `submit_mitigation` returns only a neutral acknowledgement — do not rely on it to decide whether to continue. Decide based on what you observe in the cluster. Do not exit until you have called `submit_mitigation` exactly once and `submit_done` exactly once.
 {% endif %}
-{% if memory_mcp_server_name %}
-**Only after `submit_done` returns** — first reflect on whether you can add a new diagnostic check, or enhance an existing one, so this class of error would surface much faster on a future run. Prefer quick, well-organized checks under `.sds/`, with `.sds/diagnose.sh` as the entrypoint. Then use the ground-truth feedback to write an accurate `store_incident` record. If your own diagnosis was wrong or incomplete, use the feedback's `ground_truth_diagnosis` and judge `reasoning` to correct the `root_causes` and `lesson` fields before storing. Include `app`, `symptoms`, `key_checks` (the most useful commands and their output), `root_causes`, `fix`, and a one-line `lesson`. Do not store an incident whose diagnosis was judged wrong without first correcting it from the feedback.
-{% endif %}
+**Only after `submit_done` returns** — first reflect on whether you can add a new diagnostic check, or enhance an existing one, so this class of error would surface much faster on a future run. Prefer quick, well-organized checks under `.sds/`, with `.sds/diagnose.sh` as the entrypoint. Then write down the incident as a generalizable Markdown playbook under `.sds/playbooks/`. The playbook should cover both diagnosis and mitigation guidance for this class of issue, using the ground-truth feedback to correct any mistakes in your own understanding before writing it. Keep the playbook generic enough to help with future related incidents, not just this exact benchmark instance. Also update `.sds/playbooks/README` so it remains a concise routing index for the available playbooks. If you changed files under `.sds/`, commit those `.sds/` changes before exiting.
