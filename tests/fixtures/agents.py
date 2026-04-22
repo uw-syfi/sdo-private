@@ -7,7 +7,7 @@ scenarios without requiring actual agent execution.
 import time
 from typing import Any
 
-from libs.agent_cli.base import CodingAgent
+from agentshim.base import CodingAgent
 
 HEALTH_VERDICT_HEALTHY = (
     "<health_verdict>healthy</health_verdict>\n"

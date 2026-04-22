@@ -14,10 +14,10 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+from agentshim.claude import ClaudeCodeCodingAgent
+from agentshim.codex import CodexCodingAgent
+from agentshim.gemini import GeminiCodingAgent
 
-from libs.agent_cli.claude import ClaudeCodeCodingAgent
-from libs.agent_cli.codex import CodexCodingAgent
-from libs.agent_cli.gemini import GeminiCodingAgent
 from libs.model_config import ModelConfig
 
 
@@ -494,7 +494,7 @@ def test_generate_with_custom_env(agent_type, mock_which, mock_env):
             mock_run.return_value = MagicMock(returncode=0)
             with patch("subprocess.Popen", side_effect=track_popen):
                 with patch(
-                    "libs.agent_cli.cli_agent.get_interactive_env",
+                    "agentshim.cli_agent.get_interactive_env",
                     return_value=mock_env,
                 ):
                     agent = agent_class()

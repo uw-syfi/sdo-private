@@ -7,15 +7,15 @@ obeys the crucible invariant (cached ⊆ input).
 
 from __future__ import annotations
 
-from libs.agent_cli.claude import ClaudeGenerationSession
-from libs.agent_cli.claude_events import ResultEvent as ClaudeResultEvent
-from libs.agent_cli.codex import CodexGenerationSession
-from libs.agent_cli.codex_events import TurnCompletedEvent
-from libs.agent_cli.gemini import GeminiGenerationSession
-from libs.agent_cli.gemini_events import MessageEvent
-from libs.agent_cli.opencode import OpencodeGenerationSession
-from libs.agent_cli.opencode_events import StepFinishEvent
-from libs.agent_cli.usage import ProviderUsage, TokenUsage
+from agentshim.claude import ClaudeGenerationSession
+from agentshim.claude_events import ResultEvent as ClaudeResultEvent
+from agentshim.codex import CodexGenerationSession
+from agentshim.codex_events import TurnCompletedEvent
+from agentshim.gemini import GeminiGenerationSession
+from agentshim.gemini_events import MessageEvent
+from agentshim.opencode import OpencodeGenerationSession
+from agentshim.opencode_events import StepFinishEvent
+from agentshim.usage import ProviderUsage, TokenUsage
 
 
 class _StubLogger:

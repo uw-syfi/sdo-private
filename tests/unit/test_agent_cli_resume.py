@@ -3,21 +3,21 @@
 from unittest.mock import MagicMock
 
 import pytest
+from agentshim.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
+from agentshim.claude.events import ClaudeEvent, SystemEvent
+from agentshim.cli_agent import CLIAgentSession, CLICodingAgent
+from agentshim.codex import CodexCodingAgent, CodexGenerationSession
+from agentshim.gemini import GeminiCodingAgent, GeminiGenerationSession
+from agentshim.gemini.events import GeminiEvent, InitEvent
+from agentshim.opencode import OpencodeCodingAgent, OpencodeGenerationSession
 
 from app_operator.trajectory import NullTrajectoryRecorder
-from libs.agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
-from libs.agent_cli.claude.events import ClaudeEvent, SystemEvent
-from libs.agent_cli.cli_agent import CLIAgentSession, CLICodingAgent
-from libs.agent_cli.codex import CodexCodingAgent, CodexGenerationSession
-from libs.agent_cli.gemini import GeminiCodingAgent, GeminiGenerationSession
-from libs.agent_cli.gemini.events import GeminiEvent, InitEvent
-from libs.agent_cli.opencode import OpencodeCodingAgent, OpencodeGenerationSession
 
 
 @pytest.fixture
 def mock_binaries(monkeypatch):
     monkeypatch.setattr(
-        "libs.agent_cli.cli_agent.shutil.which",
+        "agentshim.cli_agent.shutil.which",
         lambda cmd, path=None: f"/usr/local/bin/{cmd}",
     )
     monkeypatch.setattr(CLICodingAgent, "_check_cli", lambda self: None)

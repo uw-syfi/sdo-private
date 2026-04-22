@@ -4,8 +4,9 @@ Converts fault injection results into metadata dictionaries suitable
 for embedding in trajectory JSON files.
 """
 
+from agentshim.trajectory import FaultInjectionMetadata
+
 from app_operator.fault_injection.models import FaultResult
-from libs.agent_cli.trajectory import FaultInjectionMetadata
 
 
 class FaultReport:

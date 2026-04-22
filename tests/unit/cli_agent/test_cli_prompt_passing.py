@@ -13,11 +13,10 @@ Design:
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from libs.agent_cli.claude import ClaudeCodeCodingAgent
-from libs.agent_cli.codex import CodexCodingAgent
-from libs.agent_cli.gemini import GeminiCodingAgent
-from libs.agent_cli.opencode import OpencodeCodingAgent
+from agentshim.claude import ClaudeCodeCodingAgent
+from agentshim.codex import CodexCodingAgent
+from agentshim.gemini import GeminiCodingAgent
+from agentshim.opencode import OpencodeCodingAgent
 
 
 @pytest.fixture

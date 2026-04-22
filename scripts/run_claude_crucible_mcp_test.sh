@@ -14,6 +14,7 @@ PROMPT_VERSION="${PROMPT_VERSION:-v3}"
 EXP_DIR="${EXP_DIR:-$REPO_ROOT/bench/sregym/exp_env/exp_env_0}"
 SHARED_FILE="${SHARED_FILE:-$EXP_DIR/diagnosis_session_state.md}"
 RESULT_FILE="${RESULT_FILE:-$REPO_ROOT/bench/sregym/.local_tmp/manual_crucible_result.json}"
+CONFINE_READS_HOOK="${CONFINE_READS_HOOK:-$(uv --directory "$REPO_ROOT" run python -c 'import agentshim.claude.hooks.confine_reads as m; print(m.__file__)')}"
 
 cd "$EXP_DIR"
 
@@ -45,7 +46,7 @@ SETTINGS_JSON=$(cat <<EOF
         "hooks": [
           {
             "type": "command",
-            "command": "\"$REPO_ROOT/libs/agent_cli/hooks/confine_reads.py\" \"$EXP_DIR\""
+            "command": "\"$CONFINE_READS_HOOK\" \"$EXP_DIR\""
           }
         ]
       }

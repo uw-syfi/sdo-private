@@ -20,8 +20,8 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from agentshim.base import CodingAgent
 
-from libs.agent_cli.base import CodingAgent
 from sregym_agents.cli_agent import driver
 
 if TYPE_CHECKING:
@@ -141,8 +141,8 @@ def test_default_agent_factory_unknown_provider_raises() -> None:
 
 def test_default_agent_factory_passes_mcp_server(monkeypatch: pytest.MonkeyPatch) -> None:
     """Factory must inject a HttpMcpServer for sregym submission."""
-    from libs.agent_cli.base import AGENT_REGISTRY
-    from libs.agent_cli.mcp_config import HttpMcpServer
+    from agentshim.base import AGENT_REGISTRY
+    from agentshim.mcp_config import HttpMcpServer
 
     captured: dict[str, Any] = {}
 

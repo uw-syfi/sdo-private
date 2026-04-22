@@ -5,6 +5,8 @@ import threading
 from pathlib import Path
 from types import FrameType
 
+from agentshim.base import CodingAgent
+
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.cli_agent.agents.context import AgentContext
@@ -25,7 +27,6 @@ from app_operator.core import (
 from app_operator.operator_base import OperatorBase
 from app_operator.progress import emit_progress
 from app_operator.trajectory import TrajectoryRecorder
-from libs.agent_cli.base import CodingAgent
 
 
 class AppOperator(OperatorBase):

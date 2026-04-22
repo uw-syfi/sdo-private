@@ -2,18 +2,18 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from agentshim.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
+from agentshim.cli_agent import CLICodingAgent
+from agentshim.mcp_config import HttpMcpServer, StdioMcpServer
 
 from app_operator.trajectory import NullTrajectoryRecorder
-from libs.agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
-from libs.agent_cli.cli_agent import CLICodingAgent
-from libs.agent_cli.mcp_config import HttpMcpServer, StdioMcpServer
 
 
 @pytest.fixture
 def mock_binaries(monkeypatch):
     """Mock binary discovery and CLI check."""
     monkeypatch.setattr(
-        "libs.agent_cli.cli_agent.shutil.which",
+        "agentshim.cli_agent.shutil.which",
         lambda cmd, path=None: f"/usr/local/bin/{cmd}",
     )
     monkeypatch.setattr(CLICodingAgent, "_check_cli", lambda self: None)
@@ -50,7 +50,7 @@ class TestClaudeCodeCodingAgentInit:
 
     def test_binary_not_found_raises_runtime_error(self, monkeypatch):
         monkeypatch.setattr(
-            "libs.agent_cli.cli_agent.shutil.which",
+            "agentshim.cli_agent.shutil.which",
             lambda cmd, path=None: None,
         )
         with pytest.raises(RuntimeError, match="claude binary not found"):

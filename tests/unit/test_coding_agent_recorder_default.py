@@ -1,5 +1,5 @@
-from libs.agent_cli.base import CodingAgent
-from libs.agent_cli.trajectory import NullTrajectoryRecorder
+from agentshim.base import CodingAgent
+from agentshim.trajectory import NullTrajectoryRecorder
 
 
 class _ConcreteAgent(CodingAgent):

@@ -14,6 +14,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from agentshim import call_subagent, litellm_call_with_retry
+from agentshim.base import CodingAgent, register_provider
+from agentshim.events import AgentEventHandler
+from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
+from agentshim.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 from loguru import logger
 
 from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
@@ -25,11 +30,6 @@ from app_operator.prompts import (
     render_script_analyst_prompt,
     render_trajectory_analyst_prompt,
 )
-from libs.agent_cli import call_subagent, litellm_call_with_retry
-from libs.agent_cli.base import CodingAgent, register_provider
-from libs.agent_cli.events import AgentEventHandler
-from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
-from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 
 
 @register_provider("subagent")

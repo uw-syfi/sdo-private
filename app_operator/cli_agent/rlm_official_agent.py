@@ -20,13 +20,12 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agentshim.base import CodingAgent, register_provider
+from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
 
-from libs.agent_cli.base import CodingAgent, register_provider
-from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
-
 if TYPE_CHECKING:
-    from libs.agent_cli.events import AgentEventHandler
+    from agentshim.events import AgentEventHandler
 
 
 def _build_custom_tools(repo_path: Path) -> dict[str, Any]:

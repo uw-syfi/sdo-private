@@ -1,13 +1,14 @@
 """Pin the shared schema contract between the two TokenUsage copies.
 
-``libs.agent_cli.usage.TokenUsage`` and ``libs.pydantic_agent._usage.TokenUsage``
+``agentshim.usage.TokenUsage`` and ``libs.pydantic_agent._usage.TokenUsage``
 are intentionally duplicated to avoid a cross-lib dependency. The contract
 they share is the ``to_dict()`` output shape; this test catches drift.
 """
 
 from __future__ import annotations
 
-from libs.agent_cli.usage import TokenUsage as CliTokenUsage
+from agentshim.usage import TokenUsage as CliTokenUsage
+
 from libs.pydantic_agent._usage import TokenUsage as PydTokenUsage
 
 

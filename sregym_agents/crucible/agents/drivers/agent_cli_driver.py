@@ -1,7 +1,7 @@
-"""AgentCLIDriver — ``AgentDriver`` backed by ``libs.agent_cli`` coding agents.
+"""AgentCLIDriver — ``AgentDriver`` backed by ``agentshim`` coding agents.
 
 Uses a provider-agnostic ``CodingAgent`` (resolved from
-``libs.agent_cli.base.AGENT_REGISTRY``) and relies on it to spawn the
+``agentshim.base.AGENT_REGISTRY``) and relies on it to spawn the
 underlying CLI, parse the stream-json events, and drive its
 ``AgentEventHandler`` callbacks.  Crucible MCP tools are exposed to the
 CLI via a ``StdioMcpServer`` entry.
@@ -455,12 +455,12 @@ class AgentCLIDriver(AgentDriver):
     ) -> Any:
         """Construct a ``CodingAgent`` from the registry for this provider.
 
-        Resolves via ``libs.agent_cli.base.AGENT_REGISTRY`` so the driver
+        Resolves via ``agentshim.base.AGENT_REGISTRY`` so the driver
         stays provider-agnostic (new providers only need to register
-        themselves in ``libs/agent_cli``).
+        themselves in ``agentshim``).
         """
-        from libs.agent_cli.base import AGENT_REGISTRY
-        from libs.agent_cli.mcp_config import StdioMcpServer
+        from agentshim.base import AGENT_REGISTRY
+        from agentshim.mcp_config import StdioMcpServer
 
         agent_cls = AGENT_REGISTRY.get(self._provider.lower())
         if agent_cls is None:

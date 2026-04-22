@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from libs.agent_cli import SandboxConfig
+from agentshim import SandboxConfig
 
 _SYSTEM_READ_PATHS = (
     "/bin",

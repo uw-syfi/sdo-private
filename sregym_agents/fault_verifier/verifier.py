@@ -1,7 +1,7 @@
 """Agent-based fault-injection verifier.
 
 Given a problem's expected fault description and a live cluster kubeconfig,
-spawn a Claude agent (via `libs.agent_cli`) to investigate whether:
+spawn a Claude agent (via `agentshim`) to investigate whether:
 
   1. the expected fault is actually present, and
   2. any other unintended faults are present.
@@ -119,7 +119,7 @@ def parse_agent_output(raw: str, elapsed_s: float) -> FaultVerification:
 
 
 def _default_agent_factory(model: str | None, kubeconfig_path: str) -> Any:
-    from libs.agent_cli.claude import ClaudeCodeCodingAgent
+    from agentshim.claude import ClaudeCodeCodingAgent
 
     agent = ClaudeCodeCodingAgent(model=model)
     # Claude's bash subprocesses inherit this env. Pointing KUBECONFIG at
