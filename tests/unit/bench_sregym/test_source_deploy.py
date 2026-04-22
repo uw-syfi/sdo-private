@@ -79,11 +79,14 @@ def test_hotel_source_plan_generates_overlay_outside_source_tree(monkeypatch):
         assert plan.manifest_path is not None
         assert plan.manifest_path.name == "overlay"
         assert TARGET_MICROSERVICES not in plan.manifest_path.parents
+        assert (plan.manifest_path.parent / "base").is_dir()
+        base_kustomization_path = plan.manifest_path.parent / "base" / "kustomization.yaml"
+        base_kustomization = yaml.safe_load(base_kustomization_path.read_text(encoding="utf-8"))
 
         kustomization_path = plan.manifest_path / "kustomization.yaml"
         kustomization = yaml.safe_load(kustomization_path.read_text(encoding="utf-8"))
 
-        assert kustomization["resources"] == [str(TARGET_MICROSERVICES / "hotelReservation" / "kubernetes")]
+        assert kustomization["resources"] == ["../base"]
         assert kustomization["images"] == [
             {
                 "name": "yinfangchen/hotelreservation",
@@ -91,6 +94,8 @@ def test_hotel_source_plan_generates_overlay_outside_source_tree(monkeypatch):
                 "newTag": "sregym-src-hotel-reservation-kind-src-test",
             }
         ]
+        assert "frontend/frontend-deployment.yaml" in base_kustomization["resources"]
+        assert "rate/mongodb-rate-deployment.yaml" in base_kustomization["resources"]
 
     assert commands == [
         [
