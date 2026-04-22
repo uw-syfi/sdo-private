@@ -84,6 +84,7 @@ class ExperimentConfig:
     parallel: int = 4
     app_filter: str = ""
     deploy_from_source: bool = False
+    application_workspace: bool = False
     enable_summary: bool = True
     no_inject_summary: bool = True
     repeat: int = 1
@@ -114,6 +115,13 @@ class ExperimentConfig:
             raise ValueError("runner.spec_names cannot be used with runner.variants.enabled")
         if self.spec_names and (self.tasklist or self.problems):
             raise ValueError("runner.spec_names is mutually exclusive with runner.tasklist and runner.problems")
+        if self.application_workspace:
+            if not self.app_filter:
+                raise ValueError("application_workspace requires runner.app_filter")
+            if not self.deploy_from_source:
+                raise ValueError("application_workspace requires runner.deploy_from_source = true")
+            if self.parallel != 1:
+                raise ValueError("application_workspace requires runner.parallel = 1")
         return self
 
 
@@ -168,6 +176,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         parallel=runner.get("parallel", 4),
         app_filter=runner.get("app_filter", ""),
         deploy_from_source=runner.get("deploy_from_source", False),
+        application_workspace=runner.get("application_workspace", False),
         enable_summary=runner.get("enable_summary", True),
         no_inject_summary=runner.get("no_inject_summary", True),
         repeat=runner.get("repeat", 1),
@@ -316,6 +325,8 @@ def config_to_main_args(
         args.extend(["--app-filter", config.app_filter])
     if config.deploy_from_source:
         args.append("--deploy-from-source")
+    if config.application_workspace:
+        args.append("--application-workspace")
     if config.no_inject_summary:
         args.append("--no-inject-summary")
     if config.repeat > 1:
@@ -415,6 +426,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"parallel = {_toml_value(config.parallel)}")
     lines.append(f"app_filter = {_toml_value(config.app_filter)}")
     lines.append(f"deploy_from_source = {_toml_value(config.deploy_from_source)}")
+    lines.append(f"application_workspace = {_toml_value(config.application_workspace)}")
     lines.append(f"enable_summary = {_toml_value(config.enable_summary)}")
     lines.append(f"no_inject_summary = {_toml_value(config.no_inject_summary)}")
     lines.append(f"repeat = {_toml_value(config.repeat)}")

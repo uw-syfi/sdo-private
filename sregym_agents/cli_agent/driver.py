@@ -307,12 +307,12 @@ def _run(
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
     submit_mcp_url = f"http://localhost:{mcp_port}/submit/sse"
 
-    exp_env = os.getenv("SREGYM_EXP_ENV")
-    if exp_env:
-        if not os.path.isdir(exp_env):
-            logger.error("SREGYM_EXP_ENV=%s is not a valid directory", exp_env)
+    agent_workdir = os.getenv("SREGYM_AGENT_WORKDIR") or os.getenv("SREGYM_EXP_ENV")
+    if agent_workdir:
+        if not os.path.isdir(agent_workdir):
+            logger.error("Agent workdir %s is not a valid directory", agent_workdir)
             sys.exit(1)
-        os.chdir(exp_env)
+        os.chdir(agent_workdir)
         logger.info("Working directory: %s", os.getcwd())
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())

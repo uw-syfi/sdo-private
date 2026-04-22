@@ -136,6 +136,24 @@ def test_app_filter_loaded_from_toml(tmp_path: Path) -> None:
     assert config.app_filter == "hotel_reservation"
 
 
+def test_application_workspace_loaded_from_toml(tmp_path: Path) -> None:
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        parallel = 1
+        app_filter = "hotel_reservation"
+        deploy_from_source = true
+        application_workspace = true
+
+        [runner.variants]
+        enabled = false
+    """,
+    )
+    config = load_experiment_config(toml)
+    assert config.application_workspace is True
+
+
 def test_config_to_main_args_emits_deploy_from_source_flag(tmp_path: Path) -> None:
     config = ExperimentConfig(deploy_from_source=True)
     args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
@@ -147,6 +165,17 @@ def test_config_to_main_args_emits_app_filter(tmp_path: Path) -> None:
     args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
     assert "--app-filter" in args
     assert "social_network" in args
+
+
+def test_config_to_main_args_emits_application_workspace_flag(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        parallel=1,
+        app_filter="hotel_reservation",
+        deploy_from_source=True,
+        application_workspace=True,
+    )
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+    assert "--application-workspace" in args
 
 
 def test_config_to_main_args_omits_deploy_from_source_when_disabled(tmp_path: Path) -> None:
@@ -167,6 +196,17 @@ def test_serialize_includes_app_filter() -> None:
     assert 'app_filter = "hotel_reservation"' in serialized
 
 
+def test_serialize_includes_application_workspace() -> None:
+    config = ExperimentConfig(
+        parallel=1,
+        app_filter="hotel_reservation",
+        deploy_from_source=True,
+        application_workspace=True,
+    )
+    serialized = _serialize_config(config)
+    assert "application_workspace = true" in serialized
+
+
 def test_roundtrip_deploy_from_source(tmp_path: Path) -> None:
     config = ExperimentConfig(deploy_from_source=True)
     toml_path = tmp_path / "snap.toml"
@@ -181,6 +221,39 @@ def test_roundtrip_app_filter(tmp_path: Path) -> None:
     toml_path.write_text(_serialize_config(config))
     loaded = load_experiment_config(toml_path)
     assert loaded.app_filter == "social_network"
+
+
+def test_roundtrip_application_workspace(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        parallel=1,
+        app_filter="hotel_reservation",
+        deploy_from_source=True,
+        application_workspace=True,
+    )
+    toml_path = tmp_path / "snap.toml"
+    toml_path.write_text(_serialize_config(config))
+    loaded = load_experiment_config(toml_path)
+    assert loaded.application_workspace is True
+
+
+def test_application_workspace_requires_app_filter() -> None:
+    with pytest.raises(ValueError, match="application_workspace requires runner.app_filter"):
+        ExperimentConfig(deploy_from_source=True, application_workspace=True)
+
+
+def test_application_workspace_requires_deploy_from_source() -> None:
+    with pytest.raises(ValueError, match="application_workspace requires runner.deploy_from_source = true"):
+        ExperimentConfig(app_filter="hotel_reservation", application_workspace=True)
+
+
+def test_application_workspace_requires_single_worker() -> None:
+    with pytest.raises(ValueError, match="application_workspace requires runner.parallel = 1"):
+        ExperimentConfig(
+            app_filter="hotel_reservation",
+            deploy_from_source=True,
+            application_workspace=True,
+            parallel=2,
+        )
 
 
 def test_serialize_includes_spec_names(tmp_path: Path) -> None:

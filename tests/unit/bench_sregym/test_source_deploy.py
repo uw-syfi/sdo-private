@@ -118,6 +118,34 @@ def test_hotel_source_plan_generates_overlay_outside_source_tree(monkeypatch):
     ]
 
 
+def test_hotel_source_plan_uses_application_workspace_when_configured(monkeypatch, tmp_path: Path):
+    commands: list[list[str]] = []
+    workspace_dir = tmp_path / "workspace" / "hotelReservation"
+    (workspace_dir / "kubernetes").mkdir(parents=True)
+    (workspace_dir / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    (workspace_dir / "kubernetes" / "frontend.yaml").write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: frontend\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SREGYM_KIND_CLUSTER_NAME", "kind-src-test")
+    monkeypatch.setenv("SREGYM_APP_SOURCE_DIR", str(workspace_dir))
+    monkeypatch.setattr("sregym.service.source_deploy._run_command", lambda command: commands.append(command))
+
+    with plan_for_app(_FakeApp("Hotel Reservation")) as plan:
+        assert plan.manifest_path is not None
+        assert (plan.manifest_path.parent / "base" / "frontend.yaml").is_file()
+
+    assert commands[0] == [
+        "docker",
+        "build",
+        "-t",
+        "yinfangchen/hotelreservation:sregym-src-hotel-reservation-kind-src-test",
+        "-f",
+        str(workspace_dir / "Dockerfile"),
+        str(workspace_dir),
+    ]
+
+
 def test_social_source_plan_generates_expected_helm_overrides(monkeypatch):
     commands: list[list[str]] = []
     monkeypatch.setenv("SREGYM_KIND_CLUSTER_NAME", "kind-social")
