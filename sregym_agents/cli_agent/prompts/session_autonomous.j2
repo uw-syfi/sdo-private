@@ -4,7 +4,23 @@ Application: {{ app_name }}
 Namespace: {{ namespace }}
 
 KUBECONFIG is already set in your environment — use `kubectl` and `bash` to investigate the cluster directly.
-You are operating from within the application repository and have full source-code read access in your current working directory. Use that source tree as additional context when it is helpful for understanding the application, manifests, configuration, or expected behavior. This source access is for information only in this benchmark mode: do not modify application source files and do not redeploy from source.
+You are operating from within the application repository and have full source-code read access in your current working directory. Use that source tree as additional context when it is helpful for understanding the application, manifests, configuration, or expected behavior.
+
+Do not modify application source files.
+
+You are allowed to add small, generic repository-local diagnostic scripts if you want to encode quick checks that would help when future incidents occur. When you do this:
+- Keep them diagnostic-only and low-risk. Do not encode benchmark IDs, injected-fault-specific keys, or exact oracle answers.
+- Put persistent diagnostics under `.sds/`.
+- The fixed entrypoint is `.sds/diagnose.sh`. Write or update that script when you want to encode quick triage checks for previously seen symptoms or errors.
+- Aside from that fixed entrypoint, you may organize `.sds/` however you want.
+- Keep these checks quick to run and write the code in a well-organized way.
+- Prefer checks for general live symptoms or invariants such as selector-to-pod matching, missing service endpoints, probe/config references, DNS resolution, dependency reachability, crash loops, or recurring log/error signatures.
+- Treat any persistent diagnostic you find or create as a hinting layer. Verify its claims against the live cluster before relying on them.
+
+Start every run with this preflight workflow before broader triage:
+1. Read the application source code and deployment manifests to contextualize the Kubernetes resources you are seeing. Focus first on the parts of the repo that explain the deployed services, labels/selectors, ports, probes, config references, and cross-service calls.
+2. Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist from prior runs.
+3. If `.sds/diagnose.sh` exists, run it at the beginning of the session to quickly triage the cluster and flag previously seen issues. Use its output to guide your initial investigation, but verify its claims against the live cluster before relying on them.
 {% if memory_mcp_server_name %}
 **Incident memory** (from the `{{ memory_mcp_server_name }}` MCP server):
 {%- if not memory_store_only %}
@@ -65,5 +81,5 @@ Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happ
 `submit_mitigation` returns only a neutral acknowledgement — do not rely on it to decide whether to continue. Decide based on what you observe in the cluster. Do not exit until you have called `submit_mitigation` exactly once and `submit_done` exactly once.
 {% endif %}
 {% if memory_mcp_server_name %}
-**Only after `submit_done` returns** — use its ground-truth feedback to write an accurate `store_incident` record. If your own diagnosis was wrong or incomplete, use the feedback's `ground_truth_diagnosis` and judge `reasoning` to correct the `root_causes` and `lesson` fields before storing. Include `app`, `symptoms`, `key_checks` (the most useful commands and their output), `root_causes`, `fix`, and a one-line `lesson`. Do not store an incident whose diagnosis was judged wrong without first correcting it from the feedback.
+**Only after `submit_done` returns** — first reflect on whether you can add a new diagnostic check, or enhance an existing one, so this class of error would surface much faster on a future run. Prefer quick, well-organized checks under `.sds/`, with `.sds/diagnose.sh` as the entrypoint. Then use the ground-truth feedback to write an accurate `store_incident` record. If your own diagnosis was wrong or incomplete, use the feedback's `ground_truth_diagnosis` and judge `reasoning` to correct the `root_causes` and `lesson` fields before storing. Include `app`, `symptoms`, `key_checks` (the most useful commands and their output), `root_causes`, `fix`, and a one-line `lesson`. Do not store an incident whose diagnosis was judged wrong without first correcting it from the feedback.
 {% endif %}

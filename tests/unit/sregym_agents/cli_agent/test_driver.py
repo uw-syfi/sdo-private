@@ -131,6 +131,46 @@ def test_build_prompt_autonomous_mitigation_only() -> None:
     assert "submit_diagnosis" not in prompt
 
 
+def test_build_prompt_autonomous_mentions_persistent_diagnostic_contract() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert ".sds/" in prompt
+    assert ".sds/diagnose.sh" in prompt
+    assert "quick to run" in prompt
+    assert "well-organized" in prompt
+
+
+def test_build_prompt_autonomous_requires_preflight_for_prior_diagnostics() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "Start every run with this preflight workflow" in prompt
+    assert "If `.sds/diagnose.sh` exists, run it at the beginning of the session" in prompt
+    assert "Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist" in prompt
+    assert "Do not modify application source files." in prompt
+    assert "repository-local diagnostic scripts" in prompt
+    assert "Read the application source code and deployment manifests" in prompt
+    assert "quickly triage the cluster and flag previously seen issues" in prompt
+
+
+def test_build_prompt_autonomous_mentions_post_submit_check_improvement() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+        memory_mcp_server_name="incident_memory",
+    )
+    assert "Only after `submit_done` returns" in prompt
+    assert "add a new diagnostic check, or enhance an existing one" in prompt
+    assert "future run" in prompt
+    assert ".sds/diagnose.sh" in prompt
+
+
 # --- Agent factory ---------------------------------------------------------
 
 
