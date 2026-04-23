@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Application deployment and monitoring operator"
 requires-python = ">=3.10"
 dependencies = [
-    "agentshim>=0.1.0",
+    "agentshim>=0.2.0",
     "sds-core",
     "llm-rt",
     "langchain-openai>=1.1.6",
@@ -26,6 +26,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "012fbf5aa42fc116643903ff851c11ab8facd814" }
 sds-core = { workspace = true }
 llm-rt = { workspace = true }
 
