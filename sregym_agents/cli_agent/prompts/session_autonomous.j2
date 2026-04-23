@@ -23,6 +23,7 @@ You are allowed to add small, generic repository-local diagnostic scripts if you
 
 Start every run with this preflight workflow before broader triage:
 1. Read the application source code and deployment manifests to contextualize the Kubernetes resources you are seeing. Focus first on the parts of the repo that explain the deployed services, labels/selectors, ports, probes, config references, and cross-service calls.
+   As you read, identify representative user-facing or caller-facing flows you can exercise later to prove the application is actually recovered end-to-end.
 2. Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist from prior runs.
 3. If `.sds/diagnose.sh` exists, run it at the beginning of the session to quickly triage the cluster and flag previously seen issues. Use its output to guide your initial investigation, but verify its claims against the live cluster before relying on them.
 You have up to 2 tasks to complete:
@@ -40,6 +41,8 @@ Your task is to work through {{ planned_stages | length }} stage{{ "s" if planne
 {%- elif stage == "mitigation" %} Take concrete actions (kubectl/bash) to bring the cluster back to a fully healthy state. Verify your fixes thoroughly before submitting:
   - Check pod phase and container readiness across all affected namespaces.
   - Verify application behaviour end-to-end (service connectivity, expected responses).
+  - Run at least one representative end-to-end request or caller-path check for each affected user-facing flow you identified from source/manifests.
+  - Treat any remaining user-visible failure — especially `5xx`, timeout, connection refusal, DNS failure, empty/unexpected response, or degraded caller path — as evidence that you are not done yet.
   - Look for subtle issues that may not directly impact current traffic but indicate residual misconfiguration — e.g. wrong environment variables, stale config, misconfigured resource limits, auth issues on inactive code paths.
   - Only call `submit_mitigation` once you are confident the application is genuinely healthy, not just "not crashing". You may call `submit_mitigation` exactly once.
 {%- endif %}
@@ -54,7 +57,7 @@ Submission tools (from the `{{ submit_mcp_server_name }}` MCP server):
 - `submit_done()` — signal that your investigation is complete. Call this exactly once,{% if "diagnosis" in planned_stages and "mitigation" in planned_stages %} **after** all `submit_diagnosis` calls and your single `submit_mitigation`.{% elif "diagnosis" in planned_stages %} **after** all `submit_diagnosis` calls.{% elif "mitigation" in planned_stages %} **after** your single `submit_mitigation`.{% else %} after completing your investigation.{% endif %} On this call the benchmark stops the TTL clock, grades your diagnoses, and returns rich feedback — judge reasoning, which candidate matched (if any), and the ground-truth root cause(s).{% if "diagnosis" in planned_stages and "mitigation" in planned_stages %} Any further `submit_diagnosis` or `submit_mitigation` calls after `submit_done` will be rejected.{% elif "diagnosis" in planned_stages %} Any further `submit_diagnosis` calls after `submit_done` will be rejected.{% elif "mitigation" in planned_stages %} Any further `submit_mitigation` calls after `submit_done` will be rejected.{% endif %}
 
 {% if "diagnosis" in planned_stages and "mitigation" in planned_stages %}
-Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happen in any order, but **prefer calling `submit_mitigation` early** — lowering time-to-mitigation reduces customer impact. Then call `submit_done` once you're finished investigating.
+Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happen in any order, but **prefer calling `submit_mitigation` early** — lowering time-to-mitigation reduces customer impact. Still, do not call `submit_mitigation` until the representative end-to-end checks above are passing. Then call `submit_done` once you're finished investigating.
 {% endif %}
 
 {% if "diagnosis" in planned_stages and "mitigation" in planned_stages %}
