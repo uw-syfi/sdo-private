@@ -9,10 +9,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from loguru import logger
 from starlette.websockets import WebSocketState
 
-from lego_agent.config import Config, load_config
-from lego_agent.engine import LegoAgentEngine
 from lego_agent.prompts import PromptLoader, get_loader
-from lego_agent.utils import find_repo_root
+
+from .config import Config, load_config
+from .engine import LegoAgentEngine
+from .utils import find_repo_root
 
 DEFAULT_LOOP_BOUND = 10  # default execution loop bound for generated scripts
 DEFAULT_MAX_CLARIFICATIONS = 5  # maximum clarification rounds before proceeding

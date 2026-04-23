@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app_operator.core import AgentConfig, Config, OperatorConfig
-from lego_agent.engine import LegoAgentEngine
+from lego_agent.backend.engine import LegoAgentEngine
 from libs.model_config import ModelConfig
 
 
@@ -42,7 +42,7 @@ def test_submit_response_tool_usage(tmp_path, mock_config):
                         "status": "ready",
                         "yaml_config": "workflow: ...",
                         "python_script": (
-                            'import lego_agent.runtime\nMAX_ITERATIONS = 10\nif __name__ == "__main__": pass'
+                            'import lego_agent.backend.runtime\nMAX_ITERATIONS = 10\nif __name__ == "__main__": pass'
                         ),
                     }
                 },
@@ -60,8 +60,8 @@ def test_submit_response_tool_usage(tmp_path, mock_config):
         mock_agent.ainvoke = mock_ainvoke
         mock_agent.astream_events = mock_astream_events
         # Patch create_react_agent and build_llm
-        with patch("lego_agent.engine.create_react_agent", return_value=mock_agent):
-            with patch("lego_agent.engine.build_llm"):
+        with patch("lego_agent.backend.engine.create_react_agent", return_value=mock_agent):
+            with patch("lego_agent.backend.engine.build_llm"):
                 engine = LegoAgentEngine(
                     config=mock_config,
                     prompt_loader=mock_loader,

@@ -1,6 +1,6 @@
 import pytest
 
-from lego_agent.config import AgentConfig, Config
+from lego_agent.backend.config import AgentConfig, Config
 
 
 def test_invalid_backend_raises():

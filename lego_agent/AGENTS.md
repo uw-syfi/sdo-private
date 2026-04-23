@@ -14,9 +14,9 @@ uv run -m lego_agent --no-tui --prompt "task" # CLI mode
 
 ## Architecture
 
-- `engine.py` — Core generation loop
-- `runtime.py` — Script execution runtime
-- `server.py` — Web UI backend
+- `backend/engine.py` — Core generation loop
+- `backend/runtime.py` — Script execution runtime
+- `backend/server.py` — Web UI backend
 - `ui/` — Web and TUI frontends
 
 ## Debugging

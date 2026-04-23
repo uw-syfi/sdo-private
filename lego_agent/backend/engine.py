@@ -8,20 +8,21 @@ from langchain_core.tools import StructuredTool, tool  # pyright: ignore[reportU
 from langgraph.prebuilt import create_react_agent  # pyright: ignore[reportUnknownVariableType, reportDeprecated]
 from loguru import logger
 
-from lego_agent.config import Config
-from lego_agent.exceptions import AgentError
-from lego_agent.io import UserIO
-from lego_agent.llm import build_llm
-from lego_agent.models import (
+from lego_agent.prompts import PromptLoader
+from libs.sds_core.filesystem import RealFilesystem
+from libs.sds_core.tools import build_readonly_tools
+
+from .config import Config
+from .exceptions import AgentError
+from .io import UserIO
+from .llm import build_llm
+from .models import (
     LegoAgentResponse,
     LegoAgentResult,
     parse_lego_agent_response,
 )
-from lego_agent.prompts import PromptLoader
-from lego_agent.storage import LegoAgentStorage
-from lego_agent.streaming import extract_tool_result, parse_chunk_content
-from libs.sds_core.filesystem import RealFilesystem
-from libs.sds_core.tools import build_readonly_tools
+from .storage import LegoAgentStorage
+from .streaming import extract_tool_result, parse_chunk_content
 
 
 class LegoAgentEngine:
@@ -236,7 +237,7 @@ class LegoAgentEngine:
             f"#!/usr/bin/env python3\n"
             f"import sys\n"
             f"from pathlib import Path\n"
-            f"from lego_agent.runtime import run_yaml\n\n"
+            f"from lego_agent.backend.runtime import run_yaml\n\n"
             f"MAX_ITERATIONS = {self.loop_bound}\n\n"
             f"if __name__ == '__main__':\n"
             f"    config_path = Path(__file__).parent / {Path(config_path).name!r}\n"

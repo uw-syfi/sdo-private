@@ -1,8 +1,8 @@
-"""Tests for lego_agent.streaming shared utilities."""
+"""Tests for lego_agent.backend.streaming shared utilities."""
 
 from types import SimpleNamespace
 
-from lego_agent.streaming import extract_tool_result, parse_chunk_content
+from lego_agent.backend.streaming import extract_tool_result, parse_chunk_content
 
 # --- parse_chunk_content ---
 

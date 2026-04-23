@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app_operator.core import AgentConfig, Config, OperatorConfig
-from lego_agent.engine import LegoAgentEngine
-from lego_agent.io import UserIO
+from lego_agent.backend.engine import LegoAgentEngine
+from lego_agent.backend.io import UserIO
 from lego_agent.prompts import get_loader
 from libs.model_config import ModelConfig
 
@@ -85,8 +85,8 @@ def engine(tmp_path, mock_config, mock_io):
 
 def test_engine_happy_path(engine, tmp_path):
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 
@@ -128,8 +128,8 @@ def test_engine_clarification_loop(engine, mock_io):
     # the prompt or just sequential calls.
 
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 
@@ -175,8 +175,8 @@ def test_engine_clarification_loop(engine, mock_io):
 
 def test_engine_validation_failure_and_repair(engine):
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 
@@ -219,8 +219,8 @@ def test_engine_validation_failure_and_repair(engine):
 
 def test_engine_yaml_validation_repair(engine):
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 

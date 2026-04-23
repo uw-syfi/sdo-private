@@ -10,7 +10,7 @@ The recommended way is the wrapper script from the repo root:
 ./scripts/start_lego_ui.sh
 ```
 
-This starts both the backend server (`lego_agent/server.py`) and this Next.js frontend, then opens `http://localhost:3000`.
+This starts both the backend server (`lego_agent/backend/server.py`) and this Next.js frontend, then opens `http://localhost:3000`.
 
 ## Manual start (development)
 
@@ -25,7 +25,7 @@ npm run dev
 The frontend expects the backend at `http://localhost:8000`. Start the backend separately:
 
 ```bash
-uv run -m lego_agent.server
+uv run -m lego_agent.backend.server
 ```
 
 ## What it does

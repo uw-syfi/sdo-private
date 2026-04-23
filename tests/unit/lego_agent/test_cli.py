@@ -1,15 +1,15 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-from lego_agent.cli import main
-from lego_agent.models import LegoAgentResult
+from lego_agent.backend.cli import main
+from lego_agent.backend.models import LegoAgentResult
 
 
 def test_cli_no_run(tmp_path):
     with (
-        patch("lego_agent.cli.load_config") as mock_load_config,
-        patch("lego_agent.cli.LegoAgentEngine") as mock_engine_cls,
-        patch("lego_agent.cli.ConsoleIO"),
+        patch("lego_agent.backend.cli.load_config") as mock_load_config,
+        patch("lego_agent.backend.cli.LegoAgentEngine") as mock_engine_cls,
+        patch("lego_agent.backend.cli.ConsoleIO"),
         patch("subprocess.run") as mock_subprocess_run,
     ):
         # Setup mocks

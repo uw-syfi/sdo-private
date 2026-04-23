@@ -1,4 +1,4 @@
-"""Property-based tests for lego_agent.models using hypothesis.
+"""Property-based tests for lego_agent.backend.models using hypothesis.
 
 These tests encode invariants of extract_json and parse_lego_agent_response,
 verifying robustness against arbitrary string inputs.
@@ -10,7 +10,7 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from lego_agent.models import LegoAgentResponse, extract_json, parse_lego_agent_response
+from lego_agent.backend.models import LegoAgentResponse, extract_json, parse_lego_agent_response
 
 # ---------------------------------------------------------------------------
 # Strategies

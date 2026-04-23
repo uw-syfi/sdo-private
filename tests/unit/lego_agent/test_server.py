@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from lego_agent.server import WebIO, app, websocket_endpoint
+from lego_agent.backend.server import WebIO, app, websocket_endpoint
 
 
 class MockWebSocket:
@@ -101,9 +101,9 @@ def test_websocket_connection():
 async def test_server_logic(tmp_path):
     # We can mock the dependencies of websocket_endpoint
     with (
-        patch("lego_agent.server.load_config"),
-        patch("lego_agent.server.get_loader"),
-        patch("lego_agent.server.LegoAgentEngine") as mock_engine_cls,
+        patch("lego_agent.backend.server.load_config"),
+        patch("lego_agent.backend.server.get_loader"),
+        patch("lego_agent.backend.server.LegoAgentEngine") as mock_engine_cls,
     ):
         mock_engine = AsyncMock()
         mock_engine.run_async.return_value = MagicMock(script_path="/tmp/script.py")
@@ -113,7 +113,7 @@ async def test_server_logic(tmp_path):
         # a client or careful mocking of the websocket object lifecycle.
         # But we can test the run_engine_and_script function if we
         # extract it or import it.
-        from lego_agent.server import run_engine_and_script
+        from lego_agent.backend.server import run_engine_and_script
 
         io = AsyncMock()
         config = MagicMock()
@@ -178,10 +178,10 @@ async def test_path_traversal_rejected(tmp_path):
     )
 
     with (
-        patch("lego_agent.server.find_repo_root", return_value=repo_root),
-        patch("lego_agent.server.load_config", return_value=mock_config),
-        patch("lego_agent.server.get_loader"),
-        patch("lego_agent.server.LegoAgentEngine") as mock_engine_cls,
+        patch("lego_agent.backend.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.backend.server.load_config", return_value=mock_config),
+        patch("lego_agent.backend.server.get_loader"),
+        patch("lego_agent.backend.server.LegoAgentEngine") as mock_engine_cls,
     ):
         mock_engine = AsyncMock()
         mock_engine_cls.return_value = mock_engine
@@ -227,10 +227,10 @@ async def test_valid_work_dir_accepted(tmp_path):
     )
 
     with (
-        patch("lego_agent.server.find_repo_root", return_value=repo_root),
-        patch("lego_agent.server.load_config", return_value=mock_config),
-        patch("lego_agent.server.get_loader"),
-        patch("lego_agent.server.run_engine_and_script", new_callable=AsyncMock),
+        patch("lego_agent.backend.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.backend.server.load_config", return_value=mock_config),
+        patch("lego_agent.backend.server.get_loader"),
+        patch("lego_agent.backend.server.run_engine_and_script", new_callable=AsyncMock),
     ):
         await websocket_endpoint(ws)  # type: ignore[arg-type]
 
@@ -261,9 +261,9 @@ async def test_non_dict_message_returns_error(tmp_path):
     )
 
     with (
-        patch("lego_agent.server.find_repo_root", return_value=repo_root),
-        patch("lego_agent.server.load_config", return_value=mock_config),
-        patch("lego_agent.server.get_loader"),
+        patch("lego_agent.backend.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.backend.server.load_config", return_value=mock_config),
+        patch("lego_agent.backend.server.get_loader"),
     ):
         await websocket_endpoint(ws)  # type: ignore[arg-type]
 
@@ -291,9 +291,9 @@ async def test_missing_type_field_returns_error(tmp_path):
     )
 
     with (
-        patch("lego_agent.server.find_repo_root", return_value=repo_root),
-        patch("lego_agent.server.load_config", return_value=mock_config),
-        patch("lego_agent.server.get_loader"),
+        patch("lego_agent.backend.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.backend.server.load_config", return_value=mock_config),
+        patch("lego_agent.backend.server.get_loader"),
     ):
         await websocket_endpoint(ws)  # type: ignore[arg-type]
 
@@ -321,9 +321,9 @@ async def test_non_string_type_field_returns_error(tmp_path):
     )
 
     with (
-        patch("lego_agent.server.find_repo_root", return_value=repo_root),
-        patch("lego_agent.server.load_config", return_value=mock_config),
-        patch("lego_agent.server.get_loader"),
+        patch("lego_agent.backend.server.find_repo_root", return_value=repo_root),
+        patch("lego_agent.backend.server.load_config", return_value=mock_config),
+        patch("lego_agent.backend.server.get_loader"),
     ):
         await websocket_endpoint(ws)  # type: ignore[arg-type]
 

@@ -51,14 +51,14 @@ uv run -m lego_agent --no-tui --prompt "Your task"
 
 ### Core Components
 
-- **LegoAgentEngine (`engine.py`)**:
+- **LegoAgentEngine (`backend/engine.py`)**:
   - Manages the clarification loop (up to `max_clarifications` rounds).
   - Integrates with LangGraph for agent execution.
   - Streams thinking chunks, tool calls, and results.
   - Validates generated Python scripts before execution.
   - Handles response parsing and error repair.
 
-- **Web UI Server (`server.py`)**:
+- **Web UI Server (`backend/server.py`)**:
   - FastAPI application serving a WebSocket endpoint (`/ws`).
   - **WebIO**: Adapts the `UserIO` protocol to WebSocket events.
   - Streams "thinking", "tool_start", "tool_end" events to the frontend.
@@ -70,7 +70,7 @@ uv run -m lego_agent --no-tui --prompt "Your task"
   - **InputArea**: Dynamic form for prompts and clarification answers.
   - Connects to the backend via WebSocket.
 
-- **I/O Abstraction (`io.py`)**:
+- **I/O Abstraction (`backend/io.py`)**:
   - **UserIO Protocol**: Duck-typed interface for user interaction.
   - **WebIO**: WebSocket-based implementation for the Web UI.
   - **ConsoleIO**: ANSI-colored console output for CLI mode.
@@ -83,7 +83,7 @@ uv run -m lego_agent --no-tui --prompt "Your task"
   - Async script execution with live stdout/stderr streaming.
   - Uses `flexoki` theme for consistent styling.
 
-- **LangGraphAgent (`runtime.py`)**:
+- **LangGraphAgent (`backend/runtime.py`)**:
   - Wraps LangGraph React agent for orchestration.
   - Implements streaming event handlers for thinking and tool use.
   - Provides `generate()` sync and `_generate_async()` async methods.
@@ -98,8 +98,8 @@ uv run -m lego_agent --no-tui --prompt "Your task"
 
 ### Storage & Models
 
-- **LegoAgentStorage (`storage.py`)**: Manages script output with timestamped directories.
-- **LegoAgentResponse/Result (`models.py`)**: Pydantic models for structured data.
+- **LegoAgentStorage (`backend/storage.py`)**: Manages script output with timestamped directories.
+- **LegoAgentResponse/Result (`backend/models.py`)**: Dataclasses for structured data.
 
 ### Prompt System
 
@@ -118,7 +118,7 @@ uv run -m lego_agent --no-tui --prompt "Your task"
 ### Web UI Flow
 
 ```
-Browser (Next.js) <── WebSocket ──> FastAPI (server.py)
+Browser (Next.js) <── WebSocket ──> FastAPI (backend/server.py)
                                         ↓
                                 LegoAgentEngine
                                         ↓
@@ -158,7 +158,7 @@ Script Execution (in work_dir)
 
 Generated scripts must satisfy:
 1. Define `MAX_ITERATIONS = {loop_bound}` constant.
-2. Import from `lego_agent.runtime` or related modules.
+2. Import from `lego_agent.backend.runtime` or related modules.
 3. Include `if __name__ == "__main__":` block.
 4. Be valid Python with proper syntax.
 
@@ -166,7 +166,7 @@ Generated scripts must satisfy:
 
 Scripts are saved in `lego_agent_runs/<timestamp>/lego_agent.py` with:
 - Timestamped directory for each run.
-- Standalone execution (no external dependencies except `lego_agent.runtime`).
+- Standalone execution (no external dependencies except `lego_agent.backend.runtime`).
 - `MAX_ITERATIONS` constant for loop bounding.
 - Orchestration tools: `fan_out()`, `summarize()`, `judge_loop()`.
 

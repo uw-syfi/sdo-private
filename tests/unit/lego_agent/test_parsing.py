@@ -1,6 +1,6 @@
 import pytest
 
-from lego_agent.models import parse_lego_agent_response
+from lego_agent.backend.models import parse_lego_agent_response
 
 
 def test_extract_json_from_markdown():
