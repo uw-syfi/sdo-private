@@ -316,6 +316,24 @@ worker_cpu_limit = "16"
 
 ---
 
+### `submit_done_returns_feedback`
+
+**Default:** `false`
+
+Controls whether autonomous-mode `submit_done()` returns rich grading
+feedback (`SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK` env var). When `false`,
+the agent only gets a neutral completion payload with timing fields and the
+submission count. When `true`, `submit_done()` also includes diagnosis and
+mitigation verdict details, matched-candidate reasoning, ground truth, and
+the submitted diagnoses.
+
+```toml
+[runner.env]
+submit_done_returns_feedback = true
+```
+
+---
+
 ## SREGym Pipeline Config (`[[stages]]`)
 
 A pipeline TOML uses `[[stages]]` instead of `[runner]` to chain multiple experiments automatically, passing each stage's KB as the seed for the next. Detected by the presence of a `stages` key; handled transparently by `run_sregym.py`.

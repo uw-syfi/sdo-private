@@ -52,6 +52,7 @@ spec_names = ["wrong_service_selector"]
 judge_model_id = "judge-model"
 reuse_cluster = true
 force_recreate_cluster = false
+submit_done_returns_feedback = true
 
 [defaults.variants]
 seed = 99
@@ -182,6 +183,19 @@ class TestMergeStageConfig:
         assert config.env.judge_model_id == "judge"
         assert config.env.reuse_cluster is True
         assert config.env.force_recreate_cluster is False
+        assert config.env.submit_done_returns_feedback is False
+
+    def test_defaults_env_preserves_submit_done_feedback(self) -> None:
+        defaults = {
+            "env": {
+                "judge_model_id": "judge",
+                "reuse_cluster": True,
+                "force_recreate_cluster": False,
+                "submit_done_returns_feedback": True,
+            },
+        }
+        config = merge_stage_config(defaults, {})
+        assert config.env.submit_done_returns_feedback is True
 
     def test_with_overrides(self) -> None:
         defaults = {
@@ -204,7 +218,11 @@ class TestMergeStageConfig:
             "deploy_from_source": True,
             "application_workspace": True,
             "spec_names": ["wrong_service_selector"],
-            "env": {"reuse_cluster": True, "force_recreate_cluster": True},
+            "env": {
+                "reuse_cluster": True,
+                "force_recreate_cluster": True,
+                "submit_done_returns_feedback": True,
+            },
         }
         overrides = {"model": "claude-sonnet-4-5"}
         config = merge_stage_config(defaults, overrides)
@@ -217,6 +235,7 @@ class TestMergeStageConfig:
         assert config.spec_names == ["wrong_service_selector"]
         assert config.env.reuse_cluster is True
         assert config.env.force_recreate_cluster is True
+        assert config.env.submit_done_returns_feedback is True
 
     def test_nested_override_preserves_siblings(self) -> None:
         """Override variants.count but keep variants.seed from defaults."""

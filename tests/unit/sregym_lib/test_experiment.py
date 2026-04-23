@@ -246,14 +246,15 @@ def test_application_workspace_requires_deploy_from_source() -> None:
         ExperimentConfig(app_filter="hotel_reservation", application_workspace=True)
 
 
-def test_application_workspace_requires_single_worker() -> None:
-    with pytest.raises(ValueError, match="application_workspace requires runner.parallel = 1"):
-        ExperimentConfig(
-            app_filter="hotel_reservation",
-            deploy_from_source=True,
-            application_workspace=True,
-            parallel=2,
-        )
+def test_application_workspace_allows_parallel_workers() -> None:
+    config = ExperimentConfig(
+        app_filter="hotel_reservation",
+        deploy_from_source=True,
+        application_workspace=True,
+        parallel=2,
+    )
+
+    assert config.parallel == 2
 
 
 def test_serialize_includes_spec_names(tmp_path: Path) -> None:
@@ -280,6 +281,7 @@ def test_reuse_cluster_defaults_to_false() -> None:
     config = ExperimentConfig()
     assert config.env.reuse_cluster is False
     assert config.env.force_recreate_cluster is False
+    assert config.env.submit_done_returns_feedback is False
 
 
 def test_reuse_cluster_loaded_from_toml(tmp_path: Path) -> None:
@@ -295,11 +297,13 @@ def test_reuse_cluster_loaded_from_toml(tmp_path: Path) -> None:
         [runner.env]
         reuse_cluster = true
         force_recreate_cluster = false
+        submit_done_returns_feedback = true
     """,
     )
     config = load_experiment_config(toml)
     assert config.env.reuse_cluster is True
     assert config.env.force_recreate_cluster is False
+    assert config.env.submit_done_returns_feedback is True
 
 
 def test_reuse_cluster_env_override_enables() -> None:
@@ -321,6 +325,12 @@ def test_force_recreate_env_override() -> None:
     assert resolved.env.force_recreate_cluster is True
 
 
+def test_submit_done_feedback_env_override() -> None:
+    config = ExperimentConfig(env=RunnerEnv(submit_done_returns_feedback=False))
+    resolved = resolve_config(config, env_overrides={"SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK": "1"})
+    assert resolved.env.submit_done_returns_feedback is True
+
+
 def test_deploy_from_source_env_override_enables() -> None:
     config = ExperimentConfig(deploy_from_source=False)
     resolved = resolve_config(config, env_overrides={"SREGYM_DEPLOY_FROM_SOURCE": "1"})
@@ -338,6 +348,13 @@ def test_config_to_env_emits_reuse_flags(tmp_path: Path) -> None:
     env = config_to_env(config, project_root=tmp_path)
     assert env["SREGYM_REUSE_CLUSTER"] == "1"
     assert env["SREGYM_FORCE_RECREATE_CLUSTER"] == "1"
+    assert env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] == "0"
+
+
+def test_config_to_env_emits_submit_done_feedback_flag_when_enabled(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(submit_done_returns_feedback=True))
+    env = config_to_env(config, project_root=tmp_path)
+    assert env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] == "1"
 
 
 def test_config_to_env_omits_reuse_flags_when_false(tmp_path: Path) -> None:
@@ -384,3 +401,11 @@ def test_roundtrip_reuse_cluster(tmp_path: Path) -> None:
     loaded = load_experiment_config(toml_path)
     assert loaded.env.reuse_cluster is True
     assert loaded.env.force_recreate_cluster is False
+
+
+def test_roundtrip_submit_done_returns_feedback(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(submit_done_returns_feedback=True))
+    toml_path = tmp_path / "snap.toml"
+    toml_path.write_text(_serialize_config(config))
+    loaded = load_experiment_config(toml_path)
+    assert loaded.env.submit_done_returns_feedback is True

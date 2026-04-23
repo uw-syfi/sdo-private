@@ -189,6 +189,7 @@ def merge_stage_config(
             worker_cpu_limit=str(env_raw.get("worker_cpu_limit", "")),
             reuse_cluster=bool(env_raw.get("reuse_cluster", False)),
             force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
+            submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
         ),
         agent_config=agent_config,
     )

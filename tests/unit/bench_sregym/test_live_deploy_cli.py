@@ -168,22 +168,23 @@ def test_application_workspace_requires_deploy_from_source():
         mod.parse_cli_args(["--agent", "cli_agent", "--app-filter", "hotel_reservation", "--application-workspace"])
 
 
-def test_application_workspace_requires_single_worker():
+def test_application_workspace_allows_parallel_workers():
     mod = _import_bench_main()
 
-    with pytest.raises(SystemExit):
-        mod.parse_cli_args(
-            [
-                "--agent",
-                "cli_agent",
-                "--app-filter",
-                "hotel_reservation",
-                "--deploy-from-source",
-                "--application-workspace",
-                "--parallel",
-                "2",
-            ]
-        )
+    args = mod.parse_cli_args(
+        [
+            "--agent",
+            "cli_agent",
+            "--app-filter",
+            "hotel_reservation",
+            "--deploy-from-source",
+            "--application-workspace",
+            "--parallel",
+            "2",
+        ]
+    )
+
+    assert args.parallel == 2
 
 
 def test_live_parser_accepts_deploy_from_source_flag():
@@ -234,6 +235,17 @@ def test_count_completed_problem_results_reads_problem_run_directories(tmp_path:
     )
 
     assert mod._count_completed_problem_results(str(tmp_path), "wrong_service_selector_hotel_reservation") == 2
+
+
+def test_iteration_run_log_path_uses_timestamped_filename(tmp_path: Path):
+    mod = _import_bench_main()
+
+    problem_dir = tmp_path / "problem_runs" / "0422_0000_wrong_service_selector_hotel_reservation"
+    problem_dir.mkdir(parents=True)
+
+    run_log_path = mod._iteration_run_log_path(str(problem_dir), "0422_0312")
+
+    assert run_log_path == str(problem_dir / "run_0422_0312.log")
 
 
 def test_partition_resumed_problems_uses_problem_run_results(tmp_path: Path):

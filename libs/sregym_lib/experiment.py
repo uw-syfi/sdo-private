@@ -74,6 +74,7 @@ class RunnerEnv:
     worker_cpu_limit: str = ""
     reuse_cluster: bool = False
     force_recreate_cluster: bool = False
+    submit_done_returns_feedback: bool = False
 
 
 @dataclass
@@ -120,8 +121,6 @@ class ExperimentConfig:
                 raise ValueError("application_workspace requires runner.app_filter")
             if not self.deploy_from_source:
                 raise ValueError("application_workspace requires runner.deploy_from_source = true")
-            if self.parallel != 1:
-                raise ValueError("application_workspace requires runner.parallel = 1")
         return self
 
 
@@ -166,6 +165,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         worker_cpu_limit=str(env_raw.get("worker_cpu_limit", "")),
         reuse_cluster=bool(env_raw.get("reuse_cluster", False)),
         force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
+        submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
     )
 
     agent_config = raw.get("agent", {})
@@ -198,7 +198,8 @@ def resolve_config(
     """Apply environment variable overrides on top of the loaded config.
 
     Recognized env vars: MODEL, PARALLEL, JUDGE_MODEL_ID,
-    SREGYM_WORKER_CPU_LIMIT, SREGYM_PRELOAD_INFRA_IMAGES.
+    SREGYM_WORKER_CPU_LIMIT, SREGYM_REUSE_CLUSTER,
+    SREGYM_FORCE_RECREATE_CLUSTER, SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK.
     """
     if env_overrides is None:
         env_overrides = dict(os.environ)
@@ -220,6 +221,10 @@ def resolve_config(
         env_updates["reuse_cluster"] = _parse_bool_env(env_overrides["SREGYM_REUSE_CLUSTER"])
     if "SREGYM_FORCE_RECREATE_CLUSTER" in env_overrides:
         env_updates["force_recreate_cluster"] = _parse_bool_env(env_overrides["SREGYM_FORCE_RECREATE_CLUSTER"])
+    if "SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK" in env_overrides:
+        env_updates["submit_done_returns_feedback"] = _parse_bool_env(
+            env_overrides["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"]
+        )
     if updates or env_updates:
         new_env = dataclasses.replace(config.env, **env_updates) if env_updates else config.env
         config = dataclasses.replace(config, **updates, env=new_env)
@@ -386,6 +391,7 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
         env["SREGYM_REUSE_CLUSTER"] = "1"
     if config.env.force_recreate_cluster:
         env["SREGYM_FORCE_RECREATE_CLUSTER"] = "1"
+    env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] = "1" if config.env.submit_done_returns_feedback else "0"
 
     env["SREGYM_PROGRESS_MODE"] = "rich"
 
@@ -461,6 +467,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"worker_cpu_limit = {_toml_value(config.env.worker_cpu_limit)}")
     lines.append(f"reuse_cluster = {_toml_value(config.env.reuse_cluster)}")
     lines.append(f"force_recreate_cluster = {_toml_value(config.env.force_recreate_cluster)}")
+    lines.append(f"submit_done_returns_feedback = {_toml_value(config.env.submit_done_returns_feedback)}")
 
     for agent_name, agent_cfg in config.agent_config.items():
         lines.append("")

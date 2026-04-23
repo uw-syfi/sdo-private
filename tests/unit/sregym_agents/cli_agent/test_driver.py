@@ -97,7 +97,8 @@ def test_build_prompt_autonomous_uses_per_stage_tool_names() -> None:
     assert "kubectl" in prompt.lower()
     # Must not promise a grading verdict from the tool response.
     assert "verdict" not in prompt.lower()
-    assert "whether the answer was accepted" not in prompt
+    assert "whether your answer was accepted" in prompt
+    assert "ground-truth root cause" not in prompt
 
 
 def test_build_prompt_non_autonomous_is_unchanged() -> None:
@@ -139,8 +140,13 @@ def test_build_prompt_autonomous_mentions_persistent_diagnostic_contract() -> No
     )
     assert ".sds/" in prompt
     assert ".sds/diagnose.sh" in prompt
+    assert ".sds/playbooks/" in prompt
     assert "quick to run" in prompt
     assert "well-organized" in prompt
+    assert "good Bash script best practices" in prompt
+    assert "prefer small functions" in prompt
+    assert "dispatch into helper scripts" in prompt
+    assert "readable, maintainable, and easy to extend" in prompt
 
 
 def test_build_prompt_autonomous_requires_preflight_for_prior_diagnostics() -> None:
@@ -156,6 +162,7 @@ def test_build_prompt_autonomous_requires_preflight_for_prior_diagnostics() -> N
     assert "repository-local diagnostic scripts" in prompt
     assert "Read the application source code and deployment manifests" in prompt
     assert "quickly triage the cluster and flag previously seen issues" in prompt
+    assert "print which playbook file(s) under `.sds/playbooks/` are relevant" in prompt
 
 
 def test_build_prompt_autonomous_mentions_post_submit_check_improvement() -> None:
@@ -163,12 +170,29 @@ def test_build_prompt_autonomous_mentions_post_submit_check_improvement() -> Non
         planned_stages=["diagnosis", "mitigation"],
         app_info={"app_name": "a", "namespace": "n"},
         autonomous=True,
-        memory_mcp_server_name="incident_memory",
     )
     assert "Only after `submit_done` returns" in prompt
     assert "add a new diagnostic check, or enhance an existing one" in prompt
     assert "future run" in prompt
     assert ".sds/diagnose.sh" in prompt
+    assert ".sds/playbooks/" in prompt
+    assert "generalizable Markdown playbook" in prompt
+    assert "using what you verified from the live cluster and source tree" in prompt
+    assert "using the ground-truth feedback" not in prompt
+    assert "commit those `.sds/` changes before exiting" in prompt
+    assert "store_incident" not in prompt
+
+
+def test_build_prompt_autonomous_mentions_rich_feedback_when_enabled() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+        submit_done_returns_feedback=True,
+    )
+    assert "returns rich feedback" in prompt
+    assert "ground-truth root cause" in prompt
+    assert "using the ground-truth feedback" in prompt
 
 
 # --- Agent factory ---------------------------------------------------------
@@ -329,6 +353,30 @@ def test_run_autonomous_env_var_picks_autonomous_prompt(
     prompt = stub.calls[0]["prompt"]
     assert "submit_diagnosis" in prompt
     assert "submit_mitigation" in prompt
+    assert "whether your answer was accepted" in prompt
+
+
+def test_run_autonomous_submit_done_feedback_env_var_updates_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.setenv("SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK", "1")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        status_sequence=["diagnosis", "done"],
+    )
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(), agent_factory=lambda p, m, u: stub)
+
+    prompt = stub.calls[0]["prompt"]
+    assert "returns rich feedback" in prompt
+    assert "ground-truth root cause" in prompt
 
 
 def test_run_happy_path_single_session(monkeypatch: pytest.MonkeyPatch) -> None:

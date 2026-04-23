@@ -56,7 +56,6 @@ logger = logging.getLogger(__name__)
 _POST_STAGE_TIMEOUT_S = 300
 
 _SUBMIT_MCP_SERVER_NAME = "sregym"
-_MEMORY_MCP_SERVER_NAME = "incident_memory"
 
 
 # --- Pure helpers ----------------------------------------------------------
@@ -82,6 +81,7 @@ def _build_prompt(
     app_info: dict[str, Any],
     *,
     autonomous: bool = False,
+    submit_done_returns_feedback: bool = False,
     memory_mcp_server_name: str | None = None,
     memory_store_only: bool = False,
 ) -> str:
@@ -110,6 +110,7 @@ def _build_prompt(
             app_name=app_info.get("app_name", "<unknown>"),
             namespace=app_info.get("namespace", "<unknown>"),
             submit_mcp_server_name=_SUBMIT_MCP_SERVER_NAME,
+            submit_done_returns_feedback=submit_done_returns_feedback,
             memory_mcp_server_name=memory_mcp_server_name,
             memory_store_only=memory_store_only,
         )
@@ -119,36 +120,6 @@ def _build_prompt(
 # --- Conductor I/O ---------------------------------------------------------
 # Conductor HTTP client lives in libs/sregym_lib/conductor.py — this driver
 # only owns the cli_agent-specific orchestration below.
-
-
-# --- Agent construction ----------------------------------------------------
-
-
-def _build_memory_mcp_server(store_path: str, merge_model: str | None = None) -> Any:
-    """Build a ``StdioMcpServer`` that launches the incident memory server as a subprocess."""
-    from libs.agent_cli.mcp_config import StdioMcpServer
-
-    args = [
-        "run",
-        "python",
-        "-m",
-        "sregym_agents.cli_agent.memory_server",
-        "--store-path",
-        store_path,
-    ]
-    if merge_model:
-        args += ["--merge-model", merge_model]
-    return StdioMcpServer(name=_MEMORY_MCP_SERVER_NAME, command="uv", args=args, env={})
-
-
-def _build_memory_mcp_server_http(port: int, store_only: bool = False) -> Any:
-    """Build an ``HttpMcpServer`` pointing to the shared memory daemon."""
-    from libs.agent_cli.mcp_config import HttpMcpServer
-
-    url = f"http://localhost:{port}/sse"
-    if store_only:
-        url += "?store_only=1"
-    return HttpMcpServer(name=_MEMORY_MCP_SERVER_NAME, url=url)
 
 
 def _default_agent_factory(
@@ -330,19 +301,12 @@ def _run(
         planned_stages,
     )
 
-    memory_port = getattr(args, "memory_port", None)
-    memory_store = getattr(args, "memory_store", None)
-    memory_merge_model = getattr(args, "memory_merge_model", None)
-    memory_store_only = getattr(args, "memory_store_only", False)
-    if memory_port:
-        extra_mcp_servers = [_build_memory_mcp_server_http(memory_port, store_only=memory_store_only)]
-        memory_server_name = _MEMORY_MCP_SERVER_NAME
-    elif memory_store:
-        extra_mcp_servers = [_build_memory_mcp_server(memory_store, memory_merge_model)]
-        memory_server_name = _MEMORY_MCP_SERVER_NAME
-    else:
-        extra_mcp_servers = []
-        memory_server_name = None
+    # Incident-memory MCP integration is intentionally disabled for now.
+    # The autonomous prompt directs the agent to persist reusable repo-local
+    # diagnostics and playbooks under `.sds/` instead.
+    memory_store_only = False
+    extra_mcp_servers = []
+    memory_server_name = None
 
     if agent_factory is not None:
         factory = agent_factory
@@ -355,10 +319,12 @@ def _run(
     # agent instead calls per-stage `submit_diagnosis` / `submit_mitigation`
     # tools that return a neutral ack, and must self-verify via kubectl.
     autonomous = os.getenv("SREGYM_AUTONOMOUS_SUBMIT", "").strip() == "1"
+    submit_done_returns_feedback = os.getenv("SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK", "").strip() == "1"
     prompt = _build_prompt(
         planned_stages,
         app_info,
         autonomous=autonomous,
+        submit_done_returns_feedback=submit_done_returns_feedback,
         memory_mcp_server_name=memory_server_name,
         memory_store_only=memory_store_only,
     )
