@@ -5,13 +5,15 @@ import unittest.mock as mock
 import pytest
 from agentshim import CodingAgent
 
+from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.rlm_official_agent import (
     _SDS_ROOT_PROMPT_PREFIX,
     RLMOfficialAgent,
     _build_context_text,
     _build_custom_tools,
 )
-from app_operator.core import AgentConfig, Config
+from app_operator.core import AgentConfig, Config, DSPyConfig
+from libs.model_config import ModelConfig
 
 
 class TestRegistration:
@@ -20,6 +22,22 @@ class TestRegistration:
     def test_registered_as_rlm_official(self):
         agent = CodingAgent(provider="rlm-official", model="gemini-2.5-pro")
         assert isinstance(agent.backend, RLMOfficialAgent)
+
+    def test_factory_forwards_backend_kwargs(self, tmp_path):
+        dspy_cfg = DSPyConfig()
+        config = Config(
+            agent=AgentConfig(
+                backend="rlm-official",
+                model_config=ModelConfig.from_string("gemini-2.5-pro", location="us-west1"),
+            ),
+            dspy=dspy_cfg,
+        )
+
+        agent = create_agent_from_config(str(tmp_path), config=config)
+
+        assert isinstance(agent.backend, RLMOfficialAgent)  # type: ignore[attr-defined]
+        assert agent.backend.location == "us-west1"  # type: ignore[attr-defined]
+        assert agent.backend.dspy_config is dspy_cfg  # type: ignore[attr-defined]
 
 
 class TestConfigAcceptsBackend:

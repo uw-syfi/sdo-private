@@ -34,15 +34,17 @@ def create_agent_from_config(
     if model:
         logger.info(f"Using coding agent model: {model}")
 
-    kwargs: dict[str, object] = {}
-    if model is not None:
-        kwargs["model"] = model
+    backend_kwargs: dict[str, object] | None = None
     if backend in ("rlm-official", "subagent", "hybrid"):
-        kwargs["location"] = config.agent.location
-        kwargs["dspy_config"] = config.dspy  # type: ignore[reportArgumentType]
+        backend_kwargs = {
+            "location": config.agent.location,
+            "dspy_config": config.dspy,  # type: ignore[reportArgumentType]
+        }
     if backend == "hybrid":
-        kwargs["rlm_mode"] = config.rlm.mode
+        if backend_kwargs is None:
+            backend_kwargs = {}
+        backend_kwargs["rlm_mode"] = config.rlm.mode
     try:
-        return CodingAgent(provider=backend, **kwargs)
+        return CodingAgent(provider=backend, model=model, backend_kwargs=backend_kwargs)
     except ValueError as exc:
         raise ValueError(f"Unknown agent backend '{backend}': {exc}") from exc
