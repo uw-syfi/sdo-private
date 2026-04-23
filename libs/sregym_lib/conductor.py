@@ -9,7 +9,7 @@ Covered surface:
 * Status-stage polling with exponential backoff (async primary,
   :func:`poll_stage_sync` wrapper for sync callers).
 * One-shot GETs for ``/get_app``, ``/get_problem``, ``/stages`` — each
-  uses :func:`libs.agent_mw.request_with_retry` so transient failures
+  uses :func:`libs.sregym_lib._http.request_with_retry` so transient failures
   don't propagate to drivers.
 * Best-effort ``POST /cleanup`` for the deferred-teardown gate.
 
@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import httpx
 import requests
 
-from libs.agent_mw import request_with_retry
+from libs.sregym_lib._http import request_with_retry
 from libs.sregym_lib.schema import (
     API_HOSTNAME_DEFAULT,
     API_HOSTNAME_ENV,

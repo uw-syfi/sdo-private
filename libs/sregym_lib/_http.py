@@ -1,4 +1,4 @@
-"""Retry wrapper for HTTP requests with exponential backoff."""
+"""Small HTTP helpers local to the SREGym shared library."""
 
 from __future__ import annotations
 
@@ -25,17 +25,13 @@ def request_with_retry(
     jitter: bool = True,
     **requests_kwargs: Any,
 ) -> requests.Response:
-    """Issue an HTTP request with retry on transient errors.
-
-    Retries on 429/5xx status codes and connection errors.
-    """
+    """Issue an HTTP request with retry on transient errors."""
     for attempt in range(max_retries + 1):
         try:
             resp = requests.request(method, url, **requests_kwargs)
             if resp.status_code not in _RETRYABLE_STATUSES:
                 resp.raise_for_status()
                 return resp
-            # Retryable status — fall through to retry logic
             status = resp.status_code
         except requests.ConnectionError as exc:
             if attempt == max_retries:
