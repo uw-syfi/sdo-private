@@ -5,10 +5,10 @@ from ._behavior_guards import (
     ThinkingRepetitionMiddleware,
     TimeoutMiddleware,
 )
-from ._retry import RetryMiddleware, arun_with_retry, arun_with_retry_tracked, run_with_retry_sync
+from ._retry import RetryMiddleware
 from ._soft_limit import SoftLimitExtension
 from ._trajectory import FixedPathProvider, TrajectoryMiddleware, TrajectoryPathProvider
-from ._turn_logger import TurnLoggingMiddleware, fmt_tool_args, tool_call_failed
+from ._turn_logger import TurnLoggingMiddleware
 
 __all__ = [
     "FixedPathProvider",
@@ -22,9 +22,4 @@ __all__ = [
     "TrajectoryMiddleware",
     "TrajectoryPathProvider",
     "TurnLoggingMiddleware",
-    "fmt_tool_args",
-    "tool_call_failed",
-    "arun_with_retry",
-    "arun_with_retry_tracked",
-    "run_with_retry_sync",
 ]
