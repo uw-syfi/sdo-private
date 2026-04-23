@@ -22,7 +22,7 @@ from sregym_agents.crucible.tools._deps import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from sregym_agents.crucible.agents.base import RunSubagent
+    from sregym_agents.crucible.agents import RunSubagent
     from sregym_agents.crucible.knowledge_base.root_cause import DiagnosisFrontMatter, KBView
 
 import yaml

@@ -306,7 +306,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _create_run_subagent(backend: str, model: str, provider: str, exp_cwd: str | None):
     """Create a ``run_subagent`` closure for KB tool subagent dispatch."""
     if backend == "agent-cli":
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers import AgentCLIDriver
         from sregym_agents.crucible.sandbox import build_crucible_sandbox
 
         sandbox_cfg = build_crucible_sandbox(exp_cwd) if exp_cwd else False
@@ -317,7 +317,7 @@ def _create_run_subagent(backend: str, model: str, provider: str, exp_cwd: str |
             sandbox=sandbox_cfg,
         )
     else:
-        from sregym_agents.crucible.agents.drivers.pydantic_ai_driver import PydanticAIDriver
+        from sregym_agents.crucible.agents.drivers import PydanticAIDriver
 
         driver = PydanticAIDriver(model)
 

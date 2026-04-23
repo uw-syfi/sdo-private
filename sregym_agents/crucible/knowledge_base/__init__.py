@@ -12,7 +12,7 @@ from .structured import StructuredKnowledgeBase
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.agents.base import AgentDriver
+    from sregym_agents.crucible.agents import AgentDriver
     from sregym_agents.crucible.config import CrucibleConfig
 
 __all__ = [

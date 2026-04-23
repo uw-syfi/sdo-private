@@ -128,11 +128,10 @@ async def _compact_messages(
     """Summarize message history for context compaction."""
     import json
 
-    from pydantic_ai import Agent
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-    from libs.agent_mw import arun_with_retry
-    from libs.pydantic_agent import TokenUsage
+    from libs.agent_mw import RetryMiddleware
+    from libs.pydantic_agent import InlineAgent
 
     to_summarize: list[Any] = messages[1:] if len(messages) > 1 else messages
     try:
@@ -156,10 +155,16 @@ async def _compact_messages(
         "state. Be detailed enough for the agent to continue without losing context.\n\n"
         f"<history>\n{history_text}\n</history>"
     )
-    compactor: Agent[None, str] = Agent(model, output_type=str)
-    compact_result = await arun_with_retry(compactor, summary_prompt)
-    if usage_collector is not None:
-        usage_collector.add("compact-messages", TokenUsage.from_run_usage(compact_result.usage()))
+    compactor = InlineAgent(
+        model,
+        deps=None,
+        agent_name="compact-messages",
+        output_type=str,
+        tools=[],
+        middleware=[RetryMiddleware()],
+        usage_collector=usage_collector,
+    )
+    compact_result = await compactor.arun(summary_prompt)
     logger.info("Context compacted: %d chars → %d chars", len(history_text), len(compact_result.output))
     return compact_result.output
 
