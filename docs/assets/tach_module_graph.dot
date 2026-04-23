@@ -5,7 +5,6 @@ digraph tach_modules {
 
     "libs.pydantic_agent" -> "libs.model_config";
     "libs.agent_mw" -> "libs.pydantic_agent";
-    "libs.sregym_lib" -> "libs.agent_mw";
     "app_operator.core" -> "libs.model_config";
     "app_operator.core" -> "libs.sds_core";
     "app_operator.llm" -> "app_operator.core";
