@@ -31,9 +31,7 @@ depends_on = [
 
 [[modules]]
 path = "libs.sregym_lib"
-depends_on = [
-    "libs.agent_mw",
-]
+depends_on = []
 
 [[modules]]
 path = "libs.llm_rt"

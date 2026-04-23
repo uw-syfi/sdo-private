@@ -1,4 +1,4 @@
-"""Tests for request_with_retry HTTP utility."""
+"""Tests for the SREGym-local HTTP retry utility."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from libs.agent_mw._http_retry import request_with_retry
+from libs.sregym_lib._http import request_with_retry
 
 
 def _mock_response(status_code: int) -> MagicMock:
@@ -20,16 +20,16 @@ def _mock_response(status_code: int) -> MagicMock:
 
 
 class TestRequestWithRetry:
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_success_no_retry(self, mock_request, mock_sleep):
         mock_request.return_value = _mock_response(200)
         resp = request_with_retry("GET", "http://example.com/api")
         assert resp.status_code == 200
         mock_sleep.assert_not_called()
 
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_retries_on_429(self, mock_request, mock_sleep):
         mock_request.side_effect = [
             _mock_response(429),
@@ -40,8 +40,8 @@ class TestRequestWithRetry:
         assert resp.status_code == 200
         assert mock_sleep.call_count == 2
 
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_retries_on_500(self, mock_request, mock_sleep):
         mock_request.side_effect = [
             _mock_response(500),
@@ -51,8 +51,8 @@ class TestRequestWithRetry:
         assert resp.status_code == 200
         assert mock_sleep.call_count == 1
 
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_retries_on_connection_error(self, mock_request, mock_sleep):
         mock_request.side_effect = [
             requests.ConnectionError("connection refused"),
@@ -62,8 +62,8 @@ class TestRequestWithRetry:
         assert resp.status_code == 200
         assert mock_sleep.call_count == 1
 
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_exhausted_retries_raises(self, mock_request, mock_sleep):
         mock_request.return_value = _mock_response(429)
         with pytest.raises(requests.HTTPError):
@@ -75,16 +75,16 @@ class TestRequestWithRetry:
             )
         assert mock_sleep.call_count == 2
 
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_non_retryable_error_raises_immediately(self, mock_request, mock_sleep):
         mock_request.return_value = _mock_response(404)
         with pytest.raises(requests.HTTPError):
             request_with_retry("GET", "http://example.com/api")
         mock_sleep.assert_not_called()
 
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_exponential_backoff(self, mock_request, mock_sleep):
         mock_request.side_effect = [
             _mock_response(429),
@@ -102,8 +102,8 @@ class TestRequestWithRetry:
         delays = [call.args[0] for call in mock_sleep.call_args_list]
         assert delays == [1.0, 2.0, 4.0]
 
-    @patch("libs.agent_mw._http_retry.time.sleep")
-    @patch("libs.agent_mw._http_retry.requests.request")
+    @patch("libs.sregym_lib._http.time.sleep")
+    @patch("libs.sregym_lib._http.requests.request")
     def test_connection_error_exhausted_raises(self, mock_request, mock_sleep):
         mock_request.side_effect = requests.ConnectionError("refused")
         with pytest.raises(requests.ConnectionError):

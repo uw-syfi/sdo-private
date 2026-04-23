@@ -5,7 +5,6 @@ from ._behavior_guards import (
     ThinkingRepetitionMiddleware,
     TimeoutMiddleware,
 )
-from ._http_retry import request_with_retry
 from ._retry import RetryMiddleware, arun_with_retry, arun_with_retry_tracked, run_with_retry_sync
 from ._soft_limit import SoftLimitExtension
 from ._trajectory import FixedPathProvider, TrajectoryMiddleware, TrajectoryPathProvider
@@ -27,6 +26,5 @@ __all__ = [
     "tool_call_failed",
     "arun_with_retry",
     "arun_with_retry_tracked",
-    "request_with_retry",
     "run_with_retry_sync",
 ]
