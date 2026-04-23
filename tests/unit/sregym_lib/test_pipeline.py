@@ -380,7 +380,7 @@ class TestResetStagesForRerun:
 
 
 from libs.sregym_lib import runner as runner_mod  # noqa: E402
-from libs.sregym_lib.runner import StageHooks  # noqa: E402
+from libs.sregym_lib.runner import ExpStageLifecycle  # noqa: E402
 
 
 class TestPipelineRunner:
@@ -563,7 +563,7 @@ class TestPipelineRunner:
         def wait(exp_dir, baseline):
             wait_calls.append((exp_dir, baseline))
 
-        hooks = StageHooks(
+        lifecycle = ExpStageLifecycle(
             before_stage=before_stage,
             snapshot_before_drain=snap,
             wait_for_drain=wait,
@@ -587,7 +587,7 @@ class TestPipelineRunner:
                 sregym_dir=sregym_dir,
                 pipeline_dir=pipeline_dir,
                 state=state,
-                hooks=hooks,
+                lifecycle=lifecycle,
             )
 
         assert rc == 0
@@ -606,7 +606,7 @@ class TestPipelineRunner:
         def wait_fails(exp_dir, baseline):
             raise TimeoutError("queue stuck")
 
-        hooks = StageHooks(
+        lifecycle = ExpStageLifecycle(
             snapshot_before_drain=lambda exp_dir, cfg: object(),
             wait_for_drain=wait_fails,
         )
@@ -629,7 +629,7 @@ class TestPipelineRunner:
                 sregym_dir=sregym_dir,
                 pipeline_dir=pipeline_dir,
                 state=state,
-                hooks=hooks,
+                lifecycle=lifecycle,
             )
 
         assert rc == 1

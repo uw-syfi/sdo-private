@@ -4,10 +4,10 @@ Pure orchestration — resolving configs, creating experiment directories,
 translating :class:`ExperimentConfig` into CLI args + env vars for
 ``bench/sregym/main.py``, and running pipelines with resume/rerun support.
 
-Agent-specific concerns (e.g. crucible's knowledge-base seeding and the
-between-stage KB drain barrier) are injected via :class:`StageHooks`.
-The top-level launcher module (``sregym_agents.run_sregym``) wires the
-crucible hooks in; this module stays agent-agnostic.
+Agent-specific concerns (for example crucible's knowledge-base seeding and
+between-stage KB drain barrier) are injected via :class:`ExpStageLifecycle`.
+Each agent package under ``sregym_agents/`` may expose its own lifecycle
+definition; this module stays agent-agnostic.
 """
 
 from __future__ import annotations
@@ -116,11 +116,11 @@ def _inject_memory_defaults(env: dict[str, str], agent_name: str, log_dir: Path)
 
 
 @dataclasses.dataclass
-class StageHooks:
-    """Agent-specific hooks invoked during stage lifecycle.
+class ExpStageLifecycle:
+    """Agent-specific behavior invoked during experiment stage lifecycle.
 
-    All hooks are optional. Defaults are no-ops so an agent with no
-    extra stage needs can pass ``StageHooks()`` (or nothing at all).
+    All callbacks are optional. Agents with no extra stage needs can use
+    :data:`NOOP_EXP_STAGE_LIFECYCLE` (or pass ``None``).
     """
 
     before_stage: Callable[[Path, ExperimentConfig], None] | None = None
@@ -128,7 +128,7 @@ class StageHooks:
     wait_for_drain: Callable[[Path, object], None] | None = None
 
 
-_NOOP_HOOKS = StageHooks()
+NOOP_EXP_STAGE_LIFECYCLE = ExpStageLifecycle()
 
 
 # ---------------------------------------------------------------------------
@@ -176,10 +176,10 @@ def run_single_experiment(
     *,
     project_root: Path,
     sregym_dir: Path,
-    hooks: StageHooks | None = None,
+    lifecycle: ExpStageLifecycle | None = None,
 ) -> None:
     """Run or resume a single experiment."""
-    hooks = hooks or _NOOP_HOOKS
+    lifecycle = lifecycle or NOOP_EXP_STAGE_LIFECYCLE
 
     if target.is_dir():
         exp_dir = target.resolve()
@@ -205,8 +205,8 @@ def run_single_experiment(
     _print_experiment_info(config, env)
     print()
 
-    if hooks.before_stage is not None:
-        hooks.before_stage(exp_dir, config)
+    if lifecycle.before_stage is not None:
+        lifecycle.before_stage(exp_dir, config)
 
     env = _inject_memory_defaults(env, config.agent, exp_dir)
     before_hook, after_hook = _load_agent_hooks(config.agent, project_root)
@@ -292,10 +292,10 @@ def run_pipeline(
     sregym_dir: Path,
     pipeline_dir: Path | None = None,
     state: PipelineState | None = None,
-    hooks: StageHooks | None = None,
+    lifecycle: ExpStageLifecycle | None = None,
 ) -> int:
     """Run a multi-stage pipeline with automatic KB chaining."""
-    hooks = hooks or _NOOP_HOOKS
+    lifecycle = lifecycle or NOOP_EXP_STAGE_LIFECYCLE
 
     _verify_sregym(sregym_dir)
 
@@ -370,13 +370,13 @@ def run_pipeline(
                 print(f"  KB seed: {prev_kb_dir}")
             print("=" * 60)
 
-            if hooks.before_stage is not None:
-                hooks.before_stage(stage_exp_dir, exp_config)
+            if lifecycle.before_stage is not None:
+                lifecycle.before_stage(stage_exp_dir, exp_config)
 
             needs_kb_barrier = i + 1 < len(config.stages) and config.stages[i + 1].chain_kb
             drain_baseline: object | None = None
-            if needs_kb_barrier and hooks.snapshot_before_drain is not None:
-                drain_baseline = hooks.snapshot_before_drain(stage_exp_dir, exp_config)
+            if needs_kb_barrier and lifecycle.snapshot_before_drain is not None:
+                drain_baseline = lifecycle.snapshot_before_drain(stage_exp_dir, exp_config)
 
             try:
                 returncode = _run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root)
@@ -396,10 +396,10 @@ def run_pipeline(
                 print(f"Resume with: run_sregym.sh {pipeline_dir}")
                 return 1
 
-            if needs_kb_barrier and hooks.wait_for_drain is not None:
+            if needs_kb_barrier and lifecycle.wait_for_drain is not None:
                 print("  Waiting for KB review queue to drain before chaining...")
                 try:
-                    hooks.wait_for_drain(stage_exp_dir, drain_baseline)
+                    lifecycle.wait_for_drain(stage_exp_dir, drain_baseline)
                 except KeyboardInterrupt:
                     print(f"\nInterrupted while waiting for KB queue after stage {i}. Saving state for resume.")
                     stage_state.status = "failed"

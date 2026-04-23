@@ -18,71 +18,69 @@ Usage:
     uv run python -m sregym_agents.run_sregym bench/sregym/logs/<pipeline_dir>/ --stage 1
 
 This script is a thin integration layer: the launcher orchestration lives
-in :mod:`libs.sregym_lib`; the crucible-specific knowledge-base hooks are
-wired in here.
+in :mod:`libs.sregym_lib`; agent-specific experiment-stage lifecycle
+behavior is loaded from ``sregym_agents.<agent_name>`` packages.
 """
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
 from libs.sregym_lib import (
-    ExperimentConfig,
-    StageHooks,
+    NOOP_EXP_STAGE_LIFECYCLE,
+    ExpStageLifecycle,
+    PipelineConfig,
     has_pipeline_state,
     is_pipeline_config,
     load_pipeline_config,
+    merge_stage_config,
     read_pipeline_snapshot,
     read_pipeline_state,
+    read_snapshot,
     reset_stages_for_rerun,
     run_pipeline,
     run_single_experiment,
     write_pipeline_state,
 )
-from sregym_agents.crucible.kb_update_queue import (
-    KbQueueSnapshot,
-    snapshot_kb_queue,
-    wait_for_kb_queue_drain,
-)
-from sregym_agents.crucible.knowledge_base import seed_kb
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 _SREGYM_DIR = _PROJECT_ROOT / "bench" / "sregym"
-_KB_QUEUE_DRAIN_TIMEOUT_S = 1800.0
-_KB_QUEUE_DRAIN_POLL_INTERVAL_S = 2.0
 
 
 # ---------------------------------------------------------------------------
-# Crucible-specific stage hooks
+# Agent lifecycle loading
 # ---------------------------------------------------------------------------
 
 
-def _crucible_before_stage(exp_dir: Path, config: ExperimentConfig) -> None:
-    seed_kb(exp_dir / "kb", config.env.crucible_seed_kb_dir or None)
+def _load_exp_stage_lifecycle(agent_name: str) -> ExpStageLifecycle:
+    module_name = f"sregym_agents.{agent_name}"
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name == module_name:
+            return NOOP_EXP_STAGE_LIFECYCLE
+        raise
+
+    getter = getattr(module, "get_exp_stage_lifecycle", None)
+    if getter is None:
+        return NOOP_EXP_STAGE_LIFECYCLE
+
+    lifecycle = getter()
+    if lifecycle is None:
+        return NOOP_EXP_STAGE_LIFECYCLE
+    if not isinstance(lifecycle, ExpStageLifecycle):
+        raise TypeError(
+            f"{module_name}.get_exp_stage_lifecycle() must return ExpStageLifecycle or None, "
+            f"got {type(lifecycle).__name__}"
+        )
+    return lifecycle
 
 
-def _crucible_snapshot(exp_dir: Path, config: ExperimentConfig) -> object:
-    del config
-    return snapshot_kb_queue(exp_dir / "kb")
-
-
-def _crucible_wait_for_drain(exp_dir: Path, baseline: object) -> None:
-    assert isinstance(baseline, KbQueueSnapshot)
-    wait_for_kb_queue_drain(
-        exp_dir / "kb",
-        baseline=baseline,
-        timeout_s=_KB_QUEUE_DRAIN_TIMEOUT_S,
-        poll_interval_s=_KB_QUEUE_DRAIN_POLL_INTERVAL_S,
-    )
-
-
-_CRUCIBLE_HOOKS = StageHooks(
-    before_stage=_crucible_before_stage,
-    snapshot_before_drain=_crucible_snapshot,
-    wait_for_drain=_crucible_wait_for_drain,
-)
+def _pipeline_agent_name(config: PipelineConfig) -> str:
+    return merge_stage_config(config.defaults, {}).agent
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +124,7 @@ def main() -> None:
         target = target.resolve()
         if has_pipeline_state(target):
             config = read_pipeline_snapshot(target)
+            lifecycle = _load_exp_stage_lifecycle(_pipeline_agent_name(config))
             state = read_pipeline_state(target)
             if stage_index is not None:
                 reset_stages_for_rerun(config, state, stage_index, target)
@@ -138,7 +137,7 @@ def main() -> None:
                     sregym_dir=_SREGYM_DIR,
                     pipeline_dir=target,
                     state=state,
-                    hooks=_CRUCIBLE_HOOKS,
+                    lifecycle=lifecycle,
                 )
             )
         else:
@@ -148,12 +147,13 @@ def main() -> None:
                     file=sys.stderr,
                 )
                 sys.exit(1)
+            config = read_snapshot(target)
             run_single_experiment(
                 target,
                 extra_args,
                 project_root=_PROJECT_ROOT,
                 sregym_dir=_SREGYM_DIR,
-                hooks=_CRUCIBLE_HOOKS,
+                lifecycle=_load_exp_stage_lifecycle(config.agent),
             )
 
     elif target.is_file() and target.suffix == ".toml":
@@ -165,21 +165,25 @@ def main() -> None:
             sys.exit(1)
         if is_pipeline_config(target):
             config = load_pipeline_config(target)
+            lifecycle = _load_exp_stage_lifecycle(_pipeline_agent_name(config))
             sys.exit(
                 run_pipeline(
                     config,
                     project_root=_PROJECT_ROOT,
                     sregym_dir=_SREGYM_DIR,
-                    hooks=_CRUCIBLE_HOOKS,
+                    lifecycle=lifecycle,
                 )
             )
         else:
+            from libs.sregym_lib.runner import load_experiment_config_or_resolve
+
+            config = load_experiment_config_or_resolve(target)
             run_single_experiment(
                 target,
                 extra_args,
                 project_root=_PROJECT_ROOT,
                 sregym_dir=_SREGYM_DIR,
-                hooks=_CRUCIBLE_HOOKS,
+                lifecycle=_load_exp_stage_lifecycle(config.agent),
             )
 
     else:
