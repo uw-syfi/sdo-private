@@ -115,6 +115,10 @@ class SubagentCodingAgent(BaseCodingAgent):
             logger.error(f"[Subagent] Direct text LLM call failed: {type(e).__name__}: {e}")
             return f"LLM call failed: {type(e).__name__}: {e}"
 
+    def generate_direct(self, prompt: str, token_acc: dict[str, int] | None = None) -> str:
+        """Public wrapper for the direct-text path."""
+        return self._generate_direct(prompt, token_acc)
+
     def _generate_files(self, prompt: str, repo_path: Path, token_acc: dict[str, int] | None = None) -> str:
         import os
 
@@ -140,6 +144,10 @@ class SubagentCodingAgent(BaseCodingAgent):
 
         generate_and_write_files(raw, prompt, repo_path, "[Subagent]")
         return raw
+
+    def generate_files(self, prompt: str, repo_path: Path, token_acc: dict[str, int] | None = None) -> str:
+        """Public wrapper for the file-generation path."""
+        return self._generate_files(prompt, repo_path, token_acc)
 
     # -- Fix path: fan-out subagents + root synthesis -------------------------
 
@@ -334,6 +342,10 @@ class SubagentCodingAgent(BaseCodingAgent):
             logger.warning(f"Failed to read trajectory from {traj_path}: {e}")
             return ""
 
+    def read_trajectory(self, sds_dir: Path) -> str:
+        """Read and summarize recent trajectory data."""
+        return self._read_trajectory(sds_dir)
+
     @staticmethod
     def _read(path: Path) -> str:
         try:
@@ -342,6 +354,10 @@ class SubagentCodingAgent(BaseCodingAgent):
         except OSError as e:
             logger.warning(f"Failed to read {path}: {e}")
         return ""
+
+    def read_text(self, path: Path) -> str:
+        """Read a text file, returning an empty string on failure."""
+        return self._read(path)
 
     def _gather_repo_context(self, repo_path: Path, sds_dir: Path) -> str:
         """Gather repository-level context files into a single string."""
@@ -368,3 +384,7 @@ class SubagentCodingAgent(BaseCodingAgent):
             parts.append(f"--- Code Analysis ---\n{analysis}")
 
         return "\n\n".join(parts)
+
+    def gather_repo_context(self, repo_path: Path, sds_dir: Path) -> str:
+        """Gather repository-level context files into a single string."""
+        return self._gather_repo_context(repo_path, sds_dir)

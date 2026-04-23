@@ -40,7 +40,7 @@ wheels = [
 [[package]]
 name = "agentshim"
 version = "0.2.0"
-source = { git = "https://github.com/vic-lsh/agentshim?rev=012fbf5aa42fc116643903ff851c11ab8facd814#012fbf5aa42fc116643903ff851c11ab8facd814" }
+source = { git = "https://github.com/vic-lsh/agentshim?rev=cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e#cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" }
 dependencies = [
     { name = "litellm" },
     { name = "loguru" },
@@ -3020,7 +3020,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=012fbf5aa42fc116643903ff851c11ab8facd814" },
+    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" },
     { name = "litellm", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.2" },
 ]
@@ -5718,7 +5718,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=012fbf5aa42fc116643903ff851c11ab8facd814" },
+    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepagents", marker = "python_full_version >= '3.11'", specifier = ">=0.5.0a1" },
     { name = "dspy-ai", specifier = ">=2.4.0" },

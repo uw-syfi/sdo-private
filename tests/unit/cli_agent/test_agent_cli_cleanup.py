@@ -14,6 +14,7 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+from agentshim import CodingAgent
 from agentshim.claude import ClaudeCodeCodingAgent
 from agentshim.codex import CodexCodingAgent
 from agentshim.gemini import GeminiCodingAgent
@@ -584,7 +585,8 @@ def test_factory_creates_all_agent_types(mock_which):
                     operator=OperatorConfig(),
                 )
                 agent = create_agent_from_config("/tmp", config=config)
-                assert isinstance(agent, expected_class)
+                assert isinstance(agent, CodingAgent)
+                assert isinstance(agent.backend, expected_class)
 
 
 def test_factory_defaults_to_codex(mock_which):

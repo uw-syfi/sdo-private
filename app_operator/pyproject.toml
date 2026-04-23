@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "012fbf5aa42fc116643903ff851c11ab8facd814" }
+agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" }
 sds-core = { workspace = true }
 llm-rt = { workspace = true }
 
