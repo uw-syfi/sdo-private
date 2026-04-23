@@ -49,6 +49,9 @@ _APP_OPERATOR_SUBPACKAGES: frozenset[str] = frozenset(
 )
 _APP_OPERATOR_FACADES: frozenset[str] = frozenset(f"app_operator.{pkg}" for pkg in _APP_OPERATOR_SUBPACKAGES)
 
+_SREGYM_AGENT_ROOTS: frozenset[str] = frozenset({"cli_agent", "crucible", "fault_verifier"})
+_SREGYM_AGENT_FACADES: frozenset[str] = frozenset(f"sregym_agents.{pkg}" for pkg in _SREGYM_AGENT_ROOTS)
+
 # Additional packages that already behave like explicit public facades and can
 # realistically be kept import-clean today.
 _EXPLICIT_FACADES: frozenset[str] = frozenset(
@@ -58,13 +61,9 @@ _EXPLICIT_FACADES: frozenset[str] = frozenset(
         "libs.llm_rt.litellm",
         "libs.model_config",
         "libs.pydantic_agent",
-        "sregym_agents.crucible.agents",
-        "sregym_agents.crucible.agents.drivers",
-        "sregym_agents.crucible.tools",
-        "sregym_agents.fault_verifier",
     }
 )
-_FACADE_MODULES: frozenset[str] = _APP_OPERATOR_FACADES | _EXPLICIT_FACADES
+_FACADE_MODULES: frozenset[str] = _APP_OPERATOR_FACADES | _SREGYM_AGENT_FACADES | _EXPLICIT_FACADES
 
 _ALL_EXEMPT: frozenset[str] = frozenset(
     {
