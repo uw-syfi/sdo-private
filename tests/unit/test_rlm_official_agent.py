@@ -3,7 +3,7 @@
 import unittest.mock as mock
 
 import pytest
-from agentshim.base import AGENT_REGISTRY
+from agentshim import CodingAgent
 
 from app_operator.cli_agent.rlm_official_agent import (
     _SDS_ROOT_PROMPT_PREFIX,
@@ -15,11 +15,11 @@ from app_operator.core import AgentConfig, Config
 
 
 class TestRegistration:
-    """The agent must be discoverable via the provider registry."""
+    """The agent must be discoverable via the portable facade."""
 
     def test_registered_as_rlm_official(self):
-        assert "rlm-official" in AGENT_REGISTRY
-        assert AGENT_REGISTRY["rlm-official"] is RLMOfficialAgent
+        agent = CodingAgent(provider="rlm-official", model="gemini-2.5-pro")
+        assert isinstance(agent.backend, RLMOfficialAgent)
 
 
 class TestConfigAcceptsBackend:

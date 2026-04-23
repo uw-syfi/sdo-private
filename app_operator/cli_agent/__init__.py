@@ -1,4 +1,4 @@
-from agentshim.base import CodingAgent
+from agentshim import BaseCodingAgent, CodingAgent
 
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
@@ -11,6 +11,7 @@ from .operator import AppOperator
 
 __all__ = [
     "AppOperator",
+    "BaseCodingAgent",
     "CodeAnalyzerRunner",
     "CodingAgent",
     "DeployerRunner",
