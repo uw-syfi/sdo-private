@@ -19,10 +19,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from typing import Protocol, cast, runtime_checkable
 
 from libs.sregym_lib.experiment import (
     ExperimentConfig,
@@ -115,20 +112,33 @@ def _inject_memory_defaults(env: dict[str, str], agent_name: str, log_dir: Path)
 # ---------------------------------------------------------------------------
 
 
-@dataclasses.dataclass
-class ExpStageLifecycle:
-    """Agent-specific behavior invoked during experiment stage lifecycle.
+@runtime_checkable
+class ExpStageLifecycle(Protocol):
+    """Agent-specific behavior invoked during experiment stage lifecycle."""
 
-    All callbacks are optional. Agents with no extra stage needs can use
-    :data:`NOOP_EXP_STAGE_LIFECYCLE` (or pass ``None``).
-    """
+    def before_stage(self, exp_dir: Path, config: ExperimentConfig) -> None:
+        """Run before a stage or single experiment starts."""
 
-    before_stage: Callable[[Path, ExperimentConfig], None] | None = None
-    snapshot_before_drain: Callable[[Path, ExperimentConfig], object] | None = None
-    wait_for_drain: Callable[[Path, object], None] | None = None
+    def snapshot_before_drain(self, exp_dir: Path, config: ExperimentConfig) -> object | None:
+        """Capture any baseline needed before post-stage drain waiting."""
+
+    def wait_for_drain(self, exp_dir: Path, baseline: object | None) -> None:
+        """Block until any agent-specific post-stage work has drained."""
 
 
-NOOP_EXP_STAGE_LIFECYCLE = ExpStageLifecycle()
+class _NoopExpStageLifecycle:
+    def before_stage(self, exp_dir: Path, config: ExperimentConfig) -> None:
+        del exp_dir, config
+
+    def snapshot_before_drain(self, exp_dir: Path, config: ExperimentConfig) -> object | None:
+        del exp_dir, config
+        return None
+
+    def wait_for_drain(self, exp_dir: Path, baseline: object | None) -> None:
+        del exp_dir, baseline
+
+
+NOOP_EXP_STAGE_LIFECYCLE: ExpStageLifecycle = _NoopExpStageLifecycle()
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +215,7 @@ def run_single_experiment(
     _print_experiment_info(config, env)
     print()
 
-    if lifecycle.before_stage is not None:
-        lifecycle.before_stage(exp_dir, config)
+    lifecycle.before_stage(exp_dir, config)
 
     env = _inject_memory_defaults(env, config.agent, exp_dir)
     before_hook, after_hook = _load_agent_hooks(config.agent, project_root)
@@ -370,12 +379,11 @@ def run_pipeline(
                 print(f"  KB seed: {prev_kb_dir}")
             print("=" * 60)
 
-            if lifecycle.before_stage is not None:
-                lifecycle.before_stage(stage_exp_dir, exp_config)
+            lifecycle.before_stage(stage_exp_dir, exp_config)
 
             needs_kb_barrier = i + 1 < len(config.stages) and config.stages[i + 1].chain_kb
             drain_baseline: object | None = None
-            if needs_kb_barrier and lifecycle.snapshot_before_drain is not None:
+            if needs_kb_barrier:
                 drain_baseline = lifecycle.snapshot_before_drain(stage_exp_dir, exp_config)
 
             try:
@@ -396,7 +404,7 @@ def run_pipeline(
                 print(f"Resume with: run_sregym.sh {pipeline_dir}")
                 return 1
 
-            if needs_kb_barrier and lifecycle.wait_for_drain is not None:
+            if needs_kb_barrier:
                 print("  Waiting for KB review queue to drain before chaining...")
                 try:
                     lifecycle.wait_for_drain(stage_exp_dir, drain_baseline)
