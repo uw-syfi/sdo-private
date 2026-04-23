@@ -290,6 +290,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     if search_dir.exists() and search_dir.is_dir():
                         for item in search_dir.iterdir():
                             if item.is_dir():
+                                if item.name.startswith("."):
+                                    continue
                                 if prefix:
                                     if item.name.startswith(prefix):
                                         suggestions.append(str(item))
