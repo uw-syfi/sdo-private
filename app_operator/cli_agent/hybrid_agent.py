@@ -15,13 +15,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from agentshim import call_subagent
-from agentshim.base import CodingAgent, register_provider
+from agentshim import BaseCodingAgent
+from agentshim.base import register_provider
 from agentshim.events import AgentEventHandler
 from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
 
 from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
+from app_operator.cli_agent._subagent_utils import call_subagent
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
@@ -36,7 +37,7 @@ from app_operator.prompts import (
 
 
 @register_provider("hybrid")
-class HybridCodingAgent(CodingAgent):
+class HybridCodingAgent(BaseCodingAgent):
     """Coding agent that exposes lazy specialists to the RLM loop.
 
     For file-generation and direct-text tasks the behaviour matches

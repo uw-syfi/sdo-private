@@ -1,10 +1,10 @@
-"""Unit tests for the SubagentCodingAgent and call_subagent primitive."""
+"""Unit tests for the SubagentCodingAgent and local call_subagent primitive."""
 
 import unittest.mock as mock
 
 import pytest
-from agentshim import call_subagent
 
+from app_operator.cli_agent._subagent_utils import call_subagent
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 from libs.model_config import ModelConfig
 
@@ -373,10 +373,10 @@ class TestSubagentRegistration:
     """Tests for provider registration."""
 
     def test_subagent_in_agent_registry(self):
-        from agentshim.base import AGENT_REGISTRY
+        from agentshim import CodingAgent
 
-        assert "subagent" in AGENT_REGISTRY
-        assert AGENT_REGISTRY["subagent"] is SubagentCodingAgent
+        agent = CodingAgent(provider="subagent", model="test-model")
+        assert isinstance(agent.backend, SubagentCodingAgent)
 
     def test_subagent_valid_provider(self):
         from app_operator.core import AgentConfig
@@ -390,7 +390,7 @@ class TestSubagentRegistration:
 
         config = Config(agent=AgentConfig(backend="subagent", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, SubagentCodingAgent)
+        assert isinstance(agent.backend, SubagentCodingAgent)  # type: ignore[attr-defined]
 
     def test_factory_forwards_location(self):
         from app_operator.cli_agent.factory import create_agent_from_config
@@ -402,7 +402,7 @@ class TestSubagentRegistration:
             )
         )
         agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, SubagentCodingAgent)
+        assert isinstance(agent.backend, SubagentCodingAgent)  # type: ignore[attr-defined]
         assert agent.location == "us-west1"  # type: ignore[attr-defined]
 
     def test_factory_forwards_dspy_config(self):
@@ -415,7 +415,7 @@ class TestSubagentRegistration:
             dspy=dspy_cfg,
         )
         agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, SubagentCodingAgent)
+        assert isinstance(agent.backend, SubagentCodingAgent)  # type: ignore[attr-defined]
         assert agent.dspy_config is dspy_cfg  # type: ignore[attr-defined]
 
 
