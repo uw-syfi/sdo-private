@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -23,6 +24,9 @@ from libs.sregym_lib.pipeline import (
     write_pipeline_snapshot,
     write_pipeline_state,
 )
+
+if TYPE_CHECKING:
+    from libs.sregym_lib.experiment import ExperimentConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -380,7 +384,6 @@ class TestResetStagesForRerun:
 
 
 from libs.sregym_lib import runner as runner_mod  # noqa: E402
-from libs.sregym_lib.runner import StageHooks  # noqa: E402
 
 
 class TestPipelineRunner:
@@ -563,11 +566,17 @@ class TestPipelineRunner:
         def wait(exp_dir, baseline):
             wait_calls.append((exp_dir, baseline))
 
-        hooks = StageHooks(
-            before_stage=before_stage,
-            snapshot_before_drain=snap,
-            wait_for_drain=wait,
-        )
+        class _Lifecycle:
+            def before_stage(self, exp_dir: Path, config: ExperimentConfig) -> None:
+                before_stage(exp_dir, config)
+
+            def snapshot_before_drain(self, exp_dir: Path, config: ExperimentConfig) -> object | None:
+                return snap(exp_dir, config)
+
+            def wait_for_drain(self, exp_dir: Path, baseline: object | None) -> None:
+                wait(exp_dir, baseline)
+
+        lifecycle = _Lifecycle()
 
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
@@ -587,7 +596,7 @@ class TestPipelineRunner:
                 sregym_dir=sregym_dir,
                 pipeline_dir=pipeline_dir,
                 state=state,
-                hooks=hooks,
+                lifecycle=lifecycle,
             )
 
         assert rc == 0
@@ -606,10 +615,18 @@ class TestPipelineRunner:
         def wait_fails(exp_dir, baseline):
             raise TimeoutError("queue stuck")
 
-        hooks = StageHooks(
-            snapshot_before_drain=lambda exp_dir, cfg: object(),
-            wait_for_drain=wait_fails,
-        )
+        class _Lifecycle:
+            def before_stage(self, exp_dir: Path, config: ExperimentConfig) -> None:
+                del exp_dir, config
+
+            def snapshot_before_drain(self, exp_dir: Path, config: ExperimentConfig) -> object | None:
+                del exp_dir, config
+                return object()
+
+            def wait_for_drain(self, exp_dir: Path, baseline: object | None) -> None:
+                wait_fails(exp_dir, baseline)
+
+        lifecycle = _Lifecycle()
 
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
@@ -629,7 +646,7 @@ class TestPipelineRunner:
                 sregym_dir=sregym_dir,
                 pipeline_dir=pipeline_dir,
                 state=state,
-                hooks=hooks,
+                lifecycle=lifecycle,
             )
 
         assert rc == 1

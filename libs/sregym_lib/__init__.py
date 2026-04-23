@@ -56,7 +56,8 @@ from libs.sregym_lib.pipeline import (
     write_pipeline_state,
 )
 from libs.sregym_lib.runner import (
-    StageHooks,
+    NOOP_EXP_STAGE_LIFECYCLE,
+    ExpStageLifecycle,
     run_pipeline,
     run_single_experiment,
 )
@@ -71,14 +72,15 @@ __all__ = [
     "READY_STAGES",
     "TERMINAL_STAGES",
     "BenchmarkResult",
+    "ExpStageLifecycle",
     "ExperimentConfig",
+    "NOOP_EXP_STAGE_LIFECYCLE",
     "Oracle",
     "PipelineConfig",
     "PipelineState",
     "RunnerEnv",
     "Stage",
     "StageConfig",
-    "StageHooks",
     "StageState",
     "VariantConfig",
     "VariantOrder",
