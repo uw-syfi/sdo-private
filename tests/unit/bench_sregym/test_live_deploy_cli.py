@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
 
@@ -40,12 +41,53 @@ def _import_bench_main() -> Any:
     sregym_pkg = _module("sregym")
     conductor_pkg = _module("sregym.conductor")
     service_pkg = _module("sregym.service")
+    apps_pkg = _module("sregym.service.apps")
     app_workspace_mod = _module("sregym.service.app_workspace")
     app_workspace_mod.prepare_application_workspace = lambda **kwargs: Path("/tmp/app-workspace")
     app_workspace_mod.application_workspace_seed_override = lambda: None
     app_workspace_mod.should_replay_completed_run = lambda **kwargs: False
     source_deploy_mod = _module("sregym.service.source_deploy")
     source_deploy_mod.ensure_app_supported = lambda app_name: None
+    app_names_mod = _module("sregym.service.apps.app_names")
+
+    class _AppName(StrEnum):
+        ASTRONOMY_SHOP = "Astronomy Shop"
+        HOTEL_RESERVATION = "Hotel Reservation"
+        SOCIAL_NETWORK = "Social Network"
+        FLEET_CAST = "Fleet Cast"
+        BLUEPRINT_HOTEL_RESERVATION = "Blueprint Hotel Reservation"
+
+    _cli_aliases = {
+        "astronomy_shop": _AppName.ASTRONOMY_SHOP,
+        "hotel_reservation": _AppName.HOTEL_RESERVATION,
+        "social_network": _AppName.SOCIAL_NETWORK,
+        "fleet_cast": _AppName.FLEET_CAST,
+        "blueprint_hotel_reservation": _AppName.BLUEPRINT_HOTEL_RESERVATION,
+    }
+
+    def _resolve_cli_app_name(app_name: str) -> str:
+        normalized = app_name.strip()
+        alias_key = normalized.lower().replace("-", "_").replace(" ", "_")
+        if alias_key in _cli_aliases:
+            return _cli_aliases[alias_key].value
+        for display_name in _cli_aliases.values():
+            if normalized.lower() == display_name.lower():
+                return display_name.value
+        raise ValueError(app_name)
+
+    def _canonical_app_names(app_names: list[str] | set[str] | frozenset[str]) -> frozenset[str]:
+        canonical = set()
+        for app_name in app_names:
+            try:
+                canonical.add(_resolve_cli_app_name(app_name))
+            except ValueError:
+                canonical.add(app_name)
+        return frozenset(canonical)
+
+    app_names_mod.AppName = _AppName
+    app_names_mod.CLI_APP_NAME_ALIASES = _cli_aliases
+    app_names_mod.resolve_cli_app_name = _resolve_cli_app_name
+    app_names_mod.canonical_app_names = _canonical_app_names
 
     agent_launcher_mod = _module("sregym.agent_launcher")
     agent_launcher_mod.AgentLauncher = type("AgentLauncher", (), {})
@@ -84,6 +126,7 @@ def _import_bench_main() -> Any:
 
     sregym_pkg.conductor = conductor_pkg
     sregym_pkg.service = service_pkg
+    service_pkg.apps = apps_pkg
 
     spec = importlib.util.spec_from_file_location("bench_sregym_main", MAIN_PATH)
     assert spec is not None
@@ -304,6 +347,26 @@ def test_filter_problem_ids_by_app_respects_aliases():
         "hotel_reservation",
     )
     monkeypatch.undo()
+
+    assert filtered == ["hotel_problem"]
+
+
+def test_filter_problem_ids_by_app_uses_explicit_metadata_and_skips_multi_app():
+    mod = _import_bench_main()
+
+    problem_source = types.SimpleNamespace(
+        get_problem_target_apps=lambda problem_id: {
+            "hotel_problem": frozenset({"Hotel Reservation"}),
+            "social_problem": frozenset({"Social Network"}),
+            "multi_problem": frozenset({"Hotel Reservation", "Social Network"}),
+        }[problem_id]
+    )
+
+    filtered = mod._filter_problem_ids_by_app(
+        problem_source,
+        ["hotel_problem", "social_problem", "multi_problem"],
+        "hotel_reservation",
+    )
 
     assert filtered == ["hotel_problem"]
 
