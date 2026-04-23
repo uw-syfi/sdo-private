@@ -36,7 +36,7 @@ from sregym_agents.crucible.knowledge_base.incident_review import (
 from sregym_agents.crucible.tools import SharedFile
 
 if TYPE_CHECKING:
-    from sregym_agents.crucible.agents.base import AgentDriver
+    from sregym_agents.crucible.agents import AgentDriver
     from sregym_agents.crucible.knowledge_base.structured import StructuredKnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def create_driver(
     """
     print(f"[crucible] Driver backend: {config.backend}")
     if config.backend == "agent-cli":
-        from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
+        from sregym_agents.crucible.agents.drivers import AgentCLIDriver
         from sregym_agents.crucible.sandbox import build_crucible_sandbox
 
         exp_cwd = os.path.abspath(os.getcwd())

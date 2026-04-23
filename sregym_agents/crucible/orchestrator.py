@@ -10,8 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from sregym_agents.crucible._prompts import PromptRenderer
-    from sregym_agents.crucible.agents.base import AgentDriver, RunSubagent
-    from sregym_agents.crucible.agents.recovery_agent import RecoveryRunResult
+    from sregym_agents.crucible.agents import AgentDriver, RecoveryRunResult, RunSubagent
     from sregym_agents.crucible.knowledge_base.incident_review import DiagnosisPlaybookDraft, TriageAreaCandidate
     from sregym_agents.crucible.knowledge_base.root_cause import KBView
 
