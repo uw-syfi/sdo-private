@@ -1,4 +1,4 @@
-from agentshim.base import AGENT_REGISTRY, CodingAgent
+from agentshim import BaseCodingAgent, CodingAgent
 
 from app_operator.core import Config, load_config, logger
 
@@ -8,7 +8,7 @@ def create_agent_from_config(
     model_override: str | None = None,
     config_path: str | None = None,
     config: Config | None = None,
-) -> CodingAgent:
+) -> BaseCodingAgent:
     """Create a coding agent based on configuration file.
 
     Looks for sds.toml or config.toml in the target directory, or uses the
@@ -22,7 +22,7 @@ def create_agent_from_config(
         config: Optional Config object. If provided, skips loading from file.
 
     Returns:
-        CodingAgent: Configured coding agent.
+        BaseCodingAgent: Configured coding agent.
     """
     if config is None:
         config = load_config(target_dir, config_path)
@@ -34,14 +34,17 @@ def create_agent_from_config(
     if model:
         logger.info(f"Using coding agent model: {model}")
 
-    if backend in AGENT_REGISTRY:
-        kwargs = {"model": model}
-        if backend in ("rlm-official", "subagent", "hybrid"):
-            kwargs["location"] = config.agent.location
-            kwargs["dspy_config"] = config.dspy  # type: ignore[reportArgumentType]
-        if backend == "hybrid":
-            kwargs["rlm_mode"] = config.rlm.mode
-        return AGENT_REGISTRY[backend](**kwargs)
-
-    available = sorted(AGENT_REGISTRY.keys())
-    raise ValueError(f"Unknown agent backend '{backend}'. Available backends: {available}")
+    backend_kwargs: dict[str, object] | None = None
+    if backend in ("rlm-official", "subagent", "hybrid"):
+        backend_kwargs = {
+            "location": config.agent.location,
+            "dspy_config": config.dspy,  # type: ignore[reportArgumentType]
+        }
+    if backend == "hybrid":
+        if backend_kwargs is None:
+            backend_kwargs = {}
+        backend_kwargs["rlm_mode"] = config.rlm.mode
+    try:
+        return CodingAgent(provider=backend, model=model, backend_kwargs=backend_kwargs)
+    except ValueError as exc:
+        raise ValueError(f"Unknown agent backend '{backend}': {exc}") from exc

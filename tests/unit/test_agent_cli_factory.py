@@ -1,5 +1,13 @@
 import pytest
-from agentshim.base import AGENT_REGISTRY, CodingAgent, register_provider
+from agentshim import (
+    BaseCodingAgent,
+    ClaudeCodeCodingAgent,
+    CodexCodingAgent,
+    GeminiCodingAgent,
+    OpencodeCodingAgent,
+)
+from agentshim import CodingAgent as PortableCodingAgent
+from agentshim.base import register_provider
 from agentshim.cli_agent import CLICodingAgent
 
 from app_operator.cli_agent.factory import create_agent_from_config
@@ -19,31 +27,35 @@ def mock_binaries(monkeypatch):
 
 
 class TestAgentRegistry:
-    """Tests for the AGENT_REGISTRY contents and register_provider decorator."""
+    """Tests for provider resolution and register_provider decorator."""
 
-    def test_registry_contains_claude_aliases(self):
-        assert "claude" in AGENT_REGISTRY
-        assert "claude-code" in AGENT_REGISTRY
-        assert "anthropic" in AGENT_REGISTRY
+    def test_registry_contains_claude_aliases(self, mock_binaries):
+        assert isinstance(PortableCodingAgent(provider="claude").backend, ClaudeCodeCodingAgent)
+        assert isinstance(PortableCodingAgent(provider="claude-code").backend, ClaudeCodeCodingAgent)
+        assert isinstance(PortableCodingAgent(provider="anthropic").backend, ClaudeCodeCodingAgent)
 
-    def test_registry_contains_gemini(self):
-        assert "gemini" in AGENT_REGISTRY
+    def test_registry_contains_gemini(self, mock_binaries):
+        assert isinstance(PortableCodingAgent(provider="gemini").backend, GeminiCodingAgent)
 
-    def test_registry_contains_codex(self):
-        assert "codex" in AGENT_REGISTRY
+    def test_registry_contains_codex(self, mock_binaries):
+        assert isinstance(PortableCodingAgent(provider="codex").backend, CodexCodingAgent)
 
-    def test_registry_contains_opencode(self):
-        assert "opencode" in AGENT_REGISTRY
+    def test_registry_contains_opencode(self, mock_binaries):
+        assert isinstance(PortableCodingAgent(provider="opencode").backend, OpencodeCodingAgent)
 
-    def test_claude_aliases_resolve_to_same_class(self):
-        assert AGENT_REGISTRY["claude"] is AGENT_REGISTRY["claude-code"]
-        assert AGENT_REGISTRY["claude"] is AGENT_REGISTRY["anthropic"]
+    def test_claude_aliases_resolve_to_same_class(self, mock_binaries):
+        assert type(PortableCodingAgent(provider="claude").backend) is type(
+            PortableCodingAgent(provider="claude-code").backend
+        )
+        assert type(PortableCodingAgent(provider="claude").backend) is type(
+            PortableCodingAgent(provider="anthropic").backend
+        )
 
     def test_register_provider_adds_to_registry(self):
         """register_provider decorator adds the class under each given name."""
 
         @register_provider("test_dummy_provider_xyz")
-        class DummyAgent(CodingAgent):
+        class DummyAgent(BaseCodingAgent):
             def __init__(self, model=None):
                 self.model = model
                 self.recorder = None  # type: ignore[assignment]
@@ -51,10 +63,9 @@ class TestAgentRegistry:
             def generate(self, prompt, cwd=None, timeout=300, silent=False):
                 return ""
 
-        assert "test_dummy_provider_xyz" in AGENT_REGISTRY
-        assert AGENT_REGISTRY["test_dummy_provider_xyz"] is DummyAgent
-        # Cleanup
-        del AGENT_REGISTRY["test_dummy_provider_xyz"]
+        agent = PortableCodingAgent(provider="test_dummy_provider_xyz", model="dummy-model")
+        assert isinstance(agent.backend, DummyAgent)
+        assert agent.model == "dummy-model"
 
 
 class TestCreateAgentFromConfig:
@@ -65,14 +76,14 @@ class TestCreateAgentFromConfig:
             agent=AgentConfig(backend="claude", model_config=ModelConfig(provider="anthropic", model="test-model"))
         )
         agent = create_agent_from_config(str(tmp_path), config=config)
-        assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"
+        assert isinstance(agent.backend, ClaudeCodeCodingAgent)  # type: ignore[attr-defined]
 
     def test_creates_gemini_agent(self, tmp_path, mock_binaries):
         config = Config(
             agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="test-model"))
         )
         agent = create_agent_from_config(str(tmp_path), config=config)
-        assert agent.__class__.__name__ == "GeminiCodingAgent"
+        assert isinstance(agent.backend, GeminiCodingAgent)  # type: ignore[attr-defined]
 
     def test_model_override_takes_precedence(self, tmp_path, mock_binaries):
         config = Config(
@@ -95,7 +106,7 @@ class TestCreateAgentFromConfig:
             agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
         )
         agent = create_agent_from_config(str(tmp_path), config=config)
-        assert agent.__class__.__name__ == "CodexCodingAgent"
+        assert isinstance(agent.backend, CodexCodingAgent)  # type: ignore[attr-defined]
 
     def test_invalid_provider_raises_value_error(self):
         """AgentConfig validation rejects unknown provider names."""
@@ -106,4 +117,4 @@ class TestCreateAgentFromConfig:
         """Provider lookup lowercases the name."""
         config = Config(agent=AgentConfig(backend="Claude", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config(str(tmp_path), config=config)
-        assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"
+        assert isinstance(agent.backend, ClaudeCodeCodingAgent)  # type: ignore[attr-defined]

@@ -277,15 +277,16 @@ class TestHybridFixPath:
 
 class TestHybridRegistration:
     def test_hybrid_in_agent_registry(self):
-        from agentshim.base import AGENT_REGISTRY
+        from agentshim import CodingAgent
 
-        assert "hybrid" in AGENT_REGISTRY
-        assert AGENT_REGISTRY["hybrid"] is HybridCodingAgent
+        agent = CodingAgent(provider="hybrid", model="test-model")
+        assert isinstance(agent.backend, HybridCodingAgent)
 
     def test_legacy_architecture_backends_not_in_registry(self):
-        from agentshim.base import AGENT_REGISTRY
+        from agentshim import CodingAgent
 
-        assert "rlm" not in AGENT_REGISTRY
+        with pytest.raises(ValueError, match="Unknown coding agent provider"):
+            CodingAgent(provider="rlm")
 
     def test_hybrid_valid_provider(self):
         from app_operator.core import AgentConfig
@@ -299,7 +300,7 @@ class TestHybridRegistration:
 
         config = Config(agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, HybridCodingAgent)
+        assert isinstance(agent.backend, HybridCodingAgent)  # type: ignore[attr-defined]
 
     def test_factory_forwards_location(self):
         from app_operator.cli_agent.factory import create_agent_from_config
@@ -309,7 +310,7 @@ class TestHybridRegistration:
             agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model", location="us-west1"))
         )
         agent = create_agent_from_config("/tmp", config=config)
-        assert agent.location == "us-west1"  # type: ignore[attr-defined]
+        assert agent.backend.location == "us-west1"  # type: ignore[attr-defined]
 
     def test_factory_forwards_dspy_config(self):
         from app_operator.cli_agent.factory import create_agent_from_config
@@ -321,8 +322,8 @@ class TestHybridRegistration:
             dspy=dspy_cfg,
         )
         agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, HybridCodingAgent)
-        assert agent.dspy_config is dspy_cfg  # type: ignore[attr-defined]
+        assert isinstance(agent.backend, HybridCodingAgent)  # type: ignore[attr-defined]
+        assert agent.backend.dspy_config is dspy_cfg  # type: ignore[attr-defined]
 
     def test_factory_forwards_rlm_mode(self):
         from app_operator.cli_agent.factory import create_agent_from_config
@@ -333,8 +334,8 @@ class TestHybridRegistration:
             rlm=RLMConfig(mode="paper_faithful"),
         )
         agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, HybridCodingAgent)
-        assert agent.rlm_mode == "paper_faithful"  # type: ignore[attr-defined]
+        assert isinstance(agent.backend, HybridCodingAgent)  # type: ignore[attr-defined]
+        assert agent.backend.rlm_mode == "paper_faithful"  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

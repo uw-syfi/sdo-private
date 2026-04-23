@@ -20,7 +20,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentshim.base import CodingAgent, register_provider
+from agentshim import BaseCodingAgent
+from agentshim.base import register_provider
 from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
 
@@ -498,7 +499,7 @@ fix_summary but focus on fixing the actual deployment issue, not the rate limit.
 
 
 @register_provider("rlm-official")
-class RLMOfficialAgent(CodingAgent):
+class RLMOfficialAgent(BaseCodingAgent):
     """Coding agent wrapping the official ``rlm`` library (``pip install rlms``).
 
     Uses depth-2 RLM recursion: the root LM can delegate sub-problems to

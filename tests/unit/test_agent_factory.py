@@ -1,7 +1,8 @@
 from unittest.mock import patch
 
 import pytest
-from agentshim.base import CodingAgent, register_provider
+from agentshim import BaseCodingAgent
+from agentshim.base import register_provider
 from agentshim.cli_agent import CLICodingAgent
 
 from app_operator.cli_agent.factory import create_agent_from_config
@@ -29,7 +30,7 @@ def mock_binaries(monkeypatch):
 
 
 @register_provider("mock_provider")
-class MockAgent(CodingAgent):
+class MockAgent(BaseCodingAgent):
     def __init__(self, model=None):
         self.model = model
         self.recorder = None  # type: ignore[assignment]
@@ -57,7 +58,7 @@ def test_create_agent_registered_provider(tmp_path):
         config = Config(agent=AgentConfig(backend="mock_provider", model_config=ModelConfig.from_string("test-model")))
         agent = create_agent_from_config(str(tmp_path), config=config)
 
-        assert isinstance(agent, MockAgent)
+        assert isinstance(agent.backend, MockAgent)  # type: ignore[attr-defined]
         assert agent.model == "test-model"  # type: ignore[attr-defined]
 
 
@@ -66,7 +67,7 @@ def test_create_agent_gemini(tmp_path, mock_binaries):
         agent=AgentConfig(backend="gemini", model_config=ModelConfig(provider="gemini", model="test-model"))
     )
     agent = create_agent_from_config(str(tmp_path), config=config)
-    assert agent.__class__.__name__ == "GeminiCodingAgent"
+    assert agent.backend_class_name == "GeminiCodingAgent"
 
 
 def test_create_agent_codex_default(tmp_path):
@@ -80,7 +81,7 @@ def test_create_agent_claude_alias(tmp_path, mock_binaries):
         agent=AgentConfig(backend="anthropic", model_config=ModelConfig(provider="anthropic", model="test-model"))
     )
     agent = create_agent_from_config(str(tmp_path), config=config)
-    assert agent.__class__.__name__ == "ClaudeCodeCodingAgent"
+    assert agent.backend_class_name == "ClaudeCodeCodingAgent"
 
 
 def test_create_agent_opencode(tmp_path, mock_binaries):
@@ -88,7 +89,7 @@ def test_create_agent_opencode(tmp_path, mock_binaries):
         agent=AgentConfig(backend="opencode", model_config=ModelConfig(provider="openai", model="test-model"))
     )
     agent = create_agent_from_config(str(tmp_path), config=config)
-    assert agent.__class__.__name__ == "OpencodeCodingAgent"
+    assert agent.backend_class_name == "OpencodeCodingAgent"
 
 
 def test_create_agent_unregistered_provider_raises_valueerror(tmp_path):

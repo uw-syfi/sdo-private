@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from agentshim.base import CodingAgent
+    from agentshim import BaseCodingAgent
 
     from app_operator.core import CommandResult
     from app_operator.dspy_integration import DSPyConfig
@@ -60,7 +60,7 @@ class DeploymentAgent:
     def __init__(
         self,
         repo_path: Path,
-        coding_agent: CodingAgent,
+        coding_agent: BaseCodingAgent,
         filesystem: FileSystemInterface | None = None,
         deployment_config: DeploymentConfig | None = None,
         operator_config: OperatorConfig | None = None,
@@ -369,7 +369,10 @@ class DeploymentAgent:
         emit_progress("script_generation")
         self.ui.set_stage("Script Generation")
         logger.info("Generating Deployment Scripts")
-        logger.info(f"Scripts not found in {self.sds_dir}, generating with {self.agent.__class__.__name__}...")
+        logger.info(
+            f"Scripts not found in {self.sds_dir}, generating with "
+            f"{self.agent.readable_name} ({self.agent.backend_class_name})..."
+        )
 
         success, message = self._script_gen.generate_scripts()
 

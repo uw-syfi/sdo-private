@@ -14,14 +14,15 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from agentshim import call_subagent, litellm_call_with_retry
-from agentshim.base import CodingAgent, register_provider
+from agentshim import BaseCodingAgent
+from agentshim.base import register_provider
 from agentshim.events import AgentEventHandler
 from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from agentshim.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 from loguru import logger
 
 from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
+from app_operator.cli_agent._subagent_utils import call_subagent
 from app_operator.prompts import (
     DSPyConfigProtocol,
     render_error_log_analyst_prompt,
@@ -30,10 +31,11 @@ from app_operator.prompts import (
     render_script_analyst_prompt,
     render_trajectory_analyst_prompt,
 )
+from libs.llm_rt import litellm_call_with_retry
 
 
 @register_provider("subagent")
-class SubagentCodingAgent(CodingAgent):
+class SubagentCodingAgent(BaseCodingAgent):
     """Coding agent that fans out independent subagents for fix tasks.
 
     For file-generation and direct-text tasks the behaviour matches
@@ -113,6 +115,10 @@ class SubagentCodingAgent(CodingAgent):
             logger.error(f"[Subagent] Direct text LLM call failed: {type(e).__name__}: {e}")
             return f"LLM call failed: {type(e).__name__}: {e}"
 
+    def generate_direct(self, prompt: str, token_acc: dict[str, int] | None = None) -> str:
+        """Public wrapper for the direct-text path."""
+        return self._generate_direct(prompt, token_acc)
+
     def _generate_files(self, prompt: str, repo_path: Path, token_acc: dict[str, int] | None = None) -> str:
         import os
 
@@ -138,6 +144,10 @@ class SubagentCodingAgent(CodingAgent):
 
         generate_and_write_files(raw, prompt, repo_path, "[Subagent]")
         return raw
+
+    def generate_files(self, prompt: str, repo_path: Path, token_acc: dict[str, int] | None = None) -> str:
+        """Public wrapper for the file-generation path."""
+        return self._generate_files(prompt, repo_path, token_acc)
 
     # -- Fix path: fan-out subagents + root synthesis -------------------------
 
@@ -332,6 +342,10 @@ class SubagentCodingAgent(CodingAgent):
             logger.warning(f"Failed to read trajectory from {traj_path}: {e}")
             return ""
 
+    def read_trajectory(self, sds_dir: Path) -> str:
+        """Read and summarize recent trajectory data."""
+        return self._read_trajectory(sds_dir)
+
     @staticmethod
     def _read(path: Path) -> str:
         try:
@@ -340,6 +354,10 @@ class SubagentCodingAgent(CodingAgent):
         except OSError as e:
             logger.warning(f"Failed to read {path}: {e}")
         return ""
+
+    def read_text(self, path: Path) -> str:
+        """Read a text file, returning an empty string on failure."""
+        return self._read(path)
 
     def _gather_repo_context(self, repo_path: Path, sds_dir: Path) -> str:
         """Gather repository-level context files into a single string."""
@@ -366,3 +384,7 @@ class SubagentCodingAgent(CodingAgent):
             parts.append(f"--- Code Analysis ---\n{analysis}")
 
         return "\n\n".join(parts)
+
+    def gather_repo_context(self, repo_path: Path, sds_dir: Path) -> str:
+        """Gather repository-level context files into a single string."""
+        return self._gather_repo_context(repo_path, sds_dir)

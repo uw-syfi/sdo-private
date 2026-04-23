@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentshim.base import CodingAgent
+    from agentshim import BaseCodingAgent
 
     from app_operator.dspy_integration import DSPyConfig
 
@@ -22,7 +22,7 @@ class AgentContext:
     """Shared context passed to all agents, eliminating constructor duplication."""
 
     repo_path: Path
-    coding_agent: CodingAgent
+    coding_agent: BaseCodingAgent
     filesystem: FileSystemInterface = field(default_factory=RealFilesystem)
     operator_config: OperatorConfig = field(default_factory=OperatorConfig)
     recorder: TrajectoryRecorderProtocol = field(default_factory=NullTrajectoryRecorder)

@@ -15,13 +15,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from agentshim import call_subagent
-from agentshim.base import CodingAgent, register_provider
+from agentshim import BaseCodingAgent
+from agentshim.base import register_provider
 from agentshim.events import AgentEventHandler
 from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
 
 from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
+from app_operator.cli_agent._subagent_utils import call_subagent
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
@@ -36,7 +37,7 @@ from app_operator.prompts import (
 
 
 @register_provider("hybrid")
-class HybridCodingAgent(CodingAgent):
+class HybridCodingAgent(BaseCodingAgent):
     """Coding agent that exposes lazy specialists to the RLM loop.
 
     For file-generation and direct-text tasks the behaviour matches
@@ -90,10 +91,10 @@ class HybridCodingAgent(CodingAgent):
         if not is_fix and DIRECT_TEXT_RE.search(prompt):
             # Reuse SubagentCodingAgent's direct-text path (same implementation)
             helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
-            result = helper._generate_direct(prompt, call_tokens)
+            result = helper.generate_direct(prompt, call_tokens)
         elif not is_fix and FILE_GEN_RE.search(prompt):
             helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
-            result = helper._generate_files(prompt, repo_path, call_tokens)
+            result = helper.generate_files(prompt, repo_path, call_tokens)
         else:
             result = self._generate_fix(prompt, repo_path, call_tokens)
 
@@ -114,8 +115,8 @@ class HybridCodingAgent(CodingAgent):
         """Start the RLM loop and let it call specialists lazily."""
         helper = SubagentCodingAgent(model=self.model, location=self.location, dspy_config=self.dspy_config)
         sds = repo_path / ".sds"
-        deploy_script = helper._read(sds / "deploy.sh")
-        original_script = helper._read(sds / "deploy.sh.bak")
+        deploy_script = helper.read_text(sds / "deploy.sh")
+        original_script = helper.read_text(sds / "deploy.sh.bak")
 
         # Build the backup before creating context (same as RLMCodingAgent)
         deploy_sh = sds / "deploy.sh"
@@ -127,23 +128,23 @@ class HybridCodingAgent(CodingAgent):
             except OSError as e:
                 logger.warning(f"[Hybrid] Could not save deploy.sh backup: {e}")
 
-        deploy_log = helper._read(sds / "logs" / "deploy.log")
-        health_check_log = helper._read(sds / "logs" / "health_check.log")
+        deploy_log = helper.read_text(sds / "logs" / "deploy.log")
+        health_check_log = helper.read_text(sds / "logs" / "health_check.log")
         context = RLMContext(
             error_log=deploy_log,
             deployment_script=deploy_script,
             health_check_output=health_check_log,
-            dockerfile=helper._read(repo_path / "Dockerfile"),
+            dockerfile=helper.read_text(repo_path / "Dockerfile"),
             docker_compose=(
-                helper._read(repo_path / "docker-compose.yml") or helper._read(repo_path / "docker-compose.yaml")
+                helper.read_text(repo_path / "docker-compose.yml")
+                or helper.read_text(repo_path / "docker-compose.yaml")
             ),
-            readme=(helper._read(repo_path / "README.md") or helper._read(repo_path / "README.rst")),
-            analysis_report=helper._read(sds / "code_analysis.md"),
+            readme=(helper.read_text(repo_path / "README.md") or helper.read_text(repo_path / "README.rst")),
+            analysis_report=helper.read_text(sds / "code_analysis.md"),
             original_script=original_script,
         )
 
         logger.info("[Hybrid] Starting RLM loop with lazy specialist delegation")
-        available_specialists = self._SPECIALISTS if self.rlm_mode == "compatibility" else {}
         agent = RecursiveDeploymentAgent(
             trajectory=self.recorder,
             max_recursion_depth=5,
@@ -151,14 +152,14 @@ class HybridCodingAgent(CodingAgent):
             vertex_location=self.location,
             rlm_mode=self.rlm_mode,
             dspy_config=self.dspy_config,
-            specialist_dispatcher=lambda specialist, task: self._run_specialist_analysis(
+            specialist_dispatcher=lambda specialist, task: self.run_specialist_analysis(
                 helper=helper,
                 repo_path=repo_path,
                 specialist=specialist,
                 task=task,
                 token_acc=token_acc,
             ),
-            available_specialists=available_specialists,
+            available_specialists=self.available_specialists,
         )
         if self.rlm_mode == "paper_faithful":
             rlm_task = prompt
@@ -203,13 +204,15 @@ class HybridCodingAgent(CodingAgent):
                         dspy_config=self.dspy_config,
                         recorder=self.recorder,
                     ),
-                    user_prompt=task_prefix + (helper._read_trajectory(sds) or "(no trajectory data available)"),
+                    user_prompt=task_prefix + (helper.read_trajectory(sds) or "(no trajectory data available)"),
                     location=self.location,
                     token_acc=token_acc,
                 )
             elif specialist == "error_log":
                 error_log = (
-                    helper._read(sds / "logs" / "deploy.log") + "\n" + helper._read(sds / "logs" / "health_check.log")
+                    helper.read_text(sds / "logs" / "deploy.log")
+                    + "\n"
+                    + helper.read_text(sds / "logs" / "health_check.log")
                 )
                 summary = call_subagent(
                     model=self.model,
@@ -223,8 +226,8 @@ class HybridCodingAgent(CodingAgent):
                     token_acc=token_acc,
                 )
             elif specialist == "script":
-                deploy_script = helper._read(sds / "deploy.sh")
-                original_script = helper._read(sds / "deploy.sh.bak")
+                deploy_script = helper.read_text(sds / "deploy.sh")
+                original_script = helper.read_text(sds / "deploy.sh.bak")
                 script_input = f"{task_prefix}Current script:\n{deploy_script}"
                 if original_script:
                     script_input += f"\n\nOriginal script (before fixes):\n{original_script}"
@@ -248,7 +251,7 @@ class HybridCodingAgent(CodingAgent):
                         recorder=self.recorder,
                     ),
                     user_prompt=task_prefix
-                    + (helper._gather_repo_context(repo_path, sds) or "(no repository context available)"),
+                    + (helper.gather_repo_context(repo_path, sds) or "(no repository context available)"),
                     location=self.location,
                     token_acc=token_acc,
                 )
@@ -263,3 +266,19 @@ class HybridCodingAgent(CodingAgent):
 
         logger.info(f"[Hybrid] {specialist} specialist complete")
         return summary
+
+    @property
+    def available_specialists(self) -> dict[str, str]:
+        """Specialists exposed to external chat orchestration."""
+        return self._SPECIALISTS if self.rlm_mode == "compatibility" else {}
+
+    def run_specialist_analysis(
+        self,
+        helper: SubagentCodingAgent,
+        repo_path: Path,
+        specialist: str,
+        task: str,
+        token_acc: dict[str, int] | None = None,
+    ) -> str:
+        """Public wrapper for specialist analysis dispatch."""
+        return self._run_specialist_analysis(helper, repo_path, specialist, task, token_acc)

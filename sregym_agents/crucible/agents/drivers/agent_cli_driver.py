@@ -1,7 +1,6 @@
 """AgentCLIDriver — ``AgentDriver`` backed by ``agentshim`` coding agents.
 
-Uses a provider-agnostic ``CodingAgent`` (resolved from
-``agentshim.base.AGENT_REGISTRY``) and relies on it to spawn the
+Uses a provider-agnostic ``CodingAgent`` facade and relies on it to spawn the
 underlying CLI, parse the stream-json events, and drive its
 ``AgentEventHandler`` callbacks.  Crucible MCP tools are exposed to the
 CLI via a ``StdioMcpServer`` entry.
@@ -453,31 +452,24 @@ class AgentCLIDriver(AgentDriver):
         mcp_args: list[str] | None,
         handler: _AgentCLIEventHandler,
     ) -> Any:
-        """Construct a ``CodingAgent`` from the registry for this provider.
-
-        Resolves via ``agentshim.base.AGENT_REGISTRY`` so the driver
-        stays provider-agnostic (new providers only need to register
-        themselves in ``agentshim``).
-        """
-        from agentshim.base import AGENT_REGISTRY
+        """Construct a provider-routed ``CodingAgent`` for this provider."""
+        from agentshim import CodingAgent
         from agentshim.mcp_config import StdioMcpServer
-
-        agent_cls = AGENT_REGISTRY.get(self._provider.lower())
-        if agent_cls is None:
-            raise RuntimeError(
-                f"No CodingAgent registered for provider={self._provider!r}. Available: {sorted(AGENT_REGISTRY)}"
-            )
 
         mcp_servers: list[StdioMcpServer] = []
         if mcp_args is not None:
             mcp_servers.append(StdioMcpServer(name="crucible-tools", command="uv", args=list(mcp_args)))
 
-        return agent_cls(
-            model=self._model,
-            event_handler=handler,
-            mcp_servers=mcp_servers,
-            sandbox=self._sandbox,
-        )
+        try:
+            return CodingAgent(
+                provider=self._provider,
+                model=self._model,
+                event_handler=handler,
+                mcp_servers=mcp_servers,
+                sandbox=self._sandbox,
+            )
+        except ValueError as exc:
+            raise RuntimeError(f"No CodingAgent available for provider={self._provider!r}: {exc}") from exc
 
     async def run(
         self,

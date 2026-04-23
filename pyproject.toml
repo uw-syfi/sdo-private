@@ -5,7 +5,7 @@ description = "Application deployment and monitoring operator"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "agentshim>=0.1.0",
+    "agentshim>=0.2.0",
     "langchain-openai>=1.1.6",
     "langchain-anthropic>=0.1.20",
     "langchain-google-genai>=4.0.0",
@@ -58,8 +58,11 @@ build-backend = "hatchling.build"
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
 
+[tool.uv.sources]
+agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" }
+
 [tool.uv.workspace]
-members = ["libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config", "libs/sregym_lib"]
+members = ["libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config", "libs/sregym_lib", "libs/llm_rt"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app_operator", "app_operator_dspy", "lego_agent", "libs"]

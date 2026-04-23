@@ -13,7 +13,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
-from agentshim.base import CodingAgent
+from agentshim import BaseCodingAgent
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.core import AgentConfig, Config, DSPyConfig
@@ -23,7 +23,7 @@ from libs.model_config import ModelConfig
 # --- Fake Agent for DSPy Testing ---
 
 
-class DSPyFakeCodingAgent(CodingAgent):
+class DSPyFakeCodingAgent(BaseCodingAgent):
     """Fake agent that simulates deployment behavior for DSPy tests."""
 
     def __init__(self, repo_path: Path):

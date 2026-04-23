@@ -35,6 +35,10 @@ depends_on = [
     "libs.agent_mw",
 ]
 
+[[modules]]
+path = "libs.llm_rt"
+depends_on = []
+
 # --- app_operator catch-all (strict tripwire) ---
 # Any app_operator.* path not matched by a more specific [[modules]] block
 # below falls into this catch-all.  With `depends_on = []` it acts as a
@@ -210,6 +214,7 @@ depends_on = [
     "app_operator.script_runner",
     "app_operator.subprocess_runner",
     "app_operator.trajectory",
+    "libs.llm_rt",
 ]
 
 [[modules]]
@@ -280,6 +285,7 @@ depends_on = [
 path = "sregym_agents"
 depends_on = [
     "libs.agent_mw",
+    "libs.llm_rt",
     "libs.pydantic_agent",
     "libs.sregym_lib",
 ]
