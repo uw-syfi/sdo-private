@@ -38,6 +38,7 @@ from libs.sregym_lib.pipeline import (
     PipelineState,
     StageState,
     merge_stage_config,
+    reconcile_pipeline_state,
     write_pipeline_snapshot,
     write_pipeline_state,
 )
@@ -348,6 +349,9 @@ def run_pipeline(
         print(f"Resuming pipeline from: {pipeline_dir}")
 
     assert state is not None
+    reconcile_pipeline_state(config, state)
+    write_pipeline_state(state, pipeline_dir)
+
     print(f"  stages: {len(config.stages)}")
     print()
 

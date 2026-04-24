@@ -437,6 +437,18 @@ class TestResetStagesForRerun:
         with pytest.raises(ValueError, match="out of range"):
             reset_stages_for_rerun(config, state, from_stage=5, pipeline_dir=tmp_path)
 
+    def test_extends_state_when_config_adds_new_stage(self, tmp_path: Path) -> None:
+        config, state = self._make_state_and_config(tmp_path)
+        state.stages = state.stages[:2]
+
+        reset_stages_for_rerun(config, state, from_stage=2, pipeline_dir=tmp_path)
+
+        assert len(state.stages) == 4
+        assert state.stages[2].index == 2
+        assert state.stages[2].name == "s2"
+        assert state.stages[2].status == "pending"
+        assert state.stages[2].experiment_dir == ""
+
 
 # ---------------------------------------------------------------------------
 # Pipeline runner tests (mocked subprocess)
@@ -892,3 +904,38 @@ class TestPipelineRunner:
         loaded_state = read_pipeline_state(pipeline_dir)
         assert loaded_state.stages[1].status == "failed"
         assert "matching app_filter values" in loaded_state.stages[1].error
+
+    def test_resume_extends_state_for_new_stage(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={"agent": "crucible", "model": "gemini-flash"},
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(name="eval", chain_kb=True),
+                StageConfig(name="eval_again", chain_kb=False),
+            ],
+        )
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with patch.object(runner_mod, "_run_stage", return_value=0):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 0
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert [stage.name for stage in loaded_state.stages] == ["build", "eval", "eval_again"]

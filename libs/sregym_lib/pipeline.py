@@ -221,6 +221,26 @@ def read_pipeline_state(pipeline_dir: Path) -> PipelineState:
     return PipelineState(stages=stages)
 
 
+def reconcile_pipeline_state(config: PipelineConfig, state: PipelineState) -> PipelineState:
+    """Ensure persisted state covers the current config's stage list.
+
+    This supports resuming an existing pipeline directory after the
+    pipeline snapshot has been edited to add new downstream stages.
+    Existing stage runtime data is preserved; missing stages are
+    appended as pending entries. Extra stale state entries are left
+    untouched so older run metadata is not discarded implicitly.
+    """
+    for i, stage_cfg in enumerate(config.stages):
+        stage_name = stage_cfg.name or f"stage_{i}"
+        if i < len(state.stages):
+            state.stages[i].index = i
+            state.stages[i].name = stage_name
+            continue
+        state.stages.append(StageState(index=i, name=stage_name))
+
+    return state
+
+
 def has_pipeline_state(pipeline_dir: Path) -> bool:
     """Return True if *pipeline_dir* contains a pipeline state file."""
     return (pipeline_dir / _STATE_FILENAME).exists()
@@ -262,8 +282,10 @@ def reset_stages_for_rerun(
 
     Returns the updated pipeline state.
     """
-    if from_stage < 0 or from_stage >= len(state.stages):
-        raise ValueError(f"Stage index {from_stage} out of range (0..{len(state.stages) - 1})")
+    reconcile_pipeline_state(config, state)
+
+    if from_stage < 0 or from_stage >= len(config.stages):
+        raise ValueError(f"Stage index {from_stage} out of range (0..{len(config.stages) - 1})")
 
     from datetime import datetime
 
