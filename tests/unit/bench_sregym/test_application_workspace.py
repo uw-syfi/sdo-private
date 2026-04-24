@@ -144,3 +144,7 @@ def test_should_replay_completed_run_only_when_workspace_mode_enabled():
         is_resuming=False,
         pending_problems=[],
     )
+
+
+def test_resolve_app_source_subdir_supports_train_ticket():
+    assert app_workspace.resolve_app_source_subdir("train_ticket") == "train-ticket"
