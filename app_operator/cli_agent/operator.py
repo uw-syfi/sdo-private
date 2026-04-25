@@ -4,6 +4,7 @@ import subprocess
 import threading
 from pathlib import Path
 from types import FrameType
+from typing import Any
 
 from agentshim import BaseCodingAgent
 from app_operator.cli_agent._event_handlers import TrajectoryAgentEventHandler, append_event_handler
@@ -117,8 +118,9 @@ class AppOperator(OperatorBase):
         # SDS-owned custom agents still expose a recorder attribute for prompt
         # and recursive-agent telemetry. New agentshim providers do not.
         for recorder_target in (self.agent, getattr(self.agent, "backend", None)):
-            if recorder_target is not None and hasattr(recorder_target, "recorder"):
-                recorder_target.recorder = self.recorder
+            recorder_target_any: Any = recorder_target
+            if recorder_target_any is not None and hasattr(recorder_target_any, "recorder"):
+                recorder_target_any.recorder = self.recorder
 
         # Construct shared context for all agents
         self._ctx = AgentContext(

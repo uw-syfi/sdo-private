@@ -14,11 +14,11 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentshim import CodingAgent
 from agentshim.claude import ClaudeCodeCodingAgent
 from agentshim.codex import CodexCodingAgent
 from agentshim.gemini import GeminiCodingAgent
 
+from agentshim import CodingAgent
 from libs.model_config import ModelConfig
 
 

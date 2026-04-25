@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentshim import BaseCodingAgent
-
     from app_operator.core import CommandResult
     from app_operator.dspy_integration import DSPyConfig
     from app_operator.trajectory import TrajectoryRecorderProtocol

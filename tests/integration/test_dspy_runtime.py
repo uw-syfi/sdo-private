@@ -13,8 +13,8 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
-from agentshim import BaseCodingAgent
 
+from agentshim import BaseCodingAgent
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.core import AgentConfig, Config, DSPyConfig
 from app_operator.dspy_integration._loader import reset_cache

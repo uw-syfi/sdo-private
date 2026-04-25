@@ -206,13 +206,15 @@ class TestConsoleEventHandlerRendering:
 
     def test_system_event_renders_none(self):
         event = SystemEvent({"type": "system"})
-        if hasattr(event, "render"):
-            assert event.render("[P]") is None
+        render = getattr(event, "render", None)
+        if render is not None:
+            assert render("[P]") is None
 
     def test_text_event_renders_text(self):
         event = TextEvent("hello")
-        if hasattr(event, "render"):
-            assert event.render("[P]") == "hello"
+        render = getattr(event, "render", None)
+        if render is not None:
+            assert render("[P]") == "hello"
             return
         handler, logger = self._handler()
         if handler is None or logger is None:
@@ -222,8 +224,9 @@ class TestConsoleEventHandlerRendering:
 
     def test_tool_use_event_renders_with_prefix(self):
         event = ToolUseEvent("Bash", "t1", {"cmd": "ls"})
-        if hasattr(event, "render"):
-            rendered = event.render("[Claude]")
+        render = getattr(event, "render", None)
+        if render is not None:
+            rendered = render("[Claude]")
         else:
             handler, logger = self._handler()
             if handler is None or logger is None:
@@ -236,8 +239,9 @@ class TestConsoleEventHandlerRendering:
 
     def test_memory_tool_use_event_preserves_large_payload(self):
         event = ToolUseEvent("store_incident", "t1", {"summary": "x" * 300})
-        if hasattr(event, "render"):
-            rendered = event.render("[Claude]")
+        render = getattr(event, "render", None)
+        if render is not None:
+            rendered = render("[Claude]")
         else:
             handler, logger = self._handler()
             if handler is None or logger is None:
@@ -251,8 +255,9 @@ class TestConsoleEventHandlerRendering:
     def test_tool_result_event_renders_with_output(self):
         event = ToolResultEvent(output="file.txt", tool_id="t1")
         event.tool_name_resolved = "Bash"
-        if hasattr(event, "render"):
-            rendered = event.render("[Claude]")
+        render = getattr(event, "render", None)
+        if render is not None:
+            rendered = render("[Claude]")
         else:
             handler, logger = self._handler()
             if handler is None or logger is None:
@@ -265,8 +270,9 @@ class TestConsoleEventHandlerRendering:
     def test_tool_result_event_renders_success_when_empty(self):
         event = ToolResultEvent(output="", tool_id="t1")
         event.tool_name_resolved = "Bash"
-        if hasattr(event, "render"):
-            rendered = event.render("[Claude]")
+        render = getattr(event, "render", None)
+        if render is not None:
+            rendered = render("[Claude]")
         else:
             handler, logger = self._handler()
             if handler is None or logger is None:
@@ -277,13 +283,15 @@ class TestConsoleEventHandlerRendering:
 
     def test_result_event_renders_none(self):
         event = ResultEvent("done")
-        if hasattr(event, "render"):
-            assert event.render("[P]") is None
+        render = getattr(event, "render", None)
+        if render is not None:
+            assert render("[P]") is None
 
     def test_multi_event_renders_none(self):
         event = MultiEvent([TextEvent("a")])
-        if hasattr(event, "render"):
-            assert event.render("[P]") is None
+        render = getattr(event, "render", None)
+        if render is not None:
+            assert render("[P]") is None
 
 
 class TestCodexEventFromDict:
@@ -295,8 +303,9 @@ class TestCodexEventFromDict:
         event = CodexEvent.from_dict({"type": "thread.started", "thread_id": "abc"})
         assert isinstance(event, ThreadStartedEvent)
         assert event.thread_id == "abc"
-        if hasattr(event, "render"):
-            assert event.render("[Codex]") is None
+        render = getattr(event, "render", None)
+        if render is not None:
+            assert render("[Codex]") is None
 
     def test_turn_started_is_lifecycle(self):
         from agentshim.codex_events import CodexEvent, LifecycleEvent

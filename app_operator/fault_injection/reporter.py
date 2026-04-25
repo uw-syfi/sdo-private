@@ -4,15 +4,16 @@ Converts fault injection results into metadata dictionaries suitable
 for embedding in trajectory JSON files.
 """
 
+from typing import Any
+
 from app_operator.fault_injection.models import FaultResult
-from app_operator.trajectory import FaultInjectionMetadata
 
 
 class FaultReport:
     """Converts fault injection results to trajectory-compatible metadata."""
 
     @staticmethod
-    def to_trajectory_metadata(results: list[FaultResult]) -> FaultInjectionMetadata:
+    def to_trajectory_metadata(results: list[FaultResult]) -> dict[str, Any]:
         """Convert fault results to a metadata dict for trajectory JSON.
 
         Args:

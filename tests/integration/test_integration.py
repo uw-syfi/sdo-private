@@ -2,8 +2,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentshim import BaseCodingAgent
 
+from agentshim import BaseCodingAgent
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.core import AgentConfig, Config
 from libs.model_config import ModelConfig

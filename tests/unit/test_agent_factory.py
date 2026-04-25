@@ -1,10 +1,10 @@
 from unittest.mock import patch
 
 import pytest
-from agentshim import BaseCodingAgent
 from agentshim.base import register_provider
 from agentshim.cli_agent import CLICodingAgent
 
+from agentshim import BaseCodingAgent
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.core import AgentConfig, Config
 from libs.model_config import ModelConfig

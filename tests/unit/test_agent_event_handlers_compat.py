@@ -24,6 +24,9 @@ class _RecordingHandler:
     def on_tool_result(self, tool, stdout="", stderr="", exit_code=None, duration=None) -> None:
         pass
 
+    def on_usage(self, usage) -> None:
+        pass
+
 
 @pytest.mark.parametrize("agent_cls", [SubagentCodingAgent, HybridCodingAgent, RLMOfficialAgent])
 def test_custom_provider_constructors_accept_event_handlers(agent_cls):
