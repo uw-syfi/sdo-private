@@ -26,6 +26,7 @@ except ModuleNotFoundError:
 from libs.sregym_lib.experiment import (
     ExperimentConfig,
     RunnerEnv,
+    promote_crucible_legacy_config,
     variant_config_from_raw,
 )
 
@@ -164,18 +165,28 @@ def merge_stage_config(
     variants_raw = merged.pop("variants", {})
     env_raw = merged.pop("env", {})
     agent_config = merged.pop("agent_config", {})
+    agent = merged.get("agent", "crucible")
+    enable_summary = merged.get("enable_summary", True)
+    no_inject_summary = merged.get("no_inject_summary", True)
+    agent_config = promote_crucible_legacy_config(
+        agent=agent,
+        agent_config=agent_config,
+        enable_summary=enable_summary,
+        no_inject_summary=no_inject_summary,
+        crucible_seed_kb_dir=str(env_raw.get("crucible_seed_kb_dir", "")),
+    )
 
     variants = variant_config_from_raw(variants_raw)
 
     return ExperimentConfig(
-        agent=merged.get("agent", "crucible"),
+        agent=agent,
         model=merged.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=merged.get("parallel", 4),
         app_filter=merged.get("app_filter", ""),
         deploy_from_source=merged.get("deploy_from_source", False),
         application_workspace=merged.get("application_workspace", False),
-        enable_summary=merged.get("enable_summary", True),
-        no_inject_summary=merged.get("no_inject_summary", True),
+        enable_summary=enable_summary,
+        no_inject_summary=no_inject_summary,
         repeat=merged.get("repeat", 1),
         sequence_len=merged.get("sequence_len", 0),
         sequence_seed=merged.get("sequence_seed", 42),

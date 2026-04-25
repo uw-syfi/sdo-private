@@ -178,6 +178,13 @@ def _parse_args() -> argparse.Namespace:
         help="Directory for knowledge base files (enables KB mode when set)",
     )
     parser.add_argument(
+        "--enable-summary",
+        action="store_true",
+        default=False,
+        dest="enable_summary",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--kb-model",
         "--summary-model",
         type=str,
@@ -297,21 +304,28 @@ async def _async_main(args: argparse.Namespace) -> None:
         kb: KnowledgeBase | None = None
         injected_kb: InjectedKB | None = None
         kb_type = args.kb_type or agent_cfg.get("kb_type", "structured")
+        kb_enabled = bool(agent_cfg.get("enable_summary", args.enable_summary))
+        no_inject_kb = bool(agent_cfg.get("no_inject_summary", args.no_inject_kb))
+        kb_dir = args.kb_dir or agent_cfg.get("kb_dir") or agent_cfg.get("summary_dir")
+        if kb_enabled and not kb_dir:
+            experiment_dir = os.getenv("SREGYM_EXPERIMENT_DIR")
+            if experiment_dir:
+                kb_dir = str(Path(experiment_dir) / "kb")
 
-        if args.kb_dir:
+        if kb_enabled and kb_dir:
             model_id: str = args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model
             from sregym_agents.crucible.agents import PydanticAIDriver as _KBDriver
 
             kb_driver = _KBDriver(model_id)
             kb = create_knowledge_base(
                 kb_type=kb_type,
-                kb_dir=Path(args.kb_dir),
+                kb_dir=Path(kb_dir),
                 app_name=app_info.get("app_name", "unknown"),
                 config=crucible_config,
                 renderer=renderer,
                 driver=kb_driver,
             )
-            if not args.no_inject_kb:
+            if not no_inject_kb:
                 injected = await kb.inject(Path(exp_env or "."))
                 if agent_cfg.get("inject_priors", agent_cfg.get("inject_heuristics", True)):
                     injected_kb = injected
@@ -376,7 +390,7 @@ async def _async_main(args: argparse.Namespace) -> None:
                     shutil.copy2(sf, dest)
                     logger.info(f"Saved {suffix} session markdown to {dest}")
 
-        if kb is not None and args.kb_dir:
+        if kb is not None and kb_dir:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             diagnosis_run_path = None
             recovery_diagnosis_run_path = None
@@ -461,7 +475,7 @@ async def _async_main(args: argparse.Namespace) -> None:
                         else None
                     ),
                     stage_outputs_file=saved_stage_outputs,
-                    kb_dir=args.kb_dir,
+                    kb_dir=kb_dir,
                     kb_type=args.kb_type or agent_cfg.get("kb_type", "structured"),
                     model_id=str(args.kb_model or os.environ.get("MODEL_ID", args.model) or args.model),
                     app_name=app_info.get("app_name", "unknown"),
@@ -471,10 +485,10 @@ async def _async_main(args: argparse.Namespace) -> None:
                     timestamp=timestamp,
                     **crucible_config.to_kb_task_fields(),
                 )
-                task_path = enqueue_task(Path(args.kb_dir), kb_task, problem_id=problem_id)
+                task_path = enqueue_task(Path(kb_dir), kb_task, problem_id=problem_id)
                 logger.info(f"KB update task written to {task_path}")
 
-                ensure_kb_worker(Path(args.kb_dir))
+                ensure_kb_worker(Path(kb_dir))
             else:
                 logger.info("Knowledge base: missing playbook candidates; skipping async review enqueue.")
 

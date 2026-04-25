@@ -7,6 +7,7 @@ and agent-specific config.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import os
@@ -89,6 +90,35 @@ class RunnerEnv:
     reuse_cluster: bool = False
     force_recreate_cluster: bool = False
     submit_done_returns_feedback: bool = False
+
+
+def promote_crucible_legacy_config(
+    *,
+    agent: str,
+    agent_config: dict[str, dict[str, Any]],
+    enable_summary: bool,
+    no_inject_summary: bool,
+    crucible_seed_kb_dir: str = "",
+) -> dict[str, dict[str, Any]]:
+    """Move legacy runner/env Crucible settings into ``agent.crucible``.
+
+    Older experiment files stored KB settings under ``[runner]`` and
+    ``[runner.env]`` because sregym forwarded them as generic summary flags.
+    Crucible now owns those fields, while this promotion keeps old TOMLs and
+    snapshots readable.
+    """
+    normalized = copy.deepcopy(agent_config)
+    if agent != "crucible":
+        return normalized
+
+    crucible_cfg = normalized.setdefault("crucible", {})
+    if "seed_kb_dir" not in crucible_cfg and "crucible_seed_kb_dir" in crucible_cfg:
+        crucible_cfg["seed_kb_dir"] = crucible_cfg.pop("crucible_seed_kb_dir")
+    crucible_cfg.setdefault("enable_summary", enable_summary)
+    crucible_cfg.setdefault("no_inject_summary", no_inject_summary)
+    if crucible_seed_kb_dir:
+        crucible_cfg.setdefault("seed_kb_dir", crucible_seed_kb_dir)
+    return normalized
 
 
 @dataclass
@@ -182,17 +212,26 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
     )
 
-    agent_config = raw.get("agent", {})
+    agent = runner.get("agent", "crucible")
+    enable_summary = runner.get("enable_summary", True)
+    no_inject_summary = runner.get("no_inject_summary", True)
+    agent_config = promote_crucible_legacy_config(
+        agent=agent,
+        agent_config=raw.get("agent", {}),
+        enable_summary=enable_summary,
+        no_inject_summary=no_inject_summary,
+        crucible_seed_kb_dir=str(env_raw.get("crucible_seed_kb_dir", "")),
+    )
 
     return ExperimentConfig(
-        agent=runner.get("agent", "crucible"),
+        agent=agent,
         model=runner.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=runner.get("parallel", 4),
         app_filter=runner.get("app_filter", ""),
         deploy_from_source=runner.get("deploy_from_source", False),
         application_workspace=runner.get("application_workspace", False),
-        enable_summary=runner.get("enable_summary", True),
-        no_inject_summary=runner.get("no_inject_summary", True),
+        enable_summary=enable_summary,
+        no_inject_summary=no_inject_summary,
         repeat=runner.get("repeat", 1),
         sequence_len=runner.get("sequence_len", 0),
         sequence_seed=runner.get("sequence_seed", 42),
@@ -244,6 +283,18 @@ def resolve_config(
         config = dataclasses.replace(config, **updates, env=new_env)
 
     return config
+
+
+def effective_agent_config(config: ExperimentConfig) -> dict[str, Any]:
+    """Return the selected agent's config after legacy promotion."""
+    agent_config = promote_crucible_legacy_config(
+        agent=config.agent,
+        agent_config=config.agent_config,
+        enable_summary=config.enable_summary,
+        no_inject_summary=config.no_inject_summary,
+        crucible_seed_kb_dir=config.env.crucible_seed_kb_dir,
+    )
+    return copy.deepcopy(agent_config.get(config.agent, {}))
 
 
 _SNAPSHOT_FILENAME = "experiment_config.toml"
@@ -338,8 +389,6 @@ def config_to_main_args(
         str(exp_dir),
     ]
 
-    if config.enable_summary:
-        args.append("--enable-summary")
     if config.app_filter:
         args.extend(["--app-filter", config.app_filter])
     if config.deploy_from_source:
@@ -349,8 +398,6 @@ def config_to_main_args(
         args.append("--application-workspace")
     elif workspace_mode is not None:
         args.extend(["--application-workspace", workspace_mode])
-    if config.no_inject_summary:
-        args.append("--no-inject-summary")
     if config.repeat > 1:
         args.extend(["--repeat", str(config.repeat)])
 
@@ -387,7 +434,7 @@ def config_to_main_args(
     return args
 
 
-def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str]:
+def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | None = None) -> dict[str, str]:
     """Build env var dict from ExperimentConfig.
 
     Starts with the current environment and adds/overrides entries.
@@ -411,9 +458,11 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
     env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] = "1" if config.env.submit_done_returns_feedback else "0"
 
     env["SREGYM_PROGRESS_MODE"] = "rich"
+    if exp_dir is not None:
+        env["SREGYM_EXPERIMENT_DIR"] = str(exp_dir)
 
     # Agent-specific config via JSON env var
-    agent_cfg = config.agent_config.get(config.agent)
+    agent_cfg = effective_agent_config(config)
     if agent_cfg:
         env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(agent_cfg)
 
@@ -450,8 +499,6 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"app_filter = {_toml_value(config.app_filter)}")
     lines.append(f"deploy_from_source = {_toml_value(config.deploy_from_source)}")
     lines.append(f"application_workspace = {_toml_value(config.application_workspace)}")
-    lines.append(f"enable_summary = {_toml_value(config.enable_summary)}")
-    lines.append(f"no_inject_summary = {_toml_value(config.no_inject_summary)}")
     lines.append(f"repeat = {_toml_value(config.repeat)}")
     lines.append(f"sequence_len = {_toml_value(config.sequence_len)}")
     lines.append(f"sequence_seed = {_toml_value(config.sequence_seed)}")
@@ -480,13 +527,19 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append("")
     lines.append("[runner.env]")
     lines.append(f"judge_model_id = {_toml_value(config.env.judge_model_id)}")
-    lines.append(f"crucible_seed_kb_dir = {_toml_value(config.env.crucible_seed_kb_dir)}")
     lines.append(f"worker_cpu_limit = {_toml_value(config.env.worker_cpu_limit)}")
     lines.append(f"reuse_cluster = {_toml_value(config.env.reuse_cluster)}")
     lines.append(f"force_recreate_cluster = {_toml_value(config.env.force_recreate_cluster)}")
     lines.append(f"submit_done_returns_feedback = {_toml_value(config.env.submit_done_returns_feedback)}")
 
-    for agent_name, agent_cfg in config.agent_config.items():
+    agent_configs = promote_crucible_legacy_config(
+        agent=config.agent,
+        agent_config=config.agent_config,
+        enable_summary=config.enable_summary,
+        no_inject_summary=config.no_inject_summary,
+        crucible_seed_kb_dir=config.env.crucible_seed_kb_dir,
+    )
+    for agent_name, agent_cfg in agent_configs.items():
         lines.append("")
         lines.append(f"[agent.{agent_name}]")
         for k, v in agent_cfg.items():

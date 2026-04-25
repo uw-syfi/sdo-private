@@ -14,7 +14,6 @@ name = "kb-inject-summary-ablation"
 agent = "crucible"
 model = "google-vertex:gemini-2.5-flash"
 parallel = 8
-enable_summary = true
 
 [defaults.variants]
 enabled = true
@@ -24,10 +23,11 @@ seed = 42
 
 [defaults.env]
 judge_model_id = "vertex-ai-gemini-2.5-pro"
-crucible_seed_kb_dir = ""
 worker_cpu_limit = "16"
 
 [defaults.agent_config.crucible]
+enable_summary = true
+seed_kb_dir = ""
 prompt_version = "v3"
 enable_judge = false
 enable_ltm_retrieval = true
@@ -46,7 +46,7 @@ wait_stage_timeout = 300
 name = "build_kb_no_inject"
 chain_kb = false
 
-[stages.runner]
+[stages.agent_config.crucible]
 no_inject_summary = true
 
 # Stage 1: reuse stage 0's KB, with summary injection
@@ -54,8 +54,6 @@ no_inject_summary = true
 name = "eval_with_inject"
 chain_kb = true
 
-[stages.runner]
-no_inject_summary = false
-
 [stages.agent_config.crucible]
+no_inject_summary = false
 inject_heuristics = false

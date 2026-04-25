@@ -94,11 +94,11 @@ count = 8
 
 [runner.env]
 judge_model_id = "judge-model"
-crucible_seed_kb_dir = ""
 worker_cpu_limit = "16"
 
 [agent.crucible]
 enable_judge = true
+seed_kb_dir = ""
 """
 
 
@@ -276,6 +276,23 @@ class TestMergeStageConfig:
         assert config.agent_config["crucible"]["enable_judge"] is False
         assert config.agent_config["crucible"]["kb_type"] == "structured"
 
+    def test_legacy_crucible_runner_fields_promoted(self) -> None:
+        defaults = {
+            "agent": "crucible",
+            "enable_summary": True,
+            "no_inject_summary": True,
+            "env": {"crucible_seed_kb_dir": "/tmp/default-kb", "judge_model_id": "judge-default"},
+        }
+        overrides = {
+            "agent_config": {"crucible": {"no_inject_summary": False}},
+        }
+        config = merge_stage_config(defaults, overrides)
+        assert config.agent_config["crucible"]["enable_summary"] is True
+        assert config.agent_config["crucible"]["no_inject_summary"] is False
+        assert config.agent_config["crucible"]["seed_kb_dir"] == "/tmp/default-kb"
+        assert "judge_model_id" not in config.agent_config["crucible"]
+        assert config.env.judge_model_id == "judge-default"
+
 
 # ---------------------------------------------------------------------------
 # test_deep_merge
@@ -334,19 +351,19 @@ class TestPipelineState:
 
 class TestChainKb:
     def test_chain_kb_sets_seed_dir(self) -> None:
-        """chain_kb=true with a prior KB dir should set crucible_seed_kb_dir."""
+        """chain_kb=true with a prior KB dir should set Crucible's seed KB config."""
         defaults = {"agent": "crucible"}
         config = merge_stage_config(defaults, {})
         # Simulate what the pipeline runner does
         prev_kb = "/some/experiment/kb"
-        config.env.crucible_seed_kb_dir = prev_kb
-        assert config.env.crucible_seed_kb_dir == prev_kb
+        config.agent_config.setdefault("crucible", {})["seed_kb_dir"] = prev_kb
+        assert config.agent_config["crucible"]["seed_kb_dir"] == prev_kb
 
     def test_chain_kb_false_no_seed(self) -> None:
-        """chain_kb=false should leave crucible_seed_kb_dir empty."""
+        """chain_kb=false should leave Crucible's seed KB config unset."""
         defaults = {"agent": "crucible"}
         config = merge_stage_config(defaults, {})
-        assert config.env.crucible_seed_kb_dir == ""
+        assert "seed_kb_dir" not in config.agent_config.get("crucible", {})
 
 
 # ---------------------------------------------------------------------------
@@ -624,11 +641,11 @@ class TestPipelineRunner:
                 state=state,
             )
 
-        # Stage 0 should not have crucible_seed_kb_dir set (chain_kb=false)
-        assert captured_configs[0].env.crucible_seed_kb_dir == ""
+        # Stage 0 should not have seed_kb_dir set (chain_kb=false)
+        assert "seed_kb_dir" not in captured_configs[0].agent_config.get("crucible", {})
 
-        # Stage 1 should have crucible_seed_kb_dir pointing to stage 0's kb/
-        seed_dir = captured_configs[1].env.crucible_seed_kb_dir
+        # Stage 1 should have seed_kb_dir pointing to stage 0's kb/
+        seed_dir = captured_configs[1].agent_config["crucible"]["seed_kb_dir"]
         assert seed_dir.endswith("/stage_0_build/kb")
 
     def test_hooks_invoked_for_kb_barrier(self, sregym_dir, tmp_path: Path) -> None:

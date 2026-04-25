@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 from typing import TYPE_CHECKING
 
@@ -104,6 +105,73 @@ def test_config_to_main_args_no_problem_spec_when_empty(tmp_path: Path) -> None:
     config = ExperimentConfig()
     args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
     assert "--problem-spec" not in args
+
+
+def test_config_to_main_args_does_not_emit_crucible_summary_flags(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        agent="crucible",
+        agent_config={"crucible": {"enable_summary": True, "no_inject_summary": False}},
+    )
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+    assert "--enable-summary" not in args
+    assert "--no-inject-summary" not in args
+
+
+def test_crucible_agent_config_loaded_from_toml(tmp_path: Path) -> None:
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        agent = "crucible"
+
+        [agent.crucible]
+        enable_summary = true
+        no_inject_summary = false
+        seed_kb_dir = "/tmp/seed-kb"
+    """,
+    )
+    config = load_experiment_config(toml)
+    assert config.agent_config["crucible"]["enable_summary"] is True
+    assert config.agent_config["crucible"]["no_inject_summary"] is False
+    assert config.agent_config["crucible"]["seed_kb_dir"] == "/tmp/seed-kb"
+
+
+def test_legacy_crucible_runner_fields_are_promoted_to_agent_config(tmp_path: Path) -> None:
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        agent = "crucible"
+        enable_summary = false
+        no_inject_summary = true
+
+        [runner.env]
+        crucible_seed_kb_dir = "/tmp/legacy-kb"
+        judge_model_id = "legacy-judge"
+    """,
+    )
+    config = load_experiment_config(toml)
+    assert config.agent_config["crucible"]["enable_summary"] is False
+    assert config.agent_config["crucible"]["no_inject_summary"] is True
+    assert config.agent_config["crucible"]["seed_kb_dir"] == "/tmp/legacy-kb"
+    assert "judge_model_id" not in config.agent_config["crucible"]
+    assert config.env.judge_model_id == "legacy-judge"
+
+
+def test_legacy_crucible_agent_seed_field_is_renamed(tmp_path: Path) -> None:
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        agent = "crucible"
+
+        [agent.crucible]
+        crucible_seed_kb_dir = "/tmp/old-agent-seed"
+    """,
+    )
+    config = load_experiment_config(toml)
+    assert config.agent_config["crucible"]["seed_kb_dir"] == "/tmp/old-agent-seed"
+    assert "crucible_seed_kb_dir" not in config.agent_config["crucible"]
 
 
 def test_deploy_from_source_loaded_from_toml(tmp_path: Path) -> None:
@@ -334,6 +402,29 @@ def test_serialize_omits_spec_names_when_empty() -> None:
     assert "spec_names" not in serialized
 
 
+def test_serialize_writes_crucible_fields_under_agent_config() -> None:
+    config = ExperimentConfig(
+        agent="crucible",
+        agent_config={
+            "crucible": {
+                "enable_summary": True,
+                "no_inject_summary": False,
+                "seed_kb_dir": "/tmp/seed",
+            }
+        },
+        env=RunnerEnv(judge_model_id="judge-model"),
+    )
+    serialized = _serialize_config(config)
+    runner_block = serialized.split("[runner.variants]", 1)[0]
+    assert "enable_summary" not in runner_block
+    assert "no_inject_summary" not in runner_block
+    assert "[agent.crucible]" in serialized
+    assert "enable_summary = true" in serialized
+    assert "no_inject_summary = false" in serialized
+    assert 'seed_kb_dir = "/tmp/seed"' in serialized
+    assert '[runner.env]\njudge_model_id = "judge-model"' in serialized
+
+
 def test_roundtrip_spec_names(tmp_path: Path) -> None:
     config = ExperimentConfig(spec_names=["service_dns_resolution_failure", "wrong_dns_policy"])
     toml_path = tmp_path / "snap.toml"
@@ -457,6 +548,30 @@ def test_config_to_env_omits_autonomous_submit_when_absent(tmp_path: Path) -> No
     )
     env = config_to_env(config, project_root=tmp_path)
     assert "SREGYM_AUTONOMOUS_SUBMIT" not in env
+
+
+def test_config_to_env_serializes_effective_crucible_agent_config(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        agent="crucible",
+        agent_config={
+            "crucible": {
+                "prompt_version": "v3",
+                "enable_summary": True,
+                "no_inject_summary": False,
+                "seed_kb_dir": "/tmp/seed",
+            }
+        },
+        env=RunnerEnv(judge_model_id="judge-model"),
+    )
+    env = config_to_env(config, project_root=tmp_path, exp_dir=tmp_path / "exp")
+    decoded = json.loads(env["SREGYM_EXPERIMENT_AGENT_CONFIG"])
+    assert decoded["prompt_version"] == "v3"
+    assert decoded["enable_summary"] is True
+    assert decoded["no_inject_summary"] is False
+    assert decoded["seed_kb_dir"] == "/tmp/seed"
+    assert "judge_model_id" not in decoded
+    assert env["JUDGE_MODEL_ID"] == "judge-model"
+    assert env["SREGYM_EXPERIMENT_DIR"] == str(tmp_path / "exp")
 
 
 def test_roundtrip_reuse_cluster(tmp_path: Path) -> None:
