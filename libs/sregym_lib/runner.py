@@ -13,7 +13,6 @@ crucible hooks in; this module stays agent-agnostic.
 from __future__ import annotations
 
 import dataclasses
-import json
 import os
 import subprocess
 import sys
@@ -43,8 +42,6 @@ from libs.sregym_lib.pipeline import (
     write_pipeline_state,
 )
 
-_MEMORY_AGENT = "cli_agent"
-_DEFAULT_MEMORY_PORT = 9953
 _APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
 
 
@@ -84,32 +81,6 @@ def _run_hook(cmd: str, env: dict[str, str], label: str, project_root: Path) -> 
     result = subprocess.run(cmd, shell=True, cwd=str(project_root), env=env)  # noqa: S602
     if result.returncode != 0:
         print(f"  ⚠️  {label} exited with code {result.returncode}", flush=True)
-
-
-def _inject_memory_defaults(env: dict[str, str], agent_name: str, log_dir: Path) -> dict[str, str]:
-    """Inject default memory daemon config for cli_agent runs.
-
-    Only applied for ``cli_agent`` and only when the experiment did not
-    already supply explicit ``memory_store`` / ``memory_port`` settings.
-    """
-    if agent_name != _MEMORY_AGENT:
-        return env
-
-    raw = env.get("SREGYM_EXPERIMENT_AGENT_CONFIG", "{}")
-    try:
-        cfg = json.loads(raw)
-    except json.JSONDecodeError:
-        cfg = {}
-    if not isinstance(cfg, dict):
-        return env
-    if "memory_store" in cfg or "memory_port" in cfg:
-        return env
-
-    env = dict(env)
-    cfg["memory_store"] = str(log_dir / "kb" / "incidents.db")
-    cfg["memory_port"] = _DEFAULT_MEMORY_PORT
-    env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(cfg)
-    return env
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +181,6 @@ def run_single_experiment(
     if hooks.before_stage is not None:
         hooks.before_stage(exp_dir, config)
 
-    env = _inject_memory_defaults(env, config.agent, exp_dir)
     before_hook, after_hook = _load_agent_hooks(config.agent, project_root)
     if before_hook:
         _run_hook(before_hook, env, "before_benchmark", project_root)
@@ -261,13 +231,6 @@ def _run_stage(
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
     env = config_to_env(exp_config, project_root)
 
-    # Pipeline stages share a single memory daemon launched from the
-    # pipeline root, so default cli_agent memory settings should point at
-    # the pipeline dir when present.
-    memory_log_dir = stage_exp_dir
-    if (stage_exp_dir.parent / "pipeline_state.json").exists():
-        memory_log_dir = stage_exp_dir.parent
-    env = _inject_memory_defaults(env, exp_config.agent, memory_log_dir)
     if extra_env:
         env.update(extra_env)
 
@@ -361,7 +324,6 @@ def run_pipeline(
         hook_exp = merge_stage_config(config.defaults, {})
         hook_exp = resolve_config(hook_exp)
         hook_env = config_to_env(hook_exp, project_root)
-        hook_env = _inject_memory_defaults(hook_env, hook_exp.agent, pipeline_dir)
         before_hook, after_hook = _load_agent_hooks(hook_exp.agent, project_root)
 
     if before_hook:

@@ -76,6 +76,16 @@ def test_build_prompt_names_the_mcp_server() -> None:
     assert driver._SUBMIT_MCP_SERVER_NAME in prompt
 
 
+def test_build_prompt_omits_incident_memory_instructions() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+    )
+    assert "recall_incident" not in prompt
+    assert "store_incident" not in prompt
+    assert "Incident memory" not in prompt
+
+
 # --- Autonomous-submit prompt variant ---------------------------------------
 
 
@@ -585,6 +595,11 @@ def test_parse_args_tolerates_sregym_launcher_flags() -> None:
     )
     assert ns.provider == "claude"
     assert ns.timeout_sec == 2000
+
+
+def test_parse_args_rejects_removed_memory_flags() -> None:
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--memory-store", "/tmp/incidents.db"])
 
 
 def test_cli_agent_is_registered_as_external_agent() -> None:

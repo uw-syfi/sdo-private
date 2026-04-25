@@ -30,5 +30,3 @@ agents:
     # hasn't exited by then.
     # No defer_cleanup: the agent submits and exits; the conductor tears
     # down synchronously.
-    before_benchmark: uv run python -m sregym_agents.cli_agent.memory_server start-daemon
-    after_benchmark: uv run python -m sregym_agents.cli_agent.memory_server stop-daemon

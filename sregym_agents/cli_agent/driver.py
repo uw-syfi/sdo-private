@@ -82,8 +82,6 @@ def _build_prompt(
     *,
     autonomous: bool = False,
     submit_done_returns_feedback: bool = False,
-    memory_mcp_server_name: str | None = None,
-    memory_store_only: bool = False,
 ) -> str:
     """Render the single-session prompt handed to the wrapped CLI agent.
 
@@ -111,8 +109,6 @@ def _build_prompt(
             namespace=app_info.get("namespace", "<unknown>"),
             submit_mcp_server_name=_SUBMIT_MCP_SERVER_NAME,
             submit_done_returns_feedback=submit_done_returns_feedback,
-            memory_mcp_server_name=memory_mcp_server_name,
-            memory_store_only=memory_store_only,
         )
     )
 
@@ -220,42 +216,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "for the entire problem (default: 2000)"
         ),
     )
-    parser.add_argument(
-        "--memory-store",
-        default=toml_cfg.get("memory_store"),
-        help=(
-            "Path to the SQLite incident memory store. "
-            "When set, the agent gains recall_incident / store_incident MCP tools "
-            "backed by the incident_memory server (optional)."
-        ),
-    )
-    parser.add_argument(
-        "--memory-merge-model",
-        default=toml_cfg.get("memory_merge_model"),
-        help=(
-            "LLM model id (litellm) used to merge duplicate incidents when storing. "
-            "Requires --memory-store. If omitted, duplicate incidents are skipped without merging."
-        ),
-    )
-    parser.add_argument(
-        "--memory-port",
-        type=int,
-        default=toml_cfg.get("memory_port"),
-        help=(
-            "Port of the shared incident memory HTTP/SSE daemon (started by run_sregym.py "
-            "before_benchmark hook). When set, agents connect to the daemon instead of "
-            "spawning a per-agent stdio subprocess. Takes precedence over --memory-store."
-        ),
-    )
-    parser.add_argument(
-        "--memory-store-only",
-        action="store_true",
-        default=bool(toml_cfg.get("memory_store_only", False)),
-        help=(
-            "When set, only store_incident is available — recall_incident is disabled. "
-            "Useful for KB-building stages where agents should not read from prior memory."
-        ),
-    )
     # No-op flags accepted for compatibility with sregym's agent launcher
     # (`bench/sregym/main.py` ~L1314-L1330), which appends these to every
     # agent's argv depending on the experiment config — cli_agent has no
@@ -301,12 +261,7 @@ def _run(
         planned_stages,
     )
 
-    # Incident-memory MCP integration is intentionally disabled for now.
-    # The autonomous prompt directs the agent to persist reusable repo-local
-    # diagnostics and playbooks under `.sds/` instead.
-    memory_store_only = False
     extra_mcp_servers = []
-    memory_server_name = None
 
     if agent_factory is not None:
         factory = agent_factory
@@ -325,8 +280,6 @@ def _run(
         app_info,
         autonomous=autonomous,
         submit_done_returns_feedback=submit_done_returns_feedback,
-        memory_mcp_server_name=memory_server_name,
-        memory_store_only=memory_store_only,
     )
     started = time.monotonic()
     crashed_with: str | None = None
