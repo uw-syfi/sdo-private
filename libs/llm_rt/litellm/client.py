@@ -1,11 +1,13 @@
 """Thin LiteLLM wrapper with automatic token tracking and trajectory recording."""
 
 import os
-from typing import Any
-
-from agentshim.trajectory import TrajectoryRecorderProtocol
+from typing import Any, Protocol
 
 from ._retry import litellm_call_with_retry
+
+
+class TokenUsageRecorder(Protocol):
+    def record_token_usage(self, usage: Any) -> None: ...
 
 
 class LiteLLMClient:
@@ -15,7 +17,7 @@ class LiteLLMClient:
         self,
         model: str,
         location: str | None = None,
-        recorder: TrajectoryRecorderProtocol | None = None,
+        recorder: TokenUsageRecorder | None = None,
     ):
         self.model = model
         self.location = location

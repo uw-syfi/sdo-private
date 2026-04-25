@@ -16,9 +16,7 @@ from agentshim.utils import generate_and_write_files
 from app_operator.core import (
     AgentError,
     FileSystemInterface,
-    NullOperatorUI,
     OperatorConfig,
-    OperatorUI,
     RealFilesystem,
     logger,
 )
@@ -40,7 +38,6 @@ class CodeAnalyzerAgent:
         filesystem: FileSystemInterface | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
-        ui: OperatorUI | None = None,
         operator_config: OperatorConfig | None = None,
         ctx: AgentContext | None = None,
     ):
@@ -52,13 +49,11 @@ class CodeAnalyzerAgent:
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
             dspy_config: Optional DSPy configuration for optimized prompts.
-            ui: Optional UI interface.
         """
         if ctx is not None:
             filesystem = filesystem if filesystem is not None else ctx.filesystem
             recorder = recorder if recorder is not None else ctx.recorder
             dspy_config = dspy_config if dspy_config is not None else ctx.dspy_config
-            ui = ui if ui is not None else ctx.ui
             operator_config = operator_config if operator_config is not None else ctx.operator_config
 
         self.repo_path = repo_path
@@ -66,7 +61,6 @@ class CodeAnalyzerAgent:
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
-        self.ui = ui or NullOperatorUI()
         self.operator_config = operator_config or OperatorConfig()
         self.sds_dir = self.repo_path / ".sds"
         self.analysis_file = self.sds_dir / "code_analysis.md"

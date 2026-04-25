@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app_operator.core import Config, InMemoryFilesystem, NullOperatorUI
+from app_operator.core import Config, InMemoryFilesystem
 from tests.fixtures.agents import StubAgent
 
 
@@ -21,14 +21,6 @@ class TestPhaseControlEdgeCases:
             compose_file = repo_path / "docker-compose.yml"
             compose_file.write_text("services:\n  web:\n    image: nginx\n")
             yield repo_path
-
-    @pytest.fixture
-    def mock_ui(self):
-        """Create a mock UI for testing."""
-        ui = Mock()
-        ui.set_stage = Mock()
-        ui.update_status = Mock()
-        return ui
 
     def test_analysis_files_exist_but_config_says_skip(self, temp_repo):
         """Test that existing analysis files are ignored when skip is configured."""
@@ -52,9 +44,7 @@ class TestPhaseControlEdgeCases:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Mock analyzer to verify it's not called
         operator.analyzer.run = Mock()
@@ -88,9 +78,7 @@ class TestPhaseControlEdgeCases:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Mock deployer to succeed (it should handle missing analysis gracefully)
         operator.deployer.run = Mock(return_value=True)
@@ -116,9 +104,7 @@ class TestPhaseControlEdgeCases:
 
         agent1 = StubAgent()
 
-        operator1 = AppOperator(
-            repo_path=temp_repo, config=config1, filesystem=filesystem, agent=agent1, ui=NullOperatorUI()
-        )
+        operator1 = AppOperator(repo_path=temp_repo, config=config1, filesystem=filesystem, agent=agent1)
 
         analyzer_mock1 = Mock()
         operator1.analyzer.run = analyzer_mock1
@@ -137,9 +123,7 @@ class TestPhaseControlEdgeCases:
 
         agent2 = StubAgent()
 
-        operator2 = AppOperator(
-            repo_path=temp_repo, config=config2, filesystem=filesystem, agent=agent2, ui=NullOperatorUI()
-        )
+        operator2 = AppOperator(repo_path=temp_repo, config=config2, filesystem=filesystem, agent=agent2)
 
         analyzer_mock2 = Mock()
         operator2.analyzer.run = analyzer_mock2
@@ -166,9 +150,7 @@ class TestPhaseControlEdgeCases:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Simulate shutdown signal during deployment
         def trigger_shutdown(**kwargs):
@@ -233,9 +215,7 @@ class TestPhaseControlEdgeCases:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # The deployer should handle missing analysis files
         # deployer.py:85-100 has try/except for reading analysis files
@@ -275,9 +255,7 @@ class TestPhaseControlEdgeCases:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Verify both configs are respected
         assert operator.config.operator.phase.code_analysis is False
@@ -344,9 +322,7 @@ class TestPhaseControlEdgeCases:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Verify initial config
         assert operator.config.operator.phase.code_analysis is False

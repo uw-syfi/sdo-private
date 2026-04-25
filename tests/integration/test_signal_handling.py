@@ -6,7 +6,8 @@ correctly, performing cleanup and exiting gracefully.
 
 import signal
 import threading
-from unittest.mock import patch
+import time
+from unittest.mock import Mock
 
 import pytest
 
@@ -58,18 +59,20 @@ class TestSignalHandling:
 
         # Use an event to synchronize: wait until the operator has started
         operator_started = threading.Event()
-        original_set_stage = operator.ui.set_stage
 
-        def signaling_set_stage(stage):
-            original_set_stage(stage)
+        def blocking_deploy(**kwargs):
             operator_started.set()
+            while not operator._shutdown_requested:
+                time.sleep(0.01)
+            return False
+
+        operator.deployer.run = blocking_deploy  # type: ignore[method-assign]
 
         result = None
 
         def run_with_result():
             nonlocal result
-            with patch.object(operator.ui, "set_stage", side_effect=signaling_set_stage):
-                result = operator.run()
+            result = operator.run()
 
         thread = threading.Thread(target=run_with_result)
         thread.start()
@@ -111,27 +114,30 @@ class TestSignalHandling:
             ),
         )
 
-        # Use an event to synchronize: wait until deployment stage begins
-        deployment_started = threading.Event()
-        original_set_stage = operator.ui.set_stage
+        # Use an event to synchronize: wait until monitoring begins
+        monitoring_started = threading.Event()
 
-        def signaling_set_stage(stage):
-            original_set_stage(stage)
-            if stage == "Deployment":
-                deployment_started.set()
+        operator.deployer.run = Mock(return_value=True)
+
+        def blocking_monitor(**kwargs):
+            monitoring_started.set()
+            while not operator._shutdown_requested:
+                time.sleep(0.01)
+            operator.monitor.healthy = True
+
+        operator.monitor.run = blocking_monitor  # type: ignore[method-assign]
 
         result = None
 
         def run_with_result():
             nonlocal result
-            with patch.object(operator.ui, "set_stage", side_effect=signaling_set_stage):
-                result = operator.run()
+            result = operator.run()
 
         thread = threading.Thread(target=run_with_result)
         thread.start()
 
-        # Wait for the operator to reach deployment, then request shutdown
-        deployment_started.wait(timeout=10)
+        # Wait for the operator to reach monitoring, then request shutdown
+        monitoring_started.wait(timeout=10)
         operator._shutdown_requested = True
 
         thread.join(timeout=10)

@@ -15,9 +15,7 @@ from app_operator.core import (
     DeploymentConfig,
     FileSystemInterface,
     HealthVerdict,
-    NullOperatorUI,
     OperatorConfig,
-    OperatorUI,
     RealFilesystem,
     logger,
 )
@@ -102,7 +100,6 @@ class AppHealthJudge:
         operator_config: OperatorConfig | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
-        ui: OperatorUI | None = None,
         deployment_config: DeploymentConfig | None = None,
     ):
         self.repo_path = repo_path
@@ -112,7 +109,6 @@ class AppHealthJudge:
         self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
-        self.ui = ui or NullOperatorUI()
         self.deployment_config = deployment_config or DeploymentConfig()
 
     @classmethod
@@ -130,7 +126,6 @@ class AppHealthJudge:
             operator_config=ctx.operator_config,
             recorder=ctx.recorder,
             dspy_config=ctx.dspy_config,
-            ui=ctx.ui,
             deployment_config=deployment_config,
         )
 

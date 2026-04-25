@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.core import AgentConfig, Config, MonitoringError, OperatorUI
+from app_operator.core import AgentConfig, Config, MonitoringError
 from libs.model_config import ModelConfig
 
 
@@ -162,8 +162,6 @@ def test_run_propagates_unexpected_exceptions(app_operator):
 
 def test_run_monitor_failure_marks_failed_status(repo_path, mock_agent):
     """When monitor raises, finally-block still marks status as failed."""
-    mock_ui = Mock(spec=OperatorUI)
-
     with (
         patch("app_operator.cli_agent.operator.DeploymentAgent") as mock_deployer_cls,
         patch("app_operator.cli_agent.operator.AppMonitor") as mock_monitor_cls,
@@ -175,10 +173,9 @@ def test_run_monitor_failure_marks_failed_status(repo_path, mock_agent):
         config = Config(
             agent=AgentConfig(backend="codex", model_config=ModelConfig(provider="openai", model="test-model"))
         )
-        op = AppOperator(str(repo_path), agent=mock_agent, ui=mock_ui, config=config)
+        op = AppOperator(str(repo_path), agent=mock_agent, config=config)
         with patch.object(op.recorder, "finalize") as mock_finalize:
             with pytest.raises(RuntimeError, match="monitor failed"):
                 op.run()
 
-    mock_ui.close.assert_called_once_with(status="failed", exit_code=1)
     mock_finalize.assert_called_once_with("failed")

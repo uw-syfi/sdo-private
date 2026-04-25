@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from app_operator.cli_agent.operator import AppOperator
-from app_operator.core import Config, InMemoryFilesystem, NullOperatorUI
+from app_operator.core import Config, InMemoryFilesystem
 from tests.fixtures.agents import StubAgent
 
 
@@ -36,9 +36,7 @@ class TestCLIOperatorPhaseControl:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Mock the analyzer to track if it runs
         operator.analyzer.run = Mock()
@@ -66,9 +64,7 @@ class TestCLIOperatorPhaseControl:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Mock the analyzer to track if it runs
         operator.analyzer.run = Mock()
@@ -95,9 +91,7 @@ class TestCLIOperatorPhaseControl:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Mock deployer to succeed
         operator.deployer.run = Mock(return_value=True)
@@ -123,9 +117,7 @@ class TestCLIOperatorPhaseControl:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Mock deployer and monitor
         operator.deployer.run = Mock(return_value=True)
@@ -141,37 +133,6 @@ class TestCLIOperatorPhaseControl:
         assert not filesystem.exists(analysis_file)
         assert not filesystem.exists(issues_file)
 
-    def test_ui_stages_reflect_skip(self, temp_repo):
-        """Test that UI stages are set correctly when analysis is skipped."""
-        config = Config.from_dict(
-            {"agent": {"backend": "codex", "model": "test-model"}, "operator": {"phase": {"code_analysis": False}}}
-        )
-
-        filesystem = InMemoryFilesystem()
-        # Create repo path in filesystem
-        filesystem.mkdir(temp_repo, parents=True, exist_ok=True)
-        filesystem.write_text(temp_repo / "docker-compose.yml", "services:\n  web:\n    image: nginx\n")
-
-        agent = StubAgent()
-
-        # Use a mock UI to track stage calls
-        mock_ui = Mock(spec=NullOperatorUI)
-        mock_ui.set_stage = Mock()
-        mock_ui.update_status = Mock()
-
-        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=mock_ui)
-
-        # Mock deployer and monitor
-        operator.deployer.run = Mock(return_value=True)
-        operator.monitor.run = Mock()
-
-        operator.run()
-
-        # Verify "Code Analysis" stage was NOT set
-        stage_calls = [call[0][0] for call in mock_ui.set_stage.call_args_list]
-        assert "Code Analysis" not in stage_calls
-        assert "Deployment" in stage_calls
-
     def test_analysis_enabled_explicitly(self, temp_repo):
         """Test that explicitly enabling analysis works."""
         config = Config.from_dict(
@@ -186,9 +147,7 @@ class TestCLIOperatorPhaseControl:
 
         agent = StubAgent()
 
-        operator = AppOperator(
-            repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent, ui=NullOperatorUI()
-        )
+        operator = AppOperator(repo_path=temp_repo, config=config, filesystem=filesystem, agent=agent)
 
         # Mock the analyzer
         operator.analyzer.run = Mock()

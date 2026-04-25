@@ -22,8 +22,10 @@ from typing import TYPE_CHECKING, Any
 
 from agentshim import BaseCodingAgent
 from agentshim.base import register_provider
-from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
+
+from app_operator.cli_agent._event_handlers import compose_event_handlers
+from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 if TYPE_CHECKING:
     from agentshim.events import AgentEventHandler
@@ -515,14 +517,15 @@ class RLMOfficialAgent(BaseCodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        event_handlers: list[AgentEventHandler] | None = None,
         location: str | None = None,
         dspy_config: object | None = None,
         max_depth: int = 2,
         max_iterations: int = 30,
     ):
         self.model = model or "gemini-2.5-pro"
-        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
-        self.event_handler = event_handler
+        self.recorder: Any = recorder or NullTrajectoryRecorder()
+        self.event_handler = compose_event_handlers(event_handler, event_handlers)
         self.location = location
         self.dspy_config = dspy_config
         self.max_depth = max_depth

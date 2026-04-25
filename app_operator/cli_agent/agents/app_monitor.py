@@ -20,9 +20,7 @@ from app_operator.core import (
     AgentError,
     DeploymentConfig,
     FileSystemInterface,
-    NullOperatorUI,
     OperatorConfig,
-    OperatorUI,
     RealFilesystem,
     logger,
 )
@@ -65,7 +63,6 @@ class MonitorLike(Protocol):
     filesystem: FileSystemInterface
     recorder: TrajectoryRecorderProtocol
     dspy_config: DSPyConfig | None
-    ui: OperatorUI
     check_count: int
     health_check_script: Path
     log_dir: Path
@@ -109,7 +106,6 @@ class HealthCheckTask(MonitoringTask):
             operator_config=monitor.operator_config,
             recorder=recorder,
             dspy_config=monitor.dspy_config,
-            ui=monitor.ui,
             deployment_config=monitor.deployment_config,
         )
         return judge.assess()
@@ -133,7 +129,6 @@ class HealthCheckTask(MonitoringTask):
                 monitor.repo_path,
                 monitor.health_check_script,
                 log_file_path=health_log_path,
-                ui=monitor.ui,
             )
             duration = time.time() - start_time
             health_result: CommandResult = runtime_health_result
@@ -405,7 +400,6 @@ class AppMonitor:
         operator_config: OperatorConfig | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
-        ui: OperatorUI | None = None,
         ctx: AgentContext | None = None,
     ):
         """Initialize the monitor agent.
@@ -418,14 +412,12 @@ class AppMonitor:
             operator_config: Optional operator configuration for timeouts.
             recorder: Trajectory recorder instance.
             dspy_config: Optional DSPy configuration for optimized prompts.
-            ui: Optional UI interface.
         """
         if ctx is not None:
             filesystem = filesystem if filesystem is not None else ctx.filesystem
             operator_config = operator_config if operator_config is not None else ctx.operator_config
             recorder = recorder if recorder is not None else ctx.recorder
             dspy_config = dspy_config if dspy_config is not None else ctx.dspy_config
-            ui = ui if ui is not None else ctx.ui
 
         self.repo_path = repo_path
         self.agent = agent
@@ -434,7 +426,6 @@ class AppMonitor:
         self.operator_config = operator_config or OperatorConfig()
         self.recorder = recorder or NullTrajectoryRecorder()
         self.dspy_config = dspy_config
-        self.ui = ui or NullOperatorUI()
         self.monitoring_tasks: list[MonitoringTask] = [HealthCheckTask()]
         self.check_count = 0
         self.healthy: bool = True
@@ -489,7 +480,6 @@ class AppMonitor:
 
             self.check_count += 1
 
-            self.ui.set_stage("Monitoring", detail=f"Cycle {self.check_count}")
             logger.info(f"Monitoring Cycle #{self.check_count}")
 
             # Run all registered monitoring tasks

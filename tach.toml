@@ -56,7 +56,7 @@ depends_on = []
 # --- app_operator Layer 0: foundation package ---
 # `app_operator.core` consolidates the former top-level foundation files
 # (config, logger, exceptions, filesystem, types, validation, constants,
-# ui_protocol, command_validation) into a single coherent package with a
+# command_validation) into a single coherent package with a
 # curated public surface in `app_operator/core/__init__.py`.
 
 [[modules]]
@@ -224,12 +224,6 @@ depends_on = [
     "app_operator.prompts",
     "app_operator.trajectory",
 ]
-
-# --- app_operator Layer 3.5: UI ---
-
-[[modules]]
-path = "app_operator.ui"
-depends_on = []
 
 # --- app_operator Layer 4: factory + commands ---
 

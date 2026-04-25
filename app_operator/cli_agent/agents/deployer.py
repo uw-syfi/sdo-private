@@ -27,9 +27,7 @@ from app_operator.core import (
     DeploymentConfig,
     DeploymentError,
     FileSystemInterface,
-    NullOperatorUI,
     OperatorConfig,
-    OperatorUI,
     RealFilesystem,
     logger,
 )
@@ -66,7 +64,6 @@ class DeploymentAgent:
         operator_config: OperatorConfig | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
-        ui: OperatorUI | None = None,
         *,
         ctx: AgentContext | None = None,
     ):
@@ -80,7 +77,6 @@ class DeploymentAgent:
                 operator_config=operator_config or OperatorConfig(),
                 recorder=recorder or NullTrajectoryRecorder(),
                 dspy_config=dspy_config,
-                ui=ui or NullOperatorUI(),
             )
 
         self.deployment_config = deployment_config or DeploymentConfig()
@@ -92,7 +88,6 @@ class DeploymentAgent:
         self.operator_config = self._ctx.operator_config
         self.recorder = self._ctx.recorder
         self.dspy_config = self._ctx.dspy_config
-        self.ui = self._ctx.ui
         self.sds_dir = self._ctx.sds_dir
         self.deploy_script = self.sds_dir / "deploy.sh"
         self.health_check_script = self.sds_dir / "health_check.sh"
@@ -120,7 +115,6 @@ class DeploymentAgent:
             operator_config=self.operator_config,
             recorder=recorder,
             dspy_config=self.dspy_config,
-            ui=self.ui,
             deployment_config=self.deployment_config,
         )
 
@@ -334,7 +328,6 @@ class DeploymentAgent:
                 return False
 
             emit_progress("deployment", attempt=attempt)
-            self.ui.set_stage("Deployment", detail=f"Attempt {attempt}/{absolute_max_attempts}")
             logger.info(f"--- Deployment Attempt #{attempt} ---")
 
             result = self._run_single_attempt(attempt, max_attempts, absolute_max_attempts, check_shutdown)
@@ -367,7 +360,6 @@ class DeploymentAgent:
             return True
 
         emit_progress("script_generation")
-        self.ui.set_stage("Script Generation")
         logger.info("Generating Deployment Scripts")
         logger.info(
             f"Scripts not found in {self.sds_dir}, generating with "

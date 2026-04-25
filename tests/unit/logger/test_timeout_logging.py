@@ -131,9 +131,6 @@ echo "Health Check: Finished"
     log_file_path = sds_dir / "logs" / "health.log"
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Mock time.time() to simulate timeout
-    mock_times = iter([0.0, 3.0])  # Start time, then timeout
-
     def mock_subprocess_run(*args, timeout=None, **kwargs):
         """Mock subprocess.run that simulates timeout."""
         if timeout:
@@ -142,7 +139,6 @@ echo "Health Check: Finished"
         raise RuntimeError("Unexpected call without timeout")
 
     monkeypatch.setattr("app_operator.healthcheck.subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("app_operator.healthcheck.time.time", lambda: next(mock_times))
 
     # Run with short timeout (2 seconds) - no actual waiting
     result = run_health_check(repo_path, script_path, timeout=2, log_file_path=log_file_path)

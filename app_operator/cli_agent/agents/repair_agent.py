@@ -61,7 +61,6 @@ class RepairAgent:
         deploy_script = sds_dir / "deploy.sh"
         health_check_script = sds_dir / "health_check.sh"
 
-        self.ctx.ui.set_stage("Fixing Deployment Issues", detail=f"Attempt {attempt}/{max_attempts}")
         logger.info(f"Asking {agent.readable_name} ({agent.backend_class_name}) to Fix Deployment Issues")
 
         try:

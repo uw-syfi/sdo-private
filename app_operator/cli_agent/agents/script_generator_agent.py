@@ -3,13 +3,17 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agentshim import BaseCodingAgent
 
     from app_operator.dspy_integration import DSPyConfig
 
+from app_operator.cli_agent._event_handlers import (
+    TrajectoryAgentEventHandler,
+    append_event_handler,
+)
 from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.core import (
@@ -213,7 +217,12 @@ def generate_scripts(
         except (RuntimeError, AgentError) as e:
             return False, str(e)
 
-    agent.recorder = recorder
+    append_event_handler(agent, TrajectoryAgentEventHandler(recorder))
+
+    for recorder_target in (agent, getattr(agent, "backend", None)):
+        recorder_target_any: Any = recorder_target
+        if recorder_target_any is not None and hasattr(recorder_target_any, "recorder"):
+            recorder_target_any.recorder = recorder
 
     ctx = AgentContext(
         repo_path=target_path,
