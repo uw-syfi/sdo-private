@@ -17,7 +17,6 @@ from typing import Any
 
 from agentshim.base import register_provider
 from agentshim.events import AgentEventHandler
-from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
 
 from agentshim import BaseCodingAgent
@@ -35,6 +34,7 @@ from app_operator.prompts import (
     render_script_analyst_prompt,
     render_trajectory_analyst_prompt,
 )
+from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 
 @register_provider("hybrid")
@@ -68,7 +68,7 @@ class HybridCodingAgent(BaseCodingAgent):
         rlm_mode: str = "compatibility",
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
+        self.recorder: Any = recorder or NullTrajectoryRecorder()
         self.event_handler = compose_event_handlers(event_handler, event_handlers)
         self.location = location
         self.dspy_config = dspy_config

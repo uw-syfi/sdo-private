@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
+    Protocol,
+    TypedDict,
+    runtime_checkable,
 )
 
 from app_operator.core import logger
@@ -27,25 +30,15 @@ from app_operator.trajectory.collectors import collect_gemini_sessions
 from app_operator.trajectory.utils import extract_rlm_statistics_from_trajectory
 
 if TYPE_CHECKING:
-    from agentshim.trajectory import FaultInjectionMetadata, TokenUsage
-
     from app_operator.core import ConversationEntry, TrajectoryCallRecord
-
-from agentshim.trajectory import (
-    NullTrajectoryRecorder as NullTrajectoryRecorder,
-)
-from agentshim.trajectory import (
-    TrajectoryRecorderProtocol as TrajectoryRecorderProtocol,
-)
-from agentshim.trajectory import (
-    register_context_providers as _register_context_providers,
-)
 
 __all__ = [
     "DEFAULT_MAX_OUTPUT_LENGTH",
+    "FaultInjectionMetadata",
     "MessageRole",
     "NullTrajectoryRecorder",
     "Phase",
+    "TokenUsage",
     "TrajectoryMessage",
     "TrajectoryRecorder",
     "TrajectoryRecorderProtocol",
@@ -82,6 +75,118 @@ class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     TOOL_CALL = "tool_call"
+
+
+class TokenUsage(TypedDict):
+    """Token usage statistics from an LLM call."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class FaultInjectionMetadata(TypedDict):
+    """Metadata about fault injection for embedding in trajectory JSON."""
+
+    enabled: bool
+    num_faults_requested: int
+    num_faults_injected: int
+    faults: list[Any]
+    failed_injections: list[Any]
+    fault_ids: list[str]
+    categories: list[str]
+    severities: list[str]
+
+
+@runtime_checkable
+class TrajectoryRecorderProtocol(Protocol):
+    """Protocol for SDS trajectory recorders."""
+
+    def start_phase(self, phase: Any, context: dict[str, Any] | None = None) -> None: ...
+    def end_phase(self, status: str | None = None) -> None: ...
+    def add_system_message(self, content: str) -> None: ...
+    def add_user_message(self, content: str) -> None: ...
+    def add_assistant_message(self, content: str, duration: float | None = None) -> None: ...
+    def add_tool_call(
+        self,
+        tool: str,
+        args: dict[str, Any],
+        stdout: str = "",
+        stderr: str = "",
+        exit_code: int | None = None,
+        duration: float | None = None,
+    ) -> None: ...
+    def set_phase_status(self, status: str) -> None: ...
+    def set_agent_name(self, agent_name: str) -> None: ...
+    def set_prompt_version(self, version: str) -> None: ...
+    def record_fallback(self) -> None: ...
+    def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None: ...
+    def record_rendered_prompt(self, rendered_prompt: str) -> None: ...
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None: ...
+    def record_token_usage(self, usage: TokenUsage) -> None: ...
+    def finalize(self, status: str = "completed") -> Path: ...
+    def phase(self, phase: Any, context: dict[str, Any] | None = None) -> Any: ...
+
+
+class NullTrajectoryRecorder(TrajectoryRecorderProtocol):
+    """No-op recorder that formally implements TrajectoryRecorderProtocol."""
+
+    def start_phase(self, phase: Any, context: dict[str, Any] | None = None) -> None:
+        pass
+
+    def end_phase(self, status: str | None = None) -> None:
+        pass
+
+    def add_system_message(self, content: str) -> None:
+        pass
+
+    def add_user_message(self, content: str) -> None:
+        pass
+
+    def add_assistant_message(self, content: str, duration: float | None = None) -> None:
+        pass
+
+    def add_tool_call(
+        self,
+        tool: str,
+        args: dict[str, Any],
+        stdout: str = "",
+        stderr: str = "",
+        exit_code: int | None = None,
+        duration: float | None = None,
+    ) -> None:
+        pass
+
+    def set_phase_status(self, status: str) -> None:
+        pass
+
+    def set_agent_name(self, agent_name: str) -> None:
+        pass
+
+    def set_prompt_version(self, version: str) -> None:
+        pass
+
+    def record_fallback(self) -> None:
+        pass
+
+    def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None:
+        pass
+
+    def record_rendered_prompt(self, rendered_prompt: str) -> None:
+        pass
+
+    def record_fault_injection(self, metadata: FaultInjectionMetadata) -> None:
+        pass
+
+    def record_token_usage(self, usage: TokenUsage) -> None:
+        pass
+
+    @contextmanager
+    def phase(self, phase: Any, context: dict[str, Any] | None = None):
+        yield self
+
+    def finalize(self, status: str = "completed") -> Path:
+        return Path("/dev/null")
 
 
 @dataclass
@@ -657,8 +762,3 @@ def record_user_message(content: str) -> None:
     recorder = get_trajectory()
     if recorder:
         recorder.add_user_message(content)
-
-
-# Wire agentshim.trajectory context providers to the real thread-local
-# implementations so GeminiGenerationSession gets live call/run IDs.
-_register_context_providers(get_current_call_id, get_run_id)

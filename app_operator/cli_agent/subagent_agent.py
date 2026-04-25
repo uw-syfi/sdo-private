@@ -16,7 +16,6 @@ from typing import Any
 
 from agentshim.base import register_provider
 from agentshim.events import AgentEventHandler
-from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from agentshim.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 from loguru import logger
 
@@ -32,6 +31,7 @@ from app_operator.prompts import (
     render_script_analyst_prompt,
     render_trajectory_analyst_prompt,
 )
+from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from libs.llm_rt import litellm_call_with_retry
 
 
@@ -59,7 +59,7 @@ class SubagentCodingAgent(BaseCodingAgent):
         dspy_config: DSPyConfigProtocol | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
-        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
+        self.recorder: Any = recorder or NullTrajectoryRecorder()
         self.event_handler = compose_event_handlers(event_handler, event_handlers)
         self.location = location
         self.dspy_config = dspy_config

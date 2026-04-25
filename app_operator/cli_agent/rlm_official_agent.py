@@ -21,11 +21,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentshim.base import register_provider
-from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
 
 from agentshim import BaseCodingAgent
 from app_operator.cli_agent._event_handlers import compose_event_handlers
+from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 if TYPE_CHECKING:
     from agentshim.events import AgentEventHandler
@@ -524,7 +524,7 @@ class RLMOfficialAgent(BaseCodingAgent):
         max_iterations: int = 30,
     ):
         self.model = model or "gemini-2.5-pro"
-        self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
+        self.recorder: Any = recorder or NullTrajectoryRecorder()
         self.event_handler = compose_event_handlers(event_handler, event_handlers)
         self.location = location
         self.dspy_config = dspy_config

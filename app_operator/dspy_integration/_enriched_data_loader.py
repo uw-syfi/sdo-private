@@ -10,9 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agentshim.trajectory import TokenUsage
-
-from app_operator.trajectory import Phase
+from app_operator.trajectory import Phase, TokenUsage
 
 
 @dataclass

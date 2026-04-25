@@ -6,6 +6,7 @@ from pathlib import Path
 from types import FrameType
 
 from agentshim import BaseCodingAgent
+from app_operator.cli_agent._event_handlers import TrajectoryAgentEventHandler, append_event_handler
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.cli_agent.agents.context import AgentContext
@@ -109,8 +110,15 @@ class AppOperator(OperatorBase):
             except (OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Failed to load fault injection metadata: {e}")
 
-        # Attach recorder to agent
-        self.agent.recorder = self.recorder
+        # Attach SDS trajectory capture without requiring agentshim to know
+        # about SDS recorder semantics.
+        append_event_handler(self.agent, TrajectoryAgentEventHandler(self.recorder))
+
+        # SDS-owned custom agents still expose a recorder attribute for prompt
+        # and recursive-agent telemetry. New agentshim providers do not.
+        for recorder_target in (self.agent, getattr(self.agent, "backend", None)):
+            if recorder_target is not None and hasattr(recorder_target, "recorder"):
+                recorder_target.recorder = self.recorder
 
         # Construct shared context for all agents
         self._ctx = AgentContext(
