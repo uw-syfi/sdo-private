@@ -5,10 +5,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from agentshim import CompositeEventHandler, ConsoleEventHandler
 from agentshim.claude import ClaudeCodeCodingAgent
 from loguru import logger
-
-from agentshim import CompositeEventHandler, ConsoleEventHandler
 
 
 @pytest.fixture

@@ -7,9 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agentshim import BaseCodingAgent
+
     from app_operator.dspy_integration import DSPyConfig
 
-from app_operator.cli_agent._event_handlers import TrajectoryAgentEventHandler, append_event_handler
+from app_operator.cli_agent._event_handlers import (
+    TrajectoryAgentEventHandler,
+    append_event_handler,
+)
 from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.core import (

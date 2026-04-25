@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentshim import BaseCodingAgent
+
     from app_operator.cli_agent.agents.context import AgentContext
     from app_operator.core import CommandResult, HealthVerdict
     from app_operator.dspy_integration import DSPyConfig

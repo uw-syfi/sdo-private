@@ -7,7 +7,11 @@ from types import FrameType
 from typing import Any
 
 from agentshim import BaseCodingAgent
-from app_operator.cli_agent._event_handlers import TrajectoryAgentEventHandler, append_event_handler
+
+from app_operator.cli_agent._event_handlers import (
+    TrajectoryAgentEventHandler,
+    append_event_handler,
+)
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.cli_agent.agents.context import AgentContext

@@ -466,9 +466,8 @@ class AgentCLIDriver(AgentDriver):
         handler: _AgentCLIEventHandler,
     ) -> Any:
         """Construct a provider-routed ``CodingAgent`` for this provider."""
-        from agentshim.mcp_config import StdioMcpServer
-
         from agentshim import CodingAgent
+        from agentshim.mcp_config import StdioMcpServer
 
         mcp_servers: list[StdioMcpServer] = []
         if mcp_args is not None:

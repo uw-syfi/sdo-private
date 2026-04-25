@@ -20,10 +20,10 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agentshim import BaseCodingAgent
 from agentshim.base import register_provider
 from loguru import logger
 
-from agentshim import BaseCodingAgent
 from app_operator.cli_agent._event_handlers import compose_event_handlers
 from app_operator.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 

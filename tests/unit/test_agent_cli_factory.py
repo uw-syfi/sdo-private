@@ -1,7 +1,4 @@
 import pytest
-from agentshim.base import register_provider
-from agentshim.cli_agent import CLICodingAgent
-
 from agentshim import (
     BaseCodingAgent,
     ClaudeCodeCodingAgent,
@@ -10,6 +7,9 @@ from agentshim import (
     OpencodeCodingAgent,
 )
 from agentshim import CodingAgent as PortableCodingAgent
+from agentshim.base import register_provider
+from agentshim.cli_agent import CLICodingAgent
+
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.core import AgentConfig, Config
 from libs.model_config import ModelConfig

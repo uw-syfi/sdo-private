@@ -15,11 +15,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from agentshim import BaseCodingAgent
 from agentshim.base import register_provider
 from agentshim.events import AgentEventHandler
 from loguru import logger
 
-from agentshim import BaseCodingAgent
 from app_operator.cli_agent._event_handlers import compose_event_handlers
 from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
 from app_operator.cli_agent._subagent_utils import call_subagent

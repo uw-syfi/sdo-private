@@ -12,11 +12,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from agentshim import BaseCodingAgent
 from agentshim.events import AgentEventHandler
 from agentshim.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 from loguru import logger
 
-from agentshim import BaseCodingAgent
 from app_operator.cli_agent._event_handlers import compose_event_handlers
 from app_operator.cli_agent._rlm_utils import FILE_GEN_RE, FIX_ERROR_RE
 from app_operator.cli_agent.rlm.environment import RLMContext

@@ -3,9 +3,12 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-
 from agentshim import CodingAgent
-from app_operator.cli_agent._event_handlers import TrajectoryAgentEventHandler, append_event_handler
+
+from app_operator.cli_agent._event_handlers import (
+    TrajectoryAgentEventHandler,
+    append_event_handler,
+)
 from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 from app_operator.cli_agent.rlm_official_agent import RLMOfficialAgent
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent

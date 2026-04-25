@@ -3,8 +3,8 @@
 import unittest.mock as mock
 
 import pytest
-
 from agentshim import CodingAgent
+
 from app_operator.cli_agent.factory import create_agent_from_config
 from app_operator.cli_agent.rlm_official_agent import (
     _SDS_ROOT_PROMPT_PREFIX,
