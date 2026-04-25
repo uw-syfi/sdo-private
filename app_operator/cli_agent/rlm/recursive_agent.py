@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import litellm
 
+from app_operator.cli_agent._subagent_utils import call_subagent
 from app_operator.cli_agent.rlm.environment import (
     ActionType,
     RLMCall,
@@ -23,7 +24,7 @@ from app_operator.cli_agent.rlm.environment import (
 from app_operator.core import logger
 from app_operator.prompts import DSPyConfigProtocol, render_fix_error_task_prompt
 from app_operator.trajectory import TrajectoryRecorderProtocol
-from libs.agent_cli.llm_client import LiteLLMClient
+from libs.llm_rt import LiteLLMClient
 
 
 class RecursiveDeploymentAgent:
@@ -385,8 +386,6 @@ class RecursiveDeploymentAgent:
         Returns:
             The assistant's response text.
         """
-        from libs.agent_cli import call_subagent
-
         context_section = ""
         if filtered_context:
             parts: list[str] = []

@@ -9,10 +9,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from agentshim import BaseCodingAgent
+
     from app_operator.cli_agent.agents.context import AgentContext
     from app_operator.core import CommandResult, HealthVerdict
     from app_operator.dspy_integration import DSPyConfig
-    from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge
 from app_operator.core import (
@@ -60,7 +61,7 @@ class MonitorLike(Protocol):
     """Protocol describing the monitor interface used by MonitoringTask."""
 
     repo_path: Path
-    agent: CodingAgent
+    agent: BaseCodingAgent
     filesystem: FileSystemInterface
     recorder: TrajectoryRecorderProtocol
     dspy_config: DSPyConfig | None
@@ -195,7 +196,9 @@ class HealthCheckTask(MonitoringTask):
         """Analyze health check results using the agent."""
         monitor = operator
         health_result = result
-        logger.info(f"Asking {monitor.agent.__class__.__name__} to Analyze Health Check Results")
+        logger.info(
+            f"Asking {monitor.agent.readable_name} ({monitor.agent.backend_class_name}) to Analyze Health Check Results"
+        )
 
         # Prepare health check context
         context = self._prepare_health_context(
@@ -220,7 +223,9 @@ class HealthCheckTask(MonitoringTask):
             monitor.filesystem.mkdir(monitor.log_dir, parents=True, exist_ok=True)
             log_file = monitor.log_dir / f"check_{monitor.check_count}_{timestamp}.log"
 
-            logger.info(f"Consulting {monitor.agent.__class__.__name__} for health analysis...")
+            logger.info(
+                f"Consulting {monitor.agent.readable_name} ({monitor.agent.backend_class_name}) for health analysis..."
+            )
 
             response = monitor.agent.generate(
                 prompt,
@@ -394,7 +399,7 @@ class AppMonitor:
     def __init__(
         self,
         repo_path: Path,
-        agent: CodingAgent,
+        agent: BaseCodingAgent,
         filesystem: FileSystemInterface | None = None,
         deployment_config: DeploymentConfig | None = None,
         operator_config: OperatorConfig | None = None,

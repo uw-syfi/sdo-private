@@ -196,7 +196,7 @@ class TestLiteLLMClient:
 
     def test_records_token_usage_after_complete(self):
         """complete() calls recorder.record_token_usage with running total."""
-        from libs.agent_cli.llm_client import LiteLLMClient
+        from libs.llm_rt import LiteLLMClient
 
         recorder = mock.MagicMock()
         client = LiteLLMClient("test-model", recorder=recorder)
@@ -210,7 +210,7 @@ class TestLiteLLMClient:
 
     def test_accumulates_tokens_across_calls(self):
         """Token counts accumulate across multiple complete() calls."""
-        from libs.agent_cli.llm_client import LiteLLMClient
+        from libs.llm_rt import LiteLLMClient
 
         recorder = mock.MagicMock()
         client = LiteLLMClient("test-model", recorder=recorder)
@@ -232,7 +232,7 @@ class TestLiteLLMClient:
 
     def test_no_recorder_does_not_crash(self):
         """complete() works fine with recorder=None."""
-        from libs.agent_cli.llm_client import LiteLLMClient
+        from libs.llm_rt import LiteLLMClient
 
         client = LiteLLMClient("test-model")
 
@@ -243,7 +243,7 @@ class TestLiteLLMClient:
 
     def test_partial_recorder_missing_record_token_usage(self):
         """A recorder without record_token_usage is silently skipped."""
-        from libs.agent_cli.llm_client import LiteLLMClient
+        from libs.llm_rt import LiteLLMClient
 
         class MinimalRecorder:
             pass

@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentshim import BaseCodingAgent
+
     from app_operator.core import CommandResult
     from app_operator.dspy_integration import DSPyConfig
     from app_operator.trajectory import TrajectoryRecorderProtocol
-    from libs.agent_cli.base import CodingAgent
 
 from app_operator.core import logger
 from app_operator.prompts import get_loader
@@ -60,7 +61,7 @@ class _HeuristicAssessment:
 def validate_health_check_result(
     *,
     health_result: CommandResult,
-    agent: CodingAgent,
+    agent: BaseCodingAgent,
     repo_path: Path,
     check_context: str,
     timeout: int,
@@ -184,7 +185,7 @@ def _agent_unhealthy_failure_signals(health_result: CommandResult) -> list[str]:
 def _agent_assessment(
     *,
     health_result: CommandResult,
-    agent: CodingAgent,
+    agent: BaseCodingAgent,
     repo_path: Path,
     check_context: str,
     timeout: int,

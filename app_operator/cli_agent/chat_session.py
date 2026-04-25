@@ -74,14 +74,14 @@ class HybridTerminalChatSession:
             vertex_location=self._hybrid_agent.location,
             dspy_config=self._hybrid_agent.dspy_config,
             rlm_mode=self.rlm_mode,
-            specialist_dispatcher=lambda specialist, task: self._hybrid_agent._run_specialist_analysis(
+            specialist_dispatcher=lambda specialist, task: self._hybrid_agent.run_specialist_analysis(
                 helper=self._helper,
                 repo_path=self.repo_path,
                 specialist=specialist,
                 task=task,
                 token_acc=None,
             ),
-            available_specialists=self._hybrid_agent._SPECIALISTS if self.rlm_mode == "compatibility" else {},
+            available_specialists=self._hybrid_agent.available_specialists,
         )
         task = self._build_task(user_message)
         answer = agent.run_task(
@@ -114,22 +114,22 @@ class HybridTerminalChatSession:
     def _build_context(self) -> RLMContext:
         """Build an RLM context from the current repository state."""
         sds = self.repo_path / ".sds"
-        deploy_log = self._helper._read(sds / "logs" / "deploy.log")
-        health_log = self._helper._read(sds / "logs" / "health_check.log")
+        deploy_log = self._helper.read_text(sds / "logs" / "deploy.log")
+        health_log = self._helper.read_text(sds / "logs" / "health_check.log")
         return RLMContext(
             error_log=(deploy_log + "\n" + health_log).strip(),
-            deployment_script=self._helper._read(sds / "deploy.sh"),
+            deployment_script=self._helper.read_text(sds / "deploy.sh"),
             health_check_output=health_log,
-            dockerfile=self._helper._read(self.repo_path / "Dockerfile"),
+            dockerfile=self._helper.read_text(self.repo_path / "Dockerfile"),
             docker_compose=(
-                self._helper._read(self.repo_path / "docker-compose.yml")
-                or self._helper._read(self.repo_path / "docker-compose.yaml")
+                self._helper.read_text(self.repo_path / "docker-compose.yml")
+                or self._helper.read_text(self.repo_path / "docker-compose.yaml")
             ),
             readme=(
-                self._helper._read(self.repo_path / "README.md")
-                or self._helper._read(self.repo_path / "README.rst")
-                or self._helper._read(self.repo_path / "README")
+                self._helper.read_text(self.repo_path / "README.md")
+                or self._helper.read_text(self.repo_path / "README.rst")
+                or self._helper.read_text(self.repo_path / "README")
             ),
-            analysis_report=self._helper._read(sds / "code_analysis.md"),
-            original_script=self._helper._read(sds / "deploy.sh.bak"),
+            analysis_report=self._helper.read_text(sds / "code_analysis.md"),
+            original_script=self._helper.read_text(sds / "deploy.sh.bak"),
         )

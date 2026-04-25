@@ -20,8 +20,9 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from agentshim import BaseCodingAgent
+from agentshim.base import register_provider
 
-from libs.agent_cli.base import CodingAgent
 from sregym_agents.cli_agent import driver
 
 if TYPE_CHECKING:
@@ -268,17 +269,19 @@ def test_default_agent_factory_unknown_provider_raises() -> None:
 
 def test_default_agent_factory_passes_mcp_server(monkeypatch: pytest.MonkeyPatch) -> None:
     """Factory must inject a HttpMcpServer for sregym submission."""
-    from libs.agent_cli.base import AGENT_REGISTRY
-    from libs.agent_cli.mcp_config import HttpMcpServer
+    from agentshim.mcp_config import HttpMcpServer
 
     captured: dict[str, Any] = {}
 
-    class _FakeCls:
+    @register_provider("fake_mcp_provider")
+    class _FakeCls(BaseCodingAgent):
         def __init__(self, *, model: str, mcp_servers: list[Any]) -> None:
             captured["model"] = model
             captured["mcp_servers"] = mcp_servers
 
-    monkeypatch.setitem(AGENT_REGISTRY, "fake_mcp_provider", _FakeCls)
+        def generate(self, prompt: str, cwd=None, timeout=300, silent=False) -> str:
+            return ""
+
     driver._default_agent_factory("fake_mcp_provider", "m-1", "http://h:1234/submit/sse")
 
     assert captured["model"] == "m-1"
@@ -292,7 +295,7 @@ def test_default_agent_factory_passes_mcp_server(monkeypatch: pytest.MonkeyPatch
 # --- _run orchestration ----------------------------------------------------
 
 
-class _StubAgent(CodingAgent):
+class _StubAgent(BaseCodingAgent):
     """Minimal CodingAgent stand-in."""
 
     def __init__(self, response: str = "ok") -> None:
@@ -580,7 +583,7 @@ def test_run_agent_exception_records_failure(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(driver, "_POST_STAGE_TIMEOUT_S", 1)
     monkeypatch.setattr(driver.time, "sleep", lambda *_: None)
 
-    class _Boom(CodingAgent):
+    class _Boom(BaseCodingAgent):
         def generate(self, *a: Any, **k: Any) -> str:
             raise RuntimeError("CLI died")
 
@@ -600,7 +603,7 @@ def test_run_logs_crash_when_agent_exception(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(driver, "_POST_STAGE_TIMEOUT_S", 1)
     monkeypatch.setattr(driver.time, "sleep", lambda *_: None)
 
-    class _Boom(CodingAgent):
+    class _Boom(BaseCodingAgent):
         def generate(self, *a: Any, **k: Any) -> str:
             raise RuntimeError("CLI died")
 

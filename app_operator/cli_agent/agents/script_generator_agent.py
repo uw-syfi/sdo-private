@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from agentshim import BaseCodingAgent
+
     from app_operator.dspy_integration import DSPyConfig
-    from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.agents.context import AgentContext
 from app_operator.cli_agent.factory import create_agent_from_config
@@ -164,7 +165,7 @@ class ScriptGeneratorAgent:
 
 def generate_scripts(
     target_dir: str,
-    agent: CodingAgent | None = None,
+    agent: BaseCodingAgent | None = None,
     filesystem: FileSystemInterface | None = None,
     deployment_config: DeploymentConfig | None = None,
     operator_config: OperatorConfig | None = None,
@@ -177,7 +178,7 @@ def generate_scripts(
 
     Args:
         target_dir: The directory path where scripts should be generated.
-        agent: Optional CodingAgent instance. If None, creates one from config.
+        agent: Optional BaseCodingAgent instance. If None, creates one from config.
         filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
         deployment_config: Optional deployment configuration. If None, uses default.
         operator_config: Optional operator configuration for timeouts. If None, uses default.

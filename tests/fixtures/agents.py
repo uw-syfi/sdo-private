@@ -7,7 +7,7 @@ scenarios without requiring actual agent execution.
 import time
 from typing import Any
 
-from libs.agent_cli.base import CodingAgent
+from agentshim import BaseCodingAgent
 
 HEALTH_VERDICT_HEALTHY = (
     "<health_verdict>healthy</health_verdict>\n"
@@ -17,7 +17,7 @@ HEALTH_VERDICT_HEALTHY = (
 )
 
 
-class StubAgent(CodingAgent):
+class StubAgent(BaseCodingAgent):
     """Minimal agent that returns stub responses.
 
     Use this for tests that need an agent but don't care about its behavior.
@@ -76,7 +76,7 @@ class StubAgent(CodingAgent):
         """No-op event stream for operator tests."""
 
 
-class ErrorAgent(CodingAgent):
+class ErrorAgent(BaseCodingAgent):
     """Agent that always raises errors.
 
     Use this to test error handling paths.
@@ -103,7 +103,7 @@ class ErrorAgent(CodingAgent):
         raise RuntimeError(self.error_message)
 
 
-class TimeoutAgent(CodingAgent):
+class TimeoutAgent(BaseCodingAgent):
     """Agent that simulates timeouts.
 
     Use this to test timeout handling.
@@ -132,7 +132,7 @@ class TimeoutAgent(CodingAgent):
         return "too late"
 
 
-class TrackingAgent(CodingAgent):
+class TrackingAgent(BaseCodingAgent):
     """Agent that tracks all calls for verification.
 
     Use this to verify agent interactions without relying on mocks.
@@ -177,7 +177,7 @@ class TrackingAgent(CodingAgent):
         self.generation_count = 0
 
 
-class ConfigurableAgent(CodingAgent):
+class ConfigurableAgent(BaseCodingAgent):
     """Agent with configurable responses for different scenarios.
 
     Use this for complex test scenarios that need different responses
@@ -228,7 +228,7 @@ class ConfigurableAgent(CodingAgent):
         return self.default_response
 
 
-class ScriptGeneratingAgent(CodingAgent):
+class ScriptGeneratingAgent(BaseCodingAgent):
     """Agent that simulates script generation.
 
     This agent creates actual script files when asked, useful for

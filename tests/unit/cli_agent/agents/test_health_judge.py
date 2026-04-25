@@ -2,14 +2,14 @@ import subprocess
 from typing import Any
 
 import pytest
+from agentshim import BaseCodingAgent
 
 from app_operator.cli_agent.agents.health_judge import AppHealthJudge
 from app_operator.core import AgentError
 from app_operator.prompts import PromptLoader
-from libs.agent_cli.base import CodingAgent
 
 
-class PlainStubAgent(CodingAgent):
+class PlainStubAgent(BaseCodingAgent):
     """Agent that returns exactly the configured response, without auto-detection."""
 
     def __init__(self, response="stub response"):

@@ -5,6 +5,8 @@ import threading
 from pathlib import Path
 from types import FrameType
 
+from agentshim import BaseCodingAgent
+
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.cli_agent.agents.context import AgentContext
@@ -25,7 +27,6 @@ from app_operator.core import (
 from app_operator.operator_base import OperatorBase
 from app_operator.progress import emit_progress
 from app_operator.trajectory import TrajectoryRecorder
-from libs.agent_cli.base import CodingAgent
 
 
 class AppOperator(OperatorBase):
@@ -43,7 +44,7 @@ class AppOperator(OperatorBase):
         health_check_interval: int = 30,
         health_check_max_count: int | None = 5,
         max_deployment_attempts: int = 5,
-        agent: CodingAgent | None = None,
+        agent: BaseCodingAgent | None = None,
         filesystem: FileSystemInterface | None = None,
         config: Config | None = None,
         ui: OperatorUI | None = None,
@@ -106,7 +107,7 @@ class AppOperator(OperatorBase):
 
         # Initialize trajectory recorder
         self.recorder = TrajectoryRecorder(self.repo_path)
-        self.recorder.set_agent_name(self.agent.__class__.__name__)
+        self.recorder.set_agent_name(self.agent.readable_name)
 
         # Pick up fault injection metadata if present
         fault_meta_path = self.sds_dir / "fault_injection.json"
@@ -170,7 +171,7 @@ class AppOperator(OperatorBase):
         try:
             logger.info("Starting App Operator Mode")
             logger.info(f"Repository: {self.repo_path}")
-            logger.info(f"Agent: {self.agent.__class__.__name__}")
+            logger.info(f"Agent: {self.agent.readable_name} ({self.agent.backend_class_name})")
             logger.info(f"Deployment Platform: {self.config.deployment.platform}")
             logger.info(f"Deployment Target: {self.config.deployment.target}")
 

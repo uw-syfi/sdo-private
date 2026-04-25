@@ -16,7 +16,7 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "sds-agent-cli",
+    "llm-rt",
     "sds-agent-mw",
     "sds-core",
     "sds-model-config",
@@ -35,6 +35,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/04/b5/fc0b65b561d00d88811c8a7d98ee735833f81554be244340950e7b65820c/ag_ui_protocol-0.1.13.tar.gz", hash = "sha256:811d7d7dcce4783dec252918f40b717ebfa559399bf6b071c4ba47c0c1e21bcb", size = 5671, upload-time = "2026-02-19T18:40:38.602Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cd/9f/b833c1ab1999da35ebad54841ae85d2c2764c931da9a6f52d8541b6901b2/ag_ui_protocol-0.1.13-py3-none-any.whl", hash = "sha256:1393fa894c1e8416efe184168a50689e760d05b32f4646eebb8ff423dddf8e8f", size = 8053, upload-time = "2026-02-19T18:40:37.27Z" },
+]
+
+[[package]]
+name = "agentshim"
+version = "0.2.0"
+source = { git = "https://github.com/vic-lsh/agentshim?rev=cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e#cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" }
+dependencies = [
+    { name = "litellm" },
+    { name = "loguru" },
 ]
 
 [[package]]
@@ -3000,6 +3009,23 @@ wheels = [
 ]
 
 [[package]]
+name = "llm-rt"
+version = "0.1.0"
+source = { editable = "libs/llm_rt" }
+dependencies = [
+    { name = "agentshim" },
+    { name = "litellm" },
+    { name = "loguru" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" },
+    { name = "litellm", specifier = ">=1.0.0" },
+    { name = "loguru", specifier = ">=0.7.2" },
+]
+
+[[package]]
 name = "logfire"
 version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
@@ -5606,21 +5632,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sds-agent-cli"
-version = "0.1.0"
-source = { editable = "libs/agent_cli" }
-dependencies = [
-    { name = "litellm" },
-    { name = "loguru" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "litellm", specifier = ">=1.0.0" },
-    { name = "loguru", specifier = ">=0.7.2" },
-]
-
-[[package]]
 name = "sds-agent-mw"
 version = "0.1.0"
 source = { editable = "libs/agent_mw" }
@@ -5650,6 +5661,7 @@ name = "sds-operator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agentshim" },
     { name = "click" },
     { name = "deepagents", marker = "python_full_version >= '3.11'" },
     { name = "dspy-ai" },
@@ -5706,6 +5718,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=cde3cfc7c89fa5418a8b2d03eb95a7bda3d9732e" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepagents", marker = "python_full_version >= '3.11'", specifier = ">=0.5.0a1" },
     { name = "dspy-ai", specifier = ">=2.4.0" },
@@ -5770,15 +5783,19 @@ name = "sds-sregym-lib"
 version = "0.1.0"
 source = { editable = "libs/sregym_lib" }
 dependencies = [
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "requests", specifier = ">=2.0.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
 ]
 

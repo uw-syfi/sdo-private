@@ -5,9 +5,6 @@ digraph tach_modules {
 
     "libs.pydantic_agent" -> "libs.model_config";
     "libs.agent_mw" -> "libs.pydantic_agent";
-    "libs.agent_cli" -> "libs.sds_core";
-    "libs.sregym_lib" -> "libs.agent_mw";
-    "app_operator.core" -> "libs.agent_cli";
     "app_operator.core" -> "libs.model_config";
     "app_operator.core" -> "libs.sds_core";
     "app_operator.llm" -> "app_operator.core";
@@ -20,7 +17,6 @@ digraph tach_modules {
     "app_operator.prompts" -> "app_operator.core";
     "app_operator.trajectory" -> "app_operator.core";
     "app_operator.trajectory" -> "app_operator.prompts";
-    "app_operator.trajectory" -> "libs.agent_cli";
     "app_operator.health_validation" -> "app_operator.core";
     "app_operator.health_validation" -> "app_operator.prompts";
     "app_operator.script_runner" -> "app_operator.core";
@@ -32,9 +28,7 @@ digraph tach_modules {
     "app_operator.dspy_integration" -> "app_operator.rate_limit_handler";
     "app_operator.dspy_integration" -> "app_operator.run_classifier";
     "app_operator.dspy_integration" -> "app_operator.trajectory";
-    "app_operator.dspy_integration" -> "libs.agent_cli";
     "app_operator.fault_injection" -> "app_operator.core";
-    "app_operator.fault_injection" -> "libs.agent_cli";
     "app_operator.pydantic_ai" -> "app_operator.core";
     "app_operator.pydantic_ai" -> "app_operator.guardrails";
     "app_operator.pydantic_ai" -> "app_operator.operator_base";
@@ -58,7 +52,7 @@ digraph tach_modules {
     "app_operator.cli_agent" -> "app_operator.script_runner";
     "app_operator.cli_agent" -> "app_operator.subprocess_runner";
     "app_operator.cli_agent" -> "app_operator.trajectory";
-    "app_operator.cli_agent" -> "libs.agent_cli";
+    "app_operator.cli_agent" -> "libs.llm_rt";
     "app_operator.gepa" -> "app_operator.core";
     "app_operator.gepa" -> "app_operator.cli_agent";
     "app_operator.gepa" -> "app_operator.llm";
@@ -78,8 +72,8 @@ digraph tach_modules {
     "app_operator.__main__" -> "app_operator.commands";
     "lego_agent" -> "libs.model_config";
     "lego_agent" -> "libs.sds_core";
-    "sregym_agents" -> "libs.agent_cli";
     "sregym_agents" -> "libs.agent_mw";
+    "sregym_agents" -> "libs.llm_rt";
     "sregym_agents" -> "libs.pydantic_agent";
     "sregym_agents" -> "libs.sregym_lib";
 }

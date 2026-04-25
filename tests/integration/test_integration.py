@@ -2,10 +2,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agentshim import BaseCodingAgent
 
 from app_operator.cli_agent.operator import AppOperator
 from app_operator.core import AgentConfig, Config
-from libs.agent_cli.base import CodingAgent
 from libs.model_config import ModelConfig
 
 # --- Fake Agent ---
@@ -14,7 +14,7 @@ from libs.model_config import ModelConfig
 # the full operator integration flow end-to-end.
 
 
-class FakeCodingAgent(CodingAgent):
+class FakeCodingAgent(BaseCodingAgent):
     """
     A fake agent that simulates LLM behavior for integration tests.
     It can write files to disk (simulating tool use) and return canned responses.

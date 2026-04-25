@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentshim import BaseCodingAgent
+
     from app_operator.cli_agent.agents.context import AgentContext
     from app_operator.dspy_integration import DSPyConfig
-    from libs.agent_cli.base import CodingAgent
 
 from app_operator.core import (
     DeploymentConfig,
@@ -95,7 +96,7 @@ class AppHealthJudge:
     def __init__(
         self,
         repo_path: Path,
-        coding_agent: CodingAgent,
+        coding_agent: BaseCodingAgent,
         health_check_script: Path,
         filesystem: FileSystemInterface | None = None,
         operator_config: OperatorConfig | None = None,

@@ -1,7 +1,6 @@
 import pytest
+from agentshim.mcp_config import HttpMcpServer, McpServerConfig, StdioMcpServer
 from pydantic import ValidationError
-
-from libs.agent_cli.mcp_config import HttpMcpServer, McpServerConfig, StdioMcpServer
 
 
 class TestHttpMcpServer:

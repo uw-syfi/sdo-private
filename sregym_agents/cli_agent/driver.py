@@ -1,6 +1,6 @@
-"""Minimal SRE Gym agent that wraps a ``libs.agent_cli`` CLI agent.
+"""Minimal SRE Gym agent that wraps a ``agentshim`` CLI agent.
 
-Per stage, spawns one ``CodingAgent`` from ``libs.agent_cli.AGENT_REGISTRY``
+Per stage, instantiates one provider-routed ``CodingAgent`` from `agentshim`
 with the sregym ``/submit`` MCP server wired in. The wrapped CLI itself
 calls the ``submit`` tool when it has reached a conclusion — this driver
 just builds the prompt, launches the CLI, and after it returns checks
@@ -10,11 +10,11 @@ No judge, no knowledge base, no deferred cleanup — this agent is a
 baseline / smoke test. Contrast with ``sregym_agents.crucible.driver``.
 
 Provider support: submission is done by the wrapped CLI through the MCP
-server, so only providers whose ``libs.agent_cli`` class accepts
+server, so only providers whose ``agentshim`` class accepts
 ``mcp_servers`` are usable — currently ``claude`` and ``codex``. Gemini
 and Opencode raise ``ValueError`` inside their constructor when
 ``mcp_servers`` is non-empty (see
-``libs/agent_cli/gemini.py`` and ``libs/agent_cli/opencode.py``).
+``agentshim/gemini/agent.py`` and ``agentshim/opencode/agent.py``).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from libs.sregym_lib.schema import READY_STAGES, TERMINAL_STAGES
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from libs.agent_cli import CodingAgent
+    from agentshim import BaseCodingAgent
 
 logger = logging.getLogger(__name__)
 
@@ -146,30 +146,25 @@ def _default_agent_factory(
     model: str,
     submit_mcp_url: str,
     extra_mcp_servers: list[Any] | None = None,
-) -> CodingAgent:
+) -> BaseCodingAgent:
     """Build a ``CodingAgent`` with the sregym submit MCP server wired in.
 
     Raises ``ValueError`` if the requested provider does not support MCP
     (e.g. ``gemini``/``opencode``) — the underlying class raises it from
     its ``__init__`` when ``mcp_servers`` is non-empty.
     """
-    # Deferred imports: keeps `--help` fast and avoids triggering heavy
-    # litellm/claude-sdk loads when the driver is imported by tests.
-    # Importing `libs.agent_cli.base` transitively runs `libs/agent_cli/__init__.py`,
-    # which imports each CLI subclass and populates AGENT_REGISTRY as a side effect.
-    from libs.agent_cli.base import AGENT_REGISTRY
-    from libs.agent_cli.mcp_config import HttpMcpServer
+    # Deferred imports keep `--help` fast and avoid triggering heavy
+    # provider imports until the driver actually needs a backend.
+    from agentshim import CodingAgent
+    from agentshim.mcp_config import HttpMcpServer
 
-    try:
-        cls = AGENT_REGISTRY[provider.lower()]
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown cli_agent provider {provider!r}. Available: {sorted(AGENT_REGISTRY.keys())}"
-        ) from exc
     mcp_servers: list[Any] = [HttpMcpServer(name=_SUBMIT_MCP_SERVER_NAME, url=submit_mcp_url)]
     if extra_mcp_servers:
         mcp_servers.extend(extra_mcp_servers)
-    return cls(model=model, mcp_servers=mcp_servers)
+    try:
+        return CodingAgent(provider=provider, model=model, mcp_servers=mcp_servers)
+    except ValueError as exc:
+        raise ValueError(f"Unknown cli_agent provider {provider!r}: {exc}") from exc
 
 
 # --- Entry point -----------------------------------------------------------
@@ -209,13 +204,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     toml_cfg = _load_toml_agent_config()
 
     parser = argparse.ArgumentParser(
-        description="Minimal SRE Gym agent that wraps a libs/agent_cli CLI.",
+        description="Minimal SRE Gym agent that wraps a agentshim CLI.",
     )
     parser.add_argument(
         "--provider",
         default=toml_cfg.get("provider", "claude"),
         help=(
-            "CLI provider from libs.agent_cli.AGENT_REGISTRY "
+            "CLI provider from agentshim.CodingAgent "
             "(must support mcp_servers: currently claude or codex; default: claude)"
         ),
     )
@@ -264,7 +259,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _run(
     args: argparse.Namespace,
     *,
-    agent_factory: Callable[[str, str, str], CodingAgent] | None = None,
+    agent_factory: Callable[[str, str, str], BaseCodingAgent] | None = None,
 ) -> None:
     logger.info("cli_agent driver starting (provider=%s, model=%s)", args.provider, args.model)
 

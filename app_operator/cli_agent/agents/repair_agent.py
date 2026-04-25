@@ -62,7 +62,7 @@ class RepairAgent:
         health_check_script = sds_dir / "health_check.sh"
 
         self.ctx.ui.set_stage("Fixing Deployment Issues", detail=f"Attempt {attempt}/{max_attempts}")
-        logger.info(f"Asking {agent.__class__.__name__} to Fix Deployment Issues")
+        logger.info(f"Asking {agent.readable_name} ({agent.backend_class_name}) to Fix Deployment Issues")
 
         try:
             error_context = prepare_error_context(deploy_result, health_verdict, log_file_path, health_check_log_path)
@@ -89,7 +89,9 @@ class RepairAgent:
             return False
 
         try:
-            logger.info(f"Consulting {agent.__class__.__name__} to analyze and fix the issue...")
+            logger.info(
+                f"Consulting {agent.readable_name} ({agent.backend_class_name}) to analyze and fix the issue..."
+            )
 
             start_time = time.time()
             response = agent.generate(

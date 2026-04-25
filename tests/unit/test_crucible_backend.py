@@ -231,6 +231,57 @@ class TestContextWindowDetection:
         assert _context_window_for("some-unknown-model") == 128_000
 
 
+# ── Context compaction ────────────────────────────────────────────────────
+
+
+class TestContextCompaction:
+    @pytest.mark.asyncio
+    async def test_compaction_uses_inline_agent_with_retry_middleware(self, monkeypatch):
+        from sregym_agents.crucible.agents.drivers import pydantic_ai_driver as driver_mod
+
+        captured: dict[str, Any] = {}
+
+        class _FakeUsage:
+            input_tokens = 7
+            output_tokens = 3
+            cached_input_tokens = 0
+            requests = 1
+
+        class _FakeResult:
+            output = "summary"
+
+            def usage(self):
+                return _FakeUsage()
+
+        class _FakeInlineAgent:
+            def __init__(self, model, **kwargs):
+                captured["model"] = model
+                captured["kwargs"] = kwargs
+
+            async def arun(self, prompt: str, **kwargs):
+                captured["prompt"] = prompt
+                captured["arun_kwargs"] = kwargs
+                return _FakeResult()
+
+        monkeypatch.setattr("libs.pydantic_agent.InlineAgent", _FakeInlineAgent)
+
+        output = await driver_mod._compact_messages(
+            "anthropic:claude-sonnet-4-6",
+            [{"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "hello"}]}],
+        )
+
+        assert output == "summary"
+        assert captured["model"] == "anthropic:claude-sonnet-4-6"
+        assert captured["kwargs"]["deps"] is None
+        assert captured["kwargs"]["agent_name"] == "compact-messages"
+        assert captured["kwargs"]["output_type"] is str
+        assert captured["kwargs"]["tools"] == []
+        assert len(captured["kwargs"]["middleware"]) == 1
+        assert type(captured["kwargs"]["middleware"][0]).__name__ == "RetryMiddleware"
+        assert "Summarize the following conversation history" in captured["prompt"]
+        assert captured["arun_kwargs"] == {}
+
+
 # ── Role agent construction ──────────────────────────────────────────────
 
 

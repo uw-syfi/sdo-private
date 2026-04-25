@@ -12,20 +12,20 @@ import re
 from pathlib import Path
 from typing import Any
 
+from agentshim import BaseCodingAgent
+from agentshim.events import AgentEventHandler
+from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
+from agentshim.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
 from loguru import logger
 
 from app_operator.cli_agent._rlm_utils import FILE_GEN_RE, FIX_ERROR_RE
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.prompts import DSPyConfigProtocol
-from libs.agent_cli.base import CodingAgent
-from libs.agent_cli.events import AgentEventHandler
-from libs.agent_cli.llm_client import LiteLLMClient
-from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
-from libs.agent_cli.utils import FILE_GEN_SYSTEM_PROMPT, generate_and_write_files
+from libs.llm_rt import LiteLLMClient
 
 
-class RLMCodingAgent(CodingAgent):
+class RLMCodingAgent(BaseCodingAgent):
     """Coding agent that uses the RLM paradigm for efficient context handling.
 
     Instead of passing full log files as text in every prompt, it exposes them

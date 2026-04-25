@@ -1,16 +1,15 @@
 import pytest
-
-from libs.agent_cli.cli_agent import CLICodingAgent
-from libs.agent_cli.gemini import GeminiCodingAgent
-from libs.agent_cli.mcp_config import HttpMcpServer
-from libs.agent_cli.opencode import OpencodeCodingAgent
+from agentshim.cli_agent import CLICodingAgent
+from agentshim.gemini import GeminiCodingAgent
+from agentshim.mcp_config import HttpMcpServer
+from agentshim.opencode import OpencodeCodingAgent
 
 
 @pytest.fixture
 def mock_binaries(monkeypatch):
     """Mock binary discovery and CLI check."""
     monkeypatch.setattr(
-        "libs.agent_cli.cli_agent.shutil.which",
+        "agentshim.cli_agent.shutil.which",
         lambda cmd, path=None: f"/usr/local/bin/{cmd}",
     )
     monkeypatch.setattr(CLICodingAgent, "_check_cli", lambda self: None)

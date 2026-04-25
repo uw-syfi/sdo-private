@@ -30,16 +30,12 @@ depends_on = [
 ]
 
 [[modules]]
-path = "libs.agent_cli"
-depends_on = [
-    "libs.sds_core",
-]
+path = "libs.sregym_lib"
+depends_on = []
 
 [[modules]]
-path = "libs.sregym_lib"
-depends_on = [
-    "libs.agent_mw",
-]
+path = "libs.llm_rt"
+depends_on = []
 
 # --- app_operator catch-all (strict tripwire) ---
 # Any app_operator.* path not matched by a more specific [[modules]] block
@@ -66,7 +62,6 @@ depends_on = []
 [[modules]]
 path = "app_operator.core"
 depends_on = [
-    "libs.agent_cli",
     "libs.model_config",
     "libs.sds_core",
 ]
@@ -145,7 +140,6 @@ path = "app_operator.trajectory"
 depends_on = [
     "app_operator.core",
     "app_operator.prompts",
-    "libs.agent_cli",
 ]
 
 [[modules]]
@@ -179,14 +173,12 @@ depends_on = [
     "app_operator.rate_limit_handler",
     "app_operator.run_classifier",
     "app_operator.trajectory",
-    "libs.agent_cli",
 ]
 
 [[modules]]
 path = "app_operator.fault_injection"
 depends_on = [
     "app_operator.core",
-    "libs.agent_cli",
 ]
 
 [[modules]]
@@ -220,7 +212,7 @@ depends_on = [
     "app_operator.script_runner",
     "app_operator.subprocess_runner",
     "app_operator.trajectory",
-    "libs.agent_cli",
+    "libs.llm_rt",
 ]
 
 [[modules]]
@@ -290,8 +282,8 @@ depends_on = [
 [[modules]]
 path = "sregym_agents"
 depends_on = [
-    "libs.agent_cli",
     "libs.agent_mw",
+    "libs.llm_rt",
     "libs.pydantic_agent",
     "libs.sregym_lib",
 ]

@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentshim import BaseCodingAgent
+
     from app_operator.cli_agent.agents.context import AgentContext
     from app_operator.dspy_integration import DSPyConfig
-    from libs.agent_cli.base import CodingAgent
+
+from agentshim.utils import generate_and_write_files
 
 from app_operator.core import (
     AgentError,
@@ -25,7 +28,6 @@ from app_operator.trajectory import (
     Phase,
     TrajectoryRecorderProtocol,
 )
-from libs.agent_cli.utils import generate_and_write_files
 
 
 class CodeAnalyzerAgent:
@@ -34,7 +36,7 @@ class CodeAnalyzerAgent:
     def __init__(
         self,
         repo_path: Path,
-        coding_agent: CodingAgent,
+        coding_agent: BaseCodingAgent,
         filesystem: FileSystemInterface | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         dspy_config: DSPyConfig | None = None,
@@ -156,7 +158,7 @@ class CodeAnalyzerAgent:
                 system_prompt = get_loader(self.dspy_config).render(
                     "code_analyzer/system.jinja2",
                     repo_path=self.repo_path,
-                    agent_name=self.agent.__class__.__name__,  # Added for signature
+                    agent_name=self.agent.backend_class_name,  # Added for signature
                     recorder=self.recorder,
                 )
                 user_prompt = get_loader(self.dspy_config).render(
@@ -167,7 +169,10 @@ class CodeAnalyzerAgent:
                     recorder=self.recorder,
                 )
 
-                logger.info(f"Consulting {self.agent.__class__.__name__} to analyze the codebase...")
+                logger.info(
+                    f"Consulting {self.agent.readable_name} "
+                    f"({self.agent.backend_class_name}) to analyze the codebase..."
+                )
 
                 start_time = time.time()
 

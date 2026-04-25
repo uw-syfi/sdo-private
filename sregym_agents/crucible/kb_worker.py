@@ -43,7 +43,7 @@ from sregym_agents.crucible.tools import TriagePriors
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from sregym_agents.crucible.agents.base import AgentDriver, AgentResult
+    from sregym_agents.crucible.agents import AgentDriver, AgentResult
 
 logger = logging.getLogger(__name__)
 

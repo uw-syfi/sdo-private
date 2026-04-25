@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
 
     from libs.pydantic_agent import UsageCollector
-    from sregym_agents.crucible.agents.base import RunSubagent
+    from sregym_agents.crucible.agents import RunSubagent
     from sregym_agents.crucible.config import CrucibleConfig
     from sregym_agents.crucible.knowledge_base.root_cause import KBView
     from sregym_agents.crucible.tools._kb_tools import TriagePriors, TriageReport

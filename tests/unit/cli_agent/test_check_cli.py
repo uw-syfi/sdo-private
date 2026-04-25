@@ -10,14 +10,13 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from libs.agent_cli.claude import ClaudeCodeCodingAgent
+from agentshim.claude import ClaudeCodeCodingAgent
 
 
 @pytest.fixture
 def mocked_binary(monkeypatch):
     monkeypatch.setattr(
-        "libs.agent_cli.cli_agent.shutil.which",
+        "agentshim.cli_agent.shutil.which",
         lambda cmd, path=None: f"/usr/local/bin/{cmd}",
     )
 
@@ -26,7 +25,7 @@ def test_check_cli_probe_passes_stdin_devnull(mocked_binary):
     """_check_cli must pass stdin=DEVNULL so the probe never reads the TTY."""
     completed = MagicMock(returncode=0, stderr="")
 
-    with patch("libs.agent_cli.cli_agent.subprocess.run", return_value=completed) as run:
+    with patch("agentshim.cli_agent.subprocess.run", return_value=completed) as run:
         ClaudeCodeCodingAgent(model="test-model")
 
     # Find the --help probe call (there may be other subprocess.run calls).
