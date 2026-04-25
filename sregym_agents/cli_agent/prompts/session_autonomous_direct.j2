@@ -32,47 +32,18 @@ Start every run with this preflight workflow.
 Operate in an iterative loop:
 1. Read the application source code and deployment manifests to contextualize the Kubernetes resources you are seeing. Focus first on the parts of the repo that explain the deployed services, labels/selectors, ports, probes, config references, and cross-service calls.
    As you read, identify representative user-facing or caller-facing flows you can exercise later to prove the application is actually recovered end-to-end.
-2. Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist from prior runs.
-3. If `.sds/diagnose.sh` exists, run it at the beginning of the session to quickly triage the cluster and flag previously seen issues. Use its output to guide your initial investigation, but verify its claims against the live cluster before relying on them.
-4. Once you identify a new symptom pattern or recurring manual check, prefer encoding it immediately into `.sds/diagnose.sh` or a helper script, then rerun diagnostics so the rest of the investigation benefits from the new automation.
-5. Once you identify a repeatable remediation step, prefer encoding the reusable part into a playbook-linked script and use that scripted path for subsequent iterations when appropriate.
-6. Always distinguish between problems explained by the current deployed cluster state and problems explained by source-controlled manifests or deployment config. Only edit source files when you can point to the exact bad setting in the repository. If the fault lives in source-controlled manifests or deployment config, fix the real file in place first, then apply or redeploy the updated manifests/source and verify the running cluster now reflects that source change before you consider the fix complete. Use `.sds` scripts to diagnose, automate, and verify, not to replace the real source of truth.
-7. Update the diagnosis-to-playbook routing logic so `.sds/diagnose.sh` flags one or more potentially relevant playbooks for each durable check you add or revise, and print which playbook file(s) under `.sds/playbooks/` are relevant for each finding.
-8. Repeat starting from step 1. Do diagnosis, mitigation, and verification until all user traffic is healthy across all relevant paths you can identify in the system, and the system internals also appear healthy.
+2. Inspect the live cluster directly with `kubectl` and targeted shell commands. Use multiple views when useful: workloads, events, logs, endpoints, services, ingresses, network policies, PVC/PV state, config objects, and representative requests through the system.
+3. Once you identify a symptom, verify it against the live cluster before acting on it. Keep notes and checks lightweight and repeatable, but do not treat script-writing or repo-local tooling as part of the task.
+4. Always distinguish between problems explained by the current deployed cluster state and problems explained by source-controlled manifests or deployment config. Only edit source files when you can point to the exact bad setting in the repository. If the fault lives in source-controlled manifests or deployment config, fix the real file in place first, then apply or redeploy the updated manifests/source and verify the running cluster now reflects that source change before you consider the fix complete.
+5. Repeat starting from step 1. Do diagnosis, mitigation, and verification until all user traffic is healthy across all relevant paths you can identify in the system, and the system internals also appear healthy.
 
 Additional guidelines:
-- Treat `.sds` as a maintained operational toolkit. Put persistent diagnostics, mitigation helpers, and playbook automation under `.sds/`, with `.sds/diagnose.sh` as the broad top-level triage entrypoint.
-- Keep repository-local diagnostic scripts quick to run, well-organized, and readable. Follow good Bash script best practices, prefer small functions, and dispatch into helper scripts when that keeps the entrypoint clear, so the overall toolkit stays readable, maintainable, and easy to extend.
+- Use direct `kubectl` and `bash` investigation. Repository-local scripts are optional, not expected.
+- If a tiny helper command or script would materially speed up repeated verification, you may use it, but do not spend incident time operationalizing the repository unless it is clearly necessary for the actual fix.
 - Focus on real errors that cause user-visible impact. The application may not follow best practices, but do not get distracted by every minor deviation from ideal patterns. Instead, focus on diagnosing and fixing the issues that are actually causing the observed faults.
-- Use `.sds/` for tooling and documentation, not as a replacement for the application's real manifests or deployment source.
-- Assume any script you inherit or write may be incomplete or partially wrong. Revise it when the live cluster proves it wrong.
-- Do not expect `.sds/diagnose.sh` or related scripts to automatically find every issue or fully determine every root cause. They are meant to be quick, reasonably reliable triage aids that surface issues for you to investigate further.
-- Do not hard-code detection for every one-off edge case you encounter. Prefer checks that cover general symptom patterns, recurring failure modes, and reusable operational invariants.
-- Keep diagnostics generic and low-risk. Do not encode benchmark IDs, injected-fault-specific keys, or exact oracle answers.
-- Each durable diagnosis check in `.sds/diagnose.sh` should route to one or more potentially relevant playbook file(s) and script(s) under `.sds/playbooks/`.
-- When you add or revise a diagnosis check, also add or revise the corresponding diagnosis-to-playbook mapping so the output names the candidate playbooks explicitly.
-- Keep scripts quick, well-organized, and maintainable.
-
-## Recommended `.sds` Layout
-
-```text
-.sds/
-  diagnose.sh                  # top-level triage entrypoint; broad, fast, maintained over time
-  helpers/                     # shared diagnostic helper scripts sourced or called by diagnose.sh
-    lib.sh
-    kubernetes.sh
-    logs.sh
-  playbooks/
-    README.md                  # short routing index for humans and agents
-    <issue-class>/
-      README.md                # natural-language diagnosis + mitigation guide
-      scripts/
-        diagnose.sh            # optional focused checker for this issue class
-        mitigate.sh            # optional reusable mitigation helper
-        verify.sh              # optional post-fix verification helper
-```
-
-Treat this tree as the recommended default. You may extend it when needed, but keep the top-level structure predictable and easy for other agents to navigate.
+- Assume any command output or initial hypothesis may be incomplete or partially misleading. Revise your understanding when the live cluster proves it wrong.
+- Do not hard-code detection or remediation around benchmark-specific guesses. Rely on live evidence from the cluster and source tree.
+- Keep the investigation moving. Prioritize mitigation once you have enough evidence to act safely.
 
 ## Submission Rules
 
@@ -89,8 +60,7 @@ Your task is to work through {{ planned_stages | length }} stage{{ "s" if planne
   - Treat any remaining user-visible failure — especially `5xx`, timeout, connection refusal, DNS failure, empty/unexpected response, or degraded caller path — as evidence that you are not done yet.
   - Treat any remaining internal inconsistency — especially missing endpoints, failing probes, broken registrations, dependency errors, restart loops, or cross-service connectivity failures — as evidence that you are not done yet.
   - Look for subtle issues that may not directly impact current traffic but indicate residual misconfiguration — e.g. wrong environment variables, stale config, misconfigured resource limits, auth issues on inactive code paths.
-  - When the root cause is defined in repository manifests or deployment source, fix the source-controlled file in place first, then apply or redeploy the updated manifests/source so the live cluster reflects that fix and the mitigation survives future deploys. Do not treat a source edit as complete until the updated deployment is live and verified. Use `.sds/` scripts to help diagnose, automate, or verify that fix, not to replace the real source file as the system of record. Use one-off `kubectl patch` commands mainly for emergency stabilization, validation, or when you cannot trace the symptom back to a bad setting in source.
-  - Prefer maintainable scripted mitigations for repeatable operational steps, and revise those scripts when verification shows they are incomplete.
+  - When the root cause is defined in repository manifests or deployment source, fix the source-controlled file in place first, then apply or redeploy the updated manifests/source so the live cluster reflects that fix and the mitigation survives future deploys. Do not treat a source edit as complete until the updated deployment is live and verified. Use one-off `kubectl patch` commands mainly for emergency stabilization, validation, or when you cannot trace the symptom back to a bad setting in source.
   - Only call `submit_mitigation` once you are confident the application is genuinely healthy across all relevant traffic paths and internal checks, not just "not crashing". You may call `submit_mitigation` exactly once.
 {%- endif %}
 {% endfor %}
@@ -117,4 +87,4 @@ Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happ
 
 ## After Submission
 
-**Only after `submit_done` returns** — first reflect on whether you can add a new diagnostic check, or enhance an existing one, so this class of error would surface much faster on a future run. Prefer quick, well-organized checks under `.sds/`, with `.sds/diagnose.sh` as the entrypoint. Then write down the incident as a generalizable Markdown playbook under `.sds/playbooks/`. The playbook should cover both diagnosis and mitigation guidance for this class of issue,{% if submit_done_returns_feedback %} using the ground-truth feedback to correct any mistakes in your own understanding before writing it.{% else %} using what you verified from the live cluster and source tree rather than assuming `submit_done` will correct mistakes for you.{% endif %} Keep the playbook generic enough to help with future related incidents, not just this exact benchmark instance. Also update `.sds/playbooks/README` so it remains a concise routing index for the available playbooks. Review whether the playbooks flagged by `.sds/diagnose.sh` were actually useful for this incident; if the routing was noisy, misleading, or incomplete, edit the diagnosis-to-playbook mapping logic accordingly. If you changed files under `.sds/`, commit those `.sds/` changes before exiting. If you also changed real manifests or deployment source files earlier in the incident, leave those changes in their original locations; do not copy them into `.sds/`.
+Only after `submit_done` returns, stop. You do not need to create follow-up diagnostic scripts, playbooks, or other repository-local incident tooling unless that work was part of the actual source fix you already verified.

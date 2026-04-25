@@ -56,6 +56,8 @@ logger = logging.getLogger(__name__)
 _POST_STAGE_TIMEOUT_S = 300
 
 _SUBMIT_MCP_SERVER_NAME = "sregym"
+_AUTONOMOUS_PROMPT_PROFILES = frozenset({"sds", "direct"})
+_DEFAULT_AUTONOMOUS_PROMPT_PROFILE = "sds"
 
 
 # --- Pure helpers ----------------------------------------------------------
@@ -81,6 +83,7 @@ def _build_prompt(
     app_info: dict[str, Any],
     *,
     autonomous: bool = False,
+    autonomous_prompt_profile: str = _DEFAULT_AUTONOMOUS_PROMPT_PROFILE,
     submit_done_returns_feedback: bool = False,
 ) -> str:
     """Render the single-session prompt handed to the wrapped CLI agent.
@@ -91,7 +94,8 @@ def _build_prompt(
     response carries the grading verdict. In autonomous mode (``autonomous=True``),
     the agent instead calls per-stage ``submit_diagnosis`` / ``submit_mitigation``
     tools that return only a neutral acknowledgement, so the agent must
-    self-verify by inspecting the cluster before submitting.
+    self-verify by inspecting the cluster before submitting. Autonomous
+    prompt instructions are further selected by ``autonomous_prompt_profile``.
 
     The prompt deliberately omits the benchmark ``problem_id``: SREGym
     problem IDs are descriptive (``incorrect_image``,
@@ -99,7 +103,13 @@ def _build_prompt(
     and including them would leak the answer to the agent. App name and
     namespace are kept because they're observable from the cluster anyway.
     """
-    template_name = "session_autonomous.j2" if autonomous else "session.j2"
+    template_name = "session.j2"
+    if autonomous:
+        profile = _normalize_autonomous_prompt_profile(autonomous_prompt_profile)
+        template_name = {
+            "sds": "session_autonomous.j2",
+            "direct": "session_autonomous_direct.j2",
+        }[profile]
     return (
         _jinja_env()
         .get_template(template_name)
@@ -111,6 +121,19 @@ def _build_prompt(
             submit_done_returns_feedback=submit_done_returns_feedback,
         )
     )
+
+
+def _normalize_autonomous_prompt_profile(profile: Any) -> str:
+    """Normalize and validate the autonomous prompt-profile selector."""
+    if profile is None:
+        return _DEFAULT_AUTONOMOUS_PROMPT_PROFILE
+    normalized = str(profile).strip().lower()
+    if not normalized:
+        return _DEFAULT_AUTONOMOUS_PROMPT_PROFILE
+    if normalized not in _AUTONOMOUS_PROMPT_PROFILES:
+        allowed = ", ".join(sorted(_AUTONOMOUS_PROMPT_PROFILES))
+        raise ValueError(f"Unknown autonomous prompt profile {profile!r}. Expected one of: {allowed}")
+    return normalized
 
 
 # --- Conductor I/O ---------------------------------------------------------
@@ -216,6 +239,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "for the entire problem (default: 2000)"
         ),
     )
+    parser.add_argument(
+        "--autonomous-prompt-profile",
+        choices=sorted(_AUTONOMOUS_PROMPT_PROFILES),
+        default=_normalize_autonomous_prompt_profile(toml_cfg.get("autonomous_prompt_profile")),
+        help=(
+            "Autonomous prompt variant to use when SREGYM_AUTONOMOUS_SUBMIT=1. "
+            "'sds' keeps the repo-local .sds operational-tooling workflow; "
+            "'direct' removes .sds/script-writing expectations and focuses on direct "
+            "source + cluster investigation (default: sds)."
+        ),
+    )
     # No-op flags accepted for compatibility with sregym's agent launcher
     # (`bench/sregym/main.py` ~L1314-L1330), which appends these to every
     # agent's argv depending on the experiment config — cli_agent has no
@@ -279,6 +313,7 @@ def _run(
         planned_stages,
         app_info,
         autonomous=autonomous,
+        autonomous_prompt_profile=args.autonomous_prompt_profile,
         submit_done_returns_feedback=submit_done_returns_feedback,
     )
     started = time.monotonic()
