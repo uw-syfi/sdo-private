@@ -12,6 +12,7 @@ definition; this module stays agent-agnostic.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import os
 import subprocess
@@ -184,7 +185,7 @@ def run_single_experiment(
 
     cli_args = config_to_main_args(config, exp_dir, tasklist_path)
     cli_args.extend(extra_args)
-    env = config_to_env(config, project_root)
+    env = config_to_env(config, project_root, exp_dir=exp_dir)
 
     _print_experiment_info(config, env)
     print()
@@ -239,7 +240,7 @@ def _run_stage(
     extra_env: dict[str, str] | None = None,
 ) -> int:
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
-    env = config_to_env(exp_config, project_root)
+    env = config_to_env(exp_config, project_root, exp_dir=stage_exp_dir)
     if extra_env:
         env.update(extra_env)
 
@@ -359,12 +360,12 @@ def run_pipeline(
             exp_config = resolve_config(exp_config)
 
             if stage_cfg.chain_kb and prev_kb_dir:
+                agent_config = copy.deepcopy(exp_config.agent_config)
+                if exp_config.agent == "crucible":
+                    agent_config.setdefault("crucible", {})["seed_kb_dir"] = prev_kb_dir
                 exp_config = dataclasses.replace(
                     exp_config,
-                    env=dataclasses.replace(
-                        exp_config.env,
-                        crucible_seed_kb_dir=prev_kb_dir,
-                    ),
+                    agent_config=agent_config,
                 )
 
             stage_name = stage_cfg.name or f"stage_{i}"

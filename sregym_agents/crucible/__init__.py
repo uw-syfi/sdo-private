@@ -16,7 +16,14 @@ _KB_QUEUE_DRAIN_POLL_INTERVAL_S = 2.0
 
 class _CrucibleExpStageLifecycle:
     def before_stage(self, exp_dir: Path, config: ExperimentConfig) -> None:
-        seed_kb(exp_dir / "kb", config.env.crucible_seed_kb_dir or None)
+        crucible_cfg = config.agent_config.get("crucible", {})
+        seed_kb(
+            exp_dir / "kb",
+            crucible_cfg.get("seed_kb_dir")
+            or crucible_cfg.get("crucible_seed_kb_dir")
+            or config.env.crucible_seed_kb_dir
+            or None,
+        )
 
     def snapshot_before_drain(self, exp_dir: Path, config: ExperimentConfig) -> object | None:
         del config

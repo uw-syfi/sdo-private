@@ -153,24 +153,6 @@ For multi-stage pipelines, `chain_application_workspace = true` requires
 `application_workspace = "persistent"` because the previous stage must leave a
 durable workspace directory behind for the next stage to seed from.
 
----
-
-### `enable_summary`
-
-**Default:** `true`
-
-Enables knowledge base (KB) mode. Passes `--enable-summary` to `main.py`, which activates the KB worker and per-run summarization pipeline. Set to `false` to run without any KB.
-
----
-
-### `no_inject_summary`
-
-**Default:** `true`
-
-Update the KB after each run but do not inject it into the agent's context before the run. Useful when bootstrapping a fresh KB. Set to `false` to inject existing KB content at the start of each run.
-
----
-
 ### `repeat`
 
 **Default:** `1`
@@ -309,24 +291,11 @@ These values are injected as environment variables into the `main.py` worker pro
 
 **Default:** `""` (inherits `MODEL`)
 
-Model ID for the judge agent (`JUDGE_MODEL_ID` env var). Allows using a different, often more capable model for judgment than for the SRE agent.
+Model ID for the SREGym LLM-as-a-judge (`JUDGE_MODEL_ID` env var). Allows using a different, often more capable model for benchmark judgment than for the agent under test.
 
 ```toml
 [runner.env]
 judge_model_id = "vertex-ai-gemini-2.5-pro"
-```
-
----
-
-### `crucible_seed_kb_dir`
-
-**Default:** `""` (no seed)
-
-Path to a pre-built KB directory to seed into a fresh experiment. The launcher copies this directory into the new experiment's KB dir before any worker starts, letting the agent begin with accumulated knowledge.
-
-```toml
-[runner.env]
-crucible_seed_kb_dir = "/path/to/bench/sregym/logs/20260331_012038_crucible/kb"
 ```
 
 ---
@@ -387,14 +356,43 @@ chain_kb = true    # seeds from bootstrap stage's KB output
 
 Each stage entry supports:
 - **`name`** — human-readable label for logs and directory naming.
-- **`chain_kb`** (**default:** `true`) — automatically set `crucible_seed_kb_dir` to the previous stage's KB output directory. Set to `false` for independent stages that should not inherit a KB.
+- **`chain_kb`** (**default:** `true`) — automatically set Crucible's `seed_kb_dir` agent config to the previous stage's KB output directory. Set to `false` for independent stages that should not inherit a KB.
 - **`[stages.runner]`** — per-stage overrides (deep-merged over `[defaults]`).
 
 ---
 
 ## Crucible Agent Flags (`[agent.crucible]`)
 
-Crucible flags live in experiment TOML files (e.g. `sregym_agents/experiments/default.toml`) under the `[agent.crucible]` section and map to `CrucibleConfig` fields.
+Crucible flags live in experiment TOML files (e.g. `sregym_agents/experiments/default.toml`) under the `[agent.crucible]` section. The runner forwards this section to the Crucible process as one agent config object.
+
+### `enable_summary`
+
+**Default:** `true`
+
+Enables Crucible knowledge base (KB) mode. Crucible derives its KB directory from the experiment directory and manages injection/update itself.
+
+---
+
+### `no_inject_summary`
+
+**Default:** `true`
+
+Update the KB after each run but do not inject it into the agent's context before the run. Useful when bootstrapping a fresh KB. Set to `false` to inject existing KB content at the start of each run.
+
+---
+
+### `seed_kb_dir`
+
+**Default:** `""` (no seed)
+
+Path to a pre-built KB directory to seed into a fresh experiment. The launcher copies this directory into the new experiment's KB dir before any worker starts, letting the agent begin with accumulated knowledge.
+
+```toml
+[agent.crucible]
+seed_kb_dir = "/path/to/bench/sregym/logs/20260331_012038_crucible/kb"
+```
+
+---
 
 ### `enable_judge`
 

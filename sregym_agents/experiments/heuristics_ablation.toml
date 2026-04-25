@@ -14,8 +14,6 @@ name = "heuristics-ablation"
 agent = "crucible"
 model = "google-vertex:gemini-2.5-flash"
 parallel = 4
-enable_summary = true
-no_inject_summary = false
 
 [defaults.variants]
 enabled = true
@@ -25,10 +23,12 @@ seed = 42
 
 [defaults.env]
 judge_model_id = "vertex-ai-gemini-2.5-pro"
-crucible_seed_kb_dir = ""
 worker_cpu_limit = "16"
 
 [defaults.agent_config.crucible]
+enable_summary = true
+no_inject_summary = false
+seed_kb_dir = ""
 prompt_version = "v3"
 enable_judge = false
 enable_ltm_retrieval = true
