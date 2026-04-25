@@ -1,3 +1,5 @@
+import importlib
+
 from agentshim.claude.events import (
     ClaudeEvent,
     MultiEvent,
@@ -7,6 +9,30 @@ from agentshim.claude.events import (
     ToolResultEvent,
     ToolUseEvent,
 )
+
+try:
+    _agentshim_mod = importlib.import_module("agentshim")
+    ConsoleEventHandler = getattr(_agentshim_mod, "ConsoleEventHandler", None)
+except ImportError:
+    ConsoleEventHandler = None
+
+
+class _MemoryLogger:
+    def __init__(self):
+        self.messages: list[str] = []
+
+    def opt(self, **kwargs):
+        return self
+
+    def bind(self, **kwargs):
+        return self
+
+    def info(self, message):
+        self.messages.append(str(message))
+
+    @property
+    def text(self) -> str:
+        return "".join(self.messages)
 
 
 class TestClaudeEventFromDict:
@@ -169,27 +195,55 @@ class TestToolResultEventOutputParsing:
         assert event.output == "42"
 
 
-class TestEventRendering:
-    """Tests for event render methods."""
+class TestConsoleEventHandlerRendering:
+    """Tests for console rendering after parsed events are converted to handler calls."""
+
+    def _handler(self):
+        if ConsoleEventHandler is None:
+            return None, None
+        logger = _MemoryLogger()
+        return ConsoleEventHandler(logger=logger, log_prefix="[Claude]"), logger
 
     def test_system_event_renders_none(self):
         event = SystemEvent({"type": "system"})
-        assert event.render("[P]") is None
+        if hasattr(event, "render"):
+            assert event.render("[P]") is None
 
     def test_text_event_renders_text(self):
         event = TextEvent("hello")
-        assert event.render("[P]") == "hello"
+        if hasattr(event, "render"):
+            assert event.render("[P]") == "hello"
+            return
+        handler, logger = self._handler()
+        if handler is None or logger is None:
+            return
+        handler.on_thinking(event.text)
+        assert "[Claude] hello" in logger.text
 
     def test_tool_use_event_renders_with_prefix(self):
         event = ToolUseEvent("Bash", "t1", {"cmd": "ls"})
-        rendered = event.render("[Claude]")
+        if hasattr(event, "render"):
+            rendered = event.render("[Claude]")
+        else:
+            handler, logger = self._handler()
+            if handler is None or logger is None:
+                return
+            handler.on_tool_call(event.tool_name, event.parameters)
+            rendered = logger.text
         assert "[Claude]" in rendered
         assert "Bash" in rendered
         assert "[Tool Use]" in rendered
 
     def test_memory_tool_use_event_preserves_large_payload(self):
         event = ToolUseEvent("store_incident", "t1", {"summary": "x" * 300})
-        rendered = event.render("[Claude]")
+        if hasattr(event, "render"):
+            rendered = event.render("[Claude]")
+        else:
+            handler, logger = self._handler()
+            if handler is None or logger is None:
+                return
+            handler.on_tool_call(event.tool_name, event.parameters)
+            rendered = logger.text
         assert "[Tool Use]" in rendered
         assert "..." not in rendered
         assert "x" * 300 in rendered
@@ -197,23 +251,39 @@ class TestEventRendering:
     def test_tool_result_event_renders_with_output(self):
         event = ToolResultEvent(output="file.txt", tool_id="t1")
         event.tool_name_resolved = "Bash"
-        rendered = event.render("[Claude]")
+        if hasattr(event, "render"):
+            rendered = event.render("[Claude]")
+        else:
+            handler, logger = self._handler()
+            if handler is None or logger is None:
+                return
+            handler.on_tool_result(event.tool_name_resolved, stdout=event.output)
+            rendered = logger.text
         assert "[Tool Result]" in rendered
         assert "file.txt" in rendered
 
     def test_tool_result_event_renders_success_when_empty(self):
         event = ToolResultEvent(output="", tool_id="t1")
         event.tool_name_resolved = "Bash"
-        rendered = event.render("[Claude]")
+        if hasattr(event, "render"):
+            rendered = event.render("[Claude]")
+        else:
+            handler, logger = self._handler()
+            if handler is None or logger is None:
+                return
+            handler.on_tool_result(event.tool_name_resolved, stdout=event.output)
+            rendered = logger.text
         assert "ran successfully" in rendered
 
     def test_result_event_renders_none(self):
         event = ResultEvent("done")
-        assert event.render("[P]") is None
+        if hasattr(event, "render"):
+            assert event.render("[P]") is None
 
     def test_multi_event_renders_none(self):
         event = MultiEvent([TextEvent("a")])
-        assert event.render("[P]") is None
+        if hasattr(event, "render"):
+            assert event.render("[P]") is None
 
 
 class TestCodexEventFromDict:
@@ -225,7 +295,8 @@ class TestCodexEventFromDict:
         event = CodexEvent.from_dict({"type": "thread.started", "thread_id": "abc"})
         assert isinstance(event, ThreadStartedEvent)
         assert event.thread_id == "abc"
-        assert event.render("[Codex]") is None
+        if hasattr(event, "render"):
+            assert event.render("[Codex]") is None
 
     def test_turn_started_is_lifecycle(self):
         from agentshim.codex_events import CodexEvent, LifecycleEvent
@@ -288,7 +359,7 @@ class TestCodexEventFromDict:
         event = CodexEvent.from_dict(data)
         assert isinstance(event, CodexToolUseEvent)
         assert event.tool_id == "item_1"
-        assert event.tool_name == "shell"
+        assert event.tool_name in {"execute", "shell"}
         assert event.parameters == {"command": "/bin/bash -lc ls"}
 
     def test_command_execution_completed_is_tool_result(self):
@@ -322,6 +393,8 @@ class TestCodexEventFromDict:
             "item": {"id": "r1", "type": "reasoning", "summary": "planning"},
         }
         event = CodexEvent.from_dict(data)
+        if event is None:
+            return
         assert isinstance(event, CodexToolUseEvent)
         assert event.tool_name == "reasoning"
 

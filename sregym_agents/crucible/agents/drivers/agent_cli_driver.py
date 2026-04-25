@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import importlib
 import json
 import logging
 import os
@@ -73,6 +74,18 @@ def _shared_file_arg(sf: Any) -> str:
     if hasattr(sf, "display_path"):
         return sf.display_path()
     return ""
+
+
+def _coding_agent_event_handler_kwargs(handler: Any) -> dict[str, Any]:
+    try:
+        agentshim_mod = importlib.import_module("agentshim")
+    except ImportError:
+        return {"event_handler": handler}
+    console_handler_cls = getattr(agentshim_mod, "ConsoleEventHandler", None)
+    if console_handler_cls is None:
+        return {"event_handler": handler}
+    console_handler = console_handler_cls()
+    return {"event_handlers": [console_handler, handler]}
 
 
 class _AgentCLIEventHandler:
@@ -453,8 +466,9 @@ class AgentCLIDriver(AgentDriver):
         handler: _AgentCLIEventHandler,
     ) -> Any:
         """Construct a provider-routed ``CodingAgent`` for this provider."""
-        from agentshim import CodingAgent
         from agentshim.mcp_config import StdioMcpServer
+
+        from agentshim import CodingAgent
 
         mcp_servers: list[StdioMcpServer] = []
         if mcp_args is not None:
@@ -464,7 +478,7 @@ class AgentCLIDriver(AgentDriver):
             return CodingAgent(
                 provider=self._provider,
                 model=self._model,
-                event_handler=handler,
+                **_coding_agent_event_handler_kwargs(handler),
                 mcp_servers=mcp_servers,
                 sandbox=self._sandbox,
             )

@@ -15,12 +15,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from agentshim import BaseCodingAgent
 from agentshim.base import register_provider
 from agentshim.events import AgentEventHandler
 from agentshim.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 from loguru import logger
 
+from agentshim import BaseCodingAgent
+from app_operator.cli_agent._event_handlers import compose_event_handlers
 from app_operator.cli_agent._rlm_utils import DIRECT_TEXT_RE, FILE_GEN_RE, FIX_ERROR_RE
 from app_operator.cli_agent._subagent_utils import call_subagent
 from app_operator.cli_agent.rlm.environment import RLMContext
@@ -61,13 +62,14 @@ class HybridCodingAgent(BaseCodingAgent):
         model: str | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
+        event_handlers: list[AgentEventHandler] | None = None,
         location: str | None = None,
         dspy_config: DSPyConfigProtocol | None = None,
         rlm_mode: str = "compatibility",
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()
-        self.event_handler = event_handler
+        self.event_handler = compose_event_handlers(event_handler, event_handlers)
         self.location = location
         self.dspy_config = dspy_config
         self.rlm_mode = rlm_mode
