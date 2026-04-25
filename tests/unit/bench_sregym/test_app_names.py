@@ -8,8 +8,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_ROOT = REPO_ROOT / "bench" / "sregym"
+APP_NAMES_PATH = BENCH_ROOT / "sregym" / "service" / "apps" / "app_names.py"
 
-if not BENCH_ROOT.exists():
+if not APP_NAMES_PATH.exists():
     pytest.skip(
         "bench/sregym submodule not checked out — skipping app_names tests",
         allow_module_level=True,

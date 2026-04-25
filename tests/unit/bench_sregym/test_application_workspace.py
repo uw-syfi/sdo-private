@@ -9,8 +9,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_ROOT = REPO_ROOT / "bench" / "sregym"
+APP_WORKSPACE_PATH = BENCH_ROOT / "sregym" / "service" / "app_workspace.py"
 
-if not BENCH_ROOT.exists():
+if not APP_WORKSPACE_PATH.exists():
     pytest.skip(
         "bench/sregym submodule not checked out — skipping application_workspace tests",
         allow_module_level=True,
@@ -19,7 +20,6 @@ if not BENCH_ROOT.exists():
 if str(BENCH_ROOT) not in sys.path:
     sys.path.insert(0, str(BENCH_ROOT))
 
-APP_WORKSPACE_PATH = BENCH_ROOT / "sregym" / "service" / "app_workspace.py"
 spec = importlib.util.spec_from_file_location("bench_sregym_app_workspace", APP_WORKSPACE_PATH)
 assert spec is not None
 assert spec.loader is not None

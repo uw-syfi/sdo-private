@@ -9,8 +9,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_ROOT = REPO_ROOT / "bench" / "sregym"
+SOURCE_DEPLOY_PATH = BENCH_ROOT / "sregym" / "service" / "source_deploy.py"
 
-if not BENCH_ROOT.exists():
+if not SOURCE_DEPLOY_PATH.exists():
     pytest.skip(
         "bench/sregym submodule not checked out — skipping source_deploy tests",
         allow_module_level=True,
