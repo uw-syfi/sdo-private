@@ -6,7 +6,6 @@ from pathlib import Path
 from types import FrameType
 
 from agentshim import BaseCodingAgent
-
 from app_operator.cli_agent.agents.app_monitor import AppMonitor
 from app_operator.cli_agent.agents.code_analyzer import CodeAnalyzerAgent
 from app_operator.cli_agent.agents.context import AgentContext
@@ -18,8 +17,6 @@ from app_operator.core import (
     Config,
     FileSystemInterface,
     MonitoringError,
-    NullOperatorUI,
-    OperatorUI,
     RealFilesystem,
     load_config,
     logger,
@@ -47,7 +44,6 @@ class AppOperator(OperatorBase):
         agent: BaseCodingAgent | None = None,
         filesystem: FileSystemInterface | None = None,
         config: Config | None = None,
-        ui: OperatorUI | None = None,
     ):
         """Initialize the application operator.
 
@@ -59,13 +55,11 @@ class AppOperator(OperatorBase):
             agent: Optional coding agent to use. If None, creates one from config.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             config: Optional configuration object.
-            ui: Optional UI interface.
         """
         self.health_check_interval = health_check_interval
         self.health_check_max_count = health_check_max_count
         self.max_deployment_attempts = max_deployment_attempts
         self.filesystem = filesystem if filesystem is not None else RealFilesystem()
-        self.ui = ui or NullOperatorUI()
 
         # Use absolute() which works for both real and in-memory filesystems
         # without making OS syscalls like resolve() does
@@ -98,10 +92,6 @@ class AppOperator(OperatorBase):
         else:
             self.agent = agent
 
-        # Attach UI to agent if supported
-        if hasattr(self.agent, "event_handler"):
-            self.agent.event_handler = self.ui
-
         self._shutdown_requested = False
         self._deployed = False
 
@@ -130,27 +120,23 @@ class AppOperator(OperatorBase):
             operator_config=self.config.operator,
             recorder=self.recorder,
             dspy_config=self.config.dspy,
-            ui=self.ui,
         )
 
         # Initialize agents with shared context
         self.analyzer = CodeAnalyzerAgent(
             self.repo_path,
             self.agent,
-            ui=self.ui,
             ctx=self._ctx,
         )
         self.deployer = DeploymentAgent(
             self.repo_path,
             self.agent,
             deployment_config=self.config.deployment,
-            ui=self.ui,
             ctx=self._ctx,
         )
         self.monitor = AppMonitor(
             self.repo_path,
             self.agent,
-            ui=self.ui,
             ctx=self._ctx,
         )
 
@@ -175,11 +161,8 @@ class AppOperator(OperatorBase):
             logger.info(f"Deployment Platform: {self.config.deployment.platform}")
             logger.info(f"Deployment Target: {self.config.deployment.target}")
 
-            self.ui.set_stage("Initializing")
-
             # Step 1: Code Analysis (conditional)
             if self.config.operator.phase.code_analysis:
-                self.ui.set_stage("Code Analysis")
                 self.analyzer.run()
             else:
                 logger.info("Code analysis disabled by configuration, skipping")
@@ -187,7 +170,6 @@ class AppOperator(OperatorBase):
             # Step 2: Deploy with automatic error fixing (includes script
             # generation).  Raises DeploymentError on terminal failure;
             # returns False only on shutdown request.
-            self.ui.set_stage("Deployment")
             if not self.deployer.run(
                 max_attempts=self.max_deployment_attempts,
                 check_shutdown=lambda: self._shutdown_requested,
@@ -199,7 +181,6 @@ class AppOperator(OperatorBase):
 
             # Step 3: Monitor health and provide analysis
             if self.config.operator.phase.health_monitoring:
-                self.ui.set_stage("Monitoring")
                 self.monitor.run(
                     interval=self.health_check_interval,
                     max_checks=self.health_check_max_count,
@@ -213,10 +194,6 @@ class AppOperator(OperatorBase):
 
             succeeded = True
         finally:
-            self.ui.close(
-                status="completed" if succeeded else "failed",
-                exit_code=0 if succeeded else 1,
-            )
             self._cleanup()
             self.recorder.finalize("completed" if succeeded else "failed")
 

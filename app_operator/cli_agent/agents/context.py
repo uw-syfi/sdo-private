@@ -7,10 +7,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentshim import BaseCodingAgent
-
     from app_operator.dspy_integration import DSPyConfig
 
-from app_operator.core import FileSystemInterface, NullOperatorUI, OperatorConfig, OperatorUI, RealFilesystem
+from app_operator.core import FileSystemInterface, OperatorConfig, RealFilesystem
 from app_operator.trajectory import (
     NullTrajectoryRecorder,
     TrajectoryRecorderProtocol,
@@ -27,7 +26,6 @@ class AgentContext:
     operator_config: OperatorConfig = field(default_factory=OperatorConfig)
     recorder: TrajectoryRecorderProtocol = field(default_factory=NullTrajectoryRecorder)
     dspy_config: DSPyConfig | None = None
-    ui: OperatorUI = field(default_factory=NullOperatorUI)
 
     @property
     def sds_dir(self) -> Path:

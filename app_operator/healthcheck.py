@@ -1,11 +1,10 @@
 import contextlib
 import re
 import subprocess
-import time
 from pathlib import Path
 from typing import TextIO
 
-from app_operator.core import CommandResult, OperatorUI, logger
+from app_operator.core import CommandResult, logger
 
 DEFAULT_HEALTH_CHECK_TIMEOUT = 120  # seconds
 _EXIT_CODE_RE = re.compile(r"^Exit Code:\s*(-?\d+)", re.MULTILINE)
@@ -44,7 +43,6 @@ def run_health_check(
     health_check_script: Path,
     timeout: int = DEFAULT_HEALTH_CHECK_TIMEOUT,
     log_file_path: Path | None = None,
-    ui: OperatorUI | None = None,
 ) -> CommandResult:
     """Run the health check script.
 
@@ -53,15 +51,11 @@ def run_health_check(
         health_check_script: Path to the health check script.
         timeout: Timeout in seconds.
         log_file_path: Optional path to write health check outputs to.
-        ui: Optional UI for tool events.
 
     Returns:
         CommandResult with keys 'success', 'exit_code', 'stdout', 'stderr'.
     """
     logger.info(f"Running health check: {health_check_script}")
-
-    if ui:
-        ui.on_tool_call("health_check.sh", {})
 
     log_file = None
     log_stack = contextlib.ExitStack()
@@ -73,7 +67,6 @@ def run_health_check(
         except OSError as e:
             logger.warning(f"Could not open health check log file {log_file_path}: {e}")
 
-    start_time = time.time()
     try:
         result = subprocess.run(
             [str(health_check_script)],
@@ -82,19 +75,9 @@ def run_health_check(
             text=True,
             timeout=timeout,
         )
-        duration = time.time() - start_time
 
         status = "PASSED" if result.returncode == 0 else "FAILED"
         logger.info(f"Health check finished: {status} (Exit Code: {result.returncode})")
-
-        if ui:
-            ui.on_tool_result(
-                tool="health_check.sh",
-                stdout=result.stdout,
-                stderr=result.stderr,
-                exit_code=result.returncode,
-                duration=duration,
-            )
 
         # Write outputs to log file if provided
         if log_file:
@@ -108,7 +91,6 @@ def run_health_check(
             "stderr": result.stderr,
         }
     except subprocess.TimeoutExpired as e:
-        duration = time.time() - start_time
         error_msg = f"Health check timed out after {timeout} seconds"
 
         # Capture partial output; e.stdout/e.stderr are bytes even when
@@ -124,15 +106,6 @@ def run_health_check(
             stdout_output = stdout_output.decode("utf-8", errors="replace")
         if isinstance(stderr_output, bytes):
             stderr_output = stderr_output.decode("utf-8", errors="replace")
-
-        if ui:
-            ui.on_tool_result(
-                tool="health_check.sh",
-                stdout=stdout_output,
-                stderr=stderr_output,
-                exit_code=-1,
-                duration=duration,
-            )
 
         if log_file:
             header = f"=== Health Check Timeout ===\n{error_msg}\n"
@@ -153,17 +126,7 @@ def run_health_check(
             "stderr": stderr_output,
         }
     except (OSError, subprocess.SubprocessError) as e:
-        duration = time.time() - start_time
         error_msg = f"Failed to run health check: {e}"
-
-        if ui:
-            ui.on_tool_result(
-                tool="health_check.sh",
-                stdout="",
-                stderr=error_msg,
-                exit_code=-1,
-                duration=duration,
-            )
 
         if log_file:
             header = f"=== Health Check Error ===\n{error_msg}\n"

@@ -69,9 +69,6 @@ class DeployExecutor:
             time_func=self._get_time,
             sleep_func=self._sleep,
             popen_func=subprocess.Popen,
-            ui=self.ctx.ui,
-            tool_name="deploy.sh",
-            tool_args={"command": command},
         )
 
         summarizer = ProgressSummarizer(

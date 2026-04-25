@@ -1,7 +1,7 @@
 """Foundation helpers for app_operator.
 
 Covers config, logging, types, exceptions, filesystem, validation, constants,
-UI protocol, and command validation. Public surface is curated here —
+command validation. Public surface is curated here —
 importers should use `from app_operator.core import X` rather than reaching
 into submodules.
 """
@@ -52,14 +52,13 @@ from app_operator.core.filesystem import (
     InMemoryFilesystem,
     RealFilesystem,
 )
-from app_operator.core.logger import attach_ui_sink, formatter, logger, setup_logger
+from app_operator.core.logger import formatter, logger, setup_logger
 from app_operator.core.types import (
     CommandResult,
     ConversationEntry,
     HealthVerdict,
     TrajectoryCallRecord,
 )
-from app_operator.core.ui_protocol import NullOperatorUI, OperatorUI
 from app_operator.core.validation import (
     validate_dataclass_fields,
     validate_field,
@@ -94,10 +93,8 @@ __all__ = [
     "HealthVerdict",
     "InMemoryFilesystem",
     "MonitoringError",
-    "NullOperatorUI",
     "OperatorConfig",
     "OperatorPhaseConfig",
-    "OperatorUI",
     "PROCESS_CLEANUP_TIMEOUT_SECS",
     "PROCESS_TERM_WAIT_TIMEOUT_SECS",
     "PROGRESS_INITIAL_DELAY_SECS",
@@ -111,7 +108,6 @@ __all__ = [
     "TrajectoryCallRecord",
     "UnrecognizedFieldError",
     "UnrecognizedSectionError",
-    "attach_ui_sink",
     "formatter",
     "load_config",
     "logger",

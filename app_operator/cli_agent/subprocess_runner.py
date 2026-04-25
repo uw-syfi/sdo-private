@@ -8,14 +8,13 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING
 
 from app_operator.core import (
     PROCESS_CLEANUP_TIMEOUT_SECS,
     PROCESS_TERM_WAIT_TIMEOUT_SECS,
     THREAD_JOIN_TIMEOUT_SECS,
     CommandResult,
-    OperatorUI,
     logger,
 )
 
@@ -43,9 +42,6 @@ class SubprocessRunner:
         time_func: Callable[[], float] | None = None,
         sleep_func: Callable[[float], None] | None = None,
         popen_func: Callable[..., "subprocess.Popen[str]"] | None = None,
-        ui: OperatorUI | None = None,
-        tool_name: str | None = None,
-        tool_args: dict[str, Any] | str | None = None,
     ):
         """Initialize the subprocess runner.
 
@@ -58,9 +54,6 @@ class SubprocessRunner:
             time_func: Optional function to get current time (default: time.time).
             sleep_func: Optional function to sleep (default: time.sleep).
             popen_func: Optional function to create subprocess (default: self.popen_func).
-            ui: Optional UI for tool events.
-            tool_name: Optional tool name for UI events.
-            tool_args: Optional tool arguments for UI events.
         """
         self.command = command
         self.cwd = cwd
@@ -70,9 +63,6 @@ class SubprocessRunner:
         self.time_func = time_func if time_func is not None else time.time
         self.sleep_func = sleep_func if sleep_func is not None else time.sleep
         self.popen_func = popen_func if popen_func is not None else subprocess.Popen
-        self.ui = ui
-        self.tool_name = tool_name
-        self.tool_args = tool_args
 
         self.process: subprocess.Popen[str] | None = None
         self._pgid: int | None = None
@@ -122,11 +112,6 @@ class SubprocessRunner:
         Returns:
             dict: Result with keys 'success', 'exit_code', 'stdout', 'stderr'.
         """
-        if self.ui and self.tool_name:
-            self.ui.on_tool_call(self.tool_name, self.tool_args)
-
-        start_time_mono = self.time_func()
-
         # Open log file if provided
         if self.log_file_path:
             try:
@@ -177,16 +162,6 @@ class SubprocessRunner:
             # timeout msg)
             result["stderr"] = result.get("stderr", "") + "".join(self.stderr_lines)
 
-            if self.ui and self.tool_name:
-                duration = self.time_func() - start_time_mono
-                self.ui.on_tool_result(
-                    tool=self.tool_name,
-                    stdout=result.get("stdout", ""),
-                    stderr=result.get("stderr", ""),
-                    exit_code=result.get("exit_code"),
-                    duration=duration,
-                )
-
             return result
 
         except (OSError, subprocess.SubprocessError) as e:
@@ -196,13 +171,6 @@ class SubprocessRunner:
                 "stdout": "",
                 "stderr": f"Failed to run deployment script: {e}",
             }
-            if self.ui and self.tool_name:
-                self.ui.on_tool_result(
-                    tool=self.tool_name,
-                    stdout="",
-                    stderr=result["stderr"],
-                    exit_code=-1,
-                )
             return result
         except RuntimeError as e:
             result: CommandResult = {
@@ -211,13 +179,6 @@ class SubprocessRunner:
                 "stdout": "",
                 "stderr": f"Unexpected error running deployment script: {e}",
             }
-            if self.ui and self.tool_name:
-                self.ui.on_tool_result(
-                    tool=self.tool_name,
-                    stdout="",
-                    stderr=result["stderr"],
-                    exit_code=-1,
-                )
             return result
         finally:
             self._log_stack.close()
