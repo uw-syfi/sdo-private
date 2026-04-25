@@ -40,6 +40,7 @@ class StageConfig:
 
     name: str = ""
     chain_kb: bool = True
+    chain_application_workspace: bool = False
     runner_overrides: dict[str, Any] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
 
@@ -108,6 +109,7 @@ def load_pipeline_config(path: Path) -> PipelineConfig:
         s = dict(s)  # copy so we can pop
         name = s.pop("name", "")
         chain_kb = s.pop("chain_kb", True)
+        chain_application_workspace = s.pop("chain_application_workspace", False)
         runner_overrides = s.pop("runner", {})
         # Anything remaining under the stage entry (e.g. agent_config)
         # gets merged into runner_overrides.
@@ -117,6 +119,7 @@ def load_pipeline_config(path: Path) -> PipelineConfig:
             StageConfig(
                 name=name,
                 chain_kb=chain_kb,
+                chain_application_workspace=chain_application_workspace,
                 runner_overrides=runner_overrides,
             )
         )
@@ -164,16 +167,13 @@ def merge_stage_config(
 
     variants = variant_config_from_raw(variants_raw)
 
-    env = RunnerEnv(
-        judge_model_id=env_raw.get("judge_model_id", ""),
-        crucible_seed_kb_dir=env_raw.get("crucible_seed_kb_dir", ""),
-        worker_cpu_limit=str(env_raw.get("worker_cpu_limit", "")),
-    )
-
     return ExperimentConfig(
         agent=merged.get("agent", "crucible"),
         model=merged.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=merged.get("parallel", 4),
+        app_filter=merged.get("app_filter", ""),
+        deploy_from_source=merged.get("deploy_from_source", False),
+        application_workspace=merged.get("application_workspace", False),
         enable_summary=merged.get("enable_summary", True),
         no_inject_summary=merged.get("no_inject_summary", True),
         repeat=merged.get("repeat", 1),
@@ -181,8 +181,16 @@ def merge_stage_config(
         sequence_seed=merged.get("sequence_seed", 42),
         tasklist=merged.get("tasklist", ""),
         problems=merged.get("problems", []),
+        spec_names=merged.get("spec_names", []),
         variants=variants,
-        env=env,
+        env=RunnerEnv(
+            judge_model_id=env_raw.get("judge_model_id", ""),
+            crucible_seed_kb_dir=env_raw.get("crucible_seed_kb_dir", ""),
+            worker_cpu_limit=str(env_raw.get("worker_cpu_limit", "")),
+            reuse_cluster=bool(env_raw.get("reuse_cluster", False)),
+            force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
+            submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
+        ),
         agent_config=agent_config,
     )
 
@@ -211,6 +219,26 @@ def read_pipeline_state(pipeline_dir: Path) -> PipelineState:
     data = json.loads(path.read_text())
     stages = [StageState(**s) for s in data["stages"]]
     return PipelineState(stages=stages)
+
+
+def reconcile_pipeline_state(config: PipelineConfig, state: PipelineState) -> PipelineState:
+    """Ensure persisted state covers the current config's stage list.
+
+    This supports resuming an existing pipeline directory after the
+    pipeline snapshot has been edited to add new downstream stages.
+    Existing stage runtime data is preserved; missing stages are
+    appended as pending entries. Extra stale state entries are left
+    untouched so older run metadata is not discarded implicitly.
+    """
+    for i, stage_cfg in enumerate(config.stages):
+        stage_name = stage_cfg.name or f"stage_{i}"
+        if i < len(state.stages):
+            state.stages[i].index = i
+            state.stages[i].name = stage_name
+            continue
+        state.stages.append(StageState(index=i, name=stage_name))
+
+    return state
 
 
 def has_pipeline_state(pipeline_dir: Path) -> bool:
@@ -254,8 +282,10 @@ def reset_stages_for_rerun(
 
     Returns the updated pipeline state.
     """
-    if from_stage < 0 or from_stage >= len(state.stages):
-        raise ValueError(f"Stage index {from_stage} out of range (0..{len(state.stages) - 1})")
+    reconcile_pipeline_state(config, state)
+
+    if from_stage < 0 or from_stage >= len(config.stages):
+        raise ValueError(f"Stage index {from_stage} out of range (0..{len(config.stages) - 1})")
 
     from datetime import datetime
 
@@ -265,7 +295,7 @@ def reset_stages_for_rerun(
     # subsequent stages that transitively chain via chain_kb=true.
     to_reset = {from_stage}
     for i in range(from_stage + 1, len(config.stages)):
-        if config.stages[i].chain_kb:
+        if config.stages[i].chain_kb or config.stages[i].chain_application_workspace:
             to_reset.add(i)
         else:
             # Independent stage — stop the chain propagation.
@@ -344,6 +374,7 @@ def _serialize_pipeline_config(config: PipelineConfig) -> str:
         if stage.name:
             lines.append(f"name = {_toml_value(stage.name)}")
         lines.append(f"chain_kb = {_toml_value(stage.chain_kb)}")
+        lines.append(f"chain_application_workspace = {_toml_value(stage.chain_application_workspace)}")
         if stage.runner_overrides:
             lines.append("")
             lines.append("[stages.runner]")

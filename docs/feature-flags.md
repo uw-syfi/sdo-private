@@ -107,6 +107,54 @@ Number of problems to run concurrently. Can be overridden with the `PARALLEL` en
 
 ---
 
+### `app_filter`
+
+**Default:** `""` (disabled)
+
+Restrict benchmark problems to a single application. This narrows whatever problem source is otherwise active: the default tasklist, a custom `tasklist`, inline `problems`, `spec_names`, or variant/sequence sampling.
+
+Accepted values use the same app aliases as `bench/sregym/main.py`, for example:
+
+- `hotel_reservation`
+- `social_network`
+- `astronomy_shop`
+- `fleet_cast`
+
+```toml
+[runner]
+app_filter = "hotel_reservation"
+```
+
+---
+
+### `application_workspace`
+
+**Default:** `false`
+
+Expose an application source checkout to the agent when `deploy_from_source = true`.
+
+Accepted values:
+
+- `false`: disabled
+- `true`: legacy form, equivalent to `"persistent"`
+- `"persistent"`: keep one repo copy for the whole experiment
+- `"ephemeral"`: create a fresh repo copy for each problem iteration
+
+Also requires `app_filter` to be set.
+
+```toml
+[runner]
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "ephemeral"
+```
+
+For multi-stage pipelines, `chain_application_workspace = true` requires
+`application_workspace = "persistent"` because the previous stage must leave a
+durable workspace directory behind for the next stage to seed from.
+
+---
+
 ### `enable_summary`
 
 **Default:** `true`
@@ -292,6 +340,24 @@ CPU limit string passed to each worker container (`SREGYM_WORKER_CPU_LIMIT` env 
 ```toml
 [runner.env]
 worker_cpu_limit = "16"
+```
+
+---
+
+### `submit_done_returns_feedback`
+
+**Default:** `false`
+
+Controls whether autonomous-mode `submit_done()` returns rich grading
+feedback (`SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK` env var). When `false`,
+the agent only gets a neutral completion payload with timing fields and the
+submission count. When `true`, `submit_done()` also includes diagnosis and
+mitigation verdict details, matched-candidate reasoning, ground truth, and
+the submitted diagnoses.
+
+```toml
+[runner.env]
+submit_done_returns_feedback = true
 ```
 
 ---

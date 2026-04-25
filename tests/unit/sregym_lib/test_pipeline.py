@@ -47,9 +47,16 @@ name = "test-pipeline"
 agent = "crucible"
 model = "gemini-flash"
 parallel = 4
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = true
+spec_names = ["wrong_service_selector"]
 
 [defaults.env]
 judge_model_id = "judge-model"
+reuse_cluster = true
+force_recreate_cluster = false
+submit_done_returns_feedback = true
 
 [defaults.variants]
 seed = 99
@@ -57,6 +64,7 @@ seed = 99
 [[stages]]
 name = "build_kb"
 chain_kb = false
+chain_application_workspace = false
 
 [stages.runner]
 parallel = 8
@@ -68,6 +76,7 @@ count = 16
 [[stages]]
 name = "evaluate"
 chain_kb = true
+chain_application_workspace = true
 
 [stages.runner]
 tasklist = "count_train"
@@ -107,12 +116,15 @@ class TestLoadPipelineConfig:
         assert len(config.stages) == 2
         assert config.stages[0].name == "build_kb"
         assert config.stages[0].chain_kb is False
+        assert config.stages[0].chain_application_workspace is False
         assert config.stages[0].runner_overrides["parallel"] == 8
         assert config.stages[0].runner_overrides["variants"]["enabled"] is True
         assert config.stages[1].name == "evaluate"
         assert config.stages[1].chain_kb is True
+        assert config.stages[1].chain_application_workspace is True
         assert config.stages[1].runner_overrides["tasklist"] == "count_train"
         assert config.defaults["model"] == "gemini-flash"
+        assert config.defaults["app_filter"] == "hotel_reservation"
         assert config.defaults["env"]["judge_model_id"] == "judge-model"
 
     def test_no_stages_raises(self) -> None:
@@ -155,16 +167,39 @@ class TestMergeStageConfig:
         defaults = {
             "agent": "crucible",
             "model": "gemini-flash",
-            "parallel": 4,
+            "parallel": 1,
+            "app_filter": "hotel_reservation",
+            "deploy_from_source": True,
+            "application_workspace": True,
+            "spec_names": ["wrong_service_selector"],
             "variants": {"seed": 99},
-            "env": {"judge_model_id": "judge"},
+            "env": {"judge_model_id": "judge", "reuse_cluster": True, "force_recreate_cluster": False},
         }
         config = merge_stage_config(defaults, {})
         assert config.agent == "crucible"
         assert config.model == "gemini-flash"
-        assert config.parallel == 4
+        assert config.parallel == 1
+        assert config.app_filter == "hotel_reservation"
+        assert config.deploy_from_source is True
+        assert config.application_workspace is True
+        assert config.spec_names == ["wrong_service_selector"]
         assert config.variants.seed == 99
         assert config.env.judge_model_id == "judge"
+        assert config.env.reuse_cluster is True
+        assert config.env.force_recreate_cluster is False
+        assert config.env.submit_done_returns_feedback is False
+
+    def test_defaults_env_preserves_submit_done_feedback(self) -> None:
+        defaults = {
+            "env": {
+                "judge_model_id": "judge",
+                "reuse_cluster": True,
+                "force_recreate_cluster": False,
+                "submit_done_returns_feedback": True,
+            },
+        }
+        config = merge_stage_config(defaults, {})
+        assert config.env.submit_done_returns_feedback is True
 
     def test_with_overrides(self) -> None:
         defaults = {
@@ -178,6 +213,44 @@ class TestMergeStageConfig:
         assert config.model == "gemini-pro"
         assert config.parallel == 8
         assert config.agent == "crucible"  # inherited
+
+    def test_workspace_related_fields_are_preserved(self) -> None:
+        defaults = {
+            "agent": "cli_agent",
+            "parallel": 1,
+            "app_filter": "hotel_reservation",
+            "deploy_from_source": True,
+            "application_workspace": True,
+            "spec_names": ["wrong_service_selector"],
+            "env": {
+                "reuse_cluster": True,
+                "force_recreate_cluster": True,
+                "submit_done_returns_feedback": True,
+            },
+        }
+        overrides = {"model": "claude-sonnet-4-5"}
+        config = merge_stage_config(defaults, overrides)
+        assert config.agent == "cli_agent"
+        assert config.model == "claude-sonnet-4-5"
+        assert config.parallel == 1
+        assert config.app_filter == "hotel_reservation"
+        assert config.deploy_from_source is True
+        assert config.application_workspace is True
+        assert config.spec_names == ["wrong_service_selector"]
+        assert config.env.reuse_cluster is True
+        assert config.env.force_recreate_cluster is True
+        assert config.env.submit_done_returns_feedback is True
+
+    def test_workspace_mode_is_preserved(self) -> None:
+        defaults = {
+            "agent": "cli_agent",
+            "parallel": 1,
+            "app_filter": "hotel_reservation",
+            "deploy_from_source": True,
+            "application_workspace": "ephemeral",
+        }
+        config = merge_stage_config(defaults, {})
+        assert config.application_workspace == "ephemeral"
 
     def test_nested_override_preserves_siblings(self) -> None:
         """Override variants.count but keep variants.seed from defaults."""
@@ -288,7 +361,7 @@ class TestPipelineSnapshot:
             defaults={"agent": "crucible", "model": "gemini-flash"},
             stages=[
                 StageConfig(name="s0", chain_kb=False, runner_overrides={"parallel": 8}),
-                StageConfig(name="s1", chain_kb=True),
+                StageConfig(name="s1", chain_kb=True, chain_application_workspace=True),
             ],
         )
         write_pipeline_snapshot(config, tmp_path)
@@ -299,7 +372,9 @@ class TestPipelineSnapshot:
         assert len(loaded.stages) == 2
         assert loaded.stages[0].name == "s0"
         assert loaded.stages[0].chain_kb is False
+        assert loaded.stages[0].chain_application_workspace is False
         assert loaded.stages[1].chain_kb is True
+        assert loaded.stages[1].chain_application_workspace is True
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +390,7 @@ class TestResetStagesForRerun:
             stages=[
                 StageConfig(name="s0", chain_kb=False),
                 StageConfig(name="s1", chain_kb=True),
-                StageConfig(name="s2", chain_kb=True),
+                StageConfig(name="s2", chain_kb=True, chain_application_workspace=True),
                 StageConfig(name="s3", chain_kb=False),
             ],
         )
@@ -376,6 +451,18 @@ class TestResetStagesForRerun:
         config, state = self._make_state_and_config(tmp_path)
         with pytest.raises(ValueError, match="out of range"):
             reset_stages_for_rerun(config, state, from_stage=5, pipeline_dir=tmp_path)
+
+    def test_extends_state_when_config_adds_new_stage(self, tmp_path: Path) -> None:
+        config, state = self._make_state_and_config(tmp_path)
+        state.stages = state.stages[:2]
+
+        reset_stages_for_rerun(config, state, from_stage=2, pipeline_dir=tmp_path)
+
+        assert len(state.stages) == 4
+        assert state.stages[2].index == 2
+        assert state.stages[2].name == "s2"
+        assert state.stages[2].status == "pending"
+        assert state.stages[2].experiment_dir == ""
 
 
 # ---------------------------------------------------------------------------
@@ -513,7 +600,7 @@ class TestPipelineRunner:
         config = self._make_config()
         captured_configs = []
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root):
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
             captured_configs.append(exp_config)
             return 0
 
@@ -553,7 +640,7 @@ class TestPipelineRunner:
         wait_calls = []
         sentinel = object()
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root):
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
             return 0
 
         def before_stage(exp_dir, cfg):
@@ -654,3 +741,276 @@ class TestPipelineRunner:
         assert loaded_state.stages[0].status == "failed"
         assert loaded_state.stages[0].error == "kb queue drain failed: queue stuck"
         assert loaded_state.stages[1].status == "pending"
+
+    def test_chain_application_workspace_sets_seed_env(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={
+                "agent": "cli_agent",
+                "model": "claude-sonnet-4-5",
+                "parallel": 1,
+                "app_filter": "hotel_reservation",
+                "deploy_from_source": True,
+                "application_workspace": True,
+            },
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(name="eval", chain_kb=False, chain_application_workspace=True),
+            ],
+        )
+        captured_envs = []
+
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+            captured_envs.append(extra_env or {})
+            if stage_exp_dir.name == "stage_0_build":
+                workspace = stage_exp_dir / "application_workspace"
+                workspace.mkdir(parents=True, exist_ok=True)
+                (workspace / "README.md").write_text("seed\n", encoding="utf-8")
+            return 0
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with patch.object(runner_mod, "_run_stage", side_effect=mock_run_stage):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 0
+        assert captured_envs[0] == {}
+        assert captured_envs[1]["SREGYM_APP_WORKSPACE_SEED_DIR"].endswith("/stage_0_build/application_workspace")
+
+    def test_chain_application_workspace_missing_source_fails(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={
+                "agent": "cli_agent",
+                "model": "claude-sonnet-4-5",
+                "parallel": 1,
+                "app_filter": "hotel_reservation",
+                "deploy_from_source": True,
+                "application_workspace": True,
+            },
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(name="eval", chain_kb=False, chain_application_workspace=True),
+            ],
+        )
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with patch.object(runner_mod, "_run_stage", return_value=0):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 1
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert loaded_state.stages[1].status == "failed"
+        assert "application workspace is missing" in loaded_state.stages[1].error
+
+    def test_chain_application_workspace_requires_workspace_mode(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={
+                "agent": "cli_agent",
+                "model": "claude-sonnet-4-5",
+                "parallel": 1,
+                "app_filter": "hotel_reservation",
+                "deploy_from_source": True,
+                "application_workspace": True,
+            },
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(
+                    name="eval",
+                    chain_kb=False,
+                    chain_application_workspace=True,
+                    runner_overrides={"application_workspace": False},
+                ),
+            ],
+        )
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with patch.object(runner_mod, "_run_stage", return_value=0):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 1
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert loaded_state.stages[1].status == "failed"
+        assert "requires application_workspace = 'persistent'" in loaded_state.stages[1].error
+
+    def test_chain_application_workspace_requires_persistent_workspace(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={
+                "agent": "cli_agent",
+                "model": "claude-sonnet-4-5",
+                "parallel": 1,
+                "app_filter": "hotel_reservation",
+                "deploy_from_source": True,
+                "application_workspace": "persistent",
+            },
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(
+                    name="eval",
+                    chain_kb=False,
+                    chain_application_workspace=True,
+                    runner_overrides={"application_workspace": "ephemeral"},
+                ),
+            ],
+        )
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with patch.object(runner_mod, "_run_stage", return_value=0):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 1
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert loaded_state.stages[1].status == "failed"
+        assert "requires application_workspace = 'persistent'" in loaded_state.stages[1].error
+
+    def test_chain_application_workspace_requires_matching_app_filter(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={
+                "agent": "cli_agent",
+                "model": "claude-sonnet-4-5",
+                "parallel": 1,
+                "app_filter": "hotel_reservation",
+                "deploy_from_source": True,
+                "application_workspace": True,
+            },
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(
+                    name="eval",
+                    chain_kb=False,
+                    chain_application_workspace=True,
+                    runner_overrides={"app_filter": "social_network"},
+                ),
+            ],
+        )
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+            workspace = stage_exp_dir / "application_workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            return 0
+
+        with patch.object(runner_mod, "_run_stage", side_effect=mock_run_stage):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 1
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert loaded_state.stages[1].status == "failed"
+        assert "matching app_filter values" in loaded_state.stages[1].error
+
+    def test_resume_extends_state_for_new_stage(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={"agent": "crucible", "model": "gemini-flash"},
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(name="eval", chain_kb=True),
+                StageConfig(name="eval_again", chain_kb=False),
+            ],
+        )
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with patch.object(runner_mod, "_run_stage", return_value=0):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 0
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert [stage.name for stage in loaded_state.stages] == ["build", "eval", "eval_again"]

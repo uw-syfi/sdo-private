@@ -26,6 +26,8 @@ import yaml
 
 _VARIANT_ORDERS = ("flat", "round_robin", "grouped", "adaptive")
 VariantOrder = Literal["flat", "round_robin", "grouped", "adaptive"]
+ApplicationWorkspaceMode = Literal["persistent", "ephemeral"]
+ApplicationWorkspaceSetting = ApplicationWorkspaceMode | bool
 
 
 @dataclass
@@ -67,6 +69,18 @@ def _parse_bool_env(value: str) -> bool:
     return value.strip().lower() in _BOOL_ENV_TRUE
 
 
+def application_workspace_enabled(value: ApplicationWorkspaceSetting) -> bool:
+    return application_workspace_mode(value) is not None
+
+
+def application_workspace_mode(value: ApplicationWorkspaceSetting) -> ApplicationWorkspaceMode | None:
+    if value is True:
+        return "persistent"
+    if value is False:
+        return None
+    return value
+
+
 @dataclass
 class RunnerEnv:
     judge_model_id: str = ""
@@ -74,6 +88,7 @@ class RunnerEnv:
     worker_cpu_limit: str = ""
     reuse_cluster: bool = False
     force_recreate_cluster: bool = False
+    submit_done_returns_feedback: bool = False
 
 
 @dataclass
@@ -82,6 +97,9 @@ class ExperimentConfig:
     agent: str = "crucible"
     model: str = "google-vertex:gemini-2.5-flash"
     parallel: int = 4
+    app_filter: str = ""
+    deploy_from_source: bool = False
+    application_workspace: ApplicationWorkspaceSetting = False
     enable_summary: bool = True
     no_inject_summary: bool = True
     repeat: int = 1
@@ -112,6 +130,11 @@ class ExperimentConfig:
             raise ValueError("runner.spec_names cannot be used with runner.variants.enabled")
         if self.spec_names and (self.tasklist or self.problems):
             raise ValueError("runner.spec_names is mutually exclusive with runner.tasklist and runner.problems")
+        if application_workspace_enabled(self.application_workspace):
+            if not self.app_filter:
+                raise ValueError("application_workspace requires runner.app_filter")
+            if not self.deploy_from_source:
+                raise ValueError("application_workspace requires runner.deploy_from_source = true")
         return self
 
 
@@ -156,6 +179,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         worker_cpu_limit=str(env_raw.get("worker_cpu_limit", "")),
         reuse_cluster=bool(env_raw.get("reuse_cluster", False)),
         force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
+        submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
     )
 
     agent_config = raw.get("agent", {})
@@ -164,6 +188,9 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         agent=runner.get("agent", "crucible"),
         model=runner.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=runner.get("parallel", 4),
+        app_filter=runner.get("app_filter", ""),
+        deploy_from_source=runner.get("deploy_from_source", False),
+        application_workspace=runner.get("application_workspace", False),
         enable_summary=runner.get("enable_summary", True),
         no_inject_summary=runner.get("no_inject_summary", True),
         repeat=runner.get("repeat", 1),
@@ -185,7 +212,8 @@ def resolve_config(
     """Apply environment variable overrides on top of the loaded config.
 
     Recognized env vars: MODEL, PARALLEL, JUDGE_MODEL_ID,
-    SREGYM_WORKER_CPU_LIMIT, SREGYM_PRELOAD_INFRA_IMAGES.
+    SREGYM_WORKER_CPU_LIMIT, SREGYM_REUSE_CLUSTER,
+    SREGYM_FORCE_RECREATE_CLUSTER, SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK.
     """
     if env_overrides is None:
         env_overrides = dict(os.environ)
@@ -197,6 +225,8 @@ def resolve_config(
         updates["model"] = env_overrides["MODEL"]
     if "PARALLEL" in env_overrides:
         updates["parallel"] = int(env_overrides["PARALLEL"])
+    if "SREGYM_DEPLOY_FROM_SOURCE" in env_overrides:
+        updates["deploy_from_source"] = _parse_bool_env(env_overrides["SREGYM_DEPLOY_FROM_SOURCE"])
     if "JUDGE_MODEL_ID" in env_overrides:
         env_updates["judge_model_id"] = env_overrides["JUDGE_MODEL_ID"]
     if "SREGYM_WORKER_CPU_LIMIT" in env_overrides:
@@ -205,6 +235,10 @@ def resolve_config(
         env_updates["reuse_cluster"] = _parse_bool_env(env_overrides["SREGYM_REUSE_CLUSTER"])
     if "SREGYM_FORCE_RECREATE_CLUSTER" in env_overrides:
         env_updates["force_recreate_cluster"] = _parse_bool_env(env_overrides["SREGYM_FORCE_RECREATE_CLUSTER"])
+    if "SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK" in env_overrides:
+        env_updates["submit_done_returns_feedback"] = _parse_bool_env(
+            env_overrides["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"]
+        )
     if updates or env_updates:
         new_env = dataclasses.replace(config.env, **env_updates) if env_updates else config.env
         config = dataclasses.replace(config, **updates, env=new_env)
@@ -306,6 +340,15 @@ def config_to_main_args(
 
     if config.enable_summary:
         args.append("--enable-summary")
+    if config.app_filter:
+        args.extend(["--app-filter", config.app_filter])
+    if config.deploy_from_source:
+        args.append("--deploy-from-source")
+    workspace_mode = application_workspace_mode(config.application_workspace)
+    if workspace_mode == "persistent":
+        args.append("--application-workspace")
+    elif workspace_mode is not None:
+        args.extend(["--application-workspace", workspace_mode])
     if config.no_inject_summary:
         args.append("--no-inject-summary")
     if config.repeat > 1:
@@ -365,6 +408,7 @@ def config_to_env(config: ExperimentConfig, project_root: Path) -> dict[str, str
         env["SREGYM_REUSE_CLUSTER"] = "1"
     if config.env.force_recreate_cluster:
         env["SREGYM_FORCE_RECREATE_CLUSTER"] = "1"
+    env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] = "1" if config.env.submit_done_returns_feedback else "0"
 
     env["SREGYM_PROGRESS_MODE"] = "rich"
 
@@ -403,6 +447,9 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"agent = {_toml_value(config.agent)}")
     lines.append(f"model = {_toml_value(config.model)}")
     lines.append(f"parallel = {_toml_value(config.parallel)}")
+    lines.append(f"app_filter = {_toml_value(config.app_filter)}")
+    lines.append(f"deploy_from_source = {_toml_value(config.deploy_from_source)}")
+    lines.append(f"application_workspace = {_toml_value(config.application_workspace)}")
     lines.append(f"enable_summary = {_toml_value(config.enable_summary)}")
     lines.append(f"no_inject_summary = {_toml_value(config.no_inject_summary)}")
     lines.append(f"repeat = {_toml_value(config.repeat)}")
@@ -437,6 +484,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"worker_cpu_limit = {_toml_value(config.env.worker_cpu_limit)}")
     lines.append(f"reuse_cluster = {_toml_value(config.env.reuse_cluster)}")
     lines.append(f"force_recreate_cluster = {_toml_value(config.env.force_recreate_cluster)}")
+    lines.append(f"submit_done_returns_feedback = {_toml_value(config.env.submit_done_returns_feedback)}")
 
     for agent_name, agent_cfg in config.agent_config.items():
         lines.append("")

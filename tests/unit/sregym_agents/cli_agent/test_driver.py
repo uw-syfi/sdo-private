@@ -77,6 +77,16 @@ def test_build_prompt_names_the_mcp_server() -> None:
     assert driver._SUBMIT_MCP_SERVER_NAME in prompt
 
 
+def test_build_prompt_omits_incident_memory_instructions() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+    )
+    assert "recall_incident" not in prompt
+    assert "store_incident" not in prompt
+    assert "Incident memory" not in prompt
+
+
 # --- Autonomous-submit prompt variant ---------------------------------------
 
 
@@ -98,7 +108,8 @@ def test_build_prompt_autonomous_uses_per_stage_tool_names() -> None:
     assert "kubectl" in prompt.lower()
     # Must not promise a grading verdict from the tool response.
     assert "verdict" not in prompt.lower()
-    assert "whether the answer was accepted" not in prompt
+    assert "whether your answer was accepted" in prompt
+    assert "ground-truth root cause" not in prompt
 
 
 def test_build_prompt_non_autonomous_is_unchanged() -> None:
@@ -130,6 +141,122 @@ def test_build_prompt_autonomous_mitigation_only() -> None:
     )
     assert "submit_mitigation" in prompt
     assert "submit_diagnosis" not in prompt
+
+
+def test_build_prompt_autonomous_direct_profile_omits_sds_contract() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+        autonomous_prompt_profile="direct",
+    )
+    assert ".sds/" not in prompt
+    assert ".sds/diagnose.sh" not in prompt
+    assert ".sds/playbooks/" not in prompt
+    assert "Repository-local scripts are optional, not expected" in prompt
+    assert "do not treat script-writing or repo-local tooling as part of the task" in prompt
+
+
+def test_build_prompt_autonomous_mentions_persistent_diagnostic_contract() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert ".sds/" in prompt
+    assert ".sds/diagnose.sh" in prompt
+    assert ".sds/playbooks/" in prompt
+    assert "quick to run" in prompt
+    assert "well-organized" in prompt
+    assert "good Bash script best practices" in prompt
+    assert "prefer small functions" in prompt
+    assert "dispatch into helper scripts" in prompt
+    assert "readable, maintainable, and easy to extend" in prompt
+
+
+def test_build_prompt_autonomous_requires_preflight_for_prior_diagnostics() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "Start every run with this preflight workflow" in prompt
+    assert "If `.sds/diagnose.sh` exists, run it at the beginning of the session" in prompt
+    assert "Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist" in prompt
+    assert "Only edit source files when you can point to the exact bad setting in the repository" in prompt
+    assert "repository-local diagnostic scripts" in prompt
+    assert "Read the application source code and deployment manifests" in prompt
+    assert "quickly triage the cluster and flag previously seen issues" in prompt
+    assert "print which playbook file(s) under `.sds/playbooks/` are relevant" in prompt
+
+
+def test_build_prompt_autonomous_mentions_post_submit_check_improvement() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "Only after `submit_done` returns" in prompt
+    assert "add a new diagnostic check, or enhance an existing one" in prompt
+    assert "future run" in prompt
+    assert ".sds/diagnose.sh" in prompt
+    assert ".sds/playbooks/" in prompt
+    assert "generalizable Markdown playbook" in prompt
+    assert "using what you verified from the live cluster and source tree" in prompt
+    assert "using the ground-truth feedback" not in prompt
+    assert "commit those `.sds/` changes before exiting" in prompt
+    assert "store_incident" not in prompt
+
+
+def test_build_prompt_autonomous_requires_source_fix_then_redeploy() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "Only edit source files when you can point to the exact bad setting in the repository" in prompt
+    assert "fix the real file in place first" in prompt
+    assert "apply or redeploy the updated manifests/source" in prompt
+    assert "running cluster now reflects that source change" in prompt
+    assert "Do not treat a source edit as complete until the updated deployment is live and verified" in prompt
+
+
+def test_build_prompt_autonomous_requires_multi_fault_full_health_verification() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert "Assume there may be multiple concurrent faults" in prompt
+    assert "all user traffic is healthy across all relevant paths" in prompt
+    assert "system internals also appear healthy" in prompt
+    assert "not just the first path that starts working again" in prompt
+    assert (
+        "Only call `submit_mitigation` once you are confident the application is genuinely "
+        "healthy across all relevant traffic paths and internal checks" in prompt
+    )
+
+
+def test_build_prompt_autonomous_mentions_rich_feedback_when_enabled() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+        submit_done_returns_feedback=True,
+    )
+    assert "returns rich feedback" in prompt
+    assert "ground-truth root cause" in prompt
+    assert "using the ground-truth feedback" in prompt
+
+
+def test_build_prompt_rejects_unknown_autonomous_prompt_profile() -> None:
+    with pytest.raises(ValueError, match="Unknown autonomous prompt profile"):
+        driver._build_prompt(
+            planned_stages=["diagnosis"],
+            app_info={"app_name": "a", "namespace": "n"},
+            autonomous=True,
+            autonomous_prompt_profile="unknown",
+        )
 
 
 # --- Agent factory ---------------------------------------------------------
@@ -229,6 +356,7 @@ def _args(**overrides: Any) -> argparse.Namespace:
         "model": "m",
         "logs_dir": None,
         "timeout_sec": 30,
+        "autonomous_prompt_profile": "sds",
     }
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -292,6 +420,52 @@ def test_run_autonomous_env_var_picks_autonomous_prompt(
     prompt = stub.calls[0]["prompt"]
     assert "submit_diagnosis" in prompt
     assert "submit_mitigation" in prompt
+    assert "whether your answer was accepted" in prompt
+
+
+def test_run_autonomous_submit_done_feedback_env_var_updates_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.setenv("SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK", "1")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        status_sequence=["diagnosis", "done"],
+    )
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(), agent_factory=lambda p, m, u: stub)
+
+    prompt = stub.calls[0]["prompt"]
+    assert "returns rich feedback" in prompt
+    assert "ground-truth root cause" in prompt
+
+
+def test_run_autonomous_direct_profile_uses_direct_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        status_sequence=["diagnosis", "done"],
+    )
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(autonomous_prompt_profile="direct"), agent_factory=lambda p, m, u: stub)
+
+    prompt = stub.calls[0]["prompt"]
+    assert ".sds/" not in prompt
+    assert "Repository-local scripts are optional, not expected" in prompt
 
 
 def test_run_happy_path_single_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -459,21 +633,30 @@ def test_parse_args_reads_toml_agent_config(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("MODEL_ID", raising=False)
     monkeypatch.setenv(
         "SREGYM_EXPERIMENT_AGENT_CONFIG",
-        json.dumps({"provider": "codex", "model": "my-model", "timeout_sec": 42}),
+        json.dumps(
+            {
+                "provider": "codex",
+                "model": "my-model",
+                "timeout_sec": 42,
+                "autonomous_prompt_profile": "direct",
+            }
+        ),
     )
     ns = driver._parse_args([])
     assert ns.provider == "codex"
     assert ns.model == "my-model"
     assert ns.timeout_sec == 42
+    assert ns.autonomous_prompt_profile == "direct"
 
 
 def test_parse_args_cli_flag_beats_toml(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "SREGYM_EXPERIMENT_AGENT_CONFIG",
-        json.dumps({"provider": "codex"}),
+        json.dumps({"provider": "codex", "autonomous_prompt_profile": "sds"}),
     )
-    ns = driver._parse_args(["--provider", "claude"])
+    ns = driver._parse_args(["--provider", "claude", "--autonomous-prompt-profile", "direct"])
     assert ns.provider == "claude"
+    assert ns.autonomous_prompt_profile == "direct"
 
 
 def test_parse_args_invalid_toml_json_falls_back_to_defaults(
@@ -485,6 +668,18 @@ def test_parse_args_invalid_toml_json_falls_back_to_defaults(
     assert ns.provider == "claude"
     # New whole-session default, up from the old per-stage 600s budget.
     assert ns.timeout_sec == 2000
+    assert ns.autonomous_prompt_profile == "sds"
+
+
+def test_parse_args_invalid_autonomous_prompt_profile_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "SREGYM_EXPERIMENT_AGENT_CONFIG",
+        json.dumps({"autonomous_prompt_profile": "bogus"}),
+    )
+    with pytest.raises(ValueError, match="Unknown autonomous prompt profile"):
+        driver._parse_args([])
 
 
 def test_parse_args_tolerates_sregym_launcher_flags() -> None:
@@ -500,6 +695,11 @@ def test_parse_args_tolerates_sregym_launcher_flags() -> None:
     )
     assert ns.provider == "claude"
     assert ns.timeout_sec == 2000
+
+
+def test_parse_args_rejects_removed_memory_flags() -> None:
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--memory-store", "/tmp/incidents.db"])
 
 
 def test_cli_agent_is_registered_as_external_agent() -> None:

@@ -56,7 +56,8 @@ logger = logging.getLogger(__name__)
 _POST_STAGE_TIMEOUT_S = 300
 
 _SUBMIT_MCP_SERVER_NAME = "sregym"
-_MEMORY_MCP_SERVER_NAME = "incident_memory"
+_AUTONOMOUS_PROMPT_PROFILES = frozenset({"sds", "direct"})
+_DEFAULT_AUTONOMOUS_PROMPT_PROFILE = "sds"
 
 
 # --- Pure helpers ----------------------------------------------------------
@@ -82,8 +83,8 @@ def _build_prompt(
     app_info: dict[str, Any],
     *,
     autonomous: bool = False,
-    memory_mcp_server_name: str | None = None,
-    memory_store_only: bool = False,
+    autonomous_prompt_profile: str = _DEFAULT_AUTONOMOUS_PROMPT_PROFILE,
+    submit_done_returns_feedback: bool = False,
 ) -> str:
     """Render the single-session prompt handed to the wrapped CLI agent.
 
@@ -93,7 +94,8 @@ def _build_prompt(
     response carries the grading verdict. In autonomous mode (``autonomous=True``),
     the agent instead calls per-stage ``submit_diagnosis`` / ``submit_mitigation``
     tools that return only a neutral acknowledgement, so the agent must
-    self-verify by inspecting the cluster before submitting.
+    self-verify by inspecting the cluster before submitting. Autonomous
+    prompt instructions are further selected by ``autonomous_prompt_profile``.
 
     The prompt deliberately omits the benchmark ``problem_id``: SREGym
     problem IDs are descriptive (``incorrect_image``,
@@ -101,7 +103,13 @@ def _build_prompt(
     and including them would leak the answer to the agent. App name and
     namespace are kept because they're observable from the cluster anyway.
     """
-    template_name = "session_autonomous.j2" if autonomous else "session.j2"
+    template_name = "session.j2"
+    if autonomous:
+        profile = _normalize_autonomous_prompt_profile(autonomous_prompt_profile)
+        template_name = {
+            "sds": "session_autonomous.j2",
+            "direct": "session_autonomous_direct.j2",
+        }[profile]
     return (
         _jinja_env()
         .get_template(template_name)
@@ -110,45 +118,27 @@ def _build_prompt(
             app_name=app_info.get("app_name", "<unknown>"),
             namespace=app_info.get("namespace", "<unknown>"),
             submit_mcp_server_name=_SUBMIT_MCP_SERVER_NAME,
-            memory_mcp_server_name=memory_mcp_server_name,
-            memory_store_only=memory_store_only,
+            submit_done_returns_feedback=submit_done_returns_feedback,
         )
     )
+
+
+def _normalize_autonomous_prompt_profile(profile: Any) -> str:
+    """Normalize and validate the autonomous prompt-profile selector."""
+    if profile is None:
+        return _DEFAULT_AUTONOMOUS_PROMPT_PROFILE
+    normalized = str(profile).strip().lower()
+    if not normalized:
+        return _DEFAULT_AUTONOMOUS_PROMPT_PROFILE
+    if normalized not in _AUTONOMOUS_PROMPT_PROFILES:
+        allowed = ", ".join(sorted(_AUTONOMOUS_PROMPT_PROFILES))
+        raise ValueError(f"Unknown autonomous prompt profile {profile!r}. Expected one of: {allowed}")
+    return normalized
 
 
 # --- Conductor I/O ---------------------------------------------------------
 # Conductor HTTP client lives in libs/sregym_lib/conductor.py — this driver
 # only owns the cli_agent-specific orchestration below.
-
-
-# --- Agent construction ----------------------------------------------------
-
-
-def _build_memory_mcp_server(store_path: str, merge_model: str | None = None) -> Any:
-    """Build a ``StdioMcpServer`` that launches the incident memory server as a subprocess."""
-    from agentshim.mcp_config import StdioMcpServer
-
-    args = [
-        "run",
-        "python",
-        "-m",
-        "sregym_agents.cli_agent.memory_server",
-        "--store-path",
-        store_path,
-    ]
-    if merge_model:
-        args += ["--merge-model", merge_model]
-    return StdioMcpServer(name=_MEMORY_MCP_SERVER_NAME, command="uv", args=args, env={})
-
-
-def _build_memory_mcp_server_http(port: int, store_only: bool = False) -> Any:
-    """Build an ``HttpMcpServer`` pointing to the shared memory daemon."""
-    from agentshim.mcp_config import HttpMcpServer
-
-    url = f"http://localhost:{port}/sse"
-    if store_only:
-        url += "?store_only=1"
-    return HttpMcpServer(name=_MEMORY_MCP_SERVER_NAME, url=url)
 
 
 def _default_agent_factory(
@@ -245,39 +235,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--memory-store",
-        default=toml_cfg.get("memory_store"),
+        "--autonomous-prompt-profile",
+        choices=sorted(_AUTONOMOUS_PROMPT_PROFILES),
+        default=_normalize_autonomous_prompt_profile(toml_cfg.get("autonomous_prompt_profile")),
         help=(
-            "Path to the SQLite incident memory store. "
-            "When set, the agent gains recall_incident / store_incident MCP tools "
-            "backed by the incident_memory server (optional)."
-        ),
-    )
-    parser.add_argument(
-        "--memory-merge-model",
-        default=toml_cfg.get("memory_merge_model"),
-        help=(
-            "LLM model id (litellm) used to merge duplicate incidents when storing. "
-            "Requires --memory-store. If omitted, duplicate incidents are skipped without merging."
-        ),
-    )
-    parser.add_argument(
-        "--memory-port",
-        type=int,
-        default=toml_cfg.get("memory_port"),
-        help=(
-            "Port of the shared incident memory HTTP/SSE daemon (started by run_sregym.py "
-            "before_benchmark hook). When set, agents connect to the daemon instead of "
-            "spawning a per-agent stdio subprocess. Takes precedence over --memory-store."
-        ),
-    )
-    parser.add_argument(
-        "--memory-store-only",
-        action="store_true",
-        default=bool(toml_cfg.get("memory_store_only", False)),
-        help=(
-            "When set, only store_incident is available — recall_incident is disabled. "
-            "Useful for KB-building stages where agents should not read from prior memory."
+            "Autonomous prompt variant to use when SREGYM_AUTONOMOUS_SUBMIT=1. "
+            "'sds' keeps the repo-local .sds operational-tooling workflow; "
+            "'direct' removes .sds/script-writing expectations and focuses on direct "
+            "source + cluster investigation (default: sds)."
         ),
     )
     # No-op flags accepted for compatibility with sregym's agent launcher
@@ -302,12 +267,12 @@ def _run(
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
     submit_mcp_url = f"http://localhost:{mcp_port}/submit/sse"
 
-    exp_env = os.getenv("SREGYM_EXP_ENV")
-    if exp_env:
-        if not os.path.isdir(exp_env):
-            logger.error("SREGYM_EXP_ENV=%s is not a valid directory", exp_env)
+    agent_workdir = os.getenv("SREGYM_AGENT_WORKDIR") or os.getenv("SREGYM_EXP_ENV")
+    if agent_workdir:
+        if not os.path.isdir(agent_workdir):
+            logger.error("Agent workdir %s is not a valid directory", agent_workdir)
             sys.exit(1)
-        os.chdir(exp_env)
+        os.chdir(agent_workdir)
         logger.info("Working directory: %s", os.getcwd())
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())
@@ -325,19 +290,7 @@ def _run(
         planned_stages,
     )
 
-    memory_port = getattr(args, "memory_port", None)
-    memory_store = getattr(args, "memory_store", None)
-    memory_merge_model = getattr(args, "memory_merge_model", None)
-    memory_store_only = getattr(args, "memory_store_only", False)
-    if memory_port:
-        extra_mcp_servers = [_build_memory_mcp_server_http(memory_port, store_only=memory_store_only)]
-        memory_server_name = _MEMORY_MCP_SERVER_NAME
-    elif memory_store:
-        extra_mcp_servers = [_build_memory_mcp_server(memory_store, memory_merge_model)]
-        memory_server_name = _MEMORY_MCP_SERVER_NAME
-    else:
-        extra_mcp_servers = []
-        memory_server_name = None
+    extra_mcp_servers = []
 
     if agent_factory is not None:
         factory = agent_factory
@@ -350,12 +303,13 @@ def _run(
     # agent instead calls per-stage `submit_diagnosis` / `submit_mitigation`
     # tools that return a neutral ack, and must self-verify via kubectl.
     autonomous = os.getenv("SREGYM_AUTONOMOUS_SUBMIT", "").strip() == "1"
+    submit_done_returns_feedback = os.getenv("SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK", "").strip() == "1"
     prompt = _build_prompt(
         planned_stages,
         app_info,
         autonomous=autonomous,
-        memory_mcp_server_name=memory_server_name,
-        memory_store_only=memory_store_only,
+        autonomous_prompt_profile=args.autonomous_prompt_profile,
+        submit_done_returns_feedback=submit_done_returns_feedback,
     )
     started = time.monotonic()
     crashed_with: str | None = None

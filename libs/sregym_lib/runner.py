@@ -13,7 +13,6 @@ definition; this module stays agent-agnostic.
 from __future__ import annotations
 
 import dataclasses
-import json
 import os
 import subprocess
 import sys
@@ -23,6 +22,7 @@ from typing import Protocol, cast, runtime_checkable
 
 from libs.sregym_lib.experiment import (
     ExperimentConfig,
+    application_workspace_mode,
     config_to_env,
     config_to_main_args,
     read_snapshot,
@@ -35,12 +35,12 @@ from libs.sregym_lib.pipeline import (
     PipelineState,
     StageState,
     merge_stage_config,
+    reconcile_pipeline_state,
     write_pipeline_snapshot,
     write_pipeline_state,
 )
 
-_MEMORY_AGENT = "cli_agent"
-_DEFAULT_MEMORY_PORT = 9953
+_APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
 
 
 def _load_agent_hooks(agent_name: str, project_root: Path) -> tuple[str | None, str | None]:
@@ -79,32 +79,6 @@ def _run_hook(cmd: str, env: dict[str, str], label: str, project_root: Path) -> 
     result = subprocess.run(cmd, shell=True, cwd=str(project_root), env=env)  # noqa: S602
     if result.returncode != 0:
         print(f"  ⚠️  {label} exited with code {result.returncode}", flush=True)
-
-
-def _inject_memory_defaults(env: dict[str, str], agent_name: str, log_dir: Path) -> dict[str, str]:
-    """Inject default memory daemon config for cli_agent runs.
-
-    Only applied for ``cli_agent`` and only when the experiment did not
-    already supply explicit ``memory_store`` / ``memory_port`` settings.
-    """
-    if agent_name != _MEMORY_AGENT:
-        return env
-
-    raw = env.get("SREGYM_EXPERIMENT_AGENT_CONFIG", "{}")
-    try:
-        cfg = json.loads(raw)
-    except json.JSONDecodeError:
-        cfg = {}
-    if not isinstance(cfg, dict):
-        return env
-    if "memory_store" in cfg or "memory_port" in cfg:
-        return env
-
-    env = dict(env)
-    cfg["memory_store"] = str(log_dir / "kb" / "incidents.db")
-    cfg["memory_port"] = _DEFAULT_MEMORY_PORT
-    env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(cfg)
-    return env
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +191,6 @@ def run_single_experiment(
 
     lifecycle.before_stage(exp_dir, config)
 
-    env = _inject_memory_defaults(env, config.agent, exp_dir)
     before_hook, after_hook = _load_agent_hooks(config.agent, project_root)
     if before_hook:
         _run_hook(before_hook, env, "before_benchmark", project_root)
@@ -263,17 +236,12 @@ def _run_stage(
     tasklist_path: Path | None,
     sregym_dir: Path,
     project_root: Path,
+    extra_env: dict[str, str] | None = None,
 ) -> int:
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
     env = config_to_env(exp_config, project_root)
-
-    # Pipeline stages share a single memory daemon launched from the
-    # pipeline root, so default cli_agent memory settings should point at
-    # the pipeline dir when present.
-    memory_log_dir = stage_exp_dir
-    if (stage_exp_dir.parent / "pipeline_state.json").exists():
-        memory_log_dir = stage_exp_dir.parent
-    env = _inject_memory_defaults(env, exp_config.agent, memory_log_dir)
+    if extra_env:
+        env.update(extra_env)
 
     _print_experiment_info(exp_config, env)
 
@@ -292,6 +260,41 @@ def _run_stage(
                 sig_name = f"signal {-result.returncode}"
             print(f"  ⚠️  Process was killed by {sig_name}", flush=True)
     return result.returncode
+
+
+def _resolve_workspace_seed_env(
+    *,
+    current_stage: int,
+    state: PipelineState,
+    exp_config: ExperimentConfig,
+) -> dict[str, str]:
+    """Return env vars needed to seed a stage-local application workspace."""
+    if current_stage <= 0:
+        raise ValueError("chain_application_workspace requires a previous stage to copy from")
+    if application_workspace_mode(exp_config.application_workspace) != "persistent":
+        raise ValueError("chain_application_workspace requires application_workspace = 'persistent' for the stage")
+
+    prev_state = state.stages[current_stage - 1]
+    if not prev_state.experiment_dir:
+        raise FileNotFoundError("Previous stage has no experiment directory to copy application workspace from")
+
+    prev_stage_dir = Path(prev_state.experiment_dir)
+    prev_workspace_dir = prev_stage_dir / "application_workspace"
+    if not prev_workspace_dir.is_dir():
+        raise FileNotFoundError(f"Previous stage application workspace is missing: {prev_workspace_dir}")
+
+    prev_config = read_snapshot(prev_stage_dir)
+    if application_workspace_mode(prev_config.application_workspace) != "persistent":
+        raise ValueError(
+            "chain_application_workspace requires the previous stage to enable application_workspace = 'persistent'"
+        )
+    if prev_config.app_filter != exp_config.app_filter:
+        raise ValueError(
+            "chain_application_workspace requires matching app_filter values between consecutive stages "
+            f"(previous={prev_config.app_filter!r}, current={exp_config.app_filter!r})"
+        )
+
+    return {_APP_WORKSPACE_SEED_ENV_VAR: str(prev_workspace_dir)}
 
 
 def run_pipeline(
@@ -320,6 +323,9 @@ def run_pipeline(
         print(f"Resuming pipeline from: {pipeline_dir}")
 
     assert state is not None
+    reconcile_pipeline_state(config, state)
+    write_pipeline_state(state, pipeline_dir)
+
     print(f"  stages: {len(config.stages)}")
     print()
 
@@ -329,7 +335,6 @@ def run_pipeline(
         hook_exp = merge_stage_config(config.defaults, {})
         hook_exp = resolve_config(hook_exp)
         hook_env = config_to_env(hook_exp, project_root)
-        hook_env = _inject_memory_defaults(hook_env, hook_exp.agent, pipeline_dir)
         before_hook, after_hook = _load_agent_hooks(hook_exp.agent, project_root)
 
     if before_hook:
@@ -377,6 +382,22 @@ def run_pipeline(
             print(f"Stage {i}/{len(config.stages) - 1}: {stage_name}")
             if stage_cfg.chain_kb and prev_kb_dir:
                 print(f"  KB seed: {prev_kb_dir}")
+            stage_extra_env: dict[str, str] = {}
+            try:
+                if stage_cfg.chain_application_workspace:
+                    stage_extra_env = _resolve_workspace_seed_env(
+                        current_stage=i,
+                        state=state,
+                        exp_config=exp_config,
+                    )
+                    print(f"  Application workspace seed: {stage_extra_env[_APP_WORKSPACE_SEED_ENV_VAR]}")
+            except Exception as exc:
+                stage_state.status = "failed"
+                stage_state.error = str(exc)
+                write_pipeline_state(state, pipeline_dir)
+                print(f"\nStage {i} failed before launch: {exc}")
+                print(f"Resume with: run_sregym.sh {pipeline_dir}")
+                return 1
             print("=" * 60)
 
             lifecycle.before_stage(stage_exp_dir, exp_config)
@@ -387,7 +408,14 @@ def run_pipeline(
                 drain_baseline = lifecycle.snapshot_before_drain(stage_exp_dir, exp_config)
 
             try:
-                returncode = _run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root)
+                returncode = _run_stage(
+                    exp_config,
+                    stage_exp_dir,
+                    tasklist_path,
+                    sregym_dir,
+                    project_root,
+                    stage_extra_env,
+                )
             except KeyboardInterrupt:
                 print(f"\nInterrupted during stage {i}. Saving state for resume.")
                 stage_state.status = "failed"

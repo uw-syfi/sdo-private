@@ -1211,7 +1211,7 @@ def diff_results(dirs, names=None, limit_to_index=None):
     plot_cdfs(
         res_per_dir,
         names,
-        "Time to Resolution (TTM)",
+        "Time to Resolution",
         os.path.join(output_dir, "cdf_resolution.png"),
         colors=res_colors,
     )

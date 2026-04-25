@@ -252,11 +252,12 @@ async def _async_main(args: argparse.Namespace) -> None:
     submit_mcp_url = f"http://localhost:{mcp_port}/submit/sse"
 
     exp_env = os.getenv("SREGYM_EXP_ENV")
-    if exp_env:
-        if not os.path.isdir(exp_env):
-            logger.error(f"SREGYM_EXP_ENV={exp_env} is not a valid directory")
+    agent_workdir = os.getenv("SREGYM_AGENT_WORKDIR") or exp_env
+    if agent_workdir:
+        if not os.path.isdir(agent_workdir):
+            logger.error(f"Agent workdir {agent_workdir} is not a valid directory")
             sys.exit(1)
-        os.chdir(exp_env)
+        os.chdir(agent_workdir)
         logger.info(f"Working directory: {os.getcwd()}")
     else:
         logger.warning("SREGYM_EXP_ENV is not set — running in cwd: %s", os.getcwd())

@@ -104,3 +104,4 @@ exp_config/*/*.log
 # tach cache
 .tach/
 sregym_agents/experiments/*
+!sregym_agents/experiments/hotel_reservation_workspace_cli_agent_pipeline.toml
