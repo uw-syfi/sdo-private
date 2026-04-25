@@ -26,6 +26,8 @@ import yaml
 
 _VARIANT_ORDERS = ("flat", "round_robin", "grouped", "adaptive")
 VariantOrder = Literal["flat", "round_robin", "grouped", "adaptive"]
+ApplicationWorkspaceMode = Literal["persistent", "ephemeral"]
+ApplicationWorkspaceSetting = ApplicationWorkspaceMode | bool
 
 
 @dataclass
@@ -67,6 +69,18 @@ def _parse_bool_env(value: str) -> bool:
     return value.strip().lower() in _BOOL_ENV_TRUE
 
 
+def application_workspace_enabled(value: ApplicationWorkspaceSetting) -> bool:
+    return application_workspace_mode(value) is not None
+
+
+def application_workspace_mode(value: ApplicationWorkspaceSetting) -> ApplicationWorkspaceMode | None:
+    if value is True:
+        return "persistent"
+    if value is False:
+        return None
+    return value
+
+
 @dataclass
 class RunnerEnv:
     judge_model_id: str = ""
@@ -85,7 +99,7 @@ class ExperimentConfig:
     parallel: int = 4
     app_filter: str = ""
     deploy_from_source: bool = False
-    application_workspace: bool = False
+    application_workspace: ApplicationWorkspaceSetting = False
     enable_summary: bool = True
     no_inject_summary: bool = True
     repeat: int = 1
@@ -116,7 +130,7 @@ class ExperimentConfig:
             raise ValueError("runner.spec_names cannot be used with runner.variants.enabled")
         if self.spec_names and (self.tasklist or self.problems):
             raise ValueError("runner.spec_names is mutually exclusive with runner.tasklist and runner.problems")
-        if self.application_workspace:
+        if application_workspace_enabled(self.application_workspace):
             if not self.app_filter:
                 raise ValueError("application_workspace requires runner.app_filter")
             if not self.deploy_from_source:
@@ -330,8 +344,11 @@ def config_to_main_args(
         args.extend(["--app-filter", config.app_filter])
     if config.deploy_from_source:
         args.append("--deploy-from-source")
-    if config.application_workspace:
+    workspace_mode = application_workspace_mode(config.application_workspace)
+    if workspace_mode == "persistent":
         args.append("--application-workspace")
+    elif workspace_mode is not None:
+        args.extend(["--application-workspace", workspace_mode])
     if config.no_inject_summary:
         args.append("--no-inject-summary")
     if config.repeat > 1:

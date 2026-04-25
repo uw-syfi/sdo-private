@@ -127,6 +127,34 @@ app_filter = "hotel_reservation"
 
 ---
 
+### `application_workspace`
+
+**Default:** `false`
+
+Expose an application source checkout to the agent when `deploy_from_source = true`.
+
+Accepted values:
+
+- `false`: disabled
+- `true`: legacy form, equivalent to `"persistent"`
+- `"persistent"`: keep one repo copy for the whole experiment
+- `"ephemeral"`: create a fresh repo copy for each problem iteration
+
+Also requires `app_filter` to be set.
+
+```toml
+[runner]
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "ephemeral"
+```
+
+For multi-stage pipelines, `chain_application_workspace = true` requires
+`application_workspace = "persistent"` because the previous stage must leave a
+durable workspace directory behind for the next stage to seed from.
+
+---
+
 ### `enable_summary`
 
 **Default:** `true`

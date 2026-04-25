@@ -237,6 +237,17 @@ class TestMergeStageConfig:
         assert config.env.force_recreate_cluster is True
         assert config.env.submit_done_returns_feedback is True
 
+    def test_workspace_mode_is_preserved(self) -> None:
+        defaults = {
+            "agent": "cli_agent",
+            "parallel": 1,
+            "app_filter": "hotel_reservation",
+            "deploy_from_source": True,
+            "application_workspace": "ephemeral",
+        }
+        config = merge_stage_config(defaults, {})
+        assert config.application_workspace == "ephemeral"
+
     def test_nested_override_preserves_siblings(self) -> None:
         """Override variants.count but keep variants.seed from defaults."""
         defaults = {
@@ -851,7 +862,54 @@ class TestPipelineRunner:
         assert rc == 1
         loaded_state = read_pipeline_state(pipeline_dir)
         assert loaded_state.stages[1].status == "failed"
-        assert "requires application_workspace = true" in loaded_state.stages[1].error
+        assert "requires application_workspace = 'persistent'" in loaded_state.stages[1].error
+
+    def test_chain_application_workspace_requires_persistent_workspace(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={
+                "agent": "cli_agent",
+                "model": "claude-sonnet-4-5",
+                "parallel": 1,
+                "app_filter": "hotel_reservation",
+                "deploy_from_source": True,
+                "application_workspace": "persistent",
+            },
+            stages=[
+                StageConfig(name="build", chain_kb=False),
+                StageConfig(
+                    name="eval",
+                    chain_kb=False,
+                    chain_application_workspace=True,
+                    runner_overrides={"application_workspace": "ephemeral"},
+                ),
+            ],
+        )
+
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+
+        with patch.object(runner_mod, "_run_stage", return_value=0):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build"),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 1
+        loaded_state = read_pipeline_state(pipeline_dir)
+        assert loaded_state.stages[1].status == "failed"
+        assert "requires application_workspace = 'persistent'" in loaded_state.stages[1].error
 
     def test_chain_application_workspace_requires_matching_app_filter(self, sregym_dir, tmp_path: Path) -> None:
         config = PipelineConfig(

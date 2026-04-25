@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from libs.sregym_lib.experiment import (
     ExperimentConfig,
+    application_workspace_mode,
     config_to_env,
     config_to_main_args,
     read_snapshot,
@@ -230,7 +231,6 @@ def _run_stage(
 ) -> int:
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
     env = config_to_env(exp_config, project_root)
-
     if extra_env:
         env.update(extra_env)
 
@@ -262,8 +262,8 @@ def _resolve_workspace_seed_env(
     """Return env vars needed to seed a stage-local application workspace."""
     if current_stage <= 0:
         raise ValueError("chain_application_workspace requires a previous stage to copy from")
-    if not exp_config.application_workspace:
-        raise ValueError("chain_application_workspace requires application_workspace = true for the stage")
+    if application_workspace_mode(exp_config.application_workspace) != "persistent":
+        raise ValueError("chain_application_workspace requires application_workspace = 'persistent' for the stage")
 
     prev_state = state.stages[current_stage - 1]
     if not prev_state.experiment_dir:
@@ -275,8 +275,10 @@ def _resolve_workspace_seed_env(
         raise FileNotFoundError(f"Previous stage application workspace is missing: {prev_workspace_dir}")
 
     prev_config = read_snapshot(prev_stage_dir)
-    if not prev_config.application_workspace:
-        raise ValueError("chain_application_workspace requires the previous stage to enable application_workspace")
+    if application_workspace_mode(prev_config.application_workspace) != "persistent":
+        raise ValueError(
+            "chain_application_workspace requires the previous stage to enable application_workspace = 'persistent'"
+        )
     if prev_config.app_filter != exp_config.app_filter:
         raise ValueError(
             "chain_application_workspace requires matching app_filter values between consecutive stages "
