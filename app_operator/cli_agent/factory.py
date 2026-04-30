@@ -8,6 +8,7 @@ def create_agent_from_config(
     model_override: str | None = None,
     config_path: str | None = None,
     config: Config | None = None,
+    verbose: bool = False,
 ) -> BaseCodingAgent:
     """Create a coding agent based on configuration file.
 
@@ -44,6 +45,7 @@ def create_agent_from_config(
         if backend_kwargs is None:
             backend_kwargs = {}
         backend_kwargs["rlm_mode"] = config.rlm.mode
+        backend_kwargs["verbose"] = verbose
     try:
         return CodingAgent(provider=backend, model=model, backend_kwargs=backend_kwargs)
     except ValueError as exc:

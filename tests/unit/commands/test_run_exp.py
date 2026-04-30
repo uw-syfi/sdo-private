@@ -1,6 +1,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
 try:
@@ -9,6 +10,9 @@ except ImportError:
     import tomli as tomllib
 
 import pytest
+
+if TYPE_CHECKING:
+    from rich.progress import Progress, TaskID
 
 from app_operator.commands.run_exp import (
     AppResult,
@@ -20,6 +24,7 @@ from app_operator.commands.run_exp import (
     _write_toml_simple,
     add_arguments,
     run_command,
+    run_experiment_task,
 )
 from app_operator.core import load_config
 
@@ -271,6 +276,51 @@ class TestAddArguments:
         add_arguments(parser)
         args = parser.parse_args(["exp-a", "--rerun", "all"])
         assert args.rerun == "all"
+
+    def test_verbose_default_and_flag(self):
+        """--verbose defaults to false and can be enabled."""
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        assert parser.parse_args(["exp-a"]).verbose is False
+        assert parser.parse_args(["exp-a", "--verbose"]).verbose is True
+
+
+class TestRunExperimentVerbose:
+    def test_run_experiment_task_appends_verbose_to_run_command(self, tmp_path, monkeypatch):
+        """Verbose experiment runs pass --verbose to the underlying app_operator run command."""
+        monkeypatch.chdir(tmp_path)
+        app = tmp_path / "apps" / "hotelReservation"
+        app.mkdir(parents=True)
+        commands: list[list[str]] = []
+
+        class DummyProgress:
+            def update(self, *args, **kwargs):
+                pass
+
+            def start_task(self, *args, **kwargs):
+                pass
+
+            def advance(self, *args, **kwargs):
+                pass
+
+        def fake_run(cmd, *args, **kwargs):
+            commands.append(cmd)
+            return type("Result", (), {"returncode": 0})()
+
+        with patch("app_operator.commands.run_exp.subprocess.run", side_effect=fake_run):
+            run_experiment_task(
+                str(app),
+                "exp-a",
+                cast("Progress", DummyProgress()),
+                cast("TaskID", object()),
+                cast("TaskID", object()),
+                tmp_path / "logs",
+                verbose=True,
+            )
+
+        run_cmds = [cmd for cmd in commands if "run" in cmd]
+        assert run_cmds
+        assert run_cmds[-1][-1] == "--verbose"
 
 
 class TestResolveExperiment:

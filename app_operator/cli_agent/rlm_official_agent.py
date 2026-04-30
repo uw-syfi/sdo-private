@@ -18,7 +18,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agentshim import BaseCodingAgent
 from agentshim.base import register_provider
@@ -585,22 +585,24 @@ class RLMOfficialAgent(BaseCodingAgent):
     def _run_rlm(self, prompt: str, repo_path: Path, timeout: int) -> str:
         """Run the official RLM library for fix/analysis tasks."""
         try:
-            from rlm import RLM  # type: ignore[import-not-found]
-            from rlm.logger import RLMLogger  # type: ignore[import-not-found]
+            from rlm import RLM as _RLM  # type: ignore[import-not-found]
+            from rlm.logger import RLMLogger as _RLMLogger  # type: ignore[import-not-found]
         except ImportError as exc:
             logger.error(f"[RLM-Official] rlm library not installed: {exc}")
             return f"rlm library not available: {exc}"
+        RLM = cast("Any", _RLM)
+        RLMLogger = cast("Any", _RLMLogger)
 
         custom_tools = _build_custom_tools(repo_path)
         context_text = _build_context_text(repo_path)
 
         log_dir = str(repo_path / ".sds" / "rlm_logs")
         os.makedirs(log_dir, exist_ok=True)
-        rlm_logger = RLMLogger(log_dir=log_dir)
+        rlm_logger: Any = RLMLogger(log_dir=log_dir)
 
         backend, backend_kwargs = self._resolve_backend()
 
-        rlm = RLM(
+        rlm: Any = RLM(
             backend=backend,  # type: ignore[arg-type]
             backend_kwargs=backend_kwargs,
             other_backends=[backend],  # type: ignore[list-item]
@@ -617,6 +619,7 @@ class RLMOfficialAgent(BaseCodingAgent):
         root_prompt = _SDS_ROOT_PROMPT_PREFIX + prompt
         last_exc: Exception | None = None
         try:
+            result: Any = None
             for attempt in range(1 + len(self._RATE_LIMIT_BACKOFF)):
                 try:
                     result = rlm.completion(prompt=context_text, root_prompt=root_prompt)

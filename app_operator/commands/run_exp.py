@@ -144,6 +144,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Rerun experiments: 'failed' reruns only non-successful apps, 'all' reruns everything",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Write Rich-formatted RLM iteration output to .sds/logs/rlm_verbose.log in each experiment workdir",
+    )
 
 
 def _extract_results(exp_dir: Path) -> dict[str, Any]:
@@ -399,6 +405,7 @@ def run_experiment_task(
     experiment_config: dict[str, Any] | None = None,
     repeat_idx: int = 0,
     total_repeats: int = 1,
+    verbose: bool = False,
 ) -> AppResult:
     # Make the task visible and start the timer
     progress.update(task_id, visible=True)
@@ -488,6 +495,8 @@ def run_experiment_task(
 
         # 2. Run Experiment
         run_cmd = [sys.executable, "-m", "app_operator", "run", str(exp_dir)]
+        if verbose:
+            run_cmd.append("--verbose")
 
         # Phase timing state
         run_start = time.monotonic()
@@ -611,6 +620,7 @@ def run_app_repeats(
     log_dir: Path,
     experiment_config: dict[str, Any] | None = None,
     total_repeats: int = 1,
+    verbose: bool = False,
 ) -> list[AppResult]:
     results: list[AppResult] = []
     for repeat_idx, task_id in repeat_task_ids:
@@ -624,6 +634,7 @@ def run_app_repeats(
             experiment_config,
             repeat_idx,
             total_repeats,
+            verbose=verbose,
         )
         results.append(result)
     return results
@@ -795,6 +806,7 @@ def run_command(args: argparse.Namespace) -> int:
                         log_dir,
                         config,
                         repeats,
+                        verbose=getattr(args, "verbose", False),
                     )
                     futures[future] = (app, exp_name, log_dir, config)
 

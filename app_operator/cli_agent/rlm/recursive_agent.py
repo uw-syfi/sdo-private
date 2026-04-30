@@ -21,6 +21,7 @@ from app_operator.cli_agent.rlm.environment import (
     RLMEnvironment,
     validate_file_refs,
 )
+from app_operator.cli_agent.rlm.verbose import VerbosePrinter
 from app_operator.core import logger
 from app_operator.prompts import DSPyConfigProtocol, render_fix_error_task_prompt
 from app_operator.trajectory import TrajectoryRecorderProtocol
@@ -53,6 +54,8 @@ class RecursiveDeploymentAgent:
         specialist_dispatcher: Callable[[str, str], str] | None = None,
         available_specialists: dict[str, str] | None = None,
         rlm_mode: str = "compatibility",
+        verbose: bool = False,
+        log_file: str | None = None,
     ):
         """Initialize RLM deployment agent.
 
@@ -89,6 +92,9 @@ class RecursiveDeploymentAgent:
         self.specialist_dispatcher = specialist_dispatcher
         self.available_specialists = dict(available_specialists or {})
         self.rlm_mode = rlm_mode
+        self.verbose = verbose
+        self.log_file = log_file
+        self._printer = VerbosePrinter(enabled=verbose, log_file=log_file)
         self.rlm_env: RLMEnvironment | None = None
         self._system_prompt: str = ""
         self._messages: list[dict[str, str]] = []
@@ -350,6 +356,8 @@ class RecursiveDeploymentAgent:
             specialist_dispatcher=self.specialist_dispatcher,
             available_specialists=self.available_specialists,
             rlm_mode=self.rlm_mode,
+            verbose=self.verbose,
+            log_file=self.log_file,
         )
         child._llm_client = self._llm_client
         child._shared_call_history = self._shared_call_history
@@ -515,6 +523,7 @@ class RecursiveDeploymentAgent:
         self._messages: list[dict[str, str]] = [
             {"role": "system", "content": self._system_prompt},
         ]
+        self._printer.header(self.llm_provider, self.max_iterations, self._initial_depth)
 
         if self.trajectory:
             self.trajectory.add_user_message(self._system_prompt)
@@ -552,6 +561,7 @@ class RecursiveDeploymentAgent:
         response = ""
         for iteration in range(self.max_iterations):
             logger.info(f"[RLM] Iteration {iteration + 1}/{self.max_iterations}")
+            self._printer.iteration(iteration + 1, self.max_iterations)
 
             # After several consecutive explore steps, nudge (not override) the prompt.
             if consecutive_explore_count >= self.consecutive_explore_limit:
@@ -563,6 +573,7 @@ class RecursiveDeploymentAgent:
                     f"Previous context: {current_prompt}"
                 )
 
+            self._printer.llm_call(self.llm_provider, len(current_prompt))
             response = self._call_llm(current_prompt)
 
             if self._should_compact():
@@ -598,14 +609,20 @@ class RecursiveDeploymentAgent:
                 consecutive_explore_count += 1
 
             if action == ActionType.EXECUTE_CODE:
+                code = parsed["code"]
+                description = parsed.get("description", "")
                 try:
-                    result = self.rlm_env.execute_code(parsed["code"], parsed.get("description", ""))
+                    result = self.rlm_env.execute_code(code, description)
                     consecutive_errors = 0
+                    self._printer.code_execution(description, code, result)
                 except RuntimeError as e:
                     result = f"Code execution error: {e}"
                     consecutive_errors += 1
+                    self._printer.code_execution(description, code, result, error=True)
                     if self.max_consecutive_errors is not None and consecutive_errors >= self.max_consecutive_errors:
                         logger.warning(f"[RLM] {consecutive_errors} consecutive errors, stopping loop")
+                        if self._initial_depth == 0:
+                            self._printer.close()
                         return result
                 feedback = self._metadata_feedback("last_result", "Code execution result")
                 current_prompt = f"{feedback}\n\nContinue or provide FINAL_ANSWER."
@@ -618,6 +635,7 @@ class RecursiveDeploymentAgent:
                     llm_function=self._call_recursive_subtask,
                 )
                 self.rlm_env.set_repl_value("last_recursive_result", result)
+                self._printer.recursive_call(parsed.get("subtask", ""), result)
                 feedback = self._metadata_feedback("last_recursive_result", "Recursive subcall result")
                 current_prompt = f"{feedback}\n\nContinue or provide FINAL_ANSWER."
 
@@ -627,6 +645,7 @@ class RecursiveDeploymentAgent:
                 result = self._run_specialist_call(specialist, task_text)
                 self.rlm_env.set_repl_value("last_specialist_name", specialist)
                 self.rlm_env.set_repl_value("last_specialist_result", result)
+                self._printer.specialist_call(specialist, task_text, result)
                 feedback = self._metadata_feedback("last_specialist_result", f"Specialist result from `{specialist}`")
                 current_prompt = f"{feedback}\n\nContinue or provide FINAL_ANSWER."
 
@@ -644,14 +663,21 @@ class RecursiveDeploymentAgent:
                     self._finalization_type = "final_answer"
                     answer = parsed.get("answer", response)
                 answer = self._auto_validate_deploy_sh(repo_path, answer)
+                self._printer.final_answer(answer)
+                token_usage = self.get_rlm_statistics().get("token_usage", {})
+                self._printer.summary(iteration + 1, token_usage)
 
                 if self.trajectory:
                     self.trajectory.add_assistant_message(
                         f"RLM Statistics: {json.dumps(self.get_rlm_statistics())}", duration=0.0
                     )
+                if self._initial_depth == 0:
+                    self._printer.close()
                 return answer
 
         logger.warning(f"[RLM] Max iterations ({self.max_iterations}) reached without FINAL_ANSWER")
+        if self._initial_depth == 0:
+            self._printer.close()
         return response
 
     def _run_specialist_call(self, specialist: str, task: str) -> str:

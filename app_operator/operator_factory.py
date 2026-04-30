@@ -25,6 +25,7 @@ def create_operator(shared_kwargs: dict[str, Any], config: Config) -> OperatorBa
         OperatorBase: An operator instance for the configured runtime.
     """
     impl = config.runtime.impl
+    verbose = shared_kwargs.pop("verbose", False)
 
     if impl == "pydantic_ai":
         pai_mod = importlib.import_module("app_operator.pydantic_ai")
@@ -32,5 +33,5 @@ def create_operator(shared_kwargs: dict[str, Any], config: Config) -> OperatorBa
 
     # Fall through to the default cli_agent runtime.
     cli_mod = importlib.import_module("app_operator.cli_agent")
-    agent = cli_mod.create_agent_from_config(shared_kwargs["repo_path"], config=config)
+    agent = cli_mod.create_agent_from_config(shared_kwargs["repo_path"], config=config, verbose=verbose)
     return cli_mod.AppOperator(**shared_kwargs, agent=agent)

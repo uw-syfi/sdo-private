@@ -15,6 +15,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="FILE",
         help="Path to configuration file (default: sds.toml in target dir)",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Write Rich-formatted RLM iteration output to .sds/logs/rlm_verbose.log",
+    )
 
 
 def run_command(args: argparse.Namespace) -> int:
@@ -42,6 +48,7 @@ def run_command(args: argparse.Namespace) -> int:
         "health_check_max_count": config.operator.monitoring_max_iters,
         "max_deployment_attempts": config.operator.deployment_max_iters,
         "config": config,
+        "verbose": getattr(args, "verbose", False),
     }
 
     try:
