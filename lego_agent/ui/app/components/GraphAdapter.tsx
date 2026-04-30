@@ -26,7 +26,37 @@ interface GraphAdapterProps {
 }
 
 /**
- * Split a step segment into per-worker segments using __LEGO_WORKER_START__ markers.
+ * Extract the numeric index from a v2 stage name ("agent_0" → 0, "fan_out_1" → 1).
+ * Returns -1 if the name does not end with a valid integer.
+ */
+export function stageIndex(name: string): number {
+  const parts = name.split('_');
+  const idx = parseInt(parts[parts.length - 1], 10);
+  return isNaN(idx) ? -1 : idx;
+}
+
+/**
+ * Split a coalesced script_execution string into per-stage segments using
+ * v2 __LEGO_TASK_START__ markers. Each segment spans from one marker to the
+ * next (or end). Returns a map of stageIndex → content string.
+ */
+export function extractStageSegments(data: string): Map<number, string> {
+  const segments = new Map<number, string>();
+  const matches = [...data.matchAll(/(?:^|\n)__LEGO_TASK_START__ (\S+) \S+/g)];
+
+  for (let i = 0; i < matches.length; i++) {
+    const idx = stageIndex(matches[i][1]);
+    if (idx < 0) continue;
+    const start = matches[i].index!;
+    const end = i + 1 < matches.length ? matches[i + 1].index! : data.length;
+    segments.set(idx, data.slice(start, end));
+  }
+
+  return segments;
+}
+
+/**
+ * Split a stage segment into per-worker segments using __LEGO_WORKER_START__ markers.
  * Returns a map of workerIndex → content string, or an empty map if no markers found.
  */
 function extractWorkerSegments(data: string): Map<number, string> {
@@ -43,29 +73,35 @@ function extractWorkerSegments(data: string): Map<number, string> {
   return segments;
 }
 
-/**
- * Split a coalesced script_execution data string into per-step segments.
- * Each segment spans from one __LEGO_STEP_START__ marker to the next (or end).
- * Returns a map of stepIndex → content string.
- */
-function extractStepSegments(data: string): Map<number, string> {
-  const segments = new Map<number, string>();
-  const matches = [...data.matchAll(/(?:^|\n)__LEGO_STEP_START__ (\d+)/g)];
-
-  for (let i = 0; i < matches.length; i++) {
-    const step = parseInt(matches[i][1], 10);
-    const start = matches[i].index!;
-    const end = i + 1 < matches.length ? matches[i + 1].index! : data.length;
-    segments.set(step, data.slice(start, end));
-  }
-
-  return segments;
+interface PipelineStage {
+  name: string;
+  input_queue: string;
+  output_queue: string | null;
 }
 
-export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
-  const { setNodes, setEdges, addNodes, removeNodes, updateNodeStatus, updateNodeThought, addNodeLog } = useGraphStore();
+// Edge style presets for queue states
+const QUEUE_EDGE_IDLE = {
+  animated: false,
+  style: { stroke: '#475569', strokeWidth: 1.5 },
+  labelStyle: { fill: '#94a3b8', fontSize: 10, fontFamily: 'monospace' },
+  labelBgStyle: { fill: '#1e293b', fillOpacity: 0.9 },
+  labelBgPadding: [4, 6] as [number, number],
+  labelBgBorderRadius: 4,
+};
 
-  // Current chain step index (0-based), advanced by __LEGO_STEP_START__ markers.
+const QUEUE_EDGE_ACTIVE = {
+  animated: true,
+  style: { stroke: '#10b981', strokeWidth: 2 },
+  labelStyle: { fill: '#34d399', fontSize: 10, fontFamily: 'monospace' },
+  labelBgStyle: { fill: '#064e3b', fillOpacity: 0.95 },
+  labelBgPadding: [4, 6] as [number, number],
+  labelBgBorderRadius: 4,
+};
+
+export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
+  const { setNodes, setEdges, addNodes, removeNodes, updateNodeStatus, updateNodeThought, addNodeLog, updateEdge } = useGraphStore();
+
+  // Current chain step index (0-based), advanced by __LEGO_TASK_START__ markers.
   // Used only for status updates (active/done), NOT for log routing.
   const currentStepRef = useRef<number>(0);
 
@@ -73,12 +109,20 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
   // Built during graph init; stable even after fan_out template replacement.
   const stepNodeMapRef = useRef<Map<number, string>>(new Map());
 
+  // Populated from __LEGO_PIPELINE_INIT__: maps queue name → edge ID.
+  const queueEdgeMapRef = useRef<Map<string, string>>(new Map());
+
+  // Pipeline stage list from __LEGO_PIPELINE_INIT__, used for queue→edge routing.
+  const pipelineStagesRef = useRef<PipelineStage[]>([]);
+
   // 1. Initialize Graph
   useEffect(() => {
     if (!graphConfig || !graphConfig.workflow) return;
 
     currentStepRef.current = 0;
     stepNodeMapRef.current = new Map();
+    queueEdgeMapRef.current = new Map();
+    pipelineStagesRef.current = [];
 
     const newNodes: Node<AgentNodeData>[] = [];
     const newEdges: Edge[] = [];
@@ -195,13 +239,41 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
     // ----------------------------------------------------------------
     if (evt.type === 'script_execution' && typeof evt.data === 'string') {
 
+      // --- __LEGO_PIPELINE_INIT__ <json> ---
+      // Wire queue names onto inter-stage edges so they can be animated.
+      // Processed first so the queue map is ready before TASK_* handlers run.
+      const pipelineInitMatch = evt.data.match(/(?:^|\n)__LEGO_PIPELINE_INIT__ (.+)/);
+      if (pipelineInitMatch) {
+        try {
+          const stages: PipelineStage[] = JSON.parse(pipelineInitMatch[1]);
+          pipelineStagesRef.current = stages;
+          const newQueueEdgeMap = new Map<string, string>();
+
+          for (let i = 0; i < stages.length - 1; i++) {
+            const { output_queue } = stages[i];
+            if (!output_queue) continue;
+            const srcNodeId = stepNodeMapRef.current.get(stageIndex(stages[i].name));
+            const dstNodeId = stepNodeMapRef.current.get(stageIndex(stages[i + 1].name));
+            if (srcNodeId && dstNodeId) {
+              const edgeId = `${srcNodeId}-${dstNodeId}`;
+              newQueueEdgeMap.set(output_queue, edgeId);
+              updateEdge(edgeId, { label: output_queue, ...QUEUE_EDGE_IDLE });
+            }
+          }
+
+          queueEdgeMapRef.current = newQueueEdgeMap;
+        } catch {
+          // malformed JSON — ignore
+        }
+      }
+
       // Advance currentStepRef first so __LEGO_FANOUT_INIT__ can look up the
       // correct group node even when both markers arrive in the same chunk.
-      const stepStartMatches = [...evt.data.matchAll(/(?:^|\n)__LEGO_STEP_START__ (\d+)/g)];
-      if (stepStartMatches.length > 0) {
-        const maxStep = Math.max(...stepStartMatches.map(m => parseInt(m[1], 10)));
-        if (maxStep > currentStepRef.current) {
-          currentStepRef.current = maxStep;
+      const taskStartMatches = [...evt.data.matchAll(/(?:^|\n)__LEGO_TASK_START__ (\S+) \S+/g)];
+      if (taskStartMatches.length > 0) {
+        const maxIdx = Math.max(...taskStartMatches.map(m => stageIndex(m[1])));
+        if (maxIdx >= 0 && maxIdx > currentStepRef.current) {
+          currentStepRef.current = maxIdx;
         }
       }
 
@@ -238,13 +310,13 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
       // Re-read nodes after any mutations above.
       const freshNodes = useGraphStore.getState().nodes;
 
-      // --- __LEGO_STEP_START__ <n> --- (status updates now that freshNodes includes workers)
-      if (stepStartMatches.length > 0) {
-        const maxStep = currentStepRef.current; // already advanced above
-        const stepNode = getStepNodeFrom(freshNodes, maxStep);
+      // --- __LEGO_TASK_START__ <name> <id> --- mark stage active, prior stages done
+      if (taskStartMatches.length > 0) {
+        const maxIdx = currentStepRef.current;
+        const stepNode = getStepNodeFrom(freshNodes, maxIdx);
         if (stepNode) updateNodeStatus(stepNode.id, 'active');
 
-        for (let i = 0; i < maxStep; i++) {
+        for (let i = 0; i < maxIdx; i++) {
           const prev = getStepNodeFrom(freshNodes, i);
           if (prev?.type === 'group') {
             freshNodes
@@ -254,13 +326,22 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
             updateNodeStatus(prev.id, 'done');
           }
         }
+
+        // A task was dequeued → its input queue is now draining; de-animate edge.
+        for (const m of taskStartMatches) {
+          const stage = pipelineStagesRef.current.find(s => s.name === m[1]);
+          if (stage) {
+            const edgeId = queueEdgeMapRef.current.get(stage.input_queue);
+            if (edgeId) updateEdge(edgeId, QUEUE_EDGE_IDLE);
+          }
+        }
       }
 
-      // --- __LEGO_STEP_END__ <n> --- (status updates only)
-      const endMatches = [...evt.data.matchAll(/(?:^|\n)__LEGO_STEP_END__ (\d+)/g)];
-      for (const m of endMatches) {
-        const stepIdx = parseInt(m[1], 10);
-        const stepNode = getStepNodeFrom(freshNodes, stepIdx);
+      // --- __LEGO_TASK_DONE__ <name> <id> --- mark stage done
+      const taskDoneMatches = [...evt.data.matchAll(/(?:^|\n)__LEGO_TASK_DONE__ (\S+) \S+/g)];
+      for (const m of taskDoneMatches) {
+        const idx = stageIndex(m[1]);
+        const stepNode = getStepNodeFrom(freshNodes, idx);
         if (stepNode?.type === 'group') {
           freshNodes
             .filter(n => n.parentId === stepNode.id)
@@ -268,25 +349,47 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
         } else if (stepNode) {
           updateNodeStatus(stepNode.id, 'done');
         }
+
+        // Task output was enqueued → animate the outbound edge.
+        const stage = pipelineStagesRef.current.find(s => s.name === m[1]);
+        if (stage?.output_queue) {
+          const edgeId = queueEdgeMapRef.current.get(stage.output_queue);
+          if (edgeId) updateEdge(edgeId, QUEUE_EDGE_ACTIVE);
+        }
+      }
+
+      // --- __LEGO_STAGE_IDLE__ <name> --- queue drained; mark done if not already
+      const stageIdleMatches = [...evt.data.matchAll(/(?:^|\n)__LEGO_STAGE_IDLE__ (\S+)/g)];
+      for (const m of stageIdleMatches) {
+        const idx = stageIndex(m[1]);
+        const stepNode = getStepNodeFrom(freshNodes, idx);
+        if (stepNode && stepNode.data.status !== 'done') {
+          if (stepNode.type === 'group') {
+            freshNodes
+              .filter(n => n.parentId === stepNode.id && n.data.status !== 'done')
+              .forEach(child => updateNodeStatus(child.id, 'done'));
+          } else {
+            updateNodeStatus(stepNode.id, 'done');
+          }
+        }
       }
 
       // --- Segmented log routing ---
-      // The coalesced string may span multiple chain steps. Split it at each
-      // __LEGO_STEP_START__ boundary so each step's content is routed only to
-      // its own node — not to whichever step happens to be current at render time.
+      // Split at each __LEGO_TASK_START__ boundary so each stage's content is
+      // routed only to its own node, not whichever stage is current at render time.
       if (stepNodeMapRef.current.size > 0) {
-        const segments = extractStepSegments(evt.data);
+        const segments = extractStageSegments(evt.data);
 
-        for (const [stepIdx, content] of segments) {
-          // Synthetic LogItem: same ID as the coalesced parent + step suffix
+        for (const [stageIdx, content] of segments) {
+          // Synthetic LogItem: same ID as the coalesced parent + stage suffix
           // so the upsert in addNodeLog updates in place rather than duplicating.
           const segLog: LogItem = {
             ...lastLog,
-            id: `${lastLog.id}_s${stepIdx}`,
+            id: `${lastLog.id}_s${stageIdx}`,
             event: { ...lastLog.event, data: content },
           };
 
-          const stepNode = getStepNodeFrom(freshNodes, stepIdx);
+          const stepNode = getStepNodeFrom(freshNodes, stageIdx);
           if (stepNode?.type === 'group') {
             const workerSegments = extractWorkerSegments(content);
             if (workerSegments.size > 0) {
@@ -297,13 +400,13 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
                 if (workerNode) {
                   addNodeLog(workerNode.id, {
                     ...lastLog,
-                    id: `${lastLog.id}_s${stepIdx}_w${workerIdx}`,
+                    id: `${lastLog.id}_s${stageIdx}_w${workerIdx}`,
                     event: { ...lastLog.event, data: workerContent },
                   });
                 }
               }
             } else {
-              // No worker markers — broadcast to all children (non-fan_out groups).
+              // No worker markers — broadcast to all children.
               freshNodes
                 .filter(n => n.parentId === stepNode.id)
                 .forEach(child => addNodeLog(child.id, segLog));
@@ -353,7 +456,7 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs, addNodeLog, addNodes, removeNodes, updateNodeStatus, updateNodeThought]);
+  }, [logs, addNodeLog, addNodes, removeNodes, updateNodeStatus, updateNodeThought, updateEdge]);
 
   return null;
 }

@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -159,7 +160,7 @@ class LegoAgentEngine:
                 self.io.info("")
                 self._thinking_started = False
 
-            if not final_content:
+            if not final_content and final_response_data is None:
                 # Fallback if streaming failed to capture or model didn't stream
                 logger.warning("Streaming yielded no content, running invoke...")
                 result = await agent.ainvoke({"messages": messages})
@@ -205,6 +206,7 @@ class LegoAgentEngine:
         if response.status == "ready":
             if not response.yaml_config:
                 raise ValueError("Status is ready but no yaml_config provided.")
+            response.yaml_config = self._extract_yaml_block(response.yaml_config)
             self._validate_config(response.yaml_config)
 
         return response
@@ -235,13 +237,16 @@ class LegoAgentEngine:
         # Generate Python launcher script
         launcher_script = (
             f"#!/usr/bin/env python3\n"
+            f"import os\n"
             f"import sys\n"
             f"from pathlib import Path\n"
-            f"from lego_agent.backend.runtime import run_yaml\n\n"
+            f"from lego_agent.backend.pipeline_builder import run_yaml_v2\n\n"
             f"MAX_ITERATIONS = {self.loop_bound}\n\n"
             f"if __name__ == '__main__':\n"
             f"    config_path = Path(__file__).parent / {Path(config_path).name!r}\n"
-            f"    run_yaml(config_path)\n"
+            f"    repo_root = Path(__file__).resolve().parents[2]\n"
+            f"    os.chdir(repo_root)\n"
+            f"    run_yaml_v2(str(config_path))\n"
         )
 
         script_path = self.storage.write_script(launcher_script)
@@ -303,17 +308,8 @@ class LegoAgentEngine:
                 messages.append(AIMessage(content=final_content))
                 messages.append(HumanMessage(content=repair_msg_text))
 
-                result: Any = await agent.ainvoke({"messages": messages})  # pyright: ignore[reportUnknownMemberType]
-                last_msg_content = result["messages"][-1].content
-                final_content = self._extract_message_content(last_msg_content)
-
-                self.io.info("")
-                response = parse_lego_agent_response(final_content)
-                # Verify repair
-                if response.status == "ready":
-                    if not response.yaml_config:
-                        raise ValueError("Status is ready but no yaml_config provided.") from None
-                    self._validate_config(response.yaml_config)
+                final_content, final_response_data = await self._run_clarification_round(agent, messages)
+                response = self._parse_response(final_content, final_response_data)
 
             if response.status == "clarify":
                 self.io.render_info("Agent needs clarification:")
@@ -326,6 +322,21 @@ class LegoAgentEngine:
                 return self._handle_ready_response(response, qa_pairs)
 
         raise AgentError("Max clarifications exceeded without reaching 'ready' state.")
+
+    @staticmethod
+    def _extract_yaml_block(text: str) -> str:
+        """Strip prose and code fences that LLMs sometimes prepend to yaml_config."""
+        if not text:
+            return text
+        # Strip markdown code fence wrapper (```yaml ... ``` or ``` ... ```)
+        fence = re.search(r'```(?:yaml|json)?\s*\n(.*?)(?:\n```|$)', text.strip(), re.DOTALL)
+        if fence:
+            text = fence.group(1).strip()
+        # Strip any prose before the first 'workflow:' at the start of a line
+        workflow = re.search(r'(?:^|\n)(workflow:.*)', text, re.DOTALL)
+        if workflow:
+            return workflow.group(1)
+        return text
 
     def _validate_config(self, yaml_text: str) -> None:
         """Validate the generated YAML config."""
