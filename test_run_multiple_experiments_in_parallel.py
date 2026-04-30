@@ -1,10 +1,10 @@
-import unittest
+import os
 import subprocess
 import time
-import os
+import unittest
+
 
 class TestRunExpParallel(unittest.TestCase):
-
     def setUp(self):
         # Create a mock sds_operator script
         sds_operator_script = """#!/bin/bash
@@ -52,5 +52,6 @@ fi
         os.remove("exp1.sh")
         os.remove("exp2.sh")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

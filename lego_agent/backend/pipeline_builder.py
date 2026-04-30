@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from loguru import logger
@@ -142,7 +142,8 @@ def _make_summarize_worker(
     async def worker_fn(task: Task) -> list[Task]:
         input_data = _input_value(task)
         if isinstance(input_data, list):
-            combined = "\n\n---\n\n".join(str(x) for x in input_data)
+            items = cast("list[Any]", input_data)
+            combined = "\n\n---\n\n".join(str(x) for x in items)
         else:
             combined = str(input_data)
         prompt = f"{instruction}\n\nHere are the inputs to summarize:\n{combined}"

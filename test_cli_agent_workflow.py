@@ -1,5 +1,6 @@
-import unittest
 import subprocess
+import unittest
+
 
 class TestAgentWorkflow(unittest.TestCase):
     def test_generate_and_run_agent_workflow_cli(self):
@@ -17,7 +18,7 @@ class TestAgentWorkflow(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 check=True,  # Raise an exception for non-zero exit codes
-                timeout=300  # 5-minute timeout for the agent to complete
+                timeout=300,  # 5-minute timeout for the agent to complete
             )
 
             # Verify that the command executed successfully
@@ -30,12 +31,11 @@ class TestAgentWorkflow(unittest.TestCase):
             self.fail("./sds_lego_agent not found. Please ensure the agent executable is in the path.")
         except subprocess.CalledProcessError as e:
             self.fail(
-                f"Agent execution failed with return code {e.returncode}.\n"
-                f"Stdout: {e.stdout}\n"
-                f"Stderr: {e.stderr}"
+                f"Agent execution failed with return code {e.returncode}.\nStdout: {e.stdout}\nStderr: {e.stderr}"
             )
         except subprocess.TimeoutExpired:
             self.fail("Agent execution timed out.")
+
 
 if __name__ == "__main__":
     unittest.main()

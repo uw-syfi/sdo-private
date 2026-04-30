@@ -329,11 +329,11 @@ class LegoAgentEngine:
         if not text:
             return text
         # Strip markdown code fence wrapper (```yaml ... ``` or ``` ... ```)
-        fence = re.search(r'```(?:yaml|json)?\s*\n(.*?)(?:\n```|$)', text.strip(), re.DOTALL)
+        fence = re.search(r"```(?:yaml|json)?\s*\n(.*?)(?:\n```|$)", text.strip(), re.DOTALL)
         if fence:
             text = fence.group(1).strip()
         # Strip any prose before the first 'workflow:' at the start of a line
-        workflow = re.search(r'(?:^|\n)(workflow:.*)', text, re.DOTALL)
+        workflow = re.search(r"(?:^|\n)(workflow:.*)", text, re.DOTALL)
         if workflow:
             return workflow.group(1)
         return text

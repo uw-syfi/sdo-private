@@ -1,6 +1,8 @@
 import unittest
+
 # Assuming lego_agent is the library containing the agent workflow generator
 import lego_agent
+
 
 class TestLegoAgent(unittest.TestCase):
     """
@@ -25,5 +27,6 @@ class TestLegoAgent(unittest.TestCase):
         self.assertIsInstance(workflow, list, "The workflow should be a list of steps.")
         self.assertGreater(len(workflow), 0, "The workflow should have at least one step.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

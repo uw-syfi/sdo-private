@@ -4,7 +4,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -14,11 +14,15 @@ if TYPE_CHECKING:
 class Task:
     id: str
     type: str
-    payload: dict
-    metadata: dict = field(default_factory=dict)
+    payload: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @staticmethod
-    def create(task_type: str, payload: dict, metadata: dict | None = None) -> Task:
+    def create(
+        task_type: str,
+        payload: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> Task:
         return Task(
             id=str(uuid.uuid4()),
             type=task_type,
@@ -50,7 +54,7 @@ class Pipeline:
         return list(names)
 
 
-async def _worker_loop(stage: Stage, queues: dict[str, asyncio.Queue]) -> None:
+async def _worker_loop(stage: Stage, queues: dict[str, asyncio.Queue[Task]]) -> None:
     while True:
         task = await queues[stage.input_queue].get()
         print(f"__LEGO_TASK_START__ {stage.name} {task.id}")
@@ -67,24 +71,23 @@ async def _worker_loop(stage: Stage, queues: dict[str, asyncio.Queue]) -> None:
             queues[stage.input_queue].task_done()
 
 
-def _start_stage(stage: Stage, queues: dict[str, asyncio.Queue]) -> list[asyncio.Task]:
+def _start_stage(stage: Stage, queues: dict[str, asyncio.Queue[Task]]) -> list[asyncio.Task[None]]:
     print(f"__LEGO_STAGE_START__ {stage.name}")
     return [asyncio.create_task(_worker_loop(stage, queues)) for _ in range(stage.max_workers)]
 
 
 async def run_pipeline(pipeline: Pipeline, initial_tasks: list[Task]) -> None:
     structure = [
-        {"name": s.name, "input_queue": s.input_queue, "output_queue": s.output_queue}
-        for s in pipeline.stages
+        {"name": s.name, "input_queue": s.input_queue, "output_queue": s.output_queue} for s in pipeline.stages
     ]
     print(f"__LEGO_PIPELINE_INIT__ {json.dumps(structure)}", flush=True)
 
-    queues: dict[str, asyncio.Queue] = {name: asyncio.Queue(maxsize=100) for name in pipeline.queue_names}
+    queues: dict[str, asyncio.Queue[Task]] = {name: asyncio.Queue(maxsize=100) for name in pipeline.queue_names}
 
     for task in initial_tasks:
         await queues[pipeline.stages[0].input_queue].put(task)
 
-    workers: list[asyncio.Task] = []
+    workers: list[asyncio.Task[None]] = []
     for stage in pipeline.stages:
         workers.extend(_start_stage(stage, queues))
 

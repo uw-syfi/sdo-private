@@ -1,21 +1,18 @@
-
-import unittest
-import subprocess
-import os
 import json
+import os
+import subprocess
+import unittest
+
 
 class TestOptimizePrompts(unittest.TestCase):
-
     def setUp(self):
         """Set up a dummy prompt file for testing."""
         self.input_filename = "prompts.json"
         self.output_filename = "optimized_prompts.json"
-        
+
         dummy_prompts = {
             "task": "classification",
-            "prompts": [
-                {"role": "user", "content": "Classify this text: {text}"}
-            ]
+            "prompts": [{"role": "user", "content": "Classify this text: {text}"}],
         }
         with open(self.input_filename, "w") as f:
             json.dump(dummy_prompts, f)
@@ -35,26 +32,21 @@ class TestOptimizePrompts(unittest.TestCase):
             "./sds_operator",
             "optimize-prompts",
             f"--input-file={self.input_filename}",
-            f"--output-file={self.output_filename}"
+            f"--output-file={self.output_filename}",
         ]
-        
+
         try:
-            result = subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+
             # Check that the command output indicates success
             self.assertIn("Optimization complete", result.stdout)
-            
+
             # Verify that the output file was created and is not empty
             self.assertTrue(os.path.exists(self.output_filename))
             self.assertGreater(os.path.getsize(self.output_filename), 0)
-            
+
             # Verify that the content of the output file is valid JSON
-            with open(self.output_filename, 'r') as f:
+            with open(self.output_filename) as f:
                 try:
                     json.load(f)
                 except json.JSONDecodeError:
@@ -65,5 +57,6 @@ class TestOptimizePrompts(unittest.TestCase):
         except subprocess.CalledProcessError as e:
             self.fail(f"Command failed with exit code {e.returncode}.\nStderr: {e.stderr}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

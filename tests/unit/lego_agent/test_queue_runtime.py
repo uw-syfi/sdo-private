@@ -3,6 +3,10 @@ import asyncio
 from lego_agent.backend.queue_runtime import Pipeline, Stage, Task, run_pipeline
 
 
+async def _noop_worker(_t: Task) -> list[Task]:
+    return []
+
+
 async def test_single_stage_processes_all_tasks():
     received: list[int] = []
 
@@ -85,7 +89,7 @@ async def test_max_workers_bounds_concurrency():
 
 
 async def test_empty_pipeline_completes_immediately():
-    stage = Stage("noop", "in", None, lambda t: [], max_workers=1)
+    stage = Stage("noop", "in", None, _noop_worker, max_workers=1)
     pipeline = Pipeline(stages=[stage])
 
     await run_pipeline(pipeline, [])
@@ -98,15 +102,15 @@ async def test_task_create_assigns_unique_ids():
 
 def test_pipeline_derives_queue_names_from_stages():
     stages = [
-        Stage("a", "q1", "q2", lambda t: [], max_workers=1),
-        Stage("b", "q2", None, lambda t: [], max_workers=1),
+        Stage("a", "q1", "q2", _noop_worker, max_workers=1),
+        Stage("b", "q2", None, _noop_worker, max_workers=1),
     ]
     pipeline = Pipeline(stages=stages)
     assert set(pipeline.queue_names) == {"q1", "q2"}
 
 
 def test_pipeline_single_stage_no_output_queue():
-    stage = Stage("a", "q1", None, lambda t: [], max_workers=1)
+    stage = Stage("a", "q1", None, _noop_worker, max_workers=1)
     pipeline = Pipeline(stages=[stage])
     assert pipeline.queue_names == ["q1"]
 

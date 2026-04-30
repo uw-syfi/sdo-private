@@ -1,10 +1,11 @@
 import subprocess
 import time
+
 import requests
-import pytest
+
 
 def test_start_lego_ui():
-    '''Tests that the lego_agent web UI can be launched.'''
+    """Tests that the lego_agent web UI can be launched."""
     process = None
     try:
         # Start the script in the background

@@ -676,7 +676,7 @@ def run_command(args: argparse.Namespace) -> int:
     experiments: list[str]
     if isinstance(raw_experiments, str):
         experiments = [raw_experiments]
-    elif isinstance(raw_experiments, (list, tuple)):
+    elif isinstance(raw_experiments, list | tuple):
         experiments = [str(e) for e in cast("list[Any]", raw_experiments)]
     else:
         experiments = [str(args.experiment)]

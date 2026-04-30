@@ -379,7 +379,7 @@ class EvalExecuteOptimizer:
             classification_scores = [
                 float(outcome["classification_score"])
                 for outcome in run_outcomes
-                if isinstance(outcome.get("classification_score"), (int, float))
+                if isinstance(outcome.get("classification_score"), int | float)
             ]
             classification_score = (
                 (sum(classification_scores) / len(classification_scores)) if classification_scores else None
@@ -411,7 +411,7 @@ class EvalExecuteOptimizer:
                 if rlm_s is not None:
                     app_s = 0.9 * app_s + 0.1 * rlm_s
                 cls_s = outcome.get("classification_score")
-                if isinstance(cls_s, (int, float)):
+                if isinstance(cls_s, int | float):
                     app_s = self._blend_base_and_classification_scores(app_s, float(cls_s))
                 per_app_scores[outcome["app_name"]] = app_s
 
@@ -858,7 +858,7 @@ class EvalExecuteOptimizer:
             return None
 
         best_score = metadata.get("best_score")
-        if not isinstance(best_score, (int, float)):
+        if not isinstance(best_score, int | float):
             return None
 
         # Per-app scores for the winning candidate from the previous iteration
@@ -874,7 +874,7 @@ class EvalExecuteOptimizer:
             if isinstance(raw_per_app_scores, dict):
                 raw_per_app_dict = cast("dict[Any, Any]", raw_per_app_scores)
                 for app_name, app_score in raw_per_app_dict.items():
-                    if isinstance(app_score, (int, float)):
+                    if isinstance(app_score, int | float):
                         per_app_scores[str(app_name)] = float(app_score)
 
         # Classification counts for the winning candidate
@@ -885,7 +885,7 @@ class EvalExecuteOptimizer:
             if isinstance(raw_classification_counts, dict):
                 raw_cls_dict = cast("dict[Any, Any]", raw_classification_counts)
                 for label, count in raw_cls_dict.items():
-                    if isinstance(count, (int, float)):
+                    if isinstance(count, int | float):
                         classification_counts[str(label)] = int(count)
 
         return {
@@ -992,7 +992,7 @@ class EvalExecuteOptimizer:
         """Ask teacher LLM to choose the best candidate from candidate_pool."""
 
         def _fmt_number(value: Any) -> str:
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 return f"{float(value):.4f}"
             return "n/a"
 
@@ -1124,7 +1124,7 @@ class EvalExecuteOptimizer:
             llm_info["llm_choice"] = chosen
             llm_info["llm_reason"] = str(parsed.get("reason", "")).strip()
             confidence = parsed.get("confidence")
-            if isinstance(confidence, (int, float)):
+            if isinstance(confidence, int | float):
                 llm_info["llm_confidence"] = max(0.0, min(1.0, float(confidence)))
             return chosen - 1, llm_info
         except (json.JSONDecodeError, ValueError, TypeError, KeyError, ConnectionError, TimeoutError) as e:

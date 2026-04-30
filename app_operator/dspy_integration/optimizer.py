@@ -102,12 +102,12 @@ def _ensure_serializable(obj: Any, _depth: int = 0) -> Any:
     """
     if _depth > _ENSURE_SERIALIZABLE_MAX_DEPTH:
         return str(obj)
-    if isinstance(obj, (str, int, float, bool, type(None))):
+    if isinstance(obj, str | int | float | bool | type(None)):
         return obj
     if isinstance(obj, dict):
         obj_dict = cast("dict[Any, Any]", obj)
         return {str(k): _ensure_serializable(v, _depth + 1) for k, v in obj_dict.items()}
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list | tuple):
         obj_seq = cast("list[Any] | tuple[Any, ...]", obj)
         return [_ensure_serializable(v, _depth + 1) for v in obj_seq]
     return str(obj)  # Convert unknown types to string with explicit intent

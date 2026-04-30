@@ -1,9 +1,9 @@
-
 import unittest
-from unittest.mock import patch, mock_open
+from unittest.mock import mock_open, patch
 
 # This test verifies the promise that all agents share a single LLM provider
 # configured in `sds.toml` and accessed via `agentshim/`.
+
 
 # Mock representation of the agentshim module for testing purposes.
 # In a real system, this would be an actual module.
@@ -20,23 +20,24 @@ class AgentShim:
         if cls._llm_provider_client is None:
             # In a real implementation, this would involve parsing the TOML file.
             # For this test, we'll use simple string manipulation on the mock file.
-            with open('sds.toml') as f:
+            with open("sds.toml") as f:
                 config_content = f.read()
-            
+
             provider_name = None
-            for line in config_content.split('\n'):
-                if 'provider' in line:
-                    provider_name = line.split('=')[1].strip().strip('"')
+            for line in config_content.split("\n"):
+                if "provider" in line:
+                    provider_name = line.split("=")[1].strip().strip('"')
                     break
-            
+
             if provider_name:
                 # In a real system, this would initialize a client library.
                 # Here, we just create a string to represent the client.
                 cls._llm_provider_client = f"{provider_name}_client"
             else:
                 raise ValueError("LLM provider not found in sds.toml")
-                
+
         return cls._llm_provider_client
+
 
 # Mock representations of agents that need to use the LLM.
 class MockAgentAlpha:
@@ -44,13 +45,14 @@ class MockAgentAlpha:
         # The agent gets the LLM client via the shared agentshim.
         return AgentShim.get_llm_client()
 
+
 class MockAgentBeta:
     def do_task(self):
         # This agent also gets the LLM client via the same shared agentshim.
         return AgentShim.get_llm_client()
 
-class TestSingleLLMProvider(unittest.TestCase):
 
+class TestSingleLLMProvider(unittest.TestCase):
     def setUp(self):
         # Reset the singleton client before each test to ensure isolation.
         AgentShim._llm_provider_client = None
@@ -61,7 +63,7 @@ class TestSingleLLMProvider(unittest.TestCase):
         that the client is the one specified in the mock sds.toml file.
         """
         mock_toml_content = '[llm]\nprovider = "gemini"'
-        
+
         with patch("builtins.open", mock_open(read_data=mock_toml_content)):
             agent_alpha = MockAgentAlpha()
             agent_beta = MockAgentBeta()
@@ -72,7 +74,7 @@ class TestSingleLLMProvider(unittest.TestCase):
 
             # 1. Verify the client is based on the 'gemini' config.
             self.assertEqual(client_from_alpha, "gemini_client")
-            
+
             # 2. Verify both agents received the exact same client instance.
             self.assertIs(client_from_alpha, client_from_beta)
 
@@ -90,5 +92,6 @@ class TestSingleLLMProvider(unittest.TestCase):
             # Verify the client is now based on the 'claude' config.
             self.assertEqual(client, "claude_client")
 
+
 if __name__ == "__main__":
-    unittest.main(argv=['first-arg-is-ignored'], exit=False)
+    unittest.main(argv=["first-arg-is-ignored"], exit=False)

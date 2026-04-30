@@ -1,7 +1,9 @@
-import unittest
 import subprocess
 import time
+import unittest
+
 import requests
+
 
 class TestSdsOperatorRun(unittest.TestCase):
     """
@@ -17,10 +19,7 @@ class TestSdsOperatorRun(unittest.TestCase):
         Deploy the application before running tests.
         """
         cls.process = subprocess.Popen(
-            ["./sds_operator", "run", cls.APP_NAME],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            ["./sds_operator", "run", cls.APP_NAME], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
         # Allow time for the application to deploy and start
         time.sleep(10)
@@ -60,5 +59,6 @@ class TestSdsOperatorRun(unittest.TestCase):
         output = self.process.stdout.readline()
         self.assertTrue(len(output) > 0, "No monitoring output was captured from the operator.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
