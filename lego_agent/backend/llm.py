@@ -5,8 +5,9 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
-from lego_agent.config import Config
 from libs.sds_core.logger import logger
+
+from .config import Config
 
 
 def _normalize_provider(provider: str) -> str:

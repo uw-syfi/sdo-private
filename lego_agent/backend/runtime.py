@@ -24,12 +24,13 @@ if TYPE_CHECKING:
 
     from langchain_core.runnables import RunnableConfig
 
-from lego_agent.config import load_config
-from lego_agent.io import Colors
-from lego_agent.llm import build_llm
-from lego_agent.streaming import extract_tool_result, parse_chunk_content
 from libs.sds_core.filesystem import RealFilesystem
 from libs.sds_core.tools import build_tools
+
+from .config import load_config
+from .io import Colors
+from .llm import build_llm
+from .streaming import extract_tool_result, parse_chunk_content
 
 # Default timeout (seconds) for agent generation calls
 DEFAULT_AGENT_TIMEOUT = 300

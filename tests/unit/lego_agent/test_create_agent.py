@@ -1,13 +1,13 @@
 from unittest.mock import MagicMock, patch
 
-from lego_agent.runtime import create_agent
+from lego_agent.backend.runtime import create_agent
 
 
-@patch("lego_agent.runtime.load_config")
-@patch("lego_agent.runtime.build_llm")
-@patch("lego_agent.runtime.build_tools")
-@patch("lego_agent.runtime.RealFilesystem")
-@patch("lego_agent.runtime.LangGraphAgent")
+@patch("lego_agent.backend.runtime.load_config")
+@patch("lego_agent.backend.runtime.build_llm")
+@patch("lego_agent.backend.runtime.build_tools")
+@patch("lego_agent.backend.runtime.RealFilesystem")
+@patch("lego_agent.backend.runtime.LangGraphAgent")
 def test_create_agent_with_tools_filtering(MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig):
     # Setup mocks
     mock_tools = []
@@ -37,11 +37,11 @@ def test_create_agent_with_tools_filtering(MockAgent, MockFS, MockBuildTools, Mo
     assert "unused_tool" not in names
 
 
-@patch("lego_agent.runtime.load_config")
-@patch("lego_agent.runtime.build_llm")
-@patch("lego_agent.runtime.build_tools")
-@patch("lego_agent.runtime.RealFilesystem")
-@patch("lego_agent.runtime.LangGraphAgent")
+@patch("lego_agent.backend.runtime.load_config")
+@patch("lego_agent.backend.runtime.build_llm")
+@patch("lego_agent.backend.runtime.build_tools")
+@patch("lego_agent.backend.runtime.RealFilesystem")
+@patch("lego_agent.backend.runtime.LangGraphAgent")
 def test_create_agent_default_tools(MockAgent, MockFS, MockBuildTools, MockBuildLLM, MockLoadConfig):
     # Setup mocks
     mock_tools = [MagicMock(), MagicMock()]

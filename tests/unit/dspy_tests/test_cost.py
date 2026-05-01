@@ -126,7 +126,7 @@ class TestGetModelPricing:
             assert isinstance(pricing, dict)
             assert "input" in pricing
             assert "output" in pricing
-            assert isinstance(pricing["input"], (int, float))
-            assert isinstance(pricing["output"], (int, float))
+            assert isinstance(pricing["input"], int | float)
+            assert isinstance(pricing["output"], int | float)
             assert pricing["input"] > 0
             assert pricing["output"] > 0

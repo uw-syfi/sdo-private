@@ -69,7 +69,7 @@ def _candidate_leaf(candidate_id: str, fallback: str) -> str:
 def _as_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     return None
 
@@ -81,7 +81,7 @@ def _as_counts(value: Any) -> dict[str, int]:
     for key, count in value.items():
         if isinstance(count, bool):
             continue
-        if isinstance(count, (int, float)):
+        if isinstance(count, int | float):
             counts[str(key)] = int(count)
     return counts
 

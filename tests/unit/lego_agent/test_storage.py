@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from lego_agent.storage import LegoAgentStorage
+from lego_agent.backend.storage import LegoAgentStorage
 
 
 def test_storage_initialization(tmp_path):

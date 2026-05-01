@@ -27,6 +27,7 @@ export interface GraphState {
   updateNodeStatus: (id: string, status: AgentStatus) => void;
   updateNodeThought: (id: string, thought: string) => void;
   addNodeLog: (id: string, log: LogItem) => void;
+  updateEdge: (id: string, update: Partial<Edge>) => void;
 }
 
 export const useGraphStore = create<GraphState>((set, get) => ({
@@ -67,6 +68,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         ? { ...node, data: { ...node.data, currentThought: thought } }
         : node
     ),
+  })),
+
+  updateEdge: (id, update) => set((state) => ({
+    edges: state.edges.map(edge => edge.id === id ? { ...edge, ...update } : edge),
   })),
 
   addNodeLog: (id, log) => set((state) => ({

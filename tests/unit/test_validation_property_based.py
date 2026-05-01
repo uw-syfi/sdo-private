@@ -49,7 +49,7 @@ class TestValidateTypeProperties:
     @settings(max_examples=50, deadline=1000)
     def test_non_int_non_bool_always_raises_type_error(self, value, name):
         """Non-int, non-bool values always raise TypeError when int is expected."""
-        assume(not isinstance(value, (int, bool)))
+        assume(not isinstance(value, int | bool))
         with pytest.raises(TypeError):
             validate_type(value, name, int)
 
@@ -70,7 +70,7 @@ class TestValidateTypeProperties:
     @settings(max_examples=50, deadline=1000)
     def test_error_message_contains_field_name(self, value, name):
         """TypeError message always contains the field name."""
-        assume(not isinstance(value, (int, bool)))
+        assume(not isinstance(value, int | bool))
         assume(name)  # non-empty
         with pytest.raises(TypeError) as exc_info:
             validate_type(value, name, int)
@@ -90,7 +90,7 @@ class TestValidateTypeProperties:
     @settings(max_examples=50, deadline=1000)
     def test_nullable_false_still_raises_for_non_int(self, value, name):
         """nullable=False does not suppress TypeError for non-int values."""
-        assume(not isinstance(value, (int, bool)))
+        assume(not isinstance(value, int | bool))
         assume(value is not None)
         with pytest.raises(TypeError):
             validate_type(value, name, int, nullable=False)
@@ -281,7 +281,7 @@ class TestValidateFieldProperties:
     @settings(max_examples=50, deadline=1000)
     def test_type_constraint_enforced(self, value, name):
         """Type constraint is enforced — non-int raises TypeError regardless of other flags."""
-        assume(not isinstance(value, (int, bool)))
+        assume(not isinstance(value, int | bool))
         assume(value is not None)
         with pytest.raises(TypeError):
             validate_field(value, name, int)

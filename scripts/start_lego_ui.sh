@@ -10,7 +10,7 @@ cd "$REPO_ROOT"
 # Use uvicorn with --reload-dir to only watch lego_agent source files.
 # Without this, uvicorn detects generated_script.py in lego_agent_runs/ and
 # restarts the server mid-execution, closing the WebSocket before the script runs.
-uv run uvicorn lego_agent.server:app --reload --reload-dir lego_agent --host 0.0.0.0 --port 8000 &
+uv run uvicorn lego_agent.backend.server:app --reload --reload-dir lego_agent --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # Start Frontend

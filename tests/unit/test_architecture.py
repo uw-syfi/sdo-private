@@ -172,7 +172,7 @@ def _literal_all_values(tree: ast.AST) -> set[str] | None:
         if not (
             isinstance(node, ast.Assign)
             and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)
-            and isinstance(node.value, (ast.List, ast.Tuple))
+            and isinstance(node.value, ast.List | ast.Tuple)
         ):
             continue
         values: set[str] = set()

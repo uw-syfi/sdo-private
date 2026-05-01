@@ -1,11 +1,11 @@
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app_operator.core import AgentConfig, Config, OperatorConfig
-from lego_agent.engine import LegoAgentEngine
-from lego_agent.io import UserIO
+from lego_agent.backend.engine import LegoAgentEngine
+from lego_agent.backend.io import UserIO
 from lego_agent.prompts import get_loader
 from libs.model_config import ModelConfig
 
@@ -85,8 +85,8 @@ def engine(tmp_path, mock_config, mock_io):
 
 def test_engine_happy_path(engine, tmp_path):
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 
@@ -128,8 +128,8 @@ def test_engine_clarification_loop(engine, mock_io):
     # the prompt or just sequential calls.
 
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 
@@ -171,68 +171,57 @@ def test_engine_clarification_loop(engine, mock_io):
         assert mock_io.questions_asked[0] == "Q1"
         assert result.clarifications == [("Q1", "A1")]
         assert "MAX_ITERATIONS = 5" in result.script_text
+        assert "os.chdir(repo_root)" in result.script_text
+        assert "run_yaml_v2(str(config_path))" in result.script_text
 
 
 def test_engine_validation_failure_and_repair(engine):
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 
-        # First call: Not JSON
-        # Second call (repair via ainvoke): Valid JSON
-
-        first_call_done = False
+        call_count = 0
 
         async def mock_astream_events(*args, **kwargs):
-            nonlocal first_call_done
-            if not first_call_done:
-                first_call_done = True
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
                 yield {
                     "event": "on_chat_model_stream",
                     "data": {"chunk": MagicMock(content="Not JSON")},
                 }
             else:
-                # Should not be reached via astream_events in this test logic because
-                # repair uses ainvoke
+                # Repair round: submit_response tool call with valid data
                 yield {
-                    "event": "on_chat_model_stream",
-                    "data": {"chunk": MagicMock(content="Should not be here")},
+                    "event": "on_tool_start",
+                    "name": "submit_response",
+                    "data": {"input": {"status": "ready", "yaml_config": "workflow:\n  name: repaired"}},
                 }
 
-        async def mock_ainvoke_impl(*args, **kwargs):
-            # This is the repair call
-            return {
-                "messages": [MagicMock(content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: test"}""")]
-            }
-
         mock_agent.astream_events = mock_astream_events
-        mock_agent.ainvoke = AsyncMock(side_effect=mock_ainvoke_impl)
         mock_create_agent.return_value = mock_agent
 
-        asyncio.run(engine.run_async("task"))
+        result = asyncio.run(engine.run_async("task"))
 
-        # Verify repair was attempted (ainvoke called)
-        assert mock_agent.ainvoke.called
+        assert result.script_path is not None
+        assert call_count == 2
 
 
 def test_engine_yaml_validation_repair(engine):
     with (
-        patch("lego_agent.engine.create_react_agent") as mock_create_agent,
-        patch("lego_agent.engine.build_llm"),
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
     ):
         mock_agent = MagicMock()
 
-        # First call: Valid JSON, Invalid YAML (missing workflow)
-        # Second call (repair): Valid YAML
-
-        first_call_done = False
+        call_count = 0
 
         async def mock_astream_events(*args, **kwargs):
-            nonlocal first_call_done
-            if not first_call_done:
-                first_call_done = True
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
                 yield {
                     "event": "on_chat_model_stream",
                     "data": {
@@ -247,32 +236,72 @@ def test_engine_yaml_validation_repair(engine):
                     },
                 }
             else:
+                # Repair round: submit_response tool call with valid YAML
                 yield {
-                    "event": "on_chat_model_stream",
-                    "data": {"chunk": MagicMock(content="Should not be here")},
+                    "event": "on_tool_start",
+                    "name": "submit_response",
+                    "data": {"input": {"status": "ready", "yaml_config": "workflow:\n  name: repaired"}},
                 }
 
-        async def mock_ainvoke_impl(*args, **kwargs):
-            # This is the repair call
-            return {
-                "messages": [
-                    MagicMock(content=r"""{"status": "ready", "yaml_config": "workflow:\n  name: repaired"}""")
-                ]
-            }
-
         mock_agent.astream_events = mock_astream_events
-        mock_agent.ainvoke = AsyncMock(side_effect=mock_ainvoke_impl)
         mock_create_agent.return_value = mock_agent
 
         result = asyncio.run(engine.run_async("task"))
 
-        # Verify repair was attempted
-        assert mock_agent.ainvoke.called
-
-        # Verify the config file contains the repaired content
+        assert call_count == 2
         config_content = result.config_path.read_text()
         assert "name: repaired" in config_content
-        # result.config_path points to file with yaml.
-        # But we can check result.script_text? No, script_text is the launcher.
-        # We can just assert success.
+        assert result.script_path is not None
+
+
+def test_extract_yaml_block_strips_prose(engine):
+    """LLM often prepends prose before workflow: — extract_yaml_block removes it."""
+    yaml_with_prose = "Here is the YAML:\nworkflow:\n  type: agent"
+    result = engine._extract_yaml_block(yaml_with_prose)
+    assert result.startswith("workflow:")
+    assert "Here is the YAML" not in result
+
+
+def test_extract_yaml_block_strips_code_fence(engine):
+    result = engine._extract_yaml_block("```yaml\nworkflow:\n  type: agent\n```")
+    assert result.startswith("workflow:")
+    assert "```" not in result
+
+
+def test_extract_yaml_block_passthrough_clean_yaml(engine):
+    clean = "workflow:\n  type: agent\n  name: test"
+    assert engine._extract_yaml_block(clean) == clean
+
+
+def test_repair_with_tool_use_only_response(engine):
+    """Reproduces Error 2: repair LLM calls submit_response (tool use) with no text."""
+    with (
+        patch("lego_agent.backend.engine.create_react_agent") as mock_create_agent,
+        patch("lego_agent.backend.engine.build_llm"),
+    ):
+        mock_agent = MagicMock()
+
+        call_count = 0
+
+        async def mock_astream_events(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First round: invalid YAML triggers repair
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {"chunk": MagicMock(content="Here is YAML:\nworkflow:\n  name: test")},
+                }
+            else:
+                # Repair round: LLM calls submit_response with no text preamble
+                yield {
+                    "event": "on_tool_start",
+                    "name": "submit_response",
+                    "data": {"input": {"status": "ready", "yaml_config": "workflow:\n  name: fixed"}},
+                }
+
+        mock_agent.astream_events = mock_astream_events
+        mock_create_agent.return_value = mock_agent
+
+        result = asyncio.run(engine.run_async("task"))
         assert result.script_path is not None

@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lego_agent.runtime import (
+from lego_agent.backend.runtime import (
     DEFAULT_AGENT_TIMEOUT,
     RUNNABLE_TYPES,
     FanOut,

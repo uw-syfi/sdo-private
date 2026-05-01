@@ -1,7 +1,7 @@
 """Shared streaming and content-extraction utilities.
 
-Used by both ``lego_agent.runtime.LangGraphAgent`` and
-``lego_agent.engine.LegoAgentEngine`` to avoid duplicating the
+Used by both ``lego_agent.backend.runtime.LangGraphAgent`` and
+``lego_agent.backend.engine.LegoAgentEngine`` to avoid duplicating the
 chunk-content parsing and tool-result extraction logic.
 """
 
