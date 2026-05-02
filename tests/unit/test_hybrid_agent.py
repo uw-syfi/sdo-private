@@ -129,6 +129,25 @@ class TestHybridRouting:
         assert result == "summary text"
 
 
+class TestHybridVerbose:
+    def test_verbose_passes_log_file_to_recursive_agent(self, tmp_path):
+        """Hybrid verbose mode writes RLM output to the experiment workdir log."""
+        _setup_repo(tmp_path)
+        agent = HybridCodingAgent(verbose=True)
+
+        with mock.patch("app_operator.cli_agent.hybrid_agent.RecursiveDeploymentAgent") as mock_recursive:
+            instance = mock_recursive.return_value
+            instance.run_task.return_value = "done"
+            instance.get_rlm_statistics.return_value = {"token_usage": {}}
+
+            result = agent._generate_fix("Fix the deployment error", tmp_path)
+
+        assert result == "done"
+        kwargs = mock_recursive.call_args.kwargs
+        assert kwargs["verbose"] is True
+        assert kwargs["log_file"] == str(tmp_path / ".sds" / "logs" / "rlm_verbose.log")
+
+
 # ---------------------------------------------------------------------------
 # HybridCodingAgent fix path
 # ---------------------------------------------------------------------------

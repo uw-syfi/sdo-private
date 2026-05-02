@@ -66,6 +66,7 @@ class HybridCodingAgent(BaseCodingAgent):
         location: str | None = None,
         dspy_config: DSPyConfigProtocol | None = None,
         rlm_mode: str = "compatibility",
+        verbose: bool = False,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder: Any = recorder or NullTrajectoryRecorder()
@@ -73,6 +74,7 @@ class HybridCodingAgent(BaseCodingAgent):
         self.location = location
         self.dspy_config = dspy_config
         self.rlm_mode = rlm_mode
+        self.verbose = verbose
         self._total_token_usage: dict[str, int] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -147,6 +149,7 @@ class HybridCodingAgent(BaseCodingAgent):
         )
 
         logger.info("[Hybrid] Starting RLM loop with lazy specialist delegation")
+        log_file = str(repo_path / ".sds" / "logs" / "rlm_verbose.log") if self.verbose else None
         agent = RecursiveDeploymentAgent(
             trajectory=self.recorder,
             max_recursion_depth=5,
@@ -162,6 +165,8 @@ class HybridCodingAgent(BaseCodingAgent):
                 token_acc=token_acc,
             ),
             available_specialists=self.available_specialists,
+            verbose=self.verbose,
+            log_file=log_file,
         )
         if self.rlm_mode == "paper_faithful":
             rlm_task = prompt

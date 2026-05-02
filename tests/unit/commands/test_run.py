@@ -68,6 +68,15 @@ def test_add_arguments_config_is_optional():
     assert args.config is None
 
 
+def test_add_arguments_adds_verbose_flag():
+    """Test that --verbose defaults to false and can be enabled."""
+    parser = argparse.ArgumentParser()
+    add_arguments(parser)
+
+    assert parser.parse_args(["/path"]).verbose is False
+    assert parser.parse_args(["/path", "--verbose"]).verbose is True
+
+
 # ============================================================================
 # run_command Tests - Error Cases
 # ============================================================================
@@ -138,9 +147,27 @@ def test_run_command_runs_cli_agent_operator(mock_args, mock_config):
 
     # Verify create_operator was called
     mock_create.assert_called_once()
+    assert mock_create.call_args.args[0]["verbose"] is False
     # Verify operator.run() was called
     mock_operator.run.assert_called_once()
     assert exit_code == 0
+
+
+def test_run_command_passes_verbose_to_operator(mock_args, mock_config):
+    """Test that run --verbose is forwarded through shared operator kwargs."""
+    mock_args.verbose = True
+    mock_operator = MagicMock()
+    mock_operator.run.return_value = None
+
+    with patch("app_operator.commands.run.load_config", return_value=mock_config):
+        with patch(
+            "app_operator.commands.run.create_operator",
+            return_value=mock_operator,
+        ) as mock_create:
+            exit_code = run_command(mock_args)
+
+    assert exit_code == 0
+    assert mock_create.call_args.args[0]["verbose"] is True
 
 
 def test_run_command_returns_1_on_deployment_error(mock_args, mock_config):
