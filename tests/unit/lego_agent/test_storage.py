@@ -63,23 +63,27 @@ def test_write_script_timestamp_format(tmp_path):
     assert script_path.parent.name == "20240101-120000"
 
 
-def test_write_script_multiple_scripts_different_timestamps(tmp_path):
-    """Test writing multiple scripts creates separate directories."""
-    timestamps = ["20240101-120000", "20240101-120001"]
-    paths = []
+def test_storage_keeps_single_run_dir_across_writes(tmp_path):
+    """Test that all writes for one execution share the same run directory."""
+    storage = LegoAgentStorage(tmp_path)
 
-    for ts in timestamps:
-        with patch("time.strftime") as mock_strftime:
-            mock_strftime.return_value = ts
-            # Use a fresh instance per timestamp so each write starts clean
-            storage = LegoAgentStorage(tmp_path)
-            path = storage.write_script(f"# Script {ts}")
-            paths.append(path)
+    with patch("time.strftime") as mock_strftime:
+        mock_strftime.return_value = "20240101-120000"
+        script_path = storage.write_script("# Script 1")
 
-    # Verify different directories
-    assert paths[0].parent != paths[1].parent
-    assert paths[0].parent.name == "20240101-120000"
-    assert paths[1].parent.name == "20240101-120001"
+    with patch("time.strftime") as mock_strftime:
+        mock_strftime.return_value = "20240101-120001"
+        config_path = storage.write_config("workflow: {}")
+
+    with patch("time.strftime") as mock_strftime:
+        mock_strftime.return_value = "20240101-120002"
+        storage.log_llm_call("start", {"model": "demo"})
+        storage.log_llm_call("end", {"model": "demo"})
+
+    assert script_path.parent == config_path.parent
+    assert script_path.parent.name == "20240101-120000"
+    assert (script_path.parent / "llm_calls.jsonl").exists()
+    assert len((script_path.parent / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()) == 2
 
 
 def test_write_script_overwrites_if_same_timestamp(tmp_path):

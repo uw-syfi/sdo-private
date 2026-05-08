@@ -49,6 +49,38 @@ uv run -m lego_agent --no-tui --prompt "Your task"
 
 ## Architecture
 
+LegoAgent has two execution runtimes, depending on your use case:
+
+### Runtime 1: Runnable-based (v1) — For Generated Scripts
+When you generate a script via the Web UI, TUI, or CLI, the engine outputs Python code that uses the **Runnable API**. This is a synchronous/asynchronous wrapper API designed for script execution:
+
+- **Chain**: Sequential execution of steps
+- **FanOut**: Parallel execution of prompts/items
+- **Summarize**: Aggregate and synthesize results
+- **JudgeLoop**: Iterative refinement loop
+- **Core**: `LangGraphAgent` wraps LangGraph for streaming
+
+See `backend/runtime.py` for the Runnable implementations. Scripts can import and use these directly.
+
+### Runtime 2: Queue-based (v2) — For YAML Workflows
+The queue-based runtime is designed for orchestrating complex multi-stage workflows from YAML configs. It provides:
+
+- **FIFO task queue per stage** with global worker pool
+- **Async-generator workers** that stream (yield) tasks as they discover/produce them
+- **Completion signal (`STEP_COMPLETE`)** that flows through stages to coordinate discovery → processing patterns
+- **Pipeline**: Stages and queues for orchestration
+- **Pipeline Builder**: YAML → Pipeline translator
+
+See `backend/pipeline_builder.py` and `backend/queue_runtime.py`. Entry point: `run_yaml_v2(config_path)`.
+
+### When to Use Which
+
+| Use Case | Runtime | Entry Point |
+|----------|---------|-----------|
+| Generate and run a script via UI/CLI | v1 (Runnable) | Engine → generated code imports `lego_agent.backend.runtime` |
+| Run a predefined YAML workflow | v2 (Queue) | `pipeline_builder.run_yaml_v2(config_path)` |
+| Custom Python workflows | v1 (Runnable) | Direct `from lego_agent.backend.runtime import ...` |
+
 ### Core Components
 
 - **LegoAgentEngine (`backend/engine.py`)**:
@@ -89,12 +121,30 @@ uv run -m lego_agent --no-tui --prompt "Your task"
   - Provides `generate()` sync and `_generate_async()` async methods.
   - Supports parallelization through `fan_out()` for multi-task execution.
 
+- **Queue-based Runtime (`backend/queue_runtime.py`, `backend/pipeline_builder.py`)**:
+  - **run_pipeline()**: Global worker pool processes stages with FIFO queues
+  - **Task**: Fundamental unit (id, type, payload, metadata)
+  - **Stage**: Defines a worker function, input queue, output queue
+  - **Pipeline**: Sequence of stages connected by queues
+  - **Completion Signal (STEP_COMPLETE)**: Task type that signals end-of-stage, flows through all downstream stages to coordinate discovery-processing patterns
+
 ### Orchestration Patterns
 
-1. **fan_out()**: Execute multiple independent prompts in parallel.
+1. **fan_out()**: Execute multiple independent prompts in parallel (v1 Runnable API).
 2. **summarize()**: Aggregate multiple responses into one.
 3. **judge_loop()**: Iterative refinement with evaluation.
 4. **Combined patterns**: Complex workflows combining multiple patterns.
+
+### Streaming & Discovery (v2 Queue Runtime)
+
+The queue runtime supports **streaming discovery** via `emit_mode: "iterative_discovery"`:
+- Agent makes multiple LLM calls to discover items in batches
+- Each batch is yielded immediately (async generator)
+- `STEP_COMPLETE` signal is emitted after all discovery is done
+- Downstream workers (fan_out, summarize, etc.) buffer items until `STEP_COMPLETE` arrives
+- This ensures discovery and processing overlap, avoiding wait times
+
+See `docs/streaming-tasks-architecture.md` for detailed examples.
 
 ### Storage & Models
 
@@ -164,13 +214,14 @@ Generated scripts must satisfy:
 
 ## Output Structure
 
-Scripts are saved in `lego_agent_runs/<timestamp>/lego_agent.py` with:
-- Timestamped directory for each run.
-- Standalone execution (no external dependencies except `lego_agent.backend.runtime`).
-- `MAX_ITERATIONS` constant for loop bounding.
-- Orchestration tools: `fan_out()`, `summarize()`, `judge_loop()`.
+Each run writes all artifacts into one folder under `lego_agent_runs/<timestamp>/`:
+- `generated_script.py` for the launcher script.
+- `lego_agent_config.yaml` for the generated workflow config.
+- `llm_calls.jsonl` for the full LLM call log from that execution.
+
+The launcher script is standalone and includes `MAX_ITERATIONS` for loop bounding.
 
 ## Usage Tips
 
 - When adding lego_agent features: Test both TUI and CLI modes. Verify the generated scripts are syntactically valid and include required components.
-- When debugging lego_agent scripts: Check `lego_agent_runs/<timestamp>/lego_agent.py` and examine the clarification history.
+- When debugging lego_agent scripts: Check `lego_agent_runs/<timestamp>/generated_script.py`, `lego_agent_config.yaml`, and `llm_calls.jsonl` in the same run folder.

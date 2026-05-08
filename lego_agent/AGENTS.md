@@ -21,4 +21,4 @@ uv run -m lego_agent --no-tui --prompt "task" # CLI mode
 
 ## Debugging
 
-Check `lego_agent_runs/<timestamp>/lego_agent.py` for generated scripts from past runs.
+Check `lego_agent_runs/<timestamp>/generated_script.py` and `lego_agent_config.yaml` for generated artifacts from past runs.
