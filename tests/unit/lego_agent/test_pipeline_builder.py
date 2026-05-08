@@ -184,6 +184,83 @@ async def test_agent_worker_reads_result_from_prior_stage(mock_agent):
     assert result_tasks[0].payload["result"] == "mock_llm_output"
 
 
+async def test_iterative_discovery_stops_on_done_line_with_extra_text(mock_agent):
+    config = {
+        "type": "agent",
+        "instruction": "Discover files",
+        "emit_mode": "iterative_discovery",
+        "batch_size": 10,
+    }
+    mock_agent.generate_async = AsyncMock(return_value="file1.md\nDONE: no more files")
+
+    with patch("lego_agent.backend.pipeline_builder.create_agent", return_value=mock_agent):
+        pipeline = build_pipeline_from_yaml(config)
+
+    emitted: list[str] = []
+    task = Task.create("start", {"input": "repo root"})
+    async for out_task in pipeline.stages[0].worker_fn(task):
+        if out_task.type != "STEP_COMPLETE":
+            emitted.append(out_task.payload["result"])
+
+    assert emitted == ["file1.md"]
+    assert mock_agent.generate_async.call_count == 1
+
+
+async def test_iterative_discovery_stops_after_consecutive_duplicate_batches(mock_agent):
+    config = {
+        "type": "agent",
+        "instruction": "Discover files",
+        "emit_mode": "iterative_discovery",
+        "batch_size": 2,
+    }
+    mock_agent.generate_async = AsyncMock(
+        side_effect=[
+            "file1.md\nfile2.md",
+            "file1.md\nfile2.md",
+            "file1.md\nfile2.md",
+        ]
+    )
+
+    with patch("lego_agent.backend.pipeline_builder.create_agent", return_value=mock_agent):
+        pipeline = build_pipeline_from_yaml(config)
+
+    emitted: list[str] = []
+    task = Task.create("start", {"input": "repo root"})
+    async for out_task in pipeline.stages[0].worker_fn(task):
+        if out_task.type != "STEP_COMPLETE":
+            emitted.append(out_task.payload["result"])
+
+    assert emitted == ["file1.md", "file2.md"]
+    assert mock_agent.generate_async.call_count == 3
+
+
+async def test_iterative_discovery_stops_on_model_error_response(mock_agent):
+    config = {
+        "type": "agent",
+        "instruction": "Discover files",
+        "emit_mode": "iterative_discovery",
+        "batch_size": 5,
+    }
+    mock_agent.generate_async = AsyncMock(
+        return_value=(
+            "Error: Error calling model 'gemini-2.5-flash' (Too Many Requests): "
+            "429 Too Many Requests"
+        )
+    )
+
+    with patch("lego_agent.backend.pipeline_builder.create_agent", return_value=mock_agent):
+        pipeline = build_pipeline_from_yaml(config)
+
+    emitted: list[str] = []
+    task = Task.create("start", {"input": "repo root"})
+    async for out_task in pipeline.stages[0].worker_fn(task):
+        if out_task.type != "STEP_COMPLETE":
+            emitted.append(out_task.payload["result"])
+
+    assert emitted == []
+    assert mock_agent.generate_async.call_count == 1
+
+
 async def test_fan_out_worker_static_items(mock_agent):
     config = {
         "type": "fan_out",
@@ -193,10 +270,14 @@ async def test_fan_out_worker_static_items(mock_agent):
     with patch("lego_agent.backend.pipeline_builder.create_agent", return_value=mock_agent):
         pipeline = build_pipeline_from_yaml(config)
 
-    result_tasks = await pipeline.stages[0].worker_fn(Task.create("start", {"input": None}))
+    result_tasks = []
+    async for task in pipeline.stages[0].worker_fn(Task.create("start", {"input": None})):
+        result_tasks.append(task)
 
     assert mock_agent.generate_async.call_count == 2
-    assert result_tasks[0].payload["result"] == ["mock_llm_output", "mock_llm_output"]
+    # Collect results from fan_out_output tasks (skip any completion signals)
+    outputs = [t.payload["result"] for t in result_tasks if t.type == "fan_out_output"]
+    assert outputs == ["mock_llm_output", "mock_llm_output"]
 
 
 async def test_fan_out_worker_dynamic_items_from_previous_output(mock_agent):
@@ -209,10 +290,14 @@ async def test_fan_out_worker_dynamic_items_from_previous_output(mock_agent):
         pipeline = build_pipeline_from_yaml(config)
 
     task = Task.create("start", {"result": "file1.txt\nfile2.txt\nfile3.txt"})
-    result_tasks = await pipeline.stages[0].worker_fn(task)
+    result_tasks = []
+    async for t in pipeline.stages[0].worker_fn(task):
+        result_tasks.append(t)
 
     assert mock_agent.generate_async.call_count == 3
-    assert result_tasks[0].payload["result"] == ["mock_llm_output"] * 3
+    # Collect results from fan_out_output tasks (skip any completion signals)
+    outputs = [t.payload["result"] for t in result_tasks if t.type == "fan_out_output"]
+    assert outputs == ["mock_llm_output"] * 3
 
 
 async def test_summarize_worker_joins_list_input(mock_agent):
@@ -231,6 +316,47 @@ async def test_summarize_worker_joins_list_input(mock_agent):
     prompt = mock_agent.generate_async.call_args.args[0]
     assert "res1" in prompt
     assert "res2" in prompt
+
+
+async def test_fan_out_then_summarize_aggregates_all_items_once():
+    fan_out_agent = MagicMock()
+    fan_out_agent.generate_async = AsyncMock(side_effect=["processed_a", "processed_b", "processed_c"])
+
+    summarize_agent = MagicMock()
+    summarize_agent.generate_async = AsyncMock(return_value="final_summary")
+
+    config = {
+        "type": "chain",
+        "steps": [
+            {
+                "type": "fan_out",
+                "items": ["a.py", "b.py", "c.py"],
+                "agent": {"type": "agent", "instruction": "Process {input}"},
+            },
+            {
+                "type": "summarize",
+                "instruction": "Summarize all items",
+                "agent": {"type": "agent", "instruction": "You summarize"},
+            },
+        ],
+    }
+
+    with patch(
+        "lego_agent.backend.pipeline_builder.create_agent",
+        side_effect=[fan_out_agent, summarize_agent],
+    ):
+        pipeline = build_pipeline_from_yaml(config)
+
+    from lego_agent.backend.queue_runtime import run_pipeline
+
+    await run_pipeline(pipeline, [Task.create("start", {"input": None})], max_concurrent_workers=2)
+
+    assert fan_out_agent.generate_async.call_count == 3
+    assert summarize_agent.generate_async.call_count == 1
+    summary_prompt = summarize_agent.generate_async.call_args.args[0]
+    assert "processed_a" in summary_prompt
+    assert "processed_b" in summary_prompt
+    assert "processed_c" in summary_prompt
 
 
 async def test_judge_loop_worker_returns_done_on_first_done_signal(mock_agent):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import random
 import re
 import sys
 from pathlib import Path
@@ -36,6 +37,19 @@ from .streaming import extract_tool_result, parse_chunk_content
 DEFAULT_AGENT_TIMEOUT = 300
 DEFAULT_FAN_OUT_MAX_WORKERS = 4  # maximum parallel workers for FanOut
 DEFAULT_JUDGE_LOOP_MAX_ITERATIONS = 10  # default maximum iterations for JudgeLoop
+DEFAULT_RATE_LIMIT_MAX_RETRIES = 4
+DEFAULT_RATE_LIMIT_BASE_DELAY_SECONDS = 1.0
+DEFAULT_RATE_LIMIT_MAX_DELAY_SECONDS = 20.0
+
+
+def _is_rate_limited_error(error_text: str) -> bool:
+    normalized = error_text.lower()
+    return (
+        "429" in normalized
+        or "too many requests" in normalized
+        or "resource exhausted" in normalized
+        or "rate limit" in normalized
+    )
 
 
 @runtime_checkable
@@ -64,12 +78,14 @@ class LangGraphAgent:
         tools: list[Callable[..., Any]],
         instruction: str = "",
         agent_name: str = "LegoAgentWorker",
+        logger_fn: Callable[[str, dict], None] | None = None,
     ):
         self.model_name = model_name
         self.llm = llm
         self.tools = self._wrap_tools(tools)
         self.instruction = instruction
         self.agent_name = agent_name
+        self.logger_fn = logger_fn
 
         # Create the graph
         self.graph: Any = create_react_agent(  # pyright: ignore[reportDeprecated]
@@ -118,82 +134,154 @@ class LangGraphAgent:
         messages = [HumanMessage(content=prompt)]
         config: RunnableConfig = {"recursion_limit": 50}
 
-        accumulated_text: list[str] = []
+        for attempt in range(DEFAULT_RATE_LIMIT_MAX_RETRIES + 1):
+            accumulated_text: list[str] = []
 
-        async def run_stream() -> None:
-            thinking_started = False
-            async for event in self.graph.astream_events({"messages": messages}, version="v1", config=config):
-                kind = event["event"]
+            async def run_stream() -> None:
+                thinking_started = False
+                stream_chunks = 0
+                
+                if self.logger_fn:
+                    self.logger_fn("start", {"model": self.model_name})
+                
+                async for event in self.graph.astream_events({"messages": messages}, version="v1", config=config):
+                    kind = event["event"]
 
-                if kind == "on_chat_model_stream":
-                    chunk = event["data"].get("chunk")
-                    if not chunk:
-                        continue
-                    text_chunk = parse_chunk_content(chunk.content)
+                    if kind == "on_chat_model_stream":
+                        chunk = event["data"].get("chunk")
+                        if not chunk:
+                            continue
+                        text_chunk = parse_chunk_content(chunk.content)
 
-                    if text_chunk:
-                        if not thinking_started:
+                        if text_chunk:
+                            stream_chunks += 1
+                            if self.logger_fn:
+                                self.logger_fn(
+                                    "stream",
+                                    {
+                                        "model": self.model_name,
+                                        "chunk_length": len(text_chunk),
+                                        "cumulative_chunks": stream_chunks,
+                                    },
+                                )
+                            if not thinking_started:
+                                print(
+                                    f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}",
+                                    flush=True,
+                                    file=out,
+                                )
+                                thinking_started = True
                             print(
-                                f"\n{Colors.LIGHT_GRAY}[Thinking]{Colors.ENDC}",
+                                f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}",
+                                end="",
                                 flush=True,
                                 file=out,
                             )
-                            thinking_started = True
+                            accumulated_text.append(text_chunk)
+
+                    elif kind == "on_tool_start":
+                        name = event["name"]
+                        inputs = event["data"].get("input")
+                        if thinking_started:
+                            print(flush=True, file=out)
+                            thinking_started = False
                         print(
-                            f"{Colors.LIGHT_GRAY}{text_chunk}{Colors.ENDC}",
-                            end="",
+                            f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}",
                             flush=True,
                             file=out,
                         )
-                        accumulated_text.append(text_chunk)
 
-                elif kind == "on_tool_start":
-                    name = event["name"]
-                    inputs = event["data"].get("input")
-                    if thinking_started:
-                        print(flush=True, file=out)
-                        thinking_started = False
-                    print(
-                        f"\n{Colors.BLUE}[Tool Use] {name}({inputs}){Colors.ENDC}",
-                        flush=True,
-                        file=out,
+                    elif kind == "on_tool_end":
+                        name = event["name"]
+                        tool_output = event["data"].get("output")
+                        status, result_text = extract_tool_result(tool_output)
+
+                        symbol = ""
+                        if status == "success":
+                            symbol = f"{Colors.GREEN}\u2713{Colors.ENDC} "
+                        elif status == "error":
+                            symbol = f"{Colors.RED}\u2717{Colors.ENDC} "
+
+                        print(
+                            "\n"
+                            f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
+                            f"{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}",
+                            flush=True,
+                            file=out,
+                        )
+
+                if thinking_started:
+                    print(flush=True, file=out)
+
+            try:
+                await asyncio.wait_for(run_stream(), timeout=timeout)
+                final_content = "".join(accumulated_text)
+                if self.logger_fn:
+                    self.logger_fn(
+                        "end",
+                        {
+                            "model": self.model_name,
+                            "status": "success",
+                            "content_length": len(final_content),
+                        },
                     )
+                if not final_content:
+                    return ""
+                return final_content
 
-                elif kind == "on_tool_end":
-                    name = event["name"]
-                    tool_output = event["data"].get("output")
-                    status, result_text = extract_tool_result(tool_output)
-
-                    symbol = ""
-                    if status == "success":
-                        symbol = f"{Colors.GREEN}\u2713{Colors.ENDC} "
-                    elif status == "error":
-                        symbol = f"{Colors.RED}\u2717{Colors.ENDC} "
-
-                    print(
-                        "\n"
-                        f"{Colors.BLUE}[Tool Result] {name}: {symbol}{Colors.ENDC}\n"
-                        f"{Colors.LIGHT_GRAY}{result_text}{Colors.ENDC}",
-                        flush=True,
-                        file=out,
+            except asyncio.TimeoutError:
+                if self.logger_fn:
+                    self.logger_fn(
+                        "error",
+                        {
+                            "model": self.model_name,
+                            "status": "timeout",
+                            "error_message": f"Agent execution timed out after {timeout} seconds",
+                        },
                     )
+                return f"Error: Agent execution timed out after {timeout} seconds."
+            except Exception as e:
+                err = str(e)
+                if _is_rate_limited_error(err) and attempt < DEFAULT_RATE_LIMIT_MAX_RETRIES:
+                    if self.logger_fn:
+                        self.logger_fn(
+                            "error",
+                            {
+                                "model": self.model_name,
+                                "status": "rate_limited",
+                                "error_message": err,
+                                "attempt": attempt + 1,
+                                "max_attempts": DEFAULT_RATE_LIMIT_MAX_RETRIES + 1,
+                            },
+                        )
+                    base_delay = min(
+                        DEFAULT_RATE_LIMIT_BASE_DELAY_SECONDS * (2**attempt),
+                        DEFAULT_RATE_LIMIT_MAX_DELAY_SECONDS,
+                    )
+                    jitter = random.uniform(0, base_delay * 0.25)
+                    wait_seconds = base_delay + jitter
+                    logger.warning(
+                        "Rate-limited model call (attempt %d/%d). Backing off %.2fs before retry.",
+                        attempt + 1,
+                        DEFAULT_RATE_LIMIT_MAX_RETRIES + 1,
+                        wait_seconds,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
 
-            if thinking_started:
-                print(flush=True, file=out)
+                logger.error(f"Error in agent generation: {e}")
+                if self.logger_fn:
+                    self.logger_fn(
+                        "error",
+                        {
+                            "model": self.model_name,
+                            "status": "failed",
+                            "error_message": str(e),
+                        },
+                    )
+                return f"Error: {e!s}"
 
-        try:
-            await asyncio.wait_for(run_stream(), timeout=timeout)
-
-            final_content = "".join(accumulated_text)
-            if not final_content:
-                return ""
-            return final_content
-
-        except asyncio.TimeoutError:
-            return f"Error: Agent execution timed out after {timeout} seconds."
-        except Exception as e:
-            logger.error(f"Error in agent generation: {e}")
-            return f"Error: {e!s}"
+        return "Error: Model call failed after rate-limit retries."
 
     def run(self, input_data: Any) -> Any:
         """Implement Runnable protocol."""
@@ -211,6 +299,7 @@ def create_agent(
     repo_path: str | None = None,
     instruction: str | None = None,
     tools: list[str] | None = None,
+    logger_fn: Callable[[str, dict], None] | None = None,
 ) -> LangGraphAgent:
     """Create a coding agent instance using LangGraph."""
     target_dir = repo_path or "."
@@ -247,6 +336,7 @@ def create_agent(
         llm=llm,
         tools=agent_tools,
         instruction=instruction or "",
+        logger_fn=logger_fn,
     )
 
 
