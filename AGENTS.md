@@ -25,7 +25,7 @@ SDS autonomously explores, validates, and evolves infrastructure using agentic L
 ## Usage Guide for LLM Agents
 
 - **Debugging deployment**: Check `.sds/deploy.sh` and `.sds/logs/`
-- **Debugging lego_agent**: Check `lego_agent_runs/<timestamp>/lego_agent.py`
+- **Debugging lego_agent**: Check `lego_agent_runs/<timestamp>/generated_script.py`, `lego_agent_config.yaml`, and `llm_calls.jsonl`
 - **Optimizing prompts**: `analyze-prompts` baseline → `optimize-prompts --dry-run` → compare
 - **Adding DSPy signatures**: Add to `dspy_integration/signatures.py`, register in `SIGNATURES` dict
 - **Extending metrics**: Modify `dspy_integration/metrics.py`, ensure weights sum to 1.0

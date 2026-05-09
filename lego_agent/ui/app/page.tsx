@@ -8,6 +8,7 @@ import { GraphView } from './components/GraphView';
 import { YamlView } from './components/YamlView';
 import { GraphAdapter } from './components/GraphAdapter';
 import { DemoGallery } from './components/DemoGallery';
+import { QueueDebugPanel } from './components/QueueDebugPanel';
 import { Terminal, Circle, Layout, FileText, List, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -15,7 +16,7 @@ import { useState } from 'react';
 type ViewMode = 'graph' | 'yaml' | 'logs';
 
 export default function Home() {
-  const { logs: realLogs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, updateCwd, dirOptions, listDirs, model, thinkingBudget, graphConfig: realGraphConfig } = useLegoAgent();
+    const { logs: realLogs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, updateCwd, dirOptions, listDirs, model, thinkingBudget, graphConfig: realGraphConfig, queueSnapshot } = useLegoAgent();
   const [viewMode, setViewMode] = useState<ViewMode>('graph');
   
   // Demo Mode State
@@ -168,6 +169,13 @@ export default function Home() {
         {/* Sidebar - Terminal Log when Graph or Yaml is active */}
         {graphConfig && viewMode !== 'logs' && demoMode !== 'selecting' && (
             <div className="w-96 shrink-0 border-l border-border bg-background/50 overflow-hidden flex flex-col backdrop-blur-sm z-10">
+                <div className="p-2 border-b border-border text-xs font-bold text-muted-foreground uppercase bg-secondary/10 flex justify-between items-center">
+                    <span>Queue Debug</span>
+                    <span className="text-[10px] bg-secondary px-1.5 py-0.5 rounded">{queueSnapshot?.stages.length ?? 0} stages</span>
+                </div>
+                <div className="p-3 border-b border-border/70 bg-background/70 overflow-y-auto max-h-[42vh]">
+                    <QueueDebugPanel snapshot={queueSnapshot} />
+                </div>
                 <div className="p-2 border-b border-border text-xs font-bold text-muted-foreground uppercase bg-secondary/10 flex justify-between items-center">
                     <span>Global Logs</span>
                     <span className="text-[10px] bg-secondary px-1.5 py-0.5 rounded">{logs.length}</span>

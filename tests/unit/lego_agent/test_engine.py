@@ -117,7 +117,9 @@ def test_engine_happy_path(engine, tmp_path):
         result = asyncio.run(engine.run_async("do something"))
 
         assert result.script_text is not None
-        assert (tmp_path / result.script_path.parent.name / "generated_script.py").exists()
+        assert result.config_path.exists()
+        assert result.script_path.exists()
+        assert result.config_path.parent == result.script_path.parent
         assert result.clarifications == []
 
 

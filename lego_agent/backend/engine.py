@@ -103,7 +103,17 @@ class LegoAgentEngine:
         final_response_data: dict[str, Any] | None = None
 
         try:
+            # Log the start of the LLM call
+            self.storage.log_llm_call(
+                "start",
+                {
+                    "model": self.config.agent.model,
+                    "provider": self.config.agent.backend,
+                },
+            )
+
             accumulated_text: list[str] = []
+            stream_chunks = 0
             async for event in agent.astream_events(
                 {"messages": messages}, version="v1", config={"recursion_limit": 50}
             ):
@@ -117,11 +127,21 @@ class LegoAgentEngine:
                     text_chunk = self._parse_chunk_content(content)
 
                     if text_chunk:
+                        stream_chunks += 1
                         if not self._thinking_started:
                             self.io.render_thinking_chunk("\nThinking: ")
                             self._thinking_started = True
                         self.io.render_thinking_chunk(text_chunk)
                         accumulated_text.append(text_chunk)
+                        # Log streaming chunk
+                        self.storage.log_llm_call(
+                            "stream",
+                            {
+                                "model": self.config.agent.model,
+                                "chunk_length": len(text_chunk),
+                                "cumulative_chunks": stream_chunks,
+                            },
+                        )
 
                 elif kind == "on_tool_start":
                     name = event["name"]
@@ -167,8 +187,27 @@ class LegoAgentEngine:
                 last_msg_content = result["messages"][-1].content
                 final_content = self._extract_message_content(last_msg_content)
 
+            # Log successful completion
+            self.storage.log_llm_call(
+                "end",
+                {
+                    "model": self.config.agent.model,
+                    "status": "success",
+                    "total_chunks": stream_chunks,
+                    "content_length": len(final_content),
+                },
+            )
+
         except Exception as e:
             logger.error(f"Error during agent execution: {e}")
+            self.storage.log_llm_call(
+                "error",
+                {
+                    "model": self.config.agent.model,
+                    "status": "error",
+                    "error_message": str(e),
+                },
+            )
             raise AgentError(f"Agent execution failed: {e}") from e
 
         return final_content, final_response_data

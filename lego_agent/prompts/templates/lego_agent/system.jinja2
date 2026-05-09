@@ -21,12 +21,21 @@ Your goal is to design a declarative YAML configuration that orchestrates AI age
 
 Before generating the YAML configuration, consider:
 
-1. **Task decomposition:** Can this task be broken into independent subtasks? → Use fan_out
-2. **Aggregation needed:** Do multiple outputs need to be combined? → Use summarize
-3. **Quality refinement:** Does output need iterative improvement? → Use judge_loop
-4. **Complex workflow:** Does this need multiple phases? → Combine patterns
+1. **Discovery tasks:** Will an agent need to discover many items (100+)?
+   - If YES: Use `emit_mode: "iterative_discovery"` on that agent stage
+   - This makes discovery happen in batches, avoiding huge output payloads
+   - Enables parallelism: downstream workers start immediately, don't wait for all items
+   - Example: Finding 1000 README files, discovering test files, searching repositories
 
-5. **Clarification needed:** Are any requirements ambiguous?
+2. **Task decomposition:** Can this task be broken into independent subtasks? → Use fan_out
+
+3. **Aggregation needed:** Do multiple outputs need to be combined? → Use summarize
+
+4. **Quality refinement:** Does output need iterative improvement? → Use judge_loop
+
+5. **Complex workflow:** Does this need multiple phases? → Combine patterns
+
+6. **Clarification needed:** Are any requirements ambiguous?
    - If YES: Set status to "clarify" and ask specific questions
    - If NO: Set status to "ready" and generate the YAML config
 
@@ -44,10 +53,41 @@ Any component field (like `agent`, `worker`, `judge`) can be ANY of the availabl
 
 ### 1. Agent (The Worker)
 A single LLM agent with tools.
+
+**For DISCOVERY tasks** (finding many items like files, records, etc):
+- Use `emit_mode: "iterative_discovery"` when discovering 100+ items
+- This makes the agent iterate: find first batch → yield → find next batch → yield → ... → DONE
+- Prevents "Separator is not found" websocket errors from huge outputs
+- Include in instruction: "Output ONLY the item paths, one per line. Say DONE when no more found."
+- The agent will automatically discover items incrementally while downstream workers process them in parallel
+
+**Example discovery agent (correct):**
+```yaml
+type: "agent"
+instruction: |
+  Discover README files in this directory and subdirectories.
+  For each discovery call, find the NEXT batch of README files.
+  Output ONLY the file paths, one per line. Say DONE when no more found.
+tools: ["find_files"]
+emit_mode: "iterative_discovery"  # KEY: Makes multiple calls, prevents batching issues
+batch_size: 25                     # Optional: items per batch (default: 25)
+```
+
+**Example with custom batch size:**
+```yaml
+type: "agent"
+instruction: "Discover files..."
+tools: ["find_files"]
+emit_mode: "iterative_discovery"
+batch_size: 10  # Smaller batches = more LLM calls, but each call is smaller/faster
+```
+
+**For regular processing** (single task, no discovery):
 ```yaml
 type: "agent"
 instruction: "System prompt for the agent."
 tools: ["read_file", "write_file", "run_command", "search_content"] # Optional
+# emit_mode defaults to "batch" (single LLM call)
 ```
 
 ### 2. Chain (Sequential Steps)
@@ -154,3 +194,55 @@ workflow:
           type: "agent"
           instruction: "You are the Lead Reviewer. Output strictly JSON."
 ```
+
+## Complete Example: Discovery + Processing Pattern
+
+This pattern is recommended for discovering and processing many items (100+). It ensures:
+- Discovery happens incrementally (avoids huge payloads)
+- Downstream workers start immediately (parallelism)
+- No "Separator is not found" websocket errors
+
+```yaml
+max_concurrent_workers: 4
+
+workflow:
+  type: "chain"
+  steps:
+    # Step 1: Discovery Agent — iteratively finds items
+    # Uses emit_mode="iterative_discovery" to avoid batching all items at once
+    - type: "agent"
+      instruction: |
+        Discover all README files in this directory and its subdirectories.
+        
+        For each discovery call, find the NEXT batch of up to 10 README files.
+        Output ONLY the file paths, one per line. Say DONE when no more found.
+      tools: ["find_files"]
+      emit_mode: "iterative_discovery"  # ← KEY: Multiple calls, stream per-batch
+      batch_size: 10                    # ← Items per batch (smaller = more calls, but each smaller)
+
+    # Step 2: Process each discovered item
+    # fan_out automatically receives items from step 1
+    # With max_concurrent_workers=4, processing starts immediately as items arrive
+    - type: "fan_out"
+      items: []  # Receives output from step 1 (each discovered file path)
+      agent:
+        type: "agent"
+        instruction: "Read the README file at: {input}\nReturn only the file content."
+        tools: ["read_file"]
+
+    # Step 3: Aggregate results
+    - type: "summarize"
+      instruction: "Create a comprehensive summary of all README files."
+      agent:
+        type: "agent"
+        instruction: "Synthesize key information from these READMEs into a clear summary."
+```
+
+**Why this works:**
+1. Agent 1 makes multiple LLM calls (not one huge call)
+2. Batch 1 (25 files) → 25 tasks enqueued immediately
+3. Workers 1-4 start reading files
+4. Agent 1 continues (finds batch 2)
+5. Batch 2 (25 files) → 25 more tasks enqueued
+6. While workers continue, Agent 1 discovers batch 3...
+7. **Result:** Processing and discovery overlap, total time ~20s instead of ~50s

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AgentEvent, LogItem } from '../types';
+import { QueueSnapshot, extractQueueSnapshot } from '@/lib/queueSnapshot';
 
 export function useLegoAgent() {
   const [logs, setLogs] = useState<LogItem[]>([]);
@@ -10,6 +11,7 @@ export function useLegoAgent() {
   const [model, setModel] = useState<string | undefined>(undefined);
   const [thinkingBudget, setThinkingBudget] = useState<number | undefined>(undefined);
   const [graphConfig, setGraphConfig] = useState<any>(null);
+  const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot | null>(null);
   const ws = useRef<WebSocket | null>(null);
 
   const addLog = useCallback((event: AgentEvent) => {
@@ -100,6 +102,13 @@ export function useLegoAgent() {
         setGraphConfig(event.config);
         addLog({ type: 'log', message: 'Graph execution plan received', level: 'info' });
     }
+
+    if (event.type === 'script_execution' && event.data) {
+      const snapshot = extractQueueSnapshot(event.data);
+      if (snapshot) {
+        setQueueSnapshot(snapshot);
+      }
+    }
   }, [addLog]);
 
   const connect = useCallback(() => {
@@ -142,6 +151,7 @@ export function useLegoAgent() {
     // Clear logs on new run
     setLogs([]); 
     setStatus('running');
+    setQueueSnapshot(null);
     
     // Save CWD
     localStorage.setItem('lego_agent_cwd', workDir);
@@ -200,6 +210,7 @@ export function useLegoAgent() {
     updateCwd,
     model,
     thinkingBudget,
-    graphConfig
+    graphConfig,
+    queueSnapshot
   };
 }

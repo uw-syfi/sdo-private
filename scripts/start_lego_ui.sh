@@ -4,6 +4,14 @@ set -e
 # Get repo root
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Load shared environment variables if present.
+if [ -f "$REPO_ROOT/.env" ]; then
+	set -a
+	# Strip carriage returns so CRLF .env files don't leak hidden characters into paths.
+	. <(tr -d '\r' < "$REPO_ROOT/.env")
+	set +a
+fi
+
 # Start Backend
 echo "Starting LegoAgent Backend on port 8000..."
 cd "$REPO_ROOT"
