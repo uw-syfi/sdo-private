@@ -198,9 +198,11 @@ async def test_iterative_discovery_stops_on_done_line_with_extra_text(mock_agent
 
     emitted: list[str] = []
     task = Task.create("start", {"input": "repo root"})
-    async for out_task in pipeline.stages[0].worker_fn(task):
-        if out_task.type != "STEP_COMPLETE":
-            emitted.append(out_task.payload["result"])
+    emitted = [
+        out_task.payload["result"]
+        async for out_task in pipeline.stages[0].worker_fn(task)
+        if out_task.type != "STEP_COMPLETE"
+    ]
 
     assert emitted == ["file1.md"]
     assert mock_agent.generate_async.call_count == 1
@@ -226,9 +228,11 @@ async def test_iterative_discovery_stops_after_consecutive_duplicate_batches(moc
 
     emitted: list[str] = []
     task = Task.create("start", {"input": "repo root"})
-    async for out_task in pipeline.stages[0].worker_fn(task):
-        if out_task.type != "STEP_COMPLETE":
-            emitted.append(out_task.payload["result"])
+    emitted = [
+        out_task.payload["result"]
+        async for out_task in pipeline.stages[0].worker_fn(task)
+        if out_task.type != "STEP_COMPLETE"
+    ]
 
     assert emitted == ["file1.md", "file2.md"]
     assert mock_agent.generate_async.call_count == 3
@@ -242,10 +246,7 @@ async def test_iterative_discovery_stops_on_model_error_response(mock_agent):
         "batch_size": 5,
     }
     mock_agent.generate_async = AsyncMock(
-        return_value=(
-            "Error: Error calling model 'gemini-2.5-flash' (Too Many Requests): "
-            "429 Too Many Requests"
-        )
+        return_value=("Error: Error calling model 'gemini-2.5-flash' (Too Many Requests): 429 Too Many Requests")
     )
 
     with patch("lego_agent.backend.pipeline_builder.create_agent", return_value=mock_agent):
@@ -253,9 +254,11 @@ async def test_iterative_discovery_stops_on_model_error_response(mock_agent):
 
     emitted: list[str] = []
     task = Task.create("start", {"input": "repo root"})
-    async for out_task in pipeline.stages[0].worker_fn(task):
-        if out_task.type != "STEP_COMPLETE":
-            emitted.append(out_task.payload["result"])
+    emitted = [
+        out_task.payload["result"]
+        async for out_task in pipeline.stages[0].worker_fn(task)
+        if out_task.type != "STEP_COMPLETE"
+    ]
 
     assert emitted == []
     assert mock_agent.generate_async.call_count == 1
@@ -270,9 +273,7 @@ async def test_fan_out_worker_static_items(mock_agent):
     with patch("lego_agent.backend.pipeline_builder.create_agent", return_value=mock_agent):
         pipeline = build_pipeline_from_yaml(config)
 
-    result_tasks = []
-    async for task in pipeline.stages[0].worker_fn(Task.create("start", {"input": None})):
-        result_tasks.append(task)
+    result_tasks = [task async for task in pipeline.stages[0].worker_fn(Task.create("start", {"input": None}))]
 
     assert mock_agent.generate_async.call_count == 2
     # Collect results from fan_out_output tasks (skip any completion signals)
@@ -290,9 +291,7 @@ async def test_fan_out_worker_dynamic_items_from_previous_output(mock_agent):
         pipeline = build_pipeline_from_yaml(config)
 
     task = Task.create("start", {"result": "file1.txt\nfile2.txt\nfile3.txt"})
-    result_tasks = []
-    async for t in pipeline.stages[0].worker_fn(task):
-        result_tasks.append(t)
+    result_tasks = [t async for t in pipeline.stages[0].worker_fn(task)]
 
     assert mock_agent.generate_async.call_count == 3
     # Collect results from fan_out_output tasks (skip any completion signals)

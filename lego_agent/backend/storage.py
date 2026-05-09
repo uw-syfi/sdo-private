@@ -3,6 +3,7 @@ import json
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 
 class LegoAgentStorage:
@@ -67,9 +68,9 @@ class LegoAgentStorage:
 
         return script_path
 
-    def log_llm_call(self, event_type: str, details: dict) -> None:
+    def log_llm_call(self, event_type: str, details: dict[str, Any]) -> None:
         """Log an LLM call with timestamp and details.
-        
+
         Args:
             event_type: Type of event (e.g., 'start', 'stream', 'end', 'error')
             details: Dictionary containing event details (model, tokens, etc.)
@@ -77,14 +78,14 @@ class LegoAgentStorage:
         run_dir = self._ensure_run_dir()
         run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "llm_calls.jsonl"
-        
-        log_entry = {
+
+        log_entry: dict[str, Any] = {
             "timestamp": time.time(),
             "timestamp_iso": time.strftime("%Y-%m-%d %H:%M:%S"),
             "event_type": event_type,
             **details,
         }
-        
+
         with self._llm_log_lock:
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")

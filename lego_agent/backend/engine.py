@@ -111,7 +111,7 @@ class LegoAgentEngine:
                     "provider": self.config.agent.backend,
                 },
             )
-            
+
             accumulated_text: list[str] = []
             stream_chunks = 0
             async for event in agent.astream_events(

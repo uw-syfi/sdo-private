@@ -7,10 +7,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
 
 
 _QUEUE_SNAPSHOT_PREVIEW_LIMIT = 20
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
 
 
 @dataclass
@@ -18,8 +22,7 @@ class Task:
     id: str
     type: str
     payload: dict[str, Any]
-    metadata: dict[str, Any] = field(default_factory=dict)
-    
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     @staticmethod
     def create(
@@ -40,7 +43,7 @@ class Stage:
     name: str
     input_queue: str
     output_queue: str | None
-    worker_fn: Callable[[Task], Awaitable[list[Task]]]
+    worker_fn: Callable[[Task], Any]
     max_workers: int = 10
 
 
@@ -114,7 +117,7 @@ async def _worker_loop(
     max_concurrent_workers: int,
 ) -> None:
     """Global worker that pulls from any stage's input queue.
-    
+
     Each worker:
     1. Tries each stage's queue in round-robin order
     2. Picks the first non-empty queue it finds
@@ -144,7 +147,7 @@ async def _worker_loop(
         # If no task found, wait for any queue to have something
         if task is None:
             # Wait for the next task from any stage
-            done, pending = await asyncio.wait(
+            _done, pending = await asyncio.wait(
                 [asyncio.create_task(_wait_for_queue(queues[s.input_queue])) for s in pipeline.stages],
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -174,7 +177,9 @@ async def _worker_loop(
                             await queues[stage.output_queue].put(new_task)
                             async with state_lock:
                                 queue_state.setdefault(stage.output_queue, []).append(new_task)
-                                _emit_queue_snapshot(pipeline, queue_state, active_state, completed_state, max_concurrent_workers)
+                                _emit_queue_snapshot(
+                                    pipeline, queue_state, active_state, completed_state, max_concurrent_workers
+                                )
                 else:
                     results = await worker_result
                     if stage.output_queue:
@@ -182,7 +187,9 @@ async def _worker_loop(
                             await queues[stage.output_queue].put(new_task)
                             async with state_lock:
                                 queue_state.setdefault(stage.output_queue, []).append(new_task)
-                                _emit_queue_snapshot(pipeline, queue_state, active_state, completed_state, max_concurrent_workers)
+                                _emit_queue_snapshot(
+                                    pipeline, queue_state, active_state, completed_state, max_concurrent_workers
+                                )
                 print(f"__LEGO_TASK_DONE__ {stage.name} {task.id}")
             except Exception as e:
                 print(f"__LEGO_TASK_ERROR__ {stage.name} {task.id} {e}")
@@ -197,9 +204,6 @@ async def _worker_loop(
                             break
                     _emit_queue_snapshot(pipeline, queue_state, active_state, completed_state, max_concurrent_workers)
                 queues[stage.input_queue].task_done()
-
-
-
 
 
 async def _wait_for_queue(q: asyncio.Queue[Task]) -> None:
@@ -219,23 +223,21 @@ def _start_global_workers(
 ) -> list[asyncio.Task[None]]:
     """Start a global worker pool that can work on any stage."""
     print(f"__LEGO_PIPELINE_START__ Starting {max_concurrent_workers} global workers")
-    workers: list[asyncio.Task[None]] = []
-    for worker_index in range(max_concurrent_workers):
-        workers.append(
-            asyncio.create_task(
-                _worker_loop(
-                    worker_index,
-                    pipeline,
-                    queues,
-                    queue_state,
-                    active_state,
-                    completed_state,
-                    state_lock,
-                    max_concurrent_workers,
-                )
+    return [
+        asyncio.create_task(
+            _worker_loop(
+                worker_index,
+                pipeline,
+                queues,
+                queue_state,
+                active_state,
+                completed_state,
+                state_lock,
+                max_concurrent_workers,
             )
         )
-    return workers
+        for worker_index in range(max_concurrent_workers)
+    ]
 
 
 async def run_pipeline(
@@ -244,7 +246,7 @@ async def run_pipeline(
     max_concurrent_workers: int = 4,
 ) -> None:
     """Execute a pipeline with a global worker pool.
-    
+
     Args:
         pipeline: The pipeline definition with stages
         initial_tasks: Tasks to start the pipeline with
@@ -261,7 +263,7 @@ async def run_pipeline(
     queues: dict[str, asyncio.Queue[Task]] = {name: asyncio.Queue(maxsize=100) for name in pipeline.queue_names}
     queue_state: dict[str, list[Task]] = {name: [] for name in pipeline.queue_names}
     active_state: dict[str, list[Task]] = {name: [] for name in pipeline.queue_names}
-    completed_state: dict[str, int] = {name: 0 for name in pipeline.queue_names}
+    completed_state: dict[str, int] = dict.fromkeys(pipeline.queue_names, 0)
     state_lock = asyncio.Lock()
 
     for task in initial_tasks:
@@ -271,7 +273,9 @@ async def run_pipeline(
     _emit_queue_snapshot(pipeline, queue_state, active_state, completed_state, max_concurrent_workers)
 
     # Start global worker pool that can work on any stage
-    workers = _start_global_workers(pipeline, queues, queue_state, active_state, completed_state, max_concurrent_workers, state_lock)
+    workers = _start_global_workers(
+        pipeline, queues, queue_state, active_state, completed_state, max_concurrent_workers, state_lock
+    )
 
     # Wait for all queues to be processed
     for stage in pipeline.stages:

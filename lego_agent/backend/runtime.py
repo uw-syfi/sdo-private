@@ -78,7 +78,7 @@ class LangGraphAgent:
         tools: list[Callable[..., Any]],
         instruction: str = "",
         agent_name: str = "LegoAgentWorker",
-        logger_fn: Callable[[str, dict], None] | None = None,
+        logger_fn: Callable[[str, dict[str, Any]], None] | None = None,
     ):
         self.model_name = model_name
         self.llm = llm
@@ -137,13 +137,13 @@ class LangGraphAgent:
         for attempt in range(DEFAULT_RATE_LIMIT_MAX_RETRIES + 1):
             accumulated_text: list[str] = []
 
-            async def run_stream() -> None:
+            async def run_stream(accumulated_text: list[str] = accumulated_text) -> None:
                 thinking_started = False
                 stream_chunks = 0
-                
+
                 if self.logger_fn:
                     self.logger_fn("start", {"model": self.model_name})
-                
+
                 async for event in self.graph.astream_events({"messages": messages}, version="v1", config=config):
                     kind = event["event"]
 
@@ -299,7 +299,7 @@ def create_agent(
     repo_path: str | None = None,
     instruction: str | None = None,
     tools: list[str] | None = None,
-    logger_fn: Callable[[str, dict], None] | None = None,
+    logger_fn: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> LangGraphAgent:
     """Create a coding agent instance using LangGraph."""
     target_dir = repo_path or "."

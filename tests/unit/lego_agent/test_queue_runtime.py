@@ -148,7 +148,6 @@ async def test_queue_snapshot_includes_active_tasks(capsys):
 
 async def test_async_generator_worker_yields_tasks_incrementally():
     """Test that async-generator workers (like producer/fan_out) yield tasks one at a time."""
-    yielded_tasks: list[str] = []
     collected_results: list[str] = []
 
     async def streaming_producer(task: Task):
@@ -246,7 +245,7 @@ async def test_streaming_agent_emits_per_line():
         """Agent that outputs multiple lines and yields one task per line."""
         # Simulate agent output with 3 items
         agent_output = "file1.md\nfile2.md\nfile3.md"
-        
+
         # Streaming mode: split by lines and yield each
         for i, line in enumerate(agent_output.strip().split("\n")):
             if line.strip():
@@ -277,31 +276,22 @@ async def test_iterative_discovery_batches_and_yields():
         batch_size = 2
         discovered = set()
         batch_num = 0
-        
+
         while len(discovered) < len(all_items):
             batch_num += 1
             # Simulate finding next batch
-            batch = [
-                item for item in all_items
-                if item not in discovered
-            ][:batch_size]
-            
+            batch = [item for item in all_items if item not in discovered][:batch_size]
+
             if not batch:
                 break
-            
+
             # Yield each item in the batch
             for item in batch:
                 discovered.add(item)
-                yield Task.create(
-                    "discovered",
-                    {"result": item, "batch": batch_num}
-                )
+                yield Task.create("discovered", {"result": item, "batch": batch_num})
 
     async def collector(task: Task) -> list[Task]:
-        discovered_items.append((
-            task.payload["result"],
-            task.payload["batch"]
-        ))
+        discovered_items.append((task.payload["result"], task.payload["batch"]))
         return []
 
     stages = [
@@ -315,6 +305,6 @@ async def test_iterative_discovery_batches_and_yields():
     # Verify all items discovered and grouped by batch
     items_only = [item for item, _ in discovered_items]
     batches = [batch for _, batch in discovered_items]
-    
+
     assert items_only == ["item1", "item2", "item3", "item4", "item5"]
     assert batches == [1, 1, 2, 2, 3]  # 2-2-1 batches
