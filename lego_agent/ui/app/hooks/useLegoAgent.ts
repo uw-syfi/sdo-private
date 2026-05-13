@@ -4,6 +4,9 @@ import { QueueSnapshot, extractQueueSnapshot } from '@/lib/queueSnapshot';
 
 export function useLegoAgent() {
   const [logs, setLogs] = useState<LogItem[]>([]);
+  // Per-agent log streams keyed by agent_id (e.g. "worker_0").
+  // Populated only for messages that carry an agent_id field.
+  const [agentLogs, setAgentLogs] = useState<Record<string, LogItem[]>>({});
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'running'>('disconnected');
   const [pendingQuestions, setPendingQuestions] = useState<string[] | null>(null);
   const [cwd, setCwd] = useState<string>('.');
@@ -23,6 +26,32 @@ export function useLegoAgent() {
   }, []);
 
   const handleEvent = useCallback((event: AgentEvent) => {
+    // Route events with agent_id to per-agent streams (e.g. FanOut workers).
+    // They also flow into the global logs so the sidebar log panel stays complete.
+    if (event.agent_id !== undefined) {
+      const agentId = event.agent_id;
+      setAgentLogs(prev => {
+        const existing = prev[agentId] ?? [];
+        // Coalesce consecutive thinking chunks per agent.
+        if (event.type === 'thinking' && existing.length > 0) {
+          const last = existing[existing.length - 1];
+          if (last.event.type === 'thinking') {
+            return {
+              ...prev,
+              [agentId]: [
+                ...existing.slice(0, -1),
+                { ...last, event: { ...last.event, text: (last.event.text ?? '') + (event.text ?? '') } },
+              ],
+            };
+          }
+        }
+        return {
+          ...prev,
+          [agentId]: [...existing, { id: Math.random().toString(36).substring(7), event, timestamp: Date.now() }],
+        };
+      });
+    }
+
     setLogs(prev => {
         // Coalesce thinking events
         if (event.type === 'thinking' && prev.length > 0) {
@@ -198,6 +227,7 @@ export function useLegoAgent() {
 
   return {
     logs,
+    agentLogs,
     status,
     pendingQuestions,
     sendPrompt,

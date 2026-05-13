@@ -19,6 +19,8 @@ export interface AgentEvent {
   path?: string;
   valid?: boolean;
   config?: any;
+  // Phase 3: present on messages emitted by runtime workers (FanOut, etc.)
+  agent_id?: string;
 }
 
 export interface LogItem {

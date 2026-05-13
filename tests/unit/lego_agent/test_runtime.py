@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -167,39 +168,71 @@ def test_langgraph_agent_run_no_placeholder_uses_input_data():
         mock_generate.assert_called_once_with("some input")
 
 
-# --- Per-worker output markers for fan_out (issue 2) ---
+# --- Per-worker JSON line multiplexing for fan_out ---
 
 
-def test_fan_out_emits_worker_markers(capsys):
-    """FanOut should wrap each worker's output in __LEGO_WORKER_START/END__ markers."""
+class FakeAsyncAgent:
+    """Minimal AsyncRunnable that emits tagged JSON lines in structured mode."""
 
-    # Use a real class so isinstance(agent, AsyncRunnable) returns True.
-    class FakeAsyncAgent:
-        def run(self, input_data):
-            return f"result for {input_data}"
+    def run(self, input_data: str) -> str:
+        return f"result for {input_data}"
 
-        async def generate_async(self, prompt, timeout, output=None):
-            if output is not None:
-                output.write(f"output for {prompt}")
-            return f"result for {prompt}"
+    async def generate_async(
+        self, prompt: str, timeout: int, output=None, agent_id: str | None = None
+    ) -> str:
+        if agent_id is not None:
+            from lego_agent.backend.messages import LogMsg, TaggedMsg, ThinkingMsg
 
-    fo = FanOut(FakeAsyncAgent(), ["item0", "item1"])
+            print(
+                TaggedMsg(
+                    agent_id=agent_id,
+                    inner=ThinkingMsg(type="thinking", text=f"thinking: {prompt}"),
+                ).to_json_line(),
+                flush=True,
+            )
+            print(
+                TaggedMsg(
+                    agent_id=agent_id,
+                    inner=LogMsg(type="log", message=f"done: {prompt}", level="success"),
+                ).to_json_line(),
+                flush=True,
+            )
+        return f"result for {prompt}"
+
+
+def test_fan_out_emits_tagged_json_lines(capsys):
+    """FanOut AsyncRunnable workers emit JSON lines tagged with agent_id in real time.
+
+    Replaces the old sentinel-marker behaviour (__LEGO_WORKER_START/END__).
+    Each line must be valid JSON with an agent_id and a known type field.
+    """
+    fo = FanOut(FakeAsyncAgent(), ["item0", "item1", "item2"])
     results = fo.run("")
 
+    assert results == ["result for item0", "result for item1", "result for item2"]
+
     captured = capsys.readouterr().out
-    assert "__LEGO_WORKER_START__ 0" in captured
-    assert "__LEGO_WORKER_END__ 0" in captured
-    assert "__LEGO_WORKER_START__ 1" in captured
-    assert "__LEGO_WORKER_END__ 1" in captured
-    # Worker 0's output should appear between its markers
-    start0 = captured.index("__LEGO_WORKER_START__ 0")
-    end0 = captured.index("__LEGO_WORKER_END__ 0")
-    assert "output for item0" in captured[start0:end0]
-    # Worker 1's output should appear between its markers
-    start1 = captured.index("__LEGO_WORKER_START__ 1")
-    end1 = captured.index("__LEGO_WORKER_END__ 1")
-    assert "output for item1" in captured[start1:end1]
-    assert results == ["result for item0", "result for item1"]
+    parsed = [json.loads(line) for line in captured.splitlines() if line.strip().startswith("{")]
+    tagged_lines = [entry for entry in parsed if "agent_id" in entry]
+
+    # Every worker emitted at least one tagged line.
+    ids_seen = {entry["agent_id"] for entry in tagged_lines}
+    assert ids_seen == {"worker_0", "worker_1", "worker_2"}
+
+    # Every tagged line carries a valid type field.
+    valid_types = {"thinking", "log", "tool_start", "tool_end"}
+    for line in tagged_lines:
+        assert line["type"] in valid_types
+
+
+def test_fan_out_no_sentinel_markers(capsys):
+    """The old __LEGO_WORKER_START/END__ markers must not appear in output."""
+    fo = FanOut(FakeAsyncAgent(), ["item0", "item1"])
+    fo.run("")
+
+    captured = capsys.readouterr().out
+    assert "__LEGO_WORKER_START__" not in captured
+    assert "__LEGO_WORKER_END__" not in captured
 
 
 def test_fan_out_default_timeout():
