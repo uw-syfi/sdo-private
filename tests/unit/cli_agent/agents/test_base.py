@@ -1,15 +1,11 @@
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from app_operator.cli_agent.agents.base import OperatorAgent
-
-if TYPE_CHECKING:
-    from app_operator.cli_agent.agents.context import AgentContext
 
 
 class _TestAgent(OperatorAgent[str]):
@@ -21,7 +17,7 @@ class _TestAgent(OperatorAgent[str]):
 
 
 @pytest.fixture
-def mock_agent_context() -> AgentContext:
+def mock_agent_context() -> MagicMock:
     ctx = MagicMock()
     ctx.coding_agent.generate.return_value = "response"
     ctx.repo_path = "/tmp"
@@ -29,7 +25,7 @@ def mock_agent_context() -> AgentContext:
     return ctx
 
 
-def test_operator_agent_run(mock_agent_context: AgentContext):
+def test_operator_agent_run(mock_agent_context: MagicMock):
     agent = _TestAgent(ctx=mock_agent_context)
     result = agent.run()
     assert result == "parsed: response"
@@ -40,7 +36,7 @@ def test_operator_agent_run(mock_agent_context: AgentContext):
     )
 
 
-def test_operator_agent_execute(mock_agent_context: AgentContext):
+def test_operator_agent_execute(mock_agent_context: MagicMock):
     agent = _TestAgent(ctx=mock_agent_context)
     response = agent.execute("test_prompt", timeout=60)
     assert response == "response"

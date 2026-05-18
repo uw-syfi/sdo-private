@@ -1,4 +1,3 @@
-
 import json
 from pathlib import Path
 
@@ -48,6 +47,7 @@ def test_load_examples(enriched_trajectory_file: Path):
     example = examples[0]
     assert example.phase == Phase.DEPLOYMENT
     assert example.prompt_name == "deployer_fix_error"
+    assert example.prompt_kwargs is not None
     assert example.prompt_kwargs["attempt"] == 1
 
 
