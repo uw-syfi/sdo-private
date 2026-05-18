@@ -2,6 +2,11 @@ import { useEffect, useRef } from 'react';
 import { useGraphStore, AgentNodeData } from '../store/graphStore';
 import { LogItem } from '../types';
 import { Node, Edge, MarkerType } from 'reactflow';
+import {
+  computeWorkerGridLayout,
+  DEFAULT_CELL_HEIGHT,
+  DEFAULT_CELL_WIDTH,
+} from '../utils/workerGridLayout';
 
 interface GraphConfigNode {
   id?: string;
@@ -167,7 +172,9 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
               id: `${prevId}-${stepId}`,
               source: prevId,
               target: stepId,
-              sourceHandle: 'source-bottom',
+              sourceHandle: 'source-right',
+              targetHandle: 'target-left',
+              type: 'smoothstep',
               markerEnd: { type: MarkerType.ArrowClosed },
             });
           }
@@ -192,8 +199,8 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
           source: workerId,
           target: judgeId,
           label: 'attempt',
-          sourceHandle: 'source-bottom',
-          targetHandle: 'target-bottom',
+          sourceHandle: 'source-right',
+          targetHandle: 'target-left',
           type: 'smoothstep',
           markerEnd: { type: MarkerType.ArrowClosed },
           animated: true,
@@ -203,7 +210,8 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
           source: judgeId,
           target: workerId,
           label: 'critique',
-          sourceHandle: 'source-top',
+          sourceHandle: 'source-left',
+          targetHandle: 'target-right',
           type: 'smoothstep',
           style: { strokeDasharray: 5 },
           markerEnd: { type: MarkerType.ArrowClosed },
@@ -289,6 +297,7 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
             .filter(n => n.parentId === groupNode.id)
             .map(n => n.id);
 
+          const { positions, bounds } = computeWorkerGridLayout(count);
           const workerNodes: Node<AgentNodeData>[] = Array.from({ length: count }, (_, i) => ({
             id: Math.random().toString(36).substring(2, 11),
             type: 'agent' as const,
@@ -298,12 +307,20 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
               pattern: 'worker' as AgentNodeData['pattern'],
               logs: [],
             },
-            position: { x: 0, y: 0 },
+            position: positions[i],
             parentId: groupNode.id,
+            style: { width: DEFAULT_CELL_WIDTH, height: DEFAULT_CELL_HEIGHT },
           }));
 
           removeNodes(templateIds);
           addNodes(workerNodes);
+          useGraphStore.getState().setNodes(
+            useGraphStore.getState().nodes.map((n) =>
+              n.id === groupNode.id
+                ? { ...n, style: { ...n.style, width: bounds.width, height: bounds.height } }
+                : n,
+            ),
+          );
         }
       }
 

@@ -17,14 +17,18 @@ const StatusIcon = ({ status }: { status: string }) => {
 const AgentNode = ({ data, selected }: NodeProps<AgentNodeData>) => {
   return (
     <div className={cn(
-      "relative min-w-[180px] bg-slate-900 border transition-all duration-300 shadow-md flex items-center justify-between p-3 rounded-lg group",
+      "relative w-full h-full min-w-[180px] bg-slate-900 border transition-all duration-300 shadow-md flex items-center justify-between p-3 rounded-lg group",
       selected ? "border-blue-500 ring-1 ring-blue-500" : "border-slate-700",
       data.status === 'active' && "border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.2)] bg-emerald-950/10",
       data.status === 'blocked' && "opacity-80 border-dashed bg-slate-900/50",
       data.status === 'done' && "border-slate-700 bg-slate-900"
     )}>
+      <Handle type="target" position={Position.Left} id="target-left" className="!w-0 !h-0 opacity-0 pointer-events-none border-0" isConnectable={false} />
+      <Handle type="target" position={Position.Right} id="target-right" className="!w-0 !h-0 opacity-0 pointer-events-none border-0" isConnectable={false} />
+      <Handle type="source" position={Position.Left} id="source-left" className="!w-0 !h-0 opacity-0 pointer-events-none border-0" isConnectable={false} />
+      <Handle type="source" position={Position.Right} id="source-right" className="!w-0 !h-0 opacity-0 pointer-events-none border-0" isConnectable={false} />
       <Handle type="target" position={Position.Top} className="!w-0 !h-0 opacity-0 pointer-events-none border-0" isConnectable={false} />
-      <Handle type="source" position={Position.Top} id="source-top" className="!w-0 !h-0 opacity-0 pointer-events-none border-0" style={{ left: '70%' }} isConnectable={false} />
+      <Handle type="source" position={Position.Top} id="source-top" className="!w-0 !h-0 opacity-0 pointer-events-none border-0" style={{ top: '30%' }} isConnectable={false} />
       
       <div className="flex items-center gap-3 w-full">
         <div className={cn(
