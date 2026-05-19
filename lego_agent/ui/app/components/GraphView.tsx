@@ -32,14 +32,16 @@ export function GraphView({ className }: GraphViewProps) {
   
   const { computeLayout } = useElkLayout();
   
+  const layoutKey = nodes
+    .map((n) => `${n.id}:${n.parentId ?? ''}:${n.style?.width ?? ''}:${n.style?.height ?? ''}`)
+    .join('|');
+
   useEffect(() => {
-      // Debounce or check if layout needed? 
-      // For now run on structure change
       if (nodes.length > 0) {
           computeLayout(nodes, edges);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, edges.length, computeLayout]);
+  }, [layoutKey, edges.length, computeLayout]);
 
   return (
     <div className={className || "w-full h-full"}>

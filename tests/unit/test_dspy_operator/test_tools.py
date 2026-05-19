@@ -77,14 +77,14 @@ class TestFilesystem:
         assert "Wrote 4 bytes" in result
         assert f.read_text() == "data"
 
-    def test_write_file_raises_on_failure(self):
+    def test_write_file_raises_on_failure(self, tmp_path):
         with patch("pathlib.Path.write_text", side_effect=OSError(13, "Permission denied")):
             with pytest.raises(OSError, match="Permission denied"):
-                write_file("/nonexistent/file.txt", "data")
+                write_file(str(tmp_path / "file.txt"), "data")
 
-    def test_write_file_tool_returns_error_string(self):
+    def test_write_file_tool_returns_error_string(self, tmp_path):
         with patch("pathlib.Path.write_text", side_effect=OSError(13, "Permission denied")):
-            result = write_file_tool("/nonexistent/file.txt", "data")
+            result = write_file_tool(str(tmp_path / "file.txt"), "data")
         assert result.startswith("Error writing")
         assert "Permission denied" in result
 
