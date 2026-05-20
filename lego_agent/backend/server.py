@@ -408,7 +408,7 @@ async def run_engine_and_script(
                 _SNAPSHOT_PREFIX = "__LEGO_QUEUE_SNAPSHOT__ "
                 if decoded.startswith(_SNAPSHOT_PREFIX):
                     try:
-                        snapshot = json.loads(decoded[len(_SNAPSHOT_PREFIX):])
+                        snapshot = json.loads(decoded[len(_SNAPSHOT_PREFIX) :])
                         await io.send_event("queue_snapshot", {"config": snapshot})
                         continue
                     except json.JSONDecodeError:

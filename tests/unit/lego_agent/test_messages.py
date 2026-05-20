@@ -63,18 +63,14 @@ def test_parse_thinking_msg():
 
 
 def test_parse_tool_end_msg():
-    result = parse_server_msg(
-        {"type": "tool_end", "name": "bash", "output": "ok", "status": "success"}
-    )
+    result = parse_server_msg({"type": "tool_end", "name": "bash", "output": "ok", "status": "success"})
     assert isinstance(result, ToolEndMsg)
     assert result.status == "success"
 
 
 def test_parse_ignores_agent_id():
     """agent_id in the dict must not cause a TypeError — it's silently dropped."""
-    result = parse_server_msg(
-        {"agent_id": "worker_0", "type": "thinking", "text": "hi"}
-    )
+    result = parse_server_msg({"agent_id": "worker_0", "type": "thinking", "text": "hi"})
     assert isinstance(result, ThinkingMsg)
     assert result.text == "hi"
 

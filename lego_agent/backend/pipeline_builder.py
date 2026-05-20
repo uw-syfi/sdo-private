@@ -278,7 +278,10 @@ def _make_fan_out_worker(
             _prefix = re.compile(r"^(\d+[\.\)]\s+|[-*•]\s+)")
             items = [_prefix.sub("", line) for line in raw_lines if not line.endswith(":")]
 
-        print(json.dumps({"type": "log", "message": f"FanOut: {len(items)} workers starting", "level": "info"}), flush=True)
+        print(
+            json.dumps({"type": "log", "message": f"FanOut: {len(items)} workers starting", "level": "info"}),
+            flush=True,
+        )
 
         semaphore = asyncio.Semaphore(max_workers)
         result_q: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
@@ -470,7 +473,9 @@ def _make_judge_loop_worker(
                 "- Mark as 'done' only when task is FULLY satisfied\n"
                 '- Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}\n'
             )
-            judge_resp = await judge_agent.generate_async(judge_prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name)
+            judge_resp = await judge_agent.generate_async(
+                judge_prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name
+            )
             feedback = _parse_judge_feedback(judge_resp)
             logger.info(f"Judge feedback: {feedback}")
 
@@ -496,7 +501,9 @@ def _make_judge_loop_worker(
                 "You are responsible for executing the task/refinements based on feedback.\n"
                 "Please perform the task now."
             )
-            current_output = await worker_agent.generate_async(worker_prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name)
+            current_output = await worker_agent.generate_async(
+                worker_prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name
+            )
 
         return [
             Task.create(

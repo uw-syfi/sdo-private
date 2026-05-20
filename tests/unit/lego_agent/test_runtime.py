@@ -177,9 +177,7 @@ class FakeAsyncAgent:
     def run(self, input_data: str) -> str:
         return f"result for {input_data}"
 
-    async def generate_async(
-        self, prompt: str, timeout: int, output=None, agent_id: str | None = None
-    ) -> str:
+    async def generate_async(self, prompt: str, timeout: int, output=None, agent_id: str | None = None) -> str:
         if agent_id is not None:
             from lego_agent.backend.messages import LogMsg, TaggedMsg, ThinkingMsg
 
