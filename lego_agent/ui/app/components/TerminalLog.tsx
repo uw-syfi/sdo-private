@@ -143,10 +143,16 @@ function LogEntry({ item }: { item: LogItem }) {
   }
 
   if (event.type === 'script_execution') {
+      const displayData = (event.data ?? '')
+          .split('\n')
+          .filter(line => !line.startsWith('__LEGO_'))
+          .join('\n')
+          .trim();
+      if (!displayData) return null;
       return (
           <div className="pl-[4.5rem] text-xs text-muted-foreground">
               <span className={event.stream === 'stderr' ? 'text-error' : ''}>
-                  {stripAnsi(event.data ?? '')}
+                  {stripAnsi(displayData)}
               </span>
           </div>
       );

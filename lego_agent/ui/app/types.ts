@@ -1,5 +1,5 @@
 export interface AgentEvent {
-  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result" | "init" | "dir_options" | "path_validation" | "graph";
+  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result" | "init" | "dir_options" | "path_validation" | "graph" | "queue_snapshot";
   // specific fields
   text?: string;
   name?: string;

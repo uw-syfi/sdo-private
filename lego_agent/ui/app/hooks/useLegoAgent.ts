@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AgentEvent, LogItem } from '../types';
-import { QueueSnapshot, extractQueueSnapshot } from '@/lib/queueSnapshot';
+import { QueueSnapshot } from '@/lib/queueSnapshot';
 
 export function useLegoAgent() {
   const [logs, setLogs] = useState<LogItem[]>([]);
@@ -26,6 +26,12 @@ export function useLegoAgent() {
   }, []);
 
   const handleEvent = useCallback((event: AgentEvent) => {
+    // Queue snapshots are silent state updates — never shown in logs.
+    if (event.type === 'queue_snapshot' && event.config) {
+      setQueueSnapshot(event.config as QueueSnapshot);
+      return;
+    }
+
     // Route events with agent_id to per-agent streams (e.g. FanOut workers).
     // They also flow into the global logs so the sidebar log panel stays complete.
     if (event.agent_id !== undefined) {
@@ -132,12 +138,6 @@ export function useLegoAgent() {
         addLog({ type: 'log', message: 'Graph execution plan received', level: 'info' });
     }
 
-    if (event.type === 'script_execution' && event.data) {
-      const snapshot = extractQueueSnapshot(event.data);
-      if (snapshot) {
-        setQueueSnapshot(snapshot);
-      }
-    }
   }, [addLog]);
 
   const connect = useCallback(() => {
