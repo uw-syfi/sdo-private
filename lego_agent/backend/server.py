@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sys
 from collections.abc import Coroutine
@@ -390,6 +391,28 @@ async def run_engine_and_script(
                 if not line:
                     break
                 decoded = line.decode().rstrip()
+                if not decoded:
+                    continue
+                # Try to route as a structured runtime message (JSON line with "type").
+                # Falls back to a raw script_execution event for non-JSON output.
+                try:
+                    data: dict[str, Any] = json.loads(decoded)
+                    msg_type = data.get("type")
+                    if isinstance(msg_type, str):
+                        payload = {k: v for k, v in data.items() if k != "type"}
+                        await io.send_event(msg_type, payload)
+                        continue
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+                # Route queue snapshot lines as a dedicated event (not shown in logs).
+                _SNAPSHOT_PREFIX = "__LEGO_QUEUE_SNAPSHOT__ "
+                if decoded.startswith(_SNAPSHOT_PREFIX):
+                    try:
+                        snapshot = json.loads(decoded[len(_SNAPSHOT_PREFIX) :])
+                        await io.send_event("queue_snapshot", {"config": snapshot})
+                        continue
+                    except json.JSONDecodeError:
+                        pass
                 await io.send_event("script_execution", {"stream": name, "data": decoded})
 
         await asyncio.gather(read_stream(process.stdout, "stdout"), read_stream(process.stderr, "stderr"))

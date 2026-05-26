@@ -1,5 +1,5 @@
 export interface AgentEvent {
-  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result" | "init" | "dir_options" | "path_validation" | "graph";
+  type: "thinking" | "tool_start" | "tool_end" | "question" | "log" | "script_execution" | "execution_result" | "init" | "dir_options" | "path_validation" | "graph" | "queue_snapshot";
   // specific fields
   text?: string;
   name?: string;
@@ -19,6 +19,8 @@ export interface AgentEvent {
   path?: string;
   valid?: boolean;
   config?: any;
+  // Phase 3: present on messages emitted by runtime workers (FanOut, etc.)
+  agent_id?: string;
 }
 
 export interface LogItem {

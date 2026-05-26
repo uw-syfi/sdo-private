@@ -91,44 +91,76 @@ tools: ["read_file", "write_file", "run_command", "search_content"] # Optional
 ```
 
 ### 2. Chain (Sequential Steps)
-Executes steps in order. Output of step N becomes input of step N+1.
+Executes steps in order.
+
+**Two pipeline models — choose the right one:**
+
+**Model A — Batch pipeline** (no `emit_mode`): Each step produces one complete output; the next step receives it as a single input. Use when the number of items is small or known upfront.
 ```yaml
 type: "chain"
 steps:
   - type: "agent"
-    instruction: "Step 1..."
-  - type: "agent"
-    instruction: "Step 2 (uses Step 1 output)..."
+    instruction: "Collect all items. Output one item per line."
+    # No emit_mode → single call, outputs the whole list at once
+  - type: "fan_out"
+    items: []   # splits the above output by newlines → one worker per item
+    agent:
+      type: "agent"
+      instruction: "Process this item: {input}"
 ```
+
+**Model B — Queue pipeline** (`emit_mode: "iterative_discovery"`): The discovery step emits items **one at a time** into a shared worker queue. Each subsequent step is called **once per item** by the global worker pool, so processing and discovery overlap.
+```yaml
+type: "chain"
+steps:
+  - type: "agent"
+    instruction: "Discover all items. Output one item per line. Say DONE when finished."
+    emit_mode: "iterative_discovery"   # items flow through queue one-at-a-time
+  - type: "fan_out"
+    items: []  # each discovered item becomes a 1-item fan_out; {input} holds the item
+    agent:
+      type: "agent"
+      instruction: "Process this item: {input}"
+  - type: "summarize"
+    instruction: "Combine all results."
+    agent:
+      type: "agent"
+      instruction: "Synthesize these results into a single summary."
+```
+
+**⚠️ CRITICAL — do NOT insert a "collect and filter" step in a queue pipeline:**
+With `emit_mode: "iterative_discovery"`, every downstream step receives items **one at a time**. An intermediate agent that expects a full list (e.g. "select the last 5 files from the list") will fail — it only ever sees one item, never the full list.
+- **Wrong:** discovery → agent("select last 5 from list") → fan_out
+- **Correct:** discovery → fan_out (items are already individual; just process each one)
+- If you need to process only a subset, either: (a) use static `items:` in fan_out with exact known items, or (b) limit the discovery step via `batch_size` and instruct it to stop after N items.
 
 ### 3. Fan-out (Parallel Execution)
 Runs the SAME agent/component against multiple items in parallel.
 
-**Static items** — when you know the items upfront:
+**Static items** — preferred when you know the items upfront (e.g. you explored during planning):
 ```yaml
 type: "fan_out"
-items: ["Task A", "Task B", "Task C"]
+items: ["item_a", "item_b", "item_c"]
 agent:
   type: "agent"
-  instruction: "Process this: {input}"  # {input} is replaced with each item
+  instruction: "Process this item: {input}"  # {input} is replaced with each item
 ```
 
-**Dynamic items from a previous chain step** — when items come from a prior agent's output, use `items: []`. The runtime will automatically split the previous step's output by newlines and scatter one item per agent. Use `{input}` in the instruction to receive the current item:
+**Dynamic items from a batch agent step** — when a preceding batch agent outputs a list, use `items: []` to split it:
 ```yaml
 type: "fan_out"
-items: []  # empty = split previous step's output by newlines
+items: []  # splits previous step's output by newlines, one worker per line
 agent:
   type: "agent"
-  instruction: "Analyze the file at path: {input}. Use read_file to read its content."
-  tools: ["read_file", "write_file"]
+  instruction: "Process this item: {input}. Use relevant tools as needed."
 ```
 
-**IMPORTANT:** Never use expression syntax like `{steps.0.output...}` in `items` — it is not evaluated. Use `items: []` for dynamic scatter over the prior step's output.
+**IMPORTANT:** Never use expression syntax like `{steps.0.output...}` in `items` — it is not evaluated. Use `items: []` for dynamic scatter over the prior batch step's output.
 
 **CRITICAL — File path handling:** When fan_out items are file paths:
-- **Prefer static items.** If you already called `list_files` or `find_files` during planning and know the file paths, embed those **exact full relative paths** directly in `items` — do NOT create an intermediate chain step to re-discover them. The tools return paths like `app_operator/cli_agent/__init__.py`; use those verbatim.
-- **Avoid dynamic `items: []` for file paths.** LLM chain steps reformulate paths (e.g. dropping the directory prefix to just `__init__.py`) and add header text, which breaks the path and creates extra workers from non-path lines.
-- If dynamic `items: []` is unavoidable, the preceding chain step's instruction **must** say: "Output ONLY the file paths, one per line, exactly as returned by the tool. No headers, no numbering, no explanation."
+- **Prefer static items.** If you already discovered paths during planning, embed those **exact full relative paths** directly in `items` — do NOT create an intermediate chain step to re-discover them.
+- **Avoid dynamic `items: []` for file paths.** LLM chain steps may reformulate paths (e.g. dropping the directory prefix) and add header text, which breaks the path and creates extra workers from non-path lines.
+- If dynamic `items: []` is unavoidable, the preceding chain step's instruction **must** say: "Output ONLY the item identifiers, one per line, exactly as returned by the tool. No headers, no numbering, no explanation."
 
 ### 4. Summarize (Aggregation)
 Aggregates a list of inputs (usually from Fan-out) into one string.

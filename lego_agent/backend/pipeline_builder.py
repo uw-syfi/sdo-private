@@ -62,6 +62,7 @@ def _input_value(task: Task) -> Any:
 def _make_agent_worker(
     config: dict[str, Any],
     logger_fn: Callable[[str, dict[str, Any]], None] | None = None,
+    stage_name: str | None = None,
 ) -> Callable[[Task], Any]:
     """Create an agent worker with optional streaming discovery.
 
@@ -108,7 +109,7 @@ def _make_agent_worker(
         else:
             prompt = str(input_val) if input_val else instruction
 
-        result = await agent.generate_async(prompt, timeout=DEFAULT_AGENT_TIMEOUT)
+        result = await agent.generate_async(prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name)
         return [Task.create("agent_output", {"result": result})]
 
     async def iterative_discovery_worker(task: Task) -> AsyncIterator[Task]:
@@ -158,7 +159,7 @@ def _make_agent_worker(
                 )
 
             # Make LLM call to discover next batch
-            response = await agent.generate_async(discovery_prompt, timeout=DEFAULT_AGENT_TIMEOUT)
+            response = await agent.generate_async(discovery_prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name)
             response_stripped = response.strip()
 
             logger.info(f"Discovery batch {batch_num}: {len(response_stripped)} chars")
@@ -222,6 +223,7 @@ def _make_agent_worker(
 def _make_fan_out_worker(
     config: dict[str, Any],
     logger_fn: Callable[[str, dict[str, Any]], None] | None = None,
+    stage_name: str | None = None,
 ) -> Callable[[Task], Any]:
     agent_config = config["agent"]
     instruction = agent_config.get("instruction", "")
@@ -276,7 +278,10 @@ def _make_fan_out_worker(
             _prefix = re.compile(r"^(\d+[\.\)]\s+|[-*•]\s+)")
             items = [_prefix.sub("", line) for line in raw_lines if not line.endswith(":")]
 
-        print(f"__LEGO_FANOUT_INIT__ {len(items)}", flush=True)
+        print(
+            json.dumps({"type": "log", "message": f"FanOut: {len(items)} workers starting", "level": "info"}),
+            flush=True,
+        )
 
         semaphore = asyncio.Semaphore(max_workers)
         result_q: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
@@ -289,7 +294,7 @@ def _make_fan_out_worker(
                     else:
                         prompt = str(item)
                     try:
-                        result = await agent.generate_async(prompt, timeout=timeout)
+                        result = await agent.generate_async(prompt, timeout=timeout, agent_id=f"worker_{i}")
                     except Exception as e:
                         logger.error(f"Fan-out worker {i} failed: {e}")
                         result = f"Error: {e!s}"
@@ -336,6 +341,7 @@ def _make_fan_out_worker(
 def _make_summarize_worker(
     config: dict[str, Any],
     logger_fn: Callable[[str, dict[str, Any]], None] | None = None,
+    stage_name: str | None = None,
 ) -> Callable[[Task], Any]:
     agent_config = config["agent"]
     instruction = config.get("instruction", "Summarize the inputs.")
@@ -367,7 +373,7 @@ def _make_summarize_worker(
             combined = "\n\n---\n\n".join(str(x) for x in items)
 
             prompt = f"{instruction}\n\nHere are the inputs to summarize:\n{combined}"
-            result = await agent.generate_async(prompt, timeout=DEFAULT_AGENT_TIMEOUT)
+            result = await agent.generate_async(prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name)
             processing_state["completed"] = True
             logger.info(f"Summarize completed with {len(items)} items after receiving completion signal")
             return [Task.create("summarize_output", {"result": result})]
@@ -400,7 +406,7 @@ def _make_summarize_worker(
             combined = str(input_data)
 
         prompt = f"{instruction}\n\nHere are the inputs to summarize:\n{combined}"
-        result = await agent.generate_async(prompt, timeout=DEFAULT_AGENT_TIMEOUT)
+        result = await agent.generate_async(prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name)
         processing_state["done"] = True
         logger.info(f"Summarize completed after {processing_state['count']} invocations")
         return [Task.create("summarize_output", {"result": result})]
@@ -423,6 +429,7 @@ def _parse_judge_feedback(judge_resp: str) -> dict[str, str]:
 def _make_judge_loop_worker(
     config: dict[str, Any],
     logger_fn: Callable[[str, dict[str, Any]], None] | None = None,
+    stage_name: str | None = None,
 ) -> Callable[[Task], Any]:
     judge_config = config["judge"]
     worker_config = config["worker"]
@@ -466,7 +473,9 @@ def _make_judge_loop_worker(
                 "- Mark as 'done' only when task is FULLY satisfied\n"
                 '- Respond with strictly JSON: {"status": "continue" or "done", "feedback": "..."}\n'
             )
-            judge_resp = await judge_agent.generate_async(judge_prompt, timeout=DEFAULT_AGENT_TIMEOUT)
+            judge_resp = await judge_agent.generate_async(
+                judge_prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name
+            )
             feedback = _parse_judge_feedback(judge_resp)
             logger.info(f"Judge feedback: {feedback}")
 
@@ -492,7 +501,9 @@ def _make_judge_loop_worker(
                 "You are responsible for executing the task/refinements based on feedback.\n"
                 "Please perform the task now."
             )
-            current_output = await worker_agent.generate_async(worker_prompt, timeout=DEFAULT_AGENT_TIMEOUT)
+            current_output = await worker_agent.generate_async(
+                worker_prompt, timeout=DEFAULT_AGENT_TIMEOUT, agent_id=stage_name
+            )
 
         return [
             Task.create(
@@ -513,6 +524,7 @@ def _make_judge_loop_worker(
 def _make_producer_worker(
     config: dict[str, Any],
     logger_fn: Callable[[str, dict[str, Any]], None] | None = None,
+    stage_name: str | None = None,
 ) -> Callable[[Task], Any]:
     """Create a producer worker that discovers items and yields one task per item.
 
@@ -561,7 +573,7 @@ def _make_producer_worker(
 
 _WORKER_FACTORIES: dict[
     str,
-    Callable[[dict[str, Any], Callable[[str, dict[str, Any]], None] | None], Callable[[Task], Any]],
+    Callable[[dict[str, Any], Callable[[str, dict[str, Any]], None] | None, str | None], Callable[[Task], Any]],
 ] = {
     "agent": _make_agent_worker,
     "fan_out": _make_fan_out_worker,
@@ -606,7 +618,7 @@ def build_pipeline_from_yaml(
                 name=sdef.name,
                 input_queue=input_queue,
                 output_queue=output_queue,
-                worker_fn=factory(sdef.config, logger_fn),
+                worker_fn=factory(sdef.config, logger_fn, sdef.name),
                 max_workers=max_workers,
             )
         )

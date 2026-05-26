@@ -60,23 +60,8 @@ export function extractStageSegments(data: string): Map<number, string> {
   return segments;
 }
 
-/**
- * Split a stage segment into per-worker segments using __LEGO_WORKER_START__ markers.
- * Returns a map of workerIndex → content string, or an empty map if no markers found.
- */
-function extractWorkerSegments(data: string): Map<number, string> {
-  const segments = new Map<number, string>();
-  const matches = [...data.matchAll(/(?:^|\n)__LEGO_WORKER_START__ (\d+)/g)];
-
-  for (let i = 0; i < matches.length; i++) {
-    const workerIdx = parseInt(matches[i][1], 10);
-    const start = matches[i].index!;
-    const end = i + 1 < matches.length ? matches[i + 1].index! : data.length;
-    segments.set(workerIdx, data.slice(start, end));
-  }
-
-  return segments;
-}
+/** Match "FanOut: N workers starting" log messages emitted by runtime.py. */
+const FANOUT_INIT_RE = /^FanOut: (\d+) workers starting$/;
 
 interface PipelineStage {
   name: string;
@@ -243,6 +228,68 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
     };
 
     // ----------------------------------------------------------------
+    // FanOut init: "FanOut: N workers starting" log event.
+    // Replaces the old __LEGO_FANOUT_INIT__ sentinel in script_execution.
+    // ----------------------------------------------------------------
+    if (evt.type === 'log' && typeof evt.message === 'string') {
+      const fanOutMatch = evt.message.match(FANOUT_INIT_RE);
+      if (fanOutMatch) {
+        const count = parseInt(fanOutMatch[1], 10);
+        const groupNode = getStepNodeFrom(allNodes, currentStepRef.current);
+
+        if (groupNode?.type === 'group' && count > 0) {
+          const templateIds = allNodes
+            .filter(n => n.parentId === groupNode.id)
+            .map(n => n.id);
+
+          const workerNodes: Node<AgentNodeData>[] = Array.from({ length: count }, (_, i) => ({
+            id: Math.random().toString(36).substring(2, 11),
+            type: 'agent' as const,
+            data: {
+              label: `Worker ${i + 1}`,
+              status: 'active' as const,
+              pattern: 'worker' as AgentNodeData['pattern'],
+              logs: [],
+            },
+            position: { x: 0, y: 0 },
+            parentId: groupNode.id,
+          }));
+
+          removeNodes(templateIds);
+          addNodes(workerNodes);
+        }
+        return;
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // Worker routing: events tagged with agent_id (e.g. "worker_2").
+    // Replaces the old __LEGO_WORKER_START__ sentinel parsing.
+    // ----------------------------------------------------------------
+    if (evt.agent_id && evt.agent_id.startsWith('worker_')) {
+      const workerIdx = parseInt(evt.agent_id.replace('worker_', ''), 10);
+      const freshNodes = useGraphStore.getState().nodes;
+      const currentStepNode = getStepNodeFrom(freshNodes, currentStepRef.current);
+
+      if (currentStepNode?.type === 'group') {
+        const children = freshNodes.filter(n => n.parentId === currentStepNode.id);
+        const workerNode = children[workerIdx];
+        if (workerNode) {
+          addNodeLog(workerNode.id, lastLog);
+          if (evt.type === 'thinking') {
+            updateNodeStatus(workerNode.id, 'active');
+            if (evt.text) updateNodeThought(workerNode.id, evt.text);
+          } else if (evt.type === 'tool_start') {
+            updateNodeStatus(workerNode.id, 'active');
+          } else if (evt.type === 'tool_end' && evt.status === 'error') {
+            updateNodeStatus(workerNode.id, 'failed');
+          }
+        }
+      }
+      return;
+    }
+
+    // ----------------------------------------------------------------
     // script_execution: step-marker processing + segmented log routing
     // ----------------------------------------------------------------
     if (evt.type === 'script_execution' && typeof evt.data === 'string') {
@@ -324,7 +371,7 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
         }
       }
 
-      // Re-read nodes after any mutations above.
+      // Re-read nodes in case FanOut init already mutated the store.
       const freshNodes = useGraphStore.getState().nodes;
 
       // --- __LEGO_TASK_START__ <name> <id> --- mark stage active, prior stages done
@@ -408,26 +455,10 @@ export function GraphAdapter({ logs, graphConfig }: GraphAdapterProps) {
 
           const stepNode = getStepNodeFrom(freshNodes, stageIdx);
           if (stepNode?.type === 'group') {
-            const workerSegments = extractWorkerSegments(content);
-            if (workerSegments.size > 0) {
-              // Route each worker's captured output to its specific child node.
-              const children = freshNodes.filter(n => n.parentId === stepNode.id);
-              for (const [workerIdx, workerContent] of workerSegments) {
-                const workerNode = children[workerIdx];
-                if (workerNode) {
-                  addNodeLog(workerNode.id, {
-                    ...lastLog,
-                    id: `${lastLog.id}_s${stageIdx}_w${workerIdx}`,
-                    event: { ...lastLog.event, data: workerContent },
-                  });
-                }
-              }
-            } else {
-              // No worker markers — broadcast to all children.
-              freshNodes
-                .filter(n => n.parentId === stepNode.id)
-                .forEach(child => addNodeLog(child.id, segLog));
-            }
+            // Broadcast to all children for non-fan_out groups.
+            freshNodes
+              .filter(n => n.parentId === stepNode.id)
+              .forEach(child => addNodeLog(child.id, segLog));
           } else if (stepNode) {
             addNodeLog(stepNode.id, segLog);
           }

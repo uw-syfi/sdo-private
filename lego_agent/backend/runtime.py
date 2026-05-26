@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import random
 import re
@@ -21,6 +20,7 @@ from langgraph.prebuilt import create_react_agent  # pyright: ignore[reportUnkno
 from loguru import logger
 
 if TYPE_CHECKING:
+    import io
     from collections.abc import Callable
 
     from langchain_core.runnables import RunnableConfig
@@ -31,6 +31,7 @@ from libs.sds_core.tools import build_tools
 from .config import load_config
 from .io import Colors
 from .llm import build_llm
+from .messages import LogMsg, TaggedMsg, ThinkingMsg, ToolEndMsg, ToolStartMsg
 from .streaming import extract_tool_result, parse_chunk_content
 
 # Default timeout (seconds) for agent generation calls
@@ -65,7 +66,9 @@ class AsyncRunnable(Protocol):
 
     def run(self, input_data: Any) -> Any: ...
 
-    async def generate_async(self, prompt: str, timeout: int, output: io.StringIO | None = None) -> str: ...
+    async def generate_async(
+        self, prompt: str, timeout: int, output: io.StringIO | None = None, agent_id: str | None = None
+    ) -> str: ...
 
 
 class LangGraphAgent:
@@ -120,16 +123,73 @@ class LangGraphAgent:
         """
         return asyncio.run(self.generate_async(prompt, timeout))
 
-    async def generate_async(self, prompt: str, timeout: int, output: io.StringIO | None = None) -> str:
+    async def _stream_structured(self, prompt: str, timeout: int, agent_id: str) -> str:
+        """Stream agent events as JSON lines to stdout (multiplexed mode).
+
+        Each line is a TaggedMsg JSON object:
+            {"agent_id": "worker_0", "type": "thinking", "text": "..."}
+
+        This lets the parent process (server.py or terminal) parse and route
+        messages from concurrent workers without buffering or blocking.
+        """
+        messages = [HumanMessage(content=prompt)]
+        config: RunnableConfig = {"recursion_limit": 50}
+        accumulated_text: list[str] = []
+
+        def emit(inner: Any) -> None:
+            print(TaggedMsg(agent_id=agent_id, inner=inner).to_json_line(), flush=True)
+
+        async def run_stream() -> None:
+            async for event in self.graph.astream_events({"messages": messages}, version="v1", config=config):
+                kind = event["event"]
+
+                if kind == "on_chat_model_stream":
+                    chunk = event["data"].get("chunk")
+                    if not chunk:
+                        continue
+                    text_chunk = parse_chunk_content(chunk.content)
+                    if text_chunk:
+                        emit(ThinkingMsg(type="thinking", text=text_chunk))
+                        accumulated_text.append(text_chunk)
+
+                elif kind == "on_tool_start":
+                    name = event["name"]
+                    inputs = event["data"].get("input")
+                    emit(ToolStartMsg(type="tool_start", name=name, input=str(inputs)))
+
+                elif kind == "on_tool_end":
+                    name = event["name"]
+                    raw_status, result_text = extract_tool_result(event["data"].get("output"))
+                    status: Any = raw_status if raw_status in ("success", "error") else "error"
+                    emit(ToolEndMsg(type="tool_end", name=name, output=result_text, status=status))
+
+        try:
+            await asyncio.wait_for(run_stream(), timeout=timeout)
+            return "".join(accumulated_text)
+        except asyncio.TimeoutError:
+            emit(LogMsg(type="log", message=f"Agent timed out after {timeout}s", level="error"))
+            return f"Error: Agent execution timed out after {timeout} seconds."
+        except Exception as e:
+            logger.error(f"Error in agent generation: {e}")
+            emit(LogMsg(type="log", message=f"Error: {e}", level="error"))
+            return f"Error: {e!s}"
+
+    async def generate_async(
+        self, prompt: str, timeout: int, output: io.StringIO | None = None, agent_id: str | None = None
+    ) -> str:
         """Async implementation of generate.
 
-        Public so that callers such as :class:`FanOut` can await it
-        directly without reaching into private internals.
+        When agent_id is set, emits structured JSON lines to stdout for
+        multiplexed streaming (used by FanOut). Otherwise, falls back to
+        the legacy colored-text mode for CLI/TUI usage.
 
         Args:
-            output: Optional buffer to write printed output to instead of stdout.
-                    Used by FanOut to capture per-worker output for clean routing.
+            output: Buffer for colored text output (legacy CLI mode only).
+            agent_id: Worker identifier for multiplexed JSON line mode.
         """
+        if agent_id is not None:
+            return await self._stream_structured(prompt, timeout, agent_id)
+
         out = output if output is not None else sys.stdout
         messages = [HumanMessage(content=prompt)]
         config: RunnableConfig = {"recursion_limit": 50}
@@ -400,34 +460,29 @@ class FanOut(Runnable):
             else:
                 prompts_to_run.append(str(item))
 
-        # Emit count so the UI can expand the FAN_OUT group with N real nodes.
-        print(f"__LEGO_FANOUT_INIT__ {len(prompts_to_run)}", flush=True)
+        # Announce worker count as a structured log so server.py and the
+        # terminal both see it as a parseable JSON line.
+        print(
+            json.dumps({"type": "log", "message": f"FanOut: {len(prompts_to_run)} workers starting", "level": "info"}),
+            flush=True,
+        )
 
         async def _run_parallel() -> list[Any]:
             semaphore = asyncio.Semaphore(self.max_workers)
 
-            async def _run_one(i: int, p: str) -> tuple[int, Any, str]:
+            async def _run_one(i: int, p: str) -> tuple[int, Any]:
                 async with semaphore:
-                    buffer = io.StringIO()
                     if isinstance(self.agent, AsyncRunnable):
-                        result = await self.agent.generate_async(p, timeout=self.timeout, output=buffer)
+                        # Structured mode: each worker emits JSON lines tagged
+                        # with its agent_id in real time — no buffering.
+                        result = await self.agent.generate_async(p, timeout=self.timeout, agent_id=f"worker_{i}")
                     else:
                         result = await asyncio.to_thread(self.agent.run, p)
-                    return i, result, buffer.getvalue()
+                    return i, result
 
             tasks = [_run_one(i, p) for i, p in enumerate(prompts_to_run)]
             indexed_results = await asyncio.gather(*tasks)
-
-            # Print each worker's captured output sequentially with markers so
-            # the UI can route logs to individual worker nodes.
-            results: list[Any] = []
-            for i, result, captured in sorted(indexed_results, key=lambda x: x[0]):
-                print(f"__LEGO_WORKER_START__ {i}", flush=True)
-                if captured:
-                    print(captured, end="", flush=True)
-                print(f"__LEGO_WORKER_END__ {i}", flush=True)
-                results.append(result)
-            return results
+            return [result for _, result in sorted(indexed_results, key=lambda x: x[0])]
 
         return asyncio.run(_run_parallel())
 
