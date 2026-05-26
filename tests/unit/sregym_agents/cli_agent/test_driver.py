@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from agentshim import BaseCodingAgent
-from agentshim.base import register_provider
+from agentshim.base import BaseAgentSession, register_provider
 
 from sregym_agents.cli_agent import driver
 
@@ -85,6 +85,35 @@ def test_build_prompt_omits_incident_memory_instructions() -> None:
     assert "recall_incident" not in prompt
     assert "store_incident" not in prompt
     assert "Incident memory" not in prompt
+
+
+def test_build_prompt_omits_recall_guidance_when_memory_disabled() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+    )
+    assert "`recall`" not in prompt
+
+
+def test_build_prompt_includes_recall_guidance_when_memory_enabled() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        memory_enabled=True,
+    )
+    assert "`recall`" in prompt
+    assert "memory" in prompt.lower()
+    assert "hypotheses" in prompt.lower()
+
+
+def test_build_prompt_autonomous_includes_recall_guidance_when_memory_enabled() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+        memory_enabled=True,
+    )
+    assert "`recall`" in prompt
 
 
 # --- Autonomous-submit prompt variant ---------------------------------------
@@ -295,12 +324,55 @@ def test_default_agent_factory_passes_mcp_server(monkeypatch: pytest.MonkeyPatch
 # --- _run orchestration ----------------------------------------------------
 
 
-class _StubAgent(BaseCodingAgent):
-    """Minimal CodingAgent stand-in."""
+class _StubSession(BaseAgentSession):
+    """Resumable-session stand-in that records each ``generate`` on its agent."""
 
-    def __init__(self, response: str = "ok") -> None:
+    def __init__(self, agent: _StubAgent, cwd: str | None, timeout: int) -> None:
+        self.agent = agent
+        self._cwd = cwd
+        self._timeout = timeout
+        self.session_id = "stub-session"
+
+    def generate(
+        self,
+        prompt: str,
+        cwd: str | None = None,
+        timeout: int | None = None,
+        silent: bool | None = None,
+        on_process_started: Any | None = None,
+    ) -> str:
+        self.agent.calls.append(
+            {
+                "prompt": prompt,
+                "cwd": cwd if cwd is not None else self._cwd,
+                "timeout": timeout if timeout is not None else self._timeout,
+            }
+        )
+        # First call = investigation; later calls = extraction (queued replies).
+        if len(self.agent.calls) == 1:
+            return self.agent.response
+        return self.agent.extra_replies.pop(0) if self.agent.extra_replies else ""
+
+
+class _StubAgent(BaseCodingAgent):
+    """Minimal CodingAgent stand-in.
+
+    ``extra_replies`` are returned by the second and later ``generate`` calls
+    (i.e. the post-verdict lesson-extraction turn).
+    """
+
+    def __init__(self, response: str = "ok", extra_replies: list[str] | None = None) -> None:
         self.response = response
         self.calls: list[dict[str, Any]] = []
+        self.extra_replies = list(extra_replies or [])
+
+    def start_session(
+        self,
+        cwd: str | None = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ) -> _StubSession:
+        return _StubSession(self, cwd, timeout)
 
     def generate(
         self,
@@ -584,6 +656,9 @@ def test_run_agent_exception_records_failure(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(driver.time, "sleep", lambda *_: None)
 
     class _Boom(BaseCodingAgent):
+        def start_session(self, *a: Any, **k: Any) -> Any:
+            raise RuntimeError("CLI died")
+
         def generate(self, *a: Any, **k: Any) -> str:
             raise RuntimeError("CLI died")
 
@@ -604,6 +679,9 @@ def test_run_logs_crash_when_agent_exception(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(driver.time, "sleep", lambda *_: None)
 
     class _Boom(BaseCodingAgent):
+        def start_session(self, *a: Any, **k: Any) -> Any:
+            raise RuntimeError("CLI died")
+
         def generate(self, *a: Any, **k: Any) -> str:
             raise RuntimeError("CLI died")
 
@@ -623,6 +701,149 @@ def test_run_logs_crash_when_agent_exception(tmp_path: Path, monkeypatch: pytest
     assert data["crashed_with"] is not None
     assert "CLI died" in data["crashed_with"]
     assert data["completed"] is False
+
+
+# --- Memory (incident lessons) ---------------------------------------------
+
+
+_EXTRACTION_REPLY = json.dumps(
+    {
+        "decision": "new",
+        "merge_into": None,
+        "situation": "frontend 503s; profile CrashLoopBackOff",
+        "obvious_guess": "bad image tag",
+        "root_cause": "missing DB_HOST env var",
+        "tell": "kubectl describe shows env unset",
+        "fix": "set DB_HOST on profile deployment",
+        "affected_resource": "deployment/profile.env",
+    }
+)
+
+
+def _memory_args(tmp_path: Path, **overrides: Any) -> argparse.Namespace:
+    return _args(memory_enabled=True, memory_dir=str(tmp_path), **overrides)
+
+
+def _load_lessons(tmp_path: Path, app: str = "myapp") -> list[Any]:
+    from sregym_agents.cli_agent.memory.store import LessonStore
+
+    return LessonStore(tmp_path).load(app)
+
+
+def test_memory_no_write_when_not_confirmed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unconfirmed run must never produce a lesson (§9)."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    stub = _StubAgent(extra_replies=[_EXTRACTION_REPLY])
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        status_sequence=["diagnosis", "diagnosis"],  # never reaches terminal
+    )
+    driver._run(_memory_args(tmp_path), agent_factory=lambda p, m, u: stub)
+
+    assert _load_lessons(tmp_path) == []
+    # Only the investigation turn ran — no extraction turn.
+    assert len(stub.calls) == 1
+
+
+def test_memory_writes_on_full_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    stub = _StubAgent(extra_replies=[_EXTRACTION_REPLY])
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis", "mitigation"],
+        status_sequence=["diagnosis", "done"],
+    )
+    driver._run(_memory_args(tmp_path), agent_factory=lambda p, m, u: stub)
+
+    lessons = _load_lessons(tmp_path)
+    assert len(lessons) == 1
+    assert lessons[0].confirmed_by == "verdict"
+    assert lessons[0].root_cause == "missing DB_HOST env var"
+    # Investigation + extraction turns.
+    assert len(stub.calls) == 2
+
+
+def test_memory_partial_confirmation_flags_unverified_fix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Diagnosis accepted (stage advanced to mitigation) but not completed →
+    write the lesson with confirmed_by=diagnosis_only."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    stub = _StubAgent(extra_replies=[_EXTRACTION_REPLY])
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis", "mitigation"],
+        status_sequence=["diagnosis", "mitigation"],  # advanced, never terminal
+    )
+    driver._run(_memory_args(tmp_path), agent_factory=lambda p, m, u: stub)
+
+    lessons = _load_lessons(tmp_path)
+    assert len(lessons) == 1
+    assert lessons[0].confirmed_by == "diagnosis_only"
+
+
+def test_memory_disabled_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    stub = _StubAgent(extra_replies=[_EXTRACTION_REPLY])
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis", "mitigation"],
+        status_sequence=["diagnosis", "done"],
+    )
+    # memory_dir set but memory_enabled defaults off (plain _args).
+    driver._run(_args(memory_dir=str(tmp_path)), agent_factory=lambda p, m, u: stub)
+
+    assert _load_lessons(tmp_path) == []
+    assert len(stub.calls) == 1
+
+
+def test_memory_wires_recall_server_into_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With memory on, the default factory must hand the agent a `memory` MCP
+    server in addition to the sregym submit server."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("MCP_SERVER_PORT", "9954")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    captured: dict[str, Any] = {}
+
+    @register_provider("fake_memory_provider")
+    class _FakeCls(BaseCodingAgent):
+        def __init__(self, *, model: str, mcp_servers: list[Any]) -> None:
+            captured["mcp_servers"] = mcp_servers
+
+        def start_session(self, cwd=None, timeout=300, silent=False) -> Any:
+            return _StubSession(_StubAgent(), cwd, timeout)
+
+        def generate(self, prompt: str, cwd=None, timeout=300, silent=False) -> str:
+            return ""
+
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        status_sequence=["diagnosis", "done"],
+    )
+    driver._run(_memory_args(tmp_path, provider="fake_memory_provider"))
+
+    names = {s.name for s in captured["mcp_servers"]}
+    assert driver._SUBMIT_MCP_SERVER_NAME in names
+    assert "memory" in names
 
 
 # --- Argument parsing ------------------------------------------------------

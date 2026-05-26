@@ -42,6 +42,11 @@ from libs.sregym_lib.conductor import (
     wait_for_stages_or_last_seen_sync,
 )
 from libs.sregym_lib.schema import READY_STAGES, TERMINAL_STAGES
+from sregym_agents.cli_agent.memory.store import (
+    CONFIRMED_DIAGNOSIS_ONLY,
+    CONFIRMED_SELF,
+    CONFIRMED_VERDICT,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -85,6 +90,7 @@ def _build_prompt(
     autonomous: bool = False,
     autonomous_prompt_profile: str = _DEFAULT_AUTONOMOUS_PROMPT_PROFILE,
     submit_done_returns_feedback: bool = False,
+    memory_enabled: bool = False,
 ) -> str:
     """Render the single-session prompt handed to the wrapped CLI agent.
 
@@ -119,6 +125,7 @@ def _build_prompt(
             namespace=app_info.get("namespace", "<unknown>"),
             submit_mcp_server_name=_SUBMIT_MCP_SERVER_NAME,
             submit_done_returns_feedback=submit_done_returns_feedback,
+            memory_enabled=memory_enabled,
         )
     )
 
@@ -134,6 +141,104 @@ def _normalize_autonomous_prompt_profile(profile: Any) -> str:
         allowed = ", ".join(sorted(_AUTONOMOUS_PROMPT_PROFILES))
         raise ValueError(f"Unknown autonomous prompt profile {profile!r}. Expected one of: {allowed}")
     return normalized
+
+
+# --- Memory helpers --------------------------------------------------------
+
+
+def _default_memory_dir() -> Path:
+    """Persistent default store root, outside any ephemeral experiment workdir."""
+    return Path.home() / ".sds" / "cli_agent_memory"
+
+
+def _resolve_memory_dir(args: argparse.Namespace, *, base_cwd: str) -> Path:
+    """Resolve the lesson-store dir to an absolute path.
+
+    A relative ``--memory-dir`` is anchored to ``base_cwd`` (the cwd *before*
+    the driver chdir's into ``SREGYM_EXP_ENV``) so the store never lands inside
+    the ephemeral workdir.
+    """
+    raw = getattr(args, "memory_dir", None)
+    if not raw:
+        return _default_memory_dir()
+    path = Path(raw).expanduser()
+    return path if path.is_absolute() else (Path(base_cwd) / path).resolve()
+
+
+def _classify_confirmation(
+    *,
+    autonomous: bool,
+    completed: bool,
+    final_stage: str | None,
+    planned_stages: list[str],
+) -> str | None:
+    """Decide whether (and how) this run's outcome was confirmed — see §3, §8.
+
+    Returns the ``confirmed_by`` value to store, or ``None`` to write nothing.
+
+    - Autonomous mode has no per-stage grader, so only a fully completed run
+      counts (``self_verified``); no partial writes.
+    - Default mode reads the conductor stage: a terminal stage means the grader
+      accepted everything (``verdict``); reaching ``mitigation`` without
+      terminating means diagnosis was accepted but the fix was not
+      (``diagnosis_only`` — partial, fix recorded-but-unverified).
+    """
+    if autonomous:
+        return CONFIRMED_SELF if completed else None
+    if completed:
+        return CONFIRMED_VERDICT
+    if "mitigation" in planned_stages and final_stage == "mitigation":
+        return CONFIRMED_DIAGNOSIS_ONLY
+    return None
+
+
+def _maybe_write_lesson(
+    *,
+    session: Any,
+    store: Any,
+    app: str,
+    autonomous: bool,
+    completed: bool,
+    final_stage: str | None,
+    planned_stages: list[str],
+    timeout: int,
+) -> None:
+    """Extract and upsert a lesson if the outcome was confirmed (else no-op).
+
+    Resumes the agent session for one extraction turn, parses the reply, and
+    upserts into the per-app store. Best-effort: any failure is logged and
+    swallowed — a memory write must never break the benchmark run.
+    """
+    from sregym_agents.cli_agent.memory import extract as memory_extract
+
+    confirmed_by = _classify_confirmation(
+        autonomous=autonomous,
+        completed=completed,
+        final_stage=final_stage,
+        planned_stages=planned_stages,
+    )
+    if confirmed_by is None:
+        logger.info("Memory: outcome not confirmed (final_stage=%r); no lesson written", final_stage)
+        return
+    try:
+        existing = store.load(app)
+        prompt = memory_extract.build_extraction_prompt(existing, confirmed_by)
+        reply = session.generate(prompt, timeout=timeout)
+        result = memory_extract.parse_upsert(reply, existing)
+        if result is None:
+            logger.warning("Memory: extraction produced no usable lesson; nothing written")
+            return
+        lesson = memory_extract.apply_upsert(store, app, result, confirmed_by)
+        logger.info(
+            "Memory: %s lesson id=%d for app=%s (confirmed_by=%s, seen=%d)",
+            "merged" if result.decision == "merge" else "stored new",
+            lesson.id,
+            app,
+            confirmed_by,
+            lesson.seen_count,
+        )
+    except Exception:
+        logger.exception("Memory: lesson extraction/write failed; continuing")
 
 
 # --- Conductor I/O ---------------------------------------------------------
@@ -245,6 +350,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "source + cluster investigation (default: sds)."
         ),
     )
+    parser.add_argument(
+        "--memory-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=bool(toml_cfg.get("memory_enabled", False)),
+        help=(
+            "Enable persistent incident memory: a `recall` MCP tool for the agent "
+            "to query past lessons, plus a post-confirmation lesson write. Only "
+            "writes after the conductor confirms the outcome (default: off)."
+        ),
+    )
+    parser.add_argument(
+        "--memory-dir",
+        default=toml_cfg.get("memory_dir"),
+        help=(
+            "Directory holding the per-app lesson store (one `{app}.jsonl` per app). "
+            "Must persist across runs and live OUTSIDE the ephemeral SREGYM_EXP_ENV "
+            "workdir (default: ~/.sds/cli_agent_memory)."
+        ),
+    )
     # No-op flags accepted for compatibility with sregym's agent launcher
     # (`bench/sregym/main.py` ~L1314-L1330), which appends these to every
     # agent's argv depending on the experiment config — cli_agent has no
@@ -266,6 +390,10 @@ def _run(
     api_base = get_api_base()
     mcp_port = os.getenv("MCP_SERVER_PORT", "9954")
     submit_mcp_url = f"http://localhost:{mcp_port}/submit/sse"
+
+    # Captured before the chdir below so a relative --memory-dir resolves
+    # outside the ephemeral SREGYM_EXP_ENV workdir, not inside it.
+    base_cwd = os.getcwd()
 
     agent_workdir = os.getenv("SREGYM_AGENT_WORKDIR") or os.getenv("SREGYM_EXP_ENV")
     if agent_workdir:
@@ -290,7 +418,27 @@ def _run(
         planned_stages,
     )
 
-    extra_mcp_servers = []
+    extra_mcp_servers: list[Any] = []
+
+    # Persistent incident memory (opt-in). Start a read-only `recall` MCP
+    # server bound to this app's lesson store and wire it in; the matching
+    # write happens out-of-band after the conductor confirms the outcome.
+    app_name = app_info.get("app_name") or "unknown"
+    memory_enabled = bool(getattr(args, "memory_enabled", False))
+    memory_store = None
+    recall_server = None
+    if memory_enabled:
+        from agentshim.mcp_config import HttpMcpServer
+
+        from sregym_agents.cli_agent.memory.recall_server import RecallServer
+        from sregym_agents.cli_agent.memory.store import LessonStore
+
+        store_dir = _resolve_memory_dir(args, base_cwd=base_cwd)
+        memory_store = LessonStore(store_dir)
+        recall_server = RecallServer(memory_store, app_name)
+        recall_server.start()
+        extra_mcp_servers.append(HttpMcpServer(name="memory", url=recall_server.url))
+        logger.info("Memory enabled: store=%s recall=%s", store_dir, recall_server.url)
 
     if agent_factory is not None:
         factory = agent_factory
@@ -310,13 +458,19 @@ def _run(
         autonomous=autonomous,
         autonomous_prompt_profile=args.autonomous_prompt_profile,
         submit_done_returns_feedback=submit_done_returns_feedback,
+        memory_enabled=memory_enabled,
     )
     started = time.monotonic()
     crashed_with: str | None = None
     agent = None
+    session = None
     try:
         agent = factory(args.provider, args.model, submit_mcp_url)
-        agent.generate(prompt, cwd=os.getcwd(), timeout=args.timeout_sec)
+        # A stateful session (not one-shot generate) so the same conversation
+        # can be resumed after the verdict to extract a lesson — the agent's
+        # full investigation is already in its context window.
+        session = agent.start_session(cwd=os.getcwd(), timeout=args.timeout_sec)
+        session.generate(prompt, cwd=os.getcwd(), timeout=args.timeout_sec)
     except Exception as exc:
         logger.exception("CLI agent raised")
         crashed_with = f"{type(exc).__name__}: {exc}"
@@ -344,6 +498,25 @@ def _run(
         completed,
         bool(crashed_with),
     )
+
+    # Verified-only write (§3): extract a lesson only when the environment
+    # confirmed the outcome, and never if the agent crashed mid-run.
+    if memory_enabled and memory_store is not None:
+        try:
+            if crashed_with is None and session is not None:
+                _maybe_write_lesson(
+                    session=session,
+                    store=memory_store,
+                    app=app_name,
+                    autonomous=autonomous,
+                    completed=completed,
+                    final_stage=final_stage,
+                    planned_stages=planned_stages,
+                    timeout=args.timeout_sec,
+                )
+        finally:
+            if recall_server is not None:
+                recall_server.stop()
 
     if args.logs_dir:
         logs_dir = Path(args.logs_dir)

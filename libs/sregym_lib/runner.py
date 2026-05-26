@@ -19,7 +19,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from libs.sregym_lib.experiment import (
     ExperimentConfig,
@@ -42,6 +42,36 @@ from libs.sregym_lib.pipeline import (
 )
 
 _APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
+_MEMORY_AGENT = "cli_agent"
+
+
+def _inject_memory_defaults(env: dict[str, str], agent_name: str, memory_log_dir: Path) -> dict[str, str]:
+    """Default cli_agent's lesson-store dir when memory is enabled but unset.
+
+    The store must persist across the many per-problem driver processes of a
+    run (so lessons accumulate), so it lives at the experiment/pipeline root —
+    not inside a per-problem ``SREGYM_EXP_ENV`` workdir. Only applied for
+    ``cli_agent``, only when ``memory_enabled`` is set and no explicit
+    ``memory_dir`` was given.
+    """
+    import json
+
+    if agent_name != _MEMORY_AGENT:
+        return env
+    try:
+        cfg = json.loads(env.get("SREGYM_EXPERIMENT_AGENT_CONFIG", "{}"))
+    except json.JSONDecodeError:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        return env
+    cfg = cast("dict[str, Any]", cfg)
+    if not cfg.get("memory_enabled") or cfg.get("memory_dir"):
+        return env
+
+    env = dict(env)
+    cfg["memory_dir"] = str(memory_log_dir / "memory")
+    env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(cfg)
+    return env
 
 
 def _load_agent_hooks(agent_name: str, project_root: Path) -> tuple[str | None, str | None]:
@@ -186,6 +216,7 @@ def run_single_experiment(
     cli_args = config_to_main_args(config, exp_dir, tasklist_path)
     cli_args.extend(extra_args)
     env = config_to_env(config, project_root, exp_dir=exp_dir)
+    env = _inject_memory_defaults(env, config.agent, exp_dir)
 
     _print_experiment_info(config, env)
     print()
@@ -241,6 +272,12 @@ def _run_stage(
 ) -> int:
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
     env = config_to_env(exp_config, project_root, exp_dir=stage_exp_dir)
+    # Pipeline stages share one lesson store at the pipeline root so lessons
+    # carry across stages; otherwise default to the stage's own dir.
+    memory_log_dir = stage_exp_dir
+    if (stage_exp_dir.parent / "pipeline_state.json").exists():
+        memory_log_dir = stage_exp_dir.parent
+    env = _inject_memory_defaults(env, exp_config.agent, memory_log_dir)
     if extra_env:
         env.update(extra_env)
 
