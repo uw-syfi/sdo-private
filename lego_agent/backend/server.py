@@ -286,9 +286,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     except asyncio.CancelledError:
                         pass
 
-                current_task = asyncio.create_task(
-                    run_yaml_directly(io, yaml_path, repo_root)
-                )
+                current_task = asyncio.create_task(run_yaml_directly(io, yaml_path, repo_root))
 
             elif event_type == "stop":
                 if current_task and not current_task.done():
@@ -382,6 +380,7 @@ async def run_yaml_directly(io: WebIO, yaml_path: Path, repo_root: Path) -> None
         )
 
         import tempfile
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(launcher)
             script_path = Path(f.name)
@@ -420,7 +419,7 @@ async def run_yaml_directly(io: WebIO, yaml_path: Path, repo_root: Path) -> None
                 _SNAPSHOT_PREFIX = "__LEGO_QUEUE_SNAPSHOT__ "
                 if decoded.startswith(_SNAPSHOT_PREFIX):
                     try:
-                        snapshot = json.loads(decoded[len(_SNAPSHOT_PREFIX):])
+                        snapshot = json.loads(decoded[len(_SNAPSHOT_PREFIX) :])
                         await io.send_event("queue_snapshot", {"config": snapshot})
                         continue
                     except json.JSONDecodeError:
