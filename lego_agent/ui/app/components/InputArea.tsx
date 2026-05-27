@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 
 interface InputAreaProps {
   onSendPrompt: (prompt: string, workDir: string) => void;
+  onSendYaml?: (yamlPath: string) => void;
   onSendAnswers: (answers: string[]) => void;
   onStop: () => void;
   pendingQuestions: string[] | null;
@@ -16,6 +17,7 @@ interface InputAreaProps {
 
 export function InputArea({
   onSendPrompt,
+  onSendYaml,
   onSendAnswers,
   onStop,
   pendingQuestions,
@@ -26,6 +28,8 @@ export function InputArea({
   onCwdChange,
 }: InputAreaProps) {
   const [input, setInput] = useState("");
+  const [yamlMode, setYamlMode] = useState(false);
+  const [yamlPath, setYamlPath] = useState("");
   const [workDir, setWorkDir] = useState(initialCwd);
   const [showDirSuggestions, setShowDirSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -153,6 +157,9 @@ export function InputArea({
     e.preventDefault();
     if (pendingQuestions) {
       onSendAnswers(answers);
+    } else if (yamlMode) {
+      if (!yamlPath.trim()) return;
+      onSendYaml?.(yamlPath.trim());
     } else {
       if (!input.trim()) return;
       onSendPrompt(input, workDir);
@@ -285,21 +292,63 @@ export function InputArea({
           </div>
         </div>
 
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            type="button"
+            onClick={() => setYamlMode(false)}
+            disabled={status === "running"}
+            className={cn(
+              "text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 border transition-colors",
+              !yamlMode
+                ? "border-brand text-brand bg-brand/10"
+                : "border-border text-muted-foreground hover:border-brand/40",
+            )}
+          >
+            Prompt
+          </button>
+          <button
+            type="button"
+            onClick={() => setYamlMode(true)}
+            disabled={status === "running"}
+            className={cn(
+              "text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 border transition-colors",
+              yamlMode
+                ? "border-brand text-brand bg-brand/10"
+                : "border-border text-muted-foreground hover:border-brand/40",
+            )}
+          >
+            Run YAML
+          </button>
+        </div>
+
         {/* Input Line */}
         <div className="flex items-start gap-2">
           <ChevronRight className="w-4 h-4 text-brand mt-1 shrink-0 animate-pulse" />
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              status === "running" ? "Agent is busy..." : "Enter command or instructions..."
-            }
-            rows={1}
-            disabled={status === "running"}
-            className="w-full bg-transparent px-0 py-1 text-sm resize-none focus:outline-none disabled:opacity-50 min-h-[24px] max-h-[200px] text-foreground placeholder:text-muted-foreground/30 caret-brand"
-          />
+          {yamlMode ? (
+            <input
+              type="text"
+              value={yamlPath}
+              onChange={(e) => setYamlPath(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSubmit(e); } }}
+              placeholder="Path to YAML file (e.g. lego_agent/backend/td_graphs/task1.yaml)"
+              disabled={status === "running"}
+              className="w-full bg-transparent px-0 py-1 text-sm focus:outline-none disabled:opacity-50 text-foreground placeholder:text-muted-foreground/30 caret-brand"
+            />
+          ) : (
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                status === "running" ? "Agent is busy..." : "Enter command or instructions..."
+              }
+              rows={1}
+              disabled={status === "running"}
+              className="w-full bg-transparent px-0 py-1 text-sm resize-none focus:outline-none disabled:opacity-50 min-h-[24px] max-h-[200px] text-foreground placeholder:text-muted-foreground/30 caret-brand"
+            />
+          )}
         </div>
 
         <div className="flex justify-end items-center mt-2 h-6">
