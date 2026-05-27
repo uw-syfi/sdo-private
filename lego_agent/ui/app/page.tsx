@@ -16,7 +16,7 @@ import { useState } from 'react';
 type ViewMode = 'graph' | 'yaml' | 'logs';
 
 export default function Home() {
-    const { logs: realLogs, status, pendingQuestions, sendPrompt, sendAnswers, stopAgent, cwd, updateCwd, dirOptions, listDirs, model, thinkingBudget, graphConfig: realGraphConfig, queueSnapshot } = useLegoAgent();
+    const { logs: realLogs, status, pendingQuestions, sendPrompt, sendYaml, sendAnswers, stopAgent, cwd, updateCwd, dirOptions, listDirs, model, thinkingBudget, graphConfig: realGraphConfig, queueSnapshot } = useLegoAgent();
   const [viewMode, setViewMode] = useState<ViewMode>('graph');
   
   // Demo Mode State
@@ -191,8 +191,9 @@ export default function Home() {
       <div className="shrink-0 bg-background border-t border-border z-20 relative">
          <div className="w-full max-w-5xl mx-auto">
             {!isDemo ? (
-                <InputArea 
-                    onSendPrompt={sendPrompt} 
+                <InputArea
+                    onSendPrompt={sendPrompt}
+                    onSendYaml={sendYaml}
                     onSendAnswers={sendAnswers}
                     onStop={stopAgent} 
                     pendingQuestions={pendingQuestions}

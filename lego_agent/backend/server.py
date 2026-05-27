@@ -6,6 +6,7 @@ from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from loguru import logger
 from starlette.websockets import WebSocketState
@@ -261,6 +262,34 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     )
                 )
 
+            elif event_type == "run_yaml":
+                yaml_path_raw = data.get("yaml_path")
+                if not yaml_path_raw or not isinstance(yaml_path_raw, str):
+                    await io.send_event("log", {"message": "run_yaml requires a yaml_path field", "level": "error"})
+                    continue
+
+                yaml_path = Path(yaml_path_raw)
+                if not yaml_path.is_absolute():
+                    yaml_path = repo_root / yaml_path
+
+                if not yaml_path.exists():
+                    await io.send_event(
+                        "log",
+                        {"message": f"YAML file not found: {yaml_path}", "level": "error"},
+                    )
+                    continue
+
+                if current_task and not current_task.done():
+                    current_task.cancel()
+                    try:
+                        await current_task
+                    except asyncio.CancelledError:
+                        pass
+
+                current_task = asyncio.create_task(
+                    run_yaml_directly(io, yaml_path, repo_root)
+                )
+
             elif event_type == "stop":
                 if current_task and not current_task.done():
                     current_task.cancel()
@@ -331,6 +360,84 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.error(f"WebSocket error: {e}", exc_info=True)
     finally:
         await io.cleanup()
+
+
+async def run_yaml_directly(io: WebIO, yaml_path: Path, repo_root: Path) -> None:
+    try:
+        await io.send_event("log", {"message": f"Running YAML: {yaml_path}", "level": "info"})
+
+        # Send graph event so the UI renders the visual pipeline before execution starts.
+        try:
+            config_dict = yaml.safe_load(yaml_path.read_text())
+            await io.send_event("graph", {"config": config_dict})
+        except Exception as e:
+            logger.warning(f"Failed to send graph event for {yaml_path}: {e}")
+
+        launcher = (
+            "import asyncio, sys\n"
+            f"sys.path.insert(0, '{repo_root!s}')\n"
+            "from lego_agent.backend.pipeline_builder import run_yaml_v2\n\n"
+            "if __name__ == '__main__':\n"
+            f"    run_yaml_v2('{yaml_path!s}')\n"
+        )
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write(launcher)
+            script_path = Path(f.name)
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{repo_root!s}:{env.get('PYTHONPATH', '')}"
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=repo_root,
+            env=env,
+        )
+
+        async def read_stream(stream: asyncio.StreamReader | None, name: str) -> None:
+            if stream is None:
+                return
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                decoded = line.decode().rstrip()
+                if not decoded:
+                    continue
+                try:
+                    data: dict[str, Any] = json.loads(decoded)
+                    msg_type = data.get("type")
+                    if isinstance(msg_type, str):
+                        payload = {k: v for k, v in data.items() if k != "type"}
+                        await io.send_event(msg_type, payload)
+                        continue
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+                _SNAPSHOT_PREFIX = "__LEGO_QUEUE_SNAPSHOT__ "
+                if decoded.startswith(_SNAPSHOT_PREFIX):
+                    try:
+                        snapshot = json.loads(decoded[len(_SNAPSHOT_PREFIX):])
+                        await io.send_event("queue_snapshot", {"config": snapshot})
+                        continue
+                    except json.JSONDecodeError:
+                        pass
+                await io.send_event("script_execution", {"stream": name, "data": decoded})
+
+        await asyncio.gather(read_stream(process.stdout, "stdout"), read_stream(process.stderr, "stderr"))
+        return_code = await process.wait()
+        script_path.unlink(missing_ok=True)
+
+        level = "success" if return_code == 0 else "error"
+        await io.send_event("log", {"message": f"Finished (exit code {return_code})", "level": level})
+        await io.send_event("execution_result", {"exit_code": return_code})
+
+    except Exception as e:
+        logger.error(f"run_yaml_directly failed: {e}", exc_info=True)
+        await io.send_event("log", {"message": f"Error: {e}", "level": "error"})
 
 
 async def run_engine_and_script(

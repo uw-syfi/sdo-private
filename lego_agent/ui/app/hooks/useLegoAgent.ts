@@ -188,6 +188,14 @@ export function useLegoAgent() {
     ws.current.send(JSON.stringify({ type: 'start', prompt, work_dir: workDir }));
   };
 
+  const sendYaml = (yamlPath: string) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    setLogs([]);
+    setStatus('running');
+    setQueueSnapshot(null);
+    ws.current.send(JSON.stringify({ type: 'run_yaml', yaml_path: yamlPath }));
+  };
+
   const stopAgent = () => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
     
@@ -231,6 +239,7 @@ export function useLegoAgent() {
     status,
     pendingQuestions,
     sendPrompt,
+    sendYaml,
     sendAnswers,
     stopAgent,
     connect,
